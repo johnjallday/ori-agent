@@ -722,6 +722,20 @@ Configured-model checks require a separately selected authorized sandbox model;
 credential presence alone is not a decision to change the application's model.
 Live-model evidence remains separate from inspecting providers and browser mocks.
 
+### Operating the app
+
+Everything above is about reading. A turn may also ask Ori to **operate** the
+app (open a workspace, select an agent, prepare a task draft) when the user's
+current message asks for it. That is a separate contract,
+[`assistant-operations.md`](assistant-operations.md), and it follows the same
+provider boundary: the two operation tools and their skill are advertised only
+when the configured provider supports Ori's tools and the turn's own message
+is an explicit request; a provider without tools is offered neither and keeps
+the manual route. The operation tools write nothing: they stage a request
+that Ori records after the turn is stored. Saving a prepared task and starting
+it are the user's own actions in the app, never a tool call, and the readers
+above stay read-only on an operating turn.
+
 ## Minimal context/evidence/persistence seam (proposed)
 
 Use a small data-only package (e.g. `internal/assistantcontext`) shared by HTTP

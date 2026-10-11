@@ -503,3 +503,34 @@ the route helper and the workspace page's own selection owner.
 - A task created but not started, a refused Start and an unresolved Start all
   keep the task under its original ID with an action beside it. Nothing is
   deleted to roll back and nothing uncertain is started again automatically.
+
+## What is logged and kept
+
+An operation row holds identifiers, the draft's title and brief, named
+commands, receipts and bounded reasons. It holds no tool arguments as the
+model sent them, no credentials and no conversation text; the conversation is
+the Session it points to. Server logs name operation and task IDs only. The
+acceptance runner's kept records hold statuses, counts, tool and parameter
+names and the skill's version, never a turn's words.
+
+## How it is verified
+
+- `./scripts/operate-ori-acceptance.sh [port]` runs the five browser runs on
+  isolated `wt demo` hosts: open and select, prepare a draft, create and start
+  once, results and a restart mid-run, and the whole journey with a second tab
+  open. The assistant's model and the agent's model are local deterministic
+  stand-ins; everything else is the production browser, routes, stores, task
+  form, create handler and execution path. One run also records what Ori's
+  harness handed the model on an operating turn (skill version, operation
+  names and parameters, every offered tool name).
+- `./scripts/operate-ori-live-check.py --sandbox <wt demo sandbox> --model <name>`
+  asks a real model, on an isolated host, for two explicit operations, a
+  question and a hypothetical, times each turn and checks that nothing was
+  written. It is a separate check: stand-in success says nothing about how a
+  real model behaves.
+- Go: `internal/assistantops` (lifecycle, claims, recovery, outcome),
+  `internal/orchestrationhttp` (create handler, first start, task state),
+  `internal/agenthttp` (gate, tools, endpoints), `internal/server` (real host),
+  `internal/workspace` (execution mark, boot reconciliation).
+- JS: `ori-operation-*.test.js`, `personal-assistant-operations.test.js`,
+  `task-modal-controller.test.js`.

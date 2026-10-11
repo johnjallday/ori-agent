@@ -249,6 +249,42 @@ class DemoProviderTests(unittest.TestCase):
         # A result that is not JSON is treated as unavailable, not as success.
         self.assertIn("Nothing was requested.", demo.operate_step(ask, ["not json"], tool)["answer"])
 
+    def test_harness_audit_records_facts_about_what_ori_sent_and_none_of_the_words(self):
+        def tool(name, properties, closed=True):
+            return {"function": {"name": name, "parameters": {"type": "object", "properties": properties,
+                                                             "additionalProperties": not closed}}}
+        request = {"messages": [
+            {"role": "system", "content": "You are Atlas.\n\n# Ori skill: operate-ori (v3)\n\nUse `assistant_operate_open` or "
+                                          "`assistant_operate_prepare_task`. Saving does not start it. **Start task** is theirs."},
+            {"role": "user", "content": "Create a task for Engineer to bounce the SECRET-STEMS"}],
+            "tools": [tool("home_agents", {}), tool(demo.OPERATE_TOOL, {"workspace_id": {}, "agent_name": {}}),
+                      tool(demo.OPERATE_TASK_TOOL, {"title": {}, "brief": {}}, closed=False)]}
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            # A turn that offers no operation tool is not an operating turn.
+            demo.audit_operate_harness(state, {"messages": request["messages"], "tools": [tool("home_agents", {})]})
+            demo.audit_operate_harness(state, {})
+            self.assertFalse((state / "operate-harness.json").exists())
+
+            demo.audit_operate_harness(state, request)
+            text = (state / "operate-harness.json").read_text()
+            record = json.loads(text)
+            self.assertEqual(record["skill_version"], 3)
+            self.assertTrue(record["skill_loaded"] and record["skill_names_each_operation"]
+                            and record["skill_says_save_and_start_are_the_users"])
+            self.assertEqual(record["offered_tools"], ["assistant_operate_open", "assistant_operate_prepare_task", "home_agents"])
+            self.assertEqual(record["operations"][demo.OPERATE_TOOL], {"parameters": ["agent_name", "workspace_id"], "closed_schema": True})
+            self.assertEqual(record["operations"][demo.OPERATE_TASK_TOOL], {"parameters": ["brief", "title"], "closed_schema": False})
+            # Nothing the user or the assistant said is kept.
+            self.assertNotIn("SECRET-STEMS", text)
+            self.assertNotIn("Atlas", text)
+
+            # Tools without their skill are reported as exactly that.
+            demo.audit_operate_harness(state, {"messages": [{"role": "system", "content": "You are Atlas."}], "tools": request["tools"]})
+            bare = json.loads((state / "operate-harness.json").read_text())
+            self.assertFalse(bare["skill_loaded"] or bare["skill_names_each_operation"])
+            self.assertEqual(bare["skill_version"], 0)
+
     def test_worker_fixture_answers_only_a_task_ori_is_running_and_decides_nothing(self):
         run = {"messages": [{"role": "system", "content": "You are Engineer."},
                             {"role": "user", "content": demo.WORKER_MARK + "\n\n## Task Description\n\nBounce the stems\n\n## Task Details\n\nBy Friday."}]}

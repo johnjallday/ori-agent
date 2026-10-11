@@ -62,6 +62,8 @@ PLAIN_DEMOS = {
                       "ORI_WORKSPACE_OPERATESTART_SANDBOX", "operate-ori-start.log"),
     "operate_result": ("tests/operate-ori-result.spec.ts",
                        "ORI_WORKSPACE_OPERATERESULT_SANDBOX", "operate-ori-result.log"),
+    "operate_journey": ("tests/operate-ori-journey.spec.ts",
+                        "ORI_WORKSPACE_OPERATEJOURNEY_SANDBOX", "operate-ori-journey.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -248,6 +250,36 @@ def operate_step(prompt, results, tools):
                           (" The closest are: " + names + "." if names else "") + " Nothing was requested."}
     return {"answer": "Ori could not prepare that (" + str(result.get("reason", "unavailable")) +
                       "). You can open it from the Workspaces page. Nothing was requested."}
+
+
+def audit_operate_harness(state_dir, request):
+    """Record what Ori actually handed the model on an operating turn.
+
+    This is the request Ori's own harness built, as the model receives it: the
+    skill text Ori loaded and the tool definitions Ori advertised. The record
+    holds facts about them (version, names, parameter names) and none of the
+    turn's words, so it can be kept beside the run's log. It is written only
+    for a turn that offers an operation tool.
+    """
+    offered = [tool.get("function", {}) for tool in request.get("tools") or []]
+    operations = {fn.get("name"): fn for fn in offered if fn.get("name") in (OPERATE_TOOL, OPERATE_TASK_TOOL)}
+    if not operations:
+        return
+    system = "\n".join(str(message.get("content", "")) for message in request.get("messages", [])
+                       if message.get("role") == "system")
+    version = re.search(r"# Ori skill: operate-ori \(v(\d+)\)", system)
+    record = {
+        "skill_loaded": bool(version),
+        "skill_version": int(version.group(1)) if version else 0,
+        "skill_names_each_operation": all(name in system for name in operations),
+        "skill_says_save_and_start_are_the_users": "Saving does not start it" in system and "Start task" in system,
+        "operations": {name: {
+            "parameters": sorted(((fn.get("parameters") or {}).get("properties") or {}).keys()),
+            "closed_schema": (fn.get("parameters") or {}).get("additionalProperties") is False,
+        } for name, fn in sorted(operations.items())},
+        "offered_tools": sorted(fn.get("name", "") for fn in offered),
+    }
+    (state_dir / "operate-harness.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
 
 
 WORKER_MARK = "You have been assigned a task in a collaborative workspace."
@@ -600,6 +632,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": summary}, "done": True,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
+                if operate:
+                    audit_operate_harness(state_dir, request)
                 worker = worker_reply(state_dir, request) if operate else None
                 if worker is not None:
                     if "error" in worker:
@@ -766,6 +800,9 @@ def main():
                         help="wt demo: Operate Ori — the result of the request's own run, a rerun that is not "
                              "attributed to it, needs-input, the recap, leaving the page, and a run interrupted "
                              "by restarting this same isolated host")
+    parser.add_argument("--operate-journey", action="store_true",
+                        help="wt demo: Operate Ori — the whole journey for a non-entry agent with a second tab open, "
+                             "a failed run, the manual route, and what Ori's harness handed the model")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
@@ -790,7 +827,8 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    operating = args.operate or args.operate_task or args.operate_start or args.operate_result
+    operating = (args.operate or args.operate_task or args.operate_start or args.operate_result or
+                 args.operate_journey)
     evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if operating else
                 ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
@@ -885,7 +923,7 @@ def main():
             # Keep the provider's sanitized records beside the run's log: which
             # readers were chosen and what status each returned, and whether a
             # watched marker reached the provider. Neither holds content.
-            for record in ("provider-trace.jsonl", "provider-audit.json"):
+            for record in ("provider-trace.jsonl", "provider-audit.json", "operate-harness.json"):
                 if (state / record).exists():
                     shutil.copyfile(state / record, evidence / (log.stem + "-" + record))
             # A forced shell termination can skip zsh's always block. Restrict
