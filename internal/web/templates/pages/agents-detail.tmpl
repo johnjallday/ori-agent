@@ -5,6 +5,26 @@
 
 <body class="bg-light" data-sidebar-default="hidden">
   <style>
+    #agentWorkspacesSection.agent-workspaces {
+      scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px);
+      background: var(--bg-secondary);
+    }
+    .agent-workspaces .modern-btn { background-image: none; }
+    .agent-workspaces a { color: var(--text-primary); text-decoration: underline; }
+    .agent-workspaces[hidden] { display: none !important; }
+    .agent-workspaces h2 { font-size: 20px; color: var(--text-primary); }
+    .agent-workspaces p { color: var(--text-secondary); }
+    .agent-workspaces fieldset { min-width: 0; }
+    .agent-workspaces legend { font-size: 14px; color: var(--text-primary); }
+    .agent-workspaces ul { list-style: none; padding: 0; margin: 12px 0; }
+    .agent-workspaces li { padding: 12px 0; border-top: 1px solid var(--border-color); overflow-wrap: anywhere; }
+    .agent-workspaces label { display: flex; gap: 10px; align-items: center; color: var(--text-primary); }
+    .agent-workspaces input[type="checkbox"] { flex-shrink: 0; width: 20px; height: 20px; accent-color: var(--primary-color); }
+    .agent-workspaces li p { margin: 6px 0; font-size: 13px; }
+    .agent-workspaces li a { display: inline-block; margin-top: 6px; text-decoration: underline; }
+    .agent-workspaces :is(a, button, input, h2, [data-workspace-status]):focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .agent-workspaces-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
     /* Toggle Switch Styles */
     .toggle-switch {
       position: relative;
@@ -529,6 +549,21 @@
           <!-- Setup Health -->
           <div id="setupHealthBanner" class="section-card modern-card p-3 mb-4 setup-health-banner" style="display: none;"></div>
 
+          <section id="agentWorkspacesSection" class="agent-workspaces section-card modern-card p-4 mb-4" aria-labelledby="agentWorkspacesTitle" hidden>
+            <h2 id="agentWorkspacesTitle" tabindex="-1">Workspaces</h2>
+            <p>Choose where this agent belongs. Saving changes membership only; it does not start tasks or change the agent's settings. Removing membership removes its instances from that workspace.</p>
+            <p data-workspace-status role="status" aria-live="polite" tabindex="-1">Loading membership…</p>
+            <fieldset disabled>
+              <legend>Workspace membership</legend>
+              <ul data-workspace-list></ul>
+            </fieldset>
+            <div class="agent-workspaces-actions">
+              <button type="button" class="modern-btn modern-btn-primary" data-workspace-save disabled>Save membership</button>
+              <button type="button" class="modern-btn modern-btn-secondary" data-workspace-reload>Reload membership</button>
+              <a href="/">Open Home to create a workspace</a>
+            </div>
+          </section>
+
           <!-- Quick Stats -->
           <div class="row g-3 mb-4">
             <div class="col-md-3">
@@ -576,7 +611,7 @@
           <!-- Details Grid -->
           <div id="contentGrid" class="row g-4" style="display: none;">
             <div class="col-12">
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px;">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px;">
                 <!-- Configuration Section -->
                 <div class="section-card modern-card p-4">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
@@ -935,6 +970,7 @@
   <script defer src="/js/modules/resizer.js"></script>
   <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/agent-origin.js"></script>
+  <script defer src="/js/modules/agent-workspace-editor.js"></script>
   <script defer src="/js/agents-detail.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>

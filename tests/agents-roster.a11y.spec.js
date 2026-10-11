@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { mockWorkspaceActionRoster } from './helpers/agent-workspace-actions';
 
 // Accessibility regression for the Agents Gallery/Inspector, in both themes.
 // Mirrors tests/workspace-detail.a11y.spec.js: axe-core is loaded from a CDN and
@@ -17,6 +18,42 @@ async function runAxe(page, target) {
 }
 
 for (const theme of ['light', 'dark']) {
+  test(`contextual workspace choice is accessible in the narrow inspector (${theme})`, async ({
+    page
+  }, testInfo) => {
+    await installLocalCdn(page);
+    await mockWorkspaceActionRoster(page);
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ json: { needs_onboarding: false, completed: true } })
+    );
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/agents');
+    const opener = page.locator('[data-name="Action Shared"] .roster-card__open');
+    await opener.click();
+    const summary = page.locator('#stageNextStep summary');
+    await page.keyboard.press('Tab'); // enter keyboard modality after clicking the card
+    await summary.focus();
+    await expect(summary).toHaveCSS('outline-style', 'solid');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#stageNextStep a').first()).toBeFocused();
+    await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+    const scan = await runAxe(page, '#stageNextStep');
+    expect(scan.violations).toEqual([]);
+    expect(scan.passes.find(rule => rule.id === 'color-contrast')?.nodes.length).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(
+      false
+    );
+    await page.screenshot({
+      path: testInfo.outputPath(`agent-choice-${theme}.png`),
+      fullPage: true
+    });
+    await page.keyboard.press('Escape');
+    await expect(opener).toBeFocused();
+  });
+
   test(`agents roster accessibility (${theme})`, async ({ page, request }) => {
     const name = `PW A11y ${theme} ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {

@@ -2385,10 +2385,11 @@ body.inspector-sheet-open {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
   grid-template-areas:
-    "actions actions"
     "avatar ident"
     "vitals vitals"
-    "purpose purpose";
+    "purpose purpose"
+    "nextstep nextstep"
+    "actions actions";
   gap: 14px 16px;
   padding: 22px 24px;
   border-bottom: 1px solid var(--border-color, #e5e7eb);
@@ -2559,13 +2560,15 @@ body.inspector-sheet-open {
   color: var(--card-muted);
 }
 
-/* One sentence and one link, for an agent that has never done anything. A
-   left rule in the role accent rather than a filled banner: it should read as
-   the agent's own next line, not as an alert. */
+/* Work before progression and administration; a choice when membership is
+   shared, never a silently selected first workspace. */
 .stage__nextstep {
+  grid-area: nextstep;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  overflow-wrap: anywhere;
   gap: 4px 12px;
   margin: 0;
   padding: 9px 12px;
@@ -2578,6 +2581,37 @@ body.inspector-sheet-open {
 
 .stage__nextstep[hidden] {
   display: none;
+}
+
+.stage__nextstep h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.stage__workspace-choice {
+  width: 100%;
+}
+
+.stage__workspace-choice summary {
+  padding: 6px 0;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stage__workspace-choice ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.stage__workspace-choice li + li {
+  margin-top: 10px;
+}
+
+.stage__workspace-choice summary:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
 }
 
 .stage__nextstep-copy {
