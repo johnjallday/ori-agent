@@ -52,6 +52,7 @@ class GitFixture(unittest.TestCase):
         self.runs = {}
         self.prs = [{"url": "https://example.invalid/merge-back"}]
         self.promote_runs = []
+        self.variables = []
         self.env = patch.dict(os.environ, {"GITHUB_OUTPUT": str(self.root / "output"),
                                           "GITHUB_STEP_SUMMARY": "", "AUTO_RELEASE_HOLD": "",
                                           "FORCE_RELEASE": "false", "RELEASE_MIN_PRS": "10"})
@@ -86,6 +87,10 @@ class GitFixture(unittest.TestCase):
             return self.prs
         if args[:2] == ("run", "list"):
             return self.promote_runs
+        if args[:2] == ("variable", "list"):
+            if self.variables is None:
+                raise rc.Refusal("HTTP 403: Resource not accessible by personal access token")
+            return self.variables
         raise AssertionError(args)
 
     @staticmethod
@@ -129,6 +134,9 @@ class GitFixture(unittest.TestCase):
 
     def react(self, workflow, branch, sha, event="push", conclusion="success"):
         rc.react(rc.Repository(), workflow, event, branch, sha, conclusion)
+
+    def status(self):
+        return rc.status(rc.Repository())
 
 
 class LifecycleTests(GitFixture):
@@ -507,6 +515,94 @@ class LifecycleTests(GitFixture):
                     self.react("Release", self.tag, sha)
             self.assertEqual(calls, [])
 
+    def test_status_counts_the_gate_before_a_cut_without_touching_refs(self):
+        before = self.refs()
+        report = self.status()
+        self.assertIsNone(report["release"])
+        self.assertEqual((report["latest_stable"], report["next_version"]), ("v1.2.3", "v1.2.4"))
+        self.assertEqual((report["dev"]["unreleased_prs"], report["dev"]["minimum_prs"]), (10, 10))
+        self.assertEqual(report["dev"]["ci"]["conclusion"], "success")
+        self.assertTrue(report["dev"]["merged_back"])
+        self.assertIsNone(report["merge_back_pr"])
+        self.assertIn("gate cuts v1.2.4 from dev", report["next"])
+        with patch.dict(os.environ, {"RELEASE_MIN_PRS": "11"}):
+            self.assertIn("10/11 PRs toward v1.2.4", self.status()["next"])
+        self.runs["ci.yml", self.source] = [self.workflow_run(self.source, "dev", None, "in_progress")]
+        self.assertIn("dev CI is in_progress", self.status()["next"])
+        # A red dev head outranks the count: it is what someone must act on.
+        self.runs["ci.yml", self.source] = [self.workflow_run(self.source, "dev", "failure")]
+        with patch.dict(os.environ, {"RELEASE_MIN_PRS": "11"}):
+            report = self.status()
+        self.assertTrue(report["next"].startswith("dev CI failed"))
+        self.assertIn("run ci-triage. 10/11 PRs", report["next"])
+        self.assertEqual(before, self.refs())
+
+    def test_status_follows_a_candidate_to_promotion(self):
+        sha = self.prepare()
+        report = self.status()
+        release = report["release"]
+        self.assertEqual((release["version"], release["branch"], release["sha"]), ("v1.2.4", "release/v1.2.4", sha))
+        self.assertEqual((release["candidates"], release["latest_candidate"], release["candidate_at_head"]),
+                         ([self.tag], self.tag, True))
+        self.assertEqual((release["prerelease"], release["release_workflow"]["conclusion"]), ("published", "success"))
+        self.assertEqual(release["promotion"], {"state": "ready"})
+        self.assertIn(f"release.sh promote {self.tag}", report["next"])
+        self.promote_runs = [{"status": "waiting", "displayTitle": f"Promote {self.tag} to stable",
+                              "url": "https://example.invalid/promote"}]
+        report = self.status()
+        self.assertEqual(report["release"]["promotion"]["state"], "awaiting_approval")
+        self.assertIn("https://example.invalid/promote", report["next"])
+        self.promote_runs = []
+        self.runs["release.yml", sha] = [self.workflow_run(sha, self.tag, None, "in_progress")]
+        report = self.status()
+        self.assertEqual(report["release"]["promotion"]["state"], "blocked")
+        self.assertIn("release.yml is not green", report["next"])
+        self.runs.pop(("release.yml", sha))
+        self.releases[self.tag] = {"isDraft": True, "isPrerelease": True}
+        report = self.status()
+        self.assertEqual(report["release"]["prerelease"], "draft")
+        self.assertIn("published GitHub prerelease", report["next"])
+        # A fix lands on the branch: its head is untagged until CI is green and react tags rc.2.
+        rc.git("checkout", "-qb", "release/v1.2.4", sha)
+        fixed = self.commit("fix: release blocker", "fix")
+        rc.git("push", "-q", "origin", "release/v1.2.4")
+        report = self.status()
+        self.assertFalse(report["release"]["candidate_at_head"])
+        self.assertIn("release.sh candidate v1.2.4", report["next"])
+        self.runs["ci.yml", fixed] = [self.workflow_run(fixed, "release/v1.2.4", None, "in_progress")]
+        self.assertIn("its CI is in_progress", self.status()["next"])
+        self.runs["ci.yml", fixed] = [self.workflow_run(fixed, "release/v1.2.4", "failure")]
+        self.assertIn("its CI failed (https://example.invalid/run); run ci-triage", self.status()["next"])
+
+    def test_status_reports_the_merge_back_and_the_hold(self):
+        sha = self.prepare()
+        rc.promote(rc.Repository(), self.tag, sha)
+        self.releases["v1.2.4"] = {"isDraft": False, "isPrerelease": False}
+        report = self.status()
+        self.assertIsNone(report["release"])
+        self.assertEqual(report["latest_stable"], "v1.2.4")
+        self.assertFalse(report["dev"]["merged_back"])
+        self.assertEqual(report["merge_back_pr"], "https://example.invalid/merge-back")
+        self.assertIn("merge commit", report["next"])
+        self.variables = [{"name": "AUTO_RELEASE_HOLD", "value": "1"}]
+        report = self.status()
+        self.assertTrue(report["hold"])
+        self.assertTrue(report["next"].startswith("HOLD is set"))
+        # A personal token without Actions scope cannot read the variable: unknown, not false.
+        self.variables = None
+        report = self.status()
+        self.assertIsNone(report["hold"])
+        self.assertTrue(report["next"].startswith("Hold unknown"))
+        self.assertIn("merge commit", report["next"])
+
+    def test_status_reports_inconsistencies_instead_of_refusing(self):
+        self.prepare()
+        rc.git("push", "-q", "origin", f"{self.source}:refs/heads/release/v1.2.5")
+        report = self.status()
+        self.assertIsNone(report["release"])
+        self.assertIn("Multiple active candidates", report["problem"])
+        self.assertIn("Inspect by hand", report["next"])
+
     def test_fetch_failure_never_uses_stale_remote_tracking_refs(self):
         repo = rc.Repository()
         self.assertIn("dev", repo.branches)
@@ -524,9 +620,15 @@ class EntryPointTests(unittest.TestCase):
             gh.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$CALL_LOG"\n')
             gh.chmod(0o700)
             env = dict(os.environ, PATH=f"{root}{os.pathsep}{os.environ['PATH']}", CALL_LOG=str(log))
-            def call(*args, script="release.sh"):
-                return subprocess.run(["bash", str(ROOT / "scripts" / script), *args],
-                                      stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env)
+            # status hands off to the Python lifecycle; record that call instead of fetching.
+            python = root / "py"
+            python.mkdir()
+            (python / "python3").write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$CALL_LOG"\n')
+            (python / "python3").chmod(0o700)
+            def call(*args, script="release.sh", fake_python=False):
+                path = f"{python}{os.pathsep}{env['PATH']}" if fake_python else env["PATH"]
+                return subprocess.run(["bash", str(ROOT / "scripts" / script), *args], stdin=subprocess.DEVNULL,
+                                      capture_output=True, text=True, env=dict(env, PATH=path))
             for args in (("promote", "v1.2.4-rc.1"), ("v1.2.4", "--yes"),
                          ("promote", "v1.2.4", "--yes"), ("candidate", "--skip-checks", "--yes"),
                          ("promote", "v1.2.4-rc.1;touch owned", "--yes")):
@@ -540,6 +642,14 @@ class EntryPointTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(log.read_text().splitlines(), ["workflow", "run", "promote-release.yml", "--ref", "main",
                                                            "-f", "rc_tag=v1.2.4-rc.2", "-f", "confirm_tested=true"])
+            log.unlink()
+            # status needs no confirmation and never dispatches; extra arguments are refused.
+            for args in (("status", "--yes"), ("status", "v1.2.4"), ("status", "--force")):
+                self.assertNotEqual(call(*args, fake_python=True).returncode, 0, args)
+                self.assertFalse(log.exists())
+            result = call("status", fake_python=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(log.read_text().splitlines(), [str(ROOT / "scripts/release-candidate.py"), "status"])
 
     def test_workflow_contracts(self):
         auto = (ROOT / ".github/workflows/auto-release.yml").read_text()

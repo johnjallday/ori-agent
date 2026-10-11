@@ -76,6 +76,9 @@ stable tag: a squash merge's `(#N)` subject or a merge commit's
 run, not merely an unrelated successful check. Fetch/API failures fail closed.
 
 ```bash
+# Where the lifecycle stands, as JSON with a one-line next step (reads only):
+./scripts/release.sh status
+
 # Read readiness without pushing or publishing:
 ./scripts/release-ready.sh
 
@@ -176,10 +179,13 @@ release branch is merged once dev CI is green for that exact commit; and an RC
 with green branch CI, a published prerelease and passing installer checks gets a
 Promote Release dispatch. The one human action is approving the `release`
 environment review on that run (GitHub emails the request). Red CI on `dev` or
-on the release branch is the release watcher routine's job: it opens a
-`release-fix/*` PR to `dev` with auto-merge, then the sync PR. Stable's
-merge-back PR auto-merges with a merge commit. `AUTO_RELEASE_HOLD=1` stops every
-automatic step. To promote by hand instead:
+on the release branch is the release watcher routine's job, following
+[CI_TRIAGE.md](CI_TRIAGE.md): it opens a `release-fix/*` PR to `dev` with
+auto-merge, then the sync PR. Stable's merge-back PR auto-merges with a merge
+commit. `AUTO_RELEASE_HOLD=1` stops every automatic step.
+`./scripts/release.sh status` says which of these steps is next, whether a
+promotion is awaiting approval, and why a candidate is not promotable yet. To
+promote by hand instead:
 
 ```bash
 ./scripts/release.sh promote vX.Y.Z-rc.2
