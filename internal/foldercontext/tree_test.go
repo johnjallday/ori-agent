@@ -2,6 +2,7 @@ package foldercontext
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,50 @@ func TestTreeFocus_IsIndependentOpaqueBoundedMetadata(t *testing.T) {
 	clone.Nodes[0].Name = "changed"
 	if o.Tree.Nodes[0].Name != "Aurora" {
 		t.Fatal("clone mutated evidence")
+	}
+}
+
+func TestTreeFocus_AllRecordedEntriesCanBeIndependentlyDeselected(t *testing.T) {
+	o := validObservation()
+	o.Entries = MaxTreeNodes
+	o.Tree = &Tree{}
+	var ids []string
+	for i := 0; i < MaxTreeNodes; i++ {
+		node := TreeNode{ID: fmt.Sprintf("entry-%d", i), Name: fmt.Sprintf("Topic %d", i), Kind: "file"}
+		// Worst-case repeated, escaped ancestors still fit the snapshot budget.
+		if i < 3 {
+			node.Kind = "folder"
+			node.Name = strings.Repeat("<", MaxNameRunes)
+		}
+		if i > 0 {
+			node.ParentID = fmt.Sprintf("entry-%d", min(i-1, 2))
+		}
+		o.Tree.Nodes = append(o.Tree.Nodes, node)
+		ids = append(ids, node.ID)
+	}
+	if err := o.Validate(); err != nil {
+		t.Fatal("fixture must remain a valid bounded snapshot", err)
+	}
+	all, err := o.ResolveFocus(ids)
+	if err != nil || len(all.Topics) != MaxTreeNodes {
+		t.Fatal("full snapshot could not be selected", all, err)
+	}
+	remaining := append(append([]string{}, ids[:9]...), ids[10:]...)
+	focus, err := o.ResolveFocus(remaining)
+	if err != nil || len(focus.Topics) != MaxTreeNodes-1 {
+		t.Fatal("deselecting a topic failed", focus, err)
+	}
+	for _, topic := range focus.Topics {
+		if topic.Names[len(topic.Names)-1] == "Topic 9" {
+			t.Fatal("deselected topic remained in focus")
+		}
+	}
+	encoded, err := json.Marshal(focus)
+	if err != nil || len(encoded) <= 4096 || len(encoded) > MaxFocusBytes {
+		t.Fatal("focus bound does not fit repeated ancestors", len(encoded), err)
+	}
+	if err := (Event{Version: Version, Observation: &o, FocusIDs: remaining}).Validate(); err != nil {
+		t.Fatal("partial bulk selection cannot be saved", err)
 	}
 }
 

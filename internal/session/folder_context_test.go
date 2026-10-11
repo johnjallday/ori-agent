@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -88,6 +89,63 @@ func TestFolderContext_CanonicalLifecycleAndUntrustedMessageInput(t *testing.T) 
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE session_id = ?`, sess.ID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("cascade: %d, %v", count, err)
+	}
+}
+
+func TestFolderContext_FullSnapshotSelectionAndSubsetSurviveRestart(t *testing.T) {
+	db, _ := setupTestDB(t)
+	hybrid := NewHybridStoreWithDB(db, 10)
+	store := hybrid.(FolderContextStore)
+	ctx := context.Background()
+	sess := &Session{AgentName: "Atlas"}
+	if err := hybrid.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	event := folderEventFixture()
+	o := event.Observation
+	o.Entries = foldercontext.MaxTreeNodes
+	o.Tree = &foldercontext.Tree{}
+	for i := 0; i < foldercontext.MaxTreeNodes; i++ {
+		id := fmt.Sprintf("entry-%d", i)
+		o.Tree.Nodes = append(o.Tree.Nodes, foldercontext.TreeNode{ID: id, Name: fmt.Sprintf("Topic %d", i), Kind: "file"})
+		event.FocusIDs = append(event.FocusIDs, id)
+	}
+	// Fill the observation close to its unchanged 8 KiB cap. The additional
+	// selected IDs must fit both the writer and the restarted SQLite reader.
+fill:
+	for i := range o.Tree.Nodes {
+		for len(o.Tree.Nodes[i].Name) < foldercontext.MaxNameRunes {
+			previous := o.Tree.Nodes[i].Name
+			o.Tree.Nodes[i].Name += "<"
+			data, err := json.Marshal(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(data) > foldercontext.MaxBytes {
+				o.Tree.Nodes[i].Name = previous
+				break fill
+			}
+		}
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil || len(encoded) <= foldercontext.MaxBytes+256 || len(encoded) > foldercontext.MaxEventBytes {
+		t.Fatal("fixture must exercise the enlarged event envelope", len(encoded), err)
+	}
+	rows, err := store.AppendFolderTurn(ctx, sess.ID, "", "Atlas", "", event, "All selected", "Discussed")
+	if err != nil {
+		t.Fatal("full selection could not be stored", err)
+	}
+	event.FocusIDs = append([]string{}, event.FocusIDs[1:]...)
+	if _, err := store.AppendFolderTurn(ctx, sess.ID, "", "Atlas", rows[0].ID, event, "All except the first", "Discussed subset"); err != nil {
+		t.Fatal("subset could not be stored", err)
+	}
+	restarted := NewHybridStoreWithDB(db, 10).(FolderContextStore)
+	loaded, err := restarted.GetFolderMessages(ctx, sess.ID)
+	if err != nil || len(loaded) != 6 || loaded[0].FolderContext == nil || loaded[3].FolderContext == nil {
+		t.Fatalf("restarted bulk selection: %d messages, %v", len(loaded), err)
+	}
+	if len(loaded[0].FolderContext.FocusIDs) != 64 || strings.Join(loaded[3].FolderContext.FocusIDs, ",") != strings.Join(event.FocusIDs, ",") {
+		t.Fatal("saved selections were truncated or overwritten")
 	}
 }
 

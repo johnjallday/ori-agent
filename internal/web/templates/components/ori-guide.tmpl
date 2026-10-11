@@ -132,16 +132,26 @@
     </div>
     <div class="personal-assistant-explorer__workbench">
       <aside id="personalAssistantFolderExplorer" class="personal-assistant-explorer__pane" aria-labelledby="personalAssistantFolderExplorerName" hidden>
-        <p id="personalAssistantFolderExplorerStatus" class="personal-assistant-explorer__eyebrow"></p>
-        <h3 id="personalAssistantFolderExplorerName"></h3>
-        <p class="personal-assistant-explorer__hint">Contents not read. Send shares metadata with your model. Checks set topics—not access, a privacy filter or descendants.</p>
-        <details class="personal-assistant-explorer__coverage">
-          <summary id="personalAssistantFolderExplorerCoverageSummary">Bounded snapshot</summary>
-          <p id="personalAssistantFolderExplorerCoverage" class="personal-assistant-explorer__hint"></p>
-        </details>
-        <button type="button" id="personalAssistantFolderSelectAll" class="personal-assistant-conversation__button personal-assistant-folder-tree__select-all" aria-controls="personalAssistantFolderTree" disabled>Select all</button>
-        <p id="personalAssistantExplorerNotice" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
-        <ul id="personalAssistantFolderTree" class="personal-assistant-folder-tree" aria-label="Recorded folder and file discussion topics"></ul>
+        <div id="personalAssistantFolderExplorerHeader" class="personal-assistant-explorer__header">
+          <div class="personal-assistant-explorer__heading">
+            <h3 id="personalAssistantFolderExplorerName"></h3>
+            <label id="personalAssistantFolderSelection" class="personal-assistant-folder-tree__select-all">
+              <input type="checkbox" id="personalAssistantFolderSelectAll" aria-controls="personalAssistantFolderTree" aria-describedby="personalAssistantFolderSelectionStatus" disabled>
+              <span>Select all</span>
+            </label>
+          </div>
+          <p id="personalAssistantFolderSelectionStatus" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
+        </div>
+        <div class="personal-assistant-explorer__body">
+          <p id="personalAssistantFolderExplorerStatus" class="personal-assistant-explorer__eyebrow"></p>
+          <p class="personal-assistant-explorer__hint">Contents not read. Send shares metadata with your model. Checks set topics—not access, a privacy filter or descendants.</p>
+          <details class="personal-assistant-explorer__coverage">
+            <summary id="personalAssistantFolderExplorerCoverageSummary">Bounded snapshot</summary>
+            <p id="personalAssistantFolderExplorerCoverage" class="personal-assistant-explorer__hint"></p>
+          </details>
+          <p id="personalAssistantExplorerNotice" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
+          <ul id="personalAssistantFolderTree" class="personal-assistant-folder-tree" aria-label="Recorded folder and file discussion topics"></ul>
+        </div>
       </aside>
     <!-- The existing conversation scrolls here; no second transcript/composer. -->
     <div id="personalAssistantScroll" class="personal-assistant-panel__scroll">
@@ -314,7 +324,7 @@
     <!-- The composer stays pinned and shared by Tree/Chat on every page. -->
     <div id="personalAssistantFolderFocus" class="personal-assistant-folder-focus" hidden>
       <span id="personalAssistantFolderFocusText" role="status" aria-live="polite"></span>
-      <button type="button" id="personalAssistantFolderFocusClear" class="personal-assistant-conversation__button" hidden>Clear focus</button>
+      <button type="button" id="personalAssistantFolderFocusClear" class="personal-assistant-conversation__button" hidden>Clear checks</button>
     </div>
     <button type="button" id="personalAssistantNewReply" class="personal-assistant-transcript__jump"
             aria-controls="homeAssistantConversation" hidden>New reply</button>

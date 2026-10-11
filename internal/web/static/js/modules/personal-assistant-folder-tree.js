@@ -1,5 +1,7 @@
 // Snapshot-only presentation. No paths, network, model prose or read authority.
-export const MAX_FOLDER_FOCUS = 8;
+// Match foldercontext: every entry in the bounded snapshot can be a topic.
+export const MAX_FOLDER_FOCUS = 64;
+export const MAX_FOLDER_FOCUS_BYTES = 160 * 1024;
 
 export function folderTreeView(observation) {
   const tree = observation?.tree;
@@ -63,17 +65,34 @@ export function folderFocusView(observation, ids = []) {
     /[<>&\u2028\u2029]/g,
     character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
   );
-  return new TextEncoder().encode(encoded).length <= 4096 ? focus : null;
+  return new TextEncoder().encode(encoded).length <= MAX_FOLDER_FOCUS_BYTES ? focus : null;
 }
 
-// Bulk focus never silently picks a subset or bypasses the host's limits.
-// A tree that cannot fit as individual topics uses existing whole-folder focus.
+// Checked entries are local selection state, not necessarily individual host
+// topics. Only an exact full selection may fall back to whole-folder focus;
+// an oversized/ambiguous subset must still fail, never silently broaden scope.
+export function folderSelectionFocus(observation, ids = []) {
+  const focus = folderFocusView(observation, ids);
+  if (focus) return focus;
+  if (!Array.isArray(ids) || new Set(ids).size !== ids.length) return null;
+  const tree = folderTreeView(observation);
+  if (
+    !tree?.entries.length ||
+    ids.length !== tree.entries.length ||
+    !ids.every(id => tree.byId.has(id))
+  )
+    return null;
+  return folderFocusView(observation, []);
+}
+
+// Keep every checkbox selected even when Send uses existing whole-folder focus.
 export function folderSelectAllFocus(observation) {
   const tree = folderTreeView(observation);
   if (!tree?.entries.length) return null;
   const ids = tree.entries.map(entry => entry.id);
+  if (!folderSelectionFocus(observation, ids)) return null;
   const wholeFolder = !folderFocusView(observation, ids);
-  return { ids: wholeFolder ? [] : ids, wholeFolder, count: ids.length };
+  return { ids, wholeFolder, count: ids.length };
 }
 
 export function renderFolderFocus(row, focus) {
