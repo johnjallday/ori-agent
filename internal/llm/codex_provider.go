@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 )
@@ -20,6 +22,14 @@ import (
 type CodexProvider struct {
 	cliPath  string
 	mcpStore *CLIMCPConfigStore
+
+	// What the installed CLI's `features list` names, read on demand and kept
+	// briefly; see codex_isolation.go. listFeatures replaces the CLI in tests.
+	featuresMu   sync.Mutex
+	featuresAt   time.Time
+	features     map[string]bool
+	featuresErr  error
+	listFeatures func(ctx context.Context, cliPath string) (map[string]bool, error)
 }
 
 // NewCodexProvider creates a new Codex provider backed by the Codex CLI.
@@ -57,6 +67,8 @@ func (p *CodexProvider) Capabilities() ProviderCapabilities {
 		SupportsStructuredOutput: true,
 		MaxContextWindow:         128000,
 		SupportedFormats:         []string{"text"},
+		// True only while the installed CLI can take the isolated posture.
+		SupportsIsolatedChat: p.IsolatedChatAvailable(context.Background()),
 	}
 }
 
@@ -79,8 +91,25 @@ func (p *CodexProvider) DefaultModels() []string {
 
 // Chat sends a chat request via the Codex CLI.
 func (p *CodexProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := CheckIsolatedRequest(req); err != nil {
+		return nil, err
+	}
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	schema := any(req.ResponseSchema)
+	if req.Isolated {
+		// One posture only: the call is never run any other way when the CLI
+		// cannot take it.
+		content, err := p.runCodexIsolated(ctx, req.Model, prompt, req.ReasoningEffort)
+		if err != nil {
+			return nil, err
+		}
+		return &ChatResponse{Content: content, Model: req.Model, Provider: p.Name(), FinishReason: FinishReasonStop}, nil
+	}
+	// A nil map must stay nil: converted to an interface it would count as a
+	// schema, and the CLI would be handed a schema file that says only "null".
+	var schema any
+	if req.ResponseSchema != nil {
+		schema = req.ResponseSchema
+	}
 	if len(req.Tools) > 0 {
 		var err error
 		prompt, err = appendCodexBrokeredToolProtocol(prompt, req.Tools)
@@ -385,6 +414,19 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 		}
 	}
 
+	dir := ""
+	if nat != nil {
+		dir = nat.WorkspaceDir
+	}
+	return p.execCodex(ctx, prompt, dir, func(outPath string) []string {
+		return buildCodexArgs(model, reasoningEffort, schemaPath, outPath, nat)
+	})
+}
+
+// execCodex runs the CLI once with the prompt on stdin and returns its last
+// message. dir, when set, is the working folder; args is given the file the
+// CLI is told to write that message to.
+func (p *CodexProvider) execCodex(ctx context.Context, prompt, dir string, args func(outPath string) []string) (string, error) {
 	tmpOut, err := os.CreateTemp("", "codex-output-*.txt")
 	if err != nil {
 		return "", fmt.Errorf("codex output temp file: %w", err)
@@ -393,14 +435,12 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 	_ = tmpOut.Close()
 	defer func() { _ = os.Remove(tmpOutPath) }()
 
-	args := buildCodexArgs(model, reasoningEffort, schemaPath, tmpOutPath, nat)
-
 	// #nosec G204 -- cliPath comes from exec.LookPath("codex") and every scoped
 	// filesystem/network argument is canonicalized and allowlisted above; exec
 	// receives an argv slice directly and never invokes a shell.
-	cmd := exec.CommandContext(ctx, p.cliPath, args...)
-	if nat != nil && nat.WorkspaceDir != "" {
-		cmd.Dir = nat.WorkspaceDir
+	cmd := exec.CommandContext(ctx, p.cliPath, args(tmpOutPath)...)
+	if dir != "" {
+		cmd.Dir = dir
 	}
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout bytes.Buffer

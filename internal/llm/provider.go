@@ -1,6 +1,11 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Provider defines the interface for all LLM providers
 type Provider interface {
@@ -135,6 +140,33 @@ type ProviderCapabilities struct {
 
 	// SupportedFormats lists supported content formats (text, image, audio, etc.)
 	SupportedFormats []string
+
+	// SupportsIsolatedChat says the provider can run a ChatRequest with Isolated
+	// set and guarantee what that field asks for. A plain API or local model
+	// call qualifies when the provider adds nothing of its own to the request: with
+	// no tools sent, the model can only answer. A CLI agent qualifies only when
+	// it has a posture that removes its built-in tools and its use of the
+	// user's local configuration, and can tell that the installed CLI honours
+	// it. Defaults false: an unknown provider is not trusted with an isolated call.
+	SupportsIsolatedChat bool
+}
+
+// ErrIsolationUnsupported is returned for a ChatRequest with Isolated set by a
+// provider that cannot guarantee the isolation right now. Nothing was run.
+var ErrIsolationUnsupported = errors.New("llm: this provider cannot run an isolated call")
+
+// CheckIsolatedRequest refuses an isolated request that carries anything an
+// isolated call may not have. Providers call it first, so a caller's mistake
+// can never widen what an isolated call is given.
+func CheckIsolatedRequest(req ChatRequest) error {
+	if !req.Isolated {
+		return nil
+	}
+	if len(req.Tools) > 0 || len(req.MCPServers) > 0 || strings.TrimSpace(req.WorkspaceID) != "" ||
+		strings.TrimSpace(req.WorkspaceDir) != "" || req.ExecutionScope != nil {
+		return fmt.Errorf("%w: an isolated call cannot carry tools, MCP servers, a workspace or an execution scope", ErrIsolationUnsupported)
+	}
+	return nil
 }
 
 // ProviderConfig holds provider-specific configuration

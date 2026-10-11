@@ -99,20 +99,48 @@ func (h *Handler) folderFirstTaskStartsOnClick(ws *agentworkspace.Workspace) boo
 		if task.Status != agentworkspace.TaskStatusPending || assignee == "" || strings.EqualFold(assignee, "unassigned") {
 			return false
 		}
-		return !h.setupWizardOpening(ws.ID) && !h.firstTaskRecipeBlocked(task)
+		return !h.setupWizardOpening(ws.ID) && h.firstTaskRecipeReason(task) == ""
 	}
 	return false
 }
 
-// firstTaskRecipeBlocked reports a first task seeded under a host recipe that
-// this server cannot run within the recipe's restriction. It is never started
+// firstTaskRecipeReason reports why a first task seeded under a host recipe
+// could not be run within the recipe's restriction right now, or "" when it
+// could (and for a task with no recipe). A task it refuses is never started
 // some other way: the restriction is the reason the task exists in that form.
-func (h *Handler) firstTaskRecipeBlocked(task *agentworkspace.Task) bool {
-	recipe := agentworkspace.FirstTaskRecipe(task)
-	return recipe != "" && (h.firstTaskRecipeRunnable == nil || !h.firstTaskRecipeRunnable(recipe))
+func (h *Handler) firstTaskRecipeReason(task *agentworkspace.Task) string {
+	if task == nil || agentworkspace.FirstTaskRecipe(task) == "" {
+		return ""
+	}
+	if h.firstTaskRecipeGate == nil {
+		return personalassistant.FolderFirstTaskReasonRecipeUnavailable
+	}
+	return strings.TrimSpace(h.firstTaskRecipeGate(*task))
 }
 
 var errFolderFirstTaskNoChange = errors.New("no folder first task to start")
+
+// handleFolderFirstTaskRead serves GET /api/workspaces/{id}/folder-first-task:
+// where the workspace's first task stands, as Home's card reads it. The
+// workspace page uses the same answer, so both say the same thing about the
+// same task. It starts nothing and reads no file in any linked folder. A
+// workspace with no first task answers with a null first_task.
+func (h *Handler) handleFolderFirstTaskRead(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	if r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	read := h.FolderFirstTaskView
+	if h.firstTaskViewer != nil {
+		read = h.firstTaskViewer
+	}
+	view, ok := read(r.Context(), workspaceID)
+	if !ok {
+		_ = orihttp.RespondSuccess(w, map[string]any{"first_task": nil})
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"first_task": view})
+}
 
 // handleFolderFirstTaskStart serves POST /api/workspaces/{id}/folder-first-task/start,
 // the Start first look click for a shown folder's first task. Inside one store
@@ -167,10 +195,10 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 				reason = "unassigned"
 				return errFolderFirstTaskNoChange
 			}
-			if h.firstTaskRecipeBlocked(task) {
-				// Left seeded and unspent: a later click starts it once the
-				// recipe can be run here.
-				reason = personalassistant.FolderFirstTaskReasonRecipeUnavailable
+			if blocked := h.firstTaskRecipeReason(task); blocked != "" {
+				// Left seeded and unspent: a later click starts it once what
+				// stands in the way has been repaired.
+				reason = blocked
 				return errFolderFirstTaskNoChange
 			}
 			task.Context[taskContextFolderFirstTaskConsumedAt] = time.Now().UTC().Format(time.RFC3339)

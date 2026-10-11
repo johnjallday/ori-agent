@@ -110,29 +110,222 @@ type FolderFirstTaskView struct {
 	// browser words such a task as what it is (an assessment) and never offers
 	// to run it any other way.
 	Recipe string `json:"recipe,omitempty"`
+	// CanRetry is true for a recipe task whose last run did not finish and
+	// which could be run again now. When something must be repaired first it is
+	// false, and Reason, RepairRoute and RepairLabel say what and where.
+	CanRetry    bool   `json:"can_retry,omitempty"`
+	RepairRoute string `json:"repair_route,omitempty"`
+	RepairLabel string `json:"repair_label,omitempty"`
+	// NextRequest is the one next request a finished assessment suggested, as
+	// plain text for the user to read, edit and submit themselves. NextRoute
+	// opens the workspace's Plans page with it placed, unsubmitted, in the
+	// "Start a plan" box.
+	NextRequest string `json:"next_request,omitempty"`
+	NextRoute   string `json:"next_route,omitempty"`
+	// ReportRoute opens a finished assessment where it can be read in full:
+	// the task's own page, which shows its result. A ticket's detail (the
+	// TicketRoute) lists the work and its runs but not what a run wrote.
+	ReportRoute string `json:"report_route,omitempty"`
+	// Readiness is what a recipe task needs and can use, read now: the folder,
+	// the assistant's model, and optional connections. Rows are the same shape
+	// as a setup plan's prerequisites.
+	Readiness []FolderPrerequisite `json:"readiness,omitempty"`
+}
+
+// Reasons specific to a first task under a host recipe. The first group is why
+// it cannot start (or be tried again) until something is repaired; the second
+// is how a run ended without a result.
+const (
+	FolderFirstTaskReasonAssistantMissing  = "assistant_unavailable"
+	FolderFirstTaskReasonModelUnavailable  = "model_unavailable"
+	FolderFirstTaskReasonModelUnsupported  = "model_unsupported"
+	FolderFirstTaskReasonFolderUnavailable = "project_folder_unavailable"
+	FolderFirstTaskReasonWorkspaceMissing  = "workspace_unavailable"
+
+	FolderFirstTaskReasonToolRefused     = "tool_call_refused"
+	FolderFirstTaskReasonContextTooSmall = "context_too_small"
+	FolderFirstTaskReasonNothingToAssess = "nothing_to_assess"
+	FolderFirstTaskReasonTimedOut        = "timed_out"
+	FolderFirstTaskReasonProviderConfig  = "provider_configuration_required"
+	FolderFirstTaskReasonProviderQuota   = "provider_quota_exhausted"
+)
+
+// Where a recipe task's reasons are repaired. Each is an existing page.
+const (
+	folderFirstTaskAgentsRoute   = "/agents"
+	folderFirstTaskFolderRoute   = "/?panel=today&folder=show"
+	folderFirstTaskProviderRoute = "/settings#api-keys"
+)
+
+// FolderFirstTaskRecipeMessage is the one sentence shown for why a first
+// assessment cannot start, or did not finish. agent is its assistant's name.
+// An unknown reason says only that it did not finish.
+func FolderFirstTaskRecipeMessage(reason, workspaceName, agent string) string {
+	name := strings.TrimSpace(workspaceName)
+	if name == "" {
+		name = "the workspace"
+	}
+	who := strings.TrimSpace(agent)
+	if who == "" {
+		who = "The assistant"
+	}
+	switch reason {
+	case "":
+		return ""
+	case FolderFirstTaskReasonRecipeUnavailable:
+		return "The first assessment cannot be run on this server. Nothing is sent to a model until it can."
+	case FolderFirstTaskReasonUnassigned, FolderFirstTaskReasonAssistantMissing:
+		return "The assessment has no assistant in " + name + " to run it. Open " + name + " to assign one."
+	case FolderFirstTaskReasonNoModel:
+		return who + " has no model chosen. Choose one for it, then start the assessment."
+	case FolderFirstTaskReasonModelUnavailable:
+		return "The model " + who + " is set to use is not set up on this computer. Set it up, or choose another for it."
+	case FolderFirstTaskReasonModelUnsupported:
+		return "The model " + who + " is set to use cannot be held to a read-only assessment, because Ori cannot switch its tools off. Choose another model for it."
+	case FolderFirstTaskReasonFolderUnavailable:
+		return "The project folder is missing, or a different folder is now in its place, so nothing was read. Put it back where it was, or show Ori the project again."
+	case FolderFirstTaskReasonWorkspaceMissing:
+		return name + " is not available right now."
+	case FolderFirstTaskReasonLocalActivation:
+		return "Open " + name + " and activate it on this computer."
+	case FolderFirstTaskReasonSetupOpen:
+		return "Open " + name + " to finish its setup first."
+	case FolderFirstTaskReasonToolRefused:
+		return "The model asked to use a tool, which a read-only assessment does not allow. Nothing was run and its answer was discarded. Try again."
+	case FolderFirstTaskReasonContextTooSmall:
+		return "The model " + who + " uses has too small a context window for this project. Choose a model with a larger one."
+	case FolderFirstTaskReasonNothingToAssess:
+		return "Ori found no README, instructions or build files it could read in this project, so there was nothing to assess."
+	case FolderFirstTaskReasonTimedOut:
+		return "The assessment ran out of time before the model answered. Nothing in the project was run or changed. Try again."
+	case FolderFirstTaskReasonProviderConfig:
+		return "The model's provider is not signed in or set up, so the assessment did not run."
+	case FolderFirstTaskReasonProviderQuota:
+		return "The model's provider is out of quota, so the assessment did not run."
+	case FolderFirstTaskReasonNeedsInput:
+		return "The assessment is paused. Open " + name + " to continue."
+	case FolderFirstTaskReasonStartFailed:
+		return "The assessment could not start. Try again."
+	default:
+		return "The assessment did not finish. Nothing in the project was run or changed. Try again."
+	}
+}
+
+// FolderFirstTaskRecipeRepair says where a reason is repaired: an existing
+// page and what its link is called. Both are empty when a plain retry is the
+// repair, or when nothing here can repair it.
+func FolderFirstTaskRecipeRepair(reason, workspaceRoute, workspaceName string) (route, label string) {
+	switch reason {
+	case FolderFirstTaskReasonNoModel, FolderFirstTaskReasonModelUnavailable, FolderFirstTaskReasonModelUnsupported, FolderFirstTaskReasonContextTooSmall:
+		return folderFirstTaskAgentsRoute, "Choose a model"
+	case FolderFirstTaskReasonFolderUnavailable:
+		return folderFirstTaskFolderRoute, "Show the folder"
+	case FolderFirstTaskReasonProviderConfig, FolderFirstTaskReasonProviderQuota:
+		return folderFirstTaskProviderRoute, "Open AI provider settings"
+	case FolderFirstTaskReasonUnassigned, FolderFirstTaskReasonAssistantMissing, FolderFirstTaskReasonLocalActivation, FolderFirstTaskReasonSetupOpen:
+		if strings.HasPrefix(workspaceRoute, "/workspaces/") {
+			name := strings.TrimSpace(workspaceName)
+			if name == "" {
+				name = "workspace"
+			}
+			return workspaceRoute, "Open " + name
+		}
+	}
+	return "", ""
+}
+
+// FolderFirstTaskRecipeBlocks reports a reason that must be repaired before a
+// recipe task can be started or tried again. Any other reason is how one run
+// ended; trying again is then allowed.
+func FolderFirstTaskRecipeBlocks(reason string) bool {
+	switch reason {
+	case FolderFirstTaskReasonRecipeUnavailable, FolderFirstTaskReasonUnassigned, FolderFirstTaskReasonAssistantMissing,
+		FolderFirstTaskReasonNoModel, FolderFirstTaskReasonModelUnavailable, FolderFirstTaskReasonModelUnsupported,
+		FolderFirstTaskReasonFolderUnavailable, FolderFirstTaskReasonWorkspaceMissing,
+		FolderFirstTaskReasonLocalActivation, FolderFirstTaskReasonSetupOpen:
+		return true
+	}
+	return false
 }
 
 // FolderFirstTaskViewDetail is the receipt row for a first task as it stands.
 // A task under a host recipe that cannot start yet says what it is waiting
 // for: "Ready to start" there would promise a start the click cannot deliver.
 func FolderFirstTaskViewDetail(view FolderFirstTaskView, result string) string {
-	if view.Recipe != "" && view.State == FolderFirstTaskSeeded && !view.CanStart {
-		switch view.Reason {
-		case FolderFirstTaskReasonNoModel:
-			return "Needs a model before it can start"
-		case FolderFirstTaskReasonUnassigned:
-			return "Needs an assistant before it can start"
-		case FolderFirstTaskReasonLocalActivation:
-			return "Needs this workspace activated on this computer first"
-		case FolderFirstTaskReasonSetupOpen:
-			return "Waits for the workspace's own setup to finish"
-		case FolderFirstTaskReasonRecipeUnavailable:
-			return "Cannot start here yet"
-		default:
-			return "Not ready to start yet"
+	if view.Recipe == "" {
+		return FolderFirstTaskRowDetail(view.State, view.CanStart, result)
+	}
+	switch view.State {
+	case FolderFirstTaskSeeded:
+		if view.CanStart {
+			return "Starts when you press Start assessment"
 		}
+		return folderFirstTaskWaitsFor(view.Reason)
+	case FolderFirstTaskFailed:
+		if FolderFirstTaskRecipeBlocks(view.Reason) {
+			waits := folderFirstTaskWaitsFor(view.Reason)
+			return "Did not finish · " + strings.ToLower(waits[:1]) + waits[1:]
+		}
+		return "Did not finish"
+	case FolderFirstTaskWaiting:
+		return "Paused"
+	case FolderFirstTaskFinished:
+		return FolderFirstTaskRowDetail(view.State, view.CanStart, folderFirstTaskLead(result))
 	}
 	return FolderFirstTaskRowDetail(view.State, view.CanStart, result)
+}
+
+// FolderFirstTaskRecipeExcerpt is the one-line excerpt of a recipe task's
+// report. Such a report opens with the recipe's own first heading, which says
+// nothing about the project, so the excerpt is its first paragraph instead.
+func FolderFirstTaskRecipeExcerpt(result string) string {
+	return FolderFirstTaskExcerpt(folderFirstTaskLead(result))
+}
+
+// folderFirstTaskLead is the first paragraph of a report that is not a
+// Markdown heading, on one line. A report with no such paragraph is returned
+// as it is.
+func folderFirstTaskLead(result string) string {
+	var lead []string
+	for _, line := range strings.Split(result, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			if len(lead) > 0 {
+				break
+			}
+			continue
+		}
+		lead = append(lead, line)
+	}
+	if len(lead) == 0 {
+		return result
+	}
+	return strings.Join(lead, " ")
+}
+
+// folderFirstTaskWaitsFor is the short row text for what a recipe task that
+// cannot start is waiting on.
+func folderFirstTaskWaitsFor(reason string) string {
+	switch reason {
+	case FolderFirstTaskReasonNoModel:
+		return "Needs a model before it can start"
+	case FolderFirstTaskReasonModelUnavailable:
+		return "Needs its model set up before it can start"
+	case FolderFirstTaskReasonModelUnsupported:
+		return "Needs a different model before it can start"
+	case FolderFirstTaskReasonUnassigned, FolderFirstTaskReasonAssistantMissing:
+		return "Needs an assistant before it can start"
+	case FolderFirstTaskReasonFolderUnavailable:
+		return "Needs the project folder back before it can start"
+	case FolderFirstTaskReasonLocalActivation:
+		return "Needs this workspace activated on this computer first"
+	case FolderFirstTaskReasonSetupOpen:
+		return "Waits for the workspace's own setup to finish"
+	case FolderFirstTaskReasonRecipeUnavailable:
+		return "Cannot start here yet"
+	default:
+		return "Not ready to start yet"
+	}
 }
 
 // IsFolderFirstTask reports whether a task is the first look a shown folder's
@@ -196,6 +389,13 @@ func FolderFirstTaskStateAt(task *workspace.Task, now time.Time) FolderFirstTask
 			return FolderFirstTaskWaiting
 		}
 		if task.NeedsAttention() {
+			return FolderFirstTaskFailed
+		}
+		// A run under a host recipe that the server lost (it was restarted while
+		// the model was answering) is put back to pending at start-up while its
+		// ticket still says In Progress. Nothing is running it, so it did not
+		// finish; saying "running" would leave it stuck with nothing to press.
+		if task.Status == workspace.TaskStatusPending && workspace.FirstTaskRecipe(task) != "" {
 			return FolderFirstTaskFailed
 		}
 		return FolderFirstTaskRunning

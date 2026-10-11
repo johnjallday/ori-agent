@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/softwareassessment"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -57,8 +58,8 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 	case personalassistant.FolderFirstTaskSeeded:
 		view.StartedAt = nil
 		view.Reason = h.folderFirstTaskBlockedReason(ctx, ws, view.Agent)
-		if view.Reason == "" && h.firstTaskRecipeBlocked(task) {
-			view.Reason = personalassistant.FolderFirstTaskReasonRecipeUnavailable
+		if view.Reason == "" {
+			view.Reason = h.firstTaskRecipeReason(task)
 		}
 		view.CanStart = view.Reason == ""
 	case personalassistant.FolderFirstTaskWaiting:
@@ -70,9 +71,54 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 		view.FinishedAt = task.CompletedAt
 		view.Reason = personalassistant.FolderFirstTaskFailureReason(task)
 	}
-	view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, ws.Name)
+	if view.Recipe != "" {
+		h.describeRecipeFirstTask(ctx, ws, task, &view)
+	} else {
+		view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, ws.Name)
+	}
 	view.Detail = personalassistant.FolderFirstTaskViewDetail(view, task.Result)
 	return view, true
+}
+
+// describeRecipeFirstTask finishes the view of a first task that runs under a
+// host recipe. Such a task is an assessment: it asks the user nothing, it can
+// be tried again only when what stopped it has been repaired, and every reason
+// is read now rather than remembered, so the view follows a repair made on
+// another page.
+func (h *Handler) describeRecipeFirstTask(ctx context.Context, ws *agentworkspace.Workspace, task *agentworkspace.Task, view *personalassistant.FolderFirstTaskView) {
+	if view.State == personalassistant.FolderFirstTaskFailed {
+		// What stands in the way of another try, if anything, comes first; else
+		// the reason is how the last run ended.
+		blocked := h.folderFirstTaskBlockedReason(ctx, ws, view.Agent)
+		if blocked == "" {
+			blocked = h.firstTaskRecipeReason(task)
+		}
+		ended, _ := task.Context[agentworkspace.TaskContextFirstTaskFailure].(string)
+		switch {
+		case blocked != "":
+			view.Reason = blocked
+		case strings.TrimSpace(ended) != "":
+			view.Reason = strings.TrimSpace(ended)
+		}
+		view.CanRetry = blocked == ""
+	}
+	view.Message = personalassistant.FolderFirstTaskRecipeMessage(view.Reason, ws.Name, view.Agent)
+	// The sentence recorded when a run ended says more than its code does.
+	if view.State == personalassistant.FolderFirstTaskFailed && view.CanRetry && strings.TrimSpace(task.Error) != "" &&
+		view.Reason != personalassistant.FolderFirstTaskReasonToolRefused && view.Reason != personalassistant.FolderFirstTaskReasonTimedOut {
+		view.Message = strings.TrimSpace(task.Error)
+	}
+	view.RepairRoute, view.RepairLabel = personalassistant.FolderFirstTaskRecipeRepair(view.Reason, view.WorkspaceRoute, ws.Name)
+	if view.State == personalassistant.FolderFirstTaskFinished {
+		view.ResultExcerpt = personalassistant.FolderFirstTaskRecipeExcerpt(task.Result)
+		view.ReportRoute = view.WorkspaceRoute + "/task/" + url.PathEscape(task.ID)
+		if next := softwareassessment.NextTask(task.Result); next != "" {
+			// The workspace's Plans page is where a request is drafted into a plan,
+			// and where nothing is created until the user presses Create plan.
+			view.NextRequest = next
+			view.NextRoute = view.WorkspaceRoute + "/plans?next=assessment"
+		}
+	}
 }
 
 // folderFirstTaskBlockedReason answers, in the start endpoint's own order, why a

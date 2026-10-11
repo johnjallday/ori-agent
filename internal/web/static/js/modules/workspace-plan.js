@@ -180,6 +180,68 @@ export class WorkspacePlansPage {
   async init() {
     this.bindEvents();
     await Promise.all([this.loadPlanningPolicy(), this.reload()]);
+    await this.offerAssessmentSuggestion();
+  }
+
+  // A finished first assessment links here with ?next=assessment. The one next
+  // request it suggested is read from the server (never from the address) and
+  // placed in the "Start a plan" box for the user to edit, submit or discard.
+  // Nothing is created by arriving here: creating the plan is still the user's
+  // own press of Create plan, and even that starts no work.
+  //
+  // The suggestion is text a model wrote from the project's files. It is only
+  // ever set as the value of the box or as plain text.
+  async offerAssessmentSuggestion() {
+    const view = this.doc?.defaultView;
+    const params = new URLSearchParams(view?.location?.search || '');
+    if (params.get('next') !== 'assessment') return;
+    // The parameter has done its job: a reload must not fill the box again over
+    // what the user has typed since.
+    try {
+      params.delete('next');
+      const query = params.toString();
+      view.history?.replaceState?.(
+        view.history.state,
+        '',
+        `${view.location.pathname}${query ? `?${query}` : ''}${view.location.hash || ''}`
+      );
+    } catch {
+      // The address is left as it is.
+    }
+
+    let look = null;
+    try {
+      const body = await this.request(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task`
+      );
+      look = body?.first_task || null;
+    } catch {
+      look = null;
+    }
+    const suggestion = String(look?.next_request || '').trim();
+    if (!look || !String(look.recipe || '').trim() || look.state !== 'finished' || !suggestion) {
+      this.setStatus('This workspace has no finished assessment with a suggested next task.');
+      return;
+    }
+    if (!this.planningEnabled) {
+      // The concrete missing step, rather than a box that would do nothing.
+      this.setStatus(
+        `The first assessment suggested: “${suggestion}” Structured planning is off for this workspace, so a plan cannot be drafted from it here. Turn it on in Workspace Settings first.`
+      );
+      return;
+    }
+    const input = this.el('#plan-create-request');
+    if (!input) return;
+    const project = String(look.folder_name || look.workspace_name || '').trim();
+    const source = project
+      ? `Suggested by the first assessment of ${project}.`
+      : 'Suggested by the first assessment.';
+    // What the user has already typed is theirs.
+    if (!String(input.value || '').trim()) input.value = `${suggestion}\n\n(${source})`;
+    input.focus?.();
+    this.setStatus(
+      'The first assessment suggested this next task. Edit it if you like, then press Create plan. Nothing is created until you do, and creating a plan starts no work.'
+    );
   }
 
   bindEvents() {

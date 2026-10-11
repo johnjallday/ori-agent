@@ -108,7 +108,10 @@ func (p *OllamaProvider) Capabilities() ProviderCapabilities {
 	if window <= 0 {
 		window = defaultLocalContextWindow
 	}
-	return LocalProviderCapabilities(window)
+	caps := LocalProviderCapabilities(window)
+	// A plain call to a local model server: nothing but the request reaches it.
+	caps.SupportsIsolatedChat = true
+	return caps
 }
 
 // ValidateConfig validates the provider configuration
@@ -431,6 +434,9 @@ func looksLikeFormatUnsupported(status int, body string) bool {
 
 // Chat sends a chat request to Ollama
 func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := CheckIsolatedRequest(req); err != nil {
+		return nil, err
+	}
 	ollamaReq := p.buildRequest(req, false)
 
 	ollamaResp, status, body, err := p.postChat(ctx, ollamaReq)

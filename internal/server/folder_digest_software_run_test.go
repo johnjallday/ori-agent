@@ -178,8 +178,9 @@ func TestSoftwareSetup_CarriesOutTheReviewedPlanExactlyOnce(t *testing.T) {
 		t.Fatalf("a tool server was given the project folder: %s", bound)
 	}
 
-	// One assessment under the host recipe, waiting, and not startable as an
-	// ordinary agent task.
+	// One assessment under the host recipe, waiting. This fixture's model is a
+	// stand-in for a CLI agent that Ori cannot hold to a tool-free call, so the
+	// assessment is not startable on it, and is not started some other way.
 	tasks := firstTasks(ws)
 	if len(tasks) != 1 || len(ws.Tasks) != 1 {
 		t.Fatalf("tasks = %d first of %d", len(tasks), len(ws.Tasks))
@@ -190,7 +191,7 @@ func TestSoftwareSetup_CarriesOutTheReviewedPlanExactlyOnce(t *testing.T) {
 		t.Fatalf("assessment = %+v", task)
 	}
 	status, started := f.call(t, http.MethodPost, "/api/workspaces/"+ws.ID+"/folder-first-task/start", nil)
-	if status != http.StatusOK || started["started"] != false || started["reason"] != "assessment_unavailable" {
+	if status != http.StatusOK || started["started"] != false || started["reason"] != "model_unsupported" {
 		t.Fatalf("starting the assessment: %d %v", status, started)
 	}
 	if after, _ := f.builder.workspaceFileStore.Get(ws.ID); firstTasks(after)[0].Status != workspace.TaskStatusPending ||
@@ -207,7 +208,7 @@ func TestSoftwareSetup_CarriesOutTheReviewedPlanExactlyOnce(t *testing.T) {
 		"folder":    {"widget", "linked where it is, read-only"},
 		"blueprint": {"Code Project", "planning first"},
 		"agent":     {"Development Assistant", "development assistant, added"},
-		"task":      {"Assess this project and suggest a first task", "Cannot start here yet"},
+		"task":      {"Assess this project and suggest a first task", "Needs a different model before it can start"},
 	} {
 		row := receiptRow(offer, kind)
 		if row == nil || row["name"] != want[0] || !strings.Contains(row["detail"].(string), want[1]) {
@@ -218,8 +219,22 @@ func TestSoftwareSetup_CarriesOutTheReviewedPlanExactlyOnce(t *testing.T) {
 	// assessment that cannot start is never shown as ready.
 	live, _ := offer["first_task"].(map[string]any)
 	if live == nil || live["state"] != "seeded" || live["can_start"] != false || live["recipe"] != workspace.FirstTaskRecipeSoftwareAssessment ||
-		live["detail"] != "Cannot start here yet" || strings.Contains(strings.ToLower(mustJSON(t, live)), "ready to start") {
+		live["reason"] != "model_unsupported" || live["detail"] != "Needs a different model before it can start" ||
+		live["repair_route"] != "/agents" || live["repair_label"] != "Choose a model" ||
+		!strings.Contains(live["message"].(string), "cannot be held to a read-only assessment") ||
+		strings.Contains(strings.ToLower(mustJSON(t, live)), "ready to start") {
 		t.Fatalf("live first task = %v", live)
+	}
+	// What the assessment needs, read now: the folder is there, the model is the
+	// problem, and GitHub is optional and not connected.
+	readiness := map[string]map[string]any{}
+	for _, row := range live["readiness"].([]any) {
+		item := row.(map[string]any)
+		readiness[item["id"].(string)] = item
+	}
+	if readiness["folder"]["state"] != "verified" || readiness["model"]["state"] != "absent" || readiness["model"]["route"] != "/agents" ||
+		readiness["github"]["state"] != "absent" || readiness["github"]["required"] != false || len(readiness) != 3 {
+		t.Fatalf("readiness = %v", readiness)
 	}
 	if encoded := mustJSON(t, offer); strings.Contains(encoded, os.Getenv("HOME")) {
 		t.Fatal("the resolved offer carries a filesystem path")

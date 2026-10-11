@@ -3,6 +3,7 @@ package projectinspect
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -402,6 +403,69 @@ func TestInspect_LimitsStopEarlyAndSaySo(t *testing.T) {
 	cancelled, err := Inspect(ctx, set.GoNode, Options{})
 	if err != nil || !cancelled.Partial || cancelled.PartialReason != PartialTime || len(cancelled.Documents) != 0 {
 		t.Fatalf("cancelled: %+v %v", cancelled, err)
+	}
+}
+
+// The top level is listed by name so a report can say how a project is laid
+// out. Listing is not reading: hidden entries, dependency trees and anything
+// named for keys or secrets are not even mentioned, and the listing is not
+// part of what a review is tied to.
+func TestInspect_LayoutNamesTheTopLevelAndLeavesOutWhatIsNotItsBusiness(t *testing.T) {
+	set := fixtures(t)
+	evidence := inspect(t, set.GoNode, Options{})
+	var got []string
+	for _, entry := range evidence.Layout {
+		name := entry.Name
+		if entry.Dir {
+			name += "/"
+		}
+		got = append(got, name)
+	}
+	// Folders first, then files, each in name order.
+	want := ".github/|internal/|web/|AGENTS.md|go.mod|main.go|Makefile|package.json|README.md"
+	if strings.Join(got, "|") != want || evidence.LayoutMore != 0 {
+		t.Fatalf("layout = %v (+%d), want %s", got, evidence.LayoutMore, want)
+	}
+
+	// Names that are nobody's business are simply absent.
+	root := t.TempDir()
+	for _, name := range []string{".env", ".npmrc", ".ssh", "id_rsa", "deploy.pem", "client-secret.json", "API_TOKEN.txt", "node_modules", "src", "README.md"} {
+		path := filepath.Join(root, name)
+		if strings.Contains(name, ".") && name != ".ssh" || name == "id_rsa" {
+			if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.Mkdir(path, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quiet := inspect(t, root, Options{})
+	if len(quiet.Layout) != 2 || quiet.Layout[0] != (LayoutEntry{Name: "src", Dir: true}) || quiet.Layout[1] != (LayoutEntry{Name: "README.md"}) {
+		t.Fatalf("layout of a folder with private names = %+v", quiet.Layout)
+	}
+
+	// A long top level is cut, and says by how much.
+	wide := t.TempDir()
+	for i := 0; i < maxLayoutEntries+7; i++ {
+		if err := os.WriteFile(filepath.Join(wide, fmt.Sprintf("file-%03d.txt", i)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	long := inspect(t, wide, Options{})
+	if len(long.Layout) != maxLayoutEntries || long.LayoutMore != 7 {
+		t.Fatalf("a long layout kept %d and counted %d more", len(long.Layout), long.LayoutMore)
+	}
+
+	// A file added beside the ones that were read changes the layout and not
+	// the revision a review was made from.
+	if err := os.WriteFile(filepath.Join(set.GoNode, "NOTES.txt"), []byte("later\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after := inspect(t, set.GoNode, Options{})
+	if after.Revision != evidence.Revision || len(after.Layout) != len(evidence.Layout)+1 {
+		t.Fatalf("revision moved (%v) or layout did not follow (%d -> %d)", after.Revision != evidence.Revision, len(evidence.Layout), len(after.Layout))
 	}
 }
 

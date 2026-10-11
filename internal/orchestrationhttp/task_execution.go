@@ -964,6 +964,17 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 	delete(task.Context, "human_loop")
 	delete(task.Context, "structured_output")
+	recipe := workspace.FirstTaskRecipe(task)
+	if recipe != "" {
+		// A recipe run that is tried again is running again: the failure of the
+		// attempt before it is no longer what the task says about itself.
+		delete(task.Context, workspace.TaskContextFirstTaskFailure)
+		if task.Status == workspace.TaskStatusFailed || task.Status == workspace.TaskStatusTimeout || task.Status == workspace.TaskStatusPending {
+			if err := task.SetStatus(workspace.TaskStatusInProgress); err != nil {
+				logger.Debug("Recipe task was not moved back to in progress", logger.Fields{"task_id": task.ID, "error": err})
+			}
+		}
+	}
 
 	if err := ws.UpdateTask(*task); err != nil {
 		return "", fmt.Errorf("failed to update task status: %w", err)
@@ -1025,7 +1036,13 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	var result string
 	var execErr error
 	inferredExecutionSteps := workspace.InferTaskExecutionSteps(taskForExecution)
-	if len(task.ExecutionSteps) > 0 && len(inferredExecutionSteps) == 0 {
+	if recipe != "" {
+		// A task under a host recipe is exactly one call, made by that recipe. It
+		// is not split into steps by the words in its description, not tried again
+		// because of how its answer is phrased, and not retried on an error: a
+		// second attempt is the user's own click.
+		result, execErr = th.executeRecipeTaskOnce(ctx, task, taskForExecution)
+	} else if len(task.ExecutionSteps) > 0 && len(inferredExecutionSteps) == 0 {
 		if cachedResult := strings.TrimSpace(workspace.BuildTaskExecutionSummary(task)); cachedResult != "" {
 			workspace.SkipPendingExecutionSteps(task)
 			result = cachedResult

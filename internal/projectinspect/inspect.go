@@ -172,7 +172,23 @@ type Evidence struct {
 	// considered; PartialReason says which.
 	Partial       bool
 	PartialReason string
+	// Layout is the project's top level: the names in its root, folders first.
+	// It comes from listing that one directory; no entry in it was opened
+	// because it is listed here. LayoutMore counts entries left out of a long
+	// listing. Neither is part of Revision: a file added beside the ones that
+	// were read does not change what a review was made from.
+	Layout     []LayoutEntry
+	LayoutMore int
 }
+
+// LayoutEntry is one name at the top level of a project.
+type LayoutEntry struct {
+	Name string
+	Dir  bool
+}
+
+// maxLayoutEntries bounds the top-level listing kept as evidence.
+const maxLayoutEntries = 60
 
 // Document returns the document read from a relative path, if any.
 func (e Evidence) Document(path string) (Document, bool) {
@@ -290,13 +306,58 @@ func (r *inspection) listRoot() map[string]string {
 	if err != nil {
 		return names
 	}
+	var layout []LayoutEntry
 	for _, entry := range listed {
 		lower := strings.ToLower(entry.Name())
 		if _, taken := names[lower]; !taken {
 			names[lower] = entry.Name()
 		}
+		// A link is listed as a file: it is not followed.
+		if layoutName(entry.Name()) {
+			layout = append(layout, LayoutEntry{Name: entry.Name(), Dir: entry.IsDir()})
+		}
 	}
+	sort.SliceStable(layout, func(i, j int) bool {
+		if layout[i].Dir != layout[j].Dir {
+			return layout[i].Dir
+		}
+		return strings.ToLower(layout[i].Name) < strings.ToLower(layout[j].Name)
+	})
+	if len(layout) > maxLayoutEntries {
+		r.evidence.LayoutMore = len(layout) - maxLayoutEntries
+		layout = layout[:maxLayoutEntries]
+	}
+	r.evidence.Layout = layout
 	return names
+}
+
+// layoutName reports whether a root entry's name is kept as evidence of the
+// project's shape. Hidden entries are left out (settings, version control,
+// environment files) apart from the CI folder; so are dependency trees and
+// anything whose name says it holds keys or secrets. A name left out here is
+// simply not mentioned: nothing about it is reported at all.
+func layoutName(name string) bool {
+	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 ||
+		strings.ContainsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return false
+	}
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, ".") {
+		return lower == ".github"
+	}
+	if lower == "node_modules" || lower == "id_rsa" || lower == "id_ed25519" {
+		return false
+	}
+	for _, mark := range []string{"secret", "credential", "password", "token"} {
+		if strings.Contains(lower, mark) {
+			return false
+		}
+	}
+	switch filepath.Ext(lower) {
+	case ".pem", ".key", ".p12", ".pfx", ".keystore":
+		return false
+	}
+	return true
 }
 
 func (r *inspection) gap(code, source string) {

@@ -10,8 +10,17 @@
 //              anything
 //   resume     after the server was restarted on the same sandbox: the paused
 //              setup is still there; a model is chosen, Continue finishes it,
-//              the receipt is what was saved, the same folder shown again opens
-//              that workspace, and a sibling worktree is a different project
+//              and the receipt is what was saved
+//   assess-interrupt  the receipt offers Start assessment and says what it
+//              needs; pressed twice it starts once, and the phase ends with the
+//              run still going so the server can be stopped under it
+//   assess     after the server was restarted: a run the server lost did not
+//              finish and says so; Try again (or Start assessment, when it was
+//              never started) runs the same task with the real model; its
+//              result is followed into the workspace and its suggestion onto
+//              the Plans page, where nothing is created
+//   repeat     the same folder shown again opens that workspace, and a sibling
+//              worktree is a different project
 //
 // Usage:
 //   ./scripts/demo-server.sh 8947 "$TMPDIR/ori-software-demo"      (background)
@@ -20,6 +29,12 @@
 //
 // For resume: run setup, stop the server (./scripts/stop-demo-server.sh 8947),
 // start it again on the same sandbox, then run resume with the same shots dir.
+// assess-interrupt, assess and repeat continue that sandbox in that order, with
+// the server stopped and started again between assess-interrupt and assess.
+// Choosing the model (resume) and both assessment phases need a signed-in model
+// provider: start those servers with CODEX_HOME set to a signed-in Codex home
+// (demo-server.sh is otherwise fully isolated and has no provider). The two
+// assessment phases make real model calls.
 //
 // The script reads the seeded folders only to hash them: every folder it did
 // not replace itself must be byte-for-byte the same at the end.
@@ -37,10 +52,13 @@ import {
 } from 'node:fs';
 import { join, relative } from 'node:path';
 
+const PHASES = ['recognize', 'review', 'setup', 'resume', 'assess-interrupt', 'assess', 'repeat'];
+// The phases that continue the sandbox an earlier phase left behind.
+const CONTINUES = ['resume', 'assess-interrupt', 'assess', 'repeat'];
 const [base, sandbox, output, phase = 'review'] = process.argv.slice(2);
-if (!base || !sandbox || !output || !['recognize', 'review', 'setup', 'resume'].includes(phase))
+if (!base || !sandbox || !output || !PHASES.includes(phase))
   throw new Error(
-    'usage: demo-software-folder.mjs <base-url> <sandbox-dir> <shots-dir> [recognize|review|setup|resume]'
+    `usage: demo-software-folder.mjs <base-url> <sandbox-dir> <shots-dir> [${PHASES.join('|')}]`
   );
 mkdirSync(output, { recursive: true });
 // What setup saw before it changed anything, for resume to compare against.
@@ -548,6 +566,428 @@ async function resumePhase(untouched) {
   expect(resolved?.first_task?.state === 'seeded', 'the assessment was started by setup');
   await shot('23-card-receipt');
 
+  writeFileSync(
+    carried,
+    JSON.stringify({
+      ...before,
+      resolved: resolved.id,
+      workspace: resolved.first_task.workspace_id,
+      task: resolved.first_task.task_id
+    }),
+    { mode: 0o600 }
+  );
+  await settled(before, untouched);
+  console.log('OK (resume): one workspace, one assistant, folders unchanged, no page errors');
+}
+
+// settled is what every phase after setup leaves true: one workspace and one
+// assistant more than before, and every seeded folder byte-for-byte the same.
+async function settled(before, untouched) {
+  expect(
+    (await workspaceCount()) === before.workspaces + 1,
+    'the workspaces changed after the setup'
+  );
+  expect((await developmentAssistants()) === 1, 'there is not exactly one assistant');
+  expect(
+    JSON.stringify(hashes(untouched)) === JSON.stringify(before.hashes),
+    'a seeded folder changed'
+  );
+  expect(errors.length === 0, `page errors: ${errors.join('; ')}`);
+}
+
+// The set-up offer's first task, read the way its card reads it.
+async function firstTask(offerID) {
+  const digest = await api(
+    'GET',
+    `/api/personal-assistant/folder-digest?offer_id=${encodeURIComponent(offerID)}`
+  );
+  return digest.folder_digest?.offer?.first_task || null;
+}
+// The workspace's tasks: an assessment is one task however often it is run.
+async function taskIDs(workspaceID) {
+  const listed = await api(
+    'GET',
+    `/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceID)}`
+  );
+  const tasks = Array.isArray(listed) ? listed : listed.tasks || listed.data || [];
+  return tasks.map(task => task.id).sort();
+}
+// What the receipt card says about the assessment right now.
+async function assessmentCard() {
+  return {
+    receipt: (await list('#personalAssistantFolderReceipt')).map(line => line.replace(/\n/g, ' ')),
+    readiness: (await list('#personalAssistantFolderPrerequisites')).map(line =>
+      line.replace(/\n/g, ' ')
+    ),
+    note: await text('#personalAssistantFolderOfferNote'),
+    result: await text('#personalAssistantFolderFirstLookResult'),
+    buttons: await buttons()
+  };
+}
+// Waits until the card's first task is in one of the given states.
+async function waitForLook(offerID, states, timeout) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const look = await firstTask(offerID);
+    if (look && states.includes(look.state)) return look;
+    if (Date.now() > deadline)
+      throw new Error(`the assessment is ${look?.state} after ${timeout / 1000}s, not ${states}`);
+    await page.waitForTimeout(1500);
+  }
+}
+// Home refreshes what its assistant drawer shows with a POST that only reads
+// (no model turn, nothing saved). Every other request that is not a GET could
+// start a run or change something, and is recorded.
+const DISPLAY_READS = new Set(['/api/home-assistant/context']);
+function watchWrites() {
+  const writes = [];
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== 'GET' && !DISPLAY_READS.has(path))
+      writes.push(`${request.method()} ${path}`);
+  });
+  return writes;
+}
+
+async function assessInterruptPhase(untouched) {
+  expect(existsSync(carried), `run setup and resume first: ${carried} is missing`);
+  const before = JSON.parse(readFileSync(carried, 'utf8'));
+  expect(before.resolved && before.task, 'run the resume phase first');
+  const tasksBefore = await taskIDs(before.workspace);
+
+  // 15. Home shows the receipt with the assessment waiting for its click.
+  //     Looking at it spends nothing: no request but reads leaves the page.
+  const writes = watchWrites();
+  await comeBack();
+  const ready = await assessmentCard();
+  console.log('assessment ready:', JSON.stringify(ready, null, 1));
+  expect(ready.buttons[0] === 'Start assessment', `first action: ${ready.buttons}`);
+  expect(/no tools/.test(ready.note), `the cost is not said: ${ready.note}`);
+  expect(
+    ready.receipt.some(line => /Starts when you press Start assessment/.test(line)),
+    `the receipt's task row: ${ready.receipt}`
+  );
+  expect(
+    ready.readiness.some(line => /^Project folder · Ready/.test(line)),
+    `folder readiness: ${ready.readiness}`
+  );
+  expect(
+    ready.readiness.some(line => /^Assistant's model · Set, not checked/.test(line)),
+    `a model that was never called is not "ready": ${ready.readiness}`
+  );
+  expect(
+    ready.readiness.some(line => /^GitHub · Not set \(optional\)/.test(line)),
+    `GitHub readiness: ${ready.readiness}`
+  );
+  await page.waitForTimeout(4000);
+  expect(writes.length === 0, `looking at the card sent: ${writes}`);
+  expect((await firstTask(before.resolved)).state === 'seeded', 'the page load started it');
+  await shot('30-assessment-ready');
+
+  // 16. Start assessment, pressed twice. One start is sent, and the card says
+  //     the model is reading and offers nothing more to press. The phase ends
+  //     here, with the run still going: stop the server now to interrupt it.
+  const start = card.getByRole('button', { name: 'Start assessment', exact: true });
+  await start.click();
+  await start.click({ timeout: 1000 }).catch(() => {});
+  const look = await waitForLook(before.resolved, ['running', 'finished', 'failed'], 30000);
+  expect(look.state === 'running', `the assessment is ${look.state}: ${look.message || ''}`);
+  await page.waitForFunction(
+    () =>
+      ![...document.querySelectorAll('#personalAssistantFolderOfferActions button')].some(button =>
+        /Start assessment|Starting/.test(button.textContent)
+      ),
+    null,
+    { timeout: 30000 }
+  );
+  const running = await assessmentCard();
+  console.log('assessment running:', JSON.stringify(running));
+  expect(/Nothing is being run/.test(running.note), `running note: ${running.note}`);
+  expect(
+    !running.buttons.some(name => /Start assessment|Try again/.test(name)),
+    `a second start is offered while it runs: ${running.buttons}`
+  );
+  expect(look.task_id === before.task, 'the run is another task');
+  const sent = writes.filter(write => /folder-first-task\/start$|tasks\/execute$/.test(write));
+  expect(sent.length === 1, `the start was not sent exactly once: ${sent}`);
+  expect(
+    JSON.stringify(await taskIDs(before.workspace)) === JSON.stringify(tasksBefore),
+    'starting the assessment made another task'
+  );
+  await card.scrollIntoViewIfNeeded();
+  await shot('31-assessment-running');
+  await settled(before, untouched);
+  console.log(
+    'OK (assess-interrupt): one start for two presses, one task, still running. Stop the server now.'
+  );
+}
+
+async function assessPhase(untouched) {
+  expect(existsSync(carried), `run setup and resume first: ${carried} is missing`);
+  const before = JSON.parse(readFileSync(carried, 'utf8'));
+  expect(before.resolved && before.task, 'run the resume phase first');
+  const tasksBefore = await taskIDs(before.workspace);
+
+  // 17. After a restart the assessment is where it was left: a run the server
+  //     lost did not finish, and says so in a sentence. Coming back runs
+  //     nothing, and nothing polls it into running again.
+  const writes = watchWrites();
+  await comeBack();
+  const waiting = await firstTask(before.resolved);
+  const left = await assessmentCard();
+  console.log('assessment after a restart:', JSON.stringify({ ...left, look: waiting }, null, 1));
+  // The model the assistant is saved with, as the server reads it.
+  console.log(
+    'model:',
+    (waiting.readiness || []).find(row => row.id === 'model')?.detail || 'not reported'
+  );
+  expect(waiting.task_id === before.task, 'the assessment is another task after a restart');
+  const retry = waiting.state === 'failed';
+  // A finished assessment is read, never run again by this script.
+  const ran = waiting.state !== 'finished';
+  expect(
+    retry || waiting.state === 'seeded' || !ran,
+    `the assessment is ${waiting.state}; this phase needs one that is waiting, did not finish, or is finished`
+  );
+  if (ran) await runAssessment(before, { writes, waiting, left, retry, tasksBefore });
+  else console.log('the assessment is already finished: reading it, not running it again');
+  const done = await firstTask(before.resolved);
+  expect(done.state === 'finished', `the assessment did not finish: ${done.message}`);
+  expect(done.task_id === before.task, 'the finished run is another task');
+  const sent = writes.filter(write => /folder-first-task\/start$|tasks\/execute$/.test(write));
+  expect(sent.length === (ran ? 1 : 0), `runs asked for: ${sent}`);
+
+  await readAssessment(before, { writes, done, tasksBefore });
+  await settled(before, untouched);
+  const how = !ran
+    ? 'no run (it was already finished)'
+    : `one run of one task (${retry ? 'a retry of the run that did not finish' : 'its first start'}), a real model call`;
+  console.log(`OK (assess): ${how}, nothing created by the hand-off, folders unchanged`);
+}
+
+// runAssessment presses the one button the card offers and follows the run to
+// its end. It is the only place this script spends model tokens.
+async function runAssessment(before, { writes, waiting, left, retry, tasksBefore }) {
+  if (retry) {
+    expect(waiting.can_retry === true, `it cannot be tried again: ${waiting.reason}`);
+    expect(Boolean(waiting.message), 'the run that did not finish has no sentence');
+    expect(
+      !/codex|exit status|stderr|\/Users\/|\/private\//i.test(waiting.message),
+      `the sentence shows a raw error: ${waiting.message}`
+    );
+    expect(
+      left.receipt.some(line => /Did not finish/.test(line)),
+      `the receipt's task row: ${left.receipt}`
+    );
+  }
+  const label = retry ? 'Try again' : 'Start assessment';
+  expect(left.buttons[0] === label, `first action: ${left.buttons}`);
+  await page.waitForTimeout(6000);
+  expect(writes.length === 0, `coming back sent: ${writes}`);
+  expect(
+    (await firstTask(before.resolved)).state === waiting.state,
+    'the assessment moved without a click'
+  );
+  await shot(retry ? '32-assessment-did-not-finish' : '32-assessment-after-restart');
+
+  // 18. One click runs it: the same task, with the real model. While it runs
+  //     the card says so and offers nothing to press twice.
+  await press(label);
+  await waitForLook(before.resolved, ['running', 'finished', 'failed'], 30000);
+  const running = await assessmentCard();
+  console.log('assessment running:', JSON.stringify(running));
+  if ((await firstTask(before.resolved)).state === 'running') {
+    expect(/Nothing is being run/.test(running.note), `running note: ${running.note}`);
+    expect(
+      !running.buttons.some(name => /Start assessment|Try again/.test(name)),
+      `a second start is offered while it runs: ${running.buttons}`
+    );
+    await shot('33-assessment-running');
+  }
+  const ended = await waitForLook(before.resolved, ['finished', 'failed'], 420000);
+  expect(ended.state === 'finished', `the assessment did not finish: ${ended.message}`);
+  console.log(`run: started ${ended.started_at}, finished ${ended.finished_at}`);
+  expect(
+    JSON.stringify(await taskIDs(before.workspace)) === JSON.stringify(tasksBefore),
+    'running the assessment made another task'
+  );
+}
+
+// readAssessment follows a finished assessment from Home to its report, to the
+// workspace's banner, and to the Plans page. It only reads.
+async function readAssessment(before, { writes, done, tasksBefore }) {
+  // 19. The result on Home: one line of it, the suggestion, and the two links.
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('#personalAssistantFolderOfferActions a')].some(
+        link => link.textContent.trim() === 'Open the assessment'
+      ),
+    null,
+    { timeout: 30000 }
+  );
+  const finished = await assessmentCard();
+  console.log('assessment finished:', JSON.stringify({ ...finished, look: done }, null, 1));
+  const task = await api('GET', `/api/orchestration/tasks?id=${encodeURIComponent(before.task)}`);
+  console.log(`--- the assessment (${task.result.length} characters) ---\n${task.result}\n---`);
+  expect(Boolean(done.next_request), 'the assessment suggested no next task');
+  expect(
+    finished.buttons.join(',') ===
+      `Open the assessment,Plan the suggested task,Open ${projectName}`,
+    `actions on a finished assessment: ${finished.buttons}`
+  );
+  expect(
+    finished.result.includes(done.next_request),
+    `the card does not show the suggestion: ${finished.result}`
+  );
+  expect(/^Next task: /m.test(task.result), 'the assessment has no Next task line');
+  expect(
+    /What this is based on/.test(task.result),
+    'the assessment does not say what it was based on'
+  );
+  expect(
+    !/\b(tests? (pass|passed|are passing)|CI is green|build succeeds)\b/i.test(task.result),
+    'the assessment claims something was run'
+  );
+  if (isOri)
+    expect(
+      /worktree/i.test(task.result),
+      "Ori's own worktree rules were not recognized from its instructions"
+    );
+  await card.scrollIntoViewIfNeeded();
+  await shot('34-assessment-finished');
+
+  // 20. Open the assessment: the task's own page, where the whole report can
+  //     be read. (A ticket's detail lists the work and its runs, not this.)
+  const followWrites = writes.length;
+  await card.getByRole('link', { name: 'Open the assessment', exact: true }).click();
+  await page.waitForURL(url => /\/workspaces\/[^/]+\/task\/[^/]+$/.test(url.pathname), {
+    timeout: 30000
+  });
+  const report = page.getByText('What this is based on', { exact: false }).first();
+  await report.waitFor({ state: 'visible', timeout: 30000 });
+  await closeAssistantDrawer();
+  const reportPage = {
+    url: new URL(page.url()).pathname,
+    shows: {
+      purpose: await page.getByText('What it is', { exact: true }).first().isVisible(),
+      declared: await page
+        .getByText(/Build and test \(declared, not run\)/)
+        .first()
+        .isVisible(),
+      next: await page
+        .getByText(/^Next task: /)
+        .first()
+        .isVisible()
+    }
+  };
+  console.log('report page:', JSON.stringify(reportPage));
+  expect(
+    reportPage.url === `/workspaces/${projectName}/task/${before.task}`,
+    `the report opened ${reportPage.url}`
+  );
+  expect(
+    reportPage.shows.purpose && reportPage.shows.declared && reportPage.shows.next,
+    `the report page does not show the assessment: ${JSON.stringify(reportPage.shows)}`
+  );
+  await shot('35-assessment-report');
+  await report.scrollIntoViewIfNeeded();
+  await shot('36-assessment-report-basis');
+
+  // 21. The workspace itself: its banner hands on the same suggestion.
+  await page.goto(`/workspaces/${projectName}`);
+  const banner = page.locator('#workspaceFirstTaskBanner');
+  await banner.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(
+    () => document.getElementById('workspaceFirstTaskBanner')?.dataset.phase === 'done',
+    null,
+    { timeout: 30000 }
+  );
+  await closeAssistantDrawer();
+  const bannerSays = {
+    text: (await banner.locator('.first-task-banner__text').innerText()).replace(/\n/g, ' '),
+    controls: await banner.locator('button, a').allInnerTexts(),
+    report: await banner
+      .getByRole('link', { name: 'Open the assessment', exact: true })
+      .getAttribute('href')
+  };
+  console.log('workspace banner:', JSON.stringify(bannerSays));
+  expect(
+    bannerSays.text.includes(done.next_request),
+    `the banner's suggestion differs from the card's: ${bannerSays.text}`
+  );
+  expect(
+    bannerSays.controls.join(',') === 'Open the assessment,Plan the suggested task,Dismiss',
+    `banner controls: ${bannerSays.controls}`
+  );
+  expect(bannerSays.report === reportPage.url, `the banner's report link: ${bannerSays.report}`);
+  await shot('37-workspace-banner');
+
+  // 22. Plan the suggested task: the Plans page with the suggestion in its box.
+  //     Nothing is created by arriving, and nothing is written into the project.
+  await banner.getByRole('link', { name: 'Plan the suggested task', exact: true }).click();
+  const box = page.locator('#plan-create-request');
+  await box.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(
+    () => (document.getElementById('plan-create-request')?.value || '').length > 0,
+    null,
+    { timeout: 30000 }
+  );
+  const planning = {
+    url: new URL(page.url()).pathname + new URL(page.url()).search,
+    box: await box.inputValue(),
+    status: await text('#plan-status')
+  };
+  console.log('plans page:', JSON.stringify(planning));
+  expect(planning.box.startsWith(done.next_request), `the box: ${planning.box}`);
+  expect(
+    /Suggested by the first assessment of/.test(planning.box),
+    `the box does not say where the request came from: ${planning.box}`
+  );
+  expect(
+    /Nothing is created until you do/.test(planning.status),
+    `plans status: ${planning.status}`
+  );
+  expect(!/next=assessment/.test(planning.url), `the address still asks for it: ${planning.url}`);
+  const plans = await api('GET', `/api/workspaces/${encodeURIComponent(before.workspace)}/plans`);
+  expect((plans.plans || []).length === 0, 'arriving on the Plans page created a plan');
+  // Opening a workspace page makes its own open-time requests (activating the
+  // workspace on this computer, and asking whether a blueprint setup task is
+  // waiting). None of them may run a task, send a message, or create a plan or
+  // a ticket; the unchanged task list below is the proof that none did.
+  const followed = writes.slice(followWrites);
+  console.log('requests while following the assessment:', JSON.stringify(followed));
+  const acted = followed.filter(write =>
+    /folder-first-task\/start$|\/tasks\/execute$|\/plans(\/|$)|\/tickets(\/|$)|\/api\/chat|\/orchestration\/tasks$/.test(
+      write
+    )
+  );
+  expect(acted.length === 0, `following the suggestion sent: ${acted}`);
+  await shot('38-suggestion-on-plans-page');
+
+  expect(
+    JSON.stringify(await taskIDs(before.workspace)) === JSON.stringify(tasksBefore),
+    'following the suggestion made a task'
+  );
+  expect(
+    (await firstTask(before.resolved)).finished_at === done.finished_at,
+    'following the suggestion ran the assessment again'
+  );
+}
+
+// The assistant's drawer stays open across pages when it was open on Home. A
+// person reading the page behind it closes it; so does this.
+async function closeAssistantDrawer() {
+  const close = page.locator('#personalAssistantClose');
+  if (await close.isVisible().catch(() => false)) {
+    await close.click();
+    await page.locator('#personalAssistantPanel').waitFor({ state: 'hidden', timeout: 10000 });
+  }
+}
+
+async function repeatPhase(untouched) {
+  expect(existsSync(carried), `run setup and resume first: ${carried} is missing`);
+  const before = JSON.parse(readFileSync(carried, 'utf8'));
+
   // 13. The same folder shown again opens that workspace; nothing new is offered.
   await show('Documents');
   const again = {
@@ -608,17 +1048,8 @@ async function resumePhase(untouched) {
     console.log('sibling worktree NOT SHOWN: seed with --ori to include one');
   }
 
-  expect(
-    (await workspaceCount()) === before.workspaces + 1,
-    'showing folders again changed the workspaces'
-  );
-  expect((await developmentAssistants()) === 1, 'a second assistant appeared');
-  expect(
-    JSON.stringify(hashes(untouched)) === JSON.stringify(before.hashes),
-    'a seeded folder changed during setup'
-  );
-  expect(errors.length === 0, `page errors: ${errors.join('; ')}`);
-  console.log('OK (resume): one workspace, one assistant, folders unchanged, no page errors');
+  await settled(before, untouched);
+  console.log('OK (repeat): one workspace, one assistant, folders unchanged, no page errors');
 }
 
 try {
@@ -642,8 +1073,11 @@ try {
     });
   }
   const untouched = ['documents', 'api', 'site'];
-  if (phase === 'resume') {
-    await resumePhase(untouched);
+  if (CONTINUES.includes(phase)) {
+    if (phase === 'resume') await resumePhase(untouched);
+    if (phase === 'assess-interrupt') await assessInterruptPhase(untouched);
+    if (phase === 'assess') await assessPhase(untouched);
+    if (phase === 'repeat') await repeatPhase(untouched);
   } else {
     const before = { hashes: hashes(untouched), workspaces: await workspaceCount() };
 

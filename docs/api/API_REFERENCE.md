@@ -1460,11 +1460,19 @@ Ends an open build without creating anything (Start over, or Discard from Today)
   "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | assessment_unavailable | needs_input | start_failed | run_failed",
   "message": "one plain sentence for the reason",
   "detail": "what the receipt's task row says now",
-  "recipe": "software_assessment (present only for a task that runs under a host recipe)"
+  "recipe": "software_assessment (present only for a task that runs under a host recipe)",
+  "can_retry": true,
+  "repair_route": "/agents", "repair_label": "Choose a model",
+  "next_request": "the one next task a finished assessment suggested, as plain text",
+  "next_route": "/workspaces/thesis/plans?next=assessment",
+  "report_route": "/workspaces/thesis/task/<task id>",
+  "readiness": [ { "id": "folder | model | github", "label": "…", "state": "verified | configured | absent | unknown", "required": true, "detail": "…", "source": "…", "route": "…" } ]
 }
 ```
 
-`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). For a task with a `recipe`, a `detail` for one that cannot start says what it waits for ("Needs a model before it can start", "Cannot start here yet") and never that it is ready. Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+
+The last six fields are sent only for a task with a `recipe` (a software project's first assessment; see "The first assessment" under Review a Software Project's Setup). For such a task `reason` is also one of `assistant_unavailable`, `model_unavailable`, `model_unsupported`, `project_folder_unavailable`, `workspace_unavailable` (each must be repaired before a start or a retry) or `tool_call_refused`, `context_too_small`, `nothing_to_assess`, `timed_out`, `provider_configuration_required`, `provider_quota_exhausted` (how one run ended). `can_retry` is true only for a `failed` assessment that could be run again now; when something must be repaired first it is false and `repair_route`/`repair_label` name the existing page that repairs it. `detail` for one that cannot start says what it waits for ("Needs a model before it can start", "Needs the project folder back before it can start") and never that it is ready. `readiness` is read live without opening a project file or calling a model or GitHub: a model that is set reads `configured` ("set, not checked"), never `verified`, and a saved GitHub connection does not claim the repository can be reached. `next_request` is text the model wrote; `next_route` opens the workspace's Plans page with it placed, unsubmitted, in the "Start a plan" box. `report_route` is sent for a finished assessment and opens the task's own page, where the whole result is shown (the `ticket_route` detail lists the work and its runs but not what a run wrote).
 
 `offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist (none in a sandboxed home). `picker_available` is false where the native dialog cannot run — outside macOS, or under `ORI_NO_DESKTOP_OPEN` as every sandboxed demo server runs. `picker_note` explains what can still be chosen: it is empty only when there are chips and a dialog; otherwise it names the missing folders, the switched-off or unsupported dialog, or both.
 
@@ -1559,7 +1567,17 @@ A software run stops with one of these `stop_reason`s and keeps what it finished
 
 A workspace with a `software_project` record resolves its code root from that record alone: when the folder is missing or a different directory is at that path, the workspace has no code root, and neither repository checks nor planning documents fall back to Ori's own folder for the workspace.
 
-The seeded first assessment is the workspace's first task (see `first_task` under Get Folder Digest) with `recipe: "software_assessment"`. A task under a recipe is run by that recipe or not at all: it is never started as an ordinary agent task, the recipe marker cannot be set or removed through the task API, and while this server cannot run the recipe `first_task.can_start` is false with `reason: "assessment_unavailable"` and the start action answers `started: false` without spending the task's one start.
+#### The first assessment
+
+The seeded first assessment is the workspace's first task (see `first_task` under Get Folder Digest) with `recipe: "software_assessment"`. A task under a recipe is run by that recipe or not at all: it is never started as an ordinary agent task, and the recipe marker cannot be set or removed through the task API. It starts only on **Start assessment** (`POST /api/workspaces/{id}/folder-first-task/start`, once) on Home's receipt or mission card or on the workspace page's banner; setup, a page load, a refresh and polling never start it or call a model.
+
+A run is one model call and nothing else. The server checks that the workspace still points at the directory the user confirmed (the `software_project` record; a missing or replaced folder is `project_folder_unavailable` and nothing is read), reads the project itself with the same bounded, read-only inspector the review uses (README, repository instructions, declared build and test files, and the names at the top level, leaving out dot-entries other than `.github`, dependency folders and key-like names), and sends that text to the assistant's model as evidence, marked as data and not as instructions. The model is given no tools, no MCP servers, no agent system prompt and no access to the folder; the request is flagged isolated and a provider that cannot guarantee a tool-free call refuses it before anything is sent (`model_unsupported`). API and local providers support it; the Codex CLI is used only in a posture the server verifies against that CLI's own feature list (read-only sandbox, user config and rules ignored, tool features disabled, an empty working directory), and the Claude Code CLI is refused. A reply that asks for a tool is discarded and the run ends `tool_call_refused`. A run is never retried, split into steps, or moved to another provider by the server. The evidence is cut to fit the model's context window (`context_too_small` when even the compact form does not fit).
+
+The result is the task's result: the project's purpose and structure, detected stack, declared (never "tested") build and test commands, repository instructions, readiness gaps, and one line `Next task: …`, followed by Ori's own note of which files it was based on and what was not read. Nothing is written into the project folder. A run that does not finish leaves the task `failed` with one plain sentence and its `reason`; **Try again** is the ordinary manual run of the same task (`POST /api/orchestration/tasks/execute` with `{"task_id": …}`), offered only while `can_retry` is true, and it never creates a second task. Concurrent starts of one task are refused by the executor, so two clicks or two tabs do not produce two runs.
+
+**Endpoint:** `GET /api/workspaces/{id}/folder-first-task`
+
+Answers `200` with `{ "first_task": <the shape above> }` for the workspace's first task as it stands now, or `{ "first_task": null }` when the workspace has none. It is a read: it starts nothing and spends nothing. The workspace page's banner and the Plans page (`?next=assessment`) use it so every surface shows the server's one reading of the task.
 
 ### Resolve a Project Offer
 

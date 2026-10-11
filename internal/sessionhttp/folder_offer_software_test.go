@@ -261,13 +261,124 @@ func TestSeedFolderOfferAssessmentSeedsOneRecipeTaskAndKeepsAnExistingFirstLook(
 	if ws, _ := handler.workspaceStore.Get(id); ws.Tasks[0].Context[personalassistant.FolderFirstTaskConsumedKey] != nil {
 		t.Fatal("a refused start spent the task's one start")
 	}
-	// Once the recipe can be run here, the same click starts it.
-	handler.SetFirstTaskRecipeRunnable(func(recipe string) bool { return recipe == agentworkspace.FirstTaskRecipeSoftwareAssessment })
-	if view, _ := handler.FolderFirstTaskView(context.Background(), id); !view.CanStart {
-		t.Fatalf("a runnable recipe is still blocked: %+v", view)
+	// A reason the gate gives is the reason shown, with where to repair it, and
+	// the start is refused for that reason without being spent.
+	reason := personalassistant.FolderFirstTaskReasonModelUnsupported
+	handler.SetFirstTaskRecipeGate(func(task agentworkspace.Task) string {
+		if task.ID != taskID || agentworkspace.FirstTaskRecipe(&task) != agentworkspace.FirstTaskRecipeSoftwareAssessment {
+			t.Errorf("the gate was asked about %q", task.ID)
+		}
+		return reason
+	})
+	view, _ = handler.FolderFirstTaskView(context.Background(), id)
+	if view.CanStart || view.Reason != reason || view.RepairRoute != "/agents" || view.RepairLabel != "Choose a model" ||
+		!strings.Contains(view.Message, "Development Assistant") || view.Detail != "Needs a different model before it can start" {
+		t.Fatalf("a blocked assessment = %+v", view)
+	}
+	if got := start(); got["started"] != false || got["reason"] != reason || started != 0 {
+		t.Fatalf("start while blocked = %v (%d)", got, started)
+	}
+	// Once nothing stands in the way, the same click starts it, exactly once.
+	reason = ""
+	if view, _ := handler.FolderFirstTaskView(context.Background(), id); !view.CanStart || view.Reason != "" || view.Message != "" ||
+		view.Detail != "Starts when you press Start assessment" || view.Recipe != agentworkspace.FirstTaskRecipeSoftwareAssessment {
+		t.Fatalf("a ready assessment = %+v", view)
 	}
 	if got := start(); got["started"] != true || started != 1 {
-		t.Fatalf("start with a runnable recipe = %v (%d)", got, started)
+		t.Fatalf("start when ready = %v (%d)", got, started)
+	}
+	if got := start(); got["started"] != false || got["reason"] != "already_consumed" || started != 1 {
+		t.Fatalf("a second start = %v (%d)", got, started)
+	}
+}
+
+// How a first assessment reads once it has run: a run that did not finish can
+// be tried again unless something must be repaired first, and a finished one
+// offers its one suggested next request for the user to send themselves.
+func TestFolderFirstTaskViewOfAnAssessmentAfterItsRun(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	writeRosterTemplate(t, handler, "offer-roster", offerRosterManifest)
+	review := reviewedRoster(t, handler, "")
+	id, err := handler.CreateFolderOfferWorkspace(context.Background(), FolderOfferWorkspaceRequest{
+		Name: "Widget", TemplateID: "offer-roster", OfferID: "offer-1", Roster: &review,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := handler.SeedFolderOfferAssessment(id, FolderOfferAssessment{
+		Recipe: agentworkspace.FirstTaskRecipeSoftwareAssessment, RecipeVersion: 1, Description: "Assess this project",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gate := ""
+	handler.SetFirstTaskRecipeGate(func(agentworkspace.Task) string { return gate })
+	change := func(edit func(task *agentworkspace.Task)) personalassistant.FolderFirstTaskView {
+		t.Helper()
+		if err := handler.taskMutationStore().Update(id, func(ws *agentworkspace.Workspace) error {
+			edit(&ws.Tasks[0])
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		view, ok := handler.FolderFirstTaskView(context.Background(), id)
+		if !ok {
+			t.Fatal("no first task view")
+		}
+		return view
+	}
+
+	// A run that failed: the sentence recorded for it, and Try again.
+	failed := change(func(task *agentworkspace.Task) {
+		if err := task.StartTicketRun("", agentworkspace.TicketActorUser, task.CreatedAt); err != nil {
+			t.Fatal(err)
+		}
+		task.ForceStatus(agentworkspace.TaskStatusFailed) // as the run's failure branch leaves it
+		task.Error = "The model's provider is out of quota, so the assessment did not run. Nothing in the project was run or changed."
+		task.Context[agentworkspace.TaskContextFirstTaskFailure] = personalassistant.FolderFirstTaskReasonProviderQuota
+	})
+	if failed.State != personalassistant.FolderFirstTaskFailed || !failed.CanRetry || failed.Reason != personalassistant.FolderFirstTaskReasonProviderQuota ||
+		!strings.Contains(failed.Message, "out of quota") || failed.RepairRoute != "/settings#api-keys" || failed.Detail != "Did not finish" {
+		t.Fatalf("a failed assessment = %+v", failed)
+	}
+	// The same failure when the folder has since gone: repair first, no retry.
+	gate = personalassistant.FolderFirstTaskReasonFolderUnavailable
+	blocked := change(func(*agentworkspace.Task) {})
+	if blocked.CanRetry || blocked.Reason != gate || blocked.RepairLabel != "Show the folder" || blocked.RepairRoute != "/?panel=today&folder=show" ||
+		!strings.Contains(blocked.Message, "project folder is missing") || !strings.HasPrefix(blocked.Detail, "Did not finish · needs the project folder back") {
+		t.Fatalf("a failed assessment with its folder gone = %+v", blocked)
+	}
+	gate = ""
+
+	// A run that refused a tool call says so, whatever sentence was stored.
+	refused := change(func(task *agentworkspace.Task) {
+		task.Context[agentworkspace.TaskContextFirstTaskFailure] = personalassistant.FolderFirstTaskReasonToolRefused
+	})
+	if !refused.CanRetry || !strings.Contains(refused.Message, "asked to use a tool") {
+		t.Fatalf("a refused tool call = %+v", refused)
+	}
+
+	// A finished run: its suggestion, and where it can be picked up unsent.
+	finished := change(func(task *agentworkspace.Task) {
+		task.ForceStatus(agentworkspace.TaskStatusInProgress)
+		task.Error = ""
+		delete(task.Context, agentworkspace.TaskContextFirstTaskFailure)
+		task.ApplyRunOutcome(agentworkspace.TicketRunResult{Outcome: agentworkspace.TicketRunSucceeded, Actor: agentworkspace.TicketActorRun, At: task.CreatedAt})
+		task.Result = "## What it is\nA service (README.md).\n\nNext task: Add a health check endpoint.\n\n---\n*What this is based on: Ori read 2 files.*"
+	})
+	if finished.State != personalassistant.FolderFirstTaskFinished || finished.NextRequest != "Add a health check endpoint." ||
+		finished.NextRoute != finished.WorkspaceRoute+"/plans?next=assessment" || finished.CanRetry || finished.Reason != "" {
+		t.Fatalf("a finished assessment = %+v", finished)
+	}
+	// The report opens on the task's own page, which shows what the run wrote;
+	// a ticket's detail does not.
+	if finished.ReportRoute != finished.WorkspaceRoute+"/task/"+finished.TaskID || refused.ReportRoute != "" {
+		t.Fatalf("report routes: finished %q, not finished %q", finished.ReportRoute, refused.ReportRoute)
+	}
+	// A report with no suggestion offers none, rather than an empty box.
+	none := change(func(task *agentworkspace.Task) { task.Result = "## What it is\nA service." })
+	if none.NextRequest != "" || none.NextRoute != "" || none.ReportRoute == "" {
+		t.Fatalf("a report with no suggestion = %+v", none)
 	}
 }
 

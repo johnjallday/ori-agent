@@ -1099,11 +1099,19 @@ const PREREQUISITE_STATES = {
 };
 
 const PREREQUISITE_LINKS = { model: 'Set up a model', github: 'Connect GitHub' };
+// What an assessment needs is repaired elsewhere than a setup's prerequisites:
+// its assistant's own model is chosen on the Agents page, and its folder is
+// shown again.
+const READINESS_LINKS = {
+  model: 'Choose a model',
+  folder: 'Show the folder',
+  github: 'Connect GitHub'
+};
 
 // softwarePrerequisiteRows normalizes the server's prerequisite rows. A link is
 // offered only to one of Ori's own pages, and only when there is something to
-// do there.
-export function softwarePrerequisiteRows(rows) {
+// do there. links names the link for each row id; rows without a name get none.
+export function softwarePrerequisiteRows(rows, links = PREREQUISITE_LINKS) {
   return (Array.isArray(rows) ? rows : [])
     .filter(row => row && String(row.label || '').trim() && PREREQUISITE_STATES[row.state])
     .map(row => {
@@ -1111,7 +1119,9 @@ export function softwarePrerequisiteRows(rows) {
       const required = row.required === true;
       const route = String(row.route || '').trim();
       const actionable = row.state === 'absent' || row.state === 'unknown';
-      const linked = actionable && PREREQUISITE_LINKS[id] && /^\/[a-z]/.test(route);
+      // One of Ori's own pages, or Home with the folder chooser open.
+      const ownPage = /^\/[a-z]/.test(route) || route === '/?panel=today&folder=show';
+      const linked = Boolean(actionable && links[id] && ownPage);
       return {
         id,
         label: String(row.label).trim(),
@@ -1121,7 +1131,7 @@ export function softwarePrerequisiteRows(rows) {
         source: String(row.source || '').trim(),
         required,
         href: linked ? route : '',
-        linkLabel: linked ? PREREQUISITE_LINKS[id] : ''
+        linkLabel: linked ? links[id] : ''
       };
     });
 }
@@ -1334,6 +1344,149 @@ export function firstLookStartMessage(reason, workspaceName) {
   }
 }
 
+// What Start assessment costs and does not do, said beside the button.
+export const ASSESSMENT_HINT =
+  'Spends model tokens once. The model gets what Ori read from the project and no tools; nothing in the project is run or changed.';
+const ASSESSMENT_NOT_STARTED = 'The assessment could not start. Try again.';
+
+// assessmentStartMessage is what a refused start of an assessment says at
+// once. A reason the server can explain has no sentence here: the card is
+// read again, and the server's own sentence and repair are shown instead.
+export function assessmentStartMessage(reason) {
+  switch (String(reason || '').trim()) {
+    case 'start_failed':
+    case 'execution_unavailable':
+    case 'workspace_unavailable':
+    case 'admission_unavailable':
+    case 'no_task_store':
+      return ASSESSMENT_NOT_STARTED;
+    default:
+      return '';
+  }
+}
+
+// assessmentLookView is the first look of a software project: a read-only
+// assessment run under Ori's own recipe. Whether it can start or be tried
+// again, why not, where that is repaired, and what it suggests next all come
+// from the server; nothing is worked out here.
+function assessmentLookView(look, { state, base, open, busy, said, local }) {
+  const repairRoute = local(look.repair_route);
+  const repairLabel = String(look.repair_label || '').trim();
+  const repair =
+    repairRoute && repairLabel
+      ? [{ id: 'repair', label: repairLabel, style: 'primary', href: repairRoute }]
+      : [];
+  const readiness = softwarePrerequisiteRows(look.readiness, READINESS_LINKS);
+  switch (state) {
+    case 'seeded':
+      if (look.can_start === true)
+        return {
+          ...base,
+          assessment: true,
+          readiness,
+          message: '',
+          hint: ASSESSMENT_HINT,
+          actions: [
+            {
+              id: 'start-first-look',
+              label: busy ? 'Starting…' : 'Start assessment',
+              style: 'primary',
+              start: true,
+              busy
+            },
+            ...open('outline')
+          ]
+        };
+      return {
+        ...base,
+        assessment: true,
+        readiness,
+        message: said || 'The assessment cannot start yet.',
+        actions: [...repair, ...open(repair.length ? 'outline' : 'primary')]
+      };
+    case 'running':
+      return {
+        ...base,
+        assessment: true,
+        status: 'Assessing… the model is reading what Ori gathered. Nothing is being run.',
+        actions: open('primary')
+      };
+    case 'waiting':
+      return {
+        ...base,
+        assessment: true,
+        message: said || 'The assessment is paused.',
+        actions: open('primary')
+      };
+    case 'finished': {
+      // The assessment is read on its task's own page, which shows what the
+      // run wrote. A ticket's detail lists the work and its runs, not that.
+      const report = String(look.report_route || '').trim();
+      const link = ASSESSMENT_REPORT_ROUTE.test(report)
+        ? [{ id: 'report', label: 'Open the assessment', style: 'primary', href: report }]
+        : [];
+      // The one next request the assessment suggested. The link opens the
+      // workspace's Plans page with it in the "Start a plan" box, unsubmitted,
+      // for the user to edit or discard.
+      const nextRequest = String(look.next_request || '').trim();
+      const nextRoute = local(look.next_route);
+      const next =
+        nextRequest && ASSESSMENT_NEXT_ROUTE.test(nextRoute)
+          ? [
+              {
+                id: 'next',
+                label: 'Plan the suggested task',
+                style: 'outline',
+                href: nextRoute
+              }
+            ]
+          : [];
+      return {
+        ...base,
+        assessment: true,
+        excerpt: String(look.result_excerpt || '').trim(),
+        next: next.length ? nextRequest : '',
+        actions: [...link, ...next, ...open(link.length || next.length ? 'outline' : 'primary')]
+      };
+    }
+    default: {
+      const message = said || 'The assessment did not finish.';
+      if (look.can_retry === true)
+        return {
+          ...base,
+          assessment: true,
+          readiness,
+          message,
+          actions: [
+            {
+              id: 'retry-first-look',
+              label: busy ? 'Starting…' : 'Try again',
+              style: 'primary',
+              retry: true,
+              busy
+            },
+            ...repair.map(action => ({ ...action, style: 'outline' })),
+            ...open('outline')
+          ]
+        };
+      return {
+        ...base,
+        assessment: true,
+        readiness,
+        message,
+        actions: [...repair, ...open(repair.length ? 'outline' : 'primary')]
+      };
+    }
+  }
+}
+
+// The link that opens a workspace's Plans page with the assessment's
+// suggestion placed, unsubmitted, in its "Start a plan" box. Nothing else is
+// accepted as that link.
+const ASSESSMENT_NEXT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/plans\?next=assessment$/;
+// The page of the assessment's own task in its workspace, and nothing else.
+const ASSESSMENT_REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
+
 // folderFirstLookView is the render decision for a folder's first look on its
 // receipt (FR13, FR15, FR18): one primary action, the workspace as the other,
 // and one line of status. Nothing is inferred: the state, whether a click would
@@ -1363,6 +1516,10 @@ export function folderFirstLookView(look, options = {}) {
     excerpt: '',
     actions: []
   };
+  // A first task under a host recipe is an assessment, with its own wording,
+  // its own repairs, and no retry while something must be repaired first.
+  if (String(look.recipe || '').trim())
+    return assessmentLookView(look, { state, base, open, busy, said, local });
 
   switch (state) {
     case 'seeded': {
@@ -2234,7 +2391,12 @@ function renderOffer(place) {
   if (els.assistantName && document.activeElement !== els.assistantName)
     els.assistantName.value = state.assistantName;
   renderFacts(els.evidence, view.evidence);
-  renderFacts(els.prerequisites, view.prerequisites);
+  // Before setup the list is what the setup needs; once a project is set up it
+  // is what its assessment needs and can use, read now.
+  renderFacts(
+    els.prerequisites,
+    firstLook.visible && firstLook.readiness?.length ? firstLook.readiness : view.prerequisites
+  );
   setText(els.capability, view.capabilityDetail);
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
@@ -2242,8 +2404,16 @@ function renderOffer(place) {
     els.receipt.hidden = !receipt.visible;
     renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
-  // What the agent found, once its first look has finished.
+  // What the agent found, once its first look has finished, and for an
+  // assessment the one next request it suggested. Both are text the model
+  // wrote: they are set as text, never as markup.
   setText(els.result, firstLook.visible ? firstLook.excerpt : '');
+  if (els.result && firstLook.visible && firstLook.next) {
+    const label = document.createElement('strong');
+    label.textContent = 'Suggested next task: ';
+    els.result.append(document.createElement('br'), label, firstLook.next);
+    els.result.hidden = false;
+  }
   if (els.plan) {
     const lines = view.setup?.lines || view.plan?.lines || [];
     renderSetupLines(els.plan, lines);
@@ -2660,6 +2830,9 @@ async function startFirstLook() {
   if (!look || state.firstLookBusy) return idle;
   const retry = look.state === 'failed';
   if (!retry && !(look.state === 'seeded' && look.can_start === true)) return idle;
+  // An assessment is tried again only when nothing has to be repaired first.
+  const assessment = Boolean(String(look.recipe || '').trim());
+  if (retry && assessment && look.can_retry !== true) return idle;
   const workspaceID = String(look.workspace_id || '').trim();
   const taskID = String(look.task_id || '').trim();
   if (!workspaceID || (retry && !taskID)) return idle;
@@ -2700,6 +2873,8 @@ async function startFirstLook() {
       message: '',
       detail: 'Running…'
     });
+  } else if (assessment) {
+    state.firstLookMessage = retry ? ASSESSMENT_NOT_STARTED : assessmentStartMessage(reason);
   } else {
     state.firstLookMessage = retry
       ? FIRST_LOOK_NOT_STARTED

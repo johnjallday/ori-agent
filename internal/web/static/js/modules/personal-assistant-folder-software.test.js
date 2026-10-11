@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  ASSESSMENT_HINT,
+  assessmentStartMessage,
   conversationFolderOfferView,
+  folderFirstLookView,
   folderOfferView,
   setupModalView,
-  softwareOfferView
+  softwareOfferView,
+  softwarePrerequisiteRows
 } from './personal-assistant-folder.js';
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
@@ -863,4 +867,268 @@ test('choosing a candidate sends its listed id and nothing that names a folder',
     /postOffer\(offer\.id, 'candidate', \{\s*candidate_id: action\.candidate\s*\}\)/
   );
   assert.doesNotMatch(body, /path|rel_path|folder_key|window\.location/);
+});
+
+// --- The first assessment ----------------------------------------------------
+
+// A software project's first task, as the server describes it on the receipt.
+const assessment = (overrides = {}) => ({
+  recipe: 'software_assessment',
+  state: 'seeded',
+  can_start: true,
+  offer_id: 'offer-1',
+  workspace_id: 'ws-1',
+  workspace_name: 'widget',
+  workspace_route: '/workspaces/widget',
+  task_id: 'task-1',
+  folder_name: 'widget',
+  ...overrides
+});
+const lookActions = view => view.actions.map(action => action.id);
+const readyRows = [
+  { id: 'folder', label: 'Project folder', state: 'verified', detail: 'widget is where it was.' },
+  { id: 'model', label: 'Model', state: 'verified', detail: 'Robin uses gpt-5.6-luna.' }
+];
+
+test('an assessment that can start says what one press spends and does not do', () => {
+  const view = folderFirstLookView(assessment({ readiness: readyRows }), {});
+  assert.equal(view.assessment, true);
+  assert.deepEqual(lookActions(view), ['start-first-look', 'open']);
+  assert.equal(view.actions[0].label, 'Start assessment');
+  assert.equal(view.actions[0].start, true);
+  assert.equal(view.hint, ASSESSMENT_HINT);
+  assert.match(ASSESSMENT_HINT, /no tools/);
+  assert.match(ASSESSMENT_HINT, /nothing in the project is run or changed/);
+  assert.deepEqual(
+    view.readiness.map(row => [row.id, row.stateWord, row.href]),
+    [
+      ['folder', 'Ready', ''],
+      ['model', 'Ready', '']
+    ]
+  );
+  assert.equal(folderFirstLookView(assessment(), { busy: true }).actions[0].label, 'Starting…');
+});
+
+test('an assessment that cannot start offers the repair and never a Start', () => {
+  const blocked = assessment({
+    can_start: false,
+    reason: 'model_unsupported',
+    message: 'Robin uses a model that cannot run a read-only assessment. Choose another model.',
+    repair_route: '/agents',
+    repair_label: 'Choose a model',
+    readiness: [
+      readyRows[0],
+      {
+        id: 'model',
+        label: 'Model',
+        state: 'absent',
+        required: true,
+        detail: 'Robin uses a model that cannot run a read-only assessment.',
+        route: '/agents'
+      }
+    ]
+  });
+  const view = folderFirstLookView(blocked, {});
+  assert.deepEqual(lookActions(view), ['repair', 'open']);
+  assert.deepEqual(
+    [view.actions[0].label, view.actions[0].href, view.actions[0].style],
+    ['Choose a model', '/agents', 'primary']
+  );
+  assert.equal(view.actions[1].style, 'outline');
+  assert.match(view.message, /cannot run a read-only assessment/);
+  assert.equal(view.hint, '');
+  assert.equal(
+    view.actions.some(action => action.start || action.retry),
+    false
+  );
+  const model = view.readiness.find(row => row.id === 'model');
+  assert.deepEqual(
+    [model.stateWord, model.href, model.linkLabel],
+    ['Needed', '/agents', 'Choose a model']
+  );
+
+  // With nothing the server can point at, the workspace is the one way on.
+  const bare = folderFirstLookView(assessment({ can_start: false }), {});
+  assert.deepEqual(lookActions(bare), ['open']);
+  assert.equal(bare.actions[0].style, 'primary');
+  assert.equal(bare.message, 'The assessment cannot start yet.');
+});
+
+test('a running assessment says nothing is being run and offers nothing to press twice', () => {
+  const view = folderFirstLookView(assessment({ state: 'running', can_start: false }), {});
+  assert.match(view.status, /^Assessing…/);
+  assert.match(view.status, /Nothing is being run\.$/);
+  assert.deepEqual(lookActions(view), ['open']);
+});
+
+test('a finished assessment opens its report and hands on one suggestion, unsubmitted', () => {
+  const done = assessment({
+    state: 'finished',
+    can_start: false,
+    ticket_route: '/workspaces/widget?ticket=task-1',
+    report_route: '/workspaces/widget/task/task-1',
+    result_excerpt: 'A Go service with a Makefile.',
+    next_request: 'Add a health check endpoint.',
+    next_route: '/workspaces/widget/plans?next=assessment'
+  });
+  const view = folderFirstLookView(done, {});
+  assert.deepEqual(lookActions(view), ['report', 'next', 'open']);
+  assert.deepEqual(
+    view.actions.map(action => [action.label, action.href, action.style]),
+    [
+      // The task's own page shows what the run wrote; its ticket does not.
+      ['Open the assessment', '/workspaces/widget/task/task-1', 'primary'],
+      ['Plan the suggested task', '/workspaces/widget/plans?next=assessment', 'outline'],
+      ['Open workspace', '/workspaces/widget', 'outline']
+    ]
+  );
+  assert.equal(view.excerpt, 'A Go service with a Makefile.');
+  assert.equal(view.next, 'Add a health check endpoint.');
+  // Following the suggestion is a link to a page, never a request made here.
+  assert.equal(
+    view.actions.some(action => action.start || action.retry || action.create),
+    false
+  );
+});
+
+test('a suggestion is linked only to its own workspace plans page', () => {
+  const done = route =>
+    folderFirstLookView(
+      assessment({
+        state: 'finished',
+        next_request: 'Add a health check endpoint.',
+        next_route: route
+      }),
+      {}
+    );
+  for (const route of [
+    'https://evil.example/workspaces/widget/plans?next=assessment',
+    '//evil.example/plans?next=assessment',
+    '/workspaces/widget/plans?next=assessment&run=1',
+    '/workspaces/widget/plans',
+    '/api/workspaces/ws-1/plans',
+    ''
+  ]) {
+    const view = done(route);
+    assert.equal(lookActions(view).includes('next'), false, route);
+    assert.equal(view.next, '', route);
+  }
+  // A route with no suggestion to carry is not a link either.
+  const empty = folderFirstLookView(
+    assessment({ state: 'finished', next_route: '/workspaces/widget/plans?next=assessment' }),
+    {}
+  );
+  assert.equal(lookActions(empty).includes('next'), false);
+  // The report is linked only to its task's page: not its ticket, which shows
+  // no result, and nothing off the app.
+  for (const report of [
+    '/workspaces/widget?ticket=task-1',
+    'https://evil.example/workspaces/widget/task/task-1',
+    '//evil.example/task/task-1',
+    '/workspaces/widget/task/task-1/run',
+    ''
+  ]) {
+    const view = folderFirstLookView(assessment({ state: 'finished', report_route: report }), {});
+    assert.equal(lookActions(view).includes('report'), false, report);
+  }
+});
+
+test('an assessment that did not finish is tried again only when nothing needs repair', () => {
+  const retryable = folderFirstLookView(
+    assessment({
+      state: 'failed',
+      can_start: false,
+      can_retry: true,
+      message: 'The model did not answer in time. Nothing was changed.'
+    }),
+    {}
+  );
+  assert.deepEqual(lookActions(retryable), ['retry-first-look', 'open']);
+  assert.equal(retryable.actions[0].retry, true);
+  assert.equal(retryable.message, 'The model did not answer in time. Nothing was changed.');
+
+  const needsRepair = folderFirstLookView(
+    assessment({
+      state: 'failed',
+      can_start: false,
+      can_retry: false,
+      reason: 'project_folder_unavailable',
+      message: 'The project folder is not where it was. Show it again.',
+      repair_route: '/?panel=today&folder=show',
+      repair_label: 'Show the folder'
+    }),
+    {}
+  );
+  assert.deepEqual(lookActions(needsRepair), ['repair', 'open']);
+  assert.equal(needsRepair.actions[0].href, '/?panel=today&folder=show');
+  assert.equal(
+    needsRepair.actions.some(action => action.retry),
+    false
+  );
+
+  // A repair that leaves the app is not a link.
+  const offSite = folderFirstLookView(
+    assessment({
+      state: 'failed',
+      can_retry: false,
+      repair_route: 'https://evil.example',
+      repair_label: 'Fix it'
+    }),
+    {}
+  );
+  assert.deepEqual(lookActions(offSite), ['open']);
+  assert.equal(offSite.message, 'The assessment did not finish.');
+});
+
+test('what an assessment needs links only to the page that repairs it', () => {
+  const links = { model: 'Choose a model', folder: 'Show the folder', github: 'Connect GitHub' };
+  const rows = softwarePrerequisiteRows(
+    [
+      {
+        id: 'folder',
+        label: 'Project folder',
+        state: 'absent',
+        required: true,
+        route: '/?panel=today&folder=show'
+      },
+      { id: 'model', label: 'Model', state: 'unknown', required: true, route: '/agents' },
+      { id: 'github', label: 'GitHub', state: 'absent', route: 'https://github.com/login' },
+      { id: 'model', label: 'Model', state: 'verified', route: '/agents' },
+      { id: 'other', label: 'Other', state: 'absent', required: true, route: '/settings' }
+    ],
+    links
+  );
+  assert.deepEqual(
+    rows.map(row => [row.id, row.stateWord, row.href, row.linkLabel]),
+    [
+      ['folder', 'Needed', '/?panel=today&folder=show', 'Show the folder'],
+      ['model', 'Could not check', '/agents', 'Choose a model'],
+      // Off the app, already ready, or a row nothing here repairs: no link.
+      ['github', 'Not set (optional)', '', ''],
+      ['model', 'Ready', '', ''],
+      ['other', 'Needed', '', '']
+    ]
+  );
+});
+
+test('a refused start is explained by the server, and only an unexplained one by the card', () => {
+  for (const reason of ['start_failed', 'execution_unavailable', 'workspace_unavailable'])
+    assert.equal(assessmentStartMessage(reason), 'The assessment could not start. Try again.');
+  // These have the server's own sentence and repair on the next read.
+  for (const reason of ['model_unsupported', 'no_model', 'project_folder_unavailable', ''])
+    assert.equal(assessmentStartMessage(reason), '', reason);
+});
+
+test('starting an assessment asks the one-time start, and a repair-first failure asks nothing', () => {
+  const start = source.indexOf('async function startFirstLook');
+  const body = source.slice(start, source.indexOf('\n}\n', start));
+  assert.ok(start > 0 && body.length > 0);
+  // No retry is sent while something has to be repaired first.
+  assert.match(body, /if \(retry && assessment && look\.can_retry !== true\) return idle;/);
+  const guard = body.indexOf('look.can_retry !== true');
+  assert.ok(guard > 0 && guard < body.indexOf('fetch('));
+  // The card sends the task's id and nothing about the project or the model.
+  assert.match(body, /body: JSON\.stringify\(\{ task_id: taskID \}\)/);
+  assert.match(body, /folder-first-task\/start`, \{\s*\.\.\.request,\s*body: '\{\}'/);
+  assert.doesNotMatch(body, /path|model|prompt|evidence/);
 });

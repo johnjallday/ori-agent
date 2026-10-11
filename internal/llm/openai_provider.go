@@ -83,6 +83,8 @@ func (p *OpenAIProvider) Type() ProviderType {
 func (p *OpenAIProvider) Capabilities() ProviderCapabilities {
 	caps := CloudProviderCapabilities(128000) // GPT-4o context window
 	caps.SupportsStreaming = false
+	// A plain API call: this provider adds no tool of its own to a request.
+	caps.SupportsIsolatedChat = true
 	return caps
 }
 
@@ -102,6 +104,9 @@ func (p *OpenAIProvider) DefaultModels() []string {
 
 // Chat sends a chat completion request to OpenAI
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := CheckIsolatedRequest(req); err != nil {
+		return nil, err
+	}
 	client, apiKey := p.snapshot()
 	if apiKey == "" {
 		return nil, fmt.Errorf("OpenAI API key is required (set OPENAI_API_KEY or configure it in settings)")

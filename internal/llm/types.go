@@ -64,6 +64,16 @@ type ChatRequest struct {
 	// grant resolution; prompts, template data, browser bodies, and model output
 	// never supply it. Providers defensively clone/canonicalize it before use.
 	ExecutionScope *CLIExecutionScope
+
+	// Isolated asks for a call that has no authority beyond producing text: no
+	// tools of any kind, no MCP servers, no reading or writing of files, no
+	// network or other agents reached from the provider's side, and nothing
+	// loaded from the user's machine (settings, rules, memories, hooks, plugins).
+	// The caller sends no Tools, MCPServers, WorkspaceID or ExecutionScope with
+	// it. A provider that cannot guarantee all of that for this call must return
+	// ErrIsolationUnsupported and run nothing; it must never run the call in a
+	// looser posture instead.
+	Isolated bool
 }
 
 // CLINetworkPosture describes what local connectivity a scoped CLI task needs.

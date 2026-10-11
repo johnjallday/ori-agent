@@ -1058,6 +1058,31 @@ func TestResolveFolderFirstLook_EveryState(t *testing.T) {
 		{"finished while the mission is open", with(func(m *MissionFirstTask) { m.State = MissionFirstTaskFinished }),
 			ShowFolderActionURL, "Show another folder",
 			"Your assistant already looked at Thesis. Show it another folder to see what it finds there.", false},
+
+		// A software project's first look is an assessment, and is worded as one.
+		{"assessment ready", with(func(m *MissionFirstTask) { m.Assessment, m.State, m.CanStart = true, MissionFirstTaskSeeded, true }),
+			FolderFirstLookActionURL, "Start assessment",
+			folderFirstLookWhy + " Spends model tokens once. The model gets what Ori read and no tools; nothing in the project is run or changed.", false},
+		{"assessment cannot start: its model is chosen elsewhere", with(func(m *MissionFirstTask) {
+			m.Assessment, m.State = true, MissionFirstTaskSeeded
+			m.Blocked, m.BlockedURL, m.BlockedLabel = "Dev has no model chosen. Choose one for it, then start the assessment.", "/agents", "Choose a model"
+		}), "/agents", "Choose a model", "Dev has no model chosen. Choose one for it, then start the assessment.", false},
+		{"assessment running", with(func(m *MissionFirstTask) { m.Assessment, m.State = true, MissionFirstTaskRunning }),
+			"/workspaces/thesis", "Open Thesis", "Assessing thesis-draft… nothing is being run.", true},
+		{"assessment did not finish and can be tried again", with(func(m *MissionFirstTask) {
+			m.Assessment, m.State, m.CanRetry = true, MissionFirstTaskFailed, true
+			m.Blocked = "The assessment ran out of time before the model answered."
+		}), FolderFirstLookActionURL, "Try again", "The assessment ran out of time before the model answered.", false},
+		{"assessment did not finish and needs a repair first", with(func(m *MissionFirstTask) {
+			m.Assessment, m.State = true, MissionFirstTaskFailed
+			m.Blocked, m.BlockedURL, m.BlockedLabel = "The project folder is missing.", "/?panel=today&folder=show", "Show the folder"
+		}), "/?panel=today&folder=show", "Show the folder", "The project folder is missing.", false},
+		{"assessment did not finish, no sentence", with(func(m *MissionFirstTask) {
+			m.Assessment, m.State, m.CanRetry = true, MissionFirstTaskFailed, true
+		}), FolderFirstLookActionURL, "Try again", "The assessment did not finish. Try again.", false},
+		{"assessment finished reads as any finished look", with(func(m *MissionFirstTask) { m.Assessment, m.State = true, MissionFirstTaskFinished }),
+			ShowFolderActionURL, "Show another folder",
+			"Your assistant already looked at Thesis. Show it another folder to see what it finds there.", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
