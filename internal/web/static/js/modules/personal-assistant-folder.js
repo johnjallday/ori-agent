@@ -592,7 +592,21 @@ export function folderOfferView(offer, options = {}) {
       actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
     };
   }
+  if (view.visible && view.needsPick && !view.decided && offer.software) {
+    // A software project's folder can also be lost by being replaced: a folder
+    // deleted and made again at the same place is not the one that was shown.
+    return {
+      ...repickView(view, subject),
+      question: `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`
+    };
+  }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
+  if (view.visible && status === 'pending' && offer.software)
+    return softwareOfferView(offer, enclosingView(offer, view), { subject, folder });
+  if (view.visible && !view.decided) {
+    enclosingView(offer, view);
+    if (view.enclosing && !view.capabilityDetail) view.capabilityDetail = view.enclosing;
+  }
   if (view.visible && !view.setup && !view.plan && offer.setup_unavailable_reason) {
     const reasons = {
       integration_unavailable: 'integration readiness could not be verified',
@@ -623,6 +637,159 @@ export function folderOfferView(offer, options = {}) {
     };
   }
   return view;
+}
+
+// enclosingView adds, to any undecided card, that the folder sits inside a
+// larger repository. The server found that by checking for a marker's name
+// above the selection; it read nothing there, and only the user choosing that
+// folder lets Ori look at it.
+function enclosingView(offer, view) {
+  const name = String(offer?.enclosing?.name || '').trim();
+  const levels = Number(offer?.enclosing?.levels) || 0;
+  if (!name || levels < 1) return view;
+  const where = levels === 1 ? 'the folder above it' : `${levels} folders up`;
+  view.enclosing = `This folder is inside the repository ${name} (${where}). To set up the whole project, show me ${name} instead.`;
+  if (!(view.actions || []).some(action => action.open))
+    view.actions = [
+      ...(view.actions || []),
+      { id: 'enclosing', label: `Show me ${name} instead`, style: 'link', open: true }
+    ];
+  return view;
+}
+
+// softwareRecognizedNote says what marked a folder as a software project. The
+// scan read names only, and the note says so.
+function softwareRecognizedNote(software) {
+  const marker = String(software?.marker || '').trim();
+  const from = marker && marker.toLowerCase() !== 'git repository' ? `its ${marker}` : '';
+  let note;
+  switch (String(software?.repository || '')) {
+    case 'directory':
+      note = `Recognized from ${from ? `${from} and its` : 'its'} Git repository.`;
+      break;
+    case 'file':
+      note = `Recognized from ${from || 'its Git marker'}. It is a linked Git checkout (a worktree or submodule).`;
+      break;
+    default:
+      note = `Recognized from ${from || 'its project files'}. It is not under Git.`;
+  }
+  return `${note} Nothing in it was opened.`;
+}
+
+// softwareOfferView is the pending card for a recognized software project. It
+// replaces the plan with a question when several projects were found and the
+// user has not said which, and with the workspace to open when one already
+// covers this exact folder. Ori never guesses among projects and never sets up
+// a second workspace for the same folder.
+export function softwareOfferView(offer, view, { subject, folder }) {
+  const software = offer?.software || {};
+  const enclosing = view.enclosing || '';
+  const decline = [
+    { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
+    { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+  ];
+  const candidates = (Array.isArray(software.candidates) ? software.candidates : []).filter(
+    candidate =>
+      candidate && String(candidate.id || '').trim() && String(candidate.name || '').trim()
+  );
+  if (software.needs_candidate === true && candidates.length > 1) {
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline: segments([
+        { text: folder },
+        ` holds ${plural(candidates.length, 'software project')}.`
+      ]),
+      question:
+        'Which one do you want to set up? Nothing is set up until you choose, and the others stay as they are.',
+      capabilityDetail: enclosing,
+      actions: [
+        ...candidates.map((candidate, index) => ({
+          id: `candidate-${index}`,
+          label: candidate.marker
+            ? `${String(candidate.name).trim()} · ${String(candidate.marker).trim()}`
+            : String(candidate.name).trim(),
+          style: 'outline',
+          candidate: String(candidate.id).trim()
+        })),
+        { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+      ]
+    };
+  }
+  if (software.needs_candidate === true) {
+    // The server says a choice is owed but sent nothing usable to choose from.
+    // No setup is offered on a guess; showing the folder again lists them.
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline: segments([{ text: folder }, ' holds more than one software project.']),
+      question:
+        'I could not list them here. Show me the folder again, or show me the one project you want.',
+      capabilityDetail: enclosing,
+      actions: [
+        { id: 'another', label: 'Show another folder', style: 'outline', open: true },
+        { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+      ]
+    };
+  }
+  const listed = Array.isArray(software.existing) ? software.existing : [];
+  const existing = listed.filter(
+    project =>
+      project &&
+      String(project.name || '').trim() &&
+      String(project.route || '').startsWith('/workspaces/')
+  );
+  if (existing.length) {
+    const first = existing[0];
+    const name = String(first.name).trim();
+    let question;
+    if (existing.length > 1)
+      question = 'Open the one you want. I will not set up another for the same folder.';
+    else if (first.replaced === true)
+      question = `${name} was set up for a folder that used to be at this place. The folder here now is a different one, so I have not connected them. Open ${name} to look at it.`;
+    else question = `It is set up as ${name}. Open it instead of setting up another.`;
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline:
+        existing.length > 1
+          ? segments([{ text: subject }, ` already has ${existing.length} workspaces.`])
+          : segments([{ text: subject }, ' already has a workspace.']),
+      question,
+      capabilityDetail: enclosing,
+      actions: [
+        ...existing.map((project, index) => ({
+          id: `open-existing-${index}`,
+          label: `Open ${String(project.name).trim()}`,
+          style: index === 0 ? 'primary' : 'outline',
+          href: String(project.route)
+        })),
+        ...decline
+      ]
+    };
+  }
+  // A workspace the server reported but this page cannot link to is still a
+  // workspace: no second one is offered.
+  if (software.existing_unavailable === true || listed.length) {
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      question:
+        'I could not check whether this folder already has a workspace, so I will not set up another. Try again in a moment.',
+      capabilityDetail: enclosing,
+      actions: decline
+    };
+  }
+  const recognized = softwareRecognizedNote(software);
+  return {
+    ...view,
+    capabilityDetail:
+      view.capabilityDetail || (enclosing ? `${recognized} ${enclosing}` : recognized)
+  };
 }
 
 // repickView keeps what the scan said and swaps the yes for "Pick it again".
@@ -1615,7 +1782,11 @@ export function conversationFolderOfferView(offer, options = {}) {
         offer.create_available ||
         (!action.modal && !action.create))
   );
-  if (!offer.needs_pick && !offer.capability && !offer.create_available)
+  // A folder that already has a workspace, or whose workspaces could not be
+  // read, has said why no setup is offered; that is not "unavailable here".
+  const softwareExplained =
+    (offer.software?.existing || []).length > 0 || offer.software?.existing_unavailable === true;
+  if (!offer.needs_pick && !offer.capability && !offer.create_available && !softwareExplained)
     view.question =
       'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
   // A blocked review says only why it is blocked and how to refresh it; it does
@@ -1880,6 +2051,10 @@ function runAction(action) {
   }
   if (action.href) {
     window.location.assign(action.href);
+    return;
+  }
+  if (action.candidate) {
+    void chooseCandidate(action);
     return;
   }
   if (action.oneCard) {
@@ -2572,6 +2747,37 @@ function showOfferFailure(payload) {
     return;
   }
   showError(String(payload?.error || 'That could not be saved. Try again.'));
+}
+
+// chooseCandidate tells the server which of the software projects a folder
+// holds the card is about. It names a candidate the server listed for this
+// offer, never a folder, and sets nothing up: the chosen project's plan is the
+// next thing the card shows.
+async function chooseCandidate(action) {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'candidate', {
+      candidate_id: action.candidate
+    });
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) {
+      showOfferFailure(payload);
+      return;
+    }
+    // The choice was the "which project" answer; go straight to its plan.
+    if (state.offer?.verdict === 'mixed' || state.offer?.verdict === 'ambiguous')
+      state.confirm = 'project';
+  } catch (_) {
+    if (generation === state.reviewGeneration) showError('That could not be saved. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+  }
 }
 
 export function folderDecisionProgress(offer, action) {

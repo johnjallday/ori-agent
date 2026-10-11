@@ -188,6 +188,7 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		ProjectsCount:      1,
 		ConversationReview: &FolderConversationReview{Target: target, ObservationID: held.observation.ID, CandidateID: candidateID, CandidateIdentity: identity},
 	}
+	offer.Enclosing = d.enclosingHint(offer.Subject.Repository, candidate.Path)
 	placement := folderReviewPlacement(ctx)
 	offer.ConversationReview.Operation, offer.ConversationReview.DestinationID = placement.Operation, placement.DestinationID
 	if placement.Operation == FolderOperationSupport {

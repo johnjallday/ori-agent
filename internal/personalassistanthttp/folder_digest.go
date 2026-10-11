@@ -36,6 +36,7 @@ type FolderDigestService interface {
 	PortfolioContinuations(ctx context.Context, userID, homeID string) ([]personalassistant.FolderContinuation, error)
 	ResolveExistingHome(ctx context.Context, userID, offerID, requestID string) (personalassistant.FolderOfferView, error)
 	StartSetup(ctx context.Context, userID, offerID string, input personalassistant.FolderSetupInput) (personalassistant.FolderOfferView, error)
+	ChooseCandidate(ctx context.Context, userID, offerID string, input personalassistant.FolderCandidateInput) (personalassistant.FolderOfferView, error)
 }
 
 // FolderProjectSelectionIssuer mints the existing project-connection picker's
@@ -300,6 +301,52 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "The setup changed. Review the updated plan before confirming.", "offer": offer})
 		return
 	}
+	if errors.Is(err, personalassistant.ErrFolderProjectExists) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":          "This folder already has a workspace. Open it instead of setting up another.",
+			"project_exists": true, "offer": offer,
+		})
+		return
+	}
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
+}
+
+type folderCandidateRequest struct {
+	CandidateID string `json:"candidate_id"`
+	RequestID   string `json:"request_id"`
+}
+
+// ChooseFolderCandidate records which of the software projects a folder holds
+// the offer is about. The body names a candidate the offer's own view listed;
+// no folder or path is accepted, nothing is scanned, and nothing is set up.
+func (h *Handler) ChooseFolderCandidate(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req folderCandidateRequest
+	if !decodeFolderDigestBody(w, r, &req, "candidate_id", "request_id") {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	offer, err := h.folderDigest.ChooseCandidate(r.Context(), userID, offerID, personalassistant.FolderCandidateInput{
+		CandidateID: req.CandidateID, RequestID: req.RequestID,
+	})
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return

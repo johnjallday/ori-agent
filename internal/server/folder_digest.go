@@ -44,6 +44,9 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		ProjectLinked: func(_ context.Context, userID, workspaceID, folderPath string) bool {
 			return folderProjectLinked(b.workspaceStore, userID, workspaceID, folderPath)
 		},
+		ExistingProjects: func(_ context.Context, userID, folderPath, identity string) ([]personalassistant.FolderExistingProject, error) {
+			return softwareExistingProjects(b.workspaceFileStore, userID, folderPath, identity)
+		},
 		LegacyDeclined: func(ctx context.Context, userID, domain string) (bool, error) {
 			if b.personalAssistantStore == nil || domain != "music_production" {
 				return false, nil

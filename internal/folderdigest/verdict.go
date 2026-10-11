@@ -183,6 +183,26 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 	subProjects = Rank(subProjects)
 	rootDeclined := declined(root)
 	rootProject := !rootDeclined && projectSignal(root, now)
+	// A root with no marker can only look like a project by the density of the
+	// files under it. When those files sit in a subfolder that carries a marker
+	// of its own, that subfolder is the project and the root is the folder that
+	// holds it: a Documents folder with one repository in it is not the
+	// repository. A root that holds a body of work directly keeps its signal.
+	if rootProject && !root.HasMarker() && root.LooseExtensions[root.DominantExtension] < ProjectMinFiles {
+		for _, c := range r.Subfolders() {
+			if c.HasMarker() && projectSignal(c, now) {
+				rootProject = false
+				break
+			}
+		}
+	}
+	// A software project's subfolders are its packages, documents and scripts,
+	// not projects of their own: a repository with several manifests is one
+	// project. A folder that only holds separate projects has no marker of its
+	// own, so its subfolders stay candidates.
+	if rootProject && ShapeFor(root) == ShapeCode {
+		subProjects = nil
+	}
 	v.RootDump = !rootDeclined && dumpSignal(root)
 
 	switch {

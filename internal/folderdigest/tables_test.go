@@ -55,6 +55,23 @@ func TestCapabilityTableIntegrity(t *testing.T) {
 				}
 			}
 		}
+		if b := row.Builtin; b != nil {
+			// A built-in setup installs nothing, so it has no integration behind it
+			// and its blueprint ships in the built-in library.
+			if row.Offer != nil {
+				t.Errorf("%q: a row has an integration offer or a built-in setup, never both", row.Shape)
+			}
+			if b.Recipe == "" || b.Version < 1 || b.DisplayName == "" || b.Workspace == "" ||
+				b.Question == "" || b.AcceptLabel == "" || b.DeclineLabel == "" {
+				t.Errorf("%q: incomplete built-in setup", row.Shape)
+			}
+			if _, err := projecttemplates.FindLibraryTemplate(library, row.Blueprint.BlueprintID); err != nil {
+				t.Errorf("%q: built-in setup has no built-in blueprint: %v", row.Shape, err)
+			}
+			if len(row.Markers) == 0 {
+				t.Errorf("%q: built-in setup has no marker to recognize", row.Shape)
+			}
+		}
 		if row.Offer == nil {
 			continue
 		}

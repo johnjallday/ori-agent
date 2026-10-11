@@ -1497,7 +1497,25 @@ No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
 { "decision": "yes", "choice": "project", "create": true, "request_id": "…" }
 ```
 
+A recognized software project adds two refusals to a `yes` with `project`: `400` while the offer's `software.needs_candidate` is true (choose a candidate first, below), and `409` with `"project_exists": true` and the offer when a workspace of the user's already has this exact folder as its primary linked folder (the offer's `software.existing` lists it; no second workspace is made). `409` with `"needs_pick": true` also covers a folder that was deleted and made again at the same path since it was shown.
+
 `decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` and `create: true` — the card's confirmed plan ("Set up Thesis as a Writing project workspace?") — has the server set the workspace up itself (the folder's name, the shape's installed blueprint or blank, the folder linked as the primary directory, the first task seeded) and the returned offer is `resolved` with `outcome.workspace_id`, `outcome.route` and `outcome.blueprint`; a retried click reuses the workspace already made for the offer. It is offered only while the offer's `create_available` is true. A `yes` with `project` and no `create` (the card's Adjust…) leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered; `503` when the workspace could not be created (the offer stays pending).
+
+### Choose a Software Project
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/candidate`
+
+```json
+{ "candidate_id": "<id from software.candidates>", "request_id": "…" }
+```
+
+An offer about a recognized software project carries `software`: `recipe` (`software_project`), `marker` (the plain label of what marked it, such as `Go module`), `repository` (`directory` for an ordinary Git checkout, `file` for a worktree or submodule, absent when the folder is not under Git), and, when relevant, `needs_candidate` with `candidates`, `existing`, or `existing_unavailable`. Recognition reads directory entries only; no file in the folder is opened.
+
+When the shown folder has no marker of its own and holds two or more software projects, `needs_candidate` is true and `candidates` lists them (`id`, `name`, `marker`, `repository`, and `current` on the provisional subject). Nothing can be set up until one is chosen. This action makes the named candidate the offer's subject and returns the offer; the others stay queued for later offers. It accepts exactly the two fields above. A candidate `id` is opaque and valid only for its own offer; there is no path or folder field, nothing is scanned again, and nothing is created. `400` for an id the offer did not list; `409` when the offer is no longer pending, was made from a conversation review (which already names one candidate), or has no choice outstanding; `409` with `"needs_pick": true` when the server no longer holds the folder.
+
+`software.existing` lists the user's active workspaces whose primary linked folder is this exact directory (`workspace_id`, `name`, `route`, `software`, and `replaced` when the workspace was set up for a directory at this path that has since been replaced). A sibling worktree or a clone of the same repository is a different directory and is never listed. `existing_unavailable` means the server could not read which workspaces cover the folder, so it offers no setup.
+
+An offer may also carry `enclosing` (`levels`, `name`) when the subject sits inside a larger repository. The server finds that by checking for a repository marker's name in at most six folders above the selection, stopping below the user's home folder; it lists nothing and opens nothing there, and the user must show that folder for Ori to look at it.
 
 ### Resolve a Project Offer
 

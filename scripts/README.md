@@ -75,6 +75,12 @@ workflows and Ori's worktree provisioning adapter.
 - `demo-server.sh`: standalone isolated HOME/data server, browser opt-in.
   `wt demo` uses Ori's separate adapter preserving Codex pass-through/opt-out,
   default port 8931 and automatic sandbox cleanup; they are not interchangeable.
+- `software-folder-seed.sh <sandbox> [--ori]`: put disposable software-project
+  folders under a demo sandbox's Documents, Desktop and Downloads, where its
+  folder chips reach them (a sandboxed server has no native folder dialog). It
+  refuses any directory outside `$TMPDIR` and runs no git command that creates
+  a repository, worktree or clone. `demo-software-folder.mjs` then drives the
+  folder card against that sandbox and checks every seeded folder is unchanged.
 - `test-all-installers.sh`, `docker-test-installers.sh`: installer checks.
 - `test-with-ollama.sh`: provider-backed suite, opt-in.
 - `diagnose-test-failures.sh`: summarize failing Go tests.

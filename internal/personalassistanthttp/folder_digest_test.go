@@ -30,6 +30,10 @@ type fakeFolderDigest struct {
 	existingHomeCalls []string
 	// setups records every one-card setup click that reached the service.
 	setups []personalassistant.FolderSetupInput
+	// candidates records every candidate choice that reached the service.
+	candidates []personalassistant.FolderCandidateInput
+	// decideErr, when set, is what Decide returns with a pending offer.
+	decideErr error
 	// namedOffers records every offer id a GET asked for by name.
 	namedOffers []string
 	// stored holds the offers StoredOffer can return, by id; storedReads records
@@ -202,6 +206,12 @@ func (f *fakeFolderDigest) Decide(_ context.Context, _ string, offerID string, i
 	if stored, ok := f.decisions[input.RequestID]; ok {
 		return stored, nil
 	}
+	if f.decideErr != nil {
+		return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending, Software: &personalassistant.FolderSoftwareView{
+			Recipe:   "software_project",
+			Existing: []personalassistant.FolderExistingProject{{WorkspaceID: "ws-1", Name: "Widget", Route: "/workspaces/widget"}},
+		}}, f.decideErr
+	}
 	f.decided = append(f.decided, input)
 	view := personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferDeclined, Decision: input.Decision}
 	f.decisions[input.RequestID] = view
@@ -275,6 +285,81 @@ func (f *fakeFolderDigest) StartSetup(_ context.Context, _ string, offerID strin
 		ID: offerID, Status: personalassistant.FolderOfferAwaitingOutcome,
 		Setup: &personalassistant.FolderSetupView{Status: personalassistant.FolderSetupRunning},
 	}, nil
+}
+
+func (f *fakeFolderDigest) ChooseCandidate(_ context.Context, _ string, offerID string, input personalassistant.FolderCandidateInput) (personalassistant.FolderOfferView, error) {
+	f.candidates = append(f.candidates, input)
+	if input.CandidateID != "listed" {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrValidation
+	}
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending, Software: &personalassistant.FolderSoftwareView{Recipe: "software_project"}}, nil
+}
+
+func TestFolderCandidate_AcceptsOnlyAListedCandidateAndNeverAPath(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	post := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/candidate", strings.NewReader(body))
+		r.SetPathValue("offerID", "offer-1")
+		w := httptest.NewRecorder()
+		h.ChooseFolderCandidate(w, r)
+		return w
+	}
+	for _, body := range []string{
+		`{"request_id":"r","candidate_id":"listed","path":"/private"}`,
+		`{"request_id":"r","candidate_id":"listed","folder":"api"}`,
+		`{"request_id":"r","candidate_id":"listed","rel_path":"api"}`,
+		`{"request_id":"r","candidate_id":"listed","workspace_id":"ws"}`,
+		`not json`,
+	} {
+		if w := post(body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s => %d, want 400", body, w.Code)
+		}
+	}
+	if len(fake.candidates) != 0 {
+		t.Fatalf("a refused body reached the service: %+v", fake.candidates)
+	}
+	w := post(`{"request_id":"r1","candidate_id":"listed"}`)
+	if w.Code != http.StatusOK || len(fake.candidates) != 1 || fake.candidates[0].CandidateID != "listed" || fake.candidates[0].RequestID != "r1" {
+		t.Fatalf("status=%d candidates=%+v body=%s", w.Code, fake.candidates, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"software"`) {
+		t.Fatalf("the chosen project must reach the card: %s", w.Body.String())
+	}
+	// A candidate the offer never listed is a refusal, not a guess.
+	if unknown := post(`{"request_id":"r2","candidate_id":"made-up"}`); unknown.Code != http.StatusBadRequest {
+		t.Fatalf("an unlisted candidate => %d", unknown.Code)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	r.SetPathValue("offerID", "offer-1")
+	gw := httptest.NewRecorder()
+	h.ChooseFolderCandidate(gw, r)
+	if gw.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET => %d", gw.Code)
+	}
+}
+
+// A yes on a folder that already has a workspace is a 409 that carries the
+// offer, so the card can show the workspace to open instead of an error.
+func TestFolderDecide_AnExistingWorkspaceIsAConflictCarryingTheOffer(t *testing.T) {
+	fake := &fakeFolderDigest{decideErr: personalassistant.ErrFolderProjectExists}
+	h := newFolderDigestHandler(fake)
+	r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/decide",
+		strings.NewReader(`{"decision":"yes","choice":"project","create":true,"request_id":"r1"}`))
+	r.SetPathValue("offerID", "offer-1")
+	w := httptest.NewRecorder()
+	h.DecideFolderDigest(w, r)
+	var body struct {
+		ProjectExists bool                              `json:"project_exists"`
+		Offer         personalassistant.FolderOfferView `json:"offer"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.ProjectExists ||
+		body.Offer.Software == nil || len(body.Offer.Software.Existing) != 1 || body.Offer.Software.Existing[0].Route != "/workspaces/widget" {
+		t.Fatalf("existing workspace => %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "/Users") || strings.Contains(w.Body.String(), "/private") {
+		t.Fatalf("the conflict leaked a path: %s", w.Body.String())
+	}
 }
 
 func TestGetFolderDigest_CanReadOneNamedOfferAndNothingElse(t *testing.T) {

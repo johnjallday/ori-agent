@@ -16,6 +16,10 @@ const (
 	// MarkerGlob matches any entry, file or bundle directory, whose name fits
 	// the pattern (filepath.Match syntax).
 	MarkerGlob MarkerKind = "glob"
+	// MarkerEntry matches a file or a directory with exactly this name. An
+	// ordinary Git checkout keeps .git as a directory and a worktree keeps it
+	// as a file; both mark a repository, and neither is opened to find out.
+	MarkerEntry MarkerKind = "entry"
 )
 
 // Shape is what a marker says the folder is for. FR28 maps a shape to the
@@ -50,6 +54,10 @@ type Marker struct {
 	// tempo, length and track count. It is inert: generic code interprets it,
 	// and a Home reads facts only with the user's song-details consent.
 	Facts *ProjectFacts
+	// Repository says the entry marks a version-control checkout. The scan
+	// records it on the candidate even when a more specific marker names the
+	// project. It is a name on disk: it does not prove the checkout is valid.
+	Repository bool
 }
 
 // ProjectFacts describes, as data, where three song facts sit in a
@@ -115,6 +123,8 @@ func (m Marker) matches(name string, isDir bool) bool {
 		return !isDir && name == m.Name
 	case MarkerDir:
 		return isDir && name == m.Name
+	case MarkerEntry:
+		return name == m.Name
 	case MarkerGlob:
 		if m.ProjectFormat != "" && isDir && !m.ProjectBundle {
 			return false
