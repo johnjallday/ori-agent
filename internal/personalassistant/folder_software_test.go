@@ -477,6 +477,65 @@ func TestFolderSoftware_ConversationOptionsDescribeWithoutScanningOrCreating(t *
 	}
 }
 
+// A folder that is itself a software project is one thing to set up. The
+// conversation used to list the checkout and each of its subfolders as separate
+// compatible folders, so attaching a single repository asked which of them to
+// set up, its caches and its package folder among them. A folder that only
+// holds separate projects still names each of them.
+func TestFolderSoftware_ConversationTreatsARepositoryAsOneProject(t *testing.T) {
+	s := newSoftwareFixture(t)
+	ctx := context.Background()
+	service, target, observation := softwareObservation(t, s, s.set.GoNode)
+	if len(observation.Projects) != 1 || !observation.Projects[0].Root || observation.Projects[0].Marker == "" || observation.Coverage.ProjectsOmitted != 0 {
+		t.Fatalf("a repository's candidates: %+v (omitted %d)", observation.Projects, observation.Coverage.ProjectsOmitted)
+	}
+	// Its parts are still described, as entries of the one project.
+	named := map[string]bool{}
+	if observation.Tree != nil {
+		for _, node := range observation.Tree.Nodes {
+			named[node.Name] = true
+		}
+	}
+	if !named["web"] || !named["internal"] {
+		t.Fatalf("the repository's subfolders left the observation: %v", named)
+	}
+
+	// The host that sets up software projects needs no generic creator for it.
+	s.service.deps.Creator = nil
+	options := service.ReviewOptions(ctx, target, observation.ID)
+	if len(options) != 1 || options[0].CandidateID != observation.Projects[0].ID || options[0].WorkspaceType != "Code project workspace" {
+		t.Fatalf("a repository's setup options: %+v", options)
+	}
+	if p := options[0].Presentation; p == nil || p.State != "proposed" || p.Kind != "workspace" || p.Effect != "workspace" {
+		t.Fatalf("a reviewable software project is presented as %+v", options[0].Presentation)
+	}
+	noPathIn(t, s.home, options)
+
+	// The one candidate reviews as the software card for the whole folder, and
+	// a subfolder that was never disclosed cannot be named instead.
+	if _, err := service.Review(ctx, target, "conversation-repository", observation.ID, "candidate-1"); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("an undisclosed subfolder was reviewed: %v", err)
+	}
+	offer, err := service.Review(ctx, target, "conversation-repository", observation.ID, options[0].CandidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !offer.Subject.IsRoot || offer.Software == nil || offer.Software.NeedsCandidate || offer.Software.Review != nil {
+		t.Fatalf("reviewed repository: %+v software=%+v", offer.Subject, offer.Software)
+	}
+	if len(s.creator.requests) != 0 || len(s.inspected) != 0 {
+		t.Fatal("choosing the repository created a workspace or read its files")
+	}
+
+	// A folder with no marker of its own holds separate projects.
+	_, _, container := softwareObservation(t, s, s.set.Container)
+	candidateNamed(t, container, "api")
+	candidateNamed(t, container, "site")
+	if len(container.Projects) < 3 {
+		t.Fatalf("a folder of projects lost its candidates: %+v", container.Projects)
+	}
+}
+
 // A conversation reopened after a restart shows what was observed, as history.
 // The server holds no selection for it, so it describes no option, reviews no
 // candidate, looks up no workspace, and creates nothing until the user picks

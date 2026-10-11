@@ -33,7 +33,7 @@ const sandbox = process.env.ORI_SOFTWARE_SANDBOX || '';
 const fixturePort = Number(process.env.ORI_SOFTWARE_FIXTURE_PORT || '0');
 const phase = process.env.ORI_SOFTWARE_PHASE || '';
 test.skip(
-  !sandbox || !fixturePort || !['first', 'restarted'].includes(phase),
+  !sandbox || !fixturePort || !['first', 'restarted', 'conversation'].includes(phase),
   'requires the sandbox, fixture port and phase that scripts/e2e-software-folder.sh provides'
 );
 test.describe.configure({ mode: 'serial' });
@@ -262,6 +262,37 @@ async function ok(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   return text ? JSON.parse(text) : {};
 }
 
+// hireAssistant brings a fresh server to the point a person reaches after
+// onboarding: an assistant, and the HQ it works from.
+async function hireAssistant(request: APIRequestContext) {
+  await request.post('/api/onboarding/skip');
+  await ok(await request.post('/api/settings/workspace-root', { data: { workspace_root: '' } }));
+  let relationship = (await ok(await request.get('/api/personal-assistant'))).personal_assistant;
+  if (relationship.state !== 'needs_hire') return;
+  await ok(
+    await request.post('/api/personal-assistant/hire', {
+      data: {
+        request_id: 'software-e2e-hire',
+        if_version: relationship.state_version ?? 0,
+        display_name: 'Atlas',
+        mandate: 'Keep my projects moving.',
+        focus_areas: ['plan_my_day']
+      }
+    })
+  );
+  relationship = (await ok(await request.get('/api/personal-assistant'))).personal_assistant;
+  await ok(
+    await request.post('/api/personal-assistant/hq', {
+      data: {
+        request_id: 'software-e2e-hq',
+        if_version: relationship.state_version,
+        name: 'My HQ',
+        timezone: 'UTC'
+      }
+    })
+  );
+}
+
 async function workspaceCount(request: APIRequestContext) {
   const listed = await ok(await request.get('/api/workspaces'));
   const items = Array.isArray(listed) ? listed : listed.workspaces || listed.folders || [];
@@ -386,33 +417,7 @@ test.describe('a fresh server', () => {
     page,
     request
   }) => {
-    await request.post('/api/onboarding/skip');
-    await ok(await request.post('/api/settings/workspace-root', { data: { workspace_root: '' } }));
-    let relationship = (await ok(await request.get('/api/personal-assistant'))).personal_assistant;
-    if (relationship.state === 'needs_hire') {
-      await ok(
-        await request.post('/api/personal-assistant/hire', {
-          data: {
-            request_id: 'software-e2e-hire',
-            if_version: relationship.state_version ?? 0,
-            display_name: 'Atlas',
-            mandate: 'Keep my projects moving.',
-            focus_areas: ['plan_my_day']
-          }
-        })
-      );
-      relationship = (await ok(await request.get('/api/personal-assistant'))).personal_assistant;
-      await ok(
-        await request.post('/api/personal-assistant/hq', {
-          data: {
-            request_id: 'software-e2e-hq',
-            if_version: relationship.state_version,
-            name: 'My HQ',
-            timezone: 'UTC'
-          }
-        })
-      );
-    }
+    await hireAssistant(request);
     if (!existsSync(folders.widget)) seed();
     const before: Carried = { hashes: hashes(), workspaces: await workspaceCount(request) };
     writeCarried(before);
@@ -825,5 +830,179 @@ test.describe('after the server was restarted', () => {
     expect(plan[2]).toContain('Uses your saved agent Development Assistant');
 
     await settled(request, before);
+  });
+});
+
+// --- third phase: the composer's Add folder, on a server of its own ----------
+
+test.describe('a repository attached to the conversation', () => {
+  test.skip(phase !== 'conversation', 'runs in the conversation phase');
+
+  // The folder that is picked is itself the checkout: its marker is at its
+  // root, and beside it are a package of its own, tests, data and a cache.
+  const repository = join(sandbox, 'Downloads');
+  const parts = ['__pycache__', 'data', 'enrollment', 'tests', 'tools'];
+  function seedRepository() {
+    writeTree(repository, {
+      '.git/HEAD': 'ref: refs/heads/main\n',
+      '.git/config': gitConfig('https://example.invalid/acme/gradebook.git'),
+      'pyproject.toml':
+        '[project]\nname = "gradebook-tools"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+      'README.md': '# Gradebook tools\n\nScripts that sync a gradebook.\n\nRun `pytest`.\n',
+      'main.py': 'def main():\n    pass\n',
+      'report.py': 'def report():\n    pass\n',
+      'tests/test_report.py': 'def test_ok():\n    assert True\n',
+      'data/sample.csv': 'a,b\n',
+      'enrollment/roster.py': 'ROSTER = []\n',
+      'tools/package.json': '{\n  "name": "gradebook-helpers"\n}\n',
+      'tools/index.js': 'export default {};\n',
+      '__pycache__/main.cpython-314.pyc': 'x',
+      '.env': `GRADEBOOK_FIXTURE_SETTING=${neverRead}\n`
+    });
+  }
+
+  // attach opens the assistant and adds the folder in its composer. Nothing is
+  // sent to a model by this.
+  async function attach(page: Page) {
+    await page.goto('/');
+    await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
+    if (!(await page.locator('#personalAssistantPanel').isVisible()))
+      await page.locator('#personalAssistantLauncher').click();
+    await page.locator('#personalAssistantFolderChip').click();
+    const attached = page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' &&
+        /\/api\/home-assistant\/folder-context\/select$/.test(response.url()),
+      { timeout: 60_000 }
+    );
+    await page
+      .locator('#personalAssistantFolderChoices')
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+    expect((await attached).ok()).toBeTruthy();
+    await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeEnabled({
+      timeout: 30_000
+    });
+  }
+
+  test('is one project to set up, not a choice among its subfolders', async ({ page, request }) => {
+    await hireAssistant(request);
+    await ok(
+      await request.post('/api/settings/system-model', {
+        data: { provider: 'lmstudio', model: fixtureModel }
+      })
+    );
+    if (!existsSync(join(repository, 'pyproject.toml'))) seedRepository();
+    const before = { hash: hashFolder(repository), workspaces: await workspaceCount(request) };
+
+    // Add folder in the composer, then Send: the path a person with a model
+    // takes, and the one that used to answer with a list of subfolders.
+    const panel = page.locator('#personalAssistantPanel');
+    await attach(page);
+    await page.locator('#personalAssistantSend').click();
+
+    // The reply proposes the folder itself, by name, as one workspace.
+    const proposal = page.locator('[data-folder-setup-suggestion]');
+    await expect(proposal).toBeVisible({ timeout: 90_000 });
+    await expect(proposal.locator('.personal-assistant-proposal__label')).toHaveText(
+      'Proposed workspace'
+    );
+    await expect(proposal.locator('.personal-assistant-proposal__subject')).toHaveText('Downloads');
+    await expect(proposal.locator('.personal-assistant-proposal__scope')).toHaveText(
+      'Whole folder'
+    );
+    const propose = proposal.getByRole('button');
+    await expect(propose).toHaveText('Review workspace setup');
+    await expect(proposal.locator('.personal-assistant-folder-context__note')).toHaveText(
+      'Review its effects before confirming. Nothing is set up here.'
+    );
+    const said = await panel.innerText();
+    expect(said).not.toContain('Choose setup scope');
+    expect(said).not.toContain('compatible folders');
+    // Its parts are not offered as topics of their own, or as projects.
+    await expect(page.locator('[data-folder-discussion] button')).toHaveText([
+      'Discuss this folder'
+    ]);
+
+    // What the model was told: one project, the whole folder, and its parts
+    // only as entries inside it. Nothing from a file it must not open.
+    const told = JSON.stringify(provider.calls);
+    const calls = provider.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    const observed = /<folder_observation>([\s\S]*?)<\/folder_observation>/.exec(
+      provider.calls.map(call => call.messages.map((m: any) => m.content).join('\n')).join('\n')
+    );
+    expect(observed, 'the turn carried no folder observation').toBeTruthy();
+    const observation = JSON.parse(observed![1]);
+    expect(observation.projects).toHaveLength(1);
+    expect(observation.projects[0]).toMatchObject({
+      name: 'Downloads',
+      marker: 'pyproject.toml',
+      root: true
+    });
+    const entries = (observation.observed_entries || []).map((entry: any) => entry.name);
+    for (const part of parts) expect(entries, `${part} left the observation`).toContain(part);
+    expect(told).toContain('Code project workspace');
+    expect(told).not.toContain(neverRead);
+
+    // One click reaches the project's own card: there is no scope to choose.
+    await propose.click();
+    const reviewCard = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
+    await expect(reviewCard).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeHidden();
+    await expect(headline(page)).toHaveText('Downloads looks like a Python project.');
+    expect((await buttons(page))[0]).toBe('Review setup');
+    expect(await buttons(page)).not.toContain('Set up');
+    // The line under the conversation agrees with the card it describes.
+    const status = page.locator('#personalAssistantFolderReviewStatus');
+    await expect(status).toContainText('waiting for your confirmation');
+    await expect(status).not.toContainText('not available');
+
+    await review(page);
+    await expect(headline(page)).toHaveText('Here is what I found in Downloads.');
+    const plan = await list(page, '#personalAssistantFolderPlan');
+    expect(plan).toHaveLength(5);
+    expect(plan[0]).toContain('Creates a Code project workspace named Downloads');
+    expect(await buttons(page)).toContain('Set up');
+    await expect(status).not.toContainText('not available');
+
+    // Nothing private and no path reaches the card; nothing was created, the
+    // folder is as it was, and the reviews called no model.
+    const shown = await reviewCard.innerText();
+    expect(shown).not.toContain(neverRead);
+    expect(shown).not.toContain(sandbox);
+    expect(await workspaceCount(request)).toBe(before.workspaces);
+    expect(hashFolder(repository), 'the project folder changed').toBe(before.hash);
+    expect(provider.calls, 'a review called the model').toHaveLength(calls);
+
+    // Keep chatting closes this review without deciding anything about the
+    // folder: the next conversation can review it again.
+    await press(page, 'Keep chatting');
+    await expect(reviewCard).toBeHidden({ timeout: 30_000 });
+  });
+
+  test('is reviewed from the composer without sending anything to a model', async ({
+    page,
+    request
+  }) => {
+    const before = { hash: hashFolder(repository), workspaces: await workspaceCount(request) };
+    const calls = provider.calls.length;
+    await attach(page);
+
+    // Review setup beside the folder's chip: no reply is needed, and with one
+    // project there is nothing to choose from.
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    const reviewCard = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
+    await expect(reviewCard).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeHidden();
+    await expect(headline(page)).toHaveText('Downloads looks like a Python project.');
+    expect(await buttons(page)).toEqual(['Review setup', 'Keep chatting']);
+    const status = page.locator('#personalAssistantFolderReviewStatus');
+    await expect(status).toContainText('waiting for your confirmation');
+    await expect(status).not.toContainText('not available');
+
+    expect(provider.calls, 'attaching or reviewing called the model').toHaveLength(calls);
+    expect(await workspaceCount(request)).toBe(before.workspaces);
+    expect(hashFolder(repository), 'the project folder changed').toBe(before.hash);
   });
 });

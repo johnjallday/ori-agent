@@ -196,11 +196,7 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 			}
 		}
 	}
-	// A software project's subfolders are its packages, documents and scripts,
-	// not projects of their own: a repository with several manifests is one
-	// project. A folder that only holds separate projects has no marker of its
-	// own, so its subfolders stay candidates.
-	if rootProject && ShapeFor(root) == ShapeCode {
+	if rootProject && r.SoftwareRoot() {
 		subProjects = nil
 	}
 	v.RootDump = !rootDeclined && dumpSignal(root)

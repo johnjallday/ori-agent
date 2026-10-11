@@ -21,6 +21,10 @@
 //              the Plans page, where nothing is created
 //   repeat     the same folder shown again opens that workspace, and a sibling
 //              worktree is a different project
+//   add-folder on a fresh seeded sandbox of its own: a checkout is attached
+//              through the composer's Add folder and sent to the real model;
+//              the reply proposes that one folder as a workspace, one click
+//              reaches its card, and its review and Set up finish as on Home
 //
 // Usage:
 //   ./scripts/demo-server.sh 8947 "$TMPDIR/ori-software-demo"      (background)
@@ -50,9 +54,18 @@ import {
   rmSync,
   writeFileSync
 } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
-const PHASES = ['recognize', 'review', 'setup', 'resume', 'assess-interrupt', 'assess', 'repeat'];
+const PHASES = [
+  'recognize',
+  'review',
+  'setup',
+  'resume',
+  'assess-interrupt',
+  'assess',
+  'repeat',
+  'add-folder'
+];
 // The phases that continue the sandbox an earlier phase left behind.
 const CONTINUES = ['resume', 'assess-interrupt', 'assess', 'repeat'];
 const [base, sandbox, output, phase = 'review'] = process.argv.slice(2);
@@ -1069,6 +1082,176 @@ async function repeatPhase(untouched) {
   console.log('OK (repeat): one workspace, one assistant, folders unchanged, no page errors');
 }
 
+// add-folder: the composer's Add folder, which is how a person with a model set
+// up shows the assistant a folder without going to Home's Explore a folder. The
+// folder picked is itself a checkout: its marker is at its root, and beside it
+// are a package of its own, tests, data and caches. That used to be answered
+// with "choose one of N compatible folders", its cache among them.
+async function addFolderPhase() {
+  const repository = join(sandbox, 'Downloads');
+  const files = {
+    '.git/HEAD': 'ref: refs/heads/main\n',
+    '.git/config':
+      '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://example.invalid/acme/gradebook.git\n',
+    'pyproject.toml':
+      '[project]\nname = "gradebook-tools"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+    'README.md':
+      '# Gradebook tools\n\nScripts that sync a gradebook and enrollment lists.\n\nRun `pytest`.\n',
+    'CLAUDE.md': '# Notes for assistants\n\nRun the tests before changing grading code.\n',
+    'run.sh': '#!/bin/sh\npython main.py\n',
+    'main.py': 'def main():\n    pass\n',
+    'gradebook.py': '"""gradebook."""\n',
+    'report.py': '"""report."""\n',
+    'tests/test_grading.py': 'def test_ok():\n    assert True\n',
+    'data/sample.csv': 'a,b\n',
+    'enrollment/roster.py': 'ROSTER = []\n',
+    'solutions/one.py': 'pass\n',
+    '__pycache__/main.cpython-314.pyc': 'x',
+    '.env': 'GRADEBOOK_DEMO_SETTING=never-read-this\n'
+  };
+  for (const [rel, content] of Object.entries(files)) {
+    const file = join(repository, rel);
+    mkdirSync(dirname(file), { recursive: true, mode: 0o750 });
+    writeFileSync(file, content, { mode: 0o600 });
+  }
+  const before = { hash: hashFolder(repository), workspaces: await workspaceCount() };
+  const configured = await context.request.post('/api/settings/system-model', {
+    data: { provider: 'codex', model: 'gpt-5.6-luna' }
+  });
+  expect(configured.ok(), `no model provider in this sandbox (${configured.status()})`);
+
+  // 26. Add folder in the composer. Nothing is sent to a model yet.
+  await page.goto('/');
+  const panel = page.locator('#personalAssistantPanel');
+  await page.locator('#personalAssistantLauncher').waitFor({ state: 'visible', timeout: 30000 });
+  if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
+  await page.locator('#personalAssistantFolderChip').click();
+  const attached = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' &&
+      /\/api\/home-assistant\/folder-context\/select$/.test(response.url()),
+    { timeout: 60000 }
+  );
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: 'Downloads', exact: true })
+    .click();
+  expect((await attached).ok(), 'the folder was not attached');
+  await page.waitForFunction(
+    () => document.getElementById('personalAssistantReviewFolderSetup')?.disabled === false,
+    null,
+    { timeout: 30000 }
+  );
+  await shot('26-add-folder-attached');
+
+  // 27. Send. The real model answers; the proposal beside its reply is Ori's.
+  await page.locator('#personalAssistantSend').click();
+  const proposal = page.locator('[data-folder-setup-suggestion]');
+  await proposal.waitFor({ state: 'visible', timeout: 240000 });
+  const part = name => proposal.locator(`.personal-assistant-proposal__${name}`).innerText();
+  const proposed = {
+    reply: (
+      await page
+        .locator('#homeAssistantConversation [data-message-role="assistant"]')
+        .last()
+        .innerText()
+    ).slice(0, 1200),
+    label: await part('label'),
+    subject: await part('subject'),
+    scope: await part('scope'),
+    action: await proposal.getByRole('button').innerText(),
+    topics: await page.locator('[data-folder-discussion] button').allInnerTexts()
+  };
+  console.log('the reply and its proposal:', JSON.stringify(proposed, null, 1));
+  expect(proposed.label === 'Proposed workspace', `not proposed as one: ${proposed.label}`);
+  expect(proposed.subject === 'Downloads', `the proposal names ${proposed.subject}`);
+  expect(proposed.scope === 'Whole folder', `the proposal's scope: ${proposed.scope}`);
+  expect(proposed.action === 'Review workspace setup', `the proposal's action: ${proposed.action}`);
+  expect(
+    proposed.topics.join(',') === 'Discuss this folder',
+    `its subfolders are offered as topics: ${proposed.topics}`
+  );
+  const said = await panel.innerText();
+  expect(
+    !/Choose setup scope|compatible folders/.test(said),
+    'the conversation still asks which subfolder to set up'
+  );
+  expect(!said.includes('never-read-this'), 'a private file reached the conversation');
+  await shot('27-add-folder-reply-proposes-the-project');
+
+  // 28. One click reaches the project's own card. There is no scope to choose.
+  await proposal.getByRole('button').click();
+  const inline = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
+  await inline.waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('#personalAssistantFolderOfferHeadline').waitFor({ state: 'visible' });
+  const status = page.locator('#personalAssistantFolderReviewStatus');
+  const recognized = {
+    headline: await text('#personalAssistantFolderOfferHeadline'),
+    question: await text('#personalAssistantFolderOfferQuestion'),
+    buttons: await buttons(),
+    status: await status.innerText(),
+    chooser: await page.locator('#personalAssistantFolderSetupChoices').isVisible()
+  };
+  console.log('the card in the conversation:', JSON.stringify(recognized, null, 1));
+  expect(
+    recognized.headline === 'Downloads looks like a Python project.',
+    `the card's headline: ${recognized.headline}`
+  );
+  expect(recognized.buttons[0] === 'Review setup', `first action: ${recognized.buttons}`);
+  expect(!recognized.chooser, 'a scope chooser was shown for one project');
+  expect(
+    /waiting for your confirmation/.test(recognized.status) &&
+      !/not available/.test(recognized.status),
+    `the line under the conversation disagrees with the card: ${recognized.status}`
+  );
+  await inline.scrollIntoViewIfNeeded();
+  await shot('28-add-folder-project-card');
+
+  // 29. Its review: what was read, and everything Set up will do.
+  await review();
+  const reviewed = {
+    headline: await text('#personalAssistantFolderOfferHeadline'),
+    evidence: await list('#personalAssistantFolderEvidence'),
+    plan: await list('#personalAssistantFolderPlan'),
+    buttons: await buttons(),
+    status: await status.innerText()
+  };
+  console.log('reviewed in the conversation:', JSON.stringify(reviewed, null, 1));
+  expect(reviewed.plan.length === 5, `the plan has ${reviewed.plan.length} lines`);
+  expect(reviewed.buttons.includes('Set up'), `no Set up after a review: ${reviewed.buttons}`);
+  expect(!/not available/.test(reviewed.status), `after the review: ${reviewed.status}`);
+  expect(
+    (await workspaceCount()) === before.workspaces,
+    'a review in the conversation created a workspace'
+  );
+  await inline.scrollIntoViewIfNeeded();
+  await shot('29-add-folder-reviewed-plan');
+
+  // 30. Set up, confirmed on the card, makes the one workspace.
+  await press('Set up');
+  const deadline = Date.now() + 120000;
+  while ((await workspaceCount()) === before.workspaces) {
+    expect(Date.now() < deadline, 'Set up in the conversation made no workspace');
+    await page.waitForTimeout(1000);
+  }
+  await page.waitForTimeout(3000);
+  const finished = {
+    workspaces: (await workspaceCount()) - before.workspaces,
+    assistants: await developmentAssistants(),
+    status: await status.innerText().catch(() => ''),
+    conversation: (await panel.innerText()).replace(/\n{2,}/g, '\n').slice(-900)
+  };
+  console.log('after Set up:', JSON.stringify(finished, null, 1));
+  expect(finished.workspaces === 1, `Set up made ${finished.workspaces} workspaces`);
+  expect(finished.assistants === 1, `${finished.assistants} development assistants`);
+  expect(hashFolder(repository) === before.hash, 'the project folder changed');
+  expect(errors.length === 0, `page errors: ${errors.join('; ')}`);
+  await shot('30-add-folder-set-up');
+  console.log(
+    'OK (add-folder): one proposal, one card, one workspace, folder unchanged, no page errors'
+  );
+}
+
 try {
   await api('POST', '/api/onboarding/skip');
   await api('POST', '/api/settings/workspace-root', { workspace_root: '' });
@@ -1090,7 +1273,11 @@ try {
     });
   }
   const untouched = ['documents', 'api', 'site'];
-  if (CONTINUES.includes(phase)) {
+  if (phase === 'add-folder') {
+    // No folder is shown on Home first: a review waiting there would be the
+    // one the conversation is told to finish.
+    await addFolderPhase();
+  } else if (CONTINUES.includes(phase)) {
     if (phase === 'resume') await resumePhase(untouched);
     if (phase === 'assess-interrupt') await assessInterruptPhase(untouched);
     if (phase === 'assess') await assessPhase(untouched);

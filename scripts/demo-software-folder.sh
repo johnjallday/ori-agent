@@ -4,12 +4,18 @@
 # browser, on one isolated demo server, with a real model.
 #
 # Usage:
-#   ./scripts/demo-software-folder.sh [--ori] [--port PORT] [--shots DIR]
+#   ./scripts/demo-software-folder.sh [--ori] [--add-folder] [--port PORT] [--shots DIR]
 #
 # --ori seeds a copy of this repository as the project (laid out as a linked
 # Git worktree, with a sibling worktree beside it). Without it the project is a
 # small unrelated one. --shots is where the screenshots go (default: a `shots`
 # folder inside the sandbox).
+#
+# --add-folder runs a different, shorter journey instead: a checkout is attached
+# through the assistant composer's Add folder and sent to the real model. The
+# reply proposes that one folder as a workspace, one click reaches its card, and
+# its review and Set up finish there. One server, no restart, and the model is
+# called for the assistant's reply only.
 #
 # The journey needs the server stopped and started twice, at exact moments. By
 # hand that is a dozen commands. This is one:
@@ -41,10 +47,15 @@ set -euo pipefail
 port=8947
 seed_args=()
 shots=""
+journey=home
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--ori)
 		seed_args=(--ori)
+		shift
+		;;
+	--add-folder)
+		journey=add-folder
 		shift
 		;;
 	--port)
@@ -56,9 +67,10 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	-h | --help)
-		echo "usage: $0 [--ori] [--port PORT] [--shots DIR]"
+		echo "usage: $0 [--ori] [--add-folder] [--port PORT] [--shots DIR]"
 		echo "Runs the software-project folder journey with a real model on one isolated"
-		echo "demo server. See the header of this script."
+		echo "demo server; --add-folder runs the composer's Add folder journey instead."
+		echo "See the header of this script."
 		exit 0
 		;;
 	*)
@@ -139,6 +151,13 @@ run_phase() {
 
 start_server
 ./scripts/software-folder-seed.sh "$sandbox" ${seed_args[@]+"${seed_args[@]}"} >"$sandbox/seed.log"
+if [[ "$journey" == add-folder ]]; then
+	run_phase add-folder
+	stop_server
+	echo "PASS  add-folder"
+	echo "What the assistant replied is in $sandbox/add-folder.log; screenshots are in $shots"
+	exit 0
+fi
 run_phase setup
 stop_server
 

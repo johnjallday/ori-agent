@@ -245,7 +245,10 @@ Automated, in a real browser, with no model and no network:
 It starts one isolated demo server, runs the suite's first phase
 (`tests/software-project-folder-setup.spec.ts`), stops and starts the server on
 the same sandbox, and runs the second phase, so a paused setup surviving a
-restart is checked for real. The suite writes its own inert project folders
+restart is checked for real. A third phase, on a server and sandbox of its
+own, attaches a checkout through the assistant composer's **Add folder** and
+sends it: the reply proposes that one folder as a workspace, and one click
+reaches its card. The suite writes its own inert project folders
 (Git metadata is plain text; no git command runs) and hashes them before and
 after. Its one stand-in is labelled in the spec as the FIXTURE PROVIDER: a
 local HTTP server that answers the model API, which the server's own `lmstudio`
@@ -254,14 +257,21 @@ the evidence, the isolation and every screen are the product's own; only the
 model's words are canned, and the spec reads back exactly what was sent to it.
 Run directly through `scripts/e2e.sh`, the spec skips unless
 `ORI_SOFTWARE_SANDBOX`, `ORI_SOFTWARE_FIXTURE_PORT` and `ORI_SOFTWARE_PHASE`
-(`first` or `restarted`) are set.
+(`first`, `restarted` or `conversation`) are set.
 
 With a real model, the whole journey in one command:
 
 ```bash
-./scripts/demo-software-folder.sh          # a small unrelated project
-./scripts/demo-software-folder.sh --ori    # a copy of this repository, as a linked worktree
+./scripts/demo-software-folder.sh               # a small unrelated project
+./scripts/demo-software-folder.sh --ori         # a copy of this repository, as a linked worktree
+./scripts/demo-software-folder.sh --add-folder  # the composer's Add folder instead of Home
 ```
+
+`--add-folder` is a shorter journey of its own: a checkout whose marker is at
+the root of the picked folder is attached in the composer and sent to the real
+model, the reply's proposal is followed to the project's card, and its review
+and Set up finish in the conversation. The reply is printed in the sandbox's
+`add-folder.log`.
 
 It starts an isolated demo server on a new sandbox, seeds the folders, and runs
 the walkthrough's phases in order, restarting the server where the journey
@@ -297,6 +307,10 @@ Check by eye:
 5. **Plan the suggested task** opens the workspace's Plans page with the
    suggestion in the box. Nothing is created until Create plan is pressed.
 6. The project folder is byte-for-byte unchanged afterwards.
+7. Through **Add folder**, a folder that is itself one project is proposed by
+   name as one workspace. It never asks which of its subfolders to set up, and
+   the line under the conversation agrees with the card (it does not say setup
+   is unavailable while the card offers a review).
 
 Evidence and the post-implementation guide stay ignored/local at
 `tasks/evidence/software-project-folder-setup/` and

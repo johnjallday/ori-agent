@@ -189,6 +189,16 @@ func (r Result) Subfolders() []Candidate {
 	return r.Candidates[1:]
 }
 
+// SoftwareRoot reports whether the scanned folder is itself a software
+// project: a marker of one sits directly inside it. Its subfolders are then
+// its packages, documents and scripts, not projects of their own, and a
+// repository with several manifests is one project. A folder that only holds
+// separate projects has no marker of its own, so its subfolders stay
+// candidates.
+func (r Result) SoftwareRoot() bool {
+	return ShapeFor(r.RootCandidate()) == ShapeCode
+}
+
 // HasMarker reports whether the marker row named markerName still sits
 // directly inside dir, for revalidating a fact learned from it (FR38). It
 // reads one directory listing and never opens a file.
