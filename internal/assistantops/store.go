@@ -235,8 +235,12 @@ func (s *SQLiteStore) Sweep(ctx context.Context, now time.Time, limit int) (Swee
 	}
 	nowMS := now.UnixMilli()
 	err := s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		// An operation that expires while it only holds a reservation (it is
+		// still requested or prepared) names no task afterwards: the
+		// reservation was never confirmed as written.
 		expired, err := tx.ExecContext(ctx, `UPDATE assistant_operations
-			SET status = 'expired', revision = revision + 1, updated_at_ms = ?
+			SET task_id = CASE WHEN status IN ('requested','prepared') THEN '' ELSE task_id END,
+				status = 'expired', revision = revision + 1, updated_at_ms = ?
 			WHERE id IN (SELECT id FROM assistant_operations
 				WHERE expires_at_ms <= ? AND status NOT IN ('cancelled','expired','invalidated')
 				ORDER BY expires_at_ms ASC LIMIT ?)`, nowMS, nowMS, limit)

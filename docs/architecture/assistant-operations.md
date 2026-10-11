@@ -51,23 +51,34 @@ the panel's `revalidateWorkspaceTurn` does. A mismatch returns
 
 ```
 requested ─► prepared ─► reviewed ─► start_requested ─► started
-    │           │  ▲         │              │  │
-    │           └──┘         │              │  └─► unresolved ─► started | reviewed
+    │           │  ▲         │  ▲           │  │           ▲
+    │           └──┘         │  └─ refused ─┘  └─► unresolved (retry ─► start_requested)
+    │                        └─ the task ran from its own controls ──────┘
     └───────────────────────┴──────────────┴──────► cancelled | expired | invalidated
 ```
 
 - `requested`: a validated tool call created it; commands may be pending.
 - `prepared`: a draft revision was issued and handed to the composer. A
-  repeat prepare is a new revision of the same operation.
-- `reviewed`: the composer's save created the task bound to this operation.
-- `start_requested`: Start was claimed exactly once (compare-and-swap).
-- `started`: a run was observed on the task (`current_run_id` or execution
-  history), not merely an accepted request.
-- `unresolved`: the claim's outcome could not be proven (crash or timeout
-  between execution admission and the status write). Only inspection or an
-  explicit retry through the claim path may follow; nothing starts fresh.
+  repeat prepare is a new revision of the same operation. While a save is
+  being written, a prepared operation also holds the **reservation** for its
+  one task (see "Creating and starting the task"); a reservation is not a task
+  and is not shown to the browser.
+- `reviewed`: the composer's save created the task bound to this operation,
+  and the server read that task back. A refused Start returns here.
+- `start_requested`: Start was claimed exactly once (compare-and-swap). The
+  start owner's answer is recorded as `start_accepted` or `start_refused`.
+- `started`: the task itself shows execution (in progress, a run identity or
+  an execution record), not merely an accepted request. It is also reached
+  from `reviewed` when the user ran the task from the task's own controls:
+  that is observed, not claimed.
+- `unresolved`: a claimed Start showed no outcome. Either no answer from the
+  start owner was recorded and nothing in this process is still delivering it
+  (a restart between the claim and the answer), or the Start was accepted and
+  the task showed no run within 90 seconds. Reads never start it again; only
+  the user's explicit retry goes back through the same claim.
 - `cancelled`, `expired`, `invalidated` are terminal. None of them cancels a
-  task: cancelling work stays an explicit existing task action.
+  task: cancelling work stays an explicit existing task action. An operation
+  whose bound task was deleted is `invalidated` and is never given another.
 
 Task outcome (completed, failed, needs-input, interrupted) is never copied
 into the operation. It is read from the task each time, so a quiet event
@@ -97,12 +108,18 @@ the UI:
 
 - browser acknowledgements establish **view** changes;
 - server receipts establish **writes** (`draft_prepared`, `task_created`,
-  `start_accepted`, `start_refused`);
+  `start_accepted`, `start_refused` with its reason, `start_unresolved`);
 - task state establishes **execution** (`run_established` is recorded only
-  when the task itself reports a run).
+  when the task itself reports a run, and carries that run's identity when the
+  task has one). The first run a task reports is the operation's run; a later
+  rerun has its own identity and never replaces it.
 
 Optional recaps are rendered from these recorded facts, labelled as recaps,
 and never replay a write or delay a result.
+
+When an operation reaches its receipt bound, view facts are dropped first and
+then the oldest answers to Start (each retry adds one). `task_created` and
+`run_established` are kept for as long as anything else can go.
 
 ## Bounds
 
@@ -115,6 +132,7 @@ and never replay a write or delay a result.
 | observed path / tab identity | 300 runes / 64 characters of `[A-Za-z0-9_-]` |
 | stored JSON columns | context ≤ 4 KB, commands ≤ 16 KB, draft ≤ 24 KB, receipts ≤ 16 KB (checked in Go first, repeated by the schema) |
 | time to live | 24 h from creation |
+| accepted Start with no run | 90 s, then `unresolved` |
 | active operations per user | 20 (the oldest open one is retired first; a start being decided is never retired) |
 | rows expired / removed per sweep | 50 each; an ended operation stays readable for 24 h so a returning tab can be told why it ended |
 
@@ -128,8 +146,13 @@ operations never drive one view.
 `not_found`, `conflict` (stale revision; read again), `forbidden` (not this
 owner), `expired`, `invalidated` (conversation/relationship/workspace
 changed), `tab_mismatch` (no watch lease), `invalid_command`, `bound_exceeded`,
-`transition_not_allowed`. Responses carry the category and a bounded
-user-safe reason, never storage or provider text.
+`transition_not_allowed`, `assignee` (the task's agent is not one instance in
+this workspace's own roster; the operation continues), `create_in_flight`
+(another request is writing this operation's task right now), `start_refused`
+(the start owner said no; nothing ran) and `task_missing` (the bound task is
+gone). Responses carry the category and a bounded user-safe reason, never
+storage or provider text: a start owner's internal error is recorded as "Ori
+could not start the task right now."
 
 ## Storage
 
@@ -217,6 +240,97 @@ workspace's page. Reopening is a local view of the same draft: it reports
 nothing to the server, changes no operation and does not replace unsaved
 edits. When the user saves the form, the tab stops offering that draft.
 
+### Creating and starting the task
+
+There is no model tool for either. Creation is the user's Save in the task
+form; Start is the user's click on **Start task** in the drawer. Watch, an
+operation ID typed into a request, an earlier agreement in the conversation or
+anything the model returns authorizes neither.
+
+**Create.** The task form stays the one create owner. When it saves a draft
+the assistant prepared, and the save is one ordinary task (no schedule, parent
+or input tasks), its `POST /api/orchestration/tasks` carries
+`assistant_operation_id` and `assistant_draft_revision`. With a schedule or
+inputs the form sends neither: that is the user's own task, and the tab stops
+offering the draft. The create handler validates every field exactly as for
+any create, pre-assigns the task ID, and then asks the operation service to
+**reserve** the operation's single task (`ClaimTaskCreate`). The reservation:
+
+- revalidates the owner, the relationship, the conversation and the workspace,
+  and requires a task operation for this workspace at the current draft
+  revision;
+- checks the **submitted** assignee (the human's reviewed choice, which may
+  differ from the draft) against the workspace's own roster as it is now. An
+  empty assignee, `unassigned`, an agent that left, a same-named agent
+  elsewhere, or another instance's node is refused with `operation_assignee`.
+  It is never added to the workspace and never replaced by the entry agent;
+  the operation stays `prepared` so the corrected form can be saved;
+- is a compare-and-swap that stores the task ID on the operation **before**
+  the task is written.
+
+The handler then writes the task with the roster's canonical name and node and
+a stamp, `assistant_operation_id`, saves the workspace, and confirms
+(`ConfirmTaskCreate`). Confirmation reads the task back and checks its stamp
+before moving to `reviewed` with a `task_created` receipt: the browser's
+report of a save is never the evidence. A failed save gives the reservation
+back (`ReleaseTaskCreate`). Assignment provenance is `manual`: the person
+reviewed and saved it.
+
+One operation creates one task:
+
+- a repeated save, a second tab or a retry after a lost response loses the
+  swap and gets the first task back (`200`, `already_created: true`);
+- a second save while the first is still being written gets
+  `operation_create_in_flight`;
+- after a restart the reservation and the stamp identify each other. On the
+  next read, a reservation whose stamped task exists is confirmed, and one
+  whose task never appeared is given back. A reservation that this process is
+  still writing is left alone, and "could not read the task" is never treated
+  as "missing". (Ori runs one server per data directory, so "not being written
+  by this process" is exact.) "Missing" itself gives a reservation back or
+  ends an operation, so it is believed only when a second read agrees;
+- an operation that ends (dismissed, expired, invalidated, or expired by the
+  sweep) while it only holds a reservation names no task afterwards. A task
+  identity survives the end of an operation only if it was confirmed;
+- an expired, invalidated, dismissed or unknown operation refuses the save
+  (`operation_expired`, `operation_invalidated`, `operation_ended`,
+  `operation_not_found`). Nothing is created. The form then lets go of the
+  operation and says so; only the user's next Save creates an ordinary task.
+  A create that names an operation is never turned into an ordinary create by
+  the server.
+
+**Start.** `POST /api/home-assistant/operations/{id}/start` claims Start once:
+
+- an operation already `start_requested` or `started` returns its snapshot and
+  starts nothing (duplicate delivery, a second tab, a reload, a retry);
+- a task that already shows execution (the user started it from the task's
+  own controls first) becomes `started` from the task's own run, without
+  calling Start;
+- otherwise the task's **own** assignee, as saved and possibly edited since,
+  is checked against the roster. A removed agent is refused with
+  `operation_assignee` and a `start_refused` receipt; the task is untouched;
+- the claim is a compare-and-swap `reviewed → start_requested`, then one call
+  to the task owner's first-start method, `StartReviewedTask`. That method
+  uses the same path as the manual execute endpoint (reset admission, manual
+  workspace admission, the backlog rule, the default execution mode and
+  `executeTaskWithDependencies` with its capability gate) and, unlike that
+  endpoint, never resets a finished task and refuses a task that already ran,
+  so no repeated or late call can become a rerun. Ordinary reruns from the
+  task's own controls are unchanged.
+
+A refusal returns the operation to `reviewed` with the reason, and the task
+stays under its original ID, startable again through the same claim. Nothing
+is deleted as a rollback and nothing uncertain is re-executed.
+
+The drawer follows the bound task through the existing
+`WorkspaceExecutionController`: on the task's workspace page it is the page's
+own controller and tray; elsewhere it is a controller of the same class that
+only reads the task. "Working", "needs your input", "failed" and "finished"
+are read from `resolveTaskPresentation`, never inferred from an acceptance or
+a timer. The operation is read again when the task moves, every 3 seconds
+while a claimed Start waits for its run, and every 15 seconds while a created
+task waits for the user.
+
 ## HTTP surface
 
 | Method and path | Purpose |
@@ -228,11 +342,16 @@ edits. When the user saves the form, the tab stops offering that draft.
 | `POST /api/home-assistant/operations/{id}/ack` | `{command_id, revision, tab_id, outcome, observed, reason}` from the watching tab |
 | `POST /api/home-assistant/operations/{id}/watch` | `{tab_id, revision, watch, adopt}` |
 | `POST /api/home-assistant/operations/{id}/cancel` | `{tab_id, revision}`; dismisses the operation only |
+| `POST /api/home-assistant/operations/{id}/start` | `{tab_id}`; the user's Start for the operation's task, claimed once |
+| `POST /api/orchestration/tasks` | optional `assistant_operation_id` and `assistant_draft_revision`, sent by the task form for a prepared draft; a repeat answers `200` with `already_created: true` and the first task |
 
 Errors are `{code, message}` with `operation_not_found` (404),
-`operation_conflict`, `operation_tab_mismatch`, `operation_ended` (409),
-`operation_expired`, `operation_invalidated` (410), `operation_invalid` (400)
-and `operation_unavailable` (503). Every response is `Cache-Control: no-store`.
+`operation_conflict`, `operation_tab_mismatch`, `operation_ended`,
+`operation_assignee`, `operation_start_refused`, `operation_create_in_flight`
+(409), `operation_expired`, `operation_invalidated` (410), `operation_invalid`,
+`operation_not_plain` (400) and `operation_unavailable` (503). A refused Start
+also carries `details.operation`, the operation as it now stands. Every
+response is `Cache-Control: no-store`.
 
 ## Browser delivery
 
@@ -257,6 +376,20 @@ the route helper and the workspace page's own selection owner.
 - The control Ori used is outlined for a few seconds. The mark re-resolves the
   live node from its key, because the page re-renders its controls; the pulse
   is dropped under `prefers-reduced-motion`.
+- Once the operation has a task, the status line reports three separate
+  things in order: "Task created … It has not started." (the server's
+  `task_created` receipt), "Start accepted. Waiting for … to begin…" (the
+  start owner's answer) and then the task's own state ("… is working on …",
+  "… needs your input …", "… failed. …", "… finished …"). **Start task** is the
+  only control that starts anything, it is disabled while its request is on
+  its way, and it is gone once Start is claimed. A refusal shows its reason
+  with **Try starting again**; a Start request that got no answer shows
+  **Check again** and never retries by itself. **Open the task** is a plain
+  link to the workspace's own Tasks panel for that task.
+- The page's own execution tray is opened for a start the user just made in
+  this tab, or on the page they arrive at within the 60-second window. A later
+  visit follows the task without opening anything; **Show progress** opens the
+  tray on request.
 
 ## Fallbacks
 
@@ -269,3 +402,9 @@ the route helper and the workspace page's own selection owner.
 - Reload, reconnect, duplicated tab or server restart: the tab fetches the
   authorized snapshot and the task/run facts before consuming any pending
   command; a copied tab identity must adopt explicitly.
+- No orchestration handler (no task owner): a draft can still be prepared, a
+  save that names the operation is refused with `operation_unavailable`, and
+  the form's next Save creates an ordinary task.
+- A task created but not started, a refused Start and an unresolved Start all
+  keep the task under its original ID with an action beside it. Nothing is
+  deleted to roll back and nothing uncertain is started again automatically.

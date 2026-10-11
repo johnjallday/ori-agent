@@ -25,6 +25,16 @@ func (s *Server) wireAssistantOperations(handler *agenthttp.HomeAssistantAskHand
 		return
 	}
 	handler.SetOperationStore(s.Storage.AssistantOperations)
+	// A prepared task is committed by the task form through the canonical
+	// create, and started by the task owner. Operations get exactly those two
+	// seams: the create handler asks the service to reserve and confirm the
+	// operation's one task, and the service asks the task owner what a task
+	// says about itself and for its first start. Without an orchestration
+	// handler a draft can still be prepared and saved as an ordinary task.
+	if handler.Operations != nil && s.Handlers != nil && s.Handlers.Orchestration != nil {
+		handler.Operations.SetTaskHost(s.Handlers.Orchestration.OperationTaskHost())
+		s.Handlers.Orchestration.SetTaskOperationBinder(handler.Operations)
+	}
 	// The drawer learns whether Watch can be offered from the status it already
 	// reads, so no page makes a request of its own to find out.
 	if s.Handlers != nil && s.Handlers.PersonalAssistant != nil {

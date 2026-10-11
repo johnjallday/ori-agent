@@ -18,6 +18,7 @@
  */
 
 import { workspaceRootURL } from './workspace-routes.js';
+import { serializeWorkspaceURLState } from './workspace-url-state.js';
 
 export const OPERATION_ACTION = Object.freeze({
   OPEN_WORKSPACE: 'open_workspace',
@@ -54,6 +55,24 @@ export function operationWorkspaceURL(slug) {
   if (!value || value.length > 200 || /[\\/?#\s]|\.\./.test(value)) return '';
   try {
     return workspaceRootURL(value);
+  } catch (_) {
+    return '';
+  }
+}
+
+/**
+ * This app's page for one task: the workspace's page with its own Tasks panel
+ * open on that task, built by the page's existing URL helpers from a slug and
+ * a task ID. Returns '' for anything that is not both.
+ */
+export function operationTaskURL(slug, taskId) {
+  const value = String(slug || '').trim();
+  const id = String(taskId || '').trim();
+  if (!operationWorkspaceURL(value) || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return '';
+  try {
+    return workspaceRootURL(value, {
+      search: serializeWorkspaceURLState({ panel: 'tasks', task: id })
+    });
   } catch (_) {
     return '';
   }
@@ -178,7 +197,10 @@ export function createOperationTargets(env) {
       prefillDetails: draft.brief || '',
       draftAssignmentValue: assignment,
       draftAssignmentLabel: agent,
-      modalTitle: `Review task for ${agent}`
+      modalTitle: `Review task for ${agent}`,
+      // The form's own save names this operation, so the server binds the one
+      // task it creates. Nothing here saves or starts anything.
+      assistantOperation: { id: String(snapshot.id || ''), revision: Number(draft.revision) }
     });
     const form = env.taskForm();
     if (!form || !form.open) return unavailable('The task form did not open.');

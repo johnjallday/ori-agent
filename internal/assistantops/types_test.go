@@ -56,6 +56,11 @@ func TestLifecycle_IsClosedAndStartIsNeverReclaimedFromStarted(t *testing.T) {
 		{StatusRequested, StatusPrepared}, {StatusPrepared, StatusPrepared}, {StatusPrepared, StatusReviewed},
 		{StatusReviewed, StatusStartRequested}, {StatusStartRequested, StatusStarted},
 		{StatusStartRequested, StatusUnresolved}, {StatusUnresolved, StatusStarted}, {StatusStarted, StatusCancelled},
+		// An explicit retry goes back through the claim, and a refused claim
+		// returns to the reviewed task.
+		{StatusUnresolved, StatusStartRequested}, {StatusStartRequested, StatusReviewed},
+		// Observed, not claimed: the user ran the task from its own controls.
+		{StatusReviewed, StatusStarted},
 	}
 	for _, pair := range allowed {
 		if !CanTransition(pair[0], pair[1]) {
@@ -65,7 +70,9 @@ func TestLifecycle_IsClosedAndStartIsNeverReclaimedFromStarted(t *testing.T) {
 	refused := [][2]Status{
 		{StatusStarted, StatusStartRequested}, {StatusStarted, StatusReviewed}, {StatusRequested, StatusStartRequested},
 		{StatusRequested, StatusStarted}, {StatusCancelled, StatusRequested}, {StatusExpired, StatusStarted},
-		{StatusInvalidated, StatusPrepared}, {StatusReviewed, StatusStarted},
+		{StatusInvalidated, StatusPrepared},
+		// A draft that was never saved as a task has nothing to start.
+		{StatusPrepared, StatusStartRequested}, {StatusPrepared, StatusStarted}, {StatusPrepared, StatusUnresolved},
 	}
 	for _, pair := range refused {
 		if CanTransition(pair[0], pair[1]) {

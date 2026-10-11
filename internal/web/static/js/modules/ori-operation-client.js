@@ -16,6 +16,13 @@
  *   when the user is somewhere else or has unsaved work, it waits for Resume.
  * - A tab that turns out to be a copy of another gives up its identity and so
  *   its claim on the view.
+ * - Nothing here creates a task. The task form's own save does, and this
+ *   module only learns of it from the server's snapshot.
+ * - Start is sent only by `start()`, which only the user's click calls. It is
+ *   never retried: a Start whose answer was lost is read back, not sent again.
+ * - Whether a task is running, waiting, failed or finished comes from the
+ *   task through the execution controller. An accepted Start, a timer or a
+ *   quiet connection never stands in for it.
  *
  * Dependencies are injected so the protocol is testable without a browser.
  */
@@ -32,9 +39,20 @@ export const AUTO_WINDOW_MS = 60 * 1000;
 // How long a loading tab waits to hear that its identity is already in use.
 export const TAB_GUARD_MS = 200;
 
+// How often a tab that follows a task reads its operation again: quickly while
+// a claimed start waits for its run, slowly while nothing is expected to move.
+export const FOLLOW_FAST_MS = 3000;
+export const FOLLOW_SLOW_MS = 15000;
+
 const ENDPOINT = '/api/home-assistant/operations/';
 const TAB_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ENDED = new Set(['cancelled', 'expired', 'invalidated']);
+// Statuses in which the bound task is watched through the execution controller.
+const MONITORED = new Set(['start_requested', 'started', 'unresolved']);
+// How long a page's own execution controller is waited for before this tab
+// follows the task with a monitor of its own.
+const MONITOR_TRIES = 20;
+const MONITOR_RETRY_MS = 300;
 
 export const PHASE = Object.freeze({
   IDLE: 'idle', // no operation in this tab
@@ -90,9 +108,17 @@ export class OperationClient {
     this._now = deps.now || (() => Date.now());
     this._newId = deps.newId || (() => defaultId());
     this._wait = deps.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    this._taskMonitor = typeof deps.taskMonitor === 'function' ? deps.taskMonitor : null;
+    this._later = deps.later || defaultLater;
     this._listeners = new Set();
     this._running = false;
     this._guard = Promise.resolve();
+    this._monitored = null;
+    this._monitorTries = 0;
+    this._cancelMonitorRetry = null;
+    this._cancelRefresh = null;
+    this._awaitingBinding = false;
+    this._startedHere = false;
 
     this.snapshot = null;
     this.phase = PHASE.IDLE;
@@ -100,6 +126,15 @@ export class OperationClient {
     this.highlight = null;
     // Set when the user saved the task form that held a draft from here.
     this.saved = null;
+    // The bound task as its own monitor last read it, and how it presents.
+    // Execution is shown from these and never from the operation's status.
+    this.task = null;
+    this.taskPresentation = null;
+    this.taskPhase = '';
+    // True while this tab's Start request is on its way.
+    this.starting = false;
+    // Set when a Start request got no answer, so its outcome is not known here.
+    this.startUnconfirmed = false;
   }
 
   // ---- identity and preference ----
@@ -250,13 +285,92 @@ export class OperationClient {
 
   /**
    * The user saved the task form that held this operation's draft. The form
-   * created the task through its own owner; this tab stops offering the
-   * draft, so the same proposal cannot be saved twice from here.
+   * created the task through its own owner. When the server's own record of
+   * that task names this operation, the operation now has its task and this
+   * tab follows it; the server's snapshot, not this callback, says so. When it
+   * does not (the save carried a schedule or inputs, or the request had
+   * ended), the task is the user's own and this tab stops offering the draft.
    */
   async _draftSaved(operationId, payload) {
     if (!this.snapshot || this.snapshot.id !== operationId) return;
-    this.saved = { task: (payload && payload.task) || null };
+    const task = (payload && payload.task) || null;
+    this.saved = { task };
+    if (task && String(task.assistant_operation_id || '') === operationId) {
+      this._awaitingBinding = true;
+      this._remember(operationId);
+      if (!(await this._refresh({ quiet: true }))) this._schedule();
+      return;
+    }
     await this.dismiss();
+  }
+
+  /**
+   * The user pressed Start for the task this operation created. The server
+   * claims Start once: a second click, another tab or a retry finds the claim
+   * and starts nothing. What comes back is an acceptance or a refusal; the
+   * task itself is what later shows that it runs.
+   */
+  async start() {
+    const snapshot = this.snapshot;
+    if (!snapshot || this.starting) return false;
+    if (snapshot.status !== 'reviewed' && snapshot.status !== 'unresolved') return false;
+    this.starting = true;
+    this.startUnconfirmed = false;
+    this._emit();
+    try {
+      const reply = await this._request(
+        'POST',
+        ENDPOINT + encodeURIComponent(snapshot.id) + '/start',
+        { tab_id: this.tabId() }
+      );
+      this._startedHere = true;
+      this._remember(snapshot.id);
+      this.starting = false;
+      this._accept(reply.operation);
+      return true;
+    } catch (error) {
+      this.starting = false;
+      const refused = error && error.data && error.data.details && error.data.details.operation;
+      if (refused && refused.id === snapshot.id) {
+        // Refused, with the operation as it now stands: its receipts say why.
+        this._accept(refused);
+        return false;
+      }
+      const code = errorCode(error);
+      if (code && code !== 'operation_unavailable') {
+        await this._afterRefusal(error);
+        return false;
+      }
+      // No answer, or the server could not say. The request may or may not
+      // have arrived, so claim nothing about the task until the operation has
+      // been read again. Reading never starts anything.
+      this.startUnconfirmed = !(await this._refresh({ quiet: true }));
+      this._emit();
+      return false;
+    }
+  }
+
+  /** Read the operation again at the user's request. Starts nothing. */
+  async check() {
+    const ok = await this._refresh({ quiet: true });
+    if (ok) this.startUnconfirmed = false;
+    this._emit();
+    return ok;
+  }
+
+  /**
+   * Show the bound task's live progress in this page's own execution tray,
+   * when this page is the task's workspace. Returns whether it was shown.
+   */
+  showTask() {
+    if (!this.canShowTask()) return false;
+    this._monitored.monitor.show(this._monitored.taskId);
+    return true;
+  }
+
+  /** Whether this page has its own place to show the bound task's progress. */
+  canShowTask() {
+    return Boolean(this._monitored && typeof this._monitored.monitor.show === 'function');
   }
 
   /** Dismiss the operation. A task it created or started is not touched. */
@@ -355,7 +469,12 @@ export class OperationClient {
 
   // ---- internals ----
 
-  async _refresh() {
+  /**
+   * Read the operation as the server has it now. `quiet` is for reads the
+   * user did not ask for (following a task): a failed one changes nothing on
+   * screen and is simply tried again later.
+   */
+  async _refresh({ quiet = false } = {}) {
     const pointer = this._pointer();
     const id = (this.snapshot && this.snapshot.id) || (pointer && pointer.id);
     if (!id) return false;
@@ -364,6 +483,8 @@ export class OperationClient {
         'GET',
         ENDPOINT + encodeURIComponent(id) + '?tab=' + encodeURIComponent(this.tabId())
       );
+      // The user may have dismissed it while the read was on its way.
+      if (quiet && (!this.snapshot || this.snapshot.id !== id)) return false;
       this._accept(reply.operation);
       return true;
     } catch (error) {
@@ -373,9 +494,146 @@ export class OperationClient {
         return false;
       }
       // Could not be read right now: keep following, move nothing.
-      this._pause('unreachable');
+      if (!quiet) this._pause('unreachable');
       return false;
     }
+  }
+
+  // ---- following the task ----
+
+  /**
+   * Keep the bound task in view: monitor it through the execution controller
+   * once a start was claimed, and read the operation again on a slow beat so
+   * a change made elsewhere (another tab, the task's own controls, a lost
+   * response) shows up. Nothing here starts, retries or completes anything.
+   */
+  _follow() {
+    const snapshot = this.snapshot;
+    if (snapshot && snapshot.status !== 'prepared') this._awaitingBinding = false;
+    const taskId =
+      snapshot && !ENDED.has(snapshot.status) && snapshot.task
+        ? String(snapshot.task.task_id || '')
+        : '';
+    if (taskId && MONITORED.has(snapshot.status)) this._monitor(snapshot, taskId);
+    else this._stopMonitor();
+    this._schedule();
+  }
+
+  _monitor(snapshot, taskId) {
+    if (this._monitored && this._monitored.taskId === taskId) return;
+    this._stopMonitor();
+    if (!this._taskMonitor) return;
+    // On the task's own workspace page the page's controller is used, and it
+    // mounts after the page's data loads. Ask again shortly, a bounded number
+    // of times, then follow with a monitor of this tab's own.
+    const monitor = this._taskMonitor(String((snapshot.context || {}).workspace_id || ''), {
+      final: this._monitorTries >= MONITOR_TRIES
+    });
+    if (monitor && monitor.pending) {
+      this._monitorTries += 1;
+      this._cancelMonitorRetry = this._later(() => {
+        this._cancelMonitorRetry = null;
+        if (this.snapshot) this._follow();
+      }, MONITOR_RETRY_MS);
+      return;
+    }
+    if (!monitor || !monitor.controller) return;
+    this._monitorTries = 0;
+    // Reveal the page's own tray only for a start the user just made here or
+    // is arriving from; otherwise follow without opening anything.
+    const pointer = this._pointer();
+    const reveal = this._startedHere || Boolean(pointer && this._now() < pointer.autoUntil);
+    if (reveal && typeof monitor.show === 'function') monitor.show(taskId);
+    else monitor.controller.track(taskId, { select: false });
+    const unsubscribe = monitor.controller.subscribe(() => this._taskChanged());
+    this._monitored = { taskId, monitor, unsubscribe, seen: '' };
+    this._taskChanged();
+  }
+
+  _stopMonitor() {
+    if (this._cancelMonitorRetry) {
+      this._cancelMonitorRetry();
+      this._cancelMonitorRetry = null;
+    }
+    const monitored = this._monitored;
+    this._monitored = null;
+    this.task = null;
+    this.taskPresentation = null;
+    this.taskPhase = '';
+    if (!monitored) return;
+    try {
+      if (typeof monitored.unsubscribe === 'function') monitored.unsubscribe();
+      // A monitor this tab made for itself goes away with it; the page's own
+      // controller keeps running for the page.
+      if (monitored.monitor.owned) monitored.monitor.controller.dispose();
+    } catch (_) {
+      /* a monitor that is already gone needs no cleanup */
+    }
+  }
+
+  _taskChanged() {
+    const monitored = this._monitored;
+    if (!monitored) return;
+    const run = monitored.monitor.controller.getRun(monitored.taskId);
+    const presentation = (run && run.presentation) || null;
+    const state = presentation ? String(presentation.state || '') : '';
+    const seen = [state, run ? run.phase : '', run ? run.lastActivityAt : ''].join('|');
+    if (seen === monitored.seen) return;
+    const moved = state !== monitored.seen.split('|')[0];
+    monitored.seen = seen;
+    this.task = (run && run.task) || null;
+    this.taskPresentation = presentation;
+    this.taskPhase = run ? String(run.phase || '') : '';
+    this._emit();
+    // The task moved: let the server settle the operation from it now rather
+    // than on the next beat.
+    const snapshot = this.snapshot;
+    if (state && moved && snapshot && !this._settledRun(snapshot)) {
+      void this._refresh({ quiet: true });
+    }
+  }
+
+  /** Whether the operation already names the run it observed. */
+  _settledRun(snapshot) {
+    return snapshot.status === 'started' && Boolean(snapshot.task && snapshot.task.run_id);
+  }
+
+  /** How soon to read the operation again, or 0 for "no need". */
+  _refreshInterval() {
+    const snapshot = this.snapshot;
+    if (!snapshot || snapshot.kind !== 'task' || ENDED.has(snapshot.status)) return 0;
+    switch (snapshot.status) {
+      case 'prepared':
+        // The form reported a bound save the server has not shown yet.
+        return this._awaitingBinding ? FOLLOW_FAST_MS : 0;
+      case 'start_requested':
+        return FOLLOW_FAST_MS;
+      case 'reviewed':
+      case 'unresolved':
+        return FOLLOW_SLOW_MS;
+      case 'started': {
+        if (this._settledRun(snapshot)) return 0;
+        // No run identity yet. Keep looking while the task is still moving.
+        const settled = this.taskPhase === 'settled';
+        return settled ? 0 : FOLLOW_FAST_MS;
+      }
+      default:
+        return 0;
+    }
+  }
+
+  _schedule() {
+    if (this._cancelRefresh) {
+      this._cancelRefresh();
+      this._cancelRefresh = null;
+    }
+    const ms = this._refreshInterval();
+    if (!ms) return;
+    this._cancelRefresh = this._later(async () => {
+      this._cancelRefresh = null;
+      // A successful read reschedules itself through _accept.
+      if (!(await this._refresh({ quiet: true }))) this._schedule();
+    }, ms);
   }
 
   async _afterRefusal(error) {
@@ -403,8 +661,13 @@ export class OperationClient {
 
   _accept(snapshot) {
     if (!snapshot || !snapshot.id) return;
+    if (this.snapshot && this.snapshot.id !== snapshot.id) this._startedHere = false;
     this.snapshot = snapshot;
     this.pauseReason = '';
+    // The server has spoken: whatever was unknown about a Start is now known.
+    this.startUnconfirmed = false;
+    // Follow before announcing, so the first render already has the task.
+    this._follow();
     if (ENDED.has(snapshot.status)) this._set(PHASE.ENDED);
     else if (!Number(snapshot.pending || 0)) this._set(PHASE.SETTLED);
     else if (!snapshot.watching) this._set(PHASE.WAITING);
@@ -420,6 +683,13 @@ export class OperationClient {
     this.snapshot = null;
     this.highlight = null;
     this.pauseReason = '';
+    this.starting = false;
+    this.startUnconfirmed = false;
+    this._startedHere = false;
+    this._awaitingBinding = false;
+    this._monitorTries = 0;
+    // Stops following: no monitor and no further reads for a dismissed operation.
+    this._follow();
     this._set(PHASE.IDLE);
   }
 
@@ -463,6 +733,13 @@ export class OperationClient {
 
 function errorCode(error) {
   return String((error && error.data && error.data.code) || '');
+}
+
+/** Run fn once after ms; returns how to cancel it. Never keeps a process alive. */
+function defaultLater(fn, ms) {
+  const handle = setTimeout(fn, ms);
+  if (handle && typeof handle.unref === 'function') handle.unref();
+  return () => clearTimeout(handle);
 }
 
 function defaultId() {

@@ -148,13 +148,17 @@ test('wt demo: Ori prepares an editable task draft and creates nothing until the
   });
   expect(saved[0].status).not.toBe('in_progress'); // saving started nothing
   await here.open();
-  await expect(here.status).toHaveText('Task saved from the draft. It is in the workspace now.');
+  // The save created the task and bound it to this request. It did not start it.
+  await expect(here.status).toHaveText(
+    'Task created for Engineer: “Bounce the stems for mastering”. It has not started.'
+  );
   await shot('03-saved-by-the-user.png');
   // The same proposal cannot be saved twice from here.
   await expect(here.actions.getByRole('button', { name: /Open draft/ })).toHaveCount(0);
-  expect((await readOperation(request, prepared.operation.id, tab.tab)).body.operation.status).toBe(
-    'cancelled'
-  );
+  const afterSave = (await readOperation(request, prepared.operation.id, tab.tab)).body.operation;
+  expect(afterSave.status).toBe('reviewed');
+  expect(afterSave.task.task_id).toBe(saved[0].id);
+  expect(saved[0].assistant_operation_id).toBe(prepared.operation.id);
 
   // --- 5. Watch off: an explicit Open draft uses the same form.
   await page.goto('/');

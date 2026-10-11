@@ -98,6 +98,9 @@ type Handler struct {
 	taskCapabilityGate      workspace.TaskCapabilityGate
 	taskCapabilityValidator workspace.TaskCapabilityValidator
 	taskFileFallback        workspace.TaskFileFallbackPreparer
+	// taskOperationBinder is remembered for the same reason: assistant
+	// operations are wired after the task sub-handler exists, or before.
+	taskOperationBinder TaskOperationBinder
 	// economy is remembered for the same reason: it is wired in a later build
 	// phase than the sub-handler that uses it, and may also arrive before one.
 	economy             *economy.Service
@@ -210,6 +213,7 @@ func (h *Handler) initializeSubHandlers() {
 		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
 		h.taskHandlerSub.SetAdmissionGate(h.admissionGate)
 		h.taskHandlerSub.SetEconomy(h.economy)
+		h.taskHandlerSub.SetTaskOperationBinder(h.taskOperationBinder)
 	}
 }
 
@@ -367,6 +371,7 @@ func (h *Handler) initializeTaskHandlerLegacy() {
 		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
 		h.taskHandlerSub.SetAdmissionGate(h.admissionGate)
 		h.taskHandlerSub.SetEconomy(h.economy)
+		h.taskHandlerSub.SetTaskOperationBinder(h.taskOperationBinder)
 	}
 }
 

@@ -38,6 +38,9 @@ const (
 	// DefaultTTL is how long an operation may continue. Expiry invalidates
 	// continuation; it never starts or cancels a task.
 	DefaultTTL = 24 * time.Hour
+	// DefaultStartGrace is how long an accepted Start may show no run before
+	// the operation reports the outcome as unresolved.
+	DefaultStartGrace = 90 * time.Second
 	// CleanupBatch bounds how many expired rows one sweep removes.
 	CleanupBatch = 50
 	// PurgeAfter is how long an ended operation stays readable, so a returning
@@ -116,11 +119,13 @@ func (s Status) Terminal() bool {
 
 // transitions is the closed state machine. Anything absent is refused.
 var transitions = map[Status][]Status{
-	StatusRequested:      {StatusPrepared, StatusReviewed, StatusCancelled, StatusExpired, StatusInvalidated},
-	StatusPrepared:       {StatusPrepared, StatusReviewed, StatusCancelled, StatusExpired, StatusInvalidated},
-	StatusReviewed:       {StatusStartRequested, StatusCancelled, StatusExpired, StatusInvalidated},
+	StatusRequested: {StatusPrepared, StatusReviewed, StatusCancelled, StatusExpired, StatusInvalidated},
+	StatusPrepared:  {StatusPrepared, StatusReviewed, StatusCancelled, StatusExpired, StatusInvalidated},
+	// reviewed -> started is a start the operation did not make: the user ran
+	// the task from its own controls, and the task says so.
+	StatusReviewed:       {StatusStartRequested, StatusStarted, StatusCancelled, StatusExpired, StatusInvalidated},
 	StatusStartRequested: {StatusStarted, StatusReviewed, StatusUnresolved, StatusExpired, StatusInvalidated},
-	StatusUnresolved:     {StatusStarted, StatusReviewed, StatusCancelled, StatusExpired, StatusInvalidated},
+	StatusUnresolved:     {StatusStarted, StatusStartRequested, StatusReviewed, StatusCancelled, StatusExpired, StatusInvalidated},
 	StatusStarted:        {StatusCancelled, StatusExpired, StatusInvalidated},
 }
 
@@ -252,6 +257,7 @@ const (
 	ReceiptTaskCreated     ReceiptKind = "task_created"       // server: canonical create bound a task
 	ReceiptStartAccepted   ReceiptKind = "start_accepted"     // server: Start claim accepted by execution
 	ReceiptStartRefused    ReceiptKind = "start_refused"      // server: Start claim refused
+	ReceiptStartUnresolved ReceiptKind = "start_unresolved"   // server: a claimed Start showed no outcome
 	ReceiptRunEstablished  ReceiptKind = "run_established"    // server: task reported a run
 	ReceiptTargetMissing   ReceiptKind = "target_unavailable" // from an unavailable command
 	ReceiptContinuationEnd ReceiptKind = "continuation_ended" // server: cancelled, expired or invalidated
@@ -326,8 +332,11 @@ func (d Draft) Validate() error {
 }
 
 // TaskBinding is the canonical task identity the operation produced and the
-// run the host observed for it. RunID is filled only from the task's own
-// current_run_id or execution history, never from an acceptance.
+// run the host observed for it. While the operation is still prepared the
+// identity is a claim reserved for one create; it is the task once the
+// operation is reviewed. RunID is the first run the task itself reported
+// (current_run_id or execution history), never an acceptance, and is not
+// replaced by a later rerun. ClaimedAt is when Start was last claimed.
 type TaskBinding struct {
 	TaskID    string     `json:"task_id"`
 	RunID     string     `json:"run_id,omitempty"`
@@ -353,6 +362,29 @@ type Operation struct {
 	CreatedAt time.Time    `json:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
 	ExpiresAt time.Time    `json:"expires_at"`
+}
+
+// TaskConfirmed reports whether the bound task was confirmed by the canonical
+// create. While an operation is still prepared, a task identity is only a
+// claim: the write it reserves may not have happened.
+func (o *Operation) TaskConfirmed() bool {
+	if o == nil || o.Task == nil || o.Task.TaskID == "" {
+		return false
+	}
+	return o.Status != StatusRequested && o.Status != StatusPrepared
+}
+
+// HasReceipt reports whether a fact of that kind was recorded.
+func (o *Operation) HasReceipt(kind ReceiptKind) bool {
+	if o == nil {
+		return false
+	}
+	for _, receipt := range o.Receipts {
+		if receipt.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // PendingCommands returns the commands the lease holder still has to carry out.
@@ -469,8 +501,13 @@ func SnapshotFor(op *Operation, tabID string) *Snapshot {
 	watching := op.Watch && tabID != "" && op.TabID == tabID
 	snapshot := &Snapshot{
 		Version: op.Version, ID: op.ID, Kind: op.Kind, Status: op.Status, Revision: op.Revision,
-		Context: op.Context, Watching: watching, Draft: op.Draft, Task: op.Task,
+		Context: op.Context, Watching: watching, Draft: op.Draft,
 		Receipts: op.Receipts, ExpiresAt: op.ExpiresAt, UpdatedAt: op.UpdatedAt,
+	}
+	// A task identity is shown only once the canonical create confirmed it. A
+	// claim that is still being written is not yet a task anyone can open.
+	if op.TaskConfirmed() {
+		snapshot.Task = op.Task
 	}
 	for _, command := range op.Commands {
 		if command.Status == CommandPending {
@@ -507,4 +544,15 @@ var (
 	// ErrUnavailable: the host could not check ownership or scope right now.
 	// Nothing was changed and nothing was invalidated; the caller may retry.
 	ErrUnavailable = errors.New("assistant operation: state unavailable")
+	// ErrAssignee: the task's agent is not one instance in this workspace's own
+	// roster. The operation continues; the assignment needs a corrected review.
+	ErrAssignee = errors.New("assistant operation: the agent is not in this workspace")
+	// ErrTaskMissing: the bound task no longer exists. Definitive, like
+	// ErrInvalidated, and reported by the task host.
+	ErrTaskMissing = errors.New("assistant operation: the task no longer exists")
+	// ErrStartRefused: the canonical start owner refused. Nothing ran.
+	ErrStartRefused = errors.New("assistant operation: start refused")
+	// ErrCreateInFlight: another request is creating this operation's task
+	// right now. Nothing was written by this one.
+	ErrCreateInFlight = errors.New("assistant operation: the task is being created")
 )

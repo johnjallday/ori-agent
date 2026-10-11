@@ -58,6 +58,8 @@ PLAIN_DEMOS = {
                 "ORI_WORKSPACE_OPERATE_SANDBOX", "operate-ori-navigation.log"),
     "operate_task": ("tests/operate-ori-task.spec.ts",
                      "ORI_WORKSPACE_OPERATETASK_SANDBOX", "operate-ori-task.log"),
+    "operate_start": ("tests/operate-ori-start.spec.ts",
+                      "ORI_WORKSPACE_OPERATESTART_SANDBOX", "operate-ori-start.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -244,6 +246,38 @@ def operate_step(prompt, results, tools):
                           (" The closest are: " + names + "." if names else "") + " Nothing was requested."}
     return {"answer": "Ori could not prepare that (" + str(result.get("reason", "unavailable")) +
                       "). You can open it from the Workspaces page. Nothing was requested."}
+
+
+WORKER_MARK = "You have been assigned a task in a collaborative workspace."
+
+
+def worker_reply(state_dir, request):
+    """A deterministic worker for a task that Ori really started.
+
+    This is the agent's model, not the assistant's: Ori's own executor built the
+    request for a task it is running, and the answer becomes that task's result
+    through the production execution path. The fixture decides nothing about
+    whether, when or how often a task runs. It only answers, optionally after a
+    hold (so a browser can observe the task while it is in progress) or with a
+    failure. Returns None for anything that is not a task run.
+    """
+    text = "\n".join(str(message.get("content", "")) for message in request.get("messages", []))
+    if WORKER_MARK not in text:
+        return None
+    # How many worker requests arrived. A count, never the task's words.
+    with (state_dir / "worker-requests.log").open("a") as record:
+        record.write("request\n")
+    if (state_dir / "worker-hold").exists():
+        deadline = time.monotonic() + 90
+        while not ((state_dir / "worker-release").exists() or (state_dir / "release").exists()):
+            if time.monotonic() >= deadline:
+                raise ValueError("fixture worker hold timed out")
+            time.sleep(0.05)
+    if (state_dir / "worker-fail").exists():
+        return {"error": "fixture worker failure"}
+    described = re.search(r"## Task Description\n\n(.+?)\n", text)
+    title = described.group(1).strip() if described else "the task"
+    return {"answer": "Fixture worker result for: " + title + ". No file was changed."}
 
 
 def file_step(prompt, results, tools_offered):
@@ -555,6 +589,14 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": summary}, "done": True,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
+                worker = worker_reply(state_dir, request) if operate else None
+                if worker is not None:
+                    if "error" in worker:
+                        self.reply(500, {"error": worker["error"]})
+                    else:
+                        self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": worker["answer"]},
+                                         "done": True, "prompt_eval_count": 1, "eval_count": 1})
+                    return
                 projection = workspace_projection(request.get("messages", []))
                 subject = projection.get("subject") or {}
                 user, results = current_turn(request["messages"])
@@ -706,6 +748,9 @@ def main():
     parser.add_argument("--operate-task", action="store_true",
                         help="wt demo: Operate Ori — a task draft for a non-entry agent in the real task form, "
                              "edited, dismissed, reopened and saved by the user; zero tasks before save")
+    parser.add_argument("--operate-start", action="store_true",
+                        help="wt demo: Operate Ori — the reviewed save creates one bound task, the user's Start is "
+                             "claimed once, real progress with a deterministic worker, a repeat, a reload and a refusal")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
@@ -730,7 +775,8 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if args.operate or args.operate_task else
+    operating = args.operate or args.operate_task or args.operate_start
+    evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if operating else
                 ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
                 ROOT / "tasks/evidence/assistant-folder-response-ux" / (args.folder_response_evidence_stage or "group-3") if args.folder_response else
@@ -738,7 +784,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity, operate=args.operate or args.operate_task))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity, operate=operating))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.

@@ -1,7 +1,7 @@
 ---
 name: operate-ori
 description: Operate the user's own Ori app when they ask for it - open one of their workspaces, select an agent there, or prepare a task draft for an agent - through Ori's named operations, so the user can watch it happen, review it, or open it themselves.
-version: 2
+version: 3
 allowed-tools:
   - assistant_operate_open
   - assistant_operate_prepare_task
@@ -80,6 +80,11 @@ Pass `agent_name` only when the user asked for an agent.
   `"delivery":"open_button"` Ori shows a button to open the draft. Say that a
   draft is ready to review and that nothing is created until they save it. Do
   not say a task was created, assigned or started.
+- What happens next is the user's. When they save the form, Ori creates the
+  task and shows it beside this conversation with a **Start task** button.
+  Saving does not start it, and starting is their own click. You cannot save
+  or start it for them, and you are not told whether they did. If they ask you
+  to save or start it, point them to the form's Save and to **Start task**.
 
 ### Results both operations can return
 

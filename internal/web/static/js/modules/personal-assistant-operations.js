@@ -12,6 +12,7 @@ import { OperationClient, PHASE, TAB_CHANNEL } from './ori-operation-client.js';
 import {
   createOperationTargets,
   browserOperationEnvironment,
+  operationTaskURL,
   operationWorkspaceURL
 } from './ori-operation-targets.js';
 
@@ -178,6 +179,9 @@ function shorten(text, limit) {
  */
 function taskView(view, state) {
   const snapshot = state.snapshot;
+  // Once the reviewed save created the task, the draft is history: what is
+  // shown comes from the bound task and the operation's own receipts.
+  if (snapshot.task && snapshot.task.task_id) return committedTaskView(view, state);
   const { workspace, slug } = target(snapshot);
   const agent = String(snapshot.draft.agent_name || 'the agent');
   const title = shorten(snapshot.draft.title, 60);
@@ -249,6 +253,166 @@ function taskView(view, state) {
       }
       return view;
     default:
+      return view;
+  }
+}
+
+function lastReceipt(snapshot, kinds) {
+  const receipts = (snapshot && snapshot.receipts) || [];
+  for (let i = receipts.length - 1; i >= 0; i -= 1) {
+    if (kinds.includes(receipts[i].kind)) return receipts[i];
+  }
+  return null;
+}
+
+/** A sentence, ending in a full stop, or '' for nothing. */
+function sentence(text) {
+  const value = String(text || '').trim();
+  if (!value) return '';
+  return /[.!?…]$/.test(value) ? value : value + '.';
+}
+
+/**
+ * What the drawer shows once the operation has a task. Three kinds of fact are
+ * kept apart: the server's receipt that the task was created, the server's
+ * answer to Start (accepted or refused), and the task's own state, which alone
+ * says that work is happening, waiting, failed or finished.
+ */
+function committedTaskView(view, state) {
+  const snapshot = state.snapshot;
+  const { workspace, slug } = target(snapshot);
+  const context = snapshot.context || {};
+  const agent = String(context.agent_name || snapshot.draft.agent_name || 'the agent');
+  const title = shorten(state.taskTitle || snapshot.draft.title, 60);
+  const stop = { id: 'dismiss', label: 'Stop following' };
+  const dismiss = { id: 'dismiss', label: 'Dismiss' };
+  const taskHref = operationTaskURL(slug, snapshot.task.task_id);
+  view.link = taskHref ? { href: taskHref, label: 'Open the task' } : null;
+
+  if (state.phase === PHASE.ENDED) {
+    // The request ended. The task is the workspace's own and is still there,
+    // unless it is the task itself that is gone.
+    const ended = lastReceipt(snapshot, ['continuation_ended']);
+    if (ended && /no longer exists/.test(String(ended.reason || ''))) {
+      view.text = 'The task was deleted, so there is nothing left to follow.';
+      view.link = null;
+    } else if (snapshot.status === 'expired') {
+      view.text = `That request ran out of time. The task for ${agent} is still in ${workspace}.`;
+    } else if (snapshot.status === 'invalidated') {
+      view.text = `That request is no longer valid. The task for ${agent} is still in ${workspace}.`;
+    }
+    if (view.text) {
+      view.tone = 'attention';
+      view.actions = [dismiss];
+    } else {
+      view.link = null;
+    }
+    return view;
+  }
+  if (state.startUnconfirmed) {
+    view.text =
+      'Ori could not be reached, so it is not known whether the task started. Check before starting it again.';
+    view.tone = 'attention';
+    view.actions = [{ id: 'check', label: 'Check again', primary: true }, dismiss];
+    return view;
+  }
+
+  switch (snapshot.status) {
+    case 'reviewed': {
+      if (state.starting) {
+        view.text = `Asking Ori to start the task for ${agent}…`;
+        view.tone = 'working';
+        return view;
+      }
+      const last = lastReceipt(snapshot, ['start_refused', 'start_accepted', 'task_created']);
+      if (last && last.kind === 'start_refused') {
+        view.text = `The task for ${agent} was not started. ${sentence(last.reason)}`.trim();
+        view.tone = 'attention';
+        view.actions = [{ id: 'start', label: 'Try starting again', primary: true }, dismiss];
+        return view;
+      }
+      view.text = `Task created for ${agent}: “${title}”. It has not started.`;
+      view.tone = 'done';
+      view.actions = [{ id: 'start', label: 'Start task', primary: true }, dismiss];
+      return view;
+    }
+    case 'start_requested':
+      // Accepted is not running: the task has not reported a run yet.
+      view.text = `Start accepted. Waiting for ${agent} to begin…`;
+      view.tone = 'working';
+      view.actions = state.canShowTask
+        ? [{ id: 'show_task', label: 'Show progress' }, stop]
+        : [stop];
+      return view;
+    case 'unresolved': {
+      const why = lastReceipt(snapshot, ['start_unresolved']);
+      view.text =
+        `Ori could not confirm that the task for ${agent} started. ${sentence(why && why.reason)} Nothing was started again.`.replace(
+          /\s+/g,
+          ' '
+        );
+      view.tone = 'attention';
+      view.actions = [
+        { id: 'check', label: 'Check again', primary: true },
+        { id: 'start', label: 'Try starting again' },
+        stop
+      ];
+      return view;
+    }
+    case 'started':
+      return runningTaskView(view, state, { agent, title, stop });
+    default:
+      return view;
+  }
+}
+
+/** The bound task's own state, in the task presentation's vocabulary. */
+function runningTaskView(view, state, { agent, title, stop }) {
+  const presentation = state.taskPresentation || null;
+  const task = state.task || null;
+  const progress = state.canShowTask ? [{ id: 'show_task', label: 'Show progress' }] : [];
+  view.actions = [...progress, stop];
+  const taskState = presentation ? String(presentation.state || '') : '';
+  switch (taskState) {
+    case 'running':
+      view.text = `${agent} is working on “${title}”.`;
+      view.tone = 'working';
+      return view;
+    case 'needs_input':
+      view.text = `${agent} needs your input to continue “${title}”.`;
+      view.tone = 'attention';
+      return view;
+    case 'blocked':
+      view.text = `“${title}” is blocked. Open the task to see what it needs.`;
+      view.tone = 'attention';
+      return view;
+    case 'failed':
+    case 'timed_out': {
+      const reason = sentence(shorten(task && task.error, 140));
+      view.text =
+        `“${title}” ${taskState === 'timed_out' ? 'timed out' : 'failed'}. ${reason}`.trim();
+      view.tone = 'attention';
+      view.actions = [stop];
+      return view;
+    }
+    case 'completed':
+      view.text = `${agent} finished “${title}”.`;
+      view.tone = 'done';
+      view.actions = [{ id: 'dismiss', label: 'Dismiss' }];
+      return view;
+    case 'cancelled':
+      view.text = `“${title}” was cancelled.`;
+      view.tone = 'attention';
+      view.actions = [{ id: 'dismiss', label: 'Dismiss' }];
+      return view;
+    case '':
+      // The run was observed by the server; this tab has not read the task yet.
+      view.text = `The task for ${agent} started.`;
+      view.tone = 'working';
+      return view;
+    default:
+      view.text = `The task for ${agent} started. Open the task to see where it is.`;
+      view.tone = 'quiet';
       return view;
   }
 }
@@ -329,6 +493,60 @@ async function apiRequest(method, path, body) {
   return data;
 }
 
+/**
+ * The execution monitor for one workspace's task, as the operation client
+ * uses it. On that workspace's own page it is the page's existing execution
+ * controller, whose tray shows the live run; anywhere else it is a controller
+ * of the same class that only reads the task. Either way the task's state
+ * comes from the same code the task pages use. `pending` asks the client to
+ * try again shortly: the page's controller, or the module, is still loading.
+ */
+function browserTaskMonitor() {
+  let Controller = null;
+  let loading = null;
+  return (workspaceId, { final = false } = {}) => {
+    if (!workspaceId) return null;
+    const command = window.workspaceCommand;
+    if (String(window.currentWorkspaceId || '') === workspaceId) {
+      if (command && typeof command.ensureExecController === 'function') {
+        return {
+          controller: command.ensureExecController(),
+          owned: false,
+          show: taskId => command.trackAndShowTray(taskId)
+        };
+      }
+      if (!final) return { pending: true };
+    }
+    if (!Controller) {
+      // Loaded only when a task is first followed away from its page.
+      loading =
+        loading ||
+        import('./workspace-execution-controller.js')
+          .then(module => {
+            Controller = module.WorkspaceExecutionController;
+          })
+          .catch(() => {
+            loading = null;
+          });
+      return final ? null : { pending: true };
+    }
+    return {
+      controller: new Controller({
+        workspaceId,
+        fetchTask: async id => {
+          const response = await fetch('/api/orchestration/tasks?id=' + encodeURIComponent(id), {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' }
+          });
+          return response.ok ? await response.json() : null;
+        }
+      }),
+      owned: true,
+      show: null
+    };
+  };
+}
+
 function mount() {
   const els = {
     root: document.getElementById('personalAssistantOperation'),
@@ -344,7 +562,8 @@ function mount() {
     request: apiRequest,
     storage: tabStorage(),
     targets: createOperationTargets(browserOperationEnvironment()),
-    navigate: url => window.location.assign(url)
+    navigate: url => window.location.assign(url),
+    taskMonitor: browserTaskMonitor()
   });
   // The drawer may have read the relationship before this module mounted.
   const known = window.PersonalAssistantPanel?._state?.personalAssistant?.availability?.operations;
@@ -372,7 +591,19 @@ function mount() {
         snapshot &&
         snapshot.context &&
         String(window.currentWorkspaceId || '') === String(snapshot.context.workspace_id || '')
-      )
+      ),
+      // The bound task as its monitor reads it. Its title is the saved one,
+      // which may differ from the draft the assistant prepared.
+      task: client.task,
+      taskPresentation: client.taskPresentation,
+      taskTitle: String(
+        (client.task && client.task.description) ||
+          (client.saved && client.saved.task && client.saved.task.description) ||
+          ''
+      ),
+      starting: client.starting,
+      startUnconfirmed: client.startUnconfirmed,
+      canShowTask: client.canShowTask()
     });
     // The Watch chip lives in the composer's chip row, so it costs the drawer
     // no height. Its hint is the chip's description and tooltip.
@@ -428,6 +659,11 @@ function mount() {
     state.note = '';
     if (button.dataset.operationAction === 'resume') void client.resume();
     if (button.dataset.operationAction === 'dismiss') void client.dismiss();
+    // Start is the user's own click, here. Nothing else in this module, and no
+    // reply from the assistant, calls it.
+    if (button.dataset.operationAction === 'start') void client.start();
+    if (button.dataset.operationAction === 'check') void client.check();
+    if (button.dataset.operationAction === 'show_task') client.showTask();
     if (button.dataset.operationAction === 'open_draft') {
       void client.openDraft().then(outcome => {
         // The user's own edits are never replaced by reopening the proposal.

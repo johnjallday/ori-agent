@@ -249,6 +249,37 @@ class DemoProviderTests(unittest.TestCase):
         # A result that is not JSON is treated as unavailable, not as success.
         self.assertIn("Nothing was requested.", demo.operate_step(ask, ["not json"], tool)["answer"])
 
+    def test_worker_fixture_answers_only_a_task_ori_is_running_and_decides_nothing(self):
+        run = {"messages": [{"role": "system", "content": "You are Engineer."},
+                            {"role": "user", "content": demo.WORKER_MARK + "\n\n## Task Description\n\nBounce the stems\n\n## Task Details\n\nBy Friday."}]}
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            # An assistant turn, a chat, or an empty request is not a task run.
+            for other in ({"messages": [{"role": "user", "content": "Create a task for Engineer to bounce the stems"}]},
+                          {"messages": []}, {}):
+                self.assertIsNone(demo.worker_reply(state, other))
+            self.assertFalse((state / "worker-requests.log").exists())
+
+            self.assertEqual(demo.worker_reply(state, run),
+                             {"answer": "Fixture worker result for: Bounce the stems. No file was changed."})
+            # The record counts requests and holds none of the task's words.
+            self.assertEqual((state / "worker-requests.log").read_text(), "request\n")
+
+            (state / "worker-fail").touch()
+            self.assertEqual(demo.worker_reply(state, run), {"error": "fixture worker failure"})
+            (state / "worker-fail").unlink()
+
+            # A hold ends only when the spec, or the runner's own shutdown, releases it.
+            (state / "worker-hold").touch()
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                held = pool.submit(demo.worker_reply, state, run)
+                self.assertFalse(held.done())
+                threading.Event().wait(0.2)
+                self.assertFalse(held.done())
+                (state / "worker-release").touch()
+                self.assertIn("Fixture worker result", held.result(timeout=5)["answer"])
+            self.assertEqual((state / "worker-requests.log").read_text().count("request"), 3)
+
     def test_file_fixture_walks_listing_folder_file_and_quotes_only_what_was_read(self):
         listing = json.dumps({"status": "available", "attachments": [{"attachment_id": "a1", "name": "mix.wav", "readable": "not_supported"},
                                                                     {"attachment_id": "a2", "name": "art.md", "readable": "supported"}],

@@ -71,9 +71,12 @@ type TaskHandler struct {
 	// economy prices a schedule change before it is saved and charges it after
 	// (city-economy FR21). A nil service means the economy is off or unwired,
 	// and every save is free — the same behavior as before the feature.
-	economy        *economy.Service
-	runningMu      sync.Mutex
-	runningCancels map[string]context.CancelFunc
+	economy *economy.Service
+	// operationBinder binds a create that names an assistant operation to that
+	// operation. Nil refuses such a create; an ordinary create never uses it.
+	operationBinder TaskOperationBinder
+	runningMu       sync.Mutex
+	runningCancels  map[string]context.CancelFunc
 }
 
 // SetEconomy wires the City Economy's pricing. Called from the server builder
@@ -373,6 +376,11 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 		RequiredCapabilities   []string                       `json:"required_capabilities"`
 		FileFallbackFor        []string                       `json:"file_fallback_for"`
+		// AssistantOperationID and AssistantDraftRevision are sent by the task
+		// form when it saves a draft the personal assistant prepared. They
+		// name the operation to bind; they authorize nothing by themselves.
+		AssistantOperationID   string `json:"assistant_operation_id"`
+		AssistantDraftRevision int    `json:"assistant_draft_revision"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -476,6 +484,30 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		task.OutputContract = task.OutputSpec.Contract
 	}
 
+	// Pre-assign the ID so the created task can be located unambiguously after
+	// save; matching on the request's To no longer works once defaulting may
+	// have changed it (FR9).
+	task.ID = uuid.New().String()
+
+	// A save of a draft the personal assistant prepared reserves that
+	// operation's single task before anything is written. Every field above
+	// was validated exactly as for an ordinary create; this adds the checks an
+	// operation needs (owner, conversation, workspace, draft revision and an
+	// assignee in this workspace's own roster) and makes a repeat harmless.
+	// It runs before the entry-agent default and the auto-add below, so a
+	// refused assignee is never replaced or added.
+	var operation *taskOperationBinding
+	if operationID := strings.TrimSpace(req.AssistantOperationID); operationID != "" {
+		plain := plainTaskCreate(req.ScheduleEnabled || schedule != nil, req.ParentTaskID, req.InputTaskIDs)
+		binding, ok := th.bindTaskOperation(w, r, &task, operationID, req.AssistantDraftRevision, plain)
+		if !ok {
+			return
+		}
+		operation = binding
+		// Any return below that did not write the task gives the reservation back.
+		defer operation.finish(r.Context())
+	}
+
 	// Default an otherwise-unassigned task to the workspace coordinator (entry
 	// agent) so created work is owned and routable instead of orphaned. No-op
 	// when the request named an assignee or no coordinator can be resolved. Runs
@@ -519,13 +551,6 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 			req.AssignmentMode, req.AssignedBy, req.AssignmentReason)
 	}
 
-	// Pre-assign the ID so the created task can be located unambiguously after
-	// save; matching on the request's To no longer works once defaulting may
-	// have changed it (FR9).
-	if task.ID == "" {
-		task.ID = uuid.New().String()
-	}
-
 	// A task that is born a Farm costs the flat build price at any tier
 	// (city-economy FR17, FR18). Priced here, immediately before the task is
 	// added to the workspace, so a refusal creates nothing at all.
@@ -555,6 +580,13 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
+	}
+
+	// The task is written. Record that against its operation now, before the
+	// response, so the operation reads "created" by the time the form hears.
+	if operation != nil {
+		operation.written = true
+		operation.finish(r.Context())
 	}
 
 	// The debit goes after the save, never before: a user is never charged for

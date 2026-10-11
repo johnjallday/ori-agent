@@ -118,7 +118,9 @@ test('the draft is handed to the real form in manual mode and verified there', a
     prefillDetails: 'Export stems for mastering.',
     draftAssignmentValue: 'node:Engineer-node-1',
     draftAssignmentLabel: 'Engineer',
-    modalTitle: 'Review task for Engineer'
+    modalTitle: 'Review task for Engineer',
+    // The form's own save names the operation and its draft revision.
+    assistantOperation: { id: 'op-task', revision: 1 }
   });
   assert.equal(state.onSave, onSaved, 'the form keeps its one save owner');
   assert.deepEqual(state.form, {
@@ -313,7 +315,7 @@ test('reopening a draft is local, reports nothing and keeps the user edits', asy
   assert.equal(await client.openDraft(), 'unavailable');
 });
 
-test('saving the form stops this tab offering the same draft again', async () => {
+test('a save the server did not bind to the operation stops this tab offering the draft', async () => {
   const { client, calls, executed } = makeClient(command =>
     command.action === 'open_workspace'
       ? { outcome: OUTCOME.ACKNOWLEDGED, observed: { path: '/workspaces/album-1' } }

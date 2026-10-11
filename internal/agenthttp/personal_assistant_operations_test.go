@@ -536,6 +536,7 @@ func (f *operationFixture) server(t *testing.T) http.Handler {
 	mux.HandleFunc("POST /api/home-assistant/operations/{id}/ack", f.handler.OperationAckHandler)
 	mux.HandleFunc("POST /api/home-assistant/operations/{id}/watch", f.handler.OperationWatchHandler)
 	mux.HandleFunc("POST /api/home-assistant/operations/{id}/cancel", f.handler.OperationCancelHandler)
+	mux.HandleFunc("POST /api/home-assistant/operations/{id}/start", f.handler.OperationStartHandler)
 	return mux
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -42,14 +43,26 @@ type Guard interface {
 type Service struct {
 	store Store
 	guard Guard
+	// tasks reads and starts the one task a task operation is bound to. Nil
+	// until SetTaskHost: without it a draft can be prepared but not committed.
+	tasks TaskHost
 	now   func() time.Time
 	newID func() string
 	ttl   time.Duration
+	// startGrace is how long an accepted Start may show no run before the
+	// operation says its outcome is unresolved.
+	startGrace time.Duration
+	// flights counts the create and start claims this process is carrying out
+	// right now, so a concurrent read does not mistake one for an abandoned
+	// claim. A claim absent from it after a restart is settled from the task.
+	flightMu sync.Mutex
+	flights  map[string]int
 }
 
 // NewService wires the store and the host guard.
 func NewService(store Store, guard Guard) *Service {
-	return &Service{store: store, guard: guard, now: time.Now, newID: uuid.NewString, ttl: DefaultTTL}
+	return &Service{store: store, guard: guard, now: time.Now, newID: uuid.NewString, ttl: DefaultTTL,
+		startGrace: DefaultStartGrace, flights: map[string]int{}}
 }
 
 // Available reports whether operations can be offered at all.
@@ -229,6 +242,13 @@ func (s *Service) Snapshot(ctx context.Context, id, tabID string) (*Snapshot, er
 	op, err = s.revalidate(ctx, op)
 	if err != nil && !ended(err) {
 		return nil, err
+	}
+	if err == nil {
+		// A read is also where a claim left by a lost response is settled, from
+		// what the task itself now says.
+		if op, err = s.settle(ctx, op); err != nil {
+			return nil, err
+		}
 	}
 	return SnapshotFor(op, tabID), nil
 }
@@ -465,6 +485,11 @@ func (s *Service) end(ctx context.Context, op *Operation, status Status, reason 
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)
 	supersedePending(op, now, reason)
+	if !op.TaskConfirmed() {
+		// A reservation that was never confirmed is not a task. An ended
+		// operation must not go on naming one that may never have been written.
+		op.Task = nil
+	}
 	op.Status, op.UpdatedAt = status, now
 	appendReceipt(op, Receipt{Kind: ReceiptContinuationEnd, At: now, Ref: string(status), Reason: boundedReason(reason)})
 	stored, err := s.store.Update(ctx, op, op.Revision)
@@ -487,19 +512,38 @@ func supersedePending(op *Operation, now time.Time, reason string) {
 }
 
 // appendReceipt keeps the newest facts within MaxReceipts. View facts are
-// dropped before write and execution facts, which are what recovery reads.
+// dropped first, then the oldest answers to Start (a retried Start adds one
+// each time). That a task was created and that a run was observed are kept
+// for as long as anything else can go.
 func appendReceipt(op *Operation, receipt Receipt) {
 	op.Receipts = append(op.Receipts, receipt)
 	for len(op.Receipts) > MaxReceipts {
-		drop := 0
-		for i, existing := range op.Receipts[:len(op.Receipts)-1] {
-			if viewFact(existing.Kind) {
-				drop = i
+		older := op.Receipts[:len(op.Receipts)-1]
+		drop := -1
+		for _, expendable := range []func(ReceiptKind) bool{viewFact, startAnswer} {
+			for i, existing := range older {
+				if expendable(existing.Kind) {
+					drop = i
+					break
+				}
+			}
+			if drop >= 0 {
 				break
 			}
 		}
+		if drop < 0 {
+			drop = 0
+		}
 		op.Receipts = append(op.Receipts[:drop], op.Receipts[drop+1:]...)
 	}
+}
+
+func startAnswer(kind ReceiptKind) bool {
+	switch kind {
+	case ReceiptStartRefused, ReceiptStartAccepted, ReceiptStartUnresolved:
+		return true
+	}
+	return false
 }
 
 func viewFact(kind ReceiptKind) bool {

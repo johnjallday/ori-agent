@@ -418,6 +418,22 @@ func (h *HomeAssistantAskHandler) OperationCancelHandler(w http.ResponseWriter, 
 	writeOperation(w, snapshot, err)
 }
 
+// OperationStartHandler: POST /api/home-assistant/operations/{id}/start. It is
+// the user's own Start for the task this operation created, and the only way
+// an operation starts anything: no model tool reaches it. A repeat finds the
+// first claim and starts nothing. A refusal carries the operation as it now
+// stands, so the drawer can say what happened and keep the task reachable.
+func (h *HomeAssistantAskHandler) OperationStartHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TabID string `json:"tab_id,omitempty"`
+	}
+	if !h.operationBody(w, r, &req) {
+		return
+	}
+	snapshot, err := h.Operations.Start(r.Context(), r.PathValue("id"), req.TabID)
+	writeOperation(w, snapshot, err)
+}
+
 func (h *HomeAssistantAskHandler) operationBody(w http.ResponseWriter, r *http.Request, into any) bool {
 	if !h.Operations.Available() {
 		respondOperationError(w, assistantops.ErrUnavailable)
@@ -432,7 +448,14 @@ func writeOperation(w http.ResponseWriter, snapshot *assistantops.Snapshot, err 
 	// A snapshot is current tab-local state, never a reusable grant.
 	w.Header().Set("Cache-Control", "no-store")
 	if err != nil {
-		respondOperationError(w, err)
+		status, code, message := operationErrorCode(err)
+		failure := orihttp.NewAPIError(code, message)
+		if snapshot != nil {
+			// A refusal that left the operation readable says where it now
+			// stands, so the tab shows the task and the reason without asking again.
+			failure = failure.WithDetails(operationResponse{Operation: snapshot})
+		}
+		_ = orihttp.RespondAPIError(w, status, failure)
 		return
 	}
 	orihttp.WriteJSON(w, operationResponse{Operation: snapshot})
@@ -441,7 +464,21 @@ func writeOperation(w http.ResponseWriter, snapshot *assistantops.Snapshot, err 
 // operationErrorCode maps a service error to its stable category. The browser
 // switches on the code; the message is bounded, user-safe text.
 func operationErrorCode(err error) (int, string, string) {
+	// A refused Start explains itself in the service's own bounded wording.
+	var refusal *assistantops.Refusal
+	if errors.As(err, &refusal) && strings.TrimSpace(refusal.Reason) != "" {
+		if errors.Is(err, assistantops.ErrAssignee) {
+			return http.StatusConflict, "operation_assignee", refusal.Reason
+		}
+		return http.StatusConflict, "operation_start_refused", refusal.Reason
+	}
 	switch {
+	case errors.Is(err, assistantops.ErrStartRefused):
+		return http.StatusConflict, "operation_start_refused", "Ori could not start the task right now."
+	case errors.Is(err, assistantops.ErrAssignee):
+		return http.StatusConflict, "operation_assignee", "The task's agent is not in this workspace. Reassign the task, then start it."
+	case errors.Is(err, assistantops.ErrTaskMissing):
+		return http.StatusGone, "operation_invalidated", "The task no longer exists."
 	case errors.Is(err, assistantops.ErrNotFound), errors.Is(err, assistantops.ErrForbidden):
 		return http.StatusNotFound, "operation_not_found", "That operation is not available."
 	case errors.Is(err, assistantops.ErrExpired):

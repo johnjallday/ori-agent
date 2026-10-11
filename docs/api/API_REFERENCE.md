@@ -487,12 +487,28 @@ response may carry:
 | `POST /api/home-assistant/operations/{id}/ack` | `command_id`, `revision`, `tab_id`, `outcome` (`acknowledged` or `unavailable`), `observed` (`path`, `agent_key`, `draft_revision`), `reason` | Records what the watching tab observed for one step. Steps are reported in order; a repeat of a recorded outcome changes nothing. It is view evidence only. |
 | `POST /api/home-assistant/operations/{id}/watch` | `tab_id`, `revision`, `watch`, `adopt` | Turns watching on or off for that tab. Taking it from another tab needs `adopt`. Off cancels nothing. |
 | `POST /api/home-assistant/operations/{id}/cancel` | `tab_id`, `revision` | Dismisses the operation. No workspace, agent or task is touched. |
+| `POST /api/home-assistant/operations/{id}/start` | `tab_id` | The user's Start for the task this operation created. Start is claimed once: a repeat, another tab or a retry returns the current `operation` and starts nothing. `200` means claimed (`start_requested`) or already running (`started`), never "finished". A refusal is `409` with `operation_start_refused` or `operation_assignee`, the reason as `message` and `details.operation`; the task is untouched. |
+
+**Saving a prepared task.** The task form saves a prepared draft through
+`POST /api/orchestration/tasks` with two extra fields, `assistant_operation_id`
+and `assistant_draft_revision`. They name the operation to bind and authorize
+nothing. The create is validated as any other, the assignee must be one agent
+in that workspace's own roster (never added, never replaced by the entry
+agent), and the created task carries `assistant_operation_id`. One operation
+creates one task: a repeated request answers `200` with
+`{ "success": true, "task", "already_created": true }`. A create that names an
+operation and carries a schedule, a parent or input tasks is refused with
+`operation_not_plain`; one whose operation ended is refused and creates
+nothing. After a bound save the operation is `reviewed` and its snapshot
+carries `task` (`task_id`, then `run_id` and `claimed_at`). A task's run is
+reported only from the task: `run_id` is the first run the task itself showed.
 
 Refusals are `{ "code", "message" }`: `operation_not_found` (404, also another
 user's operation), `operation_conflict`, `operation_tab_mismatch`,
-`operation_ended` (409), `operation_expired`, `operation_invalidated` (410),
-`operation_invalid` (400) and `operation_unavailable` (503). All responses are
-`Cache-Control: no-store`.
+`operation_ended`, `operation_assignee`, `operation_start_refused`,
+`operation_create_in_flight` (409), `operation_expired`,
+`operation_invalidated` (410), `operation_invalid`, `operation_not_plain` (400)
+and `operation_unavailable` (503). All responses are `Cache-Control: no-store`.
 
 **Saved drafts:**
 

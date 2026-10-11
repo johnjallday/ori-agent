@@ -46,11 +46,17 @@ export async function listWorkspaces(request: APIRequestContext): Promise<Seeded
   return (await (await request.get('/api/workspaces')).json()).folders;
 }
 
-/** Create a workspace and staff it with existing or new agents by name. */
+/**
+ * Create a workspace and staff it with existing or new agents by name. With
+ * `worker`, new agents run on that model, so a task they are given is really
+ * executed by Ori against the loopback fixture instead of failing for want of
+ * a vendor key.
+ */
 export async function seedWorkspace(
   request: APIRequestContext,
   name: string,
-  agents: string[] = []
+  agents: string[] = [],
+  worker?: { provider: string; model: string }
 ): Promise<SeededWorkspace> {
   const created = await request.post('/api/workspaces', { data: { name } });
   expect(created.ok(), await created.text()).toBeTruthy();
@@ -58,7 +64,11 @@ export async function seedWorkspace(
   expect(workspace, `workspace ${name}`).toBeTruthy();
   for (const agent of agents) {
     // An agent that already exists is reused; either way it joins this roster.
-    await request.post('/api/agents', { data: { name: agent, model: 'gpt-4o-mini' } });
+    await request.post('/api/agents', {
+      data: worker
+        ? { name: agent, model: worker.model, llm_provider: worker.provider }
+        : { name: agent, model: 'gpt-4o-mini' }
+    });
     const joined = await request.post('/api/orchestration/workspace/agents', {
       data: { workspace_id: workspace!.id, agent_name: agent }
     });

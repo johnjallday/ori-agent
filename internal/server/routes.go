@@ -344,6 +344,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/home-assistant/operations/{id}/ack", homeAssistantAskHandler.OperationAckHandler)
 	mux.HandleFunc("POST /api/home-assistant/operations/{id}/watch", homeAssistantAskHandler.OperationWatchHandler)
 	mux.HandleFunc("POST /api/home-assistant/operations/{id}/cancel", homeAssistantAskHandler.OperationCancelHandler)
+	mux.HandleFunc("POST /api/home-assistant/operations/{id}/start", homeAssistantAskHandler.OperationStartHandler)
 	// Review/cancel are data-only. Only Ask consumes a canonical exact approval,
 	// through the dedicated budgeted research broker; there is no URL proxy.
 	mux.HandleFunc("POST /api/home-assistant/research/review", homeAssistantAskHandler.ResearchReviewHandler)
