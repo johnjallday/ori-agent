@@ -107,9 +107,10 @@ After `Go`:
 
 1. Break every parent into concrete, ordered sub-tasks.
 2. Add an `Execution Topology` section that names the integration owner, writing
-   rule, bounded delegation lanes, model hotspots, parallel-safe boundaries, and
-   validation cadence. Use `none` rather than inventing delegation for work that
-   is cheaper in the primary context.
+   rule, delegation lanes, model hotspots, parallel-safe boundaries, and
+   validation cadence. Name which of the standard lanes (demo verification,
+   scribe, exploration; see _Execution topology and delegation_) apply. Write
+   `none` with a reason only for work that is cheaper in the primary context.
 3. Add a `Companion Dependencies` section using the assessment below. Include
    concrete companion implementation, integration-test, and delivery tasks when
    needed; identify which Ori steps depend on them. Prefer vertical slices: a
@@ -151,13 +152,15 @@ Use this shape:
 Implementation agent: `[configured primary, explicit override, or worktree-only]`
 
 Check off each sub-task immediately after it is complete. Execution is continuous
-between the planning gate and the final PR gate.
+between the planning gate and the final PR gate. Record findings, real test
+counts, and evidence paths in `tasks/findings-<feature>.md`; this checklist holds
+checkbox state only.
 
 ## Execution Topology
 
 - Integration owner: `[primary implementation agent]`
 - Writing rule: one active writer at a time; the integration owner owns shared files
-- Delegation: `[bounded findings-only research/review, sequential test/docs edits, or none]`
+- Delegation: `[demo verification for every Demo: item; scribe for checkbox ticks, findings log, test guide, and PR body; exploration sweeps at group starts; other bounded findings-only review; or none with a reason]`
 - Deep-model hotspots: `[specific unresolved decisions, or none]`
 - Parallel-safe work: `[file-disjoint, independently verifiable work, or none]`
 - Validation cadence: `[scoped checks per slice; affected suites per group; full repository gate once at delivery]`
@@ -295,6 +298,28 @@ uncertain unit to the right model.
    for checklist updates, demos, commits, and the delivery gate. Delegation adds
    no human pause.
 
+### Standard lanes
+
+These lanes exist because the integration owner's context fills with output it
+never reads again: screenshots, search results, and re-reads of planning
+documents. Each lane returns a short result and writes its full output to
+`tasks/evidence-<feature>/` or `tasks/findings-<feature>.md`.
+
+- **Demo verification:** every `Demo:` item. The lane drives the running demo
+  server, captures and inspects the screenshots, and returns a verdict of at
+  most 30 lines with evidence paths. Screenshots never enter the owner's
+  context. The owner fixes what fails and re-runs the lane for the failed state.
+- **Scribe:** checkbox ticks, the append-only findings log, the manual test
+  guide, and the PR body. The owner sends a summary of at most five lines per
+  sub-task and receives the next open item back, so it never re-reads the
+  checklist or PRD. Keep one scribe for the whole feature.
+- **Exploration:** "where does this live" sweeps and file maps at the start of a
+  group. Findings only, no edits.
+
+Parent groups are never separate agents: implementation is edit-heavy and needs
+the owner's accumulated context. A harness without a lane runs that step inline
+and still keeps findings out of the checklist.
+
 ## Demo checkpoints
 
 A green test suite does not prove that a user-visible surface is reachable or
@@ -304,12 +329,14 @@ For every user-visible group:
 
 1. Build the branch.
 2. Launch the isolated demo server with `wt demo` (default port 8931).
-3. Drive the new surface in the browser in the mode users actually use.
-4. Capture a screenshot.
-5. Fix failures before committing.
+3. Hand the drive to the demo-verification lane: the expected states, their
+   click paths, the port, and the evidence directory. Without a lane, drive the
+   new surface yourself in the mode users actually use.
+4. Capture a screenshot per expected state under `tasks/evidence-<feature>/`.
+5. Record the verdict in the findings log and fix failures before committing.
 
-Demos are self-checks, not extra approval pauses. Include screenshots in the
-final report.
+Demos are self-checks, not extra approval pauses. Include the screenshot paths
+in the final report.
 
 ## Validation cadence
 
@@ -406,3 +433,7 @@ work. Do not cross the worktree boundary.
 - PR: `wt pr [feature]`, always targeting `dev`
 - Cleanup after merge: `wt done <feature>`
 - Epic CI: `.github/workflows/ci.yml` accepts `epic/**` as a PR base
+- Findings log: `tasks/findings-<feature>.md`; evidence: `tasks/evidence-<feature>/`
+- Claude lanes: the user-level `demo-verifier` and `task-scribe` agents (not
+  tracked here) plus the built-in `Explore` agent. Codex and Pi run the lanes
+  inline or through Herdr's tester and reviewer roles.
