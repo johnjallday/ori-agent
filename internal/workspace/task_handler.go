@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -72,6 +73,10 @@ type LLMTaskHandler struct {
 	// recipes are the host recipes this handler can run, by name. A task seeded
 	// under a recipe that is not here is refused; see executeRecipeTask.
 	recipes map[string]RecipeRunner
+	// recipeRuns holds the recipe tasks being run right now, by task id, so a
+	// task is never run twice at once whichever executor asked.
+	recipeRunsMu sync.Mutex
+	recipeRuns   map[string]struct{}
 }
 
 // UsageRecorder records token usage from a completed provider call.

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // A folder setup may seed a first task that runs under a host-owned recipe
@@ -106,7 +107,37 @@ const (
 	RecipeModelUnavailable = "model_unavailable"
 	RecipeModelUnsupported = "model_unsupported"
 	RecipeToolCallRefused  = "tool_call_refused"
+	// How a run ended without a report, when nothing more specific is known.
+	RecipeRunFailed      = "run_failed"
+	RecipeEmptyResult    = "empty_result"
+	RecipeTimedOut       = "timed_out"
+	RecipeAlreadyRunning = "already_running"
 )
+
+// RecipeRunError is how a run under a host recipe that produced no report is
+// returned, to every caller. Its text is one plain sentence that is safe to
+// store on the task and show in a browser; Code names the reason for surfaces
+// that offer a repair. What actually went wrong (a provider's own error, which
+// can carry paths, command output or account details) is written to the log
+// and nowhere else.
+//
+// A recipe asks the user nothing, so a run never ends "waiting for an answer":
+// whatever stopped it, including something the user can repair, is this error.
+type RecipeRunError struct {
+	Code     string
+	Sentence string
+}
+
+func (e *RecipeRunError) Error() string { return e.Sentence }
+
+// AsRecipeRunError returns the recipe failure in err's chain, if there is one.
+func AsRecipeRunError(err error) (*RecipeRunError, bool) {
+	var failure *RecipeRunError
+	if errors.As(err, &failure) && failure != nil {
+		return failure, true
+	}
+	return nil, false
+}
 
 // agentsRoute is where an agent's model is chosen.
 const agentsRoute = "/agents"
@@ -148,15 +179,23 @@ func (h *LLMTaskHandler) resolveRecipeProvider(agentName string, task Task, reci
 			Repair:     &TaskRepairAction{Code: "choose_agent_model", Label: "Choose a model", URL: agentsRoute},
 		}
 	}
+	unavailable := &TaskBlockedError{
+		ReasonCode: RecipeModelUnavailable,
+		Reason:     "The model " + strings.TrimSpace(agentName) + " is set to use is not set up on this computer." + nothingSent,
+		Question:   "Set that model up, or choose another for the assistant, then try again.",
+		Repair:     &TaskRepairAction{Code: "choose_agent_model", Label: "Choose a model", URL: agentsRoute},
+	}
+	// The assistant's own provider, or none. An ordinary task whose provider is
+	// not set up here is moved to whichever provider the model's name suggests;
+	// a recipe run is not, because that other provider may bill differently or
+	// be one the user meant to keep this assistant away from.
+	if chosen := strings.ToLower(strings.TrimSpace(ag.Settings.Provider)); chosen != "" && !h.llmFactory.HasProvider(chosen) {
+		return recipeProvider{}, unavailable
+	}
 	name := h.getProviderForAgent(ag.Settings.Provider, model)
 	provider, err := h.llmFactory.GetProvider(name)
 	if err != nil || provider == nil {
-		return recipeProvider{}, &TaskBlockedError{
-			ReasonCode: RecipeModelUnavailable,
-			Reason:     "The model " + strings.TrimSpace(agentName) + " is set to use is not set up on this computer." + nothingSent,
-			Question:   "Set that model up, or choose another for the assistant, then try again.",
-			Repair:     &TaskRepairAction{Code: "choose_agent_model", Label: "Choose a model", URL: agentsRoute},
-		}
+		return recipeProvider{}, unavailable
 	}
 	// The restriction is the provider's to guarantee. One that cannot is not
 	// asked to run the call some other way.
@@ -199,17 +238,124 @@ func (h *LLMTaskHandler) RecipeReadiness(task Task) string {
 	return ""
 }
 
-// executeRecipeTask runs a task seeded under a host recipe: one model call,
-// with what the recipe lays out and nothing else.
+// executeRecipeTask is the one way a task seeded under a host recipe is run,
+// whichever executor asked: the manual run, the scheduler, the background
+// poller, a workspace orchestrator, or another task that lists this one as an
+// input. It makes one model call, with what the recipe lays out and nothing
+// else, and holds every caller to the same three things:
 //
-// Such a task never falls through to the ordinary agent path, whose tools and
-// permissions belong to the agent rather than to the recipe. The call is made
-// with ChatRequest.Isolated: no tool definitions, no MCP servers, no workspace
-// and no execution scope are sent, so none of the paths that give a model
-// authority here can be taken; the provider must guarantee the rest or refuse.
-// There is no fallback to another provider and no second attempt. A reply
-// that asks to use a tool is not acted on: the run fails.
+//   - one run of a task at a time: a second start while one is going is
+//     refused here, before anything is read or sent;
+//   - a failure is a RecipeRunError: one plain sentence and a code, with the
+//     cause in the log, so no caller can store or show a provider's raw error;
+//   - no caller's retry, delegation or step machinery is given a result to
+//     work on: there is a report, or there is that failure.
 func (h *LLMTaskHandler) executeRecipeTask(ctx context.Context, agentName string, task Task, recipe string) (string, error) {
+	if !h.claimRecipeRun(task.ID) {
+		return "", &RecipeRunError{Code: RecipeAlreadyRunning, Sentence: "This assessment is already running. A second one was not started."}
+	}
+	defer h.releaseRecipeRun(task.ID)
+
+	report, err := h.runRecipeTask(ctx, agentName, task, recipe)
+	if err == nil && strings.TrimSpace(report) != "" {
+		return report, nil
+	}
+	// A run the user cancelled is a cancellation, not a failure to describe.
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return "", context.Canceled
+	}
+	failure := describeRecipeFailure(ctx, err)
+	cause := "no result"
+	if err != nil {
+		cause = err.Error()
+	}
+	logger.Warn("Recipe task did not finish", logger.Fields{"task_id": task.ID, "recipe": recipe, "reason": failure.Code, "error": cause})
+	return "", failure
+}
+
+// claimRecipeRun marks a recipe task as running. It answers false when that
+// task already is, from any executor.
+func (h *LLMTaskHandler) claimRecipeRun(taskID string) bool {
+	h.recipeRunsMu.Lock()
+	defer h.recipeRunsMu.Unlock()
+	if _, running := h.recipeRuns[taskID]; running {
+		return false
+	}
+	if h.recipeRuns == nil {
+		h.recipeRuns = map[string]struct{}{}
+	}
+	h.recipeRuns[taskID] = struct{}{}
+	return true
+}
+
+func (h *LLMTaskHandler) releaseRecipeRun(taskID string) {
+	h.recipeRunsMu.Lock()
+	defer h.recipeRunsMu.Unlock()
+	delete(h.recipeRuns, taskID)
+}
+
+// describeRecipeFailure turns whatever stopped a recipe run into the sentence
+// and code that may leave this package. A reason the run itself named (the
+// folder is gone, the model cannot be isolated) is kept in its own words. A
+// provider's error is said in the provider layer's classified words when it
+// has some, and otherwise only as "did not finish": its text is never passed on.
+func describeRecipeFailure(ctx context.Context, err error) *RecipeRunError {
+	const unchanged = " Nothing in the project was run or changed."
+	var blocked *TaskBlockedError
+	var already *RecipeRunError
+	switch {
+	case err == nil:
+		return &RecipeRunError{Code: RecipeEmptyResult, Sentence: "The model returned nothing to report." + unchanged}
+	case errors.As(err, &already) && already != nil:
+		return already
+	case errors.As(err, &blocked) && blocked != nil:
+		failure := &RecipeRunError{Code: RecipeRunFailed, Sentence: "The assessment did not finish." + unchanged}
+		if code := strings.TrimSpace(blocked.ReasonCode); code != "" {
+			failure.Code = code
+		}
+		if reason := strings.TrimSpace(blocked.Reason); reason != "" {
+			failure.Sentence = reason
+		}
+		return failure
+	case errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
+		return &RecipeRunError{Code: RecipeTimedOut, Sentence: "The assessment ran out of time before the model answered." + unchanged}
+	}
+	if classified := llm.ClassifyProviderError("", err, 0, ""); classified != nil &&
+		classified.Category != llm.CategoryUnknown && strings.TrimSpace(classified.Message) != "" {
+		return &RecipeRunError{Code: recipeFailureCode(classified.Category), Sentence: strings.TrimSpace(classified.Message) + unchanged}
+	}
+	return &RecipeRunError{Code: RecipeRunFailed, Sentence: "The assessment did not finish." + unchanged}
+}
+
+// recipeFailureCode names a classified provider failure with the same codes
+// the ordinary task path uses for it.
+func recipeFailureCode(category llm.ErrorCategory) string {
+	switch category {
+	case llm.CategoryQuotaExhausted:
+		return "provider_quota_exhausted"
+	case llm.CategoryAuthentication, llm.CategoryNotConfigured, llm.CategoryPermissionDenied:
+		return "provider_configuration_required"
+	case llm.CategoryInvalidModel:
+		return RecipeModelUnavailable
+	case llm.CategoryContextLength:
+		return "input_too_large"
+	case llm.CategoryInvalidRequest, llm.CategoryPolicyRejection:
+		return "request_rejected"
+	default:
+		return "execution_failed"
+	}
+}
+
+// runRecipeTask makes the call. Such a task never falls through to the
+// ordinary agent path, whose tools and permissions belong to the agent rather
+// than to the recipe. The call is made with ChatRequest.Isolated: no tool
+// definitions, no MCP servers, no workspace and no execution scope are sent,
+// so none of the paths that give a model authority here can be taken; the
+// provider must guarantee the rest or refuse. The recipe's instructions travel
+// as the request's system prompt, which every provider sends. There is no
+// fallback to another provider and no second attempt. A reply that asks to use
+// a tool is not acted on: the run fails.
+func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, task Task, recipe string) (string, error) {
 	chosen, blocked := h.resolveRecipeProvider(agentName, task, recipe)
 	if blocked != nil {
 		return "", blocked
@@ -228,7 +374,8 @@ func (h *LLMTaskHandler) executeRecipeTask(ctx context.Context, agentName string
 	}
 	response, err := chosen.provider.Chat(ctx, llm.ChatRequest{
 		Model:               chosen.model,
-		Messages:            []llm.Message{llm.NewSystemMessage(brief.System), llm.NewUserMessage(brief.User)},
+		SystemPrompt:        brief.System,
+		Messages:            []llm.Message{llm.NewUserMessage(brief.User)},
 		ContextWindowTokens: window,
 		ReasoningEffort:     chosen.effort,
 		Isolated:            true,

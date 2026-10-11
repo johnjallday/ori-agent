@@ -1078,6 +1078,22 @@ test('an assessment that did not finish is tried again only when nothing needs r
   );
   assert.deepEqual(lookActions(offSite), ['open']);
   assert.equal(offSite.message, 'The assessment did not finish.');
+
+  // A browser reads a backslash as a slash, so these are other sites too: no
+  // repair link, and no link to a "workspace" that is one of them.
+  for (const route of ['/\\evil.example', '/\\/evil.example', '//evil.example', '/agents\nx']) {
+    const view = folderFirstLookView(
+      assessment({
+        state: 'failed',
+        can_retry: false,
+        repair_route: route,
+        repair_label: 'Fix it',
+        workspace_route: route
+      }),
+      {}
+    );
+    assert.deepEqual(view.actions, [], JSON.stringify(route));
+  }
 });
 
 test('what an assessment needs links only to the page that repairs it', () => {

@@ -3,8 +3,12 @@ package orchestrationhttp
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -30,7 +34,7 @@ func firstTaskContext() map[string]any {
 
 // recipeTaskFixture is a workspace holding one seeded first assessment: a task
 // under a host recipe, added the only way one can be.
-func recipeTaskFixture(t *testing.T, handler *scriptedTaskHandler, description string) (*TaskHandler, workspace.Store) {
+func recipeTaskFixture(t *testing.T, handler workspace.TaskHandler, description string) (*TaskHandler, workspace.Store) {
 	t.Helper()
 	ws := &workspace.Workspace{
 		ID: "ws-1", Name: "widget",
@@ -125,30 +129,40 @@ func TestRecipeTaskRunsExactlyOnceWhateverItsWordingSuggests(t *testing.T) {
 }
 
 // A recipe run that ends without a result is a failure with one plain sentence
-// and a code, not a question to the user. That holds for a plain error, for a
-// reason the user can repair, and for an empty answer.
+// and a code, not a question to the user. The task handler describes its own
+// failures (a reason the user can repair, an empty answer); anything that
+// reaches this executor undescribed, from around the handler, is recorded only
+// as "did not finish", never in its own words.
 func TestRecipeTaskFailureIsRecordedAsAFailureNeverAsAQuestion(t *testing.T) {
+	const generic = "The assessment did not finish. Nothing in the project was run or changed."
 	for name, tc := range map[string]struct {
 		err      error
 		result   string
 		code     string
 		sentence string
 	}{
-		"a provider error": {
-			err: errors.New("exit status 1: stderr mentions /Users/someone/.codex/config.toml"), code: "run_failed",
-			sentence: "The assessment did not finish. Nothing in the project was run or changed.",
-		},
 		"a reason the user can repair": {
-			err: &workspace.TaskBlockedError{
-				ReasonCode: "project_folder_unavailable", Reason: "The project folder is missing.",
-				Repair: &workspace.TaskRepairAction{Code: "show_folder", Label: "Show the folder", URL: "/?panel=today&folder=show"},
-			},
+			err:  &workspace.RecipeRunError{Code: "project_folder_unavailable", Sentence: "The project folder is missing."},
 			code: "project_folder_unavailable", sentence: "The project folder is missing.",
 		},
-		"an empty answer": {
-			result: "   ", code: "empty_result",
-			sentence: "The model returned nothing to report. Nothing in the project was run or changed.",
+		"an empty answer, as the handler reports it": {
+			err:  &workspace.RecipeRunError{Code: workspace.RecipeEmptyResult, Sentence: "The model returned nothing to report. Nothing in the project was run or changed."},
+			code: "empty_result", sentence: "The model returned nothing to report. Nothing in the project was run or changed.",
 		},
+		"a described failure that was wrapped on the way": {
+			err:  fmt.Errorf("run lifecycle: %w", &workspace.RecipeRunError{Code: workspace.RecipeTimedOut, Sentence: "The assessment ran out of time before the model answered. Nothing in the project was run or changed."}),
+			code: "timed_out", sentence: "The assessment ran out of time before the model answered. Nothing in the project was run or changed.",
+		},
+		"an undescribed error from around the handler": {
+			err: errors.New("exit status 1: stderr mentions /Users/someone/.codex/config.toml"), code: "run_failed", sentence: generic,
+		},
+		// A handler other than Ori's own might hand back a block. It is still a
+		// failure here, and its words are not trusted either.
+		"an undescribed block": {
+			err:  &workspace.TaskBlockedError{ReasonCode: "needs_input", Reason: "Which folder did you mean? /Users/someone/secret", Question: "Pick one"},
+			code: "run_failed", sentence: generic,
+		},
+		"an undescribed empty answer": {result: "   ", code: "run_failed", sentence: generic},
 	} {
 		t.Run(name, func(t *testing.T) {
 			handler := &scriptedTaskHandler{result: tc.result, err: tc.err}
@@ -166,11 +180,11 @@ func TestRecipeTaskFailureIsRecordedAsAFailureNeverAsAQuestion(t *testing.T) {
 			if after.Context[workspace.TaskContextFirstTaskFailure] != tc.code {
 				t.Fatalf("failure code = %v, want %s", after.Context[workspace.TaskContextFirstTaskFailure], tc.code)
 			}
-			if after.Context["human_loop"] != nil {
-				t.Fatalf("a recipe failure opened a question: %v", after.Context["human_loop"])
+			if after.Context["human_loop"] != nil || after.Status == workspace.TaskStatusWaitingForChoice {
+				t.Fatalf("a recipe failure opened a question: %s %v", after.Status, after.Context["human_loop"])
 			}
 			// What is stored for the user never carries the raw error.
-			if strings.Contains(after.Error, "/Users/") || strings.Contains(after.Error, "exit status") {
+			if strings.Contains(after.Error, "/Users/") || strings.Contains(after.Error, "exit status") || strings.Contains(after.Error, "Which folder") {
 				t.Fatalf("the raw error was stored: %q", after.Error)
 			}
 			if !readsFailed(after) || readsFinished(after) {
@@ -247,6 +261,197 @@ func TestRecipeTaskOrphanedByARestartReadsAsNotFinished(t *testing.T) {
 	}
 	if handler.calls != 1 {
 		t.Fatalf("calls = %d", handler.calls)
+	}
+}
+
+// recordingTaskHandler answers every task and remembers which ones it was asked
+// to run.
+type recordingTaskHandler struct {
+	result string
+	ran    []string
+}
+
+func (r *recordingTaskHandler) ExecuteTask(_ context.Context, _ string, task workspace.Task) (string, error) {
+	r.ran = append(r.ran, task.ID)
+	return r.result, nil
+}
+
+func addTask(t *testing.T, store workspace.Store, task workspace.Task) {
+	t.Helper()
+	ws, err := store.Get("ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("add %s: %v", task.ID, err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// changeAssessment edits the seeded assessment's stored record.
+func changeAssessment(t *testing.T, store workspace.Store, change func(*workspace.Task)) {
+	t.Helper()
+	ws, err := store.Get("ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := ws.GetTask("assess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	change(task)
+	if err := ws.UpdateTask(*task); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func storedTask(t *testing.T, store workspace.Store, id string) *workspace.Task {
+	t.Helper()
+	ws, err := store.Get("ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := ws.GetTask(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
+// Another task that lists the assessment as an input does not start it. An
+// ordinary input that has not run is run automatically, up to three times; an
+// assessment runs when the user starts it and at no other time, so the task
+// that depends on it is told so instead.
+func TestAnotherTasksInputNeverStartsARecipeTask(t *testing.T) {
+	handler := &recordingTaskHandler{result: "## What it is\nA service.\n\nNext task: Add a health check."}
+	th, store := recipeTaskFixture(t, handler, "Assess this project and suggest a first task")
+	addTask(t, store, workspace.Task{
+		ID: "follow-up", WorkspaceID: "ws-1", To: "Development Assistant", Description: "Summarize the assessment",
+		Status: workspace.TaskStatusPending, InputTaskIDs: []string{"assess"},
+		// What a client can set to ask for more attempts of an ordinary input.
+		Context: map[string]any{"max_attempts": 3},
+	})
+
+	ws, _ := store.Get("ws-1")
+	followUp, _ := ws.GetTask("follow-up")
+	_, err := th.executeTaskWithDependencies(ws, followUp)
+	if err == nil || !strings.Contains(err.Error(), "first assessment") {
+		t.Fatalf("a task depending on an unstarted assessment => %v", err)
+	}
+	if len(handler.ran) != 0 {
+		t.Fatalf("something was run: %v", handler.ran)
+	}
+	if after := storedTask(t, store, "assess"); after.Status != workspace.TaskStatusPending || after.Result != "" {
+		t.Fatalf("the assessment was touched: status %s, result %q", after.Status, after.Result)
+	}
+
+	// A failed assessment is not tried again by a dependant either.
+	changeAssessment(t, store, func(task *workspace.Task) { task.ForceStatus(workspace.TaskStatusFailed) })
+	ws, _ = store.Get("ws-1")
+	followUp, _ = ws.GetTask("follow-up")
+	if _, err := th.executeTaskWithDependencies(ws, followUp); err == nil || len(handler.ran) != 0 {
+		t.Fatalf("a task depending on a failed assessment => %v, ran %v", err, handler.ran)
+	}
+
+	// Once the user has run it, its report is an input like any other.
+	changeAssessment(t, store, func(task *workspace.Task) {
+		task.ForceStatus(workspace.TaskStatusCompleted)
+		task.Result = "## What it is\nA service."
+	})
+	ws, _ = store.Get("ws-1")
+	followUp, _ = ws.GetTask("follow-up")
+	if _, err := th.executeTaskWithDependencies(ws, followUp); err != nil {
+		t.Fatalf("a task depending on a finished assessment: %v", err)
+	}
+	if len(handler.ran) == 0 || handler.ran[0] != "follow-up" {
+		t.Fatalf("ran = %v, want the dependant only", handler.ran)
+	}
+	for _, id := range handler.ran {
+		if id == "assess" {
+			t.Fatalf("the finished assessment was run again as an input: %v", handler.ran)
+		}
+	}
+}
+
+// Starting the assessment starts the assessment. Tasks listed as its inputs
+// are ordinary agent tasks with tools; they are not run for it.
+func TestRecipeTaskRunsNoneOfItsOwnInputs(t *testing.T) {
+	handler := &recordingTaskHandler{result: "## What it is\nA service.\n\nNext task: Add a health check."}
+	th, store := recipeTaskFixture(t, handler, "Assess this project and suggest a first task")
+	addTask(t, store, workspace.Task{
+		ID: "with-tools", WorkspaceID: "ws-1", To: "Development Assistant", Description: "Run the test suite", Status: workspace.TaskStatusPending,
+	})
+	changeAssessment(t, store, func(task *workspace.Task) { task.InputTaskIDs = []string{"with-tools"} })
+
+	if _, after, err := runRecipeTask(t, th, store); err != nil || !readsFinished(after) {
+		t.Fatalf("the assessment: %v, state %s", err, after.CanonicalState())
+	}
+	if len(handler.ran) != 1 || handler.ran[0] != "assess" {
+		t.Fatalf("ran = %v, want the assessment alone", handler.ran)
+	}
+	if other := storedTask(t, store, "with-tools"); other.Status != workspace.TaskStatusPending || other.Result != "" {
+		t.Fatalf("the input task was run: status %s", other.Status)
+	}
+}
+
+// A sub-task hung on the assessment is an ordinary agent task. Running the
+// assessment does not run it, and its output is never recorded as the report.
+func TestRecipeTaskIsNeverRunAsASequenceOfItsSubTasks(t *testing.T) {
+	handler := &recordingTaskHandler{result: "## What it is\nA service.\n\nNext task: Add a health check."}
+	th, store := recipeTaskFixture(t, handler, "Assess this project and suggest a first task")
+	addTask(t, store, workspace.Task{
+		ID: "child", WorkspaceID: "ws-1", To: "Development Assistant", Description: "Run the test suite",
+		Status: workspace.TaskStatusPending, ParentTaskID: "assess",
+	})
+
+	// The sequence itself refuses a recipe parent.
+	th.executeParentTaskSequence("ws-1", "assess")
+	if len(handler.ran) != 0 {
+		t.Fatalf("the sub-task sequence ran for a recipe task: %v", handler.ran)
+	}
+	if after := storedTask(t, store, "assess"); after.Status != workspace.TaskStatusPending || after.Result != "" {
+		t.Fatalf("the sequence touched the assessment: status %s, result %q", after.Status, after.Result)
+	}
+
+	// The manual run, which is what Try again sends, runs the recipe.
+	rec := httptest.NewRecorder()
+	th.ExecuteTaskHandler(rec, httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/execute", strings.NewReader(`{"task_id":"assess"}`)))
+	if rec.Code != http.StatusAccepted || strings.Contains(rec.Body.String(), "sequence") {
+		t.Fatalf("manual run => %d %s", rec.Code, rec.Body.String())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !readsFinished(storedTask(t, store, "assess")) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if after := storedTask(t, store, "assess"); !readsFinished(after) || !strings.HasPrefix(after.Result, "## What it is") {
+		t.Fatalf("the assessment after a manual run: state %s, result %q", after.CanonicalState(), after.Result)
+	}
+	if len(handler.ran) != 1 || handler.ran[0] != "assess" {
+		t.Fatalf("ran = %v, want the assessment alone", handler.ran)
+	}
+	if child := storedTask(t, store, "child"); child.Status != workspace.TaskStatusPending {
+		t.Fatalf("the sub-task was run: status %s", child.Status)
+	}
+}
+
+// The attempt loop an ordinary input task goes through gives a recipe task one
+// call, whatever number of attempts its record asks for.
+func TestTheAttemptLoopGivesARecipeTaskOneCall(t *testing.T) {
+	handler := &scriptedTaskHandler{err: &workspace.RecipeRunError{Code: workspace.RecipeTimedOut, Sentence: "The assessment ran out of time."}}
+	th, store := recipeTaskFixture(t, handler, "Assess this project and suggest a first task")
+	changeAssessment(t, store, func(task *workspace.Task) { task.Context["max_attempts"] = 3 })
+	ws, _ := store.Get("ws-1")
+	task, _ := ws.GetTask("assess")
+	if _, err := th.executeTaskIteratively(context.Background(), ws, task, *task, false); err == nil {
+		t.Fatal("a failed run was reported as finished")
+	}
+	if handler.calls != 1 {
+		t.Fatalf("the attempt loop called the recipe %d times", handler.calls)
 	}
 }
 

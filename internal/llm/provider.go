@@ -166,6 +166,16 @@ func CheckIsolatedRequest(req ChatRequest) error {
 		strings.TrimSpace(req.WorkspaceDir) != "" || req.ExecutionScope != nil {
 		return fmt.Errorf("%w: an isolated call cannot carry tools, MCP servers, a workspace or an execution scope", ErrIsolationUnsupported)
 	}
+	// Its instructions travel in SystemPrompt, which every provider sends. A
+	// system-role message is not sent by all of them (the Anthropic API takes
+	// its system text apart from the messages), and one that silently dropped
+	// the rules of an isolated call would leave the model with the evidence
+	// alone. Tool turns have no place in a call that has no tools.
+	for _, message := range req.Messages {
+		if (message.Role != RoleUser && message.Role != RoleAssistant) || len(message.ToolCalls) > 0 || message.ToolCallID != "" {
+			return fmt.Errorf("%w: an isolated call carries its instructions in SystemPrompt and only user or assistant messages", ErrIsolationUnsupported)
+		}
+	}
 	return nil
 }
 

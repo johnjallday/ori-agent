@@ -5,16 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
-
-// recipeFailure is a recipe run that produced no result. Its text is the one
-// plain sentence recorded on the task; the cause stays in the log.
-type recipeFailure struct{ sentence string }
-
-func (f *recipeFailure) Error() string { return f.sentence }
 
 // executeRecipeTaskOnce makes the single call a task under a host recipe is.
 //
@@ -23,10 +16,11 @@ func (f *recipeFailure) Error() string { return f.sentence }
 // no step expansion. The recipe is given the task as it was seeded.
 //
 // A recipe asks the user nothing, so its run never ends "waiting for your
-// answer". Whatever stopped it, including something the user can repair, is
-// recorded as a failure that says what happened, and trying again is the
-// user's own click. The reason's code is kept beside it so the surfaces that
-// show the task can name the repair.
+// answer". Whatever stopped it, including something the user can repair, comes
+// back from the task handler as a workspace.RecipeRunError: one plain sentence,
+// which is what is recorded on the task, and a code, which is kept beside it so
+// the surfaces that show the task can name the repair. Trying again is the
+// user's own click.
 func (th *TaskHandler) executeRecipeTaskOnce(ctx context.Context, persisted *workspace.Task, forExecution workspace.Task) (string, error) {
 	run, err := workspace.ExecuteTaskWithRunMetadata(ctx, th.taskHandler, forExecution.To, forExecution)
 	if run.RunID != "" {
@@ -35,42 +29,28 @@ func (th *TaskHandler) executeRecipeTaskOnce(ctx context.Context, persisted *wor
 	if err == nil && strings.TrimSpace(run.Result) != "" {
 		return run.Result, nil
 	}
-	if errors.Is(ctx.Err(), context.Canceled) {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 		return "", context.Canceled
 	}
 
-	code, sentence := "run_failed", "The assessment did not finish. Nothing in the project was run or changed."
-	var blocked *workspace.TaskBlockedError
-	switch {
-	case err == nil:
-		code, sentence = "empty_result", "The model returned nothing to report. Nothing in the project was run or changed."
-	case errors.As(err, &blocked):
-		if strings.TrimSpace(blocked.ReasonCode) != "" {
-			code = strings.TrimSpace(blocked.ReasonCode)
+	failure, described := workspace.AsRecipeRunError(err)
+	if !described {
+		// The handler describes every failure of its own. One that reaches here
+		// undescribed came from around it (the run could not be recorded, say),
+		// and its text is no more fit to show than a provider's.
+		cause := "no result"
+		if err != nil {
+			cause = err.Error()
 		}
-		if strings.TrimSpace(blocked.Reason) != "" {
-			sentence = strings.TrimSpace(blocked.Reason)
-		}
-	case errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
-		code, sentence = "timed_out", "The assessment ran out of time before the model answered. Nothing in the project was run or changed."
-	default:
-		// A failure the provider layer can name (no quota, not signed in, the
-		// model is unknown) is said in its words; one it cannot name is not
-		// dressed up as anything more than "did not finish".
-		if classified := llm.ClassifyProviderError("", err, 0, ""); classified != nil &&
-			classified.Category != llm.CategoryUnknown && strings.TrimSpace(classified.Message) != "" {
-			code = reasonCodeFor(classified.Category)
-			sentence = strings.TrimSpace(classified.Message) + " Nothing in the project was run or changed."
+		logger.Warn("Recipe task did not finish", logger.Fields{"task_id": persisted.ID, "reason": workspace.RecipeRunFailed, "error": cause})
+		failure = &workspace.RecipeRunError{
+			Code:     workspace.RecipeRunFailed,
+			Sentence: "The assessment did not finish. Nothing in the project was run or changed.",
 		}
 	}
-	cause := "no result"
-	if err != nil {
-		cause = err.Error()
-	}
-	logger.Warn("Recipe task did not finish", logger.Fields{"task_id": persisted.ID, "reason": code, "error": cause})
 	if persisted.Context == nil {
 		persisted.Context = map[string]any{}
 	}
-	persisted.Context[workspace.TaskContextFirstTaskFailure] = code
-	return "", &recipeFailure{sentence: sentence}
+	persisted.Context[workspace.TaskContextFirstTaskFailure] = failure.Code
+	return "", failure
 }

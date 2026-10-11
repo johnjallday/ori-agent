@@ -44,7 +44,7 @@ export function firstTaskBannerView({
   const title = String(taskTitle || '').trim();
   const link = String(href || '').trim();
   // Only a same-site path is ever linked.
-  const safeHref = link.startsWith('/') && !link.startsWith('//') ? link : '';
+  const safeHref = sameSitePath(link);
 
   if (seeded) {
     const note = String(message || '').trim();
@@ -100,6 +100,19 @@ export function firstTaskBannerView({
   };
 }
 
+// sameSitePath returns value when it is a path on this site, and '' otherwise.
+// A browser reads a backslash in a URL as a slash, so "/\host" is another site
+// just as "//host" is; neither is a path, and nor is anything with a control
+// character in it.
+export function sameSitePath(value) {
+  const target = String(value || '').trim();
+  if (!target.startsWith('/') || target.startsWith('//')) return '';
+  for (const char of target) {
+    if (char === '\\' || char.charCodeAt(0) < 0x20) return '';
+  }
+  return target;
+}
+
 // --- A software project's first assessment -----------------------------------
 
 // The states the server reports for a first task.
@@ -152,10 +165,7 @@ export function assessmentBannerView(
     return { visible: false };
 
   // Only a same-site path is ever linked.
-  const local = value => {
-    const target = String(value || '').trim();
-    return target.startsWith('/') && !target.startsWith('//') ? target : '';
-  };
+  const local = sameSitePath;
   const project =
     String(look.folder_name || '').trim() ||
     String(look.workspace_name || '').trim() ||

@@ -6,7 +6,8 @@ import {
   assessmentStartNote,
   firstTaskBannerView,
   firstTaskStartMessage,
-  renderFirstTaskBanner
+  renderFirstTaskBanner,
+  sameSitePath
 } from './workspace-first-task-banner.js';
 
 // A minimal element, enough for the banner's renderer.
@@ -404,6 +405,25 @@ test('an assessment that did not finish is tried again only when nothing needs r
   assert.equal(offSite.action, null);
   assert.deepEqual(offSite.links, []);
   assert.equal(offSite.detail, 'Nothing in the project was changed.');
+
+  // A browser reads a backslash as a slash, so these are other sites too.
+  for (const route of ['/\\evil.example', '/\\/evil.example', '//evil.example', '/agents\nx']) {
+    const view = assessmentBannerView(
+      assessment({
+        state: 'failed',
+        can_retry: false,
+        repair_route: route,
+        repair_label: 'Fix it'
+      }),
+      { taskHref: route }
+    );
+    assert.deepEqual(view.links, [], JSON.stringify(route));
+  }
+  assert.equal(sameSitePath('/agents'), '/agents');
+  assert.equal(sameSitePath('/settings#api-keys'), '/settings#api-keys');
+  assert.equal(sameSitePath('/?panel=today&folder=show'), '/?panel=today&folder=show');
+  for (const route of ['', 'agents', 'https://x.example', '//x.example', '/\\x.example', '/a\tb'])
+    assert.equal(sameSitePath(route), '', JSON.stringify(route));
 });
 
 test('only a recipe task in a state the server names is an assessment banner', () => {

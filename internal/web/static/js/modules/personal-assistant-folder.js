@@ -1499,9 +1499,15 @@ export function folderFirstLookView(look, options = {}) {
     return { visible: false };
   }
   const openLabel = String(options.openLabel || '').trim() || 'Open workspace';
+  // A path on this site and nothing else. A browser reads a backslash in a URL
+  // as a slash, so "/\host" is another site just as "//host" is.
   const local = value => {
     const target = String(value || '').trim();
-    return target.startsWith('/') && !target.startsWith('//') ? target : '';
+    if (!target.startsWith('/') || target.startsWith('//')) return '';
+    for (const char of target) {
+      if (char === '\\' || char.charCodeAt(0) < 0x20) return '';
+    }
+    return target;
   };
   const route = local(options.route) || local(look.workspace_route);
   const open = style => (route ? [{ id: 'open', label: openLabel, style, href: route }] : []);

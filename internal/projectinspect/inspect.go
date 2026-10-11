@@ -21,9 +21,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/sensitive"
@@ -337,15 +339,15 @@ func (r *inspection) listRoot() map[string]string {
 // anything whose name says it holds keys or secrets. A name left out here is
 // simply not mentioned: nothing about it is reported at all.
 func layoutName(name string) bool {
-	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 ||
-		strings.ContainsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+	if !plainFileName(name) {
 		return false
 	}
 	lower := strings.ToLower(name)
 	if strings.HasPrefix(lower, ".") {
 		return lower == ".github"
 	}
-	if lower == "node_modules" || lower == "id_rsa" || lower == "id_ed25519" {
+	switch lower {
+	case "node_modules", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519":
 		return false
 	}
 	for _, mark := range []string{"secret", "credential", "password", "token"} {
@@ -354,10 +356,26 @@ func layoutName(name string) bool {
 		}
 	}
 	switch filepath.Ext(lower) {
-	case ".pem", ".key", ".p12", ".pfx", ".keystore":
+	case ".pem", ".key", ".p8", ".p12", ".pfx", ".keystore", ".jks", ".kdbx", ".gpg", ".asc", ".env":
 		return false
 	}
 	return true
+}
+
+// plainFileName reports whether a file or folder name can be repeated as it
+// is: valid text, not overlong, and with no character that would break a line
+// or change how the text around it reads. A name is evidence only as a name;
+// one that carries a line break could pose as a line of its own wherever it is
+// repeated.
+func plainFileName(name string) bool {
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 {
+		return false
+	}
+	return !strings.ContainsFunc(name, func(r rune) bool {
+		// Control characters, the Unicode line and paragraph separators, and
+		// the characters that reorder the text around them.
+		return unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Bidi_Control, r)
+	})
 }
 
 func (r *inspection) gap(code, source string) {
@@ -418,11 +436,19 @@ func (r *inspection) readWorkflows() {
 		return
 	}
 	names := make([]string, 0, len(listed))
+	unread := false
 	for _, entry := range listed {
 		lower := strings.ToLower(entry.Name())
-		if strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml") {
-			names = append(names, entry.Name())
+		if !strings.HasSuffix(lower, ".yml") && !strings.HasSuffix(lower, ".yaml") {
+			continue
 		}
+		// A workflow's name is chosen by whoever wrote the project and is
+		// repeated wherever its text is cited, so only a plain one is read.
+		if !plainFileName(entry.Name()) {
+			unread = true
+			continue
+		}
+		names = append(names, entry.Name())
 	}
 	sort.Strings(names)
 	for i, name := range names {
@@ -430,12 +456,15 @@ func (r *inspection) readWorkflows() {
 			return
 		}
 		if i >= maxWorkflowFiles {
-			// More workflows than are read is a fact about the workflows, not
-			// about the project's README, instructions or manifests.
-			r.gap(GapMoreWorkflows, filepath.ToSlash(dir))
-			return
+			unread = true
+			break
 		}
 		r.read(filepath.Join(dir, name), ClassWorkflow)
+	}
+	if unread {
+		// More workflows than are read is a fact about the workflows, not
+		// about the project's README, instructions or manifests.
+		r.gap(GapMoreWorkflows, filepath.ToSlash(dir))
 	}
 }
 
@@ -491,19 +520,55 @@ func readRegularFile(path string, limit int) (data []byte, truncated bool, err e
 	return data, false, nil
 }
 
-// withholdCredentials replaces every line that looks like a credential, so an
-// excerpt can be shown, stored or given to a model without carrying one.
+// The credential shapes a project's own files tend to carry, beyond the token
+// formats the shared check knows. They are deliberately broad: a line withheld
+// by mistake costs one line of a README, and a credential let through is sent
+// to a model and stored in a report.
+var (
+	// A PEM block of any kind. The line that opens it is not the secret; the
+	// lines between are, so the whole block is withheld.
+	pemBlockStart = regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+-----`)
+	pemBlockEnd   = regexp.MustCompile(`-----END [A-Z0-9 ]+-----`)
+	// scheme://user:password@host
+	urlWithPassword = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@`)
+	// NAME_ENDING_IN_SECRET = value, in shell, YAML, JSON or TOML. A value that
+	// is a reference to something kept elsewhere ($VAR, ${{ secrets.X }},
+	// $(command), <placeholder>) is not a credential and is left alone.
+	secretAssignment = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)["']?\s*[:=]\s*["']?[^\s"'$({<\[][^\s"']{5,}`)
+	bearerToken      = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}`)
+	// Stripe, Google API, GitLab, Google OAuth, and three-part JSON web tokens.
+	tokenShape = regexp.MustCompile(`\b(?:[srp]k_(?:live|test)_[0-9A-Za-z]{8,}|AIza[0-9A-Za-z_-]{20,}|glpat-[0-9A-Za-z_-]{10,}|ya29\.[0-9A-Za-z_-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,})`)
+)
+
+func credentialLine(line string) bool {
+	return sensitive.ContainsSecretLikeText(line) || urlWithPassword.MatchString(line) || secretAssignment.MatchString(line) ||
+		bearerToken.MatchString(line) || tokenShape.MatchString(line)
+}
+
+// withholdCredentials replaces every line that looks like a credential, and
+// every line of a PEM block, so an excerpt can be shown, stored or given to a
+// model without carrying one. A block cut off before its end is withheld to
+// the end of the excerpt.
 func withholdCredentials(text string) (string, int) {
-	if !sensitive.ContainsSecretLikeText(text) {
-		return text, 0
-	}
 	lines := strings.Split(text, "\n")
 	withheld := 0
+	inBlock := false
 	for i, line := range lines {
-		if sensitive.ContainsSecretLikeText(line) {
-			lines[i] = WithheldLine
-			withheld++
+		switch {
+		case inBlock:
+			inBlock = !pemBlockEnd.MatchString(line)
+		case pemBlockStart.MatchString(line):
+			// A block opened and closed on one line is over already.
+			inBlock = !pemBlockEnd.MatchString(line)
+		case credentialLine(line):
+		default:
+			continue
 		}
+		lines[i] = WithheldLine
+		withheld++
+	}
+	if withheld == 0 {
+		return text, 0
 	}
 	return strings.Join(lines, "\n"), withheld
 }

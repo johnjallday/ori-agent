@@ -27,9 +27,9 @@ type CodexProvider struct {
 	// briefly; see codex_isolation.go. listFeatures replaces the CLI in tests.
 	featuresMu   sync.Mutex
 	featuresAt   time.Time
-	features     map[string]bool
+	features     map[string]codexFeature
 	featuresErr  error
-	listFeatures func(ctx context.Context, cliPath string) (map[string]bool, error)
+	listFeatures func(ctx context.Context, cliPath string) (map[string]codexFeature, error)
 }
 
 // NewCodexProvider creates a new Codex provider backed by the Codex CLI.
@@ -68,7 +68,7 @@ func (p *CodexProvider) Capabilities() ProviderCapabilities {
 		MaxContextWindow:         128000,
 		SupportedFormats:         []string{"text"},
 		// True only while the installed CLI can take the isolated posture.
-		SupportsIsolatedChat: p.IsolatedChatAvailable(context.Background()),
+		SupportsIsolatedChat: p.IsolatedChatAvailable(),
 	}
 }
 

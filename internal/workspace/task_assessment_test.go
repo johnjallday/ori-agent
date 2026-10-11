@@ -89,9 +89,14 @@ func TestExecuteTaskRefusesARecipeTaskInsteadOfRunningItAsAnAgentTask(t *testing
 	for _, recipe := range []any{FirstTaskRecipeSoftwareAssessment, "some_future_recipe", 12} {
 		task := Task{ID: "t", WorkspaceID: "ws", Description: "assess", Context: map[string]any{TaskContextFirstTaskRecipe: recipe}}
 		result, err := handler.ExecuteTask(context.Background(), "Any Agent", task)
+		failure, ok := AsRecipeRunError(err)
+		if !ok || failure.Code != "assessment_unavailable" || result != "" {
+			t.Fatalf("recipe %v => %q, %v; want a refused recipe run", recipe, result, err)
+		}
+		// A recipe asks the user nothing: its refusal is never a question.
 		var blocked *TaskBlockedError
-		if !errors.As(err, &blocked) || blocked.ReasonCode != "assessment_unavailable" || result != "" {
-			t.Fatalf("recipe %v => %q, %v; want a blocked task", recipe, result, err)
+		if errors.As(err, &blocked) {
+			t.Fatalf("recipe %v was returned as a task waiting for an answer: %v", recipe, err)
 		}
 	}
 }

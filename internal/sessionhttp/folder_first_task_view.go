@@ -86,6 +86,9 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 // is read now rather than remembered, so the view follows a repair made on
 // another page.
 func (h *Handler) describeRecipeFirstTask(ctx context.Context, ws *agentworkspace.Workspace, task *agentworkspace.Task, view *personalassistant.FolderFirstTaskView) {
+	// The code the recipe's own run recorded when it last ended without a report.
+	ended, _ := task.Context[agentworkspace.TaskContextFirstTaskFailure].(string)
+	ended = strings.TrimSpace(ended)
 	if view.State == personalassistant.FolderFirstTaskFailed {
 		// What stands in the way of another try, if anything, comes first; else
 		// the reason is how the last run ended.
@@ -93,18 +96,21 @@ func (h *Handler) describeRecipeFirstTask(ctx context.Context, ws *agentworkspac
 		if blocked == "" {
 			blocked = h.firstTaskRecipeReason(task)
 		}
-		ended, _ := task.Context[agentworkspace.TaskContextFirstTaskFailure].(string)
 		switch {
 		case blocked != "":
 			view.Reason = blocked
-		case strings.TrimSpace(ended) != "":
-			view.Reason = strings.TrimSpace(ended)
+		case ended != "":
+			view.Reason = ended
 		}
 		view.CanRetry = blocked == ""
 	}
 	view.Message = personalassistant.FolderFirstTaskRecipeMessage(view.Reason, ws.Name, view.Agent)
-	// The sentence recorded when a run ended says more than its code does.
+	// The sentence recorded when a run ended says more than its code does. It is
+	// shown only beside the code the recipe's own run recorded with it: that
+	// pairing is what says the text is one of the recipe's plain sentences and
+	// not an error some other path wrote onto the task.
 	if view.State == personalassistant.FolderFirstTaskFailed && view.CanRetry && strings.TrimSpace(task.Error) != "" &&
+		ended != "" &&
 		view.Reason != personalassistant.FolderFirstTaskReasonToolRefused && view.Reason != personalassistant.FolderFirstTaskReasonTimedOut {
 		view.Message = strings.TrimSpace(task.Error)
 	}
