@@ -10441,7 +10441,8 @@
       (conversations && typeof conversations.request === 'function'
         ? conversations.request(normalizedContext)
         : null);
-    var userRow = confirmedAction ? null : homeAssistantState.lastUserRow;
+    var userRow =
+      confirmedAction || options.researchApproval ? null : homeAssistantState.lastUserRow;
     // With a conversation reference this is a turn in the hired assistant's
     // own conversation; its progress and any failure carry that assistant's
     // name, not the name of an agent that belongs to the page.
@@ -10469,6 +10470,8 @@
       if (confirmedAction) {
         payload.confirmed_action = confirmedAction;
       }
+      if (options.researchApproval && !confirmedAction)
+        payload.research_approval = options.researchApproval;
       if (conversationRef) {
         payload.conversation = conversationRef;
         if (options.folderRef && !confirmedAction) payload.folder_context = options.folderRef;
@@ -10494,7 +10497,16 @@
         );
         return;
       }
+      if (options.researchContextMatches && !options.researchContextMatches()) {
+        conversations &&
+          conversations.notify(
+            'That research reply belongs to the earlier context. Reopen the conversation to see its saved history.'
+          );
+        return;
+      }
       if (conversationRef) window.PersonalAssistantTranscript?.beforeChange?.();
+      // Ask is authoritative when it refines a route into a conversation.
+      if (data && data.intent === 'assistant_conversation') isConversation = true;
       var responseText = String((data && data.response) || '').trim();
       var assistantRow = responseText
         ? appendHomeAssistantMessage('assistant', responseText)
@@ -10513,15 +10525,92 @@
       ) {
         window.PersonalAssistantDrafts.applyContext(data.draft_context);
       }
-      // A refused or unanswered turn was not sent: put the text back so it can
-      // be sent again instead of retyped.
-      if (conversationResult && conversationResult.restoreInput && !confirmedAction) {
+      // An unanswered turn has no saved answer: restore the draft without
+      // claiming the provider never received it.
+      if (
+        conversationResult &&
+        conversationResult.restoreInput &&
+        !confirmedAction &&
+        !options.researchApproval
+      ) {
         restorePersonalAssistantDraft(text);
+      }
+      if (assistantRow && window.PersonalAssistantResearch) {
+        var researchRefs = data.research_context || normalizedContext;
+        var researchFolder = data.research_folder_context;
+        var researchConversationId = String((data.conversation && data.conversation.id) || '');
+        var researchContextMatches = function () {
+          if (
+            !researchConversationId ||
+            !conversations ||
+            conversations.currentId() !== researchConversationId
+          )
+            return false;
+          if (String(window.location.pathname || '/') !== String(researchRefs.page_path || '/'))
+            return false;
+          var currentPage = buildHomeRouteContext();
+          if (
+            (researchRefs.page_path === '/' ||
+              /^\/workspaces\//.test(researchRefs.page_path || '')) &&
+            String(currentPage.workspace_id || '') !== String(researchRefs.workspace_id || '')
+          )
+            return false;
+          var currentFolder =
+            window.PersonalAssistantFolderContext &&
+            window.PersonalAssistantFolderContext.request();
+          if (researchFolder)
+            return (
+              currentFolder &&
+              currentFolder.selection_id === researchFolder.selection_id &&
+              currentFolder.revision === researchFolder.revision &&
+              JSON.stringify(currentFolder.focus_ids || []) ===
+                JSON.stringify(researchFolder.focus_ids || [])
+            );
+          return !currentFolder;
+        };
+        var researchIsCurrent = function () {
+          return !homeAssistantState.busy && researchContextMatches();
+        };
+        window.PersonalAssistantResearch.renderResponse(assistantRow, data, {
+          post: function (path, body) {
+            return API.post(path, body);
+          },
+          isCurrent: researchIsCurrent,
+          approve: async function (offer) {
+            if (!researchIsCurrent()) throw new Error('Research context changed');
+            // A review never submits/clears the composer's unsent text and does
+            // not pass through routing or ordinary mutation confirmation.
+            await runHomeAssistantInline(
+              'Compare the exact approved public lookup.',
+              offer.context,
+              'assistant_conversation',
+              {
+                conversationRef: offer.conversation,
+                folderRef: offer.folder,
+                researchApproval: offer.review,
+                researchContextMatches: researchContextMatches
+              }
+            );
+          }
+        });
       }
 
       if (data && data.requires_confirmation && data.confirmation) {
         inlineReview = true;
-        confirmHomeAction(data.confirmation, routeContext, intent);
+        confirmHomeAction(
+          data.confirmation,
+          routeContext,
+          intent,
+          String(data.response || '').trim() === String(data.confirmation.summary || '').trim()
+        );
+        // This review belongs to the saved proposal, not the activity header
+        // above the entire transcript. Settle scrolling after mounting it.
+        if (
+          conversationRef &&
+          assistantRow &&
+          data.confirmation.action_type === 'prepare_workspace'
+        )
+          mountPersonalTurnStatus(assistantRow);
         return;
       }
 
@@ -10566,6 +10655,10 @@
         setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
       }
       var buttons = buildHomeActionButtons(data && data.actions, routeContext, intent);
+      if (conversationRef && data && (data.model_unavailable || data.conversation?.error)) {
+        buttons.unshift(manualWorkspaceReviewButton());
+        setHomeAssistantRoutingSummary('Not completed', formatHomeAskSummary(data));
+      }
       // A conversation continues in the composer above it; it needs no
       // "ask another task" prompt after every reply.
       if (!isConversation) {
@@ -10592,7 +10685,7 @@
             };
       assistantRow = appendHomeAssistantMessage('assistant', failure.message);
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', failure.summary);
-      if (conversationRef && !confirmedAction) {
+      if (conversationRef && !confirmedAction && !options.researchApproval) {
         restorePersonalAssistantDraft(text);
       }
       if (options.folderRef) {
@@ -10603,6 +10696,7 @@
         return;
       }
       renderHomeAssistantActions([
+        ...(conversationRef ? [manualWorkspaceReviewButton()] : []),
         {
           label: 'Retry',
           variant: 'primary',
@@ -10742,19 +10836,99 @@
     return true;
   }
 
+  // Deterministic escape hatch: no model, prior proposal, context, or fields
+  // are copied. The existing creator still owns every choice and final Create.
+  function openManualWorkspaceReview() {
+    var menu = document.getElementById('personalAssistantMore');
+    if (menu) menu.open = false;
+    window.PersonalAssistantPanel?.close({ restoreFocus: false });
+    if (typeof window.sessionManager?.showAddWorkspaceModal === 'function') {
+      window.sessionManager.showAddWorkspaceModal({
+        entryPoint: 'assistant_workspace_manual',
+        stayAfterCreate: true
+      });
+    } else {
+      window.location.href = '/workspaces';
+    }
+  }
+
+  function manualWorkspaceReviewButton() {
+    return {
+      label: 'Open workspace form manually',
+      variant: 'secondary',
+      onClick: openManualWorkspaceReview
+    };
+  }
+
+  // A prepared proposal only pre-fills the existing manual wizard. It does
+  // not start a build/model, inherit a parent/binding, or submit Create.
+  function openPreparedWorkspaceReview(args, routeContext) {
+    var conversations = window.PersonalAssistantConversation;
+    var name = String(args.name || '').trim();
+    var description = String(args.description || '').trim();
+    var currentPage = buildHomeRouteContext();
+    var expected = normalizeHomeRouteContext(routeContext);
+    var panel = window.PersonalAssistantPanel;
+    var state = panel && panel._state && panel._state.personalAssistant;
+    if (
+      !conversations ||
+      conversations.currentId() !== String(args.conversation_id || '') ||
+      String(window.location.pathname || '/') !== expected.page_path ||
+      String(currentPage.workspace_id || '') !== String(expected.workspace_id || '') ||
+      String(currentPage.selection_workspace_id || '') !==
+        String(expected.selection_workspace_id || '') ||
+      !['active', 'paused'].includes(String((state && state.state) || '')) ||
+      Number((state && state.state_version) || 0) !== Number(args.state_version || 0) ||
+      (window.PersonalAssistantFolderContext && window.PersonalAssistantFolderContext.request()) ||
+      !name ||
+      Array.from(name).length > 80 ||
+      !description ||
+      Array.from(description).length > 1600 ||
+      !window.sessionManager ||
+      typeof window.sessionManager.showAddWorkspaceModal !== 'function'
+    ) {
+      conversations &&
+        conversations.notify(
+          'Reopen the original conversation before reviewing this workspace proposal. Nothing was created.'
+        );
+      return;
+    }
+    panel.close({ restoreFocus: false });
+    window.sessionManager.showAddWorkspaceModal({
+      entryPoint: 'assistant_workspace_review',
+      name: name,
+      description: description,
+      stayAfterCreate: true
+    });
+  }
+
   // confirmHomeAction shows an explicit confirm/cancel step before executing a
   // state-changing action; on confirm it re-calls /ask with confirmed_action.
   // A build_workspace confirmation is the exception: the server never runs it,
   // and Confirm opens the assistant's build in this browser (FR41).
-  function confirmHomeAction(confirmation, routeContext, intent) {
-    appendHomeAssistantMessage('assistant', String(confirmation.summary || 'Confirm this change?'));
-    setHomeAssistantRoutingSummary('Confirm', 'Review and confirm this change.');
+  function confirmHomeAction(confirmation, routeContext, intent, summaryShown) {
+    if (!summaryShown && confirmation.action_type !== 'prepare_workspace')
+      appendHomeAssistantMessage(
+        'assistant',
+        String(confirmation.summary || 'Confirm this change?')
+      );
+    var prepared = confirmation.action_type === 'prepare_workspace';
+    setHomeAssistantRoutingSummary(
+      prepared ? 'Review' : 'Confirm',
+      prepared
+        ? 'Review an editable proposal; nothing is created yet.'
+        : 'Review and confirm this change.'
+    );
     var args = confirmation.arguments || {};
     renderHomeAssistantActions([
       {
-        label: 'Confirm',
+        label: prepared ? 'Review workspace setup' : 'Confirm',
         variant: 'primary',
         onClick: async function () {
+          if (prepared) {
+            openPreparedWorkspaceReview(args, routeContext);
+            return;
+          }
           if (confirmation.action_type === 'build_workspace') {
             var first = String(args.first_message || homeAssistantState.pendingPrompt || '');
             if (await openBuildWithAssistant(first)) return;
@@ -10796,6 +10970,19 @@
   }
 
   function formatHomeAskSummary(data) {
+    if (data?.conversation?.error)
+      return 'The conversation changed or could not be saved. Nothing was created.';
+    if (data?.model_unavailable) {
+      var failures = {
+        invalid_workspace_proposal:
+          'The proposal could not be used. Open the workspace form manually.',
+        model_timeout: 'The model timed out. Your draft is kept.',
+        request_cancelled: 'Request cancelled. Your draft is kept.',
+        model_not_configured: 'No system model is configured. Manual workspace setup is available.',
+        context_changed: 'The context changed. Reopen the original conversation.'
+      };
+      return failures[data.failure_reason] || 'No answer was completed. Your draft is kept.';
+    }
     var meta = data && data.snapshot_meta;
     if (!meta) return 'Answered from your app data.';
     var parts = [];
@@ -13315,17 +13502,28 @@
     clearHomeAssistantPlanning();
     clearHomeAssistantInlineReply();
     var userRow = appendHomeAssistantMessage('user', text);
-    setHomeAssistantBusy(true, 'Checking workspace context…');
+    setHomeAssistantBusy(true, 'Preparing your request…');
     try {
       var route = await API.post('/api/home-assistant/route', {
         prompt: text,
         context: routeContext,
         conversation: conversationRef
       });
-      if (!route) throw new Error('Panel routing unavailable');
+      if (!route || typeof route.intent !== 'string') throw new Error('Panel routing unavailable');
+      if (conversationRef && conversations.currentId() !== String(conversationRef.id || '')) {
+        conversations.notify(
+          'The conversation changed while routing. Your draft is kept; send it in the intended conversation.'
+        );
+        restorePersonalAssistantDraft(text);
+        return true;
+      }
+      // Explicit workspace creation opens Ask's real server-owned review,
+      // never the legacy create-by-name shortcut. Setup gates are deterministic.
+      var reviewedInline = ['workspace_create', 'personal_assistant_setup'].includes(route.intent);
       if (
-        route.route_mode !== 'home_inline' ||
-        !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent)
+        !reviewedInline &&
+        (route.route_mode !== 'home_inline' ||
+          !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent))
       ) {
         // The non-inline route retains its existing progress/confirmation UI.
         // Retire only this provisional unsaved row before the shared path adds it.
@@ -13333,7 +13531,9 @@
         userRow?.remove();
         window.PersonalAssistantTranscript?.pendingReply?.(false);
         homeAssistantState.personalConversation = false;
-        return false;
+        // Preserve the accepted server route for utility/specialist/review
+        // handling; no second route request or local project reclassification.
+        return { route: route };
       }
       clearHomeAssistantPlanning();
       clearHomeAssistantInlineReply();
@@ -13369,7 +13569,9 @@
       await runPersonalFolderTurn(text, folderRouteContext, folderRef);
       return;
     }
-    if (await runPersonalPanelTurn(text, folderRouteContext)) return;
+    var panelTurn = await runPersonalPanelTurn(text, folderRouteContext);
+    if (panelTurn === true) return;
+    var acceptedPanelRoute = panelTurn && panelTurn.route;
     // From here the request is for the page's own agent or a specialist, so
     // the hired assistant's name no longer labels it.
     homeAssistantState.hiredAssistantTurn = false;
@@ -13384,6 +13586,7 @@
     var workspaceSlashCommand = parseWorkspaceSlashCommand(text);
     var inferredWorkspaceModeCommand = false;
     if (
+      !acceptedPanelRoute &&
       !workspaceSlashCommand &&
       inWorkspaceContext &&
       !(options && options.skipWorkspacePromptMode)
@@ -13392,14 +13595,22 @@
       inferredWorkspaceModeCommand = Boolean(workspaceSlashCommand);
     }
 
-    if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
+    if (
+      !acceptedPanelRoute &&
+      homeAssistantState.awaitingCreateConfirmation &&
+      isAffirmativeConfirmation(text)
+    ) {
       appendHomeAssistantMessage('user', text);
       setHomeAssistantRoutingSummary('Agent Creation', 'Confirmed. Creating a new agent…');
       await createAgentForPendingTask();
       return;
     }
 
-    if (homeAssistantState.awaitingCreateConfirmation && isNegativeConfirmation(text)) {
+    if (
+      !acceptedPanelRoute &&
+      homeAssistantState.awaitingCreateConfirmation &&
+      isNegativeConfirmation(text)
+    ) {
       appendHomeAssistantMessage('user', text);
       homeAssistantState.awaitingCreateConfirmation = false;
       appendHomeAssistantMessage('assistant', 'No problem. Ask another task when you are ready.');
@@ -13436,7 +13647,7 @@
       if (slashHandled) return;
     }
 
-    if (directWorkspaceCommand && directWorkspaceCommand.name) {
+    if (!acceptedPanelRoute && directWorkspaceCommand && directWorkspaceCommand.name) {
       // The assistant builds it with the user when it can (FR40); the whole
       // sentence is its first turn. Otherwise the seeded dialog opens as before.
       if (await openBuildWithAssistant(text)) return;
@@ -13445,6 +13656,7 @@
     }
 
     if (
+      !acceptedPanelRoute &&
       inWorkspaceContext &&
       !promptRequestsWorkspaceSwitch(text) &&
       homeAssistantState.pendingIntent.key !== 'utility_direct'
@@ -13529,7 +13741,7 @@
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent…');
 
     try {
-      var routeData = await routePromptWithBackend(text, routeContext);
+      var routeData = acceptedPanelRoute || (await routePromptWithBackend(text, routeContext));
       homeAssistantState.pendingRouteData = routeData;
       var match = null;
       var useFallbackRouting = !routeData;
@@ -13537,7 +13749,11 @@
 
       if (routeData) {
         homeAssistantState.pendingIntent = HOME_INTENTS[routeData.intent] || detectHomeIntent(text);
-        if (appLaunchRequest && homeAssistantState.pendingIntent.key === 'general_task') {
+        if (
+          !acceptedPanelRoute &&
+          appLaunchRequest &&
+          homeAssistantState.pendingIntent.key === 'general_task'
+        ) {
           homeAssistantState.pendingIntent = HOME_INTENTS.app_launch;
         }
         if (typeof routeData.suggested_agent_name === 'string') {
@@ -13850,6 +14066,9 @@
   }
 
   function initHomeAssistant() {
+    document
+      .getElementById('personalAssistantCreateWorkspace')
+      ?.addEventListener('click', openManualWorkspaceReview);
     var els = getHomeAssistantElements();
     var supportsRecentSessions = Boolean(
       els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn

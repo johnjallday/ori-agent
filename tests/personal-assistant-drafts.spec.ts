@@ -624,8 +624,17 @@ test.describe('Assistant drafts — mocked replies (panel behavior only)', () =>
   });
 
   test('A1: three turns stay in one conversation and each stored row is tagged', async ({
-    page
+    page,
+    request
   }) => {
+    // Only replies/row IDs are mocked here. Route independently validates
+    // canonical ownership, so do not claim a nonexistent browser-only thread.
+    const owned = await seedConversation(
+      request,
+      await readAssistant(request),
+      'Birthday greeting for Mina',
+      []
+    );
     const replies = [ENGLISH, WARMER, KOREAN];
     const sent: Array<{ prompt: string; conversation?: { id?: string } }> = [];
     await page.route('**/api/home-assistant/ask', async route => {
@@ -639,7 +648,7 @@ test.describe('Assistant drafts — mocked replies (panel behavior only)', () =>
           response: replies[turn - 1],
           intent: 'assistant_conversation',
           conversation: {
-            id: 'mock-conversation',
+            id: owned.id,
             title: 'Birthday greeting for Mina',
             started: turn === 1,
             stored: true,
@@ -669,8 +678,8 @@ test.describe('Assistant drafts — mocked replies (panel behavior only)', () =>
     expect(sent.map(body => body.prompt)).toEqual(prompts);
     // The first turn starts the conversation; the follow-ups name it.
     expect(sent[0].conversation?.id || '').toBe('');
-    expect(sent[1].conversation?.id).toBe('mock-conversation');
-    expect(sent[2].conversation?.id).toBe('mock-conversation');
+    expect(sent[1].conversation?.id).toBe(owned.id);
+    expect(sent[2].conversation?.id).toBe(owned.id);
     await expect(messageRows(page)).toHaveCount(6);
     await expect(messageRow(page, 'mock-assistant-3')).toContainText('미나야');
     const lastReply = messageRow(page, 'mock-assistant-3');

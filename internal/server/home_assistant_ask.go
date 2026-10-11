@@ -379,6 +379,7 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		}
 	}
 	handler := agenthttp.NewHomeAssistantAskHandler(sources, llmFactory, systemModel)
+	handler.Discovery = s.newPersonalAssistantDiscovery()
 	handler.WorkspaceContext = &agenthttp.AssistantWorkspaceResolver{Source: sources.Workspaces}
 	if s.Storage != nil {
 		handler.CurrentUser = s.Storage.UserProvider

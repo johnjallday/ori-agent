@@ -27,6 +27,7 @@ var compositionPolitePrefixes = []string{
 var compositionLeads = []string{
 	"write ", "draft ", "compose ", "rewrite ", "rephrase ", "reword ",
 	"translate ", "proofread ", "polish ", "paraphrase ",
+	"make a list", "make a proposal", "make an outline", "make a plan", "design a plan", "design an implementation plan",
 	"make it ", "make this ", "make that ",
 	"turn it ", "turn this ", "turn that ",
 	"convert it ", "convert this ", "convert that ",
@@ -100,6 +101,24 @@ func routesToAssistantConversation(
 		}
 	}
 	return match == nil || isAssistantOwnAgent(match.Name, workContext)
+}
+
+// panelSpecialistRequest preserves current utility/specialist reads and travel
+// planning, not incidental calendar/email/travel words in a discussion. Other
+// uncertain phrasing stays conversational instead of starting connector setup.
+func panelSpecialistRequest(prompt string) bool {
+	text := stripCompositionPolitePrefixes(normalizeRouteToken(prompt))
+	for _, prefix := range []string{
+		"check ", "show ", "list ", "read ", "find ", "search ", "triage ",
+		"reply ", "send ", "book ", "plan a trip", "plan my trip", "plan a vacation",
+		"what's on my calendar", "what is on my calendar", "am i free", "when is my next ",
+		"what emails ", "which emails ", "how many unread ",
+	} {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isAssistantOwnAgent reports whether a matched agent is the assistant itself

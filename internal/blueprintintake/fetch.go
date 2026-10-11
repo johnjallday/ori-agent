@@ -1,7 +1,6 @@
 package blueprintintake
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/publictext"
 	"github.com/johnjallday/ori-agent/internal/urlsafety"
-	"golang.org/x/net/html"
 )
 
 const MaxLinksPerIntake = 10
@@ -96,33 +95,6 @@ func (f *HTTPLinkFetcher) Fetch(ctx context.Context, rawURL string) (LinkSnapsho
 }
 
 func extractPageText(body []byte, contentType string) (string, string) {
-	if !strings.Contains(strings.ToLower(contentType), "html") && !bytes.Contains(bytes.ToLower(body[:min(len(body), 128)]), []byte("<html")) {
-		return "", strings.Join(strings.Fields(string(body)), " ")
-	}
-	doc, err := html.Parse(bytes.NewReader(body))
-	if err != nil {
-		return "", ""
-	}
-	var title string
-	var words []string
-	var walk func(*html.Node, bool)
-	walk = func(node *html.Node, hidden bool) {
-		if node.Type == html.ElementNode {
-			tag := strings.ToLower(node.Data)
-			hidden = hidden || tag == "script" || tag == "style" || tag == "noscript"
-			if tag == "title" && node.FirstChild != nil {
-				title = strings.TrimSpace(node.FirstChild.Data)
-			}
-		}
-		if node.Type == html.TextNode && !hidden {
-			if text := strings.TrimSpace(node.Data); text != "" {
-				words = append(words, text)
-			}
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child, hidden)
-		}
-	}
-	walk(doc, false)
-	return title, strings.Join(strings.Fields(strings.Join(words, " ")), " ")
+	title, text, _ := publictext.Extract(body, contentType, 0)
+	return title, text
 }

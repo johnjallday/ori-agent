@@ -101,6 +101,8 @@
       // workspace is for (a folder the assistant was shown) supplies it, and
       // the user can still change it before creating.
       name: String(options.name || '').trim(),
+      // Reviewed conversational brief: editable text only, not tasks or grants.
+      description: String(options.description || '').trim(),
       // folderOfferId ties the create to a "show me a folder" offer, so the
       // server can attach that folder after creation. Only the identifier
       // travels; the server holds the folder itself.

@@ -68,6 +68,9 @@ type Session struct {
 	// This is denormalized for efficient listing without loading messages.
 	MessageCount int `json:"message_count"`
 
+	// ContextEpoch is canonical mutation metadata, never portable history.
+	ContextEpoch int64 `json:"-"`
+
 	// CreatedAt is when the session was first created.
 	CreatedAt time.Time `json:"created_at"`
 
@@ -124,6 +127,9 @@ type Message struct {
 
 	// Content is the text content of the message.
 	Content string `json:"content"`
+
+	// ContentTruncated marks a bounded read projection, never stored/exported.
+	ContentTruncated bool `json:"-"`
 
 	// Model is the LLM model used for assistant responses (empty for user messages).
 	Model string `json:"model,omitempty"`

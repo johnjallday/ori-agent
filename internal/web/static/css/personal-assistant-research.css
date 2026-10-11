@@ -1,0 +1,110 @@
+/* Research is an editorial footnote/review inside Ori's existing paper drawer,
+   not a second chat surface. Existing light/dark ink and moss tokens own it. */
+.personal-assistant-research__sources,
+.personal-assistant-research__note,
+.personal-assistant-research__candidate,
+.personal-assistant-research__setup {
+  margin: 8px 0 0;
+  color: var(--pa-ink-dim, var(--ori-ink));
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.personal-assistant-research__candidates {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.personal-assistant-research__candidate small {
+  display: block;
+}
+.personal-assistant-research__capability {
+  font-size: 11px;
+}
+.personal-assistant-research__handoff {
+  margin: 6px 0 0;
+}
+.personal-assistant-research__handoff a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  text-underline-offset: 3px;
+}
+.personal-assistant-research__sources summary,
+.personal-assistant-research__setup summary {
+  min-height: 44px;
+  padding: 8px 0;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  cursor: pointer;
+  font-weight: 600;
+}
+.personal-assistant-research__sources ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.personal-assistant-research__sources small {
+  display: block;
+  font-size: 11px;
+}
+.personal-assistant-research__sources a,
+.personal-assistant-research__note a {
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+}
+.personal-assistant-research__review {
+  margin-top: 14px;
+  padding: 14px 0 4px;
+  border-top: 1px solid color-mix(in srgb, var(--ori-ink) 18%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.personal-assistant-research__review h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.personal-assistant-research__review p {
+  margin: 6px 0;
+}
+.personal-assistant-research__review label {
+  display: block;
+  font-weight: 600;
+}
+.personal-assistant-research__review input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  color: var(--ori-ink);
+  background: var(--ori-surface);
+  border: 1px solid color-mix(in srgb, var(--ori-ink) 25%, transparent);
+  border-radius: 6px;
+}
+.personal-assistant-research__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.personal-assistant-research__actions button {
+  min-height: 44px;
+  padding: 7px 10px;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+}
+.personal-assistant-research__actions button:disabled {
+  opacity: 0.6;
+}
+.personal-assistant-research__review :is(input, button, a):focus-visible,
+.personal-assistant-research__sources :is(a, summary):focus-visible,
+.personal-assistant-research__setup summary:focus-visible,
+.personal-assistant-research__handoff a:focus-visible,
+.personal-assistant-research__capability a:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
+  outline-offset: 3px;
+}

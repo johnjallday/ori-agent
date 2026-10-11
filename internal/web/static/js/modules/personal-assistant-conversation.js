@@ -6,6 +6,7 @@
 // share a thread by accident.
 
 import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-workspace-context.js';
+import { renderResearchSources } from './personal-assistant-research.js';
 import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
 
@@ -78,7 +79,17 @@ export function conversationNotice(data) {
   if (!reply.stored) {
     return 'This reply could not be saved to the conversation history. Copy anything you want to keep.';
   }
-  if (reply.history_truncated) {
+  const continuity = reply.continuity;
+  if (continuity?.recap_unavailable) {
+    return 'Saved. A new recap was unavailable; only bounded recent and eligible earlier context was used.';
+  }
+  if (continuity?.stale_discarded && !continuity.recap_used) {
+    return 'Saved. An outdated recap was discarded. Some earlier context may be missing.';
+  }
+  if (continuity?.recap_used || continuity?.older_used) {
+    return 'Saved. Recent messages and source-grounded historical references were used; some earlier context may be omitted.';
+  }
+  if (reply.history_truncated || continuity?.older_omitted) {
     return 'Saved. Earlier messages are still stored but were left out of this reply.';
   }
   return ''; // Routine saved history needs no permanent status line.
@@ -270,8 +281,10 @@ async function resume(id, options = {}) {
       if (message.role === 'user' && !message.imported)
         renderFolderFocus(row, message.folder_focus);
       // A saved reply lists what it read then; reloading reads nothing again.
-      if (message.role === 'assistant')
+      if (message.role === 'assistant') {
         renderTurnSources(row, message.workspace_context, { historical: true });
+        renderResearchSources(row, message.workspace_context, { historical: true });
+      }
       attachMessage(row, conversation.id, message.id);
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
@@ -309,9 +322,11 @@ async function resume(id, options = {}) {
       discussion ? { ...discussion, restored: true } : null
     );
     setNote(
-      partial
-        ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
-        : ''
+      messages.some(message => message.content_truncated)
+        ? 'Showing bounded recent history. Some long text is shortened here; the original messages are still stored.'
+        : partial
+          ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
+          : ''
     );
     return true;
   } catch (_) {
@@ -423,6 +438,7 @@ function applyReply(data, rows = {}) {
     renderTurnWorkspace(rows.userRow, data.workspace_context);
     renderTurnWorkspace(rows.assistantRow, data.workspace_context);
     renderTurnSources(rows.assistantRow, data.workspace_context);
+    renderResearchSources(rows.assistantRow, data.workspace_context);
   }
   const reply = data?.conversation;
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };

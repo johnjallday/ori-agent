@@ -189,6 +189,15 @@ Digests establish consistency, not authorship, authentication, or trust.
 
 An import set consists of the selected directory and physically contained Ori
 `sub-workspaces/` children (the actual canonical on-disk name), not referenced workspaces or external linked files. The format also reserves the older `sub_workspaces/` spelling; neither may be collected as a single owner's file payload.
+Assistant conversation recaps and mutation epochs are deliberately **not**
+portable history: export carries canonical Messages, not
+`assistant_conversation_checkpoints` or `sessions.assistant_context_epoch`.
+Restored/imported messages invalidate local derived context and preserve their
+untrusted historical role; imported approvals never become current permission.
+Eligible [disposable context](assistant-conversation-context.md) can be rebuilt
+only after local canonical ownership/source checks. These assistant checkpoints
+are distinct from the portable folder checkpoints described here.
+
 Each workspace stores only its own history. Children carry their own checkpoints;
 a parent checkpoint names its immediate physical children, not their history.
 Review validates the entire selected tree and binds every child's checkpoint and

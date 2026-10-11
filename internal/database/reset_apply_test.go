@@ -16,6 +16,8 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`INSERT INTO assistant_conversation_checkpoints(session_id,owner_user_id,hq_workspace_id,profile_name,state_version,source_epoch,through_rowid,generation,recap_json,updated_at)
+			SELECT id,'local','reset-hq','Atlas',1,0,1,1,'{"version":1,"items":[]}',CURRENT_TIMESTAMP FROM sessions LIMIT 1`,
 		`INSERT INTO setup_journey_run (
 			id, run_kind, owner_user_id, relationship_id, specialist_slug, journey_id,
 			declaration_schema_version, declaration_version, lifecycle_state,
@@ -50,7 +52,7 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 	}
 	for _, name := range []string{
 		"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts",
-		"group_requirement_reviews", "group_requirement_operations",
+		"group_requirement_reviews", "group_requirement_operations", "assistant_conversation_checkpoints",
 	} {
 		if before.Counts[name] == nil || *before.Counts[name] == 0 {
 			t.Fatalf("fixture app-record domain %s is empty: %#v", name, before.Counts)
@@ -63,7 +65,7 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 	}
 	for _, name := range []string{
 		"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts",
-		"group_requirement_reviews", "group_requirement_operations",
+		"group_requirement_reviews", "group_requirement_operations", "assistant_conversation_checkpoints",
 	} {
 		if deleted[name] == 0 {
 			t.Fatalf("deletion count for %s = 0: %#v", name, deleted)

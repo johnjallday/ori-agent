@@ -14500,6 +14500,8 @@ const sessionManager = {
           kind: contextOptions.importMode ? 'workspace' : 'workspace',
           fixedKind: contextOptions.importMode ? 'workspace' : '',
           entryPoint: String(contextOptions.entryPoint || ''),
+          name: String(contextOptions.name || '').trim(),
+          description: String(contextOptions.description || '').trim(),
           blueprint: String(contextOptions.blueprint || ''),
           postCreateAction: String(contextOptions.postCreateAction || ''),
           mapOrigin: Boolean(contextOptions.mapOrigin),
@@ -14589,6 +14591,12 @@ const sessionManager = {
     if (nameInput && prefilledName) {
       nameInput.value = prefilledName;
       nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const descriptionInput = document.getElementById('folderDescriptionInput');
+    const description = String(context?.description || '').trim();
+    if (descriptionInput && description) {
+      descriptionInput.value = description;
+      descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
     }
     const note = document.getElementById('workspaceCreateFolderNote');
     if (note) {

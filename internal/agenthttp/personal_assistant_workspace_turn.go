@@ -47,7 +47,9 @@ type assistantWorkspaceTurn struct {
 	ledger *evidenceLedger
 	// sources are the sources the finished answer may show, set once the
 	// model's citations have been checked against the ledger.
-	sources []assistantcontext.SourceRef
+	sources          []assistantcontext.SourceRef
+	researchSources  []assistantcontext.ResearchRef
+	researchRevision string
 	// prepared is how long resolving the context and its overview took.
 	prepared time.Duration
 }
@@ -93,7 +95,7 @@ func (t *assistantWorkspaceTurn) logDiagnostics(ctx context.Context, readers, fi
 // the response reports and what is saved with the turn.
 func (t *assistantWorkspaceTurn) attribution() *assistantcontext.Attribution {
 	out := t.projection.Attribution()
-	out.Sources = t.sources
+	out.Sources, out.Research = t.sources, t.researchSources
 	return out
 }
 
@@ -104,6 +106,9 @@ func (t *assistantWorkspaceTurn) finishAnswer(answer string) string {
 		return answer
 	}
 	answer, t.sources = t.ledger.cite(answer)
+	t.researchSources = t.ledger.researchReferences()
+	answer, bounded := boundedTurnSources(answer, t.attribution())
+	t.sources, t.researchSources = bounded.Sources, bounded.Research
 	return answer
 }
 
@@ -195,7 +200,7 @@ func (h *HomeAssistantAskHandler) ResolvePanelRouteContext(ctx context.Context, 
 }
 
 func (t *assistantWorkspaceTurn) saveOwner() assistantcontext.SaveOwner {
-	owner := assistantcontext.SaveOwner{UserID: t.userID, WorkspaceID: t.hq, AgentName: t.profile, StateVersion: t.relationshipVersion}
+	owner := assistantcontext.SaveOwner{UserID: t.userID, WorkspaceID: t.hq, AgentName: t.profile, StateVersion: t.relationshipVersion, ExpectedConversationRevision: t.researchRevision}
 	for _, ref := range []*assistantcontext.WorkspaceRef{t.projection.Location, t.projection.Subject} {
 		if ref != nil {
 			owner.ContextWorkspaceIDs = append(owner.ContextWorkspaceIDs, ref.ID)
@@ -204,13 +209,46 @@ func (t *assistantWorkspaceTurn) saveOwner() assistantcontext.SaveOwner {
 	return owner
 }
 
+// Current imperative + target, not a build word somewhere in the sentence.
+// History, quoted instructions and a bare agreement never supply the target.
 func panelExplicitExecution(prompt string) bool {
+	if isCompositionRequest(prompt) || panelExploratoryRequest(prompt) || isAssistantWorkspaceReviewRequest(prompt) {
+		return false
+	}
 	text := stripCompositionPolitePrefixes(normalizeRouteToken(prompt))
 	if strings.HasPrefix(text, "/") {
 		return true
 	}
-	for _, verb := range []string{"run", "start", "execute", "schedule", "assign", "delegate", "create", "set up", "setup", "delete", "remove", "install", "connect"} {
-		if text == verb || strings.HasPrefix(text, verb+" ") {
+	for _, verb := range []string{"run", "start", "execute", "schedule", "assign", "delegate", "create", "set up", "setup", "delete", "remove", "install", "connect", "build", "develop", "design", "implement", "make", "ship", "new", "add", "put", "unassign"} {
+		if !strings.HasPrefix(text, verb+" ") {
+			continue
+		}
+		target := strings.TrimSpace(strings.TrimPrefix(text, verb+" "))
+		for _, referent := range []string{"it", "that", "this", "one"} {
+			if target == referent || strings.HasPrefix(target, referent+" ") {
+				return false // Clarify; previous turns cannot authorize the target.
+			}
+		}
+		return target != ""
+	}
+	return false
+}
+
+// Advisory questions may contain specialist and execution keywords. They are
+// discussion, not a request to triage an inbox, launch an app or create work.
+// Other utility/data questions retain their existing owners.
+func panelExploratoryRequest(prompt string) bool {
+	text := stripCompositionPolitePrefixes(normalizeRouteToken(prompt))
+	for _, prefix := range []string{
+		"brainstorm ", "discuss ", "explain ", "compare ", "consider ", "evaluate ",
+		"think ", "reflect ", "tell me about ", "why ",
+		"should ", "could we ", "could ori ", "can we ", "can ori ", "would it ",
+		"what if ", "what would ", "what could ", "what do you think ",
+		"how could ", "how would ", "how might ", "how should ",
+		"do you think ", "is there ", "are there ", "suppose ", "imagine ",
+		"don't ", "do not ", "no,", "no.", "i don't ", "i do not ",
+	} {
+		if strings.HasPrefix(text, prefix) {
 			return true
 		}
 	}

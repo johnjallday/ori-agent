@@ -40,7 +40,7 @@ func loadOpenAIMetadata(skillDir string) (*OpenAIMetadata, error) {
 		}
 	}
 
-	content, err := os.ReadFile(path)
+	content, err := readMetadataFile(path, metadataFileBytes)
 	if err != nil {
 		return nil, err
 	}

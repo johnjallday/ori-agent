@@ -100,8 +100,10 @@ func labelSavedDraft(view *PersonalAssistantSavedDraft, savedBody string, messag
 		isReply := strings.EqualFold(strings.TrimSpace(message.Role), llm.RoleAssistant) && strings.TrimSpace(message.Content) != ""
 		if message.ID == view.MessageID {
 			found = true
-			matches := strings.TrimSpace(message.Content) == savedBody
-			view.MatchesSource = &matches
+			if !message.ContentTruncated {
+				matches := strings.TrimSpace(message.Content) == savedBody
+				view.MatchesSource = &matches
+			}
 			continue
 		}
 		if found && isReply {
@@ -158,8 +160,20 @@ func (h *HomeAssistantAskHandler) savedDraft(ctx context.Context, ticketID strin
 // conversationAvailability reports whether a saved draft's source conversation
 // can still be continued, without ever recreating it.
 func (h *HomeAssistantAskHandler) conversationAvailability(ctx context.Context, scope personalAssistantConversationScope, conversationID string) (available bool, reason string, messages []PersonalAssistantConversationMessage) {
-	record, err := h.Conversations.Get(ctx, conversationID)
+	var record PersonalAssistantConversationRecord
+	var err error
+	if reader, ok := h.Conversations.(PersonalAssistantConversationDisplayReader); ok {
+		owner, ownerErr := h.canonicalConversationOwner(ctx)
+		if ownerErr != nil || owner.WorkspaceID != scope.workspaceID || !strings.EqualFold(owner.AgentName, scope.agentName) {
+			return false, PersonalAssistantConversationOutOfScope, nil
+		}
+		record, messages, _, err = reader.ReadConversationDisplay(ctx, conversationID, owner)
+	} else {
+		record, err = h.Conversations.Get(ctx, conversationID)
+	}
 	switch {
+	case errors.Is(err, ErrPersonalAssistantConversationOwnerChanged):
+		return false, PersonalAssistantConversationOutOfScope, nil
 	case errors.Is(err, ErrPersonalAssistantConversationNotFound):
 		return false, PersonalAssistantConversationNotFound, nil
 	case err != nil:
@@ -167,7 +181,9 @@ func (h *HomeAssistantAskHandler) conversationAvailability(ctx context.Context, 
 	case !scope.owns(record):
 		return false, PersonalAssistantConversationOutOfScope, nil
 	}
-	messages, err = h.Conversations.Messages(ctx, record.ID)
+	if messages == nil {
+		messages, err = h.Conversations.Messages(ctx, record.ID)
+	}
 	if err != nil {
 		return false, PersonalAssistantConversationUnavailable, nil
 	}

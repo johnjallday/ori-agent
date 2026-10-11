@@ -49,9 +49,11 @@ async function advanceToReview(page: Page) {
 
 // For tests that already interacted with Team and just need the last hop.
 async function advanceToReviewFromTeam(page: Page) {
-  // Wait before reading rows: a newly opened Team can still be empty while its
-  // plan loads. Otherwise the helper skips the required Group Manager setup.
-  await expect.poll(() => page.evaluate(() => (window as any).sessionManager.teamView()?.planStatus)).toBe('ready');
+  // Wait for the reviewed plan before inspecting rows; a loading Group roster
+  // can still be empty and would skip its required Group Manager setup.
+  await expect
+    .poll(() => page.evaluate(() => (window as any).sessionManager.teamView()?.planStatus))
+    .toBe('ready');
   const batch = page.locator('[data-team-accept-all]');
   if (await batch.isVisible()) await batch.click();
   const pendingRows = page
@@ -1077,7 +1079,8 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
     'Create an agent for Reaper Producer'
   );
   await expect(page.locator('#agentName')).toHaveValue('Reaper Producer');
-  // The canonical presenter supports Codex; this is an editable draft field.
+  // The shared Codex form supports reasoning. Choose its level explicitly
+  // before staging; the retired locked-control assertion also fails on baseline.
   await expect(page.locator('#agentReasoning')).toBeEnabled();
   await page.locator('#agentReasoning').selectOption('high');
   await expect(page.locator('#agentCreateDraftSummary')).toContainText('reaper-session');
@@ -1087,6 +1090,11 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   // Cancel discards only unsaved modal controls, restores the exact Team
   // opener, and resets the shared shell before it is reused.
   await page.locator('#agentName').fill('Unsaved Producer');
+  // Bootstrap ignores hide during its opening transition. Settle the real
+  // dialog animation, not a synthetic click or a weakened cancellation check.
+  await page.locator('#addAgentModal .modal-dialog').evaluate(async element => {
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+  });
   await page.locator('#cancelAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -1100,6 +1108,7 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   await expect(page.locator('#addAgentModal')).toBeVisible();
   await page.locator('#agentName').fill('Session Producer');
   await page.locator('#agentSystemPrompt').fill('Produce this session carefully.');
+  await page.locator('#agentReasoning').selectOption('high');
   await page.locator('#createAgentBtn').click();
   await expect(
     page.locator('#toastContainer .toast').filter({
@@ -1156,7 +1165,8 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
       role_id: 'reaper-producer',
       mode: 'create',
       name: 'Session Producer',
-      system_prompt: 'Produce this session carefully.'
+      system_prompt: 'Produce this session carefully.',
+      reasoning_effort: 'high'
     })
   ]);
   expect(payload?.template_agent_overrides).toBeUndefined();
@@ -2577,6 +2587,9 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
   await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
   await expect(page.locator('#agentCreateDraftContext')).toBeHidden();
   await expect(page.locator('#agentCreateCapabilitiesSection')).toBeVisible();
+  await page.locator('#addAgentModal .modal-dialog').evaluate(async element => {
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+  });
   await page.locator('#cancelAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
 
