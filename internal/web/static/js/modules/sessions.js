@@ -9545,6 +9545,7 @@ const sessionManager = {
     }
     if (onFinalStep) this.refreshWorkspaceReview();
     this.syncWorkspaceBuildChosenTags();
+    this.syncWorkspaceBuildPresentation();
     this.announceWorkspaceCreatorStep();
   },
 
@@ -11059,6 +11060,8 @@ const sessionManager = {
   // while the user is typing to it, and must never take the caret away.
   goToWizardStep(step, options = {}) {
     const moveFocus = options.focus !== false;
+    // Contextual edits deliberately reveal the existing wizard, not a second form.
+    if (moveFocus && this.workspaceBuildAssisted()) this.collapseWorkspaceBuild({ focus: false });
     const visibleSteps = this.creatorWizardSteps();
     const requestedStep = Number(step) || visibleSteps[0];
     // Callers that know only the old numeric step IDs still land on a visible
@@ -11378,6 +11381,9 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
+    document.getElementById('workspaceBuildEditDraftBtn')?.addEventListener('click', () => {
+      this.collapseWorkspaceBuild();
+    });
     modal.addEventListener('workspace-build-start-over', () => {
       void this.startOverWorkspaceBuild();
     });
@@ -11398,6 +11404,12 @@ const sessionManager = {
       'click',
       event => {
         if (event?.target?.closest?.('.folder-color-btn')) this.noteWorkspaceBuildUserEdit(event);
+        if (
+          event?.isTrusted &&
+          event.target?.closest?.('.workspace-create-modal-body, .modal-footer')
+        ) {
+          this.noteWorkspaceBuildIntent();
+        }
       },
       true
     );
@@ -11408,6 +11420,7 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-tags-changed', () => {
       if (this.workspaceBuildApplyDepth > 0) return;
+      this.noteWorkspaceBuildIntent();
       this.clearWorkspaceBuildChosen('tags');
       this.scheduleWorkspaceBuildDraft({ user: true });
     });
@@ -11432,6 +11445,7 @@ const sessionManager = {
   // manual wizard exactly as it was, with no pane and nothing else requested.
   async maybeStartWorkspaceBuild(context) {
     this.teardownWorkspaceBuild();
+    const revision = Number(context?.buildRevision) || 0;
     const api = window.WorkspaceCreatorState;
     const pane = this.workspaceBuildPane();
     if (!context || !pane || typeof api?.buildEntryPointEligible !== 'function') return false;
@@ -11477,6 +11491,11 @@ const sessionManager = {
       chosenRoles: new Set()
     };
     this.mountWorkspaceBuildPane();
+    // A slow availability read must not replace the wizard the user is already using.
+    if ((Number(context.buildRevision) || 0) !== revision) {
+      this.collapseWorkspaceBuild({ focus: false });
+      return true;
+    }
     await this.openWorkspaceBuildSession({ firstMessage: context.buildFirstMessage });
     return true;
   },
@@ -11486,7 +11505,7 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
     pane.mount({ assistant: build.assistant });
-    document.getElementById('addFolderModal')?.classList?.add('workspace-create-modal--build');
+    this.syncWorkspaceBuildPresentation();
   },
 
   // openWorkspaceBuildSession asks the server for this user's build. A build
@@ -11503,6 +11522,7 @@ const sessionManager = {
     const parentID = String(build.context.parentId || '').trim();
     if (parentID) body.parent_id = parentID;
     if (message) body.first_message = message;
+    const revision = this.workspaceBuildRevision();
     this.setWorkspaceBuildBusy(true, message);
     let result;
     try {
@@ -11522,7 +11542,7 @@ const sessionManager = {
     // the form: an unanswered "Resume building …?" must not tie a workspace
     // the user makes by hand to the paused build.
     if (result.body.resumed && !fresh && build.context.buildResume) {
-      await this.applyWorkspaceBuildSession(session, { resume: true });
+      await this.applyWorkspaceBuildSession(session, { resume: true, revision });
       return;
     }
     if (result.body.resumed && !fresh) {
@@ -11538,7 +11558,9 @@ const sessionManager = {
       build.pendingFirstMessage = message;
       return;
     }
-    await this.applyWorkspaceBuildSession(session);
+    // A new session joins the form, including edits made before it was opened.
+    await this.applyWorkspaceBuildSession(session, { revision });
+    this.scheduleWorkspaceBuildDraft({ user: true });
   },
 
   rememberWorkspaceBuildSession(session) {
@@ -11574,6 +11596,10 @@ const sessionManager = {
       await this.startOverWorkspaceBuild();
       return;
     }
+    if (action === 'sync_again') {
+      await this.flushWorkspaceBuildDraft();
+      return;
+    }
     if (action === 'try_again' && build.lastTurn) {
       await this.sendWorkspaceBuildTurn(build.lastTurn.detail || {});
       return;
@@ -11594,18 +11620,33 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane || build.busy) return;
+    this.setWorkspaceBuildBusy(true);
+    const revision = this.workspaceBuildRevision();
     const firstMessage = build.pendingFirstMessage || '';
     const session = build.session;
     if (session?.id && session.status !== 'created') {
+      let abandoned;
       try {
-        await this.workspaceBuildApi().abandon(session.id, { version: session.version });
+        abandoned = await this.workspaceBuildApi().abandon(session.id, {
+          version: session.version
+        });
       } catch (_) {
-        // The server expires an abandoned build on its own; a failed abandon
-        // must not trap the user in it.
+        abandoned = null;
+      }
+      if (this.workspaceBuild !== build) return;
+      if (!abandoned?.ok) {
+        this.setWorkspaceBuildBusy(false);
+        pane.showLine(
+          'Could not start over. Your current draft is kept; try Start over again or set up manually.'
+        );
+        return;
       }
     }
     if (this.workspaceBuild !== build) return;
+    this.setWorkspaceBuildBusy(false);
     build.session = null;
+    this.rememberWorkspaceBuildSession(null);
+    if (!this.workspaceBuildCanApply(build, revision)) return;
     build.lastTurn = null;
     build.pendingFirstMessage = '';
     build.resumeLine = '';
@@ -11636,7 +11677,8 @@ const sessionManager = {
   // form edits are sent first, so the assistant answers the form as it is.
   async sendWorkspaceBuildTurn(detail = {}) {
     const build = this.workspaceBuild;
-    if (!build?.session || build.busy) return;
+    if (!build?.session || build.busy || build.turnPending || !this.workspaceBuildAssisted())
+      return;
     const choiceID = String(detail.choiceId || '').trim();
     const text = String(detail.text || '')
       .trim()
@@ -11647,12 +11689,24 @@ const sessionManager = {
       await this.chooseWorkspaceBuildFolder();
       return;
     }
-    await this.flushWorkspaceBuildDraft();
-    if (this.workspaceBuild !== build || !build.session) return;
+    build.lastTurn = { detail: { ...detail } };
+    build.turnPending = true;
+    try {
+      await this.flushWorkspaceBuildDraft();
+    } finally {
+      build.turnPending = false;
+    }
+    if (
+      this.workspaceBuild !== build ||
+      !build.session ||
+      build.draftError ||
+      !this.workspaceBuildAssisted()
+    )
+      return;
+    const revision = this.workspaceBuildRevision();
     const body = choiceID ? { choice_id: choiceID } : { text };
     body.version = Number(build.session.version) || 0;
     if (detail.auto) body.auto = true;
-    build.lastTurn = { detail: { ...detail } };
     this.setWorkspaceBuildBusy(true, choiceID ? '' : text);
     let result;
     try {
@@ -11661,27 +11715,39 @@ const sessionManager = {
       result = { ok: false, status: 0, body: {} };
     }
     if (this.workspaceBuild !== build) return;
-    this.setWorkspaceBuildBusy(false);
     if (result?.status === 409 && result.body?.code === 'version') {
       // Another tab or an edit moved the build on — or the server kept this
       // very answer before a failure the browser never heard back from. Take
       // the current session and let the user go on from there; resending
       // would only meet the same conflict.
-      await this.reloadWorkspaceBuildSession();
+      try {
+        await this.reloadWorkspaceBuildSession({ revision });
+      } finally {
+        if (this.workspaceBuild === build) this.setWorkspaceBuildBusy(false);
+      }
       return;
     }
     if (result?.status === 409 && result.body?.code === 'unavailable') {
       // The assistant can no longer build (its model went away): say so and
       // step aside; everything already on the form stays (FR43).
+      this.setWorkspaceBuildBusy(false);
       this.failWorkspaceBuild();
       return;
     }
     const session = result?.body?.session || null;
     if (!result?.ok || !session) {
+      this.setWorkspaceBuildBusy(false);
       this.showWorkspaceBuildFailure();
       return;
     }
-    await this.applyWorkspaceBuildSession(session);
+    try {
+      await this.applyWorkspaceBuildSession(session, { revision });
+    } finally {
+      if (this.workspaceBuild === build) {
+        this.setWorkspaceBuildBusy(false);
+        await this.flushWorkspaceBuildDraft();
+      }
+    }
     if (this.workspaceBuild === build && build.restaffPending) {
       await this.sendWorkspaceBuildRestaff(build);
     }
@@ -11689,12 +11755,12 @@ const sessionManager = {
 
   // The automatic turn after the user switched the blueprint on the form.
   sendWorkspaceBuildRestaff(build) {
-    if (this.workspaceBuild !== build) return undefined;
+    if (this.workspaceBuild !== build || !this.workspaceBuildAssisted()) return undefined;
     build.restaffPending = false;
     return this.sendWorkspaceBuildTurn({ text: '(I changed the blueprint)', auto: true });
   },
 
-  async reloadWorkspaceBuildSession() {
+  async reloadWorkspaceBuildSession({ revision = this.workspaceBuildRevision() } = {}) {
     const build = this.workspaceBuild;
     if (!build) return;
     let result;
@@ -11709,7 +11775,14 @@ const sessionManager = {
       this.failWorkspaceBuild();
       return;
     }
-    await this.applyWorkspaceBuildSession(session, { resume: true });
+    if (session.id !== build.session?.id) {
+      this.workspaceBuildPane()?.showLine(
+        'The saved build changed elsewhere. Your draft is kept here; close and reopen to choose a saved build.'
+      );
+      this.collapseWorkspaceBuild({ withdraw: true });
+      return;
+    }
+    await this.applyWorkspaceBuildSession(session, { resume: true, revision });
   },
 
   // A request that never reached the server gets the same fixed line a model
@@ -11739,51 +11812,77 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     const api = window.WorkspaceCreatorState;
     if (!build || !pane || !session) return;
+    // Never roll a draft back to a version older than a completed sync.
+    if (build.session?.id === session.id && Number(build.session.version) > Number(session.version))
+      return;
+    const revision = options.revision ?? this.workspaceBuildRevision();
+    const current = () => this.workspaceBuildCanApply(build, revision);
     build.session = session;
     this.rememberWorkspaceBuildSession(session);
     pane.applySession(session);
+    if (!current()) {
+      pane.showLine(pane.COPY.manualPreserved);
+      this.scheduleWorkspaceBuildDraft({ user: true });
+      await this.flushWorkspaceBuildDraft({ force: true });
+      return;
+    }
     const resume = Boolean(options.resume);
     const applied = Array.isArray(session.applied) ? session.applied : [];
     const patch = api?.buildPatchFromSession
       ? api.buildPatchFromSession(session, resume ? undefined : applied)
       : {};
     const name = this.workspaceBuildAssistantName();
-    await this.applyBuildPatchToWizard(patch, name, { animate: !resume });
-    if (this.workspaceBuild !== build) return;
+    await this.applyBuildPatchToWizard(patch, name, { animate: !resume, current });
+    if (!current()) return;
     if (resume && session.team_state) {
       // The serialized team holds the user's own team edits too.
-      await this.restoreWorkspaceBuildTeam(session.team_state, session.team_patch, name);
+      await this.restoreWorkspaceBuildTeam(session.team_state, session.team_patch, name, {
+        current
+      });
     } else if (session.team_patch && (resume || applied.includes('team'))) {
-      await this.applyWorkspaceBuildTeamPatch(session.team_patch, name, { animate: !resume });
+      await this.applyWorkspaceBuildTeamPatch(session.team_patch, name, {
+        animate: !resume,
+        current
+      });
     }
-    if (this.workspaceBuild !== build) return;
+    if (!current()) return;
     this.advanceWorkspaceBuildWizard(session, { resume });
     // The session learns what applying the turn did to the form (the team
     // keys the Team step derived, the step reached) without calling it the
     // user's edit. Sent at once, so a click right after cannot claim it.
     this.scheduleWorkspaceBuildDraft({ user: false });
-    await this.flushWorkspaceBuildDraft();
-    if (this.workspaceBuild !== build) return;
-    if (session.create_now && !resume) await this.createFromWorkspaceBuild();
+    await this.flushWorkspaceBuildDraft({ force: true });
+    if (!current()) return;
+    if (session.create_now && !resume) await this.createFromWorkspaceBuild({ revision });
   },
 
-  collapseWorkspaceBuild({ withdraw = false } = {}) {
+  collapseWorkspaceBuild({ withdraw = false, focus = true } = {}) {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
+    this.noteWorkspaceBuildIntent();
     build.collapsed = true;
     pane.collapse({ withdraw });
-    document.getElementById('addFolderModal')?.classList?.remove('workspace-create-modal--build');
-    if (withdraw) this.workspaceBuild.withdrawn = true;
+    if (withdraw) build.withdrawn = true;
+    this.refreshWizardChrome();
+    if (focus) document.getElementById(`wizardStep${this.wizardStep}Title`)?.focus();
   },
 
-  expandWorkspaceBuild() {
+  async expandWorkspaceBuild() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane || build.withdrawn || build.kindHidden) return;
     build.collapsed = false;
     pane.expand();
-    document.getElementById('addFolderModal')?.classList?.add('workspace-create-modal--build');
+    this.refreshWizardChrome();
+    // A deliberate mode switch may transfer focus; a late response may not.
+    document.getElementById('workspaceBuildComposerInput')?.focus();
+    if (!build.session && !build.busy) await this.openWorkspaceBuildSession();
+    else if (!build.resumeLine) {
+      this.scheduleWorkspaceBuildDraft({ user: true });
+      await this.flushWorkspaceBuildDraft();
+      if (build.restaffPending) await this.sendWorkspaceBuildRestaff(build);
+    }
   },
 
   // Build mode is for a Workspace. Choosing Group hides the pane and its
@@ -11796,8 +11895,9 @@ const sessionManager = {
     const group = this.creatorKind() === 'group';
     build.kindHidden = group;
     if (group) {
+      this.noteWorkspaceBuildIntent();
       pane.collapse({ withdraw: true });
-      document.getElementById('addFolderModal')?.classList?.remove('workspace-create-modal--build');
+      this.syncWorkspaceBuildPresentation();
       return;
     }
     if (build.withdrawn) return;
@@ -11806,7 +11906,65 @@ const sessionManager = {
       return;
     }
     pane.expand();
-    document.getElementById('addFolderModal')?.classList?.add('workspace-create-modal--build');
+    this.syncWorkspaceBuildPresentation();
+  },
+
+  // Presentation is separate from context.mode (ordinary/guided/import).
+  workspaceBuildAssisted() {
+    const build = this.workspaceBuild;
+    return Boolean(build && !build.collapsed && !build.withdrawn && !build.kindHidden);
+  },
+
+  workspaceBuildRevision() {
+    return Number(this.workspaceCreatorContext?.buildRevision) || 0;
+  },
+
+  noteWorkspaceBuildIntent() {
+    const context = this.workspaceCreatorContext;
+    if (context) context.buildRevision = (Number(context.buildRevision) || 0) + 1;
+  },
+
+  workspaceBuildCanApply(build, revision) {
+    return (
+      this.workspaceBuild === build &&
+      this.workspaceBuildAssisted() &&
+      this.workspaceBuildRevision() === revision
+    );
+  },
+
+  syncWorkspaceBuildPresentation() {
+    const assisted = this.workspaceBuildAssisted();
+    const modal = document.getElementById('addFolderModal');
+    if (modal?.dataset) modal.dataset.creationPresentation = assisted ? 'assisted' : 'manual';
+    modal?.classList?.toggle?.('workspace-create-modal--build', assisted);
+    const body = document.querySelector('#addFolderModal .workspace-create-modal-body');
+    if (body) body.hidden = assisted;
+    if (assisted) {
+      for (const id of ['wizardBackBtn', 'wizardNextBtn', 'createFolderBtn']) {
+        const button = document.getElementById(id);
+        if (button) button.hidden = true;
+      }
+    }
+    const status = document.getElementById('workspaceBuildModeStatus');
+    if (status) {
+      status.hidden = !this.workspaceBuild;
+      status.textContent = this.workspaceBuild?.draftError
+        ? 'Draft not saved to the assistant. Your edits are kept here; switch back to retry before closing.'
+        : assisted
+          ? 'Assisted setup · one shared draft'
+          : this.workspaceBuild?.withdrawn
+            ? 'Manual setup · assistant unavailable. Your draft is kept.'
+            : 'Manual setup · your draft and conversation are kept while this dialog is open.';
+    }
+    const summary = document.getElementById('workspaceBuildDraftSummary');
+    if (summary) summary.hidden = !assisted;
+    const text = document.getElementById('workspaceBuildDraftText');
+    if (text && assisted) {
+      const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
+      const name = document.getElementById('folderNameInput')?.value?.trim();
+      const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
+      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}`;
+    }
   },
 
   teardownWorkspaceBuild() {
@@ -11819,7 +11977,7 @@ const sessionManager = {
     if (!active) return;
     pane?.destroy();
     document.querySelectorAll?.('[data-build-chosen]')?.forEach(tag => tag.remove());
-    document.getElementById('addFolderModal')?.classList?.remove('workspace-create-modal--build');
+    this.syncWorkspaceBuildPresentation();
   },
 
   prefersReducedMotion() {
@@ -11859,14 +12017,15 @@ const sessionManager = {
 
   // Selecting a card is asynchronous: the picker renders after the dialog
   // opens and may re-render to Blank once. Retry until the choice sticks.
-  selectWorkspaceBuildBlueprint(id) {
+  selectWorkspaceBuildBlueprint(id, { current } = {}) {
     const build = this.workspaceBuild;
+    const canContinue = current || (() => this.workspaceBuild === build);
     return new Promise(resolve => {
       let attempts = 0;
       const step = () => {
         // A closed or restarted build stops here: its retries must never
         // click a card in the next, possibly manual, dialog.
-        if (this.workspaceBuild !== build) {
+        if (!canContinue()) {
           resolve(false);
           return;
         }
@@ -11998,7 +12157,10 @@ const sessionManager = {
   },
 
   noteWorkspaceBuildUserEdit(event) {
-    if (!this.workspaceBuild || this.workspaceBuildApplyDepth > 0) return;
+    // Trusted edits during asynchronous patch preparation also invalidate it.
+    if (event?.target?.closest?.('#workspaceBuildPane')) return;
+    if (event?.isTrusted || this.workspaceBuildApplyDepth === 0) this.noteWorkspaceBuildIntent();
+    if (!this.workspaceBuild || (this.workspaceBuildApplyDepth > 0 && !event?.isTrusted)) return;
     const key = this.workspaceBuildKeyForTarget(event?.target);
     if (!key) return;
     this.clearWorkspaceBuildChosen(key);
@@ -12032,9 +12194,12 @@ const sessionManager = {
 
   async reselectWorkspaceBuildBlueprint(build) {
     if (this.workspaceBuild !== build || build.chosenBlueprint === undefined) return;
+    const revision = this.workspaceBuildRevision();
     this.workspaceBuildApplyDepth += 1;
     try {
-      await this.selectWorkspaceBuildBlueprint(build.chosenBlueprint);
+      await this.selectWorkspaceBuildBlueprint(build.chosenBlueprint, {
+        current: () => this.workspaceBuild === build && this.workspaceBuildRevision() === revision
+      });
     } finally {
       this.workspaceBuildApplyDepth -= 1;
     }
@@ -12051,6 +12216,7 @@ const sessionManager = {
     const value = patch && typeof patch === 'object' ? patch : {};
     const name = String(assistantName || '').trim() || this.workspaceBuildAssistantName();
     const animate = options.animate !== false;
+    const current = options.current || (() => this.workspaceBuild === build);
     const applied = [];
     const has = key => Object.prototype.hasOwnProperty.call(value, key);
     const setField = (element, text, eventType) => {
@@ -12064,7 +12230,8 @@ const sessionManager = {
       if (value.blank === true || has('template_id')) {
         const id = value.blank === true ? '' : String(value.template_id || '').trim();
         if (build) build.chosenBlueprint = id;
-        const selected = await this.selectWorkspaceBuildBlueprint(id);
+        const selected = await this.selectWorkspaceBuildBlueprint(id, { current });
+        if (!current()) return applied;
         if (selected) {
           applied.push('blueprint');
           this.markWorkspaceBuildChosen('blueprint', name, { animate });
@@ -12149,7 +12316,7 @@ const sessionManager = {
     const draft = this.ensureWorkspaceTeamDraft();
     if (!api || !draft || !teamPatch || typeof teamPatch !== 'object') return [];
     const ready = await this.waitForWorkspaceBuildTeam(teamPatch);
-    if (!ready || this.workspaceBuild !== build) return [];
+    if (!ready || this.workspaceBuild !== build || options.current?.() === false) return [];
     const name = String(assistantName || '').trim() || this.workspaceBuildAssistantName();
     const filled = api.applyTeamPatch ? api.applyTeamPatch(draft, teamPatch) : [];
     if (build) {
@@ -12168,7 +12335,7 @@ const sessionManager = {
   // restoreWorkspaceBuildTeam puts a resumed build's team back through the
   // team draft's own restore, once the blueprint's plan (and the saved roster)
   // are loaded. Roles the assistant filled keep their "Chosen by" tag.
-  async restoreWorkspaceBuildTeam(teamState, teamPatch, assistantName = '') {
+  async restoreWorkspaceBuildTeam(teamState, teamPatch, assistantName = '', options = {}) {
     const api = window.CreateWorkspaceTeamDraft;
     const build = this.workspaceBuild;
     const draft = this.ensureWorkspaceTeamDraft();
@@ -12180,7 +12347,7 @@ const sessionManager = {
       roles: needsRoster ? [{ mode: 'assign' }] : [],
       saved_agents: []
     });
-    if (!ready || this.workspaceBuild !== build) return false;
+    if (!ready || this.workspaceBuild !== build || options.current?.() === false) return false;
     this.workspaceBuildApplyDepth += 1;
     let restored = false;
     try {
@@ -12351,13 +12518,13 @@ const sessionManager = {
     }, 500);
   },
 
-  async flushWorkspaceBuildDraft() {
+  async flushWorkspaceBuildDraft({ force = false } = {}) {
     const build = this.workspaceBuild;
     if (this.workspaceBuildTimer) {
       clearTimeout(this.workspaceBuildTimer);
       this.workspaceBuildTimer = null;
     }
-    if (!build?.session || build.session.status !== 'open') return;
+    if (!build?.session || build.session.status !== 'open' || (build.busy && !force)) return;
     if (build.draftInFlight) await build.draftInFlight;
     if (this.workspaceBuild !== build || build.draftUser === undefined) return;
     const user = Boolean(build.draftUser);
@@ -12365,11 +12532,24 @@ const sessionManager = {
     const body = this.workspaceBuildDraftBody(!user);
     const key = JSON.stringify({ draft: body.draft, team: body.team_state, step: body.step });
     if (key === build.lastDraftKey) return;
+    const fail = () => {
+      if (this.workspaceBuild !== build) return;
+      build.draftUser = Boolean(user || build.draftUser);
+      if (!build.draftError) {
+        const pane = this.workspaceBuildPane();
+        pane?.showLine(pane.COPY.draftFailure, {
+          chips: [{ id: 'sync_again', label: pane.COPY.tryAgain }]
+        });
+      }
+      build.draftError = true;
+      this.syncWorkspaceBuildPresentation();
+    };
     const send = async (retry = false) => {
       let result;
       try {
         result = await this.workspaceBuildApi().draft(build.session.id, body);
       } catch (_) {
+        fail();
         return;
       }
       if (this.workspaceBuild !== build) return;
@@ -12377,23 +12557,37 @@ const sessionManager = {
         const reloaded = await this.workspaceBuildApi()
           .create({ entry_point: build.context.entryPoint })
           .catch(() => null);
-        if (this.workspaceBuild !== build || !reloaded?.body?.session) return;
+        if (this.workspaceBuild !== build) return;
+        if (!reloaded?.body?.session) {
+          fail();
+          return;
+        }
+        if (reloaded.body.session.id !== build.session.id) {
+          fail();
+          return;
+        }
         build.session = reloaded.body.session;
         body.version = Number(build.session.version) || 0;
         await send(true);
         return;
       }
       const session = result?.body?.session;
-      if (!result?.ok || !session) return;
+      if (!result?.ok || !session) {
+        fail();
+        return;
+      }
+      if (Number(session.version) < Number(build.session.version)) return;
+      build.draftError = false;
       build.session = session;
       build.lastDraftKey = key;
       this.rememberWorkspaceBuildSession(session);
       this.workspaceBuildPane()?.applySession(session);
+      this.syncWorkspaceBuildPresentation();
       // Switching the blueprint changes what the team can be, so the
       // assistant re-staffs it without being asked (FR17), after the turn in
       // flight if there is one.
       if (result.body.blueprint_changed) {
-        if (build.busy) build.restaffPending = true;
+        if (build.busy || !this.workspaceBuildAssisted()) build.restaffPending = true;
         else void this.sendWorkspaceBuildRestaff(build);
       }
     };
@@ -12476,17 +12670,18 @@ const sessionManager = {
 
   // "Create it" runs the Create button's own submit (FR24). When a gate would
   // refuse, nothing is submitted and the pane says why, in the gate's words.
-  async createFromWorkspaceBuild() {
+  async createFromWorkspaceBuild({ revision = this.workspaceBuildRevision() } = {}) {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
-    if (!build || !pane || this.isCreatingFolder) return;
+    if (!build || !pane || this.isCreatingFolder || !this.workspaceBuildCanApply(build, revision))
+      return;
     const problem = this.workspaceBuildGateProblem();
     if (problem) {
       pane.showLine(`${pane.COPY.gateFailurePrefix}${problem}`);
       return;
     }
-    await this.flushWorkspaceBuildDraft();
-    if (this.workspaceBuild !== build) return;
+    await this.flushWorkspaceBuildDraft({ force: true });
+    if (!this.workspaceBuildCanApply(build, revision)) return;
     const steps = this.creatorWizardSteps();
     const review = steps[steps.length - 1];
     if (this.wizardStep !== review) this.goToWizardStep(review, { focus: false });

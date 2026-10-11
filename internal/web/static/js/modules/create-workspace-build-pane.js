@@ -1,5 +1,5 @@
-// Build with your assistant: the conversation pane beside the Create Workspace
-// wizard (#addFolderModal).
+// Build with your assistant: the active conversation surface for the shared
+// Create Workspace wizard (#addFolderModal).
 //
 // The pane only presents the build session and reports what the user did. It
 // never talks to the server and never touches the wizard: sessions.js owns the
@@ -19,11 +19,15 @@
   const COPY = {
     opening:
       'What should this workspace do? Tell me roughly — I’ll set it up and you check it at the end.',
-    modelFailure: 'I couldn’t reach my model just now. Keep going on the form, or try again.',
+    modelFailure: 'I couldn’t reach my model just now. Set up manually, or try again.',
+    draftFailure:
+      'Your edits are kept in this dialog, but I couldn’t save the shared draft. Try again before continuing or closing.',
     gateFailurePrefix: 'Not yet — ',
     unavailable: 'I can’t help right now — the form still works.',
+    manualPreserved:
+      'Your manual draft was kept. This reply did not change it; tell me what to do next.',
     role: 'Personal Assistant',
-    manual: 'I’ll do it myself',
+    manual: 'Set up manually',
     startOver: 'Start over',
     tryAgain: 'Try again',
     send: 'Send',

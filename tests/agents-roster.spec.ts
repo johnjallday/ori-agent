@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { mockWorkspaceActionRoster } from './helpers/agent-workspace-actions';
 import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assistant';
 
 // Happy-path regression for the game-inspired Agents page (roster + stage).
@@ -38,6 +39,14 @@ async function closeFilters(page) {
 }
 
 test.describe('Agents roster', () => {
+  async function openAgents(page, query = '') {
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ json: { needs_onboarding: false, completed: true } })
+    );
+    await page.goto(`${baseUrl}/agents${query}`);
+    await expect(page.locator('#rosterList')).toBeVisible();
+  }
+
   test('browse, select, read, and delete', async ({ page, request }) => {
     const name = `PW Roster ${Date.now()}`;
 
@@ -461,7 +470,8 @@ test.describe('Agents roster', () => {
         await expect(page.locator('#stageName')).toHaveText(names[0]);
       }
 
-      // Closing the Inspector was the third guarded path.
+      // Closing the narrow Inspector was the third guarded path.
+      await page.setViewportSize({ width: 860, height: 900 });
       await page.locator('#inspectorClose').click();
       expect(dialogs).toEqual([]);
     } finally {
@@ -2740,7 +2750,7 @@ test.describe('Agents first screen, faces, and blank slates', () => {
 
       await card(page, placed).locator('.roster-card__open').click();
       await expect(page.locator('#stageName')).toHaveText(placed);
-      await expect(next).toContainText('has not done any work yet');
+      await expect(next).toContainText('current tasks and results');
       if (slug) {
         await expect(next.locator('a')).toHaveAttribute(
           'href',
@@ -2748,7 +2758,7 @@ test.describe('Agents first screen, faces, and blank slates', () => {
         );
       }
 
-      // A built-in is not placed in workspaces, so it is offered no next step.
+      // Built-ins cannot be assigned here, so no membership action is offered.
       await card(page, 'Claude Code').locator('.roster-card__open').click();
       await expect(page.locator('#stageName')).toHaveText('Claude Code');
       await expect(next).toBeHidden();
@@ -2765,3 +2775,77 @@ test.describe('Agents first screen, faces, and blank slates', () => {
     }
   });
 });
+
+for (const [name, kind] of [
+  ['Action Library', 'assign'],
+  ['Action Used', 'one'],
+  ['Action Shared', 'choose'],
+  ['Action Partial', 'partial'],
+  ['Action Unknown', 'unknown'],
+  ['Action Incomplete', 'unknown'],
+  ['Action Invalid Count', 'unknown'],
+  ['Action Missing Slug', 'unknown'],
+  ['Action Owned', 'unknown'],
+  ['Action Unreadable', 'unknown'],
+  ['Action CLI', 'hidden'],
+  ['Ask Ori', 'hidden']
+]) {
+  test(`contextual workspace work respects ${name}`, async ({ page }, testInfo) => {
+    await mockWorkspaceActionRoster(page);
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ json: { needs_onboarding: false, completed: true } })
+    );
+    const workspaceReads: string[] = [];
+    page.on('request', request => {
+      if (/\/api\/workspaces(?:\?|\/|$)/.test(new URL(request.url()).pathname))
+        workspaceReads.push(request.url());
+    });
+    await page.goto(`/agents?agent=${encodeURIComponent(name)}`);
+    const next = page.locator('#stageNextStep');
+    await expect(page.locator('#stageName')).toHaveText(name);
+    if (kind === 'hidden') {
+      await expect(next).toBeHidden();
+      return;
+    }
+    await expect(next).toBeVisible();
+    await expect(page.locator('#stageVitals')).toContainText('Current activity');
+    await expect(page.locator('#stageVitals')).toContainText('Not reported here');
+    await expect(next.locator('input, select, textarea')).toHaveCount(0);
+    if (kind === 'assign')
+      await expect(next.locator('a')).toHaveAttribute(
+        'href',
+        `/agents/${encodeURIComponent(name)}?tab=workspaces`
+      );
+    if (kind === 'one')
+      await expect(next.locator('a')).toHaveAttribute(
+        'href',
+        '/workspaces/action-one?agent=action%20used'
+      );
+    if (kind === 'unknown') await expect(next.locator('a')).toHaveCount(0);
+    if (name === 'Action Owned')
+      await page.screenshot({
+        path: testInfo.outputPath('agent-workspace-owned.png'),
+        fullPage: true
+      });
+    if (kind === 'partial' || kind === 'choose') {
+      const summary = next.locator('summary');
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      await expect(next.locator('details')).toHaveAttribute('open', '');
+      await expect(next.locator('a')).toHaveCount(kind === 'partial' ? 1 : 2);
+      if (kind === 'partial')
+        await expect(next).toContainText('Some workspace destinations are unavailable');
+    }
+    expect(workspaceReads).toEqual([]);
+    const order = await page.evaluate(() => {
+      const next = document.getElementById('stageNextStep')!;
+      return ['stageProgression', 'stageFavoriteToggle'].every(id =>
+        Boolean(
+          next.compareDocumentPosition(document.getElementById(id)!) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+        )
+      );
+    });
+    expect(order).toBe(true);
+  });
+}

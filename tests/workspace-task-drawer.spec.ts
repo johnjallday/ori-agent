@@ -1,4 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+
+test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.route('**/api/onboarding/status', route =>
+    route.fulfill({ json: { needs_onboarding: false, completed: true } })
+  );
+});
 
 /**
  * Reproduces the reported bug and proves the fix (PRD FR138): opening tasks from
@@ -47,9 +55,22 @@ test.describe('Workspace task drawer', () => {
 
     await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}`);
 
+    const work = page.getByRole('region', { name: 'Next action', exact: true });
+    await expect(work.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+    const primary = work.getByRole('button', { name: 'Start', exact: true });
+    await primary.focus();
+    await page.evaluate(() => (window as any).workspaceCommand.refresh());
+    await expect(primary).toBeFocused();
+    const admin = page.locator('[data-cmd-admin]');
+    await expect(admin.getByRole('button', { name: 'Edit workspace name' })).toBeHidden();
+    await admin.locator('summary').focus();
+    await page.keyboard.press('Enter');
+    await expect(admin.getByRole('button', { name: 'Edit workspace name' })).toBeVisible();
+
     // Switch to the Operations Map.
     await page.getByRole('button', { name: /^map$/i }).click();
 
+    await expect(work).toHaveCount(0);
     // Open the Objectives Map window, then Open Tasks (precise selectors).
     await page.locator('[data-cmd-map-window="objectives"]').click();
     const objectivesWindow = page.locator('.ws-cmd-map-window-backdrop');

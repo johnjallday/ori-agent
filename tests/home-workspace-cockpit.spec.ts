@@ -1,4 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+
+test.beforeEach(async ({ page }) => installLocalCdn(page));
 
 /**
  * Behavior suite for the Map-first Home cockpit
@@ -12,6 +15,151 @@ import { test, expect, Page } from '@playwright/test';
  * actually wired to each other in a real page, that selection never navigates,
  * and that nothing covers the cockpit when it should not.
  */
+
+test('next-action counts keep workspace tasks separate and disclose injected refresh failure', async ({
+  page
+}, testInfo) => {
+  await skipOnboarding(page);
+  let failed = false;
+  const folders = [
+    {
+      id: 'attention-owner',
+      folder_slug: 'attention-owner',
+      name: 'Launch review',
+      kind: 'workspace',
+      needs_attention_count: 2,
+      open_task_count: 2,
+      task_summary_available: true,
+      active: false
+    },
+    {
+      id: 'unknown-owner',
+      folder_slug: 'unknown-owner',
+      name: 'Unreadable workspace',
+      kind: 'workspace',
+      needs_attention_count: 0,
+      open_task_count: 0,
+      task_summary_available: false,
+      active: false
+    }
+  ];
+  await page.route('**/api/workspaces?tree=true', route =>
+    route.fulfill({
+      status: failed ? 503 : 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ folders })
+    })
+  );
+  await page.goto('/');
+  const chip = page.locator('[data-cockpit-signal="attention"]');
+  await expect(chip).toContainText('Workspaces needing attention');
+  await expect(chip).toContainText('1+');
+  await page.getByRole('button', { name: 'Show Updates', exact: true }).click();
+  const link = page.locator('#cockpitTodayAttention a');
+  await expect(link).toContainText('2 tasks needing attention');
+  await expect(link).toHaveAttribute('href', '/workspaces/attention-owner?panel=tasks');
+  await page.screenshot({ path: testInfo.outputPath('home-attention-scopes.png') });
+  failed = true;
+  await page.evaluate(() => window.OriHomeCockpit?.refreshQuietly());
+  await expect(page.getByText(/Showing last-loaded information/)).toBeVisible();
+  await expect(link).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('home-injected-refresh-failure.png') });
+  failed = false;
+  await page.locator('[data-cockpit-refresh-retry]').click();
+  await expect(page.getByText(/Showing last-loaded information/)).toHaveCount(0);
+  await link.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/workspaces\/attention-owner\?panel=tasks/);
+});
+
+test('assistant-only requests survive injected failure without mixing maintenance counts', async ({
+  page
+}, testInfo) => {
+  await skipOnboarding(page);
+  let failed = false;
+  await page.route('**/api/workspaces?tree=true', route =>
+    route.fulfill({ json: { folders: [] } })
+  );
+  await page.route('**/api/plugins/updates', route =>
+    route.fulfill({
+      json: {
+        updates: ['Calendar', 'Mail', 'Notes'].map(name => ({
+          name,
+          available: true,
+          installed_version: '1',
+          available_version: '2'
+        }))
+      }
+    })
+  );
+  await page.route(/\/api\/personal-assistant$/, route =>
+    route.fulfill({
+      json: {
+        personal_assistant: {
+          state: 'active',
+          state_version: 1,
+          assistant_id: 'fixture-assistant',
+          display_name: 'Ori',
+          hq_workspace_id: 'hq',
+          availability: { model: { available: false, status: 'not_configured' } }
+        }
+      }
+    })
+  );
+  await page.route('**/api/personal-hq/status', route =>
+    route.fulfill({
+      json: { status: { valid: true, workspace_id: 'hq', folder_slug: 'personal-hq' } }
+    })
+  );
+  await page.route('**/api/personal-assistant/setup/file-janitor', route =>
+    route.fulfill({ json: { setup: { run: null } } })
+  );
+  const item = {
+    id: 'request-1',
+    kind: 'decision',
+    title: 'Choose tomorrow’s focus',
+    route: '/workspaces/personal-hq?follow_up=request-1',
+    ref: { workspace_id: 'hq', entity_type: 'follow_up', entity_id: 'request-1' }
+  };
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({
+      status: failed ? 503 : 200,
+      json: {
+        today: {
+          state: 'partial',
+          display_name: 'Ori',
+          needs_you: { health: { status: 'unavailable' }, items: [item, item] },
+          unavailable_sources: ['meetings']
+        }
+      }
+    })
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Show Updates', exact: true }).click();
+  await expect(page.locator('#homePluginUpdatesTitle')).toHaveText('3 plugin updates');
+  await expect(page.locator('#cockpitRailToggleCount')).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('home-maintenance-separate.png') });
+  await page.evaluate(async () => {
+    (window as any).PersonalAssistantPanel.open();
+    await (window as any).PersonalAssistantToday.refresh();
+    (window as any).PersonalAssistantToday.expand();
+  });
+  const request = page.locator('#personalAssistantNeedsYouItems a');
+  await page.locator('#personalAssistantNeedsYouQueueTitle').click();
+  await expect(page.locator('#personalAssistantNeedsYouCount')).toHaveText('1');
+  await expect(request).toHaveAttribute('href', item.route);
+  failed = true;
+  await page.evaluate(async () => {
+    await (window as any).PersonalAssistantToday.refresh();
+    (window as any).PersonalAssistantToday.expand();
+  });
+  await expect(page.getByText(/Showing last-loaded records/)).toBeVisible();
+  await expect(request).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath('assistant-injected-partial.png') });
+  failed = false;
+  await page.locator('#personalAssistantTodayRetry').click();
+  await expect(page.getByText(/Showing last-loaded records/)).toHaveCount(0);
+});
 
 async function skipOnboarding(page: Page) {
   await page.route('**/api/onboarding/status', route =>

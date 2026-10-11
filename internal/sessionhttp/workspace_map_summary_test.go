@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
@@ -15,6 +16,22 @@ import (
 // store, overwrites it with a fixed roster/tasks/tool-binding shape, and saves
 // it back. This is the enrichment source hydrateWorkspaceMetadataInto reads
 // from, independent of whatever the SQLite side already holds.
+func TestMissingSummarySourceDoesNotReuseKnownZero(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+	previous := &session.Workspace{ID: "missing", TaskSummaryAvailable: true}
+	handler.hydrateWorkspaceMetadataInto(previous)
+	if previous.TaskSummaryAvailable {
+		t.Fatal("failed source must not retain a known zero summary")
+	}
+}
+
 func seedMapSummaryFixture(t *testing.T, fileStore *agentworkspace.FileStore, workspaceID string) {
 	t.Helper()
 
@@ -34,6 +51,7 @@ func seedMapSummaryFixture(t *testing.T, fileStore *agentworkspace.FileStore, wo
 		{ID: "t1", Status: agentworkspace.TaskStatusPending},
 		{ID: "t2", Status: agentworkspace.TaskStatusInProgress},
 		{ID: "t3", Status: agentworkspace.TaskStatusCompleted},
+		{ID: "t4", Status: agentworkspace.TaskStatusInProgress, Context: map[string]any{"execution_step_waiting": true}},
 	}
 	ws.MCPBindings = []agentworkspace.MCPBinding{{}, {}}
 	ws.SkillBindings = []agentworkspace.SkillBinding{{}}
@@ -61,8 +79,11 @@ func assertMapSummaryFields(t *testing.T, entry map[string]any) {
 	if !ok || len(agents) != 2 {
 		t.Errorf("agents = %v, want 2 entries", entry["agents"])
 	}
-	if got, ok := entry["open_task_count"].(float64); !ok || got != 2 {
-		t.Errorf("open_task_count = %v, want 2 (pending + in_progress, excludes completed)", entry["open_task_count"])
+	if got, ok := entry["open_task_count"].(float64); !ok || got != 3 {
+		t.Errorf("open_task_count = %v, want 3 actionable tasks", entry["open_task_count"])
+	}
+	if entry["task_summary_available"] != true || entry["needs_attention_count"] != float64(2) || entry["unknown_task_count"] != float64(0) {
+		t.Errorf("attention projection must be available with two attention tasks: %+v", entry)
 	}
 	if got, ok := entry["mcp_count"].(float64); !ok || got != 2 {
 		t.Errorf("mcp_count = %v, want 2", entry["mcp_count"])

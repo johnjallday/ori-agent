@@ -1,6 +1,82 @@
 import { test, expect } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+import { checkNextActionReflow } from './helpers/next-action-reflow';
+
+test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.route('**/api/onboarding/status', route =>
+    route.fulfill({ json: { needs_onboarding: false, completed: true } })
+  );
+});
 
 for (const theme of ['light', 'dark']) {
+  test(`work-first Details is keyboard accessible and wraps at narrow width (${theme})`, async ({
+    page
+  }, testInfo) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const response = await page.request.post('/api/workspaces', {
+      data: { name: `Work-first accessibility ${Date.now()}` }
+    });
+    expect(response.ok()).toBeTruthy();
+    const { folder } = await response.json();
+    const agentName = `Work-first Manager ${Date.now()}`;
+    expect(
+      (
+        await page.request.post('/api/agents', { data: { name: agentName, type: 'orchestration' } })
+      ).ok()
+    ).toBeTruthy();
+    expect(
+      (
+        await page.request.post(`/api/workspaces/${folder.id}/agents`, {
+          data: { agent_name: agentName }
+        })
+      ).ok()
+    ).toBeTruthy();
+    try {
+      await page.goto(`/workspaces/${folder.folder_slug}`);
+      const area = page.getByRole('region', { name: 'Next action', exact: true });
+      await expect(area.getByRole('button', { name: 'Give Task' })).toBeVisible();
+      await page.keyboard.press('Tab');
+      await area.getByRole('button', { name: 'All Tasks' }).focus();
+      await expect(area.getByRole('button', { name: 'All Tasks' })).toHaveCSS(
+        'outline-style',
+        'solid'
+      );
+      await page.keyboard.press('Enter');
+      await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
+      await expect(area.getByRole('button', { name: 'All Tasks' })).toBeFocused();
+      await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+      await expect(page.locator('#onboardingModal')).toBeHidden();
+      const scan = await page.evaluate(async () => {
+        const result = await window.axe.run('.ws-cmd-work-first, .ws-cmd-work-admin', {
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+        });
+        return {
+          violations: result.violations,
+          contrastNodes: result.passes.find(rule => rule.id === 'color-contrast')?.nodes.length || 0
+        };
+      });
+      expect(scan.violations).toEqual([]);
+      expect(scan.contrastNodes).toBeGreaterThan(0);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth + 1
+      );
+      expect(overflow).toBe(false);
+      await page.screenshot({
+        path: testInfo.outputPath(`workspace-work-first-${theme}.png`),
+        fullPage: true
+      });
+      await checkNextActionReflow(page, '.ws-cmd-work-first, .ws-cmd-work-admin');
+      await page.screenshot({
+        path: testInfo.outputPath(`workspace-work-first-zoom-${theme}.png`),
+        fullPage: true
+      });
+    } finally {
+      await page.request.delete(`/api/workspaces/${folder.id}`);
+    }
+  });
   test(`workspace detail accessibility (${theme})`, async ({ page }) => {
     const baseUrl =
       process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';

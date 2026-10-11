@@ -30,7 +30,7 @@ func newRoutesTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
 	}
-	tmpDir := t.TempDir()
+	tmpDir := newServerFixtureRoot(t)
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
@@ -43,6 +43,7 @@ func newRoutesTestServer(t *testing.T) *Server {
 	// read/write the real developer machine's workspace tree. t.Setenv
 	// restores the original HOME after the test.
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("ORI_DATA_DIR", tmpDir)
 
 	builder, err := NewServerBuilder()
 	if err != nil {
@@ -54,6 +55,7 @@ func newRoutesTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
+	closeInjectionTestServer(t, srv)
 
 	return srv
 }
