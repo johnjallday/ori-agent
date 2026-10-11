@@ -204,12 +204,48 @@ func TestOperationRequest_IsOnlyAnExplicitCurrentRequest(t *testing.T) {
 		"Open Safari",
 		"Open settings",
 		"Write a note that says open the Album-1 workspace",
-		"Create a task in Album-1 to mix the chorus",
 		"Start the task in Album-1",
+		"Run the task in Album-1",
+		// Writing about tasks, and lists of them, is still conversation.
+		"Create a task list for my day",
+		"Give me a task list for today",
+		"Give me a task to practise",
+		"Give Mixer a taskforce briefing",
+		"Write a task description for the mix",
+		"Draft an email to my landlord",
+		"Create tasks for the whole album",
+		"Create that task",
+		"Should we give Mixer a task?",
+		"Don't create a task for Mixer",
+		"How do I create a task for Mixer?",
+		`The note says "create a task for Mixer"`,
+		"What task is Mixer working on?",
+		"Assign Mixer to Album-1",
+		"Create a workspace called Thesis",
 	} {
-		if f.handler.operationRequest(prompt) {
-			t.Errorf("not an operation request: %q", prompt)
+		if kind := f.handler.operationRequestKind(prompt); kind != "" {
+			t.Errorf("not an operation request (%s): %q", kind, prompt)
 		}
+	}
+	for _, prompt := range []string{
+		"Create a task in Album-1 to mix the chorus",
+		"Prepare a task for Mixer to mix the chorus",
+		"Please draft a task for Engineer: bounce the stems",
+		"Add a task: bounce the stems",
+		"Make a new task for Mixer",
+		"Give Mixer a task to mix the chorus",
+		"give a task to Engineer",
+		"Assign Mixer a task: rebalance the bridge",
+		"The bridge is muddy. Create a task for Mixer to fix it.",
+		"Can you set up a task for Mixer?",
+	} {
+		if kind := f.handler.operationRequestKind(prompt); kind != operationRequestTask {
+			t.Errorf("task request missed (%q): %q", kind, prompt)
+		}
+	}
+	// Opening and selecting stay their own kind.
+	if kind := f.handler.operationRequestKind("Open the Album-1 workspace"); kind != operationRequestNavigation {
+		t.Errorf("navigation kind: %q", kind)
 	}
 }
 

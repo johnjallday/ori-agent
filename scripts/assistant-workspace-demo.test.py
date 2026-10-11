@@ -188,6 +188,38 @@ class DemoProviderTests(unittest.TestCase):
         self.assertEqual(demo.operate_step("Please open my Thesis workspace.", [], tool)["arguments"],
                          {"workspace_name": "Thesis"})
         self.assertEqual(demo.operate_step("Select the Mixer agent", [], tool)["arguments"], {"agent_name": "Mixer"})
+        # A task draft: the user's words become the title and brief; the
+        # workspace and agent are named, never resolved by the stand-in.
+        both = tool + [{"function": {"name": demo.OPERATE_TASK_TOOL}}]
+        request = "Create a task for Engineer in the Album-1 task fixture workspace to bounce the stems"
+        self.assertEqual(demo.operate_step(request, [], both), {"tool": demo.OPERATE_TASK_TOOL, "arguments": {
+            "title": "Bounce the stems", "brief": request, "agent_name": "Engineer",
+            "workspace_name": "Album-1 task fixture"}})
+        self.assertEqual(demo.operate_step("Create a task for Mixer to mix the chorus.", [], both)["arguments"],
+                         {"title": "Mix the chorus", "brief": "Create a task for Mixer to mix the chorus.", "agent_name": "Mixer"})
+        # No agent named: the stand-in does not pick one.
+        self.assertNotIn("agent_name", demo.operate_step("Create a task to tidy the session", [], both)["arguments"])
+        # Without the task tool the same words prepare nothing.
+        self.assertIsNone(demo.operate_step(request, [], tool))
+
+        def prepared(result):
+            return demo.operate_step(request, [json.dumps(result)], both)["answer"]
+
+        form = prepared({"status": "prepared", "delivery": "watching", "agent": {"name": "Engineer"},
+                         "draft": {"title": "Bounce the stems"}})
+        self.assertEqual(form, "A draft for Engineer is ready in the task form: “Bounce the stems”. "
+                               "Nothing is created until you save it.")
+        button = prepared({"status": "prepared", "delivery": "open_button", "agent": {"name": "Engineer"},
+                           "draft": {"title": "Bounce the stems"}})
+        self.assertIn("behind Ori's Open draft button", button)
+        # A draft is never reported as a task that exists.
+        for text in (form, button):
+            for claim in ("created a task", "task was created", "assigned", "started", "is running"):
+                self.assertNotIn(claim, text)
+        self.assertIn("agent_not_named", prepared({"status": "choose", "reason": "agent_not_named",
+                                                   "choices": [{"name": "Mixer"}, {"name": "Engineer"}]}))
+        self.assertIn("Nothing was prepared.", prepared({"status": "not_found", "reason": "agent_not_in_workspace"}))
+        self.assertIn("Nothing was prepared.", prepared({"status": "unavailable", "reason": "secret_like_text"}))
         # Without the tool there is no operation, whatever the words say.
         self.assertIsNone(demo.operate_step(ask, [], [{"function": {"name": "home_workspaces"}}]))
         self.assertIsNone(demo.operate_step(ask, [], []))

@@ -21,7 +21,8 @@ import { workspaceRootURL } from './workspace-routes.js';
 
 export const OPERATION_ACTION = Object.freeze({
   OPEN_WORKSPACE: 'open_workspace',
-  SELECT_AGENT: 'select_agent'
+  SELECT_AGENT: 'select_agent',
+  OPEN_TASK_DRAFT: 'open_task_draft'
 });
 
 export const OUTCOME = Object.freeze({
@@ -80,21 +81,25 @@ async function waitFor(env, probe) {
 /**
  * @param {object} env
  * @param {() => string} env.pathname - the current page's path
- * @param {() => {workspaceId: string, command: object|null}} env.workspacePage
- *        - the workspace page's identity and its command-view controller, when mounted
+ * @param {() => {workspaceId: string, command: object|null, composer: object|null}} env.workspacePage
+ *        - the workspace page's identity, its command-view controller and its
+ *          task form controller, when mounted
  * @param {(key: string) => Element|null} env.agentControl - the mounted control for an agent key
+ * @param {() => {open: boolean, title: string, brief: string, assignment: string}} env.taskForm
+ *        - what the task form holds right now
  * @param {() => boolean} env.hasUnsavedWork - whether an editor on this page holds unsaved input
  * @param {(ms: number) => Promise<void>} env.wait
  */
 export function createOperationTargets(env) {
-  async function openWorkspace(command, { allowNavigate }) {
+  async function openWorkspace(command, { allowNavigate, replace }) {
     const url = operationWorkspaceURL(command.workspace_slug);
     if (!url) return unavailable('This workspace has no page address.');
     if (comparablePath(env.pathname()) === comparablePath(url)) {
       return { outcome: OUTCOME.ACKNOWLEDGED, observed: { path: env.pathname() } };
     }
     if (!allowNavigate) return { outcome: OUTCOME.YIELD, reason: 'moved_elsewhere' };
-    if (env.hasUnsavedWork()) return { outcome: OUTCOME.YIELD, reason: 'unsaved_work' };
+    // Leaving would discard what the user typed, unless they chose to.
+    if (!replace && env.hasUnsavedWork()) return { outcome: OUTCOME.YIELD, reason: 'unsaved_work' };
     return { outcome: OUTCOME.NAVIGATING, url };
   }
 
@@ -140,19 +145,79 @@ export function createOperationTargets(env) {
     };
   }
 
+  /**
+   * Show a prepared draft in the page's own task form. The form's controller
+   * does the opening; this only hands it the draft and then checks that the
+   * form really holds it. Nothing is typed, auto-parsed or saved.
+   */
+  async function openTaskDraft(command, { snapshot, replace, onSaved }) {
+    const draft = snapshot && snapshot.draft;
+    if (!draft || Number(draft.revision) !== Number(command.draft_revision)) {
+      return unavailable('This draft is no longer the current one.');
+    }
+    const node = String(draft.agent_node_id || '').trim();
+    const agent = String(draft.agent_name || '').trim();
+    if (!node || !agent) return unavailable('This draft has no agent to assign.');
+    const page = await waitFor(env, () => {
+      const current = env.workspacePage();
+      return current && current.composer ? current : null;
+    });
+    if (!page) return unavailable('This page has no task form.');
+    if (String(page.workspaceId || '') !== String(command.workspace_id || '')) {
+      return { outcome: OUTCOME.YIELD, reason: 'moved_elsewhere' };
+    }
+    const composer = page.composer;
+    // The user's own edits win over a proposal that arrives late.
+    if (!replace && composer.isModalOpen() && composer.hasUnsavedChanges()) {
+      return { outcome: OUTCOME.YIELD, reason: 'unsaved_work' };
+    }
+    const assignment = `node:${node}`;
+    await composer.openForCreate(page.workspaceId, draft.title, onSaved || null, {
+      forceManualMode: true,
+      prefillTitle: draft.title,
+      prefillDetails: draft.brief || '',
+      draftAssignmentValue: assignment,
+      draftAssignmentLabel: agent,
+      modalTitle: `Review task for ${agent}`
+    });
+    const form = env.taskForm();
+    if (!form || !form.open) return unavailable('The task form did not open.');
+    if (form.assignment !== assignment) {
+      // Leaving the form open would let a save hand the task to someone the
+      // user was not shown. Close it and say so instead.
+      composer.close({ force: true });
+      return unavailable(`${agent} cannot be assigned in the task form.`);
+    }
+    if (form.title !== String(draft.title || '') || form.brief !== String(draft.brief || '')) {
+      composer.close({ force: true });
+      return unavailable('The task form did not take the draft.');
+    }
+    return { outcome: OUTCOME.ACKNOWLEDGED, observed: { draft_revision: Number(draft.revision) } };
+  }
+
   return {
     /**
      * Carry out one command. `allowNavigate` is true only for a request the
      * user just made or explicitly resumed; a page load never navigates again
-     * by itself.
+     * by itself. `replace` is the user choosing Ori's step over unsaved work.
      */
     async execute(command, options = {}) {
       const action = String((command && command.action) || '');
       try {
         if (action === OPERATION_ACTION.OPEN_WORKSPACE) {
-          return await openWorkspace(command, { allowNavigate: Boolean(options.allowNavigate) });
+          return await openWorkspace(command, {
+            allowNavigate: Boolean(options.allowNavigate),
+            replace: Boolean(options.replace)
+          });
         }
         if (action === OPERATION_ACTION.SELECT_AGENT) return await selectAgent(command);
+        if (action === OPERATION_ACTION.OPEN_TASK_DRAFT) {
+          return await openTaskDraft(command, {
+            snapshot: options.snapshot || null,
+            replace: Boolean(options.replace),
+            onSaved: options.onSaved
+          });
+        }
       } catch (_) {
         return unavailable('This page could not carry out the step.');
       }
@@ -167,8 +232,23 @@ export function browserOperationEnvironment() {
     pathname: () => window.location.pathname,
     workspacePage: () => ({
       workspaceId: String(window.currentWorkspaceId || ''),
-      command: window.workspaceCommand || null
+      command: window.workspaceCommand || null,
+      // The task form exists on workspace pages only.
+      composer:
+        window.currentWorkspaceId && document.getElementById('taskModal')
+          ? window.taskModalController || null
+          : null
     }),
+    taskForm: () => {
+      const value = id => String(document.getElementById(id)?.value ?? '');
+      const composer = window.taskModalController;
+      return {
+        open: Boolean(composer && composer.isModalOpen()),
+        title: value('taskModalDescription'),
+        brief: value('taskModalDetails'),
+        assignment: value('taskModalAssignment')
+      };
+    },
     agentControl: key => {
       const escaped =
         window.CSS && typeof window.CSS.escape === 'function'

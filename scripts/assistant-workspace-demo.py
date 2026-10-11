@@ -56,6 +56,8 @@ PLAIN_DEMOS = {
                    "ORI_WORKSPACE_SLOW_SANDBOX", "group6-wt-demo-slow-reply.log"),
     "operate": ("tests/operate-ori-navigation.spec.ts",
                 "ORI_WORKSPACE_OPERATE_SANDBOX", "operate-ori-navigation.log"),
+    "operate_task": ("tests/operate-ori-task.spec.ts",
+                     "ORI_WORKSPACE_OPERATETASK_SANDBOX", "operate-ori-task.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -154,6 +156,11 @@ OPERATE_OPEN = re.compile(
     r"^(?:please\s+)?(?:open|go to|take me to|show me)\s+(?:the\s+|my\s+)?(.+?)(?:\s+workspace)?"
     r"(?:\s+and\s+(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?)?[.!]?$", re.I)
 OPERATE_SELECT = re.compile(r"^(?:please\s+)?(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?[.!]?$", re.I)
+OPERATE_TASK_TOOL = "assistant_operate_prepare_task"
+OPERATE_TASK = re.compile(
+    r"^(?:please\s+)?(?:create|prepare|draft|add|make)\s+a\s+task"
+    r"(?:\s+for\s+(?:the\s+)?(?P<agent>.+?))?(?:\s+in\s+(?:the\s+)?(?P<workspace>.+?)\s+workspace)?"
+    r"\s+to\s+(?P<what>.+?)[.!]?$", re.I)
 
 
 def operate_step(prompt, results, tools):
@@ -168,9 +175,6 @@ def operate_step(prompt, results, tools):
     if OPERATE_TOOL not in offered:
         return None
     words = prompt.strip()
-    opened, selected = OPERATE_OPEN.match(words), OPERATE_SELECT.match(words)
-    if not opened and not selected:
-        return None
 
     def parsed(text):
         try:
@@ -178,6 +182,43 @@ def operate_step(prompt, results, tools):
             return value if isinstance(value, dict) else {}
         except ValueError:
             return {}
+
+    def refused(result, nothing):
+        status = result.get("status")
+        if status == "choose":
+            names = ", ".join(str(choice.get("name")) for choice in result.get("choices", []))
+            return {"answer": "Which one do you mean: " + names + "? (" + str(result.get("reason")) + ") " + nothing}
+        if status == "not_found":
+            names = ", ".join(str(choice.get("name")) for choice in result.get("closest", []))
+            return {"answer": "I could not find that (" + str(result.get("reason")) + ")." +
+                              (" The closest are: " + names + "." if names else "") + " " + nothing}
+        return {"answer": "Ori could not prepare that (" + str(result.get("reason", "unavailable")) +
+                          "). You can do it from the app yourself. " + nothing}
+
+    task = OPERATE_TASK.match(words) if OPERATE_TASK_TOOL in offered else None
+    if task:
+        # The title and brief are the user's own words; nothing is added.
+        what = task.group("what").strip()
+        title = what[:1].upper() + what[1:]
+        if not results:
+            arguments = {"title": title, "brief": words}
+            if task.group("agent"):
+                arguments["agent_name"] = task.group("agent").strip()
+            if task.group("workspace"):
+                arguments["workspace_name"] = task.group("workspace").strip()
+            return {"tool": OPERATE_TASK_TOOL, "arguments": arguments}
+        result = parsed(results[-1])
+        if result.get("status") != "prepared":
+            return refused(result, "Nothing was prepared.")
+        agent = (result.get("agent") or {}).get("name", "the agent")
+        shown = (result.get("draft") or {}).get("title", title)
+        where = "in the task form" if result.get("delivery") == "watching" else "behind Ori's Open draft button"
+        return {"answer": "A draft for " + agent + " is ready " + where + ": “" + shown +
+                          "”. Nothing is created until you save it."}
+
+    opened, selected = OPERATE_OPEN.match(words), OPERATE_SELECT.match(words)
+    if not opened and not selected:
+        return None
 
     if not results:
         arguments = {"workspace_name": opened.group(1).strip()} if opened else {}
@@ -662,6 +703,9 @@ def main():
     parser.add_argument("--operate", action="store_true",
                         help="wt demo: Operate Ori — open a workspace and select an agent for one watching tab, "
                              "Watch off, a lost acknowledgement, user navigation and an unavailable provider")
+    parser.add_argument("--operate-task", action="store_true",
+                        help="wt demo: Operate Ori — a task draft for a non-entry agent in the real task form, "
+                             "edited, dismissed, reopened and saved by the user; zero tasks before save")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
@@ -686,7 +730,7 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if args.operate else
+    evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if args.operate or args.operate_task else
                 ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
                 ROOT / "tasks/evidence/assistant-folder-response-ux" / (args.folder_response_evidence_stage or "group-3") if args.folder_response else
@@ -694,7 +738,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity, operate=args.operate))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity, operate=args.operate or args.operate_task))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.

@@ -18,10 +18,13 @@ import (
 const (
 	// ToolOpen opens an existing workspace and can select one of its agents.
 	ToolOpen = "assistant_operate_open"
+	// ToolPrepareTask prepares one task draft for an agent in a workspace and
+	// shows it in the task form. It creates no task.
+	ToolPrepareTask = "assistant_operate_prepare_task"
 )
 
 // ToolNames lists every operation tool, in the order they are advertised.
-func ToolNames() []string { return []string{ToolOpen} }
+func ToolNames() []string { return []string{ToolOpen, ToolPrepareTask} }
 
 // IsTool reports whether name is one of the operation tools.
 func IsTool(name string) bool { return slices.Contains(ToolNames(), name) }

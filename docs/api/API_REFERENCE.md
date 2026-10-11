@@ -470,9 +470,12 @@ response may carry:
 
 - `operation`: the operation the stored turn requested, as the asking tab may
   see it (`id`, `kind`, `status`, `revision`, `context`, `watching`, `pending`,
-  `commands`, `receipts`, `expires_at`). `commands` are named actions
-  (`open_workspace`, `select_agent`) with host-resolved references; they are
-  present only for the watching tab.
+  `commands`, `draft`, `receipts`, `expires_at`). `commands` are named actions
+  (`open_workspace`, `select_agent`, `open_task_draft`) with host-resolved
+  references; they are present only for the watching tab. A `kind: task`
+  operation is `prepared` and carries `draft` (`revision`, `title`, `brief`,
+  `agent_name`, `agent_node_id`): a proposal shown in the task form, not a
+  task. No task exists until the user saves that form.
 - `operation_error`: why a requested operation was not recorded
   (`turn_not_saved`, or an operation error code). Nothing will open.
 - `operation_capability`: `{ "available", "reason" }`.
@@ -481,7 +484,7 @@ response may carry:
 |---|---|---|
 | `GET /api/home-assistant/operations/capability` | — | `{ available, reason }`: `operations_unavailable`, `model_not_configured` or `provider_cannot_run_ori_tools` when unavailable. The same answer is in `GET /api/personal-assistant` as `availability.operations`. |
 | `GET /api/home-assistant/operations/{id}?tab=<tab id>` | — | Returns `operation` as that tab may see it. An ended operation stays readable for a day. |
-| `POST /api/home-assistant/operations/{id}/ack` | `command_id`, `revision`, `tab_id`, `outcome` (`acknowledged` or `unavailable`), `observed` (`path`, `agent_key`), `reason` | Records what the watching tab observed for one step. Steps are reported in order; a repeat of a recorded outcome changes nothing. It is view evidence only. |
+| `POST /api/home-assistant/operations/{id}/ack` | `command_id`, `revision`, `tab_id`, `outcome` (`acknowledged` or `unavailable`), `observed` (`path`, `agent_key`, `draft_revision`), `reason` | Records what the watching tab observed for one step. Steps are reported in order; a repeat of a recorded outcome changes nothing. It is view evidence only. |
 | `POST /api/home-assistant/operations/{id}/watch` | `tab_id`, `revision`, `watch`, `adopt` | Turns watching on or off for that tab. Taking it from another tab needs `adopt`. Off cancels nothing. |
 | `POST /api/home-assistant/operations/{id}/cancel` | `tab_id`, `revision` | Dismisses the operation. No workspace, agent or task is touched. |
 

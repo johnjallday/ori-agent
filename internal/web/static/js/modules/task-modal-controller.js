@@ -363,8 +363,28 @@ class TaskModalController {
     }
 
     if (typeof modalContext.onSaveCallback === 'function') {
-      await modalContext.onSaveCallback();
+      // The callback receives what was saved (for a create, `{ task }` with
+      // the server's own record). Callers that take no argument are unaffected.
+      await modalContext.onSaveCallback(eventPayload);
     }
+  }
+
+  /**
+   * Make sure the assignment list can hold a specific agent instance. The list
+   * is built from the app-wide agents with a guessed node; an instance whose
+   * node differs would otherwise silently become "no agent" when selected.
+   * Returns whether the list now has that exact value.
+   */
+  ensureAssignmentOption(value, label) {
+    const selectEl = document.getElementById('taskModalAssignment');
+    const wanted = String(value || '').trim();
+    if (!selectEl || !wanted) return false;
+    if (Array.from(selectEl.options || []).some(option => option.value === wanted)) return true;
+    const option = document.createElement('option');
+    option.value = wanted;
+    option.textContent = String(label || '').trim() || wanted;
+    selectEl.appendChild(option);
+    return true;
   }
 
   getModalRoot() {
@@ -915,6 +935,11 @@ class TaskModalController {
       this.setMainInputTaskRefs(draftMainInputRefs);
     }
     this.refreshSubtaskInputOptions();
+    // A caller that names the exact instance (with its label) gets that
+    // instance in the list, so the proposed assignment is what is shown.
+    if (draftAssignmentValue && createOptions.draftAssignmentLabel) {
+      this.ensureAssignmentOption(draftAssignmentValue, createOptions.draftAssignmentLabel);
+    }
     if (assignmentInput) assignmentInput.value = draftAssignmentValue;
 
     // Reset subtasks

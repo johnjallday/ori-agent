@@ -30,6 +30,10 @@ type Guard interface {
 	// Workspace re-reads the accepted workspace for the user and returns its
 	// current slug and name.
 	Workspace(ctx context.Context, userID, workspaceID string) (Context, error)
+	// Agent confirms that this exact agent instance is in that workspace's own
+	// roster right now and returns its canonical name and node. A namesake in
+	// the app-wide roster, or another workspace's instance, is not a match.
+	Agent(ctx context.Context, userID, workspaceID, agentName, nodeID string) (name, node string, err error)
 }
 
 // Service owns operation lifecycle and owner-scoped access. It executes
@@ -65,6 +69,9 @@ type CreateRequest struct {
 	// Actions are the named browser steps, in order. Their arguments come
 	// from Context, never from the caller's free text.
 	Actions []Action
+	// Draft is the task a KindTask operation prepares: a title and a brief for
+	// the agent in Context. Preparing it writes no task and starts nothing.
+	Draft *Draft
 }
 
 // Create stores a new operation and returns the originating tab's snapshot.
@@ -101,6 +108,31 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Snapshot, err
 		Owner: req.Owner, Context: accepted, TabID: req.TabID, Watch: req.Watch,
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(s.ttl),
 	}
+	if (req.Kind == KindTask) != (req.Draft != nil) {
+		return nil, fmt.Errorf("%w: a task operation carries exactly one draft", ErrInvalidCommand)
+	}
+	if req.Draft != nil {
+		// The assignment is this workspace's own roster instance, checked now.
+		// An agent that is not there is never replaced by a namesake or by the
+		// workspace's entry agent.
+		name, node, err := s.guard.Agent(ctx, req.Owner.UserID, accepted.WorkspaceID, accepted.AgentName, accepted.AgentNodeID)
+		if err != nil {
+			return nil, guardError(err)
+		}
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(node) == "" {
+			return nil, fmt.Errorf("%w: the task needs an agent in this workspace", ErrInvalidated)
+		}
+		accepted.AgentName, accepted.AgentNodeID = name, node
+		op.Context = accepted
+		op.Draft = &Draft{
+			Revision: 1, Title: strings.TrimSpace(req.Draft.Title), Brief: strings.TrimSpace(req.Draft.Brief),
+			AgentName: name, AgentNodeID: node,
+		}
+		// Preparing is a server fact of its own: a draft revision now exists.
+		// It is not a task, and no browser has shown it yet.
+		op.Status = StatusPrepared
+		appendReceipt(op, Receipt{Kind: ReceiptDraftPrepared, At: now, Ref: "1"})
+	}
 	for i, action := range req.Actions {
 		command := Command{ID: s.newID(), Sequence: i + 1, Action: action, Status: CommandPending, IssuedAt: now,
 			WorkspaceID: accepted.WorkspaceID, WorkspaceSlug: accepted.WorkspaceSlug}
@@ -111,9 +143,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Snapshot, err
 				return nil, fmt.Errorf("%w: selecting an agent needs a resolved agent", ErrInvalidCommand)
 			}
 			command.AgentName, command.AgentNodeID = accepted.AgentName, accepted.AgentNodeID
+		case ActionOpenTaskDraft:
+			if op.Draft == nil {
+				return nil, fmt.Errorf("%w: there is no draft to open", ErrInvalidCommand)
+			}
+			command.DraftRevision = op.Draft.Revision
+			command.AgentName, command.AgentNodeID = op.Draft.AgentName, op.Draft.AgentNodeID
 		default:
-			// Draft and task commands are issued by their own transitions,
-			// which bind them to a revision or a task.
+			// Task commands are issued by their own transitions, which bind
+			// them to a task.
 			return nil, fmt.Errorf("%w: %q cannot start an operation", ErrInvalidCommand, action)
 		}
 		op.Commands = append(op.Commands, command)

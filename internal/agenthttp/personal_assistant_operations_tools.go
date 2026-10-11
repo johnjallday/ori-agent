@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/assistantops"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/sensitive"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -30,6 +32,9 @@ type operationTurn struct {
 	owner   assistantops.Owner
 	ref     HomeAssistantOperationRef
 	staged  *assistantops.CreateRequest
+	// request is what the user's own words asked for (navigation or task). It
+	// decides which legacy confirmation this turn replaces, nothing more.
+	request string
 }
 
 // operationTurn returns the turn's operating state, or nil when this turn may
@@ -38,20 +43,32 @@ type operationTurn struct {
 // cannot run Ori's tools, or the user's own current words are not an explicit
 // request. With nil, no operation tool is registered and no skill is loaded.
 func (h *HomeAssistantAskHandler) operationTurn(prompt string, ref *HomeAssistantOperationRef, conversation *openConversation, work *PersonalAssistantWorkContext, scope *assistantWorkspaceTurn) *operationTurn {
-	if h == nil || conversation == nil || scope == nil || !h.operationRequest(prompt) || !h.operationCapability().Available {
+	if h == nil || conversation == nil || scope == nil {
+		return nil
+	}
+	kind := h.operationRequestKind(prompt)
+	if kind == "" || !h.operationCapability().Available {
 		return nil
 	}
 	owner, ok := operationOwner(scope.userID, work)
 	if !ok {
 		return nil
 	}
-	turn := &operationTurn{handler: h, scope: scope, owner: owner}
+	turn := &operationTurn{handler: h, scope: scope, owner: owner, request: kind}
 	// A malformed tab identity is treated as no tab: the request can still be
 	// recorded, and it is then delivered to nobody until a tab opts in.
 	if ref != nil && assistantops.ValidTabID(ref.TabID) {
 		turn.ref = *ref
 	}
 	return turn
+}
+
+// owns reports whether this turn's operation replaces a legacy confirmation.
+// Only one does: a request to prepare a task replaces the one-click task
+// create. Starting work, and every workspace or agent change, keep their own
+// confirmation.
+func (t *operationTurn) owns(conf *HomeActionConfirmation) bool {
+	return t != nil && conf != nil && t.request == operationRequestTask && conf.ActionType == HomeActionCreateTask
 }
 
 // prompt is the operating skill for this turn, loaded only when every
@@ -71,7 +88,7 @@ func (t *operationTurn) prompt(offered []llm.Tool) string {
 	}
 	// The conversation prompt says the assistant can run nothing itself. That
 	// stays true; this names the one thing Ori will do when asked, for this turn.
-	return "\nFor this turn one exception applies to the limits above: Ori registered the operation the skill below names. Asking Ori to open a workspace or select an agent is allowed. It still saves, starts, schedules, installs and sends nothing." + instructions
+	return "\nFor this turn one exception applies to the limits above: Ori registered the operations the skill below names. Asking Ori to open a workspace, select an agent or prepare a task draft for the user to review is allowed. It still creates, saves, starts, schedules, installs and sends nothing: the user does that in the app." + instructions
 }
 
 // finalize records the staged operation once its turn is stored, and only
@@ -111,14 +128,27 @@ type operationRegistry struct {
 }
 
 func (r *operationRegistry) Definitions() []llm.Tool {
+	workspaceID := map[string]any{"type": "string", "maxLength": 80, "description": "Canonical ID of the workspace, from Ori's listings in this turn."}
+	workspaceName := map[string]any{"type": "string", "maxLength": 120, "description": "Exact workspace name, when no ID is known."}
 	return append(r.base.Definitions(), llm.Tool{
 		Name:        assistantops.ToolOpen,
 		Description: "Ask Ori to open one of the user's existing workspaces in their app and, optionally, select one agent that already works there. Use only for an explicit request in the user's current message. It changes what the user's own tab shows and nothing else: no workspace, agent or task is created, changed or started. Ori reports that the request was recorded, not that the page changed. Use as the only tool call in this batch, once.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
-			"workspace_id":   map[string]any{"type": "string", "maxLength": 80, "description": "Canonical ID of the workspace, from Ori's listings in this turn."},
-			"workspace_name": map[string]any{"type": "string", "maxLength": 120, "description": "Exact workspace name, when no ID is known."},
+			"workspace_id":   workspaceID,
+			"workspace_name": workspaceName,
 			"agent_name":     map[string]any{"type": "string", "maxLength": 120, "description": "Exact name of an agent in that workspace to select. Omit unless the user asked for an agent."},
 		}, "additionalProperties": false},
+	}, llm.Tool{
+		Name:        assistantops.ToolPrepareTask,
+		Description: "Ask Ori to prepare one task draft for an agent that already works in one of the user's workspaces, and show it in the app's own task form for the user to review. Use only for an explicit request in the user's current message. It creates no task and starts nothing: the user edits the draft and saves it themselves. Only a title, a brief and the agent can be set; schedules, subtasks, workflows and file access are the user's to add in the form. Use as the only tool call in this batch, once.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"workspace_id":   workspaceID,
+			"workspace_name": workspaceName,
+			"agent_name":     map[string]any{"type": "string", "maxLength": 120, "description": "Exact name of the agent in that workspace who should do the task."},
+			"agent_node_id":  map[string]any{"type": "string", "maxLength": 120, "description": "Only when Ori returned several instances with the same name: the node of the one to assign."},
+			"title":          map[string]any{"type": "string", "minLength": 1, "maxLength": assistantops.MaxDraftTitleRunes, "description": "A short task title in the user's own terms."},
+			"brief":          map[string]any{"type": "string", "maxLength": assistantops.MaxDraftBriefRunes, "description": "What the user asked for, in their words. Do not add requirements they did not state."},
+		}, "required": []string{"title"}, "additionalProperties": false},
 	})
 }
 
@@ -129,17 +159,108 @@ func (r *operationRegistry) Execute(ctx context.Context, name, arguments string)
 	if err := r.turn.handler.revalidateWorkspaceTurn(ctx, r.turn.scope); err != nil {
 		return "", err
 	}
-	var args struct {
-		WorkspaceID   string `json:"workspace_id"`
-		WorkspaceName string `json:"workspace_name"`
-		AgentName     string `json:"agent_name"`
-	}
+	var args operationArguments
 	decoder := json.NewDecoder(bytes.NewReader([]byte(arguments)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&args); err != nil && strings.TrimSpace(arguments) != "" {
 		return "", errors.New("invalid operation arguments")
 	}
-	return homeToolJSON(r.turn.open(strings.TrimSpace(args.WorkspaceID), strings.TrimSpace(args.WorkspaceName), strings.TrimSpace(args.AgentName)))
+	args.trim()
+	if name == assistantops.ToolPrepareTask {
+		return homeToolJSON(r.turn.prepareTask(args))
+	}
+	// Task fields on a request to open something are a mistake, not a hint.
+	if args.Title != "" || args.Brief != "" || args.AgentNodeID != "" {
+		return "", errors.New("invalid operation arguments")
+	}
+	return homeToolJSON(r.turn.open(args.WorkspaceID, args.WorkspaceName, args.AgentName))
+}
+
+// operationArguments is everything an operation tool may be given. Nothing
+// here is a URL, a selector or a script, and unknown fields are refused.
+type operationArguments struct {
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	AgentName     string `json:"agent_name"`
+	AgentNodeID   string `json:"agent_node_id"`
+	Title         string `json:"title"`
+	Brief         string `json:"brief"`
+}
+
+func (a *operationArguments) trim() {
+	for _, field := range []*string{&a.WorkspaceID, &a.WorkspaceName, &a.AgentName, &a.AgentNodeID, &a.Title, &a.Brief} {
+		*field = strings.TrimSpace(*field)
+	}
+}
+
+// prepareTask resolves the workspace and the exact roster instance, checks the
+// draft's bounds and stages it. It writes no task: the draft is shown in the
+// task form, and only the user's own save creates anything.
+func (t *operationTurn) prepareTask(args operationArguments) map[string]any {
+	if t.staged != nil {
+		return map[string]any{"status": "unavailable", "reason": "one_operation_per_request", "note": "This request already has an operation. Nothing else was prepared."}
+	}
+	ws, result := t.resolveWorkspace(args.WorkspaceID, args.WorkspaceName)
+	if ws == nil {
+		return result
+	}
+	roster := rosterChoices(ws)
+	if args.AgentName == "" {
+		// A task with no agent would be handed to the workspace's entry agent
+		// when saved. That choice is the user's, so ask instead.
+		return map[string]any{"status": "choose", "reason": "agent_not_named", "choices": roster, "note": "Ask the user which agent in this workspace should do the task. Nothing was prepared."}
+	}
+	instances := rosterInstances(ws, args.AgentName, args.AgentNodeID)
+	switch {
+	case len(instances) == 0:
+		return map[string]any{"status": "not_found", "reason": "agent_not_in_workspace", "closest": roster, "note": "No agent of that name works in this workspace. Nothing was prepared."}
+	case len(instances) > 1:
+		same := make([]operationChoice, 0, len(instances))
+		for _, instance := range instances {
+			same = append(same, operationChoice{Name: workspaceContextText(instance.Name, 120), Role: workspaceContextText(instance.Role, 120), NodeID: instance.NodeID})
+		}
+		return map[string]any{"status": "choose", "reason": "several_agents_match", "choices": same, "note": "Several instances share that name. Ask the user which one, then pass its agent_node_id. Nothing was prepared."}
+	case strings.TrimSpace(instances[0].NodeID) == "":
+		return map[string]any{"status": "unavailable", "reason": "agent_cannot_be_assigned", "note": "That agent cannot be assigned from here. The user can assign it in the task form. Nothing was prepared."}
+	}
+	draft := assistantops.Draft{Revision: 1, Title: args.Title, Brief: args.Brief}
+	switch {
+	case sensitive.ContainsSecretLikeText(args.Title) || sensitive.ContainsSecretLikeText(args.Brief):
+		return map[string]any{"status": "unavailable", "reason": "secret_like_text", "note": "The draft looks like it contains a credential. Nothing was prepared; ask the user to leave secrets out."}
+	case draft.Validate() != nil:
+		return map[string]any{"status": "unavailable", "reason": "draft_out_of_bounds", "note": "A task needs a title of at most " + strconv.Itoa(assistantops.MaxDraftTitleRunes) + " characters and a brief of at most " + strconv.Itoa(assistantops.MaxDraftBriefRunes) + ". Nothing was prepared."}
+	}
+	instance := instances[0]
+	t.staged = &assistantops.CreateRequest{
+		Kind:    assistantops.KindTask,
+		Context: assistantops.Context{WorkspaceID: ws.ID, AgentName: instance.Name, AgentNodeID: instance.NodeID},
+		Actions: []assistantops.Action{assistantops.ActionOpenWorkspace, assistantops.ActionOpenTaskDraft},
+		Draft:   &assistantops.Draft{Title: args.Title, Brief: args.Brief},
+		TabID:   t.ref.TabID, Watch: t.ref.Watch && t.ref.TabID != "",
+	}
+	delivery := "open_button"
+	if t.staged.Watch {
+		delivery = "watching"
+	}
+	return map[string]any{
+		"status":    "prepared",
+		"workspace": map[string]any{"workspace_id": ws.ID, "name": workspaceContextText(ws.Name, 120), "kind": operationKind(ws)},
+		"agent":     map[string]any{"name": workspaceContextText(instance.Name, 120), "role": workspaceContextText(instance.Role, 120)},
+		"draft":     map[string]any{"title": args.Title},
+		"delivery":  delivery,
+		"note":      "Ori prepared this draft for the user to review in the task form. No task was created and nothing was started; do not say it was.",
+	}
+}
+
+func rosterChoices(ws *workspace.Workspace) []operationChoice {
+	roster := make([]operationChoice, 0, min(len(ws.AgentInstances), 8))
+	for i := range ws.AgentInstances {
+		if len(roster) == 8 {
+			break
+		}
+		roster = append(roster, operationChoice{Name: workspaceContextText(ws.AgentInstances[i].Name, 120), Role: workspaceContextText(ws.AgentInstances[i].Role, 120)})
+	}
+	return roster
 }
 
 // operationChoice is one candidate Ori returns when a name is not one thing.
@@ -148,6 +269,7 @@ type operationChoice struct {
 	Name        string `json:"name"`
 	Kind        string `json:"kind,omitempty"`
 	Role        string `json:"role,omitempty"`
+	NodeID      string `json:"agent_node_id,omitempty"`
 }
 
 // open resolves one workspace and, when asked, one of its agents from

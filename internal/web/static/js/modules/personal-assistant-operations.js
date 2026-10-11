@@ -53,6 +53,8 @@ function target(snapshot) {
  * @param {boolean} [state.capable] - whether the assistant can operate here
  * @param {boolean} [state.watch] - this tab's Watch choice
  * @param {string} [state.error] - why a requested operation was not recorded
+ * @param {string} [state.note] - a local remark about what the user just did here
+ * @param {boolean} [state.onWorkspace] - whether this page is the operation's workspace
  * @returns {{watchVisible:boolean, watchChecked:boolean, watchHint:string, text:string,
  *   tone:string, actions:Array<{id:string,label:string,primary?:boolean}>, link:{href:string,label:string}|null}}
  */
@@ -75,10 +77,28 @@ export function operationView(state = {}) {
       view.text =
         ERROR_TEXT[state.error] || 'Ori could not record that request. Nothing will open.';
       view.tone = 'attention';
+    } else if (state.note) {
+      view.text = String(state.note);
     }
     return view;
   }
 
+  const shown =
+    snapshot.kind === 'task' && snapshot.draft
+      ? taskView(view, state)
+      : navigationView(view, state);
+  if (state.note) {
+    // A short, local remark about what the user just did here. It replaces
+    // the sentence, never the choices beside it.
+    shown.text = String(state.note);
+    shown.tone = 'quiet';
+  }
+  return shown;
+}
+
+/** What the drawer shows for opening a workspace and selecting an agent. */
+function navigationView(view, state) {
+  const snapshot = state.snapshot;
   const { workspace, agent, slug } = target(snapshot);
   const open = command(snapshot, 'open_workspace');
   const select = command(snapshot, 'select_agent');
@@ -145,6 +165,94 @@ export function operationView(state = {}) {
   }
 }
 
+function shorten(text, limit) {
+  const characters = Array.from(String(text || '').trim());
+  return characters.length <= limit
+    ? characters.join('')
+    : characters.slice(0, limit).join('') + '…';
+}
+
+/**
+ * What the drawer shows for a prepared task draft. A draft is never called a
+ * task: until the user saves the form, nothing exists but the proposal.
+ */
+function taskView(view, state) {
+  const snapshot = state.snapshot;
+  const { workspace, slug } = target(snapshot);
+  const agent = String(snapshot.draft.agent_name || 'the agent');
+  const title = shorten(snapshot.draft.title, 60);
+  const open = command(snapshot, 'open_workspace');
+  const form = command(snapshot, 'open_task_draft');
+  const failed = (snapshot.commands || []).find(item => item.status === 'unavailable');
+  const opened = Boolean(open && open.status === 'acknowledged');
+  const shown = Boolean(form && form.status === 'acknowledged');
+  const unsaved = 'Nothing is created until you save it.';
+  const dismiss = { id: 'dismiss', label: 'Dismiss' };
+  const manual = () => {
+    const href = operationWorkspaceURL(slug);
+    return href ? { href, label: `Open ${workspace} yourself` } : null;
+  };
+
+  switch (state.phase) {
+    case PHASE.ENDED:
+      if (snapshot.status === 'expired') {
+        view.text = 'That draft ran out of time. Ask again to prepare it.';
+      } else if (snapshot.status === 'invalidated') {
+        view.text =
+          'That draft is no longer valid because your assistant, the conversation, the workspace or its team changed.';
+      }
+      if (view.text) {
+        view.tone = 'attention';
+        view.actions = [dismiss];
+      }
+      return view;
+    case PHASE.RUNNING:
+    case PHASE.NAVIGATING:
+      view.text = opened ? `Opened ${workspace}. Opening the task form…` : `Opening ${workspace}…`;
+      view.tone = 'working';
+      return view;
+    case PHASE.WAITING:
+      view.text = `Draft ready for ${agent}: “${title}”. ${unsaved}`;
+      view.actions = [{ id: 'resume', label: 'Open draft', primary: true }, dismiss];
+      return view;
+    case PHASE.PAUSED:
+      view.tone = 'attention';
+      if (state.pauseReason === 'unsaved_work') {
+        // The user's edits win. Replacing them is their choice, said plainly.
+        view.text = `This page has unsaved changes. Ori's draft for ${agent} is waiting.`;
+        view.actions = [
+          { id: 'resume', label: "Replace with Ori's draft", primary: true },
+          dismiss
+        ];
+        return view;
+      }
+      view.text = PAUSE_TEXT[state.pauseReason] || 'Paused.';
+      view.actions = [{ id: 'resume', label: 'Open draft', primary: true }, dismiss];
+      view.link = manual();
+      return view;
+    case PHASE.SETTLED:
+      if (failed) {
+        const reason = String(failed.reason || '').trim();
+        view.text = `Ori could not ${failed.action === 'open_workspace' ? `open ${workspace}` : 'open the task form'}.${reason ? ' ' + reason : ''}`;
+        view.tone = 'attention';
+        view.actions = [dismiss];
+        view.link = opened ? null : manual();
+      } else if (shown) {
+        // True whether the form is still open or the user has closed it.
+        view.text = `Draft for ${agent}: “${title}”. Review it in the task form. ${unsaved}`;
+        view.tone = 'done';
+        // The form can be reopened from the same draft on its own page.
+        view.actions = state.onWorkspace
+          ? [{ id: 'open_draft', label: 'Open draft again' }, dismiss]
+          : [dismiss];
+        view.link = state.onWorkspace ? null : manual();
+      }
+      return view;
+    default:
+      return view;
+  }
+}
+
 /**
  * Mark the control Ori just used. The page re-renders its controls, replacing
  * the marked node with an identical one, so the mark follows the live node for
@@ -176,6 +284,25 @@ function applyHighlight(highlight) {
     if (element && !element.classList.contains(HIGHLIGHT_CLASS))
       element.classList.add(HIGHLIGHT_CLASS);
   }, HIGHLIGHT_FOLLOW_MS);
+}
+
+/**
+ * This tab's storage. Where the browser withholds it, the tab still works for
+ * the page it is on: it just follows nothing across a navigation.
+ */
+function tabStorage() {
+  try {
+    const storage = window.sessionStorage;
+    storage.getItem('ori.personalAssistant.tab');
+    return storage;
+  } catch (_) {
+    const memory = new Map();
+    return {
+      getItem: key => (memory.has(key) ? memory.get(key) : null),
+      setItem: (key, value) => memory.set(key, String(value)),
+      removeItem: key => memory.delete(key)
+    };
+  }
 }
 
 async function apiRequest(method, path, body) {
@@ -215,22 +342,37 @@ function mount() {
 
   const client = new OperationClient({
     request: apiRequest,
-    storage: window.sessionStorage,
+    storage: tabStorage(),
     targets: createOperationTargets(browserOperationEnvironment()),
     navigate: url => window.location.assign(url)
   });
   // The drawer may have read the relationship before this module mounted.
   const known = window.PersonalAssistantPanel?._state?.personalAssistant?.availability?.operations;
-  const state = { capable: Boolean(known && known.available), error: '', shownHighlight: '' };
+  const state = {
+    capable: Boolean(known && known.available),
+    error: '',
+    note: '',
+    shownHighlight: ''
+  };
 
   function render() {
+    const snapshot = client.snapshot;
     const view = operationView({
-      snapshot: client.snapshot,
+      snapshot,
       phase: client.phase,
       pauseReason: client.pauseReason,
       capable: state.capable,
       watch: client.watchPreference(),
-      error: state.error
+      error: state.error,
+      // The form the user saved created the task; this only says so.
+      note:
+        state.note ||
+        (!snapshot && client.saved ? 'Task saved from the draft. It is in the workspace now.' : ''),
+      onWorkspace: Boolean(
+        snapshot &&
+        snapshot.context &&
+        String(window.currentWorkspaceId || '') === String(snapshot.context.workspace_id || '')
+      )
     });
     // The Watch chip lives in the composer's chip row, so it costs the drawer
     // no height. Its hint is the chip's description and tooltip.
@@ -283,8 +425,20 @@ function mount() {
     const button = event.target.closest('[data-operation-action]');
     if (!button) return;
     state.error = '';
+    state.note = '';
     if (button.dataset.operationAction === 'resume') void client.resume();
     if (button.dataset.operationAction === 'dismiss') void client.dismiss();
+    if (button.dataset.operationAction === 'open_draft') {
+      void client.openDraft().then(outcome => {
+        // The user's own edits are never replaced by reopening the proposal.
+        if (outcome === 'kept') {
+          state.note = 'The task form is open with your changes. Nothing was replaced.';
+        } else if (outcome === 'unavailable') {
+          state.note = 'The task form could not be opened here.';
+        }
+        render();
+      });
+    }
   });
   document.addEventListener('personal-assistant:status', event => {
     const operations = event.detail?.personalAssistant?.availability?.operations;
@@ -311,7 +465,9 @@ function mount() {
       if (!data) return;
       if (data.operation_capability) state.capable = Boolean(data.operation_capability.available);
       state.error = data.operation ? '' : String(data.operation_error || '');
+      state.note = '';
       if (data.operation) {
+        client.saved = null;
         void client.adopt(data.operation);
         return;
       }

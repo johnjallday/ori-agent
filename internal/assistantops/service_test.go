@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,9 @@ type fakeGuard struct {
 	workspaces   map[string]Context
 	relationship error
 	userErr      error
+	// roster is each workspace's own agents: canonical name -> node.
+	roster   map[string]map[string]string
+	agentErr error
 }
 
 func (g *fakeGuard) CurrentUser(context.Context) (string, error) {
@@ -50,6 +54,21 @@ func (g *fakeGuard) Workspace(_ context.Context, _ string, id string) (Context, 
 		return Context{}, fmt.Errorf("%w: workspace gone", ErrInvalidated)
 	}
 	return ws, nil
+}
+
+// Agent answers from the workspace's own roster: canonical name -> node.
+func (g *fakeGuard) Agent(_ context.Context, _ string, workspaceID, name, node string) (string, string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.agentErr != nil {
+		return "", "", g.agentErr
+	}
+	for canonical, canonicalNode := range g.roster[workspaceID] {
+		if strings.EqualFold(canonical, name) && (node == "" || node == canonicalNode) {
+			return canonical, canonicalNode, nil
+		}
+	}
+	return "", "", fmt.Errorf("%w: agent not in this workspace", ErrInvalidated)
 }
 
 func (g *fakeGuard) set(change func(*fakeGuard)) {
@@ -82,7 +101,7 @@ func newFixture(t *testing.T) *fixture {
 	relationship.ConversationID, relationship.TurnMessageID = "", ""
 	f.guard = &fakeGuard{user: "local", owner: relationship, workspaces: map[string]Context{
 		"ws-album": {WorkspaceID: "ws-album", WorkspaceSlug: "album-1", WorkspaceName: "Album 1"},
-	}}
+	}, roster: map[string]map[string]string{"ws-album": {"Mixer": "Mixer-node-1", "Engineer": "Engineer-node-1"}}}
 	f.service = NewService(f.store, f.guard)
 	f.service.now = func() time.Time { return f.clock }
 	return f

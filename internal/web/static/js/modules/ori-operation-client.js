@@ -98,6 +98,8 @@ export class OperationClient {
     this.phase = PHASE.IDLE;
     this.pauseReason = '';
     this.highlight = null;
+    // Set when the user saved the task form that held a draft from here.
+    this.saved = null;
   }
 
   // ---- identity and preference ----
@@ -191,9 +193,37 @@ export class OperationClient {
   /** The user asked to continue here: watch if needed, then carry on. */
   async resume() {
     if (!this.snapshot || ENDED.has(this.snapshot.status)) return;
+    // Resuming a step that waited for unsaved work is the user choosing Ori's
+    // step over what they had typed.
+    const replace = this.phase === PHASE.PAUSED && this.pauseReason === 'unsaved_work';
     if (!this.snapshot.watching && !(await this.setWatching(true, { adopt: true }))) return;
     this._remember(this.snapshot.id);
-    await this.run({ allowNavigate: true });
+    await this.run({ allowNavigate: true, replace });
+  }
+
+  /**
+   * Show the prepared draft in the task form again, at the user's request. It
+   * is a local view of a draft this tab may already read: it reports nothing
+   * and changes no operation. Unsaved edits in the form are never replaced.
+   * Returns what happened: 'opened', 'kept' (the form holds unsaved work),
+   * 'elsewhere' (not on that workspace's page) or 'unavailable'.
+   */
+  async openDraft() {
+    const snapshot = this.snapshot;
+    if (!snapshot || !snapshot.draft || ENDED.has(snapshot.status)) return 'unavailable';
+    const result = await this._targets.execute(
+      {
+        action: 'open_task_draft',
+        workspace_id: snapshot.context && snapshot.context.workspace_id,
+        draft_revision: snapshot.draft.revision
+      },
+      { snapshot, replace: false, onSaved: payload => this._draftSaved(snapshot.id, payload) }
+    );
+    if (result.outcome === OUTCOME.ACKNOWLEDGED) return 'opened';
+    if (result.outcome === OUTCOME.YIELD) {
+      return result.reason === 'unsaved_work' ? 'kept' : 'elsewhere';
+    }
+    return 'unavailable';
   }
 
   /** Turn watching on or off for this operation in this tab. Off cancels nothing. */
@@ -216,6 +246,17 @@ export class OperationClient {
       await this._afterRefusal(error);
       return false;
     }
+  }
+
+  /**
+   * The user saved the task form that held this operation's draft. The form
+   * created the task through its own owner; this tab stops offering the
+   * draft, so the same proposal cannot be saved twice from here.
+   */
+  async _draftSaved(operationId, payload) {
+    if (!this.snapshot || this.snapshot.id !== operationId) return;
+    this.saved = { task: (payload && payload.task) || null };
+    await this.dismiss();
   }
 
   /** Dismiss the operation. A task it created or started is not touched. */
@@ -241,7 +282,7 @@ export class OperationClient {
    * Carry out this tab's pending commands in order, reporting each observed
    * outcome before the next one starts.
    */
-  async run({ allowNavigate = false } = {}) {
+  async run({ allowNavigate = false, replace = false } = {}) {
     if (this._running) return;
     this._running = true;
     try {
@@ -254,7 +295,12 @@ export class OperationClient {
         this._set(PHASE.RUNNING);
 
         const result = isSupportedAction(command.action)
-          ? await this._targets.execute(command, { allowNavigate })
+          ? await this._targets.execute(command, {
+              allowNavigate,
+              replace,
+              snapshot,
+              onSaved: payload => this._draftSaved(snapshot.id, payload)
+            })
           : { outcome: OUTCOME.UNAVAILABLE, reason: 'This step is not supported here.' };
 
         if (result.outcome === OUTCOME.NAVIGATING) {

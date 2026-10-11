@@ -503,9 +503,17 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{Response: decline, Intent: intent, Identity: identity}
 	}
 
+	// Whether this turn may operate the app is decided once, from the user's
+	// own current words, before the legacy confirmations are consulted.
+	operations := h.operationTurn(prompt, req.Operation, conversation, workContext, scope)
+
 	// Explicit, supported mutation request: ask for confirmation before doing
 	// anything (FR #24). Execution happens only on a follow-up with ConfirmedAction.
-	if conf := h.detectHomeMutationRequest(prompt); conf != nil {
+	// One request has one owner: where Ori can prepare a task in the real task
+	// form, "create a task for Mixer…" is that operation's, not also the
+	// one-click create that would hand the task to the entry agent unreviewed.
+	// Every other confirmation keeps its request.
+	if conf := h.detectHomeMutationRequest(prompt); conf != nil && !operations.owns(conf) {
 		conf = h.buildInsteadOfCreate(ctx, conf, prompt, identity)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
 		return HomeAssistantAskResponse{
@@ -529,13 +537,12 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	// An explicit request to operate the app is answered in the conversation,
 	// with the named operation tools and the operating skill for this turn
-	// only. The legacy confirmations above keep their own requests, so one
-	// request has one owner. Nothing is recorded until the turn is stored.
+	// only. Nothing is recorded until the turn is stored.
 	if scope != nil && conversation != nil {
 		capability := h.operationCapability()
 		defer func() { response.OperationCapability = &capability }()
 	}
-	if operations := h.operationTurn(prompt, req.Operation, conversation, workContext, scope); operations != nil {
+	if operations != nil {
 		ctx = context.WithValue(ctx, operationTurnKey{}, operations)
 		defer func() { operations.finalize(ctx, &response) }()
 		intent = homeAssistantConversationIntent.Key

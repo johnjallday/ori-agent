@@ -29,8 +29,12 @@ func TestLoadSkill_IsValidVersionedAndNamesExactlyTheRegisteredOperations(t *tes
 	// What the instructions must teach: inspection, one resolved target, the
 	// meaning of each result and the fallback, without claiming a view changed.
 	for _, phrase := range []string{
-		"Inspect", "Resolve one target", "only tool call", "`requested`", "`choose`", "`not_found`", "`unavailable`",
-		"You are not told whether the", "Do not use it for", "a note, a task", "save nothing, start nothing and install nothing",
+		"Inspect", "Resolve one target", "only tool call", "`requested`", "`prepared`", "`choose`", "`not_found`", "`unavailable`",
+		"You are not told whether the", "Do not use it for", "a note, a task", "save anything, start anything or install anything",
+		// Preparing a task: the user's words, no invented requirements, the
+		// v1 fields only, and never a claim that a task exists.
+		"Do not add requirements", "do not pick one", "Only a title, a brief and the agent can be set",
+		"nothing is created until they save it", "not say a task was created, assigned or started",
 	} {
 		if !strings.Contains(prompt, phrase) {
 			t.Errorf("the instructions lost %q", phrase)

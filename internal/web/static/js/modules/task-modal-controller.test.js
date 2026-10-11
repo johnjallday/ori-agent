@@ -16,6 +16,9 @@ function loadController(overrides = {}) {
     querySelectorAll() {
       return [];
     },
+    createElement(tagName) {
+      return { tagName, value: '', textContent: '' };
+    },
     addEventListener() {}
   };
   const window = {};
@@ -490,4 +493,59 @@ test('workflow auto-save payload routes output contract to final step only', () 
     JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 1, 2, true)),
     JSON.stringify(autoSaveData)
   );
+});
+
+test('a named agent instance is added to the assignment list instead of becoming no agent', () => {
+  const { Controller, elements } = loadController();
+  const controller = new Controller();
+  const added = [];
+  const select = {
+    options: [
+      { value: '', textContent: '-- No agent (manual task) --' },
+      { value: 'node:Mixer-node-1', textContent: 'Mixer' }
+    ],
+    appendChild(option) {
+      added.push(option);
+      this.options.push(option);
+    }
+  };
+  elements.set('taskModalAssignment', select);
+
+  // An instance the app-wide list already offers is left alone.
+  assert.equal(controller.ensureAssignmentOption('node:Mixer-node-1', 'Mixer'), true);
+  assert.equal(added.length, 0);
+  // An instance with another node is added with its own label.
+  assert.equal(controller.ensureAssignmentOption('node:Mixer-node-2', 'Mixer'), true);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].value, 'node:Mixer-node-2');
+  assert.equal(added[0].textContent, 'Mixer');
+  // Asking again adds nothing; an empty value is never an option.
+  assert.equal(controller.ensureAssignmentOption('node:Mixer-node-2', 'Mixer'), true);
+  assert.equal(added.length, 1);
+  assert.equal(controller.ensureAssignmentOption('', 'Nobody'), false);
+  // The form still reads the agent's name back from the node on save.
+  assert.equal(controller.parseAssignmentValue('node:Mixer-node-2').to, 'Mixer');
+  assert.equal(controller.parseAssignmentValue('node:Mixer-node-2').assignedNodeId, 'Mixer-node-2');
+});
+
+test('the save callback receives what was saved, and callers that ignore it still work', async () => {
+  const { Controller } = loadController();
+  const controller = new Controller();
+  // Closing the form touches the page; this test is about the callback.
+  controller.close = () => true;
+  const received = [];
+  controller.onSaveCallback = async payload => {
+    received.push(payload);
+  };
+  controller.workspaceId = 'ws-1';
+  await controller.finalizeSuccessfulSave('task:created', { task: { id: 'task-9', to: 'Mixer' } });
+  assert.equal(received.length, 1);
+  assert.equal(received[0].task.id, 'task-9');
+
+  let called = 0;
+  controller.onSaveCallback = () => {
+    called += 1;
+  };
+  await controller.finalizeSuccessfulSave('task:created');
+  assert.equal(called, 1);
 });

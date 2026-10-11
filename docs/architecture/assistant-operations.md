@@ -165,6 +165,58 @@ the closest names) or `unavailable`. It stages a request; the operation is
 recorded only after the turn that asked for it is stored. A turn that is not
 saved leaves no operation and the reply carries `operation_error`.
 
+### Preparing a task
+
+A clause that begins with "prepare", "create", "add", "make", "set up", "draft"
+or "write" and names a task as the thing to make ("create a task for Mixer to
+…", "add a task: …"), or "give/assign <someone> a task …", is a request to
+prepare a task. "Create a task list", "write a task description", "create
+tasks for the album" and "create that task" are not.
+
+`assistant_operate_prepare_task` takes the same workspace reference plus
+`agent_name`, an optional `agent_node_id`, a `title` (required, at most 200
+characters) and a `brief` (at most 4,000). Nothing else can be set: a field
+such as a schedule is refused, not ignored. It returns:
+
+- `prepared`: a draft was staged for exactly one instance in that workspace's
+  own roster;
+- `choose` with `agent_not_named` (no agent was named: the roster is returned
+  and nothing is assumed, because a task saved without an agent would go to the
+  workspace's entry agent) or `several_agents_match` (instances that share the
+  name, each with its node);
+- `not_found` with `agent_not_in_workspace` (a same-named agent elsewhere in
+  the app is not a match) or `workspace_not_found`;
+- `unavailable` with `draft_out_of_bounds`, `secret_like_text`,
+  `agent_cannot_be_assigned` or `one_operation_per_request`.
+
+The recorded operation is `kind: task`, `status: prepared`, with a `draft`
+(`revision`, `title`, `brief`, `agent_name`, `agent_node_id`), a
+`draft_prepared` receipt and two commands: `open_workspace` and
+`open_task_draft`. The agent is checked against the roster again when the
+operation is recorded, so an agent who left between the tool call and the saved
+turn gets no draft and no stand-in. **Preparing writes no task and starts no
+run.** One request has one owner: where Ori can prepare a task, "create a task
+in Album to …" is that operation's, not also the legacy one-click create that
+would hand the task to the entry agent unreviewed. Starting work and every
+workspace or agent change keep their own confirmation.
+
+`open_task_draft` is carried out by the page's own task form
+(`TaskModalController.openForCreate`, manual mode, with the draft's title,
+brief and the exact `node:<node id>` assignment). The form adds that instance
+to its assignment list when its own list lacks it. The step is acknowledged
+only after the form is open and really holds the title, the brief and that
+assignment; if the form cannot assign the agent it is closed and the step is
+reported unavailable, rather than left showing "no agent". A form with unsaved
+input is never overwritten: the step pauses, and replacing the input is an
+explicit choice in the drawer. Nothing is typed, auto-parsed or saved by Ori.
+The form keeps its one save owner; its save callback now receives what was
+saved (`{ task }`), which existing callers ignore.
+
+After the form has been shown, the drawer offers **Open draft again** on that
+workspace's page. Reopening is a local view of the same draft: it reports
+nothing to the server, changes no operation and does not replace unsaved
+edits. When the user saves the form, the tab stops offering that draft.
+
 ## HTTP surface
 
 | Method and path | Purpose |
@@ -193,9 +245,9 @@ the route helper and the workspace page's own selection owner.
 - A full-page navigation is acknowledged by the page that arrives, with the
   path it observed. The page that left reports nothing.
 - A page load never navigates by itself. For 60 seconds after the user asked,
-  an arriving page may report arrival and select the agent; after that, or
-  when the user is on another page or an editor holds unsaved input, the
-  operation pauses and the drawer offers Resume.
+  an arriving page may report arrival and then select the agent or open the
+  task form; after that, or when the user is on another page or an editor holds
+  unsaved input, the operation pauses and the drawer offers Resume.
 - A tab that starts as a copy of another (same stored identity) is told so over
   a `BroadcastChannel` and takes a new identity, so it holds no watch.
 - The Watch choice is a chip in the composer's chip row, shown only where

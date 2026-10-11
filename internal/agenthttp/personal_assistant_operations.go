@@ -101,29 +101,79 @@ var (
 	operationQuestionTargets = []string{"how ", "what ", "where ", "which ", "why ", "when ", "who ", "whether ", "if "}
 )
 
+// The two things a turn may ask Ori to operate.
+const (
+	operationRequestNavigation = "navigation" // open a workspace, select an agent
+	operationRequestTask       = "task"       // prepare one task for an agent
+)
+
+// Verbs that ask for a task to be prepared, the words that may stand before
+// "task", and what may follow it. "create a task for Mixer" is a request;
+// "create a task list" and "write a task description" are not.
+var (
+	operationTaskLeads       = []string{"prepare ", "create ", "add ", "make ", "set up ", "draft ", "write up ", "write "}
+	operationHandoffLeads    = []string{"give ", "assign "}
+	operationTaskDeterminers = []string{"a ", "an ", "the ", "my ", "new ", "one ", "another "}
+	operationTaskFollowers   = []string{"for", "to", "in", "on", "that", "which", "about", "called", "named", "titled", "so"}
+)
+
 // operationRequest reports whether the user's own current words ask Ori to
-// open a workspace or select an agent. It reads nothing but this message:
-// earlier turns, quoted text and anything a reader returned can never make a
-// turn an operation. A question, a hypothetical, a negation or a target that
-// is only "it" or "that" is not a request.
+// operate the app.
 func (h *HomeAssistantAskHandler) operationRequest(prompt string) bool {
-	if h == nil || strings.TrimSpace(prompt) == "" || isCompositionRequest(prompt) || isAssistantWorkspaceReviewRequest(prompt) {
-		return false
+	return h.operationRequestKind(prompt) != ""
+}
+
+// operationRequestKind says what the user's own current words ask Ori to do:
+// open a workspace or select an agent, prepare a task, or neither. It reads
+// nothing but this message: earlier turns, quoted text and anything a reader
+// returned can never make a turn an operation. A question, a hypothetical, a
+// negation or a target that is only "it" or "that" is not a request.
+func (h *HomeAssistantAskHandler) operationRequestKind(prompt string) string {
+	if h == nil || strings.TrimSpace(prompt) == "" || isAssistantWorkspaceReviewRequest(prompt) {
+		return ""
 	}
+	// "Draft a task for Mixer" opens like a writing request but asks for a
+	// task; every other writing request stays a conversation.
+	composition := isCompositionRequest(prompt)
 	// What someone else said is not what the user asks now.
 	unquoted := quotedSpan.ReplaceAllString(prompt, " ")
 	for _, clause := range clauseSeparator.Split(unquoted, -1) {
-		if h.operationClause(clause) {
-			return true
+		if kind := h.operationClause(clause, composition); kind != "" {
+			return kind
 		}
 	}
-	return false
+	return ""
 }
 
-func (h *HomeAssistantAskHandler) operationClause(clause string) bool {
+// taskObject reports whether the words after a verb name a task as the thing
+// to make: "a task for Mixer", "task: bounce stems", "a new task".
+func taskObject(target string) bool {
+	for stripped := true; stripped; {
+		stripped = false
+		for _, determiner := range operationTaskDeterminers {
+			if strings.HasPrefix(target, determiner) {
+				target, stripped = strings.TrimPrefix(target, determiner), true
+			}
+		}
+	}
+	rest, found := strings.CutPrefix(target, "task")
+	if !found {
+		return false
+	}
+	if rest == "" || strings.ContainsAny(rest[:1], ":,-—") {
+		return true
+	}
+	if !strings.HasPrefix(rest, " ") {
+		return false // "tasks", "taskforce"
+	}
+	following := strings.Fields(rest)
+	return len(following) == 0 || slices.Contains(operationTaskFollowers, strings.Trim(following[0], ":,"))
+}
+
+func (h *HomeAssistantAskHandler) operationClause(clause string, composition bool) string {
 	text := stripCompositionPolitePrefixes(normalizeRouteToken(clause))
 	if text == "" || panelExploratoryRequest(text) {
-		return false
+		return ""
 	}
 	lead := func(leads []string) (string, bool) {
 		for _, candidate := range leads {
@@ -153,17 +203,32 @@ func (h *HomeAssistantAskHandler) operationClause(clause string) bool {
 		}
 		return true
 	}
+	if target, ok := lead(operationTaskLeads); ok && explicitTarget(target) && taskObject(target) {
+		return operationRequestTask
+	}
+	if target, ok := lead(operationHandoffLeads); ok && explicitTarget(target) {
+		// "give Mixer a task to…": someone, then a task as the thing given.
+		// "give me a task list" is neither: the user is not an agent, and a
+		// list is not a task.
+		forUser := strings.HasPrefix(target, "me ") || strings.HasPrefix(target, "us ")
+		if _, after, found := strings.Cut(" "+target, " a task"); found && !forUser && taskObject("a task"+after) {
+			return operationRequestTask
+		}
+	}
+	if composition {
+		return ""
+	}
 	if target, ok := lead(operationOpenLeads); ok && explicitTarget(target) {
 		if _, _, named := matchWorkspaceInPrompt(h.Sources.Workspaces, target); named || slices.Contains(strings.Fields(target), "workspace") {
-			return true
+			return operationRequestNavigation
 		}
 	}
 	if target, ok := lead(operationSelectLeads); ok && explicitTarget(target) {
 		if _, named := matchAgentInPrompt(h.Sources.Agents, target); named || slices.Contains(strings.Fields(target), "agent") {
-			return true
+			return operationRequestNavigation
 		}
 	}
-	return false
+	return ""
 }
 
 // operationGuard is the host side of assistantops.Guard: every answer is read
@@ -240,6 +305,44 @@ func (g operationGuard) Workspace(_ context.Context, userID, workspaceID string)
 		return assistantops.Context{}, fmt.Errorf("%w: the workspace cannot be opened by this user", assistantops.ErrInvalidated)
 	}
 	return assistantops.Context{WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug, WorkspaceName: workspaceContextText(ws.Name, 120)}, nil
+}
+
+// Agent finds the exact instance in the workspace's own roster. The app-wide
+// agent list is never consulted, so a same-named agent elsewhere cannot stand
+// in for one that has left this workspace.
+func (g operationGuard) Agent(_ context.Context, userID, workspaceID, agentName, nodeID string) (string, string, error) {
+	resolver := g.handler.WorkspaceContext
+	if resolver == nil || resolver.Source == nil {
+		return "", "", errors.New("workspace source unavailable")
+	}
+	ws, err := resolver.Source.Get(workspaceID)
+	if err != nil || ws == nil {
+		return "", "", errors.New("workspace could not be read")
+	}
+	if !workspaceReadable(ws, userID) {
+		return "", "", fmt.Errorf("%w: the workspace cannot be read by this user", assistantops.ErrInvalidated)
+	}
+	matches := rosterInstances(ws, agentName, nodeID)
+	if len(matches) != 1 || strings.TrimSpace(matches[0].NodeID) == "" {
+		return "", "", fmt.Errorf("%w: that agent is not one instance in this workspace", assistantops.ErrInvalidated)
+	}
+	return matches[0].Name, matches[0].NodeID, nil
+}
+
+// rosterInstances lists the workspace's own instances with that name, and with
+// that node when one is given.
+func rosterInstances(ws *workspace.Workspace, name, nodeID string) []*workspace.AgentInstance {
+	var matches []*workspace.AgentInstance
+	if ws == nil || foldOperationName(name) == "" {
+		return nil
+	}
+	for i := range ws.AgentInstances {
+		instance := &ws.AgentInstances[i]
+		if foldOperationName(instance.Name) == foldOperationName(name) && (nodeID == "" || instance.NodeID == nodeID) {
+			matches = append(matches, instance)
+		}
+	}
+	return matches
 }
 
 // operationResponse is what every operation endpoint returns on success.
