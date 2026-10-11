@@ -10525,8 +10525,8 @@
       ) {
         window.PersonalAssistantDrafts.applyContext(data.draft_context);
       }
-      // A refused or unanswered turn was not sent: put the text back so it can
-      // be sent again instead of retyped.
+      // An unanswered turn has no saved answer: restore the draft without
+      // claiming the provider never received it.
       if (
         conversationResult &&
         conversationResult.restoreInput &&
@@ -10603,6 +10603,14 @@
           intent,
           String(data.response || '').trim() === String(data.confirmation.summary || '').trim()
         );
+        // This review belongs to the saved proposal, not the activity header
+        // above the entire transcript. Settle scrolling after mounting it.
+        if (
+          conversationRef &&
+          assistantRow &&
+          data.confirmation.action_type === 'prepare_workspace'
+        )
+          mountPersonalTurnStatus(assistantRow);
         return;
       }
 

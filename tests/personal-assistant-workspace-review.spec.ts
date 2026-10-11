@@ -119,7 +119,16 @@ test('discussion becomes a bounded editable workspace proposal, then actual crea
   expect(audit.history_runes).toBeLessThanOrEqual(24000);
   expect(await folders()).toHaveLength(before);
   await input.fill('Keep my unsent OK Go follow-up.');
-  const reviewButton = drawer.getByRole('button', { name: 'Review workspace setup', exact: true });
+  const proposalRow = drawer.locator(
+    `[data-message-id="${prepared.conversation.assistant_message_id}"]`
+  );
+  const reviewButton = proposalRow.getByRole('button', {
+    name: 'Review workspace setup',
+    exact: true
+  });
+  // A real button above the entire transcript is still a broken handoff.
+  // Its action must live beside this saved proposal, not an earlier turn.
+  await expect(reviewButton).toHaveCount(1);
   await reviewButton.scrollIntoViewIfNeeded();
   await drawer.screenshot({ path: join(evidence, 'workspace-proposal-in-conversation.png') });
   await reviewButton.scrollIntoViewIfNeeded();
