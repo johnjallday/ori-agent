@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { checkNextActionReflow } from './helpers/next-action-reflow';
 import { mockWorkspaceActionRoster } from './helpers/agent-workspace-actions';
 
 // Accessibility regression for the Agents Gallery/Inspector, in both themes.
@@ -52,6 +53,12 @@ for (const theme of ['light', 'dark']) {
     });
     await page.keyboard.press('Escape');
     await expect(opener).toBeFocused();
+    await opener.click();
+    await checkNextActionReflow(page, '#stageNextStep');
+    await page.screenshot({
+      path: testInfo.outputPath(`agent-choice-zoom-${theme}.png`),
+      fullPage: true
+    });
   });
 
   test(`agents roster accessibility (${theme})`, async ({ page, request }) => {

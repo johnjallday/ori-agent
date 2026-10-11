@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { checkNextActionReflow } from './helpers/next-action-reflow';
 
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
@@ -65,6 +66,11 @@ for (const theme of ['light', 'dark']) {
       expect(overflow).toBe(false);
       await page.screenshot({
         path: testInfo.outputPath(`workspace-work-first-${theme}.png`),
+        fullPage: true
+      });
+      await checkNextActionReflow(page, '.ws-cmd-work-first, .ws-cmd-work-admin');
+      await page.screenshot({
+        path: testInfo.outputPath(`workspace-work-first-zoom-${theme}.png`),
         fullPage: true
       });
     } finally {

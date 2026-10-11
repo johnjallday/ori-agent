@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { checkNextActionReflow } from './helpers/next-action-reflow';
 
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
@@ -287,6 +288,11 @@ for (const theme of ['light', 'dark']) {
       expect(box!.x + box!.width).toBeLessThanOrEqual(391);
       await page.screenshot({
         path: testInfo.outputPath(`agent-membership-${theme}.png`),
+        fullPage: true
+      });
+      await checkNextActionReflow(page, '#agentWorkspacesSection');
+      await page.screenshot({
+        path: testInfo.outputPath(`agent-membership-zoom-${theme}.png`),
         fullPage: true
       });
     } finally {

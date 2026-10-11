@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { checkNextActionReflow } from './helpers/next-action-reflow';
 
 // Deterministic response/fault tests are separate from the seeded real-endpoint
 // journey below. No model is involved in either kind of coverage.
@@ -355,6 +356,15 @@ test('touched rows wrap at narrow width and keep visible focus in both themes', 
         ).violations
     );
     expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+    await checkNextActionReflow(page, '.main-content');
+    await page.screenshot({
+      path: info.outputPath(`action-center-zoom-${theme}.png`),
+      fullPage: true
+    });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '';
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
   }
 });
 

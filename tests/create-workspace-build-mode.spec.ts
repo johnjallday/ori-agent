@@ -1,6 +1,7 @@
 import { test, expect, Page, Route } from '@playwright/test';
 import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assistant';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { checkNextActionReflow } from './helpers/next-action-reflow';
 
 /**
  * E2E for "Build with your assistant" (tasks/prd-build-with-your-assistant.md):
@@ -301,13 +302,15 @@ async function assisted(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
-  await page.route('**/api/onboarding/status', route => route.fulfill({ json: { needs_onboarding: false, completed: true } }));
+  await page.route('**/api/onboarding/status', route =>
+    route.fulfill({ json: { needs_onboarding: false, completed: true } })
+  );
   await mockHiredAssistant(page);
 });
 
 test('golden path: three turns and no form clicks create the workspace the build drafted', async ({
   page
-}) => {
+}, testInfo) => {
   const name = `Newsletter Desk ${Date.now().toString(36)}`;
   const fake = await fakeBuildServer(page, [
     {
@@ -389,6 +392,33 @@ test('golden path: three turns and no form clicks create the workspace the build
       return list.some((workspace: RequestBody) => workspace.name === name);
     })
     .toBe(true);
+  const collection = await (await page.request.get('/api/workspaces')).json();
+  const workspace = (collection.workspaces || collection.folders).find(
+    (item: RequestBody) => item.name === name
+  );
+  const team = await (await page.request.get(`/api/workspaces/${workspace.id}/agents`)).json();
+  expect(team.agents.map((agent: RequestBody) => agent.name)).toEqual(
+    expect.arrayContaining(['Content Lead', 'Brand Copywriter'])
+  );
+  await page.goto(`/agents?agent=${encodeURIComponent('Content Lead')}`);
+  await expect(page.locator('#stageName')).toHaveText('Content Lead');
+  const work = page.locator('#stageNextStep');
+  const choice = work.locator('summary');
+  if (await choice.isVisible()) await choice.click();
+  const owner = work.getByRole('link', { name: `Open ${name} ↗`, exact: true });
+  await expect(owner).toHaveAttribute(
+    'href',
+    `/workspaces/${workspace.folder_slug}?agent=content%20lead`
+  );
+  await page.screenshot({
+    path: testInfo.outputPath('creation-agent-workspace.png'),
+    fullPage: true
+  });
+  await owner.click();
+  await expect(page).toHaveURL(
+    new RegExp(`/workspaces/${workspace.folder_slug}\\?agent=content%20lead`)
+  );
+  await expect(page.getByRole('region', { name: 'Next action', exact: true })).toBeVisible();
 });
 
 test('a blueprint switched on the form is said back and the assistant re-staffs', async ({
@@ -415,7 +445,9 @@ test('a blueprint switched on the form is said back and the assistant re-staffs'
     request => request.method() === 'POST' && isTurn(request.url())
   );
   await cardByLabel(page, 'Research Project').click();
-  await expect.poll(() => fake.drafts.some(draft => draft.draft?.template_id === 'research-project')).toBe(true);
+  await expect
+    .poll(() => fake.drafts.some(draft => draft.draft?.template_id === 'research-project'))
+    .toBe(true);
   expect(fake.turns).toHaveLength(1); // Manual mode does not run hidden assistant work.
   await assisted(page);
 
@@ -562,7 +594,9 @@ test('the assistant’s create confirmation opens the build with the request as 
 
 function gate() {
   let release!: () => void;
-  const promise = new Promise<void>(resolve => { release = resolve; });
+  const promise = new Promise<void>(resolve => {
+    release = resolve;
+  });
   return { promise, release };
 }
 
@@ -579,22 +613,34 @@ test('slow availability keeps a manual draft active until an explicit switch', a
   await expect(page.locator('#folderNameInput')).toBeFocused();
   expect(fake.creates).toHaveLength(0);
   await assisted(page);
-  await expect.poll(() => fake.drafts.some(draft => draft.draft.name === 'My manual draft')).toBe(true);
+  await expect
+    .poll(() => fake.drafts.some(draft => draft.draft.name === 'My manual draft'))
+    .toBe(true);
   await manual(page);
   await expect(page.locator('#folderNameInput')).toHaveValue('My manual draft');
   expect(await currentStep(page)).toBe(2);
 });
 
-test('late scripted turn keeps newer manual values and cannot create or reopen assisted setup', async ({ page }) => {
+test('late scripted turn keeps newer manual values and cannot create or reopen assisted setup', async ({
+  page
+}) => {
   const wait = gate();
   let hold = false;
-  const fake = await fakeBuildServer(page, [
-    { text: 'Here is your draft.', set: { template_id: 'content-production', name: 'Original draft' } },
-    { text: 'Here is the late reply.', set: { name: 'Late overwritten name' }, createNow: true }
-  ], { turnGate: () => hold ? wait.promise : Promise.resolve() });
+  const fake = await fakeBuildServer(
+    page,
+    [
+      {
+        text: 'Here is your draft.',
+        set: { template_id: 'content-production', name: 'Original draft' }
+      },
+      { text: 'Here is the late reply.', set: { name: 'Late overwritten name' }, createNow: true }
+    ],
+    { turnGate: () => (hold ? wait.promise : Promise.resolve()) }
+  );
   let creates = 0;
   page.on('request', request => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/workspaces') creates++;
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/workspaces')
+      creates++;
   });
   await openFromHome(page);
   await say(page, 'A content workspace');
@@ -607,7 +653,9 @@ test('late scripted turn keeps newer manual values and cannot create or reopen a
   while ((await currentStep(page)) > 2) await page.locator('#wizardBackBtn').click();
   await page.locator('#folderNameInput').fill('Newer manual name');
   wait.release();
-  await expect.poll(() => fake.drafts.some(draft => draft.draft.name === 'Newer manual name')).toBe(true);
+  await expect
+    .poll(() => fake.drafts.some(draft => draft.draft.name === 'Newer manual name'))
+    .toBe(true);
   await expect(page.locator('#folderNameInput')).toHaveValue('Newer manual name');
   await expect(page.locator('#folderNameInput')).toBeFocused();
   await expect(pane(page)).toBeHidden();
@@ -618,12 +666,18 @@ test('late scripted turn keeps newer manual values and cannot create or reopen a
   expect(fake.abandons).toHaveLength(0);
 });
 
-test('scripted turn failure offers Retry and preserves the populated shared draft', async ({ page }) => {
+test('scripted turn failure offers Retry and preserves the populated shared draft', async ({
+  page
+}) => {
   const options = { turnFailures: 0 };
-  const fake = await fakeBuildServer(page, [
-    { text: 'Draft ready.', set: { blank: true, name: 'Kept draft' } },
-    { text: 'Recovered without losing your draft.' }
-  ], options);
+  const fake = await fakeBuildServer(
+    page,
+    [
+      { text: 'Draft ready.', set: { blank: true, name: 'Kept draft' } },
+      { text: 'Recovered without losing your draft.' }
+    ],
+    options
+  );
   await openFromHome(page);
   await say(page, 'A blank workspace');
   options.turnFailures = 1;
@@ -635,9 +689,11 @@ test('scripted turn failure offers Retry and preserves the populated shared draf
   expect(fake.turns).toHaveLength(2);
 });
 
-test('failed draft sync stays local, blocks new turns, and recovers through Retry', async ({ page }) => {
+test('failed draft sync stays local, blocks new turns, and recovers through Retry', async ({
+  page
+}) => {
   const options = { draftFailures: 0 };
-  const fake = await fakeBuildServer(page, [] , options);
+  const fake = await fakeBuildServer(page, [], options);
   await openFromHome(page);
   await expect(composer(page)).toBeEnabled();
   options.draftFailures = 1;
@@ -654,11 +710,15 @@ test('failed draft sync stays local, blocks new turns, and recovers through Retr
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`one active creation mode, keyboard switch and readable narrow layout (${theme})`, async ({ page }, testInfo) => {
+  test(`one active creation mode, keyboard switch and readable narrow layout (${theme})`, async ({
+    page
+  }, testInfo) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 390, height: 844 });
-    await fakeBuildServer(page, [{ text: 'We can review this draft together.', set: { blank: true, name: 'Shared draft' } }]);
+    await fakeBuildServer(page, [
+      { text: 'We can review this draft together.', set: { blank: true, name: 'Shared draft' } }
+    ]);
     await openFromHome(page);
     await say(page, 'A simple workspace');
     await expect(page.locator('.workspace-create-modal-body')).toBeHidden();
@@ -669,18 +729,49 @@ for (const theme of ['light', 'dark']) {
     await expect(switcher).toHaveCSS('outline-style', 'solid');
     await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
     const scan = await page.evaluate(async () => {
-      const result = await (window as any).axe.run('#addFolderModal', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
-      return { violations: result.violations, contrast: result.passes.find((rule: any) => rule.id === 'color-contrast')?.nodes.length || 0 };
+      const result = await (window as any).axe.run('#addFolderModal', {
+        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+      });
+      return {
+        violations: result.violations,
+        contrast: result.passes.find((rule: any) => rule.id === 'color-contrast')?.nodes.length || 0
+      };
     });
     expect(scan.violations).toEqual([]);
     expect(scan.contrast).toBeGreaterThan(0);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false);
-    await page.screenshot({ path: testInfo.outputPath(`creation-assisted-${theme}.png`), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(
+      false
+    );
+    await page.screenshot({
+      path: testInfo.outputPath(`creation-assisted-${theme}.png`),
+      fullPage: true
+    });
+    await checkNextActionReflow(page, '#addFolderModal');
+    await page.screenshot({
+      path: testInfo.outputPath(`creation-assisted-zoom-${theme}.png`),
+      fullPage: true
+    });
+    await switcher.focus();
     await page.keyboard.press('Enter');
     await expect(pane(page)).toBeHidden();
     await expect(page.locator(`#wizardStep${await currentStep(page)}Title`)).toBeFocused();
     await expect(page.locator('.workspace-create-modal-body')).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`creation-manual-${theme}.png`), fullPage: true });
+    await checkNextActionReflow(page, '#addFolderModal');
+    await page.locator('#folderNameInput').scrollIntoViewIfNeeded();
+    await expect(page.locator('#folderNameInput')).toBeVisible();
+    await expect(page.locator('#folderNameInput')).toHaveValue('Shared draft');
+    await page.screenshot({
+      path: testInfo.outputPath(`creation-manual-zoom-${theme}.png`),
+      fullPage: true
+    });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '';
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: testInfo.outputPath(`creation-manual-${theme}.png`),
+      fullPage: true
+    });
     await assisted(page);
     await expect(composer(page)).toBeFocused();
     await expect(page.locator('#folderNameInput')).toHaveValue('Shared draft');
