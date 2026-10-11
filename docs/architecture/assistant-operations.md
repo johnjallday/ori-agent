@@ -184,6 +184,17 @@ tools, the router keeps the request in the hired assistant's conversation, so
 it has one owner; where Ori cannot operate, the existing owner (a navigation
 answer, an app launch, a specialist) keeps it unchanged.
 
+The skill is sent as the request's system prompt (`ChatRequest.SystemPrompt`)
+on every round of an operating turn, the closing reply included, and never
+inside a system-role message. Every provider sends the system prompt; the
+Anthropic API provider drops system-role messages (pinned by
+`TestClaudeProvider_SendsSystemPromptAndDropsSystemRoleMessages`), so a skill
+carried in one would leave that model holding the operation tools without the
+rules for using them. The rest of the assistant's system text still travels in
+a system-role message, as it did before this feature, and so does not reach an
+Anthropic API model; that is an existing limitation of the assistant on that
+provider, not something operations change.
+
 `assistant_operate_open` takes `workspace_id` or an exact `workspace_name`, and
 an optional `agent_name` looked up in that workspace's own roster. It returns
 `requested`, `choose` (several match, with the candidates), `not_found` (with

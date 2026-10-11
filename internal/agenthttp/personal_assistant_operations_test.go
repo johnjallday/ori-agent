@@ -266,9 +266,22 @@ func TestOperate_ExplicitRequestIsRecordedOnlyAfterItsTurnIsStored(t *testing.T)
 	if !slices.Contains(offeredTools(first), assistantops.ToolOpen) {
 		t.Fatal("the operation tool was not offered for an explicit request")
 	}
-	system := first.Messages[0].Content
-	if !strings.Contains(system, "# Ori skill: operate-ori") || !strings.Contains(system, "For this turn one exception applies") {
+	if !strings.Contains(first.SystemPrompt, "# Ori skill: operate-ori") || !strings.Contains(first.SystemPrompt, "For this turn one exception applies") {
 		t.Fatal("the operating skill was not loaded beside its tool")
+	}
+	// The skill travels as the request's system prompt on every round of the
+	// turn, the closing reply included. Every provider sends that; the
+	// Anthropic API provider drops system-role messages, so a skill carried in
+	// one would leave that model holding the tools without their rules.
+	for i, request := range f.provider.requests {
+		if !strings.Contains(request.SystemPrompt, "# Ori skill: operate-ori") {
+			t.Fatalf("round %d lost the operating skill", i+1)
+		}
+		for _, message := range request.Messages {
+			if strings.Contains(message.Content, "# Ori skill: operate-ori") {
+				t.Fatalf("round %d carries the skill in a message a provider may drop", i+1)
+			}
+		}
 	}
 	if first.WorkspaceID != "" || first.ExecutionScope != nil || len(first.MCPServers) != 0 {
 		t.Fatal("operating must not inherit native execution authority")
@@ -368,7 +381,7 @@ func TestOperate_OrdinaryDiscussionHasNoToolNoSkillAndWritesNothing(t *testing.T
 			if slices.Contains(offeredTools(first), assistantops.ToolOpen) {
 				t.Fatal("the operation tool was offered without an explicit request")
 			}
-			if strings.Contains(first.Messages[0].Content, "Ori skill: operate-ori") {
+			if first.SystemPrompt != "" || strings.Contains(first.Messages[0].Content, "Ori skill: operate-ori") {
 				t.Fatal("the operating skill was loaded without its tool")
 			}
 			if len(f.provider.requests) > 1 && !strings.HasPrefix(lastToolResult(f.provider.requests[1]), "ERROR:") {
@@ -389,7 +402,8 @@ func TestOperate_ToolFreeProviderKeepsTheManualRoute(t *testing.T) {
 		t.Fatal("the router must not divert a request this provider cannot carry out")
 	}
 	response := f.ask("Open the Album-1 workspace", true)
-	if len(snapshot.requests) != 1 || len(snapshot.requests[0].Tools) != 0 || strings.Contains(snapshot.requests[0].Messages[0].Content, "operate-ori") {
+	if len(snapshot.requests) != 1 || len(snapshot.requests[0].Tools) != 0 || snapshot.requests[0].SystemPrompt != "" ||
+		strings.Contains(snapshot.requests[0].Messages[0].Content, "operate-ori") {
 		t.Fatal("a tool-free provider received operation tools or the skill")
 	}
 	if response.Operation != nil || len(f.operations.all()) != 0 {

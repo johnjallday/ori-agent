@@ -49,12 +49,12 @@ func TestPrepareTask_StagesADraftAndRecordsItOnlyAfterTheTurnIsStored(t *testing
 			t.Fatalf("%s was not offered for an explicit request", tool)
 		}
 	}
-	if !strings.Contains(first.Messages[0].Content, "# Ori skill: operate-ori (v3)") {
+	if !strings.Contains(first.SystemPrompt, "# Ori skill: operate-ori (v3)") {
 		t.Fatal("the operating skill was not loaded beside its tools")
 	}
 	// The skill tells the model that saving and starting are the user's own.
 	for _, want := range []string{"Saving does not start it", "You cannot save\n  or start it for them", "**Start task**"} {
-		if !strings.Contains(first.Messages[0].Content, want) {
+		if !strings.Contains(first.SystemPrompt, want) {
 			t.Errorf("the operating skill lacks %q", want)
 		}
 	}

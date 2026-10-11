@@ -88,7 +88,10 @@ func (t *operationTurn) prompt(offered []llm.Tool) string {
 	}
 	// The conversation prompt says the assistant can run nothing itself. That
 	// stays true; this names the one thing Ori will do when asked, for this turn.
-	return "\nFor this turn one exception applies to the limits above: Ori registered the operations the skill below names. Asking Ori to open a workspace, select an agent or prepare a task draft for the user to review is allowed. It still creates, saves, starts, schedules, installs and sends nothing: the user does that in the app." + instructions
+	// It is sent as the request's system prompt, not inside a system-role
+	// message (see runModel), so its wording does not depend on where a
+	// provider places it relative to the rest.
+	return "For this turn one exception applies to Ori's rule that you can run nothing in the app yourself: Ori registered the operations that the skill in this message names. Asking Ori to open a workspace, select an agent or prepare a task draft for the user to review is allowed. It still creates, saves, starts, schedules, installs and sends nothing: the user does that in the app." + instructions
 }
 
 // finalize records the staged operation once its turn is stored, and only

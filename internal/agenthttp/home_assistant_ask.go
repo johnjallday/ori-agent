@@ -758,7 +758,10 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()
 	}
-	// The operating skill is loaded only beside the operations it names.
+	// The operating skill is loaded only beside the operations it names, and
+	// it travels as the request's system prompt: every provider sends that,
+	// while the Anthropic API provider drops system-role messages. Tools must
+	// never reach a model without the rules for using them.
 	operatingSkill := ""
 	if operations != nil {
 		operatingSkill = operations.prompt(tools)
@@ -779,7 +782,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if proposal != nil && provider.Capabilities().SupportsTools {
 		proposalPrompt = workspaceProposalInstructions
 	}
-	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt+operatingSkill))
+	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt))
 	conversation = append(conversation, turn.history...)
 	researchEvidence := ""
 	if research != nil && research.result != nil {
@@ -798,10 +801,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			return "", err
 		}
 		resp, chatErr := provider.Chat(ctx, llm.ChatRequest{
-			Model:       model,
-			Messages:    conversation,
-			Tools:       tools,
-			Temperature: turn.temperature,
+			Model:        model,
+			SystemPrompt: operatingSkill,
+			Messages:     conversation,
+			Tools:        tools,
+			Temperature:  turn.temperature,
 		})
 		if chatErr != nil {
 			return "", chatErr
@@ -872,7 +876,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		// present what it managed to read as the whole picture.
 		conversation[0].Content += readerRoundsExhausted
 	}
-	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
+	// The closing reply of an operating turn still needs the skill's rules for
+	// reporting what Ori returned.
+	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, SystemPrompt: operatingSkill, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr
 	}
