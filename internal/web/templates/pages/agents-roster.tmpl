@@ -293,7 +293,10 @@
                   <!-- Repeats the card's purpose so it stays visible on every
                        Inspector tab, not only Overview (PRD FR54). -->
                   <p class="stage__purpose" id="stagePurpose"></p>
-                  <!-- Exactly three actions (FR-43). The Inspector reads; the
+                  <!-- Membership-owned work action for used and unused agents.
+                       Assignment remains in the full-page editor. -->
+                  <section class="stage__nextstep" id="stageNextStep" aria-labelledby="stageNextStepTitle" hidden></section>
+                  <!-- Exactly three administrative actions (FR-43). The Inspector reads; the
                        full page is where agent fields are saved. -->
                   <div class="stage__actions">
                     <!-- Not "stageFavorite": that id is already the hero's
@@ -309,13 +312,6 @@
                 <div class="stage__progression" id="stageProgression" aria-live="polite">
                   <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
                 </div>
-
-                <!-- Shown only for an agent that has never done anything: one
-                     sentence and the one step that would change that. It sits
-                     outside the header so the header keeps its three actions
-                     (FR-43), and it disappears for good once the agent has work
-                     behind it. -->
-                <div class="stage__nextstep" id="stageNextStep" hidden></div>
 
                 <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
                   <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>

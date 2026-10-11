@@ -99,6 +99,8 @@ func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
 	// global Workspace Map as a local count/link only — never aggregated or
 	// editable from that surface (PRD workspace-backlog FR58-59).
 	summary["backlog_count"] = fields.BacklogCount
+	summary["task_summary_available"] = fields.TaskSummaryAvailable
+	summary["unknown_task_count"] = fields.UnknownTaskCount
 	summary["needs_attention_count"] = fields.NeedsAttentionCount
 	summary["active"] = fields.Active
 }

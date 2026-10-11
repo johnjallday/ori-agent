@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   PRESENTATION_STATE,
@@ -13,6 +14,44 @@ import {
   taskBlockedRepair,
   isRepairGatedTask
 } from './task-presentation.js';
+
+const attentionCases = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../../../../internal/workspace/testdata/task_attention_cases.json',
+      import.meta.url
+    ),
+    'utf8'
+  )
+);
+for (const example of attentionCases) {
+  test(`shared Go/JS attention contract: ${example.name}`, () => {
+    const views = example.tasks.map(task => resolveTaskPresentation(task));
+    assert.deepEqual(
+      views.map(view => view.state),
+      example.states
+    );
+    assert.equal(
+      views.filter(view => view.countCategories.includes(FILTER.NEEDS_ATTENTION)).length,
+      example.attention
+    );
+    assert.equal(
+      views.filter(view => view.countCategories.includes(FILTER.ACTIONABLE)).length,
+      example.open
+    );
+    assert.equal(
+      views.some(view => view.state === 'running'),
+      example.active
+    );
+    assert.equal(views.filter(view => view.state === 'backlog').length, example.backlog || 0);
+    assert.equal(views.filter(view => view.isUnknown).length, example.unknown || 0);
+    views.forEach(view => {
+      if (['completed', 'cancelled', 'skipped', 'backlog', 'unknown'].includes(view.state)) {
+        assert.notEqual(view.primaryAction?.id, 'repair');
+      }
+    });
+  });
+}
 
 // ---- Fixtures for every presentation state (FR143) ----
 const unassigned = { id: 't-unassigned', status: 'pending' };

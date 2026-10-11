@@ -33,11 +33,13 @@ func (w *Workspace) GetSummary() map[string]any {
 // callers) and sessionhttp (session.Workspace list/tree callers) so both
 // surfaces derive the same values from one place.
 type MapSummaryFields struct {
-	EntryAgentName      string
-	AgentNames          []string
-	AgentCount          int
-	OpenTaskCount       int
-	NeedsAttentionCount int
+	EntryAgentName       string
+	AgentNames           []string
+	AgentCount           int
+	OpenTaskCount        int
+	NeedsAttentionCount  int
+	UnknownTaskCount     int
+	TaskSummaryAvailable bool
 	// BacklogCount is the workspace's own (non-descendant) Backlog item count
 	// (tasks/prd-workspace-backlog.md FR40, 49, 58). It is tracked separately
 	// from OpenTaskCount, which remains Ready-and-later only — Backlog is
@@ -50,7 +52,9 @@ type MapSummaryFields struct {
 }
 
 // ComputeMapSummaryFields derives entry agent, roster, tool/skill counts, ops
-// mode, and open-task/active state from a workspace in a single locked pass.
+// mode, and task state from a workspace in a single locked pass. Open means
+// actionable (including interventions and failed attempts), excluding Backlog and
+// closed history. Active means actually running, not merely committed work.
 func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
 	if w == nil {
 		return MapSummaryFields{}
@@ -61,25 +65,29 @@ func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
 
 	agentNames := w.agentNamesLocked()
 	fields := MapSummaryFields{
-		EntryAgentName: w.entryAgentNameLocked(),
-		AgentNames:     agentNames,
-		AgentCount:     len(agentNames),
-		MCPCount:       len(w.MCPBindings),
-		SkillCount:     len(w.SkillBindings),
-		OpsMode:        workspacesettings.Extract(w.SharedData).Workflow.Mode,
+		TaskSummaryAvailable: true,
+		EntryAgentName:       w.entryAgentNameLocked(),
+		AgentNames:           agentNames,
+		AgentCount:           len(agentNames),
+		MCPCount:             len(w.MCPBindings),
+		SkillCount:           len(w.SkillBindings),
+		OpsMode:              workspacesettings.Extract(w.SharedData).Workflow.Mode,
 	}
 
 	for _, t := range w.Tasks {
-		switch t.Status {
-		case TaskStatusBacklog:
+		switch TaskAttentionState(t) {
+		case "backlog":
 			fields.BacklogCount++
-		case TaskStatusPending:
+		case "ready":
 			fields.OpenTaskCount++
-		case TaskStatusInProgress:
+		case "running":
 			fields.OpenTaskCount++
 			fields.Active = true
-		case TaskStatusFailed, TaskStatusTimeout:
+		case "needs_assignment", "needs_input", "blocked", "failed", "timed_out":
+			fields.OpenTaskCount++
 			fields.NeedsAttentionCount++
+		case "unknown":
+			fields.UnknownTaskCount++
 		}
 	}
 

@@ -1328,9 +1328,13 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--pa-accent-text);
+  color: var(--pa-ink);
   font-size: 13px;
   font-weight: 700;
+}
+
+#personalAssistantTodayRetry {
+  color: var(--pa-ink);
 }
 
 .personal-assistant-summary__toggle:hover {

@@ -151,18 +151,18 @@ test('Blank creates agentless only after the explicit choice', async ({ page }) 
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#workspaceReviewSummary')).toContainText('Create without agents');
 
+  // Read the body when it arrives, before the successful create navigates away.
   const created = page.waitForResponse(
     response => response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
-  );
+  ).then(async response => ({ response, body: await response.json() }));
   await page.locator('#createFolderBtn').click();
-  const response = await created;
-  expect(response.ok(), await response.text()).toBe(true);
+  const { response, body } = await created;
+  expect(response.ok(), JSON.stringify(body)).toBe(true);
   const requestBody = response.request().postDataJSON();
   expect(requestBody.team_intent).toEqual(
     expect.objectContaining({ version: 1, mode: 'agentless' })
   );
   expect(requestBody.role_staffing).toEqual([]);
-  const body = await response.json();
   createdWorkspaceIds.push(body.folder.id);
   expect(body.folder.agent_instances || []).toEqual([]);
 });

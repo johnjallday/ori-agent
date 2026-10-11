@@ -2236,7 +2236,12 @@ func (h *Handler) hydrateWorkspaceMetadataFromFileStore(workspace *session.Works
 }
 
 func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
-	if h == nil || h.workspaceStore == nil || workspace == nil {
+	if h == nil || workspace == nil {
+		return
+	}
+	// A previous projection is not proof that this read succeeded.
+	workspace.TaskSummaryAvailable = false
+	if h.workspaceStore == nil {
 		return
 	}
 
@@ -2294,6 +2299,8 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	workspace.AgentCount = mapFields.AgentCount
 	workspace.OpenTaskCount = mapFields.OpenTaskCount
 	workspace.BacklogCount = mapFields.BacklogCount
+	workspace.TaskSummaryAvailable = mapFields.TaskSummaryAvailable
+	workspace.UnknownTaskCount = mapFields.UnknownTaskCount
 	workspace.NeedsAttentionCount = mapFields.NeedsAttentionCount
 	workspace.MCPCount = mapFields.MCPCount
 	workspace.SkillCount = mapFields.SkillCount

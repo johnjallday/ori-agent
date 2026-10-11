@@ -16975,8 +16975,12 @@ export class WorkspaceDetailPage {
     return workspacePageURL(this.workspaceSlug, ['task', normalizedTaskId]);
   }
 
-  openTask(taskId) {
-    const href = this.buildTaskHref(taskId);
+  openTask(taskId, { fromCommand = false } = {}) {
+    const command = window.workspaceCommand;
+    const href =
+      fromCommand && command?.page === this
+        ? command.taskHrefWithReturn(taskId)
+        : this.buildTaskHref(taskId);
     if (href) {
       window.location.href = href;
     }

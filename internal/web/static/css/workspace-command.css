@@ -2647,6 +2647,74 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex-direction: column;
   gap: 18px;
 }
+/* Work first: keep Ori's tactical palette, with one clear verb before setup. */
+.ws-cmd-work-first {
+  border: 1px solid var(--ws-line-bright);
+  border-left: 3px solid var(--ws-faction);
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  padding: 18px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-work-heading,
+.ws-cmd-work-admin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ws-cmd-work-first h3 {
+  font-size: 20px;
+  line-height: 1.35;
+  margin: 8px 0 14px;
+}
+.ws-cmd-work-first p {
+  margin: 8px 0 12px;
+}
+.ws-cmd-work-state {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-cmd-work-context {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+.ws-cmd-work-context > div {
+  border-top: 1px solid var(--ws-line);
+  padding-top: 12px;
+  min-width: 0;
+}
+.ws-cmd-work-context span {
+  font-size: 12px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-work-admin {
+  border-bottom: 1px solid var(--ws-line);
+  padding-bottom: 12px;
+}
+.ws-cmd-work-admin summary {
+  cursor: pointer;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-work-admin-actions {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+.ws-cmd-work-first button,
+.ws-cmd-work-admin button {
+  min-height: 36px;
+  white-space: normal;
+}
+.ws-cmd-work-admin summary:focus-visible,
+.ws-cmd-work-first button:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 4px;
+}
+
 .ws-cmd-mission {
   display: flex;
   justify-content: space-between;

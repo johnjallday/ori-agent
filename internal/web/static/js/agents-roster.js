@@ -413,6 +413,14 @@
       tab.addEventListener('keydown', onTabKeydown);
     });
 
+    // A Back/Forward-cache restore must not keep membership from before the
+    // full-page editor. Reuse the collection load, never poll per agent.
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted) {
+        state.detailCache = {};
+        loadAgents();
+      }
+    });
     window.addEventListener('popstate', function () {
       // Restore search/sort/filters/tab and the focused agent from the URL, but
       // never the (session-only) checked set (PRD FR14/FR80).
@@ -473,12 +481,20 @@
   }
 
   function loadAgents() {
+    var generation = (state.listGeneration || 0) + 1;
+    state.listGeneration = generation;
+    if (els.nextStep && !els.nextStep.hidden) {
+      els.nextStep.innerHTML =
+        '<h3 id="stageNextStepTitle">Workspace work</h3><p class="stage__nextstep-copy">Refreshing membership…</p>';
+    }
     fetch('/api/agents/dashboard/list?sort_by=name&order=asc')
       .then(function (r) {
         if (!r.ok) throw new Error('list ' + r.status);
         return r.json();
       })
       .then(function (data) {
+        if (state.listGeneration !== generation) return;
+        state.detailCache = {};
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
         // One global constant off the list response, so every card's progress
         // ring is drawn without a request per agent (FR-75). Absent means no
@@ -508,6 +524,11 @@
         restoreTabFromUrl();
       })
       .catch(function (err) {
+        if (state.listGeneration !== generation) return;
+        if (els.nextStep && !els.nextStep.hidden) {
+          els.nextStep.innerHTML =
+            '<h3 id="stageNextStepTitle">Workspace work</h3><p class="stage__nextstep-copy">Membership could not be refreshed. Retry loading agents before opening workspace work.</p>';
+        }
         setCollectionState('error');
         console.error('[roster] load failed', err);
       });
@@ -638,6 +659,7 @@
       description: description,
       hasDescription: description !== '',
       workspaces: workspaces,
+      workspaceAction: workspaceActionView(a),
       workspaceCount: (a && a.workspace_count) || 0,
       capabilities: caps,
       model: model,
@@ -2065,7 +2087,7 @@
     els.overviewDesc.textContent = '';
     fetchDetail(name)
       .then(function (detail) {
-        if (state.selected !== name) return;
+        if (state.selected !== name || state.byName[name] !== listItem) return;
         renderVitals(listItem, detail);
         renderOverview(name, detail);
         renderWorkspaces(name, listItem, detail);
@@ -2074,7 +2096,7 @@
         els.stageDelete.hidden = !isEditable(detail);
       })
       .catch(function (err) {
-        if (state.selected !== name) return;
+        if (state.selected !== name || state.byName[name] !== listItem) return;
         renderVitals(listItem, null);
         els.overviewFacts.innerHTML = '<p class="stage-hint">Could not load agent details.</p>';
         renderWorkspaces(name, listItem, null);
@@ -2115,62 +2137,112 @@
     return name === 'ask ori' || name === 'workspace manager' || name === 'ori';
   }
 
-  // An agent that has never done anything gets one sentence and the one step
-  // that would change that. "Never" is read from what the server counts — a
-  // message or any experience — not from last_active, which is stamped at
-  // creation and so is never empty.
-  //
-  // Built-ins and the system assistant are skipped: they are not placed in
-  // workspaces, so there is no honest next step to offer from here.
+  // Membership is a list-response fact, not inferred from usage, XP, status,
+  // or a per-card request. Missing references are not an unassigned agent.
+  function workspaceActionView(agent) {
+    if (isPermanent(agent) || isSystemAssistant(agent)) return { kind: 'hidden' };
+    if (isUnreadable(agent))
+      return {
+        kind: 'unavailable',
+        copy: 'This agent definition could not be read. Workspace actions are unavailable.'
+      };
+    var refs = Array.isArray(agent && agent.workspaces) ? agent.workspaces : null;
+    var count = agent && agent.workspace_count;
+    var countKnown = Number.isInteger(count) && count >= 0;
+    if ((!refs && !countKnown) || (count != null && !countKnown))
+      return {
+        kind: 'unavailable',
+        copy: 'Workspace membership is unavailable. Open the full page to inspect this agent.'
+      };
+    var seen = new Set();
+    var members = (refs || []).filter(function (ws) {
+      if (!ws || typeof ws !== 'object') return false;
+      var key = String(ws.id || ws.folder_slug || '').trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    var total = countKnown ? count : members.length;
+    if (total === 0 && members.length === 0 && (!refs || refs.length === 0)) {
+      return isWorkspaceOwned(agent)
+        ? {
+            kind: 'unavailable',
+            copy: 'This workspace-owned agent cannot be assigned from the roster. Its owning workspace is unavailable here.'
+          }
+        : {
+            kind: 'assign',
+            copy: 'This agent is not in a workspace yet. Add it through the full-page assignment editor.'
+          };
+    }
+    var linkable = members.filter(function (ws) {
+      return String(ws.folder_slug || '').trim() !== '';
+    });
+    var partial = total !== members.length || linkable.length !== members.length;
+    if (!linkable.length)
+      return {
+        kind: 'unavailable',
+        copy: 'Workspace destinations are unavailable. Open the full page to inspect membership; this does not mean the agent is unassigned.'
+      };
+    return {
+      kind: linkable.length === 1 && !partial ? 'one' : 'choose',
+      members: linkable,
+      copy: partial
+        ? 'Some workspace destinations are unavailable. Choose a known workspace to inspect its tasks.'
+        : 'Open a workspace to see this agent’s current tasks and results, or give it work.'
+    };
+  }
+
   function renderNextStep(name, listItem) {
     if (!els.nextStep) return;
-    var stats = (listItem && listItem.statistics) || {};
-    var evo = (listItem && listItem.evolution) || {};
-    var used =
-      Number(stats.message_count || 0) > 0 ||
-      Number(evo.experience || 0) > 0 ||
-      Number(evo.level || 0) > 0;
-    if (used || isPermanent(listItem) || isSystemAssistant(listItem)) {
-      els.nextStep.hidden = true;
+    var view = viewFor(listItem).workspaceAction;
+    var previousChoice = els.nextStep.querySelector('details');
+    var keepOpen = els.nextStep.dataset.agent === name && previousChoice && previousChoice.open;
+    els.nextStep.dataset.agent = name;
+    els.nextStep.hidden = view.kind === 'hidden';
+    if (view.kind === 'hidden') {
       els.nextStep.innerHTML = '';
       return;
     }
-
-    var members = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
-    // A workspace without a folder_slug has no page to link to (see
-    // readonlyWsRow), so it cannot be where the first task is given.
-    var home = members.filter(function (ws) {
-      return ws && ws.folder_slug;
-    })[0];
-
-    var copy;
-    var href;
-    var label;
-    if (home) {
-      copy = esc(name) + ' has not done any work yet.';
-      // ?agent= is the workspace page's own key for "open on this agent", and
-      // it is the lower-cased name (workspace-detail.js normalizeAgentName).
-      // That view is where Give Task lives.
-      href =
-        '/workspaces/' +
-        encodeURIComponent(home.folder_slug) +
-        '?agent=' +
-        encodeURIComponent(String(name).trim().toLowerCase());
-      label = 'Give a first task in ' + esc(home.name || 'its workspace') + ' ↗';
-    } else {
-      copy = esc(name) + ' is not in a workspace yet, so there is nowhere to give it work.';
-      href = detailHref(name, 'workspaces');
-      label = 'Add to a workspace ↗';
+    var action = '';
+    if (view.kind === 'assign') {
+      action =
+        '<a class="stage__nextstep-link" href="' +
+        esc(detailHref(name, 'workspaces')) +
+        '">Add to a workspace ↗</a>';
+    } else if (view.members) {
+      var links = view.members.map(function (ws) {
+        // Existing workspace selection contract; UUIDs never stand in for slugs.
+        var href =
+          '/workspaces/' +
+          encodeURIComponent(String(ws.folder_slug).trim()) +
+          '?agent=' +
+          encodeURIComponent(String(name).trim().toLowerCase());
+        return (
+          '<a class="stage__nextstep-link" href="' +
+          esc(href) +
+          '">Open ' +
+          esc(ws.name || 'workspace') +
+          ' ↗</a>'
+        );
+      });
+      action =
+        view.kind === 'one'
+          ? links[0]
+          : '<details class="stage__workspace-choice"' +
+            (keepOpen ? ' open' : '') +
+            '><summary>Choose a workspace</summary><ul>' +
+            links
+              .map(function (link) {
+                return '<li>' + link + '</li>';
+              })
+              .join('') +
+            '</ul></details>';
     }
     els.nextStep.innerHTML =
-      '<p class="stage__nextstep-copy">' +
-      copy +
-      '</p><a class="stage__nextstep-link" href="' +
-      esc(href) +
-      '">' +
-      label +
-      '</a>';
-    els.nextStep.hidden = false;
+      '<h3 id="stageNextStepTitle">Workspace work</h3><p class="stage__nextstep-copy">' +
+      esc(view.copy) +
+      '</p>' +
+      action;
   }
 
   // Stage-panel progression block (PRD FR18): role emblem + name, level,
@@ -2271,7 +2343,13 @@
 
   function renderVitals(listItem, detail) {
     var vitals = [];
-    vitals.push(vital('Status', titleCase(String(listItem.status || 'idle'))));
+    var health = viewFor(listItem).health;
+    vitals.push(
+      vital('Configuration', health === 'ready' ? 'Model configured' : healthText(health))
+    );
+    // AgentStatusActive means operational, not executing. No current-task
+    // snapshot is supplied here; message totals and XP cannot fill that gap.
+    vitals.push(vital('Current activity', 'Not reported here'));
     if (detail && detail.model) vitals.push(vital('Model', detail.model));
     if (detail && detail.provider) vitals.push(vital('Provider', titleCase(detail.provider)));
     var msgs = listItem.statistics && listItem.statistics.message_count;
@@ -2519,9 +2597,18 @@
   // and reconcile it on save now lives only on the detail page.
   function renderWorkspaces(name, listItem, detail) {
     var members = Array.isArray(listItem.workspaces) ? listItem.workspaces : [];
+    var action = viewFor(listItem).workspaceAction;
     var rows =
       members.length === 0
-        ? '<p class="stage-hint">Not attached to any workspace.</p>'
+        ? '<p class="stage-hint">' +
+          esc(
+            action.kind === 'unavailable'
+              ? action.copy
+              : listItem.workspace_count === 0
+                ? 'Not attached to any workspace.'
+                : 'Workspace membership is unavailable here.'
+          ) +
+          '</p>'
         : members
             .map(function (ws) {
               return readonlyWsRow(ws, listItem.role);
@@ -2534,7 +2621,15 @@
         '">Change which workspaces ' +
         esc(name) +
         ' belongs to ↗</a></p>'
-      : '<p class="stage-hint">Built-in agents cannot be attached to a workspace.</p>';
+      : '<p class="stage-hint">' +
+        (isWorkspaceOwned(listItem)
+          ? 'Manage this workspace-owned agent in its workspace.'
+          : isPermanent(listItem)
+            ? 'Built-in agents cannot be attached to a workspace.'
+            : detail
+              ? 'This definition cannot be edited here.'
+              : 'Editing eligibility is unavailable until agent details load.') +
+        '</p>';
 
     els.workspacesBody.innerHTML = rows + footer;
   }

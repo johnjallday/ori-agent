@@ -329,7 +329,7 @@ test('recommendedNextMove is deterministic and attention-first', () => {
     active: true
   });
   assert.equal(move.kind, 'attention');
-  assert.match(move.label, /3 items needing attention/);
+  assert.match(move.label, /3 tasks needing attention/);
   // Same input, same answer — no randomness, no model call.
   assert.deepEqual(
     recommendedNextMove({ needs_attention_count: 3, open_task_count: 9, active: true }),
@@ -338,7 +338,7 @@ test('recommendedNextMove is deterministic and attention-first', () => {
 });
 
 test('recommendedNextMove singularizes a single attention item', () => {
-  assert.match(recommendedNextMove({ needs_attention_count: 1 }).label, /1 item needing attention/);
+  assert.match(recommendedNextMove({ needs_attention_count: 1 }).label, /1 task needing attention/);
 });
 
 test('recommendedNextMove walks setup, running, schedule, then open tasks', () => {
@@ -1464,15 +1464,16 @@ test('scheduledTodayItems flags overdue work rather than hiding it', () => {
   assert.equal(items[0].overdue, true);
 });
 
-test('renderAttentionSectionHTML selects rather than navigates, and caps the list', () => {
+test('renderAttentionSectionHTML opens the task owner and caps the list', () => {
   const items = Array.from({ length: 9 }, (_, i) => ({
     id: `w${i}`,
     name: `W${i}`,
-    count: 9 - i
+    count: 9 - i,
+    href: `/workspaces/w${i}?panel=tasks`
   }));
   const html = renderAttentionSectionHTML(items);
-  assert.match(html, /data-cockpit-select="w0"/);
-  assert.doesNotMatch(html, /<a /);
+  assert.match(html, /href="\/workspaces\/w0\?panel=tasks"/);
+  assert.doesNotMatch(html, /data-cockpit-select/);
   assert.match(html, /\+3 more/);
 });
 
@@ -1703,6 +1704,37 @@ test('askTargetDescription says nothing when there is no target at all', () => {
 // Updates badge + Quests/context-rail header disclosure state (Issue #334)
 // ===========================================================================
 
+test('unreadable and unclassified tasks do not become idle or fabricated zeros', () => {
+  assert.equal(workspaceSignals({ active: false }).status, 'unknown');
+  const failed = {
+    task_summary_available: false,
+    open_task_count: 0,
+    needs_attention_count: 0,
+    active: false
+  };
+  assert.equal(workspaceSignals(failed).status, 'unknown');
+  assert.equal(workspaceSignals(failed).attention, null);
+  assert.equal(matchesSignal(failed, SIGNAL_RUNNING), null);
+  const partial = {
+    open_task_count: 0,
+    needs_attention_count: 0,
+    unknown_task_count: 1,
+    active: false
+  };
+  assert.equal(matchesSignal(partial, SIGNAL_ATTENTION), null);
+  assert.equal(workspaceSignals(partial).status, 'unknown');
+  const rows = [failed, { id: 'w1', folder_slug: 'first', needs_attention_count: 2 }];
+  assert.equal(signalCounts(rows, null).attention, 1);
+  assert.equal(summaryView(rows, null).partialWorkspaces, 2);
+  assert.match(renderSummaryRailHTML(summaryView(rows, null)), /Known task totals only/);
+  assert.match(renderSignalFiltersHTML(signalCounts(rows, null), '', [SIGNAL_ATTENTION]), /1\+/);
+  assert.equal(attentionItems(rows)[0].href, '/workspaces/first?panel=tasks');
+  assert.match(
+    renderAttentionSectionHTML(attentionItems([{ id: 'w2', needs_attention_count: 1 }])),
+    /destination unavailable/
+  );
+});
+
 test('updatesBadgeView hides at zero attention rather than showing a 0 (FR15)', () => {
   const flattened = [{ id: 'a', kind: 'workspace', needs_attention_count: 0 }];
   const badge = updatesBadgeView(flattened, null);
@@ -1723,13 +1755,13 @@ test('updatesBadgeView carries the real aggregate attention count when positive 
   assert.equal(badge.visible, true);
 });
 
-test('updatesBadgeView includes cached plugin updates with workspace attention', () => {
+test('updatesBadgeView never adds plugin maintenance to workspace counts', () => {
   const flattened = [
     { id: 'a', kind: 'workspace', needs_attention_count: 2 },
     { id: 'b', kind: 'workspace', needs_attention_count: 0 }
   ];
-  assert.deepEqual(updatesBadgeView(flattened, null, 3), { count: 4, visible: true });
-  assert.deepEqual(updatesBadgeView([], null, 1), { count: 1, visible: true });
+  assert.deepEqual(updatesBadgeView(flattened, null, 3), { count: 1, visible: true });
+  assert.deepEqual(updatesBadgeView([], null, 1), { count: 0, visible: false });
 });
 
 test('updatesBadgeView never lets an unavailable source read as a fabricated 0', () => {

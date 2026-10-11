@@ -10,6 +10,16 @@
         <button type="button" id="workspaceBuildWithBtn" class="workspace-build-with-btn" hidden></button>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close create workspace"></button>
       </div>
+      <p id="workspaceBuildModeStatus" class="workspace-build-mode-status" role="status" hidden></p>
+      <!-- One active surface: the conversation or the existing editable wizard. -->
+      <aside id="workspaceBuildPane" class="workspace-build-pane" aria-label="Build with your assistant" hidden></aside>
+      <section id="workspaceBuildDraftSummary" class="workspace-build-draft-summary" aria-labelledby="workspaceBuildDraftTitle" hidden>
+        <div>
+          <h2 id="workspaceBuildDraftTitle">Draft so far</h2>
+          <p id="workspaceBuildDraftText"></p>
+        </div>
+        <button type="button" id="workspaceBuildEditDraftBtn" class="modern-btn modern-btn-secondary">Review or edit draft</button>
+      </section>
       <div class="modal-body workspace-create-modal-body">
         <div class="workspace-create-layout">
           <div class="workspace-create-main-fields">
@@ -596,12 +606,6 @@
         <button type="button" id="wizardNextBtn" class="modern-btn modern-btn-primary">Next →</button>
         <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary" hidden>Create Workspace</button>
       </div>
-      <!-- Build with your assistant: the conversation that fills the form
-           beside it. Rendered by create-workspace-build-pane.js; it comes after
-           the footer so keyboard order reaches it once the wizard is done. Its
-           ids are build-scoped on purpose — the global assistant panel is
-           mounted on every page and must never be duplicated here. -->
-      <aside id="workspaceBuildPane" class="workspace-build-pane" aria-label="Build with your assistant" hidden></aside>
     </div>
   </div>
 </div>

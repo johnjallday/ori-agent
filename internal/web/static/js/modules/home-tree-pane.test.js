@@ -1306,7 +1306,7 @@ test('a workspace overview shows status, counts, next run, tags and its buttons'
   ]);
   assert.deepEqual(view.fields, [{ label: 'Next run', value: 'No schedule' }]);
   assert.deepEqual(view.actions, [
-    { label: 'Open workspace', href: '/workspaces/night-drive', primary: true },
+    { label: 'Open workspace', href: '/workspaces/night-drive?panel=tasks', primary: true },
     { label: 'Move…', action: 'move' },
     { label: 'Delete', action: 'delete', danger: true }
   ]);
@@ -1487,7 +1487,7 @@ test('overview buttons are links where they navigate and buttons where they act'
   );
   assert.match(
     html,
-    /<a class="modern-btn modern-btn-primary modern-btn-sm" href="\/workspaces\/night-drive">Open workspace<\/a>/
+    /<a class="modern-btn modern-btn-primary modern-btn-sm" href="\/workspaces\/night-drive\?panel=tasks">Open workspace<\/a>/
   );
   assert.match(
     html,
