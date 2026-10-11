@@ -80,25 +80,41 @@ export function todayLabel(value) {
 const WORKSPACE_BUILD_ACTIONS = ['resume', 'discard'];
 
 export function todaySectionItems(section) {
-  return (Array.isArray(section?.items) ? section.items : []).slice(0, 10).map(item => {
-    const row = {
-      title: String(item?.title || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
-      detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
-      attribution: String(item?.attribution || '').trim(),
-      route: safeTodayRoute(item?.route) ? String(item.route) : '',
-      kind: String(item?.kind || ''),
-      sourceAt: String(item?.source_at || '')
-    };
-    // An unfinished build is acted on in place, so it keeps its id and the
-    // controls the server named; every other row is a link and keeps neither.
-    if (row.kind === 'workspace_build') {
-      row.id = String(item?.id || '').trim();
-      row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
-        WORKSPACE_BUILD_ACTIONS.includes(action)
-      );
-    }
-    return row;
-  });
+  const seen = new Set();
+  return (Array.isArray(section?.items) ? section.items : [])
+    .filter(item => {
+      const ref = item?.ref;
+      const key =
+        ref?.workspace_id && ref?.entity_type && ref?.entity_id
+          ? JSON.stringify([ref.workspace_id, ref.entity_type, ref.entity_id])
+          : item?.id
+            ? JSON.stringify([item.kind, item.id, item.route])
+            : '';
+      if (key && seen.has(key)) return false;
+      if (key) seen.add(key);
+      return true;
+    })
+    .slice(0, 10)
+    .map(item => {
+      const row = {
+        id: String(item?.id || '').trim(),
+        ref: item?.ref ? { ...item.ref } : null,
+        title: String(item?.title || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+        detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+        attribution: String(item?.attribution || '').trim(),
+        route: safeTodayRoute(item?.route) ? String(item.route) : '',
+        kind: String(item?.kind || ''),
+        sourceAt: String(item?.source_at || '')
+      };
+      // Every row retains canonical identity; only builds have in-place controls.
+      if (row.kind === 'workspace_build') {
+        row.id = String(item?.id || '').trim();
+        row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
+          WORKSPACE_BUILD_ACTIONS.includes(action)
+        );
+      }
+      return row;
+    });
 }
 
 // Resume opens the Create Workspace dialog in build mode on the open build.
@@ -164,11 +180,6 @@ export function todayThreeSectionView(today, now = new Date()) {
 export function todaySectionRows(section) {
   const health = String(section?.health?.status || 'unavailable');
   const rows = Array.isArray(section?.items) ? section.items.slice(0, 10) : [];
-  if (health === 'unavailable') {
-    return [
-      { kind: 'status', title: 'Source unavailable — other Today sections are still current.' }
-    ];
-  }
   const projected = rows.map(item => ({
     kind: String(item?.kind || 'item'),
     title: String(item?.title || '').trim(),
@@ -176,9 +187,9 @@ export function todaySectionRows(section) {
     attribution: String(item?.attribution || '').trim(),
     route: safeTodayRoute(item?.route) ? String(item.route) : ''
   }));
-  if (health === 'partial') {
+  if (health === 'partial' || health === 'unavailable') {
     return [
-      { kind: 'status', title: 'Some sources are unavailable — showing verified items.' },
+      { kind: 'status', title: 'Some sources are unavailable — showing verified items only.' },
       ...projected
     ];
   }
@@ -1060,18 +1071,21 @@ async function loadToday() {
     if (seq !== state.sequence) return;
     const els = elements();
     if (!els) return;
+    const retained = state.today;
     renderToday({
-      state: 'unavailable',
+      ...retained,
+      state: retained?.state || 'unavailable',
       display_name: state.relationship?.display_name,
-      unavailable_sources: ['Today']
+      unavailable_sources: [...new Set([...(retained?.unavailable_sources || []), 'Today'])]
     });
     // Nothing is known, so nothing is listed: an empty drawer here would read
     // as "all clear", and this message is what stands in its place.
-    els.banner.textContent =
-      'Today is temporarily unavailable. The Workspace Map and the rest of Home remain available; no all-clear is being shown.';
+    els.banner.textContent = retained
+      ? 'Couldn’t refresh assistant requests. Showing last-loaded records. Retry to check for changes.'
+      : 'Assistant requests are temporarily unavailable. Retry, or use the Workspace Map.';
     els.banner.hidden = false;
     syncSummary(els);
-    shareTodayWithDrawer(null);
+    shareTodayWithDrawer(state.today);
     renderLauncherCue(els, { state: 'unavailable' });
   }
 }

@@ -47,14 +47,14 @@ func TestComputeMapSummaryFields(t *testing.T) {
 	if fields.OpsMode != "direct" {
 		t.Errorf("OpsMode = %q, want %q", fields.OpsMode, "direct")
 	}
-	if fields.OpenTaskCount != 2 {
-		t.Errorf("OpenTaskCount = %d, want 2 (pending + in_progress, excludes completed and Backlog)", fields.OpenTaskCount)
+	if fields.OpenTaskCount != 4 {
+		t.Errorf("OpenTaskCount = %d, want 4 actionable tasks, excluding closed and Backlog", fields.OpenTaskCount)
 	}
 	if fields.BacklogCount != 2 {
 		t.Errorf("BacklogCount = %d, want 2, tracked separately from OpenTaskCount (PRD workspace-backlog FR7, 40, 49)", fields.BacklogCount)
 	}
-	if fields.NeedsAttentionCount != 2 {
-		t.Errorf("NeedsAttentionCount = %d, want 2 (failed + timeout)", fields.NeedsAttentionCount)
+	if fields.NeedsAttentionCount != 3 {
+		t.Errorf("NeedsAttentionCount = %d, want 3 (unassigned + failed + timeout)", fields.NeedsAttentionCount)
 	}
 	if !fields.Active {
 		t.Error("Active = false, want true (workspace has an in-progress task)")

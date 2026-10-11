@@ -371,12 +371,14 @@ type Workspace struct {
 	// BacklogCount is this workspace's own Backlog item count (PRD
 	// workspace-backlog FR40, 49, 58) — separate from OpenTaskCount, which
 	// stays Ready-and-later only.
-	BacklogCount        int    `json:"backlog_count"`
-	NeedsAttentionCount int    `json:"needs_attention_count"`
-	MCPCount            int    `json:"mcp_count"`
-	SkillCount          int    `json:"skill_count"`
-	OpsMode             string `json:"ops_mode,omitempty"`
-	Active              bool   `json:"active"`
+	BacklogCount         int    `json:"backlog_count"`
+	TaskSummaryAvailable bool   `json:"task_summary_available"`
+	UnknownTaskCount     int    `json:"unknown_task_count"`
+	NeedsAttentionCount  int    `json:"needs_attention_count"`
+	MCPCount             int    `json:"mcp_count"`
+	SkillCount           int    `json:"skill_count"`
+	OpsMode              string `json:"ops_mode,omitempty"`
+	Active               bool   `json:"active"`
 
 	// BlueprintID and BlueprintBuiltin are inert template provenance projected
 	// from workspace.json for visual identity in the Build Catalog and Workspace

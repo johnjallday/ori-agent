@@ -137,19 +137,15 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 	// Ready tasks and follow-ups have their own canonical links. Exclude the
 	// decision subset from the follow-up pass so each actionable item appears
 	// only once, with one primary action (its link).
-	for _, task := range out.Priorities.Items {
-		if task.State == "waiting_for_input" || task.State == "waiting_for_choice" {
-			needs = append(needs, task)
-		}
-	}
+	needs = append(needs, hqInputItems(hq, hqRoute)...)
 	needs = append(needs, s.followUpItemsByStatus(ctx, userID, relationship, now, followup.StatusCandidate, out)...)
 	needs = append(needs, out.Decisions.Items...)
-	decisionIDs := map[string]bool{}
+	decisionIDs := map[todayItemIdentity]bool{}
 	for _, item := range out.Decisions.Items {
-		decisionIDs[item.ID] = true
+		decisionIDs[todayIdentity(item)] = true
 	}
 	for _, item := range out.FollowUps.Items {
-		if !decisionIDs[item.ID] {
+		if !decisionIDs[todayIdentity(item)] {
 			needs = append(needs, item)
 		}
 	}
@@ -184,6 +180,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		done = []TodayItem{}
 	}
 	out.WorkingOn = TodaySection{Items: working, Health: combinedTodayHealth(working, out.Brief.Health, meetingsHealth(out.Meetings), setupHealth(out.SpecialistSetup))}
+	needs = uniqueTodayItems(needs)
 	out.NeedsYou = TodaySection{Items: needs, Health: combinedTodayHealth(needs, out.Priorities.Health, out.FollowUps.Health, out.Decisions.Health)}
 	out.Done = TodaySection{Items: done, Health: combinedTodayHealth(done, out.Results.Health, studioHealth(out.Studio))}
 	for _, src := range []struct {
@@ -200,6 +197,47 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			out.UnavailableSources = appendSource(out.UnavailableSources, src.name)
 		}
 	}
+}
+
+// hqInputItems stays inside the already-loaded assistant HQ. Ready-only
+// priorities cannot represent running tasks paused for a response.
+func hqInputItems(hq *workspace.Workspace, route string) []TodayItem {
+	var tasks []workspace.Task
+	for _, task := range hq.Tasks {
+		if workspace.TaskAttentionState(task) == "needs_input" {
+			task.WorkspaceID = hq.ID
+			tasks = append(tasks, task)
+		}
+	}
+	sort.SliceStable(tasks, func(i, j int) bool { return taskSourceTime(tasks[i]).After(taskSourceTime(tasks[j])) })
+	items := taskTodaySection(tasks, route, "ticket", todayPriorityCap).Items
+	for i := range items {
+		items[i].State = "waiting_for_choice"
+	}
+	return items
+}
+
+type todayItemIdentity struct{ Owner, Kind, ID string }
+
+func todayIdentity(item TodayItem) todayItemIdentity {
+	if item.Ref.WorkspaceID != "" && item.Ref.EntityType != "" && item.Ref.EntityID != "" {
+		return todayItemIdentity{item.Ref.WorkspaceID, item.Ref.EntityType, item.Ref.EntityID}
+	}
+	return todayItemIdentity{item.Route, item.Kind, item.ID}
+}
+
+func uniqueTodayItems(items []TodayItem) []TodayItem {
+	seen := map[todayItemIdentity]bool{}
+	out := make([]TodayItem, 0, len(items))
+	for _, item := range items {
+		key := todayIdentity(item)
+		if item.ID != "" && seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 // firstLookTodayItem is the folder's first look as Today shows it: "First look
