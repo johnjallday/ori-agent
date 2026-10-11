@@ -21,14 +21,17 @@
   // when the user clicks Dismiss/Snooze on a row; consumed when the modal's
   // primary action fires.
   let activeTarget = null;
+  let loadGeneration = 0;
+  let lastLoaded = null;
+  let workspaceName = workspaceFilter;
 
   // --- Rendering ---
   const PRIORITY_CHIP_STYLES = {
     critical: 'background: #c0392b; color: white;',
-    high: 'background: #e67e22; color: white;',
+    high: 'background: #96400c; color: white;',
     medium: 'background: #f1c40f; color: #333;',
-    low: 'background: #95a5a6; color: white;',
-    '': 'background: var(--surface-2, #e0e0e0); color: var(--text-secondary, #666);'
+    low: 'background: var(--bg-secondary); color: var(--text-primary);',
+    '': 'background: var(--bg-secondary); color: var(--text-primary);'
   };
 
   function escapeHtml(s) {
@@ -69,7 +72,7 @@
       planned: 'Planned'
     };
     const muted = s === 'resolved' || s === 'dismissed' || s === 'planned';
-    return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; opacity: ${muted ? 0.6 : 1}; border: 1px solid var(--border-color, #ddd);">${escapeHtml(labels[s] || s || '')}</span>`;
+    return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; color: var(${muted ? '--text-secondary' : '--text-primary'}); border: 1px solid var(--border-color, #ddd);">${escapeHtml(labels[s] || s || '')}</span>`;
   }
 
   function assistantSourceHTML(item) {
@@ -109,39 +112,41 @@
     // but a direct link is the clearer affordance once linked (FR26, 29).
     if (item.status === 'planned' && item.linked_task_id) {
       const slug = String(item.linked_workspace_slug || item.workspace_slug || '').trim();
-      const href = slug
-        ? `/workspaces/${encodeURIComponent(slug)}?panel=backlog&task=${encodeURIComponent(item.linked_task_id)}`
-        : '#';
-      return `<a class="btn btn-sm btn-outline-primary" href="${href}" title="View in Backlog">View in Backlog</a>`;
+      if (!slug)
+        return '<span class="action-center-unavailable">Backlog workspace unavailable</span>';
+      const href = `/workspaces/${encodeURIComponent(slug)}?panel=backlog&task=${encodeURIComponent(item.linked_task_id)}`;
+      return `<a class="modern-btn modern-btn-secondary action-center-backlog" href="${href}" title="View in Backlog">View in Backlog</a>`;
     }
-    return `<button class="btn btn-sm btn-outline-primary" data-action="add-to-backlog" title="Add to Backlog">Add to Backlog</button>`;
+    return `<button class="modern-btn modern-btn-secondary action-center-backlog" data-action="add-to-backlog" title="Add to Backlog">Add to Backlog</button>`;
   }
 
   function rowHTML(item) {
     const unseen = !item.seen_at;
     const workspaceSlug = String(item.workspace_slug || '').trim();
-    const opened = workspaceSlug ? `/workspaces/${encodeURIComponent(workspaceSlug)}` : '#';
+    const opened = workspaceSlug ? `/workspaces/${encodeURIComponent(workspaceSlug)}` : '';
+    const title = escapeHtml(item.title || 'Untitled finding');
+    const workspaceName = escapeHtml(item.workspace_name || item.workspace_id);
     return `
       <div class="action-center-row" data-ws="${escapeHtml(item.workspace_id)}" data-workspace-slug="${escapeHtml(workspaceSlug)}" data-id="${escapeHtml(item.id)}"
-           style="display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem 1rem; padding: 0.75rem; border-bottom: 1px solid var(--border-color, #eee); align-items: start; ${unseen ? 'background: rgba(99,102,241,0.04);' : ''}">
-        <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; min-width: 80px;">
+           ${unseen ? 'data-unread="true"' : ''}>
+        <div class="action-center-chips">
           ${priorityChip(item.priority)}
           ${statusChip(item.status)}
         </div>
-        <div>
-          <div style="display: flex; gap: 0.5rem; align-items: baseline;">
-            ${unseen ? '<span aria-label="unread" title="Unread" style="width: 8px; height: 8px; background: #6366f1; border-radius: 50%; display: inline-block; flex: 0 0 auto;"></span>' : ''}
-            <strong style="font-weight: ${unseen ? 600 : 500}; cursor: pointer;" data-action="open">${escapeHtml(item.title || 'Untitled finding')}</strong>
+        <div class="action-center-copy">
+          <div class="action-center-title">
+            ${unseen ? '<span role="img" aria-label="Unread" title="Unread" style="width: 8px; height: 8px; background: #6366f1; border-radius: 50%; display: inline-block; flex: 0 0 auto;"></span>' : ''}
+            ${opened ? `<a href="${opened}" data-action="open">${title}</a>` : `<strong>${title}</strong>`}
           </div>
           <div style="font-size: 0.85rem; color: var(--text-secondary, #555); margin-top: 0.25rem;">${escapeHtml(item.summary || '')}</div>
           ${assistantSourceHTML(item)}
           ${dailyBriefLinkHTML(item)}
           <div style="font-size: 0.75rem; color: var(--text-secondary, #888); margin-top: 0.4rem;">
-            <a href="${opened}" style="color: inherit; text-decoration: underline;">${escapeHtml(item.workspace_name || item.workspace_id)}</a>
-            · ${fmtTime(item.updated_at)}
+            ${opened ? `<a href="${opened}" style="color: inherit; text-decoration: underline;">${workspaceName}</a>` : `<span>${workspaceName} · Workspace unavailable</span>`}
+            · ${escapeHtml(fmtTime(item.updated_at))}
           </div>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 96px;">
+        <div class="action-center-actions">
           ${backlogActionHTML(item)}
           <button class="btn btn-sm btn-outline-success" data-action="resolve" title="Mark resolved">Resolve</button>
           <button class="btn btn-sm btn-outline-secondary" data-action="snooze" title="Snooze">Snooze</button>
@@ -151,21 +156,59 @@
     `;
   }
 
-  function render(items) {
+  function emptyHTML(status) {
+    const scoped = Boolean(workspaceFilter);
+    const labels = {
+      new: 'new',
+      snoozed: 'snoozed',
+      resolved: 'resolved',
+      dismissed: 'dismissed',
+      planned: 'planned'
+    };
+    const title = !status
+      ? `No active findings${scoped ? ' in this workspace' : ''}`
+      : status === 'all' && !scoped
+        ? 'No findings'
+        : 'No matching findings';
+    const detail = !status
+      ? 'Nothing is waiting for triage in this view. Snoozed findings return when they are due.'
+      : status === 'all'
+        ? `There are no findings${scoped ? ' in this workspace' : ' across your workspaces'}.`
+        : `There are no ${labels[status] || 'matching'} findings${scoped ? ' in this workspace' : ''}.`;
+    const clear = scoped
+      ? '<a href="/action-center?status=all" class="modern-btn modern-btn-secondary">Clear filters</a>'
+      : status !== 'all'
+        ? '<button type="button" data-action="clear-filters" class="modern-btn modern-btn-secondary">Show all findings</button>'
+        : '';
+    return `<h3>${title}</h3><p>${detail}</p><div class="action-center-empty-actions">${clear}<a href="/" class="modern-btn modern-btn-secondary">Open Workspace Map</a></div>`;
+  }
+
+  function render(items, status, mutationRow = null) {
     const list = $('#action-center-list');
-    const empty = $('#action-center-empty');
     if (!list) return;
-    if (!items.length) {
-      // Restore the empty-state markup (we removed it on first render).
-      list.innerHTML = '';
-      if (empty) {
-        list.appendChild(empty);
-        empty.style.display = '';
-      }
-      return;
-    }
-    if (empty) empty.style.display = 'none';
+    // Only restore focus if the replaced list owned it. Filter/refresh controls
+    // keep focus, and background responses never pull it away from another area.
+    const focusedRow =
+      document.activeElement?.closest?.('.action-center-row') ||
+      (document.activeElement === document.body ? mutationRow : null);
+    const rows = $$('.action-center-row');
+    const index = rows.indexOf(focusedRow);
     list.innerHTML = items.map(rowHTML).join('');
+    list.hidden = items.length === 0;
+    const empty = $('#action-center-empty');
+    if (empty) {
+      empty.innerHTML = emptyHTML(status);
+      empty.hidden = items.length > 0;
+    }
+    if (index >= 0) {
+      const nextRows = $$('.action-center-row');
+      const next =
+        nextRows.find(
+          row =>
+            row.dataset.id === focusedRow.dataset.id && row.dataset.ws === focusedRow.dataset.ws
+        ) || nextRows[Math.min(index, nextRows.length - 1)];
+      (next?.querySelector('a, button') || $('#action-center-status'))?.focus();
+    }
   }
 
   // --- Home library cards (library-manager-notifications FR 13) ---
@@ -237,17 +280,17 @@
     // Prefer the human-readable workspace name from a returned item; fall back
     // to the id when the filtered workspace currently has no findings.
     const match = items.find(i => i.workspace_id === workspaceFilter);
-    const name = (match && match.workspace_name) || workspaceFilter;
+    if (match?.workspace_name) workspaceName = match.workspace_name;
     el.style.display = '';
-    el.innerHTML = `Showing findings for <strong>${escapeHtml(name)}</strong>. <a href="/action-center">Show all findings</a>`;
+    el.innerHTML = `Showing findings for <strong>${escapeHtml(workspaceName)}</strong>. <a href="/action-center">Show all workspaces</a>`;
   }
 
   function setStatus(msg, kind) {
     const el = $('#action-center-status');
     if (!el) return;
     el.textContent = msg || '';
-    el.style.color =
-      kind === 'error' ? 'var(--danger-color, #c0392b)' : 'var(--text-secondary, #666)';
+    el.style.color = kind === 'error' ? 'var(--text-primary)' : 'var(--text-secondary, #666)';
+    el.style.fontWeight = kind === 'error' ? '600' : '';
   }
 
   // Success message with a clickable link to the created/linked item, so the
@@ -256,13 +299,12 @@
     const el = $('#action-center-status');
     if (!el) return;
     el.style.color = 'var(--text-secondary, #666)';
+    el.style.fontWeight = '';
     el.innerHTML = `${escapeHtml(msg)} <a href="${href}">${escapeHtml(linkLabel)}</a>`;
   }
 
   // --- API ---
-  async function fetchList() {
-    const status = $('#action-center-status-filter').value || '';
-    const sort = $('#action-center-sort').value || 'priority';
+  async function fetchList(status, sort) {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
     if (sort) params.set('sort', sort);
@@ -285,17 +327,106 @@
     return resp.json();
   }
 
-  async function reload() {
-    void fetchLibrary().then(renderLibrary);
+  function setHidden(selector, hidden) {
+    const el = $(selector);
+    if (el) el.hidden = hidden;
+  }
+
+  function showRetainedRows() {
+    const el = $('#action-center-retained');
+    if (!el) return;
+    el.hidden = !lastLoaded?.count;
+    el.textContent = lastLoaded?.count
+      ? `Showing last-loaded findings: ${lastLoaded.label}${workspaceFilter ? ' · this workspace' : ' · all workspaces'}. Current filters have not been refreshed.`
+      : '';
+  }
+
+  async function reload(mutationRow = null) {
+    const generation = ++loadGeneration;
+    const status = $('#action-center-status-filter').value || '';
+    const sort = $('#action-center-sort').value || 'priority';
+    const label = $('#action-center-status-filter').selectedOptions?.[0]?.textContent || 'Active';
+    void fetchLibrary().then(cards => {
+      if (generation === loadGeneration) renderLibrary(cards);
+    });
+    setHidden('#action-center-empty', true);
+    setHidden('#action-center-error', true);
+    showRetainedRows();
+    $('#action-center-results')?.setAttribute('aria-busy', 'true');
+    renderFilterBanner([]);
+    setStatus('Loading findings…');
     try {
-      setStatus('Loading...');
-      const data = await fetchList();
-      const items = data.items || [];
-      render(items);
+      const data = await fetchList(status, sort);
+      if (generation !== loadGeneration) return false;
+      if (!Array.isArray(data?.items) || data.items.some(item => !item || typeof item !== 'object'))
+        throw new Error('Invalid findings response');
+      const items = data.items;
+      lastLoaded = { count: items.length, label };
+      setHidden('#action-center-retained', true);
+      setStatus(`${items.length} finding${items.length === 1 ? '' : 's'}`);
+      render(items, status, mutationRow);
       renderFilterBanner(items);
-      setStatus(data.total ? `${data.total} finding${data.total === 1 ? '' : 's'}` : '');
+      return true;
+    } catch (_) {
+      if (generation !== loadGeneration) return false;
+      setStatus('Findings could not be refreshed.', 'error');
+      setHidden('#action-center-error', false);
+      return false;
+    } finally {
+      if (generation === loadGeneration)
+        $('#action-center-results')?.setAttribute('aria-busy', 'false');
+    }
+  }
+
+  function showMutationModal(el) {
+    // Bootstrap ignores hide() during its opening transition. A fast mutation
+    // must wait for the public shown event before trying to close the dialog.
+    activeTarget.modalReady = new Promise(resolve => {
+      el.addEventListener('shown.bs.modal', resolve, { once: true });
+    });
+    bootstrap.Modal.getOrCreateInstance(el).show();
+  }
+
+  // Wait for the modal to release its focus trap before restoring the row's
+  // trigger. The subsequent render can then move focus if that row disappears.
+  async function closeMutationModal(selector, trigger) {
+    const el = $(selector);
+    const restore = el?.contains(document.activeElement);
+    if (typeof bootstrap !== 'undefined' && el) {
+      const modal = bootstrap.Modal.getInstance(el);
+      if (modal && el.classList.contains('show')) {
+        await new Promise(resolve => {
+          el.addEventListener('hidden.bs.modal', resolve, { once: true });
+          modal.hide();
+        });
+      }
+    }
+    if (restore && trigger?.isConnected) trigger.focus();
+  }
+
+  async function handleMutation(target, action, body, modalSelector, modalButton) {
+    const trigger = modalButton || target.trigger;
+    const mutationRow =
+      trigger === document.activeElement ? target.trigger?.closest('.action-center-row') : null;
+    if (trigger) trigger.disabled = true;
+    try {
+      await callMutation(target.workspaceID, target.opportunityID, action, body);
+      if (modalSelector) {
+        await target.modalReady;
+        await closeMutationModal(modalSelector, target.trigger);
+      }
+      await reload(mutationRow);
     } catch (e) {
-      setStatus(`Failed to load: ${e.message}`, 'error');
+      setStatus(
+        `${action === 'resolve' ? 'Resolve' : action === 'dismiss' ? 'Dismiss' : 'Snooze'} failed: ${e.message}`,
+        'error'
+      );
+    } finally {
+      if (trigger) {
+        trigger.disabled = false;
+        if (mutationRow && trigger.isConnected && document.activeElement === document.body)
+          trigger.focus();
+      }
     }
   }
 
@@ -305,13 +436,15 @@
   // item, since unlike Resolve it produces a new record worth navigating to.
   async function handleAddToBacklog(workspaceID, opportunityID, triggerBtn) {
     const originalLabel = triggerBtn ? triggerBtn.textContent : '';
+    const mutationRow =
+      triggerBtn === document.activeElement ? triggerBtn?.closest('.action-center-row') : null;
     if (triggerBtn) {
       triggerBtn.disabled = true;
       triggerBtn.textContent = 'Adding…';
     }
     try {
       const data = await callMutation(workspaceID, opportunityID, 'add-to-backlog');
-      await reload();
+      if (!(await reload(mutationRow))) return; // Keep the reload failure and Retry visible.
       const item = data && data.item;
       const workspaceSlug = String(data?.workspace_slug || '').trim();
       if (item && item.id && workspaceSlug) {
@@ -324,11 +457,14 @@
         setStatus('Added to backlog.');
       }
     } catch (e) {
+      setStatus(`Add to Backlog failed: ${e.message}`, 'error');
+    } finally {
       if (triggerBtn) {
         triggerBtn.disabled = false;
         triggerBtn.textContent = originalLabel;
+        if (mutationRow && triggerBtn.isConnected && document.activeElement === document.body)
+          triggerBtn.focus();
       }
-      setStatus(`Add to Backlog failed: ${e.message}`, 'error');
     }
   }
 
@@ -337,56 +473,64 @@
     const row = evt.target.closest('.action-center-row');
     if (!row) return;
     const workspaceID = row.dataset.ws;
-    const workspaceSlug = row.dataset.workspaceSlug || '';
     const opportunityID = row.dataset.id;
     const triggerBtn = evt.target.closest('[data-action]');
     const action = triggerBtn?.dataset.action;
     if (!action) return;
 
     if (action === 'open') {
-      // Mark seen via the GET-single endpoint (it sets SeenAt). Then take
-      // the user to the source workspace.
-      fetch(
-        `/api/action-center/opportunities/${encodeURIComponent(workspaceID)}/${encodeURIComponent(opportunityID)}`
-      ).finally(() => {
-        if (workspaceSlug)
-          window.location.href = `/workspaces/${encodeURIComponent(workspaceSlug)}`;
-      });
+      // Keep native keyboard, modified-click and middle-click navigation.
+      // keepalive lets the seen request finish after ordinary navigation too.
+      if (evt.type === 'auxclick' && evt.button !== 1) return;
+      void fetch(
+        `/api/action-center/opportunities/${encodeURIComponent(workspaceID)}/${encodeURIComponent(opportunityID)}`,
+        { keepalive: true }
+      ).catch(() => {});
       return;
     }
+    if (evt.type === 'auxclick') return;
 
-    activeTarget = { workspaceID, opportunityID };
+    activeTarget = { workspaceID, opportunityID, trigger: triggerBtn };
     if (action === 'add-to-backlog') {
       void handleAddToBacklog(workspaceID, opportunityID, triggerBtn);
       return;
     }
     if (action === 'resolve') {
-      callMutation(workspaceID, opportunityID, 'resolve')
-        .then(reload)
-        .catch(e => setStatus(`Resolve failed: ${e.message}`, 'error'));
+      void handleMutation(activeTarget, 'resolve');
       return;
     }
     if (action === 'dismiss') {
       const modalEl = $('#action-center-dismiss-modal');
       if (typeof bootstrap !== 'undefined' && modalEl) {
-        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        showMutationModal(modalEl);
       } else {
         // Fallback: dismiss with no reason if Bootstrap isn't available.
-        callMutation(workspaceID, opportunityID, 'dismiss').then(reload);
+        void handleMutation(activeTarget, 'dismiss');
       }
       return;
     }
     if (action === 'snooze') {
       const modalEl = $('#action-center-snooze-modal');
       if (typeof bootstrap !== 'undefined' && modalEl) {
-        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        showMutationModal(modalEl);
       } else {
-        callMutation(workspaceID, opportunityID, 'snooze', { preset: 'next_week' }).then(reload);
+        void handleMutation(activeTarget, 'snooze', { preset: 'next_week' });
       }
     }
   }
 
   function wireModals() {
+    for (const selector of ['#action-center-dismiss-modal', '#action-center-snooze-modal']) {
+      const modal = $(selector);
+      modal?.addEventListener('hidden.bs.modal', () => {
+        const trigger = activeTarget?.trigger;
+        if (
+          trigger?.isConnected &&
+          (document.activeElement === document.body || modal.contains(document.activeElement))
+        )
+          trigger.focus();
+      });
+    }
     const dismissBtn = $('#action-center-dismiss-confirm');
     if (dismissBtn) {
       dismissBtn.addEventListener('click', async () => {
@@ -395,37 +539,26 @@
           'input[name="action-center-dismiss-reason"]:checked'
         );
         const reason = reasonEl ? reasonEl.value : '';
-        try {
-          await callMutation(
-            activeTarget.workspaceID,
-            activeTarget.opportunityID,
-            'dismiss',
-            reason ? { reason } : null
-          );
-          if (typeof bootstrap !== 'undefined') {
-            bootstrap.Modal.getInstance($('#action-center-dismiss-modal'))?.hide();
-          }
-          await reload();
-        } catch (e) {
-          setStatus(`Dismiss failed: ${e.message}`, 'error');
-        }
+        await handleMutation(
+          activeTarget,
+          'dismiss',
+          reason ? { reason } : null,
+          '#action-center-dismiss-modal',
+          dismissBtn
+        );
       });
     }
 
     $$('#action-center-snooze-modal [data-snooze-preset]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!activeTarget) return;
-        try {
-          await callMutation(activeTarget.workspaceID, activeTarget.opportunityID, 'snooze', {
-            preset: btn.dataset.snoozePreset
-          });
-          if (typeof bootstrap !== 'undefined') {
-            bootstrap.Modal.getInstance($('#action-center-snooze-modal'))?.hide();
-          }
-          await reload();
-        } catch (e) {
-          setStatus(`Snooze failed: ${e.message}`, 'error');
-        }
+        await handleMutation(
+          activeTarget,
+          'snooze',
+          { preset: btn.dataset.snoozePreset },
+          '#action-center-snooze-modal',
+          btn
+        );
       });
     });
 
@@ -435,18 +568,15 @@
         if (!activeTarget) return;
         const raw = $('#action-center-snooze-custom').value;
         if (!raw) return;
-        const until = new Date(raw).toISOString();
-        try {
-          await callMutation(activeTarget.workspaceID, activeTarget.opportunityID, 'snooze', {
-            until
-          });
-          if (typeof bootstrap !== 'undefined') {
-            bootstrap.Modal.getInstance($('#action-center-snooze-modal'))?.hide();
-          }
-          await reload();
-        } catch (e) {
-          setStatus(`Snooze failed: ${e.message}`, 'error');
-        }
+        const date = new Date(raw);
+        if (Number.isNaN(date.getTime())) return;
+        await handleMutation(
+          activeTarget,
+          'snooze',
+          { until: date.toISOString() },
+          '#action-center-snooze-modal',
+          customGo
+        );
       });
     }
   }
@@ -455,9 +585,24 @@
     const list = $('#action-center-list');
     if (!list) return; // Action Center page not loaded.
     list.addEventListener('click', handleRowClick);
-    $('#action-center-status-filter')?.addEventListener('change', reload);
-    $('#action-center-sort')?.addEventListener('change', reload);
-    $('#action-center-refresh')?.addEventListener('click', reload);
+    list.addEventListener('auxclick', handleRowClick);
+    const statusFilter = $('#action-center-status-filter');
+    // Clear a workspace scope and status together via the empty state's link.
+    if (new URLSearchParams(window.location.search).get('status') === 'all')
+      statusFilter.value = 'all';
+    statusFilter?.addEventListener('change', () => void reload());
+    $('#action-center-sort')?.addEventListener('change', () => void reload());
+    $('#action-center-refresh')?.addEventListener('click', () => void reload());
+    $('#action-center-retry')?.addEventListener('click', () => {
+      $('#action-center-refresh')?.focus();
+      void reload();
+    });
+    $('#action-center-empty')?.addEventListener('click', evt => {
+      if (!evt.target.closest('[data-action="clear-filters"]')) return;
+      statusFilter.value = 'all';
+      statusFilter.focus();
+      void reload();
+    });
     wireModals();
     reload();
   }
@@ -476,7 +621,11 @@
     escapeHtml,
     fmtTime,
     libraryCardHTML,
-    renderLibrary
+    renderLibrary,
+    emptyHTML,
+    render,
+    reload,
+    handleRowClick
   };
 
   if (document.readyState === 'loading') {
