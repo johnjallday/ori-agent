@@ -8,7 +8,14 @@ import (
 // Derived checkpoints stay with canonical Sessions, outside portable history.
 // Reset explicitly clears them; Session deletion cascades and ownership changes
 // invalidate orphaned context without moving its authority.
-func (db *DB) migration078AssistantConversationContext(ctx context.Context) error {
+func (db *DB) migration079AssistantConversationContext(ctx context.Context) error {
+	// The pre-merge feature also used version 78, for conversation context.
+	// Reapply the idempotent delivered folder migration so databases from
+	// either parent get its bounds without rewriting migration history.
+	// Its column copy may invalidate disposable recaps, never message text.
+	if err := db.migration078FolderSelectionCapacity(ctx); err != nil {
+		return err
+	}
 	return db.InTransaction(ctx, func(tx *sql.Tx) error {
 		var tables, column int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions','messages')`).Scan(&tables); err != nil {

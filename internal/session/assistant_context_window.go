@@ -45,7 +45,7 @@ func readContextWindow(ctx context.Context, tx *sql.Tx, id string, high int64, c
 		}
 		if folder.Valid && !message.Imported && len(folder.String) <= metadataLimit {
 			var event foldercontext.Event
-			if len(folder.String) > foldercontext.MaxBytes+256 || json.Unmarshal([]byte(folder.String), &event) != nil || event.Validate() != nil {
+			if len(folder.String) > foldercontext.MaxEventBytes || json.Unmarshal([]byte(folder.String), &event) != nil || event.Validate() != nil {
 				return nil, 0, false, foldercontext.ErrInvalid
 			}
 			message.FolderContext = &event

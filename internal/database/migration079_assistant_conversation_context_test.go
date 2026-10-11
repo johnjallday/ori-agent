@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-func TestMigration078RetryPreservesCanonicalHistoryAndInvalidatesDerivedData(t *testing.T) {
+func TestMigration079RetryPreservesCanonicalHistoryAndInvalidatesDerivedData(t *testing.T) {
 	db, err := Open(t.Context(), &Config{Path: filepath.Join(t.TempDir(), "context.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
 	for range 2 {
-		if err := db.migration078AssistantConversationContext(t.Context()); err != nil {
+		if err := db.migration079AssistantConversationContext(t.Context()); err != nil {
 			t.Fatal("retry", err)
 		}
 	}

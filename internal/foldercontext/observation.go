@@ -20,6 +20,10 @@ const (
 	SelectionTTL = 30 * time.Minute
 )
 
+// Allow the bounded snapshot plus its envelope and all 64 opaque focus IDs.
+// The observation itself retains its existing 8 KiB metadata limit.
+const MaxEventBytes = MaxBytes + 1024
+
 var ErrInvalid = errors.New("folder context is invalid")
 
 // Target is supplied by the host after checking canonical conversation ownership.
@@ -149,7 +153,7 @@ func (e Event) Validate() error {
 			return err
 		}
 		data, err := json.Marshal(e)
-		if err != nil || len(data) > MaxBytes+256 {
+		if err != nil || len(data) > MaxEventBytes {
 			return ErrInvalid
 		}
 		return nil

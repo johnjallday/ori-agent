@@ -39,7 +39,7 @@ func (s *SQLiteStore) AppendAttributedTurn(ctx context.Context, id string, owner
 			return nil, err
 		}
 		encoded, err := json.Marshal(event)
-		if err != nil || len(encoded) > foldercontext.MaxBytes+256 {
+		if err != nil || len(encoded) > foldercontext.MaxEventBytes {
 			return nil, foldercontext.ErrInvalid
 		}
 		folderJSON = string(encoded)

@@ -1,9 +1,16 @@
 # Personal Assistant conversation context
 
-Canonical Messages remain the transcript. Migration 078 adds a **disposable,
+Canonical Messages remain the transcript. Migration 079 adds a **disposable,
 Session-owned** recap checkpoint, not another conversation store, Personal HQ
 memory, a saved Ticket, current source evidence, or permission. The existing
 conversation owner and configured **system model** remain authoritative.
+
+Version 078 remains the delivered folder-selection capacity migration. Version
+079 also reapplies that idempotent migration so pre-merge feature databases
+(which used 078 for conversation context) acquire both schemas. Canonical message
+IDs, text and attribution are preserved; copying folder-event metadata may
+invalidate disposable recaps. Both bounded history and exact event readers use
+the folder owner's `MaxEventBytes` (9 KiB), retaining its 8 KiB observation limit.
 
 ## Grounding and roles
 

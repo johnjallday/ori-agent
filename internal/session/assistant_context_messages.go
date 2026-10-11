@@ -31,7 +31,7 @@ func readContextFolderEvent(ctx context.Context, tx *sql.Tx, id, offerID, observ
 	}
 	var msg Message
 	var raw string
-	err := tx.QueryRowContext(ctx, `SELECT id,created_at,CASE WHEN length(CAST(folder_context_json AS BLOB))<=? THEN folder_context_json ELSE '' END FROM messages WHERE session_id=? AND role='system' AND folder_context_json IS NOT NULL AND continuity_source_sequence IS NULL AND (?='' OR json_extract(folder_context_json,'$.offer_id')=?) AND (?='' OR json_extract(folder_context_json,'$.observation.id')=?) ORDER BY rowid DESC LIMIT 1`, foldercontext.MaxBytes+256, id, offerID, offerID, observationID, observationID).Scan(&msg.ID, &msg.CreatedAt, &raw)
+	err := tx.QueryRowContext(ctx, `SELECT id,created_at,CASE WHEN length(CAST(folder_context_json AS BLOB))<=? THEN folder_context_json ELSE '' END FROM messages WHERE session_id=? AND role='system' AND folder_context_json IS NOT NULL AND continuity_source_sequence IS NULL AND (?='' OR json_extract(folder_context_json,'$.offer_id')=?) AND (?='' OR json_extract(folder_context_json,'$.observation.id')=?) ORDER BY rowid DESC LIMIT 1`, foldercontext.MaxEventBytes, id, offerID, offerID, observationID, observationID).Scan(&msg.ID, &msg.CreatedAt, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

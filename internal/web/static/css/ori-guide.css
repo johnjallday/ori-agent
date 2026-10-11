@@ -2093,7 +2093,8 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-folder-focus[hidden],
 .personal-assistant-folder-focus button[hidden],
 #personalAssistantFolderFocusClear[hidden],
-#personalAssistantFolderSelectAll[hidden],
+#personalAssistantFolderSelection[hidden],
+#personalAssistantFolderSelectionStatus[hidden],
 .personal-assistant-folder-tree__children[hidden],
 #personalAssistantExploreAttachedFolder[hidden] {
   display: none;
@@ -2102,7 +2103,6 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-explorer__pane {
   min-width: 0;
   min-height: 0;
-  padding: 14px;
   overflow: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--ori-line);
@@ -2111,9 +2111,38 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   scrollbar-gutter: stable;
 }
 
+/* Pin the controls without introducing a nested scroll viewport. */
+.personal-assistant-explorer__header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  padding: 10px 14px 0;
+  border-bottom: 1px solid var(--ori-line);
+  background: var(--ori-paper);
+}
+
+/* At extreme reflow, let the heading scroll rather than cover every entry. */
+.personal-assistant-explorer__pane--compact .personal-assistant-explorer__header {
+  position: static;
+}
+
+.personal-assistant-explorer__body {
+  padding: 10px 14px 14px;
+}
+
+.personal-assistant-explorer__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
 .personal-assistant-explorer__pane h3 {
+  min-width: 0;
   overflow: hidden;
-  margin: 0 0 8px;
+  flex: 1;
+  margin: 0;
   font-family: Georgia, serif;
   font-size: 24px;
   text-overflow: ellipsis;
@@ -2146,8 +2175,15 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 .personal-assistant-folder-tree__select-all {
+  display: flex;
   min-height: 44px;
-  margin-bottom: 10px;
+  align-items: center;
+  gap: 9px;
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .personal-assistant-folder-tree,
@@ -2199,7 +2235,8 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   overflow-wrap: anywhere;
 }
 
-.personal-assistant-folder-tree__label input {
+.personal-assistant-folder-tree__label input,
+.personal-assistant-folder-tree__select-all input {
   width: 18px;
   height: 18px;
   min-width: 18px;
@@ -2208,7 +2245,8 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   accent-color: var(--hc-signal-deep);
 }
 
-.personal-assistant-folder-tree__label input:focus-visible {
+.personal-assistant-folder-tree__label input:focus-visible,
+.personal-assistant-folder-tree__select-all input:focus-visible {
   outline: 2px solid var(--pa-accent-text);
   outline-offset: 4px;
 }
@@ -2314,7 +2352,9 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 .personal-assistant-panel--exploring.personal-assistant-panel--inline-toolbar
-  .personal-assistant-explorer__pane {
+  .personal-assistant-explorer__header,
+.personal-assistant-panel--exploring.personal-assistant-panel--inline-toolbar
+  .personal-assistant-explorer__body {
   padding: 6px;
 }
 
