@@ -8,9 +8,11 @@ usage() {
     '  ./scripts/release.sh candidate [--force] [--yes]' \
     '  ./scripts/release.sh candidate vX.Y.Z [--yes]  # next RC after branch fixes' \
     '  ./scripts/release.sh promote vX.Y.Z-rc.N [--yes]' \
+    '  ./scripts/release.sh status                      # read-only JSON: where the release stands' \
     '' \
     'candidate prepares a frozen release branch; dev stays open.' \
     'promote confirms you tested that exact RC and requests stable publication.' \
+    'status reads refs, runs and PRs and prints JSON with a next step; it dispatches nothing.' \
     'Commands dispatch GitHub Actions on main; they do not release local changes.' \
     '--yes explicitly confirms the selected action in non-interactive use.' \
     'See docs/RELEASE_CHECKLIST.md for testing, promotion and merge-back.'
@@ -49,6 +51,13 @@ case "$command" in
     workflow=promote-release.yml
     args=(-f "rc_tag=$version" -f confirm_tested=true)
     printf 'Confirm you completed and reviewed the test report for %s and approve publishing it as stable.\n' "$version"
+    ;;
+  status)
+    # No confirmation: nothing is dispatched. The same status is read by people and agents.
+    if [[ -n "$version" || "$force" == true || "$assume_yes" == true ]]; then usage >&2; exit 2; fi
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    cd "$script_dir/.."
+    exec python3 "$script_dir/release-candidate.py" status
     ;;
   *) usage >&2; exit 2 ;;
 esac

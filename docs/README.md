@@ -46,6 +46,7 @@ This directory contains detailed documentation for Ori Agent.
 
 ### Release & Deployment
 - [Release Checklist](./RELEASE_CHECKLIST.md) - Pre-release validation checklist
+- [CI Triage Runbook](./CI_TRIAGE.md) - Turning red CI on dev or a release branch green at the root, through PRs
 - [Dependency Management](./DEPENDENCY_MANAGEMENT.md) - Managing Go dependencies
 - [Building the MSI Installer](./BUILD_MSI.md) - Windows MSI build guide
 
@@ -81,6 +82,7 @@ docs/
 ├── BUILD_MSI.md                        # Windows MSI build guide
 ├── TESTING_INSTALLERS.md               # Manual installer testing guide
 ├── RELEASE_CHECKLIST.md                # Pre-release validation checklist
+├── CI_TRIAGE.md                        # Red-CI runbook shared by agents and people
 ├── DEPENDENCY_MANAGEMENT.md            # Go dependency management guide
 ├── SCHEDULER_NODES_GUIDE.md            # Scheduler nodes usage guide
 ├── PRD_TASK_COVERAGE_AUDIT.md          # PRD-to-task planning audit
