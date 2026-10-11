@@ -26,6 +26,22 @@ type TaskState struct {
 	Ran bool
 	// RunID is the first run the task reports, when it reports one.
 	RunID string
+
+	// What follows attributes a result to an execution; see ResolveOutcome.
+	// Active: the task is executing now. Waiting: it stopped for the user.
+	Active  bool
+	Waiting bool
+	// HasResult: the task holds a result now (its latest execution's).
+	HasResult bool
+	// Runs are the executions the task recorded, oldest first.
+	Runs []TaskRun
+	// Launched: an operation's own Start was launched for this task.
+	// LaunchPending: that start has not recorded an execution yet.
+	// LaunchedRunAt: when set, the record with this time is that start's.
+	// Launched with neither means the start will never record one.
+	Launched      bool
+	LaunchPending bool
+	LaunchedRunAt time.Time
 }
 
 // TaskHost is the host's task owner as the service needs it. Task returns an
@@ -234,7 +250,7 @@ func (s *Service) Start(ctx context.Context, id, tabID string) (*Snapshot, error
 	}
 	switch op.Status {
 	case StatusStartRequested, StatusStarted:
-		return SnapshotFor(op, tabID), nil
+		return s.project(ctx, op, tabID), nil
 	case StatusReviewed, StatusUnresolved:
 	default:
 		if op.Status.Terminal() {
@@ -251,7 +267,7 @@ func (s *Service) Start(ctx context.Context, id, tabID string) (*Snapshot, error
 		if op, err = s.settle(ctx, op); err != nil {
 			return nil, err
 		}
-		return SnapshotFor(op, tabID), nil
+		return s.project(ctx, op, tabID), nil
 	}
 	if !state.Startable {
 		return s.refuse(ctx, op, tabID, ErrStartRefused, "The task is "+taskStatusWords(state.Status)+", so it cannot be started from here. Open the task to decide what to do.")
@@ -307,7 +323,7 @@ func (s *Service) Start(ctx context.Context, id, tabID string) (*Snapshot, error
 	if recorded, err = s.settle(ctx, recorded); err != nil {
 		return nil, err
 	}
-	return SnapshotFor(recorded, tabID), nil
+	return s.project(ctx, recorded, tabID), nil
 }
 
 // recordStart writes what the start owner answered for the current claim. If
@@ -427,6 +443,22 @@ func (s *Service) settle(ctx context.Context, op *Operation) (*Operation, error)
 	op.UpdatedAt = now
 	stored, writeErr := s.store.Update(ctx, op, op.Revision)
 	return s.written(ctx, op.ID, stored, writeErr)
+}
+
+// project is the snapshot for one tab plus, for a started task, what became of
+// the operation's own run. The outcome is read from the task for this response
+// only; when the task cannot be read it is simply absent.
+func (s *Service) project(ctx context.Context, op *Operation, tabID string) *Snapshot {
+	snapshot := SnapshotFor(op, tabID)
+	if snapshot == nil || s.tasks == nil || op.Status != StatusStarted || !op.TaskConfirmed() {
+		return snapshot
+	}
+	state, err := s.tasks.Task(ctx, op.Context.WorkspaceID, op.Task.TaskID)
+	if err != nil {
+		return snapshot
+	}
+	snapshot.Outcome = ResolveOutcome(op.Task, state, s.now(), s.startGrace)
+	return snapshot
 }
 
 // readTask reads the bound task for settling. "Missing" is the one answer that

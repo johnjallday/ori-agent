@@ -148,10 +148,18 @@ function writeStoredId(id) {
 }
 
 function setCurrent(id, title) {
+  const previous = state.id;
   state.id = String(id || '').trim();
   state.title = state.id ? String(title || state.title || '').trim() : '';
   writeStoredId(state.id);
   render();
+  // Other parts of the drawer follow one conversation at a time (an operation
+  // Ori is carrying out, for one). They are told when the thread changes.
+  if (state.id !== previous && typeof document !== 'undefined') {
+    document.dispatchEvent(
+      new CustomEvent('personal-assistant:conversation', { detail: { id: state.id, previous } })
+    );
+  }
 }
 
 function setNote(message) {

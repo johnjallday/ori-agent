@@ -426,6 +426,9 @@ type Task struct {
 	// from a request body on update; it lets the operation and the task find
 	// each other after a lost response. It grants nothing.
 	AssistantOperationID string `json:"assistant_operation_id,omitempty"`
+	// AssistantOperationRun says which of the task's executions was that
+	// operation's own start. See TaskOperationRun.
+	AssistantOperationRun *TaskOperationRun `json:"assistant_operation_run,omitempty"`
 	// Assignment provenance — who chose this task's assignee and why. See
 	// task_assignment.go for the mode values and the coordinator resolver.
 	AssignedBy       string               `json:"assigned_by,omitempty"`       // Coordinator agent name, or "manual" for a user override

@@ -243,7 +243,49 @@ func operationTaskState(task *workspace.Task) assistantops.TaskState {
 		state.RunID = strings.TrimSpace(task.CurrentRunID)
 	}
 	state.Startable = !state.Ran && (task.Status == workspace.TaskStatusPending || task.Status == workspace.TaskStatusAssigned)
+
+	// What a result is attributed from: the task's own execution records. The
+	// record list is already capped by the task; a count above its length
+	// means older records were dropped.
+	state.Active = task.Status == workspace.TaskStatusInProgress
+	state.Waiting = task.Status == workspace.TaskStatusWaitingForChoice
+	state.HasResult = strings.TrimSpace(task.Result) != ""
+	state.Runs = make([]assistantops.TaskRun, 0, len(task.ExecutionHistory))
+	for _, execution := range task.ExecutionHistory {
+		state.Runs = append(state.Runs, assistantops.TaskRun{
+			At: execution.ExecutedAt, Status: strings.ToLower(strings.TrimSpace(execution.Status)),
+			HasResult: strings.TrimSpace(execution.Result) != "",
+		})
+	}
+	// Which execution was the operation's own start is the task's own mark,
+	// written by StartReviewedTask and by the execution recorder.
+	if run := task.AssistantOperationRun; run != nil {
+		state.Launched, state.LaunchPending = true, run.Pending
+		if run.ExecutedAt != nil {
+			state.LaunchedRunAt = *run.ExecutedAt
+		}
+	}
 	return state
+}
+
+// unmarkOperationRun removes a launch mark that was written for a start which
+// then did not launch. It re-reads the task inside the store's own update, so
+// it changes nothing else about it.
+func (th *TaskHandler) unmarkOperationRun(workspaceID, taskID string) {
+	err := workspace.CanonicalUpdate(th.workspaceStore, workspaceID, func(fresh *workspace.Workspace) error {
+		task, err := fresh.GetTask(taskID)
+		if err != nil {
+			return err
+		}
+		if task.AssistantOperationRun == nil || !task.AssistantOperationRun.Pending {
+			return nil
+		}
+		task.AssistantOperationRun = nil
+		return fresh.UpdateTask(*task)
+	})
+	if err != nil {
+		logger.Warn("Could not clear an assistant operation launch mark", logger.Fields{"task_id": taskID, "error": err})
+	}
 }
 
 // StartReviewedTask is a task's first start at its owner's explicit request.
@@ -292,12 +334,16 @@ func (th *TaskHandler) StartReviewedTask(ctx context.Context, workspaceID, taskI
 	}
 	if task.ExecutionMode == "" {
 		task.ExecutionMode = workspace.TaskExecutionModeAuto
-		if err := ws.UpdateTask(*task); err != nil {
-			return fmt.Errorf("failed to set task execution mode: %w", err)
-		}
-		if err := th.persistTasks(ws.ID, *task); err != nil {
-			return fmt.Errorf("failed to save workspace: %w", err)
-		}
+	}
+	// Mark the task before the work is launched: the execution this start
+	// records is the operation's own, and the recorder binds the two in the
+	// same write. A later run from the task's controls is never marked.
+	workspace.MarkOperationRunLaunched(task)
+	if err := ws.UpdateTask(*task); err != nil {
+		return fmt.Errorf("failed to mark task start: %w", err)
+	}
+	if err := th.persistTasks(ws.ID, *task); err != nil {
+		return fmt.Errorf("failed to save workspace: %w", err)
 	}
 	if err := th.startTaskWork(func() {
 		ws, err := th.workspaceStore.Get(workspaceID)
@@ -318,6 +364,9 @@ func (th *TaskHandler) StartReviewedTask(ctx context.Context, workspaceID, taskI
 			logger.Error("Reviewed task execution failed", logger.Fields{"task_id": taskID, "error": err})
 		}
 	}); err != nil {
+		// Nothing was launched, so nothing may later be recorded as this
+		// start's: take the mark back before answering.
+		th.unmarkOperationRun(workspaceID, taskID)
 		return &assistantops.StartRefusal{Reason: "Ori is being reset, so nothing can start right now."}
 	}
 	logger.Info("Started reviewed task", logger.Fields{"task_id": taskID, "workspace_id": workspaceID})

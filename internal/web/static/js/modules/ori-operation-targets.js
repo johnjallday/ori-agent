@@ -39,6 +39,9 @@ const MOUNT_ATTEMPTS = 40;
 const MOUNT_INTERVAL_MS = 150;
 
 const unavailable = reason => ({ outcome: OUTCOME.UNAVAILABLE, reason });
+// The step's request is no longer the one in front of the user. Nothing was
+// done and nothing is reported.
+const STOOD_DOWN = Object.freeze({ outcome: OUTCOME.YIELD, reason: 'stood_down' });
 
 /** Whether an action is one this browser can carry out. Anything else is refused. */
 export function isSupportedAction(action) {
@@ -73,6 +76,23 @@ export function operationTaskURL(slug, taskId) {
     return workspaceRootURL(value, {
       search: serializeWorkspaceURLState({ panel: 'tasks', task: id })
     });
+  } catch (_) {
+    return '';
+  }
+}
+
+/**
+ * This app's link that opens one task's result: the workspace page's existing
+ * one-shot arrival link (`?task=<id>&result=1`), which that page reads once
+ * and removes from the address. Returns '' for anything that is not a plain
+ * slug and a task ID.
+ */
+export function operationResultURL(slug, taskId) {
+  const value = String(slug || '').trim();
+  const id = String(taskId || '').trim();
+  if (!operationWorkspaceURL(value) || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return '';
+  try {
+    return workspaceRootURL(value, { search: new URLSearchParams({ task: id, result: '1' }) });
   } catch (_) {
     return '';
   }
@@ -122,7 +142,7 @@ export function createOperationTargets(env) {
     return { outcome: OUTCOME.NAVIGATING, url };
   }
 
-  async function selectAgent(command) {
+  async function selectAgent(command, stillWanted) {
     const wanted = String(command.agent_name || '').trim();
     if (!wanted) return unavailable('No agent was named.');
     // The controller mounts after the page's own data loads; wait for it, but
@@ -146,6 +166,9 @@ export function createOperationTargets(env) {
       );
     });
     if (!agent) return unavailable(`${wanted} is not in this workspace's roster.`);
+    // The wait above can outlast the request: the user may have dismissed it,
+    // turned Watch off or moved on. Nothing is selected for a step nobody wants.
+    if (!stillWanted()) return STOOD_DOWN;
     // The page's own selection owner does the selecting, URL state included.
     controller.selectAgent(encodeURIComponent(agent.name), { focus: false });
     const element = await waitFor(env, () =>
@@ -169,7 +192,7 @@ export function createOperationTargets(env) {
    * does the opening; this only hands it the draft and then checks that the
    * form really holds it. Nothing is typed, auto-parsed or saved.
    */
-  async function openTaskDraft(command, { snapshot, replace, onSaved }) {
+  async function openTaskDraft(command, { snapshot, replace, onSaved, stillWanted }) {
     const draft = snapshot && snapshot.draft;
     if (!draft || Number(draft.revision) !== Number(command.draft_revision)) {
       return unavailable('This draft is no longer the current one.');
@@ -190,6 +213,8 @@ export function createOperationTargets(env) {
     if (!replace && composer.isModalOpen() && composer.hasUnsavedChanges()) {
       return { outcome: OUTCOME.YIELD, reason: 'unsaved_work' };
     }
+    // A form must not open for a request the user has since dismissed or left.
+    if (!stillWanted()) return STOOD_DOWN;
     const assignment = `node:${node}`;
     await composer.openForCreate(page.workspaceId, draft.title, onSaved || null, {
       forceManualMode: true,
@@ -225,6 +250,10 @@ export function createOperationTargets(env) {
      */
     async execute(command, options = {}) {
       const action = String((command && command.action) || '');
+      // `wanted` says whether the request this step belongs to is still the
+      // one in front of the user. It is asked again just before anything on
+      // the page changes.
+      const stillWanted = typeof options.wanted === 'function' ? options.wanted : () => true;
       try {
         if (action === OPERATION_ACTION.OPEN_WORKSPACE) {
           return await openWorkspace(command, {
@@ -232,18 +261,38 @@ export function createOperationTargets(env) {
             replace: Boolean(options.replace)
           });
         }
-        if (action === OPERATION_ACTION.SELECT_AGENT) return await selectAgent(command);
+        if (action === OPERATION_ACTION.SELECT_AGENT) {
+          return await selectAgent(command, stillWanted);
+        }
         if (action === OPERATION_ACTION.OPEN_TASK_DRAFT) {
           return await openTaskDraft(command, {
             snapshot: options.snapshot || null,
             replace: Boolean(options.replace),
-            onSaved: options.onSaved
+            onSaved: options.onSaved,
+            stillWanted
           });
         }
       } catch (_) {
         return unavailable('This page could not carry out the step.');
       }
       return unavailable('This step is not supported here.');
+    },
+
+    /**
+     * Show the result of a task in this page's own result view, at the user's
+     * request. Returns false when this page is not that task's workspace or
+     * has not loaded a result for it; the caller then arrives by the page's
+     * own result link instead.
+     */
+    showResult(workspaceId, taskId) {
+      try {
+        return Boolean(
+          typeof env.showTaskResult === 'function' &&
+          env.showTaskResult(String(workspaceId || ''), String(taskId || ''))
+        );
+      } catch (_) {
+        return false;
+      }
     }
   };
 }
@@ -279,6 +328,24 @@ export function browserOperationEnvironment() {
       return document.querySelector(
         `[data-cmd-select-agent][data-agent-key="${escaped}"], [data-cmd-map-select-agent][data-agent-key="${escaped}"]`
       );
+    },
+    showTaskResult: (workspaceId, taskId) => {
+      const page = window.workspaceDetail;
+      if (
+        String(window.currentWorkspaceId || '') !== workspaceId ||
+        !page ||
+        typeof page.showTaskResult !== 'function'
+      ) {
+        return false;
+      }
+      // The page's own result view reads the page's own copy of the task. If
+      // that copy has no result yet, arriving by link reloads it.
+      const task = (Array.isArray(page.tasks) ? page.tasks : []).find(
+        item => item && item.id === taskId
+      );
+      if (!task || !String(task.result || '').trim()) return false;
+      page.showTaskResult(taskId);
+      return true;
     },
     hasUnsavedWork: () => {
       const composer = window.taskModalController;

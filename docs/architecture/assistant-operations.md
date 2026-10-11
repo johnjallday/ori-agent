@@ -91,7 +91,10 @@ stream or a stale snapshot cannot invent a finish.
 | `open_workspace` | `workspace_id`, `workspace_slug` | the **arrived** page's path equals the URL built from the slug; a queued navigation is not acknowledged |
 | `select_agent` | `workspace_id`, `agent_name`, `agent_node_id` | the workspace page controller reports that key selected and its target control is mounted (bounded mount wait, as the Help coachmarks do) |
 | `open_task_draft` | `workspace_id`, `draft_revision` | the composer is open, populated from that revision, and the assignment select holds the exact node value |
-| `open_task` | `workspace_id`, `task_id` | the task/result view for that task is open |
+
+There is no command that opens a task or a result. The user opens those from
+the drawer, on request, so a result view is never pushed onto a tab while
+they are reading or typing somewhere else.
 
 Command status: `pending → acknowledged | unavailable | superseded`. An
 acknowledgement carries `{operation_id, command_id, revision, tab_id,
@@ -330,6 +333,98 @@ are read from `resolveTaskPresentation`, never inferred from an acceptance or
 a timer. The operation is read again when the task moves, every 3 seconds
 while a claimed Start waits for its run, and every 15 seconds while a created
 task waits for the user.
+
+### The result of the operation's own run
+
+A started operation's snapshot carries `outcome`, resolved from the task on
+every read and never stored:
+
+| Field | Values |
+| --- | --- |
+| `run` | `running`, `waiting` (stopped for the user and still waiting), `stopped` (stopped for the user; continued by a later attempt), `succeeded`, `failed`, `cancelled`, `interrupted` (launched and never recorded an execution), `unknown` (the task has dropped its record from its history) |
+| `result` | `current` (the result the task shows now is this run's), `history` (the task ran again; this run's result is in its history), `gone` (finished, but its result is no longer kept), `none` |
+| `later_runs` | how many times the task has run since |
+
+Which execution was the operation's is not inferred, and a run identity is
+not used for it: one execution may retry itself under several run identities
+(the task's record then carries the last), and the task may be run again later
+from its own controls. The task carries an exact mark instead,
+`assistant_operation_run`:
+
+- `StartReviewedTask` sets it to *pending* when it launches the operation's
+  Start, and takes it back if the launch is refused;
+- the execution recorder (`RecordTaskExecution`) turns a pending mark into the
+  `executed_at` of the record it is writing, in the same write, so no reader
+  sees the record without the mark;
+- the executor's boot reconciliation clears a pending mark on a task it finds
+  left in progress: that start will never record an execution;
+- nothing else writes it, a later run never moves it, and a workspace transfer
+  drops it.
+
+So: marked and recorded → that record, and every later record is a rerun;
+marked and pending → running or waiting; marked and cleared → interrupted;
+not marked (the user started the task from its own controls, and the
+operation only observed it) → **no outcome**: the operation claims no run and
+no result. `result` is `current` only when the marked execution succeeded,
+the task has not run again and the task holds a result. **A later run's result
+is never presented as this operation's.** `task.run_id` remains the first run
+identity the task reported, for reference; it is not what attribution uses.
+
+- `current` → the drawer offers **Open result**. It opens the page's existing
+  result view (`workspaceDetail.showTaskResult`), or arrives through the
+  page's existing one-shot link (`?task=<id>&result=1`) when this page is not
+  the task's workspace or has not loaded the result. Opening is a local view:
+  nothing is reported and nothing changes.
+- `history` → no **Open result**. The drawer says the task has run again, that
+  what the task shows now is a later run's result, and that this request's
+  result is in the task's run history, with a link to the task.
+- `gone` or `unknown` → the drawer says the result is no longer kept.
+- `interrupted` → what a restart leaves: the executor's boot reconciliation
+  returns an in-progress task to waiting without recording a run. The drawer
+  says the run was interrupted and that nothing was started again. Starting it
+  again is the user's own action on the task; the operation's Start stays
+  claimed and a late call to it starts nothing.
+
+Needs-input, blocked, failed, timed-out and cancelled are the task's own
+states, shown in the task presentation's words with a link to the task, where
+the existing answer, repair, retry and cancel controls are. The drawer has no
+cancel: **Stop following** ends updates here and its tooltip says the task
+keeps going. A monitor that is reconnecting says "Reconnecting…" and what the
+task last reported; silence is never read as a finished task.
+
+### Recap
+
+The drawer's **Recap** is a native disclosure (`<details>`) outside the live
+region. It lists the operation's receipts and the outcome above, each line
+prefixed with where the fact came from: "Seen in this tab" (acknowledged view
+steps), "Recorded by Ori" (the draft, the created task, each answer to Start)
+or "From the task" (a run was reported; what became of it). It is built by
+`operationRecap` from the snapshot alone. Opening, closing or reopening it
+sends no request and changes nothing.
+
+### Taking over
+
+The user is always ahead of Ori. Any of these stops this tab's steps at once,
+cancels nothing and leaves the task running:
+
+- turning **Watch** off (before the server answers, a step already waiting on
+  the page does nothing);
+- dismissing the operation;
+- asking for something else (the newer request replaces a step still waiting
+  for the older one; the older step's outcome is not reported);
+- turning the drawer to another conversation (`personal-assistant:conversation`):
+  the operation pauses with **Resume**;
+- typing into a form (unsaved input pauses the step) or moving to another
+  page (a page load never navigates by itself).
+
+Each step asks "is this request still the one in front of the user?" again
+just before it changes anything on the page, so a wait that outlasts the
+request ends without selecting, opening or navigating. The highlight is
+removed as soon as the request is paused, dismissed or taken over.
+
+After a reload the drawer is rebuilt from the server. A draft form that was
+open is not silently re-opened: the drawer says that anything typed into it is
+gone and offers **Open draft again**.
 
 ## HTTP surface
 

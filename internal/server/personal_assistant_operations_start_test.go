@@ -174,6 +174,49 @@ func TestAssistantOperations_RealHostCreatesAndStartsTheReviewedTaskOnce(t *test
 	if after := f.taskCount(t); after != tasksBefore+1 {
 		t.Fatalf("task count drifted: %d", after-tasksBefore)
 	}
+
+	// The execution that start produced is the one marked on the task, and the
+	// operation's outcome is attributed to it and nothing else.
+	mark := ran.AssistantOperationRun
+	if mark == nil || mark.Pending || mark.ExecutedAt == nil || !mark.ExecutedAt.Equal(ran.ExecutionHistory[0].ExecutedAt) {
+		t.Fatalf("the operation's own execution is not marked: %+v", mark)
+	}
+	outcome, _ := f.read(t, id)["outcome"].(map[string]any)
+	if outcome == nil || outcome["later_runs"] != nil {
+		t.Fatalf("outcome after the run: %v", outcome)
+	}
+	if ran.Status == workspace.TaskStatusCompleted && (outcome["run"] != "succeeded" || outcome["result"] != "current") {
+		t.Fatalf("a finished run's own result must be the current one: %v", outcome)
+	}
+	runBefore, _ := f.read(t, id)["task"].(map[string]any)["run_id"].(string)
+
+	// The user reruns the task from its own controls. That is a later run: it
+	// is not marked, and its result is not this operation's.
+	if status, rerun := f.call(t, http.MethodPost, "/api/orchestration/tasks/execute", map[string]any{"task_id": taskID}); status != http.StatusAccepted {
+		t.Fatalf("manual rerun: %d %v", status, rerun)
+	}
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if task := f.task(t, taskID); len(task.ExecutionHistory) == 2 && task.Status != workspace.TaskStatusInProgress && task.Status != workspace.TaskStatusPending {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	rerun := f.task(t, taskID)
+	if len(rerun.ExecutionHistory) != 2 || !rerun.AssistantOperationRun.ExecutedAt.Equal(rerun.ExecutionHistory[0].ExecutedAt) {
+		t.Fatalf("a manual rerun must add one unmarked record: history=%d mark=%+v", len(rerun.ExecutionHistory), rerun.AssistantOperationRun)
+	}
+	after := f.read(t, id)
+	later, _ := after["outcome"].(map[string]any)
+	if later == nil || later["later_runs"] != float64(1) || later["result"] == "current" {
+		t.Fatalf("a later run's result was attributed to the operation: %v", later)
+	}
+	if got, _ := after["task"].(map[string]any)["run_id"].(string); got != runBefore {
+		t.Fatalf("a rerun replaced the operation's run: %q -> %q", runBefore, got)
+	}
+	if receiptCount(after, "start_accepted") != 1 || receiptCount(after, "run_established") != 1 {
+		t.Fatalf("a manual rerun changed the operation's receipts: %v", after["receipts"])
+	}
 }
 
 // The reviewed assignee is checked against the workspace as it is at the save.

@@ -338,6 +338,12 @@
     <section id="personalAssistantOperation" class="pa-operation" aria-label="Ori in your app" hidden>
       <p id="personalAssistantOperationStatus" class="pa-operation__status" role="status" aria-live="polite" hidden></p>
       <div id="personalAssistantOperationActions" class="pa-operation__actions" hidden></div>
+      <!-- A list of recorded facts the user may open. Outside the live region:
+           opening it announces nothing and changes nothing. -->
+      <details id="personalAssistantOperationRecap" class="pa-operation__recap" hidden>
+        <summary>Recap</summary>
+        <ol id="personalAssistantOperationRecapList"></ol>
+      </details>
     </section>
     <a id="personalAssistantModelSetup" class="personal-assistant-conversation__button" href="/settings#system-model" hidden>Configure a model for conversational replies</a>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">

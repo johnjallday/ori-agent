@@ -149,13 +149,14 @@ const (
 	// ActionOpenTaskDraft opens the task composer prefilled from the
 	// operation's current draft revision (group 2).
 	ActionOpenTaskDraft Action = "open_task_draft"
-	// ActionOpenTask opens the bound task's page or result (groups 3-4).
-	ActionOpenTask Action = "open_task"
 )
 
+// Known reports whether a is one of the named actions. Opening a task or its
+// result is not one: the user opens those from the drawer, on request, so no
+// command ever pushes a result view onto a tab.
 func (a Action) Known() bool {
 	switch a {
-	case ActionOpenWorkspace, ActionSelectAgent, ActionOpenTaskDraft, ActionOpenTask:
+	case ActionOpenWorkspace, ActionSelectAgent, ActionOpenTaskDraft:
 		return true
 	}
 	return false
@@ -190,8 +191,6 @@ type Command struct {
 	AgentNodeID string `json:"agent_node_id,omitempty"`
 	// DraftRevision binds open_task_draft to one prepared revision.
 	DraftRevision int `json:"draft_revision,omitempty"`
-	// TaskID binds open_task to the bound task.
-	TaskID string `json:"task_id,omitempty"`
 	// Observed is what the browser reported with its acknowledgement.
 	Observed  *Observation `json:"observed,omitempty"`
 	IssuedAt  time.Time    `json:"issued_at"`
@@ -205,7 +204,6 @@ type Observation struct {
 	Path          string `json:"path,omitempty"`
 	AgentKey      string `json:"agent_key,omitempty"`
 	DraftRevision int    `json:"draft_revision,omitempty"`
-	TaskID        string `json:"task_id,omitempty"`
 }
 
 // Acknowledgement is the only thing a browser may send about a command. It
@@ -236,7 +234,7 @@ func (a Acknowledgement) Validate() error {
 		return fmt.Errorf("%w: outcome must be acknowledged or unavailable", ErrInvalidCommand)
 	}
 	if o := a.Observed; o != nil && (utf8.RuneCountInString(o.Path) > MaxObservedPathRunes ||
-		utf8.RuneCountInString(o.AgentKey) > MaxReasonRunes || len(o.TaskID) > MaxTabIDLen) {
+		utf8.RuneCountInString(o.AgentKey) > MaxReasonRunes) {
 		return fmt.Errorf("%w: observation too long", ErrBounds)
 	}
 	if utf8.RuneCountInString(a.Reason) > MaxReasonRunes {
@@ -490,6 +488,9 @@ type Snapshot struct {
 	Receipts  []Receipt    `json:"receipts,omitempty"`
 	ExpiresAt time.Time    `json:"expires_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
+	// Outcome is what became of the run this operation started and where its
+	// result is, read from the task for this response and never stored.
+	Outcome *Outcome `json:"outcome,omitempty"`
 }
 
 // SnapshotFor projects an operation for one tab. Pending commands are shown

@@ -23,11 +23,21 @@
 .pa-operation__watch[hidden] {
   display: none;
 }
-.pa-operation__watch input {
+/* The whole chip is the control: the label is the touch target, so the box
+   itself stays a box. Without the minimums reset, the app's small-screen rule
+   for bare checkboxes (44px each way) turns it into a slab inside the chip. */
+.pa-operation__watch input[type="checkbox"] {
   width: 16px;
   height: 16px;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
   accent-color: var(--pa-accent-text, var(--ori-accent-strong));
+}
+@media (max-width: 768px) {
+  .pa-operation__watch {
+    min-height: 44px;
+  }
 }
 .pa-operation__watch:focus-within {
   outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
@@ -76,6 +86,41 @@
 .pa-operation__link {
   color: var(--pa-accent-text, var(--ori-accent-strong));
   text-decoration: underline;
+}
+
+/* The recap: a list the user may open. Each line starts with where the fact
+   came from, in words, so the distinction never rests on color. It scrolls
+   inside itself and so cannot push the conversation off a short drawer. */
+.pa-operation__recap {
+  color: var(--ori-ink);
+}
+.pa-operation__recap[hidden] {
+  display: none;
+}
+.pa-operation__recap > summary {
+  display: inline-block;
+  min-height: 24px;
+  padding: 2px 0;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+}
+.pa-operation__recap > summary:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
+  outline-offset: 2px;
+}
+.pa-operation__recap > ol {
+  max-height: 9.5em;
+  margin: 4px 0 0;
+  padding: 0 0 0 18px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.pa-operation__recap li + li {
+  margin-top: 2px;
+}
+.pa-operation__recap-source {
+  font-weight: 600;
 }
 
 /* The control on the page that Ori just used. The outline is the signal; the

@@ -601,3 +601,130 @@ func TestOperationTaskState_TheFirstRunIsTheOperationsRun(t *testing.T) {
 		t.Fatalf("waiting: %+v", state)
 	}
 }
+
+// The outcome an operation reports is resolved from what the task itself
+// recorded through the production recorder.
+func TestOperationTaskState_CarriesTheTasksOwnRunRecords(t *testing.T) {
+	at := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+	claimed := at.Add(-time.Second)
+	now := at.Add(6 * time.Hour)
+	binding := &assistantops.TaskBinding{TaskID: "task-1", RunID: "attempt-1", ClaimedAt: &claimed}
+	task := &workspace.Task{ID: "task-1", Status: workspace.TaskStatusInProgress, CurrentRunID: "attempt-1"}
+	outcome := func() *assistantops.Outcome {
+		return assistantops.ResolveOutcome(binding, operationTaskState(task), now, assistantops.DefaultStartGrace)
+	}
+
+	// A task nobody launched for the operation has no outcome to attribute.
+	if got := outcome(); got != nil {
+		t.Fatalf("unmarked task: %+v", got)
+	}
+	workspace.MarkOperationRunLaunched(task)
+	if got := outcome(); got == nil || *got != (assistantops.Outcome{Run: assistantops.RunRunning, Result: assistantops.ResultNone}) {
+		t.Fatalf("running: %+v", got)
+	}
+
+	// The execution retried itself: by the time it is recorded, the task is on
+	// another run identity. The record is still this start's, because the
+	// recorder binds the mark and the record in one write.
+	task.CurrentRunID = "attempt-3"
+	workspace.RecordTaskExecution(task, "success", "Mixed.", at, time.Second)
+	task.Status, task.Result = workspace.TaskStatusCompleted, "Mixed."
+	state := operationTaskState(task)
+	if len(state.Runs) != 1 || !state.Runs[0].At.Equal(at) || state.Runs[0].Status != "success" || !state.Runs[0].HasResult ||
+		!state.HasResult || state.Active || state.Waiting || !state.Launched || state.LaunchPending || !state.LaunchedRunAt.Equal(at) {
+		t.Fatalf("finished state: %+v", state)
+	}
+	if got := outcome(); *got != (assistantops.Outcome{Run: assistantops.RunSucceeded, Result: assistantops.ResultCurrent}) {
+		t.Fatalf("finished after internal retries: %+v", got)
+	}
+
+	// The user reruns it: a new record and a new current result. The mark
+	// stays on the first.
+	task.CurrentRunID = "rerun-1"
+	workspace.RecordTaskExecution(task, "success", "Mixed again.", at.Add(time.Hour), time.Second)
+	task.Result = "Mixed again."
+	if got := outcome(); *got != (assistantops.Outcome{Run: assistantops.RunSucceeded, Result: assistantops.ResultHistory, LaterRuns: 1}) {
+		t.Fatalf("after a rerun: %+v", got)
+	}
+	if !operationTaskState(task).LaunchedRunAt.Equal(at) {
+		t.Fatal("a rerun moved the mark")
+	}
+	// Enough reruns push the first record out of the task's own history.
+	for i := range 200 {
+		workspace.RecordTaskExecution(task, "success", "Again.", at.Add(time.Duration(i+2)*time.Hour), time.Second)
+	}
+	if got := outcome(); len(operationTaskState(task).Runs) >= 202 || got.Run != assistantops.RunUnknown || got.Result != assistantops.ResultGone {
+		t.Fatalf("after the record was dropped: %+v", got)
+	}
+
+	// A start that stopped for the user is waiting, not failed.
+	blocked := &workspace.Task{ID: "task-3", Status: workspace.TaskStatusInProgress}
+	workspace.MarkOperationRunLaunched(blocked)
+	workspace.RecordTaskExecution(blocked, "blocked", "connection required", at, 0)
+	blocked.Status = workspace.TaskStatusWaitingForChoice
+	got := assistantops.ResolveOutcome(&assistantops.TaskBinding{TaskID: "task-3", ClaimedAt: &claimed}, operationTaskState(blocked), now, assistantops.DefaultStartGrace)
+	if got.Run != assistantops.RunWaiting || got.Result != assistantops.ResultNone {
+		t.Fatalf("waiting: %+v", got)
+	}
+
+	// A start that never launched takes its mark back, so a later run from the
+	// task's own controls is not recorded as the operation's.
+	store := workspace.NewInMemoryStore()
+	ws := &workspace.Workspace{ID: "ws-ops", Name: "Album", AgentInstances: []workspace.AgentInstance{{ID: "mixer-id", Name: "Mixer", NodeID: "Mixer-node-1"}}}
+	marked := workspace.Task{ID: "task-5", WorkspaceID: "ws-ops", To: "Mixer", Description: "Mix", Status: workspace.TaskStatusPending}
+	workspace.MarkOperationRunLaunched(&marked)
+	if err := ws.AddTasks([]workspace.Task{marked}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewTaskHandler(store, nil, &countingExecutor{done: make(chan struct{}, 1)}, workspace.NewEventBus(16, 64))
+	handler.unmarkOperationRun("ws-ops", "task-5")
+	saved, _ := store.Get("ws-ops")
+	unmarked, _ := saved.GetTask("task-5")
+	if unmarked.AssistantOperationRun != nil || unmarked.Description != "Mix" || unmarked.To != "Mixer" {
+		t.Fatalf("unmark must remove only the mark: %+v", unmarked)
+	}
+}
+
+// The real first-start path marks the task, and the execution it runs is the
+// one recorded as the operation's. A fenced start leaves no mark behind.
+func TestStartReviewedTask_MarksTheExecutionItLaunches(t *testing.T) {
+	handler, store, _ := reviewedTaskFixture(t, nil)
+	host := operationTaskHost{handler: &Handler{taskHandlerSub: handler}}
+	if err := host.Start(t.Context(), "ws-ops", "task-1"); err != nil {
+		t.Fatal(err)
+	}
+	finished := waitForTask(t, store, func(task *workspace.Task) bool { return task.Status == workspace.TaskStatusCompleted })
+	run := finished.AssistantOperationRun
+	if run == nil || run.Pending || run.ExecutedAt == nil || len(finished.ExecutionHistory) != 1 ||
+		!run.ExecutedAt.Equal(finished.ExecutionHistory[0].ExecutedAt) {
+		t.Fatalf("the launched execution must be marked as recorded: %+v history=%d", run, len(finished.ExecutionHistory))
+	}
+	claimed := finished.ExecutionHistory[0].ExecutedAt.Add(-time.Second)
+	state, err := host.Task(t.Context(), "ws-ops", "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := assistantops.ResolveOutcome(&assistantops.TaskBinding{TaskID: "task-1", ClaimedAt: &claimed}, state, time.Now(), assistantops.DefaultStartGrace)
+	if got == nil || *got != (assistantops.Outcome{Run: assistantops.RunSucceeded, Result: assistantops.ResultCurrent}) {
+		t.Fatalf("outcome through the real path: %+v", got)
+	}
+
+	fenced, fencedStore, executor := reviewedTaskFixture(t, nil)
+	gate := &resetstate.WorkGate{}
+	fenced.SetAdmissionGate(gate)
+	if err := gate.TryFence(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var refusal *assistantops.StartRefusal
+	if err := fenced.StartReviewedTask(t.Context(), "ws-ops", "task-1"); !errors.As(err, &refusal) {
+		t.Fatalf("got %v", err)
+	}
+	ws, _ := fencedStore.Get("ws-ops")
+	task, _ := ws.GetTask("task-1")
+	if task.AssistantOperationRun != nil || executor.count() != 0 {
+		t.Fatalf("a start that never launched left a mark: %+v", task.AssistantOperationRun)
+	}
+}

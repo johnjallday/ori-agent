@@ -26,7 +26,9 @@ const PAUSE_TEXT = {
   reloaded: 'Paused after the page reloaded.',
   unreachable: 'Ori could not be reached. Nothing was changed.',
   conflict: 'This request changed while Ori was working on it.',
-  refused: 'This page could not confirm the step.'
+  refused: 'This page could not confirm the step.',
+  conversation_changed: 'Paused: you moved to another conversation.',
+  stood_down: 'Paused.'
 };
 
 const ERROR_TEXT = {
@@ -241,6 +243,12 @@ function taskView(view, state) {
         view.tone = 'attention';
         view.actions = [dismiss];
         view.link = opened ? null : manual();
+      } else if (shown && state.restored && state.onWorkspace && !state.formOpen) {
+        // A reload closed the form. What was typed there cannot be restored,
+        // and it is not replaced by a silent re-open either.
+        view.text = `Draft for ${agent}: “${title}”. This page was reloaded, so anything typed into the form is gone. Open the draft again to start from Ori's version. ${unsaved}`;
+        view.tone = 'attention';
+        view.actions = [{ id: 'open_draft', label: 'Open draft again', primary: true }, dismiss];
       } else if (shown) {
         // True whether the form is still open or the user has closed it.
         view.text = `Draft for ${agent}: “${title}”. Review it in the task form. ${unsaved}`;
@@ -284,7 +292,13 @@ function committedTaskView(view, state) {
   const context = snapshot.context || {};
   const agent = String(context.agent_name || snapshot.draft.agent_name || 'the agent');
   const title = shorten(state.taskTitle || snapshot.draft.title, 60);
-  const stop = { id: 'dismiss', label: 'Stop following' };
+  // Stopping here is not cancelling there: cancelling work is the task's own
+  // control, and this button says so.
+  const stop = {
+    id: 'dismiss',
+    label: 'Stop following',
+    hint: 'Stops updates here. The task keeps going; cancel it from the task itself.'
+  };
   const dismiss = { id: 'dismiss', label: 'Dismiss' };
   const taskHref = operationTaskURL(slug, snapshot.task.task_id);
   view.link = taskHref ? { href: taskHref, label: 'Open the task' } : null;
@@ -370,8 +384,48 @@ function committedTaskView(view, state) {
 function runningTaskView(view, state, { agent, title, stop }) {
   const presentation = state.taskPresentation || null;
   const task = state.task || null;
+  const outcome = (state.snapshot && state.snapshot.outcome) || null;
+  const later = outcome ? Number(outcome.later_runs || 0) : 0;
+  const dismiss = { id: 'dismiss', label: 'Dismiss' };
   const progress = state.canShowTask ? [{ id: 'show_task', label: 'Show progress' }] : [];
   view.actions = [...progress, stop];
+
+  // First, what became of this request's own run when the task has moved
+  // past it. A later run's state or result is never shown as this one's.
+  if (outcome && outcome.run === 'interrupted') {
+    view.text =
+      later > 0
+        ? `This request's run of “${title}” was interrupted before it finished. The task has run again since; that result belongs to the later run.`
+        : `The run of “${title}” was interrupted before it finished, and nothing was started again. Run it from the task when you are ready.`;
+    view.tone = 'attention';
+    view.actions = [dismiss];
+    return view;
+  }
+  if (outcome && later > 0) {
+    if (outcome.run === 'succeeded' && outcome.result === 'history') {
+      view.text = `${agent} finished “${title}”. The task has run again since, so what it shows now is a later run's result. This request's result is in the task's run history.`;
+    } else if (outcome.run === 'succeeded') {
+      view.text = `${agent} finished “${title}”. The task has run again since, and this request's own result is no longer kept.`;
+    } else if (outcome.run === 'stopped') {
+      view.text = `This request's run of “${title}” stopped and asked for input. It was continued from the task, and the result there is from that later attempt.`;
+    } else if (outcome.run === 'unknown') {
+      view.text = `“${title}” has run again since, and the task no longer keeps this request's own run.`;
+    } else {
+      view.text = `This request's run of “${title}” did not finish. The task has run again since.`;
+    }
+    view.tone = 'quiet';
+    view.actions = [dismiss];
+    return view;
+  }
+  if (state.taskPhase === 'reconnecting') {
+    // Not hearing from the task is not the task finishing.
+    const last =
+      presentation && presentation.label ? ` It last reported: ${presentation.label}.` : '';
+    view.text = `Reconnecting to “${title}”…${last}`;
+    view.tone = 'quiet';
+    return view;
+  }
+
   const taskState = presentation ? String(presentation.state || '') : '';
   switch (taskState) {
     case 'running':
@@ -398,23 +452,126 @@ function runningTaskView(view, state, { agent, title, stop }) {
     case 'completed':
       view.text = `${agent} finished “${title}”.`;
       view.tone = 'done';
-      view.actions = [{ id: 'dismiss', label: 'Dismiss' }];
+      view.actions = [dismiss];
+      if (outcome && outcome.result === 'current') {
+        // The server confirmed the task's present result is this run's.
+        view.actions = [{ id: 'open_result', label: 'Open result', primary: true }, dismiss];
+      } else if (outcome && outcome.result === 'gone') {
+        view.text += ' Its result is no longer kept on the task.';
+        view.tone = 'quiet';
+      }
       return view;
     case 'cancelled':
       view.text = `“${title}” was cancelled.`;
       view.tone = 'attention';
-      view.actions = [{ id: 'dismiss', label: 'Dismiss' }];
+      view.actions = [dismiss];
       return view;
     case '':
       // The run was observed by the server; this tab has not read the task yet.
       view.text = `The task for ${agent} started.`;
       view.tone = 'working';
       return view;
+    case 'ready':
+    case 'needs_assignment':
+      // Started, and now waiting again without a result: not finished.
+      view.text = `“${title}” started and is waiting again. Open the task to see why.`;
+      view.tone = 'attention';
+      return view;
     default:
-      view.text = `The task for ${agent} started. Open the task to see where it is.`;
+      view.text = `Ori cannot tell what state “${title}” is in. Open the task to check.`;
       view.tone = 'quiet';
       return view;
   }
+}
+
+const RECAP_SOURCE = Object.freeze({
+  tab: 'Seen in this tab',
+  ori: 'Recorded by Ori',
+  task: 'From the task'
+});
+
+const OUTCOME_SENTENCE = Object.freeze({
+  running: 'It is running.',
+  waiting: 'It stopped and is waiting for you.',
+  stopped: 'It stopped and asked for input.',
+  succeeded: 'It finished.',
+  failed: 'It failed.',
+  cancelled: 'It was cancelled.',
+  interrupted: 'It was interrupted before it finished.',
+  unknown: 'The task no longer keeps this run.'
+});
+
+/**
+ * A recap of one operation, from recorded facts only: what this tab reported
+ * seeing, what the server recorded, and what the task itself says now. Each
+ * line names its source, so a view step is never read as a write and an
+ * accepted Start is never read as a finished task. It is a list to read:
+ * opening, closing or reopening it sends nothing and changes nothing.
+ *
+ * @param {object} state - as for operationView
+ * @returns {{label:string, items:Array<{source:string, sourceLabel:string, text:string}>}|null}
+ */
+export function operationRecap(state = {}) {
+  const snapshot = state.snapshot || null;
+  if (!snapshot) return null;
+  const { workspace } = target(snapshot);
+  const context = snapshot.context || {};
+  const draft = snapshot.draft || {};
+  const selected = String(context.agent_name || 'the agent');
+  const drafted = String(draft.agent_name || selected);
+  const items = [];
+  const add = (source, text) =>
+    items.push({ source, sourceLabel: RECAP_SOURCE[source], text: String(text).trim() });
+
+  for (const receipt of snapshot.receipts || []) {
+    const reason = sentence(receipt.reason);
+    switch (receipt.kind) {
+      case 'draft_prepared':
+        add('ori', `A draft was prepared for ${drafted}.`);
+        break;
+      case 'view_opened':
+        add('tab', `${workspace} was opened.`);
+        break;
+      case 'agent_selected':
+        add('tab', `${selected} was selected.`);
+        break;
+      case 'draft_opened':
+        add('tab', 'The draft was shown in the task form.');
+        break;
+      case 'target_unavailable':
+        add('tab', `A step could not be shown here. ${reason}`);
+        break;
+      case 'task_created':
+        add('ori', 'You saved the form, and the task was created.');
+        break;
+      case 'start_accepted':
+        add('ori', 'You pressed Start, and it was accepted.');
+        break;
+      case 'start_refused':
+        add('ori', `A Start was refused. ${reason}`);
+        break;
+      case 'start_unresolved':
+        add('ori', `A Start could not be confirmed. ${reason}`);
+        break;
+      case 'run_established':
+        add('task', 'The task reported that it had started.');
+        break;
+      case 'continuation_ended':
+        add('ori', `This request ended${receipt.ref ? ` (${receipt.ref})` : ''}.`);
+        break;
+      default:
+        break;
+    }
+  }
+  const outcome = snapshot.outcome || null;
+  if (outcome && OUTCOME_SENTENCE[outcome.run]) {
+    const later = Number(outcome.later_runs || 0);
+    const again =
+      later > 0 ? ` The task has run ${later === 1 ? 'once' : `${later} times`} more since.` : '';
+    add('task', `${OUTCOME_SENTENCE[outcome.run]}${again}`);
+  }
+  // One line is the status line again, not a recap.
+  return items.length > 1 ? { label: 'Recap', items } : null;
 }
 
 /**
@@ -448,6 +605,12 @@ function applyHighlight(highlight) {
     if (element && !element.classList.contains(HIGHLIGHT_CLASS))
       element.classList.add(HIGHLIGHT_CLASS);
   }, HIGHLIGHT_FOLLOW_MS);
+  // How to take the mark away early, when the request is no longer current.
+  return () => {
+    window.clearInterval(follow);
+    const element = live();
+    if (element) element.classList.remove(HIGHLIGHT_CLASS);
+  };
 }
 
 /**
@@ -554,7 +717,9 @@ function mount() {
     watch: document.getElementById('personalAssistantWatch'),
     hint: document.getElementById('personalAssistantWatchHint'),
     status: document.getElementById('personalAssistantOperationStatus'),
-    actions: document.getElementById('personalAssistantOperationActions')
+    actions: document.getElementById('personalAssistantOperationActions'),
+    recap: document.getElementById('personalAssistantOperationRecap'),
+    recapList: document.getElementById('personalAssistantOperationRecapList')
   };
   if (!els.root || !els.watch || !els.status || !els.actions) return null;
 
@@ -571,12 +736,17 @@ function mount() {
     capable: Boolean(known && known.available),
     error: '',
     note: '',
-    shownHighlight: ''
+    shownHighlight: '',
+    clearHighlight: null,
+    actionsKey: '',
+    recapKey: '',
+    // The conversation the operation in front of the user was asked in.
+    conversation: ''
   };
 
   function render() {
     const snapshot = client.snapshot;
-    const view = operationView({
+    const viewState = {
       snapshot,
       phase: client.phase,
       pauseReason: client.pauseReason,
@@ -601,10 +771,20 @@ function mount() {
           (client.saved && client.saved.task && client.saved.task.description) ||
           ''
       ),
+      taskPhase: client.taskPhase,
       starting: client.starting,
       startUnconfirmed: client.startUnconfirmed,
-      canShowTask: client.canShowTask()
-    });
+      canShowTask: client.canShowTask(),
+      // After a reload: whether the page was rebuilt from the server, and
+      // whether the task form is showing.
+      restored: client.restored,
+      formOpen: Boolean(
+        window.taskModalController &&
+        typeof window.taskModalController.isModalOpen === 'function' &&
+        window.taskModalController.isModalOpen()
+      )
+    };
+    const view = operationView(viewState);
     // The Watch chip lives in the composer's chip row, so it costs the drawer
     // no height. Its hint is the chip's description and tooltip.
     if (els.watchRow) {
@@ -613,33 +793,77 @@ function mount() {
     }
     els.watch.checked = view.watchChecked;
     if (els.hint) els.hint.textContent = view.watchHint;
-    els.status.textContent = view.text;
+    // The status line is a polite live region: it is written only when it
+    // changes, so the same sentence is not announced again on every read.
+    if (els.status.textContent !== view.text) els.status.textContent = view.text;
     els.status.dataset.tone = view.tone;
     els.status.hidden = !view.text;
-    els.actions.replaceChildren();
-    view.actions.forEach(action => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'pa-operation__action' + (action.primary ? ' is-primary' : '');
-      button.dataset.operationAction = action.id;
-      button.textContent = action.label;
-      els.actions.appendChild(button);
-    });
-    if (view.link) {
-      const link = document.createElement('a');
-      link.className = 'pa-operation__link';
-      link.href = view.link.href;
-      link.textContent = view.link.label;
-      els.actions.appendChild(link);
+
+    // The choices are rebuilt only when they change. Progress updates arrive
+    // every few seconds; a button the user is on must not vanish under them.
+    const actionsKey = JSON.stringify([view.actions, view.link]);
+    if (actionsKey !== state.actionsKey) {
+      state.actionsKey = actionsKey;
+      const hadFocus = els.actions.contains(document.activeElement);
+      els.actions.replaceChildren();
+      view.actions.forEach(action => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'pa-operation__action' + (action.primary ? ' is-primary' : '');
+        button.dataset.operationAction = action.id;
+        button.textContent = action.label;
+        if (action.hint) button.title = action.hint;
+        els.actions.appendChild(button);
+      });
+      if (view.link) {
+        const link = document.createElement('a');
+        link.className = 'pa-operation__link';
+        link.href = view.link.href;
+        link.textContent = view.link.label;
+        els.actions.appendChild(link);
+      }
+      // Focus that was on a choice stays among the choices; focus that was
+      // anywhere else is left exactly where it was.
+      if (hadFocus && els.actions.firstElementChild) els.actions.firstElementChild.focus();
     }
     els.actions.hidden = !els.actions.childElementCount;
     // The status section exists only while there is something to say.
     els.root.hidden = !view.text;
 
+    // The recap is a list the user opens. It is rebuilt only when its facts
+    // change, and whether it is open is the user's and is left alone.
+    if (els.recap && els.recapList) {
+      const recap = view.text ? operationRecap(viewState) : null;
+      const recapKey = JSON.stringify(recap);
+      if (recapKey !== state.recapKey) {
+        state.recapKey = recapKey;
+        els.recapList.replaceChildren();
+        (recap ? recap.items : []).forEach(item => {
+          const row = document.createElement('li');
+          const source = document.createElement('span');
+          source.className = 'pa-operation__recap-source';
+          source.dataset.source = item.source;
+          // The colon is text, not styling: it is read aloud and copied.
+          source.textContent = item.sourceLabel + ':';
+          row.append(source, document.createTextNode(' ' + item.text));
+          els.recapList.appendChild(row);
+        });
+      }
+      els.recap.hidden = !recap;
+      if (!recap) els.recap.open = false;
+    }
+
     const highlight = client.highlight;
     if (highlight && highlight.commandId !== state.shownHighlight) {
       state.shownHighlight = highlight.commandId;
-      applyHighlight(highlight);
+      if (state.clearHighlight) state.clearHighlight();
+      state.clearHighlight = applyHighlight(highlight);
+    } else if (!highlight && state.clearHighlight) {
+      // The request was dismissed, paused or taken over: the mark goes now,
+      // not when its timer would have ended.
+      state.clearHighlight();
+      state.clearHighlight = null;
+      state.shownHighlight = '';
     }
   }
 
@@ -664,6 +888,14 @@ function mount() {
     if (button.dataset.operationAction === 'start') void client.start();
     if (button.dataset.operationAction === 'check') void client.check();
     if (button.dataset.operationAction === 'show_task') client.showTask();
+    if (button.dataset.operationAction === 'open_result') {
+      // The user asked to see it. The result view takes focus as its own
+      // dialog does; nothing is reported and nothing is changed.
+      if (client.openResult() === 'unavailable') {
+        state.note = 'The result could not be opened here. Open the task to see it.';
+        render();
+      }
+    }
     if (button.dataset.operationAction === 'open_draft') {
       void client.openDraft().then(outcome => {
         // The user's own edits are never replaced by reopening the proposal.
@@ -680,6 +912,19 @@ function mount() {
     const operations = event.detail?.personalAssistant?.availability?.operations;
     state.capable = Boolean(operations && operations.available);
     render();
+  });
+  /**
+   * The drawer turned to another conversation. An operation asked for in the
+   * one the user left stops moving this tab. It is not cancelled, its task
+   * keeps running, and Resume carries on if they want it.
+   */
+  function conversationChanged(id) {
+    const next = String(id || '');
+    if (!client.snapshot || !state.conversation || next === state.conversation) return;
+    client.standDown('conversation_changed');
+  }
+  document.addEventListener('personal-assistant:conversation', event => {
+    conversationChanged(event.detail && event.detail.id);
   });
   client.subscribe(render);
 
@@ -704,11 +949,13 @@ function mount() {
       state.note = '';
       if (data.operation) {
         client.saved = null;
+        state.conversation = String((data.conversation && data.conversation.id) || '');
         void client.adopt(data.operation);
         return;
       }
       render();
     },
+    conversationChanged,
     client
   };
 }

@@ -27,7 +27,7 @@
  * Dependencies are injected so the protocol is testable without a browser.
  */
 
-import { OUTCOME, isSupportedAction } from './ori-operation-targets.js';
+import { OUTCOME, isSupportedAction, operationResultURL } from './ori-operation-targets.js';
 
 export const TAB_KEY = 'ori.personalAssistant.tab';
 export const WATCH_KEY = 'ori.personalAssistant.watch';
@@ -119,6 +119,12 @@ export class OperationClient {
     this._cancelRefresh = null;
     this._awaitingBinding = false;
     this._startedHere = false;
+    // Bumped whenever the request in front of the user changes or is taken
+    // over, so a step that was waiting on the page knows not to act.
+    this._generation = 0;
+    this._halted = false;
+    // True after a page load rebuilt this from the server (see restore()).
+    this.restored = false;
 
     this.snapshot = null;
     this.phase = PHASE.IDLE;
@@ -203,9 +209,35 @@ export class OperationClient {
   /** A turn just returned this operation for this tab. */
   async adopt(snapshot) {
     if (!snapshot || !snapshot.id) return;
+    // A step still waiting for an earlier request must not act for it now.
+    this._generation += 1;
+    this._halted = false;
+    this.restored = false;
     this._remember(snapshot.id);
     this._accept(snapshot);
     await this.run({ allowNavigate: true });
+  }
+
+  /**
+   * The user took over: they turned to another conversation, or otherwise
+   * made clear this request is not what they are doing now. Steps stop, the
+   * highlight goes, and nothing is cancelled: the operation stays valid, its
+   * task keeps running, and Resume carries on from here.
+   */
+  standDown(reason) {
+    if (!this.snapshot || ENDED.has(this.snapshot.status)) return;
+    this._generation += 1;
+    this._halted = true;
+    this.highlight = null;
+    if (pendingCommands(this.snapshot).length) this._pause(reason || 'stood_down');
+    else this._emit();
+  }
+
+  /** Whether the request a step belongs to is still the one in front of the user. */
+  _wanted(snapshot) {
+    const generation = this._generation;
+    return () =>
+      this._generation === generation && Boolean(this.snapshot) && this.snapshot.id === snapshot.id;
   }
 
   /**
@@ -217,6 +249,10 @@ export class OperationClient {
     if (!pointer) return;
     await this._guard;
     if (!(await this._refresh())) return;
+    // What this page shows was rebuilt from the server. Anything the user had
+    // typed into a form before the reload is gone, and the drawer says so.
+    this.restored = true;
+    this._emit();
     if (this.phase !== PHASE.RUNNING) return;
     if (this._now() < pointer.autoUntil) {
       await this.run({ allowNavigate: false });
@@ -231,6 +267,8 @@ export class OperationClient {
     // Resuming a step that waited for unsaved work is the user choosing Ori's
     // step over what they had typed.
     const replace = this.phase === PHASE.PAUSED && this.pauseReason === 'unsaved_work';
+    this._halted = false;
+    this.restored = false;
     if (!this.snapshot.watching && !(await this.setWatching(true, { adopt: true }))) return;
     this._remember(this.snapshot.id);
     await this.run({ allowNavigate: true, replace });
@@ -246,24 +284,60 @@ export class OperationClient {
   async openDraft() {
     const snapshot = this.snapshot;
     if (!snapshot || !snapshot.draft || ENDED.has(snapshot.status)) return 'unavailable';
+    this.restored = false;
     const result = await this._targets.execute(
       {
         action: 'open_task_draft',
         workspace_id: snapshot.context && snapshot.context.workspace_id,
         draft_revision: snapshot.draft.revision
       },
-      { snapshot, replace: false, onSaved: payload => this._draftSaved(snapshot.id, payload) }
+      {
+        snapshot,
+        replace: false,
+        onSaved: payload => this._draftSaved(snapshot.id, payload),
+        wanted: this._wanted(snapshot)
+      }
     );
     if (result.outcome === OUTCOME.ACKNOWLEDGED) return 'opened';
     if (result.outcome === OUTCOME.YIELD) {
-      return result.reason === 'unsaved_work' ? 'kept' : 'elsewhere';
+      if (result.reason === 'unsaved_work') return 'kept';
+      return result.reason === 'stood_down' ? 'unavailable' : 'elsewhere';
     }
     return 'unavailable';
+  }
+
+  /**
+   * Open the result of this operation's own run, at the user's request. It is
+   * offered only when the server says the task's present result is that run's
+   * (`outcome.result === 'current'`): a later run's result is never opened as
+   * this one's. Nothing is reported to the server and nothing changes.
+   * Returns 'opened' (this page's own result view), 'navigating' (the page's
+   * own one-shot result link) or 'unavailable'.
+   */
+  openResult() {
+    const snapshot = this.snapshot;
+    const outcome = snapshot && snapshot.outcome;
+    const taskId = snapshot && snapshot.task ? String(snapshot.task.task_id || '') : '';
+    if (!taskId || !outcome || outcome.result !== 'current') return 'unavailable';
+    const context = snapshot.context || {};
+    if (this._targets.showResult && this._targets.showResult(context.workspace_id, taskId)) {
+      return 'opened';
+    }
+    const url = operationResultURL(context.workspace_slug, taskId);
+    if (!url) return 'unavailable';
+    this._navigate(url);
+    return 'navigating';
   }
 
   /** Turn watching on or off for this operation in this tab. Off cancels nothing. */
   async setWatching(watch, { adopt = false } = {}) {
     if (!this.snapshot) return false;
+    if (!watch) {
+      // Turning Watch off takes effect at once, before the server answers: a
+      // step already waiting on the page does nothing, and the mark goes.
+      this._generation += 1;
+      this.highlight = null;
+    }
     try {
       const reply = await this._request(
         'POST',
@@ -376,6 +450,8 @@ export class OperationClient {
   /** Dismiss the operation. A task it created or started is not touched. */
   async dismiss() {
     const snapshot = this.snapshot;
+    // A step still waiting on the page must not act once this is dismissed.
+    this._generation += 1;
     this._forget();
     if (!snapshot || ENDED.has(snapshot.status)) {
       this._clear();
@@ -403,19 +479,30 @@ export class OperationClient {
       let conflicts = 0;
       for (;;) {
         const snapshot = this.snapshot;
+        if (this._halted) return;
         if (!snapshot || ENDED.has(snapshot.status) || !snapshot.watching) return;
         const command = pendingCommands(snapshot)[0];
         if (!command) return;
         this._set(PHASE.RUNNING);
 
+        const wanted = this._wanted(snapshot);
         const result = isSupportedAction(command.action)
           ? await this._targets.execute(command, {
               allowNavigate,
               replace,
               snapshot,
-              onSaved: payload => this._draftSaved(snapshot.id, payload)
+              onSaved: payload => this._draftSaved(snapshot.id, payload),
+              wanted
             })
           : { outcome: OUTCOME.UNAVAILABLE, reason: 'This step is not supported here.' };
+
+        if (!wanted()) {
+          // While the step waited, the request was dismissed, replaced or
+          // taken over. Its outcome is not reported and nothing more is done
+          // for it; whatever is in front of the user now is looked at afresh.
+          if (this._halted) return;
+          continue;
+        }
 
         if (result.outcome === OUTCOME.NAVIGATING) {
           // The arriving page reports arrival. Keep following for a short while.
@@ -585,12 +672,9 @@ export class OperationClient {
     this.taskPresentation = presentation;
     this.taskPhase = run ? String(run.phase || '') : '';
     this._emit();
-    // The task moved: let the server settle the operation from it now rather
-    // than on the next beat.
-    const snapshot = this.snapshot;
-    if (state && moved && snapshot && !this._settledRun(snapshot)) {
-      void this._refresh({ quiet: true });
-    }
+    // The task moved: read the operation now rather than on the next beat, so
+    // the server settles it and says what became of this request's own run.
+    if (state && moved && this.snapshot) void this._refresh({ quiet: true });
   }
 
   /** Whether the operation already names the run it observed. */
@@ -683,6 +767,9 @@ export class OperationClient {
     this.snapshot = null;
     this.highlight = null;
     this.pauseReason = '';
+    this._generation += 1;
+    this._halted = false;
+    this.restored = false;
     this.starting = false;
     this.startUnconfirmed = false;
     this._startedHere = false;

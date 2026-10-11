@@ -269,10 +269,15 @@ test('Start is sent once, and an acceptance is shown as waiting, not as running'
   const accepted = view(client);
   assert.equal(accepted.text, 'Start accepted. Waiting for Engineer to begin…');
   assert.equal(accepted.tone, 'working');
-  assert.deepEqual(accepted.actions, [
-    { id: 'show_task', label: 'Show progress' },
-    { id: 'dismiss', label: 'Stop following' }
-  ]);
+  assert.deepEqual(
+    accepted.actions.map(action => [action.id, action.label]),
+    [
+      ['show_task', 'Show progress'],
+      ['dismiss', 'Stop following']
+    ]
+  );
+  // Stopping here is not cancelling the task, and the control says so.
+  assert.match(accepted.actions[1].hint, /The task keeps going; cancel it from the task itself/);
   assert.doesNotMatch(accepted.text, /is working|finished|completed/i);
   assert.deepEqual(
     pending().map(timer => timer.ms),
@@ -310,9 +315,10 @@ test('execution is shown from the task: running, then the run the server observe
   const running = view(client);
   assert.equal(running.text, 'Engineer is working on “Bounce the stems at 48k”.');
   assert.equal(running.tone, 'working');
-  assert.deepEqual(pending(), [], 'a run that is established needs no more reads');
+  assert.deepEqual(pending(), [], 'a run that is established needs no timed reads');
 
-  // Later states come from the task too, without asking the operation again.
+  // Later states come from the task too. Each move reads the operation once
+  // more (for what became of this request's own run); none sends anything.
   monitor.report('needs_input');
   assert.equal(
     view(client).text,
@@ -332,8 +338,14 @@ test('execution is shown from the task: running, then the run the server observe
     href: '/workspaces/album-1?panel=tasks&task=task-9',
     label: 'Open the task'
   });
-  assert.equal(calls.filter(call => call.method === 'GET').length, readsBefore + 1);
-  assert.equal(calls.filter(call => call.path === 'start').length, 1);
+  await settle();
+  assert.equal(calls.filter(call => call.method === 'GET').length, readsBefore + 4);
+  assert.deepEqual(
+    calls.filter(call => call.method === 'POST').map(call => call.path),
+    ['start'],
+    'following a task sends nothing but the one Start'
+  );
+  assert.deepEqual(pending(), []);
 });
 
 test('a refused Start keeps the task and says why; trying again is the same claim', async () => {
@@ -597,7 +609,15 @@ test('other task states are said in the task own words', () => {
     say('blocked'),
     '“Bounce the stems” is blocked. Open the task to see what it needs.'
   );
-  assert.equal(say('ready'), 'The task for Engineer started. Open the task to see where it is.');
+  // Started, then waiting again with nothing to show: said as it is.
+  assert.equal(
+    say('ready'),
+    '“Bounce the stems” started and is waiting again. Open the task to see why.'
+  );
+  assert.equal(
+    say('unknown'),
+    'Ori cannot tell what state “Bounce the stems” is in. Open the task to check.'
+  );
   // A long error is cut, not dumped into the drawer.
   const long = say('failed', { error: 'x'.repeat(400) });
   assert.ok(long.length < 220, String(long.length));

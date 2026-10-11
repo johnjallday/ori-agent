@@ -503,6 +503,17 @@ nothing. After a bound save the operation is `reviewed` and its snapshot
 carries `task` (`task_id`, then `run_id` and `claimed_at`). A task's run is
 reported only from the task: `run_id` is the first run the task itself showed.
 
+A started operation's snapshot also carries `outcome`, read from the task for
+that response and never stored: `run` (`running`, `waiting`, `stopped`,
+`succeeded`, `failed`, `cancelled`, `interrupted`, `unknown`), `result`
+(`current`, `history`, `gone`, `none`) and `later_runs`. `result` is `current`
+only when the task's present result is that of the operation's own execution;
+after a rerun it is `history` or `gone`, so a later run's output is never
+presented as the operation's. The operation's own execution is marked on the
+task as `assistant_operation_run` (`pending`, then `executed_at` of its
+record), written only by the task owner. A task the user started from its own
+controls has no mark, and the operation reports no `outcome` for it.
+
 Refusals are `{ "code", "message" }`: `operation_not_found` (404, also another
 user's operation), `operation_conflict`, `operation_tab_mismatch`,
 `operation_ended`, `operation_assignee`, `operation_start_refused`,

@@ -250,7 +250,7 @@ func (s *Service) Snapshot(ctx context.Context, id, tabID string) (*Snapshot, er
 			return nil, err
 		}
 	}
-	return SnapshotFor(op, tabID), nil
+	return s.project(ctx, op, tabID), nil
 }
 
 // Acknowledge records what the lease-holding tab observed for one command. A
@@ -584,10 +584,6 @@ func observedMatches(command Command, observed *Observation) error {
 	case ActionOpenTaskDraft:
 		if observed.DraftRevision != command.DraftRevision {
 			return fmt.Errorf("%w: the observed draft is another revision", ErrInvalidCommand)
-		}
-	case ActionOpenTask:
-		if observed.TaskID == "" || observed.TaskID != command.TaskID {
-			return fmt.Errorf("%w: the observed task is another task", ErrInvalidCommand)
 		}
 	}
 	return nil

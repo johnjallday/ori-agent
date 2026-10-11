@@ -60,6 +60,8 @@ PLAIN_DEMOS = {
                      "ORI_WORKSPACE_OPERATETASK_SANDBOX", "operate-ori-task.log"),
     "operate_start": ("tests/operate-ori-start.spec.ts",
                       "ORI_WORKSPACE_OPERATESTART_SANDBOX", "operate-ori-start.log"),
+    "operate_result": ("tests/operate-ori-result.spec.ts",
+                       "ORI_WORKSPACE_OPERATERESULT_SANDBOX", "operate-ori-result.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -275,6 +277,10 @@ def worker_reply(state_dir, request):
             time.sleep(0.05)
     if (state_dir / "worker-fail").exists():
         return {"error": "fixture worker failure"}
+    if (state_dir / "worker-needs-input").exists():
+        # An unhelpful answer, nothing more. Ori's own analysis of a task result
+        # is what stops the task and asks the user; the fixture does not.
+        return {"answer": "Fill in data later."}
     described = re.search(r"## Task Description\n\n(.+?)\n", text)
     title = described.group(1).strip() if described else "the task"
     return {"answer": "Fixture worker result for: " + title + ". No file was changed."}
@@ -564,8 +570,13 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                # The host that asked was stopped while this answer was held
+                # (the restart demos do that on purpose). Nobody is listening.
+                pass
 
         def do_GET(self):
             if self.path == "/api/tags":
@@ -751,6 +762,10 @@ def main():
     parser.add_argument("--operate-start", action="store_true",
                         help="wt demo: Operate Ori — the reviewed save creates one bound task, the user's Start is "
                              "claimed once, real progress with a deterministic worker, a repeat, a reload and a refusal")
+    parser.add_argument("--operate-result", action="store_true",
+                        help="wt demo: Operate Ori — the result of the request's own run, a rerun that is not "
+                             "attributed to it, needs-input, the recap, leaving the page, and a run interrupted "
+                             "by restarting this same isolated host")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
@@ -775,7 +790,7 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    operating = args.operate or args.operate_task or args.operate_start
+    operating = args.operate or args.operate_task or args.operate_start or args.operate_result
     evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if operating else
                 ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
@@ -794,8 +809,12 @@ def main():
         env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
                    ORI_ASSISTANT_EVIDENCE_DIR=str(evidence),
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
-        if args.discovery_continuity:
-            env.update(ORI_KEEP_DEMO_SANDBOX="1", ORI_DISCOVERY_CONTINUITY_PHASE="seed")
+        # Two demos restart the same isolated host on the same data between two
+        # runs of their spec. Each has its own phase variable.
+        restart_phase = ("ORI_DISCOVERY_CONTINUITY_PHASE" if args.discovery_continuity else
+                         "ORI_OPERATE_RESULT_PHASE" if args.operate_result else None)
+        if restart_phase:
+            env.update({"ORI_KEEP_DEMO_SANDBOX": "1", restart_phase: "seed"})
         if args.folder_response:
             env["ORI_FOLDER_RESPONSE_EVIDENCE_DIR"] = str(evidence)
         candidate = bool(args.reaper_source)
@@ -835,7 +854,7 @@ def main():
                 result = subprocess.run(
                     ["npx", "playwright", "test", spec, *args.extra_spec, "--workers=1"], cwd=ROOT, env=env, check=False,
                 )
-                if args.discovery_continuity and result.returncode == 0:
+                if restart_phase and result.returncode == 0:
                     # Preserve only this invocation's verified wt sandbox, stop
                     # its owned process group, then restart the built production
                     # host with the checked-in isolation entrypoint and same data.
@@ -844,7 +863,7 @@ def main():
                                                cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
                                                start_new_session=True)
                     wait_for_demo(process, log, args.port)
-                    env["ORI_DISCOVERY_CONTINUITY_PHASE"] = "reopen"
+                    env[restart_phase] = "reopen"
                     result = subprocess.run(["npx", "playwright", "test", spec, *args.extra_spec, "--workers=1"],
                                             cwd=ROOT, env=env, check=False)
                 output.flush()
