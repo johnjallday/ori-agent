@@ -614,6 +614,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.taskHandler.SetEventBus(b.eventBus)
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
+	// A software project's first assessment runs under this recipe and no other
+	// way. The runner reads the builder's stores when a task runs, not now.
+	b.taskHandler.SetRecipeRunner(workspace.FirstTaskRecipeSoftwareAssessment, softwareAssessmentRunner{builder: b})
 	// Task runs record their tokens like every other LLM call (city-economy
 	// FR29). Before this, a scheduled run was invisible to the Usage page: only
 	// chat and CLI agents ever reached the cost tracker. Guarded rather than
@@ -848,6 +851,15 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	// execution path as the manual execute endpoint.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTemplateSetupTaskStarter(handler.StartTaskAsync)
+		// Whether a first task under a host recipe could start is asked of the
+		// task handler that would run it: the same checks, made before the click.
+		if b.taskHandler != nil {
+			b.sessionHandler.SetFirstTaskRecipeGate(b.taskHandler.RecipeReadiness)
+		}
+		// The workspace page is served the same reading of a first task as Home.
+		b.sessionHandler.SetFirstTaskViewer(func(ctx context.Context, workspaceID string) (personalassistant.FolderFirstTaskView, bool) {
+			return b.folderFirstTaskView(ctx, workspaceID, b.assistantModelConfigured(ctx))
+		})
 	}
 
 	// Initialize auto-task handler for natural language task creation

@@ -67,6 +67,13 @@ func (p *ClaudeCodeProvider) DefaultModels() []string {
 
 // Chat sends a chat request via the Claude CLI.
 func (p *ClaudeCodeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	// This CLI is a full agent, and Ori has no posture for it that has been
+	// shown to remove every built-in tool and every use of the user's local
+	// configuration. An isolated call is therefore refused, not run text-only:
+	// its ordinary text posture is not a guarantee.
+	if req.Isolated {
+		return nil, fmt.Errorf("%w: the Claude Code CLI has no verified tool-free posture", ErrIsolationUnsupported)
+	}
 	prompt := buildClaudeCodePrompt(req.SystemPrompt, req.Messages)
 	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir, req.ExecutionScope)
 	if err != nil {

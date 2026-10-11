@@ -143,7 +143,9 @@ export function reviewStatusView(context, elsewhere = null) {
           ? `The reviewed destination for ${subject} has changed. Use Review setup to refresh the review.`
           : context.blocker === 'destination_unavailable'
             ? `The reviewed destination for ${subject} could not be read. Use Review setup to refresh the review.`
-            : `Setup is not available for ${subject} here. You can keep discussing the folder.`;
+            : context.blocker === 'project_exists'
+              ? `${subject} already has a workspace. Open it from its card instead of setting up another.`
+              : `Setup is not available for ${subject} here. You can keep discussing the folder.`;
       break;
     case 'completed':
       text = `${subject} is set up${place}.`;
@@ -226,6 +228,18 @@ export function currentSuggestion(state, value, offer = null) {
       state.observation.projects?.some(project => project.id === option.candidate_id)
     )
   );
+}
+
+// The line under a reply's setup proposal. A proposal about one folder has no
+// scope left to choose, so it does not ask for one.
+export function suggestionNote(value) {
+  if (value?.offer_id)
+    return 'Focuses the existing canonical review only. Setup still requires its reviewed confirmation.';
+  if (value?.subject?.name)
+    return `Workspace you named: ${String(value.subject.name)}. Placement and operation are rechecked in Review; setup still requires confirmation.`;
+  return (value?.options || []).length > 1
+    ? 'Choose scope and review effects before confirming. Nothing is set up here.'
+    : 'Review its effects before confirming. Nothing is set up here.';
 }
 
 function flowHasFocus() {
@@ -350,11 +364,7 @@ function renderSuggestion() {
   });
   const note = document.createElement('p');
   note.className = 'personal-assistant-folder-context__note';
-  note.textContent = suggestion.offer_id
-    ? 'Focuses the existing canonical review only. Setup still requires its reviewed confirmation.'
-    : suggestion.subject?.name
-      ? `Workspace you named: ${String(suggestion.subject.name)}. Placement and operation are rechecked in Review; setup still requires confirmation.`
-      : 'Choose scope and review effects before confirming. Nothing is set up here.';
+  note.textContent = suggestionNote(suggestion);
   handoff.append(button, note);
   bubble.append(handoff);
 }

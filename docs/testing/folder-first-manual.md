@@ -228,3 +228,90 @@ reader operation are separate manual checks, NOT RUN unless actually exercised.
 Feature evidence and the post-implementation guide stay ignored/local at
 `tasks/evidence/assistant-conversation-first/final/` and
 `tasks/test-guide-assistant-conversation-first.md`.
+
+## Software project folder
+
+A folder that holds a software project is reviewed, set up as a Code Project
+workspace bound to that exact directory, and given one read-only first
+assessment that the user starts. Nothing is installed and nothing is written
+into the project.
+
+Automated, in a real browser, with no model and no network:
+
+```bash
+./scripts/e2e-software-folder.sh
+```
+
+It starts one isolated demo server, runs the suite's first phase
+(`tests/software-project-folder-setup.spec.ts`), stops and starts the server on
+the same sandbox, and runs the second phase, so a paused setup surviving a
+restart is checked for real. A third phase, on a server and sandbox of its
+own, attaches a checkout through the assistant composer's **Add folder** and
+sends it: the reply proposes that one folder as a workspace, and one click
+reaches its card. The suite writes its own inert project folders
+(Git metadata is plain text; no git command runs) and hashes them before and
+after. Its one stand-in is labelled in the spec as the FIXTURE PROVIDER: a
+local HTTP server that answers the model API, which the server's own `lmstudio`
+provider is pointed at (`LM_STUDIO_BASE_URL`). The start route, the dispatch,
+the evidence, the isolation and every screen are the product's own; only the
+model's words are canned, and the spec reads back exactly what was sent to it.
+Run directly through `scripts/e2e.sh`, the spec skips unless
+`ORI_SOFTWARE_SANDBOX`, `ORI_SOFTWARE_FIXTURE_PORT` and `ORI_SOFTWARE_PHASE`
+(`first`, `restarted` or `conversation`) are set.
+
+With a real model, the whole journey in one command:
+
+```bash
+./scripts/demo-software-folder.sh               # a small unrelated project
+./scripts/demo-software-folder.sh --ori         # a copy of this repository, as a linked worktree
+./scripts/demo-software-folder.sh --add-folder  # the composer's Add folder instead of Home
+```
+
+`--add-folder` is a shorter journey of its own: a checkout whose marker is at
+the root of the picked folder is attached in the composer and sent to the real
+model, the reply's proposal is followed to the project's card, and its review
+and Set up finish in the conversation. The reply is printed in the sandbox's
+`add-folder.log`.
+
+It starts an isolated demo server on a new sandbox, seeds the folders, and runs
+the walkthrough's phases in order, restarting the server where the journey
+needs it: `setup` (pauses with no model), restart, `resume`, `assess-interrupt`
+(starts the real assessment and leaves it running), restart, `assess` (the lost
+run reads "Did not finish"; Try again runs the same task; the report, the
+workspace banner and the Plans hand-off are followed), `repeat`. Like `wt
+demo`, the server is given your Codex home (`$CODEX_HOME`, else `~/.codex`), so
+the two assessment phases make real model calls. The report it got is printed
+in the sandbox's `assess.log`, and screenshots go to its `shots` folder.
+
+To drive one phase by hand, start `scripts/demo-server.sh <port> <sandbox>`
+yourself (export `CODEX_HOME` for a model: the demo server is otherwise fully
+isolated and has no provider), seed with `scripts/software-folder-seed.sh
+<sandbox> [--ori]`, and run `node scripts/demo-software-folder.mjs
+http://localhost:<port> <sandbox> <shots-dir> <phase>`. `recognize` and `review`
+each need a fresh seeded sandbox.
+
+Check by eye:
+
+1. Before Set up, the card names the workspace, the folder (linked where it
+   is, read-only), the one assistant and its model, the planning-first mode and
+   the first assessment, and says what was read and that no command was run.
+2. Start assessment says what it spends and that the model gets no tools. A
+   model that was never called reads "Set, not checked", never "Ready".
+3. While it runs there is nothing to press twice. A run that does not finish
+   says why in one sentence, offers Try again only when nothing has to be
+   repaired first, and never shows a raw provider error or a path.
+4. A finished assessment names its sources, calls build and test commands
+   "declared, not run", and ends with Ori's own note of which files it was
+   based on. **Open the assessment** opens the task's page, where the whole
+   report is shown.
+5. **Plan the suggested task** opens the workspace's Plans page with the
+   suggestion in the box. Nothing is created until Create plan is pressed.
+6. The project folder is byte-for-byte unchanged afterwards.
+7. Through **Add folder**, a folder that is itself one project is proposed by
+   name as one workspace. It never asks which of its subfolders to set up, and
+   the line under the conversation agrees with the card (it does not say setup
+   is unavailable while the card offers a review).
+
+Evidence and the post-implementation guide stay ignored/local at
+`tasks/evidence/software-project-folder-setup/` and
+`tasks/test-guide-software-project-folder-setup.md`.

@@ -146,6 +146,12 @@ type MissionFirstTask struct {
 	BlockedLabel string
 	// TicketRoute opens the first look's full report.
 	TicketRoute string
+	// Assessment says the first look is a software project's read-only
+	// assessment, run under Ori's own recipe: the card words it as one. For an
+	// assessment that did not finish, CanRetry says whether it can be tried
+	// again now; when it cannot, Blocked and BlockedURL say what to repair.
+	Assessment bool
+	CanRetry   bool
 }
 
 // MissionPresentation is what a mission's Resolve returns. An empty string
@@ -462,6 +468,11 @@ func resolveFolderFirstLook(ctx MissionContext) MissionPresentation {
 		return MissionPresentation{Hint: "Show it a project folder to start."}
 	}
 	open := MissionPresentation{ActionURL: route, ActionLabel: "Open " + name}
+	if task.Assessment {
+		if presentation, handled := resolveAssessment(task, open); handled {
+			return presentation
+		}
+	}
 	switch task.State {
 	case MissionFirstTaskSeeded:
 		if task.CanStart {
@@ -507,6 +518,51 @@ func resolveFolderFirstLook(ctx MissionContext) MissionPresentation {
 	default:
 		return MissionPresentation{Hint: "Show it a project folder to start."}
 	}
+}
+
+// resolveAssessment words Mission 03 for a software project's assessment where
+// it differs from any other first look: what the start is called and costs,
+// what it is doing while it runs, and what a run that did not finish needs.
+// Such a run is tried again only when nothing has to be repaired first;
+// otherwise the card points at the repair. handled is false for the states
+// that read the same for every first look.
+func resolveAssessment(task MissionFirstTask, open MissionPresentation) (MissionPresentation, bool) {
+	repair := func() MissionPresentation {
+		open.Why = strings.TrimSpace(task.Blocked)
+		if url := strings.TrimSpace(task.BlockedURL); url != "" && strings.TrimSpace(task.BlockedLabel) != "" {
+			open.ActionURL, open.ActionLabel = url, strings.TrimSpace(task.BlockedLabel)
+		}
+		return open
+	}
+	switch task.State {
+	case MissionFirstTaskSeeded:
+		if task.CanStart {
+			return MissionPresentation{
+				ActionURL:   FolderFirstLookActionURL,
+				ActionLabel: "Start assessment",
+				Hint:        "Spends model tokens once. The model gets what Ori read and no tools; nothing in the project is run or changed.",
+			}, true
+		}
+		return repair(), true
+	case MissionFirstTaskRunning:
+		folder := strings.TrimSpace(task.FolderName)
+		if folder == "" {
+			folder = strings.TrimSpace(task.WorkspaceName)
+		}
+		open.Why = "Assessing " + folder + "… nothing is being run."
+		open.InProgress = true
+		return open, true
+	case MissionFirstTaskFailed:
+		if !task.CanRetry {
+			return repair(), true
+		}
+		why := strings.TrimSpace(task.Blocked)
+		if why == "" {
+			why = "The assessment did not finish. Try again."
+		}
+		return MissionPresentation{Why: why, ActionURL: FolderFirstLookActionURL, ActionLabel: "Try again"}, true
+	}
+	return MissionPresentation{}, false
 }
 
 // firstBriefWhy is Mission 05's static why line.

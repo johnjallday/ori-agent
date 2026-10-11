@@ -25,6 +25,10 @@ type FolderOfferWorkspaceRequest struct {
 	TemplateID string
 	OfferID    string
 	ParentID   string
+	// Roster, when set, holds the creation to the assistant roster a review
+	// showed. The endpoint then creates the whole reviewed roster or nothing:
+	// a roster that changed since the review is ErrFolderOfferRosterChanged.
+	Roster *FolderOfferRosterReview
 }
 
 // CreateFolderOfferWorkspace creates the workspace through the ordinary
@@ -41,10 +45,18 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 	if name == "" || offerID == "" {
 		return "", errors.New("a folder offer workspace needs a name and an offer id")
 	}
-	body, err := json.Marshal(createWorkspaceRequest{
+	create := createWorkspaceRequest{
 		Name: name, TemplateID: strings.TrimSpace(req.TemplateID), ParentID: req.ParentID,
 		EntryPoint: folderDigestEntryPoint, FolderOfferID: offerID,
-	})
+	}
+	if req.Roster != nil {
+		overrides, review, err := h.folderOfferRosterRequest(create.TemplateID, *req.Roster)
+		if err != nil {
+			return "", err
+		}
+		create.TemplateAgentOverrides, create.TemplateAgentReview = overrides, review
+	}
+	body, err := json.Marshal(create)
 	if err != nil {
 		return "", err
 	}
@@ -56,6 +68,9 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 	recorder := httptest.NewRecorder()
 	h.HandleWorkspaces(recorder, httpRequest)
 	if recorder.Code != http.StatusCreated {
+		if req.Roster != nil && recorder.Code == http.StatusConflict && createConflictType(recorder.Body.Bytes()) == "template_agent_plan" {
+			return "", ErrFolderOfferRosterChanged
+		}
 		return "", fmt.Errorf("folder offer workspace creation failed (%d): %s", recorder.Code, createFailureMessage(recorder.Body.Bytes()))
 	}
 	var response struct {
@@ -141,6 +156,19 @@ func agentReceiptDetail(instance workspace.AgentInstance) string {
 		return verb
 	}
 	return role + ", " + verb
+}
+
+// createConflictType reads which kind of conflict refused a create.
+func createConflictType(body []byte) string {
+	var payload struct {
+		Conflict struct {
+			Type string `json:"type"`
+		} `json:"conflict"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Conflict.Type)
 }
 
 // createFailureMessage pulls the user-facing error out of a refused create,

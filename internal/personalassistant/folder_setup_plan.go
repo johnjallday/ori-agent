@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
 // Line kinds of a folder setup plan, in the order the card shows them.
@@ -119,6 +121,122 @@ type FolderSetupIntent struct {
 	// plan that creates the Home may say.
 	SetsProfile     bool `json:"sets_profile,omitempty"`
 	GrantsTemplates bool `json:"grants_templates,omitempty"`
+	// Recipe names a setup the host carries out itself, with nothing to install
+	// (folderdigest.BuiltinSoftwareProject). Empty for an integration or
+	// portfolio plan. Software is that recipe's promise.
+	Recipe        string                `json:"recipe,omitempty"`
+	RecipeVersion int                   `json:"recipe_version,omitempty"`
+	Software      *FolderSoftwareIntent `json:"software,omitempty"`
+}
+
+// Outcomes a software setup can promise for the workspace, and what it does
+// about the workspace's assistant and first assessment.
+const (
+	FolderSoftwareCreate = "create"
+	FolderSoftwareReuse  = "reuse"
+	// FolderSoftwareKeep leaves what the workspace already has untouched.
+	FolderSoftwareKeep = "keep"
+	FolderSoftwareSeed = "seed"
+	// FolderSoftwareScopeReadOnly is the only access a software setup grants:
+	// the selected folder, linked where it is, for reading.
+	FolderSoftwareScopeReadOnly = "linked_folder_read_only"
+)
+
+// FolderSoftwareIntent is everything a reviewed software setup promised, in a
+// form the run checks before each effect. It is part of what the plan digest
+// covers: two reviews whose wording is identical but whose folder, workspace,
+// assistant, model or evidence differ are different reviews. It never leaves
+// the server and holds no filesystem path.
+type FolderSoftwareIntent struct {
+	// Outcome is create (a new workspace) or reuse (WorkspaceID, the user's
+	// existing workspace for this exact folder).
+	Outcome       string `json:"outcome"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name"`
+	// Template and TemplateRevision are the blueprint a new workspace is made
+	// from, exactly as reviewed.
+	Template         string `json:"template,omitempty"`
+	TemplateRevision string `json:"template_revision,omitempty"`
+	// SubjectKey and SubjectIdentity witness the one directory the review was
+	// about: its canonical path's key and the directory itself.
+	SubjectKey      string `json:"subject_key"`
+	SubjectIdentity string `json:"subject_identity"`
+	// Assistant is the development assistant's name. AssistantAction is create
+	// (a new saved agent), reuse (a saved agent, used exactly as saved) or keep
+	// (the reused workspace's own entry agent). RosterRevision witnesses the
+	// reviewed roster, including the model it resolves to.
+	Assistant       string `json:"assistant,omitempty"`
+	AssistantAction string `json:"assistant_action"`
+	Provider        string `json:"provider,omitempty"`
+	Model           string `json:"model,omitempty"`
+	RosterRevision  string `json:"roster_revision,omitempty"`
+	// Assessment is seed (one first assessment is added) or keep (the workspace
+	// already has a first look, which is left as it is).
+	Assessment string `json:"assessment"`
+	// EvidenceRevision is the inspection the review's suggestions were read
+	// from; empty when the user reviewed without one.
+	EvidenceRevision string `json:"evidence_revision,omitempty"`
+	// Scope is the access the setup grants. Planning says the workspace starts
+	// with understanding and planning and nothing runs during setup.
+	Scope    string `json:"scope"`
+	Planning bool   `json:"planning"`
+	// Workflow names the effective workflow a new workspace is given (its
+	// profile, preset, how approved work starts, and where planning documents
+	// go), or "keep" for a workspace whose own settings are left alone. A
+	// change in what those defaults do is a change in what was reviewed.
+	Workflow string `json:"workflow"`
+	// Conversation is the conversation revision the review belongs to, when it
+	// was made from one.
+	Conversation string `json:"conversation,omitempty"`
+}
+
+// Validate checks a software intent's shape: known outcomes, bounded text and
+// no path. It does not check the intent against anything on disk.
+func (i FolderSoftwareIntent) Validate() error {
+	switch i.Outcome {
+	case FolderSoftwareCreate:
+		if i.WorkspaceID != "" || i.Template == "" {
+			return fmt.Errorf("%w: software create intent", errFolderDigestInvalid)
+		}
+	case FolderSoftwareReuse:
+		if i.WorkspaceID == "" {
+			return fmt.Errorf("%w: software reuse intent", errFolderDigestInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: software outcome", errFolderDigestInvalid)
+	}
+	switch i.AssistantAction {
+	case FolderSoftwareCreate, FolderSoftwareReuse:
+		if strings.TrimSpace(i.Assistant) == "" {
+			return fmt.Errorf("%w: software assistant", errFolderDigestInvalid)
+		}
+	case FolderSoftwareKeep:
+		if i.Outcome != FolderSoftwareReuse {
+			return fmt.Errorf("%w: software assistant", errFolderDigestInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: software assistant action", errFolderDigestInvalid)
+	}
+	if i.Assessment != FolderSoftwareSeed && i.Assessment != FolderSoftwareKeep {
+		return fmt.Errorf("%w: software assessment", errFolderDigestInvalid)
+	}
+	if i.Scope != FolderSoftwareScopeReadOnly || !i.Planning {
+		return fmt.Errorf("%w: software scope", errFolderDigestInvalid)
+	}
+	if kept := i.Workflow == FolderSoftwareKeep; i.Workflow == "" || len(i.Workflow) > 120 || strings.ContainsAny(i.Workflow, "\\\x00\r\n") ||
+		kept != (i.Outcome == FolderSoftwareReuse) {
+		return fmt.Errorf("%w: software workflow", errFolderDigestInvalid)
+	}
+	if validateFolderKey(i.SubjectKey) != nil || strings.TrimSpace(i.SubjectIdentity) == "" || validateFolderName(i.WorkspaceName) != nil {
+		return fmt.Errorf("%w: software subject", errFolderDigestInvalid)
+	}
+	for _, text := range []string{i.WorkspaceID, i.Template, i.TemplateRevision, i.SubjectIdentity, i.Assistant,
+		i.Provider, i.Model, i.RosterRevision, i.EvidenceRevision, i.Conversation} {
+		if len(text) > 200 || strings.ContainsAny(text, "\\\x00\r\n") || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "~") {
+			return fmt.Errorf("%w: software intent text", errFolderDigestInvalid)
+		}
+	}
+	return nil
 }
 
 // FolderSetupPlan is everything one press of Set up will do. The browser sends
@@ -128,8 +246,41 @@ type FolderSetupPlan struct {
 	Lines       []FolderPlanLine        `json:"lines"`
 	Digest      string                  `json:"digest"`
 	Destination *FolderSetupDestination `json:"destination,omitempty"`
+	// Prerequisites say what the setup needs and what it can use, as it stands
+	// now. They are read fresh for each plan and are not part of the digest: a
+	// prerequisite that changes the setup itself (the assistant's model) is in
+	// the intent, and one that does not (an optional connection) must not make
+	// an approved review stale.
+	Prerequisites []FolderPrerequisite `json:"prerequisites,omitempty"`
 	// Intent is the machine-readable promise behind the lines; server only.
 	Intent FolderSetupIntent `json:"-"`
+}
+
+// States of a prerequisite. They are deliberately distinct: a thing that is
+// configured has not been shown to work, and a thing Ori cannot check is
+// unknown, not absent.
+const (
+	FolderPrerequisiteVerified   = "verified"
+	FolderPrerequisiteConfigured = "configured"
+	FolderPrerequisiteAbsent     = "absent"
+	FolderPrerequisiteUnknown    = "unknown"
+)
+
+// FolderPrerequisite is one thing a setup needs or can use, where the fact came
+// from, and where to fix it. Every field is plain text and none is a path.
+type FolderPrerequisite struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	State string `json:"state"`
+	// Detail says what the state means here, in one sentence.
+	Detail string `json:"detail,omitempty"`
+	// Source says where the fact was read ("Ori's settings", "this project's
+	// files"), so a reader can tell a check from a guess.
+	Source string `json:"source,omitempty"`
+	// Required is false for something a local setup works without.
+	Required bool `json:"required"`
+	// Route is an existing page where the user can set it up or connect it.
+	Route string `json:"route,omitempty"`
 }
 
 // FolderPlanDigest is the SHA-256 of the lines' canonical JSON with State
@@ -159,13 +310,30 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	stamped.Prerequisites = append([]FolderPrerequisite(nil), p.Prerequisites...)
 	if p.Destination != nil {
 		destination := *p.Destination
 		stamped.Destination = &destination
 		stamped.Intent.Destination = &destination
 		stamped.Digest = DestinationPlanDigest(stamped.Lines, &destination)
 	}
+	if stamped.Intent.Recipe != "" {
+		stamped.Digest = recipePlanDigest(stamped.Digest, stamped.Intent)
+	}
 	return stamped
+}
+
+// recipePlanDigest binds a built-in recipe's whole intent into the digest the
+// user confirms. The lines say what will happen in words; the intent says
+// which folder, workspace, assistant, model and evidence those words were
+// about. A review is stale when either changes, even if the words do not.
+func recipePlanDigest(base string, intent FolderSetupIntent) string {
+	encoded, err := json.Marshal(intent)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(append([]byte(base+"\x00recipe\x00"), encoded...))
+	return hex.EncodeToString(sum[:])
 }
 
 // FolderSetupUpdate is one snapshot of a run, written onto the offer.
@@ -198,6 +366,9 @@ type FolderSetupRequest struct {
 	EntryName    string
 	// Plan is the confirmed plan a Run is held to.
 	Plan FolderSetupPlan
+	// Software is set for a built-in software offer: what the service holds
+	// about the folder and the review so far.
+	Software *FolderSoftwareRequest
 	// Update records the run's progress on the offer.
 	Update func(ctx context.Context, update FolderSetupUpdate) error
 }
@@ -270,6 +441,23 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		if err := intent.Destination.Validate(); err != nil {
 			return err
 		}
+	}
+	// A recipe is one the host knows, with its whole promise present and well
+	// formed; anything else is refused rather than run on a guess.
+	switch intent.Recipe {
+	case "":
+		if intent.RecipeVersion != 0 || intent.Software != nil {
+			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
+		}
+	case folderdigest.BuiltinSoftwareProject:
+		if intent.RecipeVersion < 1 || intent.Software == nil {
+			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
+		}
+		if err := intent.Software.Validate(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: unknown setup recipe", errFolderDigestInvalid)
 	}
 	for _, text := range []string{intent.Integration, intent.IntegrationPlugin, intent.IntegrationVersion,
 		intent.Provider, intent.ProviderPlugin, intent.ProviderVersion, intent.Placement, intent.HomeTemplate} {

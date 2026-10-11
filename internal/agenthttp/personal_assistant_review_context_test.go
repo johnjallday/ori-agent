@@ -55,6 +55,64 @@ func TestReviewContext_StatusAndControlsAreReadOnly(t *testing.T) {
 	}
 }
 
+// A software project's card is reviewed before it is confirmed, and it is
+// never created by the generic path, so its view has no create-available flag.
+// The projection used to read that as "setup is not available" and say so
+// under a card that was offering the review.
+func TestReviewContext_ASoftwareProjectCardIsDescribedAsItStands(t *testing.T) {
+	reviewed := &personalassistant.FolderSoftwareReviewView{FolderSoftwareReview: personalassistant.FolderSoftwareReview{EvidenceRevision: "revision-1"}}
+	plan := &personalassistant.FolderSetupPlan{Lines: []personalassistant.FolderPlanLine{{Name: "Creates the workspace Widget"}}}
+	linked := personalassistant.FolderExistingProject{WorkspaceID: "ws-1", Name: "Widget", Route: "/workspaces/widget"}
+	software := linked
+	software.Software = true
+	for _, test := range []struct {
+		name     string
+		software personalassistant.FolderSoftwareView
+		plan     *personalassistant.FolderSetupPlan
+		reason   string
+		want     string
+		blocker  string
+		controls []string
+	}{
+		{"recognized, not yet looked at", personalassistant.FolderSoftwareView{SetupAvailable: true}, nil, "",
+			"awaiting_confirmation", "", []string{"Review setup", "Keep chatting"}},
+		{"reviewed with a plan", personalassistant.FolderSoftwareView{SetupAvailable: true, Review: reviewed}, plan, "",
+			"awaiting_confirmation", "", []string{"Set up", "Adjust names…", "Review again", "Keep chatting"}},
+		{"reviewed where setup cannot run", personalassistant.FolderSoftwareView{Review: reviewed}, plan, "",
+			"setup_unavailable", "setup_path_unavailable", []string{"Adjust names…", "Review again", "Keep chatting"}},
+		{"reviewed, no plan", personalassistant.FolderSoftwareView{SetupAvailable: true, Review: reviewed}, nil, "assistant_unavailable",
+			"setup_unavailable", "assistant_unavailable", []string{"Review again", "Keep chatting"}},
+		{"linked another way, completed by a review", personalassistant.FolderSoftwareView{SetupAvailable: true, Existing: []personalassistant.FolderExistingProject{linked}}, nil, "",
+			"awaiting_confirmation", "", []string{"Review setup", "Keep chatting"}},
+		{"already set up", personalassistant.FolderSoftwareView{SetupAvailable: true, Existing: []personalassistant.FolderExistingProject{software}}, nil, "",
+			"setup_unavailable", "project_exists", []string{"Open workspace"}},
+		{"workspaces unreadable", personalassistant.FolderSoftwareView{SetupAvailable: true, ExistingUnavailable: true}, nil, "",
+			"setup_unavailable", "existing_workspace_unreadable", nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			software := test.software
+			view := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending, Subject: personalassistant.FolderSubjectView{Name: "widget"},
+				Software: &software, Plan: test.plan, SetupUnavailableReason: test.reason}
+			got := projectReviewContext(view, true)
+			if got.Status != test.want || got.Blocker != test.blocker || !reflect.DeepEqual(got.Controls, test.controls) {
+				t.Fatalf("projection: %+v", got)
+			}
+			// What the first control does is said before anything has been read,
+			// and a reviewed plan is described by its own lines.
+			if test.controls != nil && test.controls[0] == "Review setup" && (len(got.Effects) != 1 || !strings.Contains(got.Effects[0].Name, "README")) {
+				t.Fatalf("the look was not explained: %+v", got.Effects)
+			}
+			if test.plan != nil && (len(got.Effects) != 1 || got.Effects[0].Name != "Creates the workspace Widget") {
+				t.Fatalf("the reviewed plan was not described: %+v", got.Effects)
+			}
+			// A card whose folder is no longer held offers nothing, whatever it is.
+			if detached := projectReviewContext(view, false); detached.Status != "reselection_needed" || detached.Controls != nil {
+				t.Fatalf("detached: %+v", detached)
+			}
+		})
+	}
+}
+
 type reviewContextReader struct {
 	PersonalAssistantFolderSetups
 	view  *personalassistant.FolderOfferView

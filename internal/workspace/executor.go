@@ -478,6 +478,12 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 			if ws.Tasks[i].Status != TaskStatusAssigned {
 				continue
 			}
+			// A task under a host recipe runs when the user starts it and at no
+			// other time. Being assigned (to another agent, or again after its
+			// ticket was reopened) is not a start.
+			if FirstTaskRecipe(&ws.Tasks[i]) != "" {
+				continue
+			}
 			task := ws.Tasks[i]
 			candidates = append(candidates, taskCandidate{ws: ws, task: task, profile: te.resolveProviderProfile(task)})
 		}

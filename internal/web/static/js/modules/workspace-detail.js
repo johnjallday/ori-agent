@@ -18,6 +18,8 @@ import {
   policySummary
 } from './workspace-planning-policy.js';
 import {
+  assessmentBannerView,
+  assessmentStartNote,
   firstTaskBannerView,
   firstTaskStartMessage,
   renderFirstTaskBanner
@@ -6012,6 +6014,14 @@ export class WorkspaceDetailPage {
   showFolderFirstTaskBanner() {
     const task = this.findFolderFirstTask();
     if (!task) return;
+    if (this.isAssessmentTask(task)) {
+      // An assessment's banner is the server's own reading of the task, in
+      // every state. Reading it starts nothing.
+      this.firstTaskBannerId = task.id;
+      this.firstTaskAssessment = true;
+      void this.refreshAssessmentBanner();
+      return;
+    }
     if (task.context.folder_first_task_autostart_consumed_at) {
       this.resumeFirstTaskBanner();
       return;
@@ -6102,7 +6112,166 @@ export class WorkspaceDetailPage {
     if (state === 'in_progress' || state === 'running') this.startExecutionMonitor(task.id);
   }
 
+  /** A first task that runs under one of Ori's own recipes: an assessment. */
+  isAssessmentTask(task) {
+    return Boolean(String(task?.context?.folder_first_task_recipe || '').trim());
+  }
+
+  /**
+   * The banner for a software project's first assessment. What it says is the
+   * server's reading of the task, the same one Home shows, fetched here and
+   * again whenever the task moves, so the two never disagree. A run that is
+   * already going (started on Home, or before a reload) is followed from here.
+   */
+  async refreshAssessmentBanner() {
+    const request = this.beginResourceRequest('firstTaskBanner');
+    if (!request) return;
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task`,
+        { signal: request.controller.signal }
+      );
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
+      const look = payload?.first_task || null;
+      this.assessmentLook = look;
+      this.renderAssessmentBanner();
+      if (look?.state === 'running' && look.task_id) {
+        if (this.assessmentFollowing !== look.task_id) {
+          this.assessmentFollowing = look.task_id;
+          void this.startExecutionMonitor(look.task_id);
+        }
+      } else {
+        this.assessmentFollowing = '';
+      }
+    } catch (error) {
+      if (this.isResourceRequestCurrent(request))
+        console.warn('Assessment banner refresh failed:', error);
+    }
+  }
+
+  renderAssessmentBanner() {
+    if (this._destroyed) return;
+    const look = this.assessmentLook;
+    const taskId = String(look?.task_id || '').trim();
+    renderFirstTaskBanner(
+      document.getElementById('workspaceFirstTaskBanner'),
+      assessmentBannerView(look, {
+        busy: this.firstTaskStarting === true,
+        message: this.firstTaskStartMessage || '',
+        taskHref: taskId ? this.buildTaskHref(taskId) : '',
+        dismissed: this.isAssessmentBannerDismissed(taskId)
+      }),
+      document,
+      {
+        onStart: () => void this.startAssessment(),
+        onRetry: () => void this.startAssessment({ retry: true }),
+        onDismiss: () => this.dismissAssessmentBanner()
+      }
+    );
+  }
+
+  /**
+   * Start assessment, or Try again, pressed on the banner. A first start goes
+   * through the one-time start; a run that did not finish is run again as the
+   * same task, so a second task is never made. Either way the server decides
+   * whether it can run, and the banner is read again for what it said.
+   */
+  async startAssessment({ retry = false } = {}) {
+    const look = this.assessmentLook;
+    if (!look || this.firstTaskStarting) return;
+    const taskId = String(look.task_id || '').trim();
+    const offered = retry
+      ? look.state === 'failed' && look.can_retry === true && Boolean(taskId)
+      : look.state === 'seeded' && look.can_start === true;
+    if (!offered) return;
+    this.firstTaskStarting = true;
+    this.firstTaskStartMessage = '';
+    this.renderAssessmentBanner();
+    let started = '';
+    let reason = 'start_failed';
+    try {
+      const request = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+      const response = retry
+        ? await fetch('/api/orchestration/tasks/execute', {
+            ...request,
+            body: JSON.stringify({ task_id: taskId })
+          })
+        : await fetch(
+            `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task/start`,
+            { ...request, body: '{}' }
+          );
+      const result = response.ok ? await response.json().catch(() => ({})) : {};
+      if (retry) {
+        if (response.ok && result?.success !== false) started = taskId;
+      } else if (response.ok) {
+        if (result?.started === true) started = String(result.task_id || taskId).trim();
+        reason = String(result?.reason || 'start_failed');
+      }
+    } catch (error) {
+      console.warn('Assessment start failed:', error);
+    }
+    this.firstTaskStarting = false;
+    if (started) {
+      this.assessmentLook = {
+        ...look,
+        state: 'running',
+        can_start: false,
+        can_retry: false,
+        reason: '',
+        message: ''
+      };
+      this.renderAssessmentBanner();
+      await this.loadTasks();
+      this.firstTaskBannerId = started;
+      this.assessmentFollowing = started;
+      void this.startExecutionMonitor(started);
+    } else {
+      this.firstTaskStartMessage = assessmentStartNote(reason);
+    }
+    // The server's reading replaces ours. A refused start may mean it is
+    // already running, or finished, somewhere else: the banner then shows that.
+    await this.refreshAssessmentBanner();
+  }
+
+  /** The assessment's task moved: read what the server now says about it. */
+  followAssessmentTask(task) {
+    if (this._destroyed || !task || task.id !== this.firstTaskBannerId) return;
+    const state = this.getTaskExecutionState(task);
+    if (state === this.assessmentTaskState) return;
+    this.assessmentTaskState = state;
+    void this.refreshAssessmentBanner();
+  }
+
+  /** A finished assessment the viewer put away stays away in this browser. */
+  isAssessmentBannerDismissed(taskId) {
+    if (!taskId) return false;
+    if (this.assessmentDismissed === taskId) return true;
+    try {
+      return window.localStorage.getItem(`ori.assessmentBanner.dismissed.${taskId}`) === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  dismissAssessmentBanner() {
+    const taskId = String(this.assessmentLook?.task_id || '').trim();
+    if (!taskId) return;
+    this.assessmentDismissed = taskId;
+    try {
+      window.localStorage.setItem(`ori.assessmentBanner.dismissed.${taskId}`, '1');
+    } catch (_) {
+      // Without storage it is put away for this page view only.
+    }
+    this.renderAssessmentBanner();
+  }
+
   async refreshFirstTaskBanner() {
+    if (this.firstTaskAssessment) {
+      await this.refreshAssessmentBanner();
+      return;
+    }
     const taskId = this.firstTaskBannerId;
     if (!taskId) return;
     const request = this.beginResourceRequest('firstTaskBanner');
@@ -6122,6 +6291,10 @@ export class WorkspaceDetailPage {
 
   updateFirstTaskBanner(task) {
     if (this._destroyed || !task || task.id !== this.firstTaskBannerId) return;
+    if (this.firstTaskAssessment) {
+      this.followAssessmentTask(task);
+      return;
+    }
     const mount = document.getElementById('workspaceFirstTaskBanner');
     // Still waiting for its click, unless it was started in the meantime (from
     // Home, or another tab): then the banner follows it like any started look.

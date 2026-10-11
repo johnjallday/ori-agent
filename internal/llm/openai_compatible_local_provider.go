@@ -124,7 +124,10 @@ func (p *OpenAICompatibleLocalProvider) Capabilities() ProviderCapabilities {
 	if window <= 0 {
 		window = defaultLocalContextWindow
 	}
-	return LocalProviderCapabilities(window)
+	caps := LocalProviderCapabilities(window)
+	// A plain call to a local model server: nothing but the request reaches it.
+	caps.SupportsIsolatedChat = true
+	return caps
 }
 
 func (p *OpenAICompatibleLocalProvider) ValidateConfig(config ProviderConfig) error {
@@ -248,6 +251,9 @@ func (p *OpenAICompatibleLocalProvider) fetchAvailableModelsUncached() ([]string
 }
 
 func (p *OpenAICompatibleLocalProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := CheckIsolatedRequest(req); err != nil {
+		return nil, err
+	}
 	messages := convertMessagesToOpenAI(req.Messages, req.SystemPrompt)
 
 	params := openai.ChatCompletionNewParams{

@@ -23,7 +23,7 @@ const folderSetupTimeout = 20 * time.Minute
 // recognized project with a reviewed capability row, or a whole collection of
 // projects (a portfolio) — never one whose capability was suppressed.
 func eligibleForOneCard(offer FolderOffer) bool {
-	return !offer.CapabilitySuppressed && isProjectCapabilityOffer(offer)
+	return !offer.CapabilitySuppressed && (isProjectCapabilityOffer(offer) || isSoftwareOffer(offer))
 }
 
 // attachSetupRun shows the stored run. A run recorded as running with no live
@@ -67,12 +67,16 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	if s.deps.Setup == nil || !planPending(offer) || !eligibleForOneCard(offer) {
 		return
 	}
+	if isSoftwareOffer(offer) && !softwarePlannable(offer, v) {
+		return
+	}
 	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
 	if err != nil || len(plan.Lines) == 0 {
 		v.SetupUnavailableReason = "setup_unavailable"
 		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
 			switch reason.SetupPreviewReason() {
-			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable":
+			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable",
+				"project_exists", "assistant_unavailable":
 				v.SetupUnavailableReason = reason.SetupPreviewReason()
 			}
 		}
@@ -80,11 +84,25 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	}
 	plan = plan.Stamped()
 	v.Plan = &plan
+	// The names the plan uses, so the card's fields start from them rather than
+	// from a reading of the plan's wording.
+	if v.Software != nil && plan.Intent.Software != nil {
+		v.Software.WorkspaceName, v.Software.Assistant = plan.Intent.Software.WorkspaceName, plan.Intent.Software.Assistant
+	}
 }
 
 // setupRequest is what the host needs to plan an offer's setup.
 func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
 	req := FolderSetupRequest{UserID: userID, Offer: offer}
+	if isSoftwareOffer(offer) {
+		// A request the service cannot fill in (the folder is no longer held, or
+		// its workspaces cannot be read) carries no software part, and the host
+		// plans nothing for it.
+		if software, err := s.softwareRequest(ctx, userID, offer); err == nil {
+			req.Software = software
+		}
+		return req
+	}
 	if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension); ok &&
 		row.Offer != nil && s.deps.AppInstalled != nil {
 		req.AppInstalled = s.deps.AppInstalled(ctx, row.Offer.IntegrationName)
@@ -208,6 +226,30 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if err != nil {
 		return FolderOfferView{}, err
 	}
+	if isSoftwareOffer(*offer) {
+		if offer.NeedsCandidate {
+			return FolderOfferView{}, ErrFolderCandidateRequired
+		}
+		if !s.softwareSetupAvailable() {
+			return FolderOfferView{}, ErrFolderOutcomeUnavailable
+		}
+		// The directory must still be the one the offer was made about.
+		if path, _, err = s.softwareSubject(*offer); err != nil {
+			return FolderOfferView{}, err
+		}
+		if offer.Setup == nil {
+			// Set up is an explicit click, so the project's files are read once
+			// more: a review made on files that have since changed is not the
+			// review being confirmed.
+			refreshed, changed, checkErr := s.recheckSoftwareEvidence(ctx, userID, *offer, path)
+			if checkErr != nil {
+				return FolderOfferView{}, checkErr
+			}
+			if changed {
+				return s.viewFor(ctx, userID, refreshed, binding.Paused), ErrFolderPlanChanged
+			}
+		}
+	}
 
 	// The click consents to the plan on screen. An offer with no run yet is
 	// checked against the plan the server would produce now; a resumed run, whose
@@ -305,9 +347,23 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	ctx, cancel := context.WithTimeout(parent, folderSetupTimeout)
 	defer cancel()
 	update := func(ctx context.Context, u FolderSetupUpdate) error { return s.recordSetup(ctx, userID, offer.ID, u) }
-	err := s.deps.Setup.Run(ctx, FolderSetupRequest{
+	request := FolderSetupRequest{
 		UserID: userID, Offer: offer, Path: path, EntryName: entryName, Plan: plan, Update: update,
-	})
+	}
+	if isSoftwareOffer(offer) {
+		software, softwareErr := s.softwareRequest(ctx, userID, offer)
+		if softwareErr != nil {
+			// The folder was lost or replaced between the click and the run.
+			reason := FolderStopFailed
+			if errors.Is(softwareErr, ErrFolderPathLost) {
+				reason = FolderStopNeedsPick
+			}
+			_ = s.recordSetup(context.WithoutCancel(ctx), userID, offer.ID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: reason, keepLines: true})
+			return
+		}
+		request.Software = software
+	}
+	err := s.deps.Setup.Run(ctx, request)
 	if err != nil {
 		logger.Warn("One-card folder setup ended unexpectedly", logger.Fields{"offer_id": offer.ID, "error": err.Error()})
 		reason := FolderStopFailed
@@ -343,6 +399,15 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 		}
 		if err != nil {
 			logger.Warn("One-card collection setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
+			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+		}
+		return
+	}
+	if isSoftwareOffer(*offer) {
+		// A built-in setup has no plugin quest to read back. Its proof is the
+		// workspace itself, re-read from canonical state for this exact folder.
+		if err := s.resolveSoftware(ctx, userID, offerID); err != nil {
+			logger.Warn("Software project setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
 			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
 		}
 		return

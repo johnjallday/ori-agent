@@ -46,11 +46,18 @@
     <label id="personalAssistantFolderWorkspaceNameLabel" hidden>Workspace name
       <input id="personalAssistantFolderWorkspaceName" class="form-control form-control-sm" maxlength="120" required>
     </label>
+    <!-- A software project's review also lets the assistant be renamed. -->
+    <label id="personalAssistantFolderAssistantNameLabel" hidden>Assistant name
+      <input id="personalAssistantFolderAssistantName" class="form-control form-control-sm" maxlength="120">
+    </label>
     <p id="personalAssistantFolderOfferCapability" class="pa-folder__note" hidden></p>
     <details class="pa-folder__why"><summary>Why this suggestion?</summary>
       <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
     </details>
+    <!-- What a software project's review read. Text only, written by the server. -->
+    <ul id="personalAssistantFolderEvidence" class="pa-folder__facts" aria-label="What I read in this project" hidden></ul>
     <ul id="personalAssistantFolderPlan" class="pa-folder__plan" aria-label="What Set up does" hidden></ul>
+    <ul id="personalAssistantFolderPrerequisites" class="pa-folder__facts" aria-label="What this setup needs" hidden></ul>
     <ul id="personalAssistantFolderReceipt" class="pa-folder__receipt" hidden></ul>
     <!-- What the agent found on its first look, one line; the full report is the
          task's ticket. Text only, written by the server. -->

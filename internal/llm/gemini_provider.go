@@ -65,7 +65,10 @@ func (p *GeminiProvider) Type() ProviderType {
 
 // Capabilities returns Gemini's capabilities.
 func (p *GeminiProvider) Capabilities() ProviderCapabilities {
-	return CloudProviderCapabilities(0)
+	caps := CloudProviderCapabilities(0)
+	// A plain API call: this provider adds no tool of its own to a request.
+	caps.SupportsIsolatedChat = true
+	return caps
 }
 
 // ValidateConfig validates the Gemini configuration.
@@ -96,6 +99,9 @@ func (p *GeminiProvider) DefaultModels() []string {
 
 // Chat sends a chat request to Gemini.
 func (p *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := CheckIsolatedRequest(req); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(p.apiKey) == "" {
 		return nil, fmt.Errorf("gemini API key is required (set GEMINI_API_KEY or configure it in settings)")
 	}

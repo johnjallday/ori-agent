@@ -9,6 +9,10 @@ type CapabilityRow struct {
 	Tools     []Tool
 	Blueprint ShapeBlueprint
 	Offer     *CapabilityOffer
+	// Builtin is a setup the host carries out itself (see builtin.go). A row has
+	// an Offer or a Builtin, never both: an Offer always names an installable
+	// integration.
+	Builtin *BuiltinCapability
 }
 
 // CapabilityOffer is optional. Its fields include the legacy specialist
@@ -156,7 +160,7 @@ var capabilityRows = []CapabilityRow{
 			{Name: "pyproject.toml", Kind: MarkerFile, Shape: ShapeCode, Label: "Python project"},
 			{Name: "requirements.txt", Kind: MarkerFile, Shape: ShapeCode, Label: "Python project"},
 			{Name: "*.xcodeproj", Kind: MarkerGlob, Shape: ShapeCode, Label: "Xcode project"},
-			{Name: ".git", Kind: MarkerDir, Shape: ShapeCode, Label: "git repository"},
+			{Name: ".git", Kind: MarkerEntry, Shape: ShapeCode, Label: "git repository", Repository: true},
 		},
 		Tools: []Tool{
 			{Match: ToolByExtension, Value: ".ipynb", ToolID: "jupyter", ToolName: "Jupyter", HypothesisText: "Jupyter may be one of the tools you use."},
@@ -165,6 +169,12 @@ var capabilityRows = []CapabilityRow{
 			{Match: ToolByApp, AppNames: []string{"Visual Studio Code"}, ToolID: "vscode", ToolName: "Visual Studio Code", HypothesisText: "Visual Studio Code may be one of the tools you use for development."},
 		},
 		Blueprint: ShapeBlueprint{Shape: ShapeCode, BlueprintID: "code-project", Label: "Code project"},
+		Builtin: &BuiltinCapability{
+			Recipe: BuiltinSoftwareProject, Version: 1,
+			DisplayName: "software project", Workspace: "Code project workspace",
+			Question:    "Want me to set this up as a software project?",
+			AcceptLabel: "Review setup", DeclineLabel: "No thanks",
+		},
 	},
 	{
 		Tools: []Tool{
@@ -204,6 +214,10 @@ func cloneCapability(row CapabilityRow) CapabilityRow {
 		offer.CapabilityOrder = append([]string(nil), offer.CapabilityOrder...)
 		offer.ProjectExtensions = append([]string(nil), offer.ProjectExtensions...)
 		row.Offer = &offer
+	}
+	if row.Builtin != nil {
+		builtin := *row.Builtin
+		row.Builtin = &builtin
 	}
 	return row
 }

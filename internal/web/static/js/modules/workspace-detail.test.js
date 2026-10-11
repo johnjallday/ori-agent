@@ -1722,6 +1722,7 @@ function firstTaskPage(response, { task } = {}) {
     workspaceId: 'ws 1',
     tasks: [{ id: 't-0', to: 'Atlas', status: 'assigned', context: {} }, seeded],
     findFolderFirstTask: WorkspaceDetailPage.prototype.findFolderFirstTask,
+    isAssessmentTask: WorkspaceDetailPage.prototype.isAssessmentTask,
     isFirstTaskWaitingToStart: WorkspaceDetailPage.prototype.isFirstTaskWaitingToStart,
     getTaskExecutionState: item => item.status,
     loadTasks: async () => {
@@ -1920,5 +1921,352 @@ test('a failed start request says so and can be tried again', async () => {
     assert.equal(page.firstTaskStartMessage, 'The first look could not start. Try again.');
     assert.equal(page.firstTaskStarting, false);
     assert.equal(page.firstTaskSeeded, true);
+  }
+});
+
+// A software project's first task is an assessment under Ori's own recipe. Its
+// banner is the server's reading of the task, in every state, and the page asks
+// the server before it says anything.
+function assessmentPage({ look, start, execute, stored = {} } = {}) {
+  const calls = { fetch: [], loadTasks: 0, monitor: [] };
+  const answers = { look, start, execute };
+  const element = tag => ({
+    tag,
+    className: '',
+    dataset: {},
+    children: [],
+    listeners: {},
+    textContent: '',
+    hidden: true,
+    setAttribute() {},
+    append(...nodes) {
+      this.children.push(...nodes);
+    },
+    replaceChildren(...nodes) {
+      this.children = [...nodes];
+    },
+    addEventListener(type, handler) {
+      this.listeners[type] = handler;
+    }
+  });
+  const mount = element('section');
+  const proto = WorkspaceDetailPage.prototype;
+  const page = {
+    workspaceId: 'ws 1',
+    tasks: [
+      {
+        id: 't-1',
+        to: 'Robin',
+        status: 'pending',
+        context: {
+          template_id: 'folder-digest',
+          template_starter_task: true,
+          folder_first_task_recipe: 'software_assessment'
+        }
+      }
+    ],
+    findFolderFirstTask: proto.findFolderFirstTask,
+    isAssessmentTask: proto.isAssessmentTask,
+    isFirstTaskWaitingToStart: proto.isFirstTaskWaitingToStart,
+    showFolderFirstTaskBanner: proto.showFolderFirstTaskBanner,
+    refreshAssessmentBanner: proto.refreshAssessmentBanner,
+    renderAssessmentBanner: proto.renderAssessmentBanner,
+    startAssessment: proto.startAssessment,
+    followAssessmentTask: proto.followAssessmentTask,
+    isAssessmentBannerDismissed: proto.isAssessmentBannerDismissed,
+    dismissAssessmentBanner: proto.dismissAssessmentBanner,
+    refreshFirstTaskBanner: proto.refreshFirstTaskBanner,
+    updateFirstTaskBanner: proto.updateFirstTaskBanner,
+    beginResourceRequest: () => ({ controller: { signal: undefined } }),
+    isResourceRequestCurrent: () => true,
+    getTaskExecutionState: item => item.status,
+    buildTaskHref: id => `/workspaces/widget/task/${id}`,
+    loadTasks: async () => {
+      calls.loadTasks++;
+    },
+    startExecutionMonitor: async id => {
+      calls.monitor.push(id);
+    },
+    resumeFirstTaskBanner: () => assert.fail('an assessment is never resumed as a first look')
+  };
+  global.fetch = async (url, init) => {
+    const method = init?.method || 'GET';
+    calls.fetch.push({ url, method, body: init?.body });
+    const answer = url.endsWith('/folder-first-task')
+      ? { first_task: answers.look ?? null }
+      : url.endsWith('/folder-first-task/start')
+        ? answers.start
+        : answers.execute;
+    if (answer instanceof Error) throw answer;
+    return { ok: answer?.ok !== false, json: async () => answer };
+  };
+  global.window.localStorage = {
+    getItem: key => (key in stored ? stored[key] : null),
+    setItem: (key, value) => {
+      stored[key] = value;
+    }
+  };
+  global.document = { getElementById: () => mount, createElement: element };
+  const controls = () => ({
+    phase: mount.dataset.phase,
+    hidden: mount.hidden,
+    buttons: mount.children.filter(node => node.tag === 'button').map(node => node.textContent),
+    links: mount.children.filter(node => node.tag === 'a').map(node => node.textContent)
+  });
+  const press = label =>
+    mount.children.find(node => node.tag === 'button' && node.textContent === label).listeners
+      .click;
+  const posts = () => calls.fetch.filter(call => call.method === 'POST');
+  // What a click's handler starts is not awaited by the banner; let it settle.
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  return { page, calls, answers, mount, controls, press, posts, settle, stored };
+}
+
+const seededAssessment = {
+  recipe: 'software_assessment',
+  state: 'seeded',
+  can_start: true,
+  task_id: 't-1',
+  folder_name: 'widget'
+};
+
+test('opening the workspace reads an assessment and starts nothing', async () => {
+  const { page, calls, controls, posts } = assessmentPage({ look: seededAssessment });
+  page.showFolderFirstTaskBanner();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(
+    calls.fetch.map(call => `${call.method} ${call.url}`),
+    ['GET /api/workspaces/ws%201/folder-first-task']
+  );
+  assert.deepEqual(posts(), [], 'opening the page must not spend the one start');
+  assert.deepEqual(calls.monitor, []);
+  assert.equal(page.firstTaskAssessment, true);
+  assert.deepEqual(controls(), {
+    phase: 'ready',
+    hidden: false,
+    buttons: ['Start assessment'],
+    links: []
+  });
+});
+
+test('Start assessment asks the one-time start once and follows the same task', async () => {
+  const { page, calls, answers, controls, press, posts, settle } = assessmentPage({
+    look: seededAssessment,
+    start: { success: true, started: true, task_id: 't-1' }
+  });
+  page.showFolderFirstTaskBanner();
+  await settle();
+
+  // From the click on, the server says it is running.
+  answers.look = { ...seededAssessment, state: 'running', can_start: false };
+  const start = press('Start assessment');
+  start();
+  start();
+  await settle();
+  await settle();
+
+  assert.deepEqual(
+    posts().map(call => [call.url, call.body]),
+    [['/api/workspaces/ws%201/folder-first-task/start', '{}']]
+  );
+  assert.equal(calls.loadTasks, 1);
+  assert.deepEqual(calls.monitor, ['t-1']);
+  assert.equal(page.firstTaskStarting, false);
+  assert.deepEqual(controls(), {
+    phase: 'working',
+    hidden: false,
+    buttons: [],
+    links: ['Watch the task']
+  });
+});
+
+test('a refused start shows what the server says is missing and where to repair it', async () => {
+  const { page, calls, answers, controls, press, posts, settle } = assessmentPage({
+    look: seededAssessment,
+    start: { success: true, started: false, reason: 'model_unsupported' }
+  });
+  page.showFolderFirstTaskBanner();
+  await settle();
+
+  answers.look = {
+    ...seededAssessment,
+    can_start: false,
+    reason: 'model_unsupported',
+    message: 'Robin uses a model that cannot run a read-only assessment. Choose another model.',
+    repair_route: '/agents',
+    repair_label: 'Choose a model'
+  };
+  press('Start assessment')();
+  await settle();
+  await settle();
+
+  assert.equal(posts().length, 1);
+  assert.deepEqual(calls.monitor, []);
+  assert.equal(calls.loadTasks, 0);
+  // The server's own sentence is shown; the page adds none of its own.
+  assert.equal(page.firstTaskStartMessage, '');
+  assert.deepEqual(controls(), {
+    phase: 'needs-you',
+    hidden: false,
+    buttons: [],
+    links: ['Choose a model']
+  });
+});
+
+test('an assessment that did not finish is run again as the same task, never a new one', async () => {
+  const failed = {
+    ...seededAssessment,
+    state: 'failed',
+    can_start: false,
+    can_retry: true,
+    message: 'The model did not answer in time. Nothing was changed.'
+  };
+  const { page, calls, answers, controls, press, posts, settle } = assessmentPage({
+    look: failed,
+    execute: { success: true, task_id: 't-1' }
+  });
+  page.showFolderFirstTaskBanner();
+  await settle();
+  assert.deepEqual(controls().buttons, ['Try again']);
+
+  answers.look = { ...seededAssessment, state: 'running', can_start: false };
+  press('Try again')();
+  await settle();
+  await settle();
+
+  assert.deepEqual(
+    posts().map(call => [call.url, call.body]),
+    [['/api/orchestration/tasks/execute', '{"task_id":"t-1"}']]
+  );
+  assert.deepEqual(calls.monitor, ['t-1']);
+  assert.equal(controls().phase, 'working');
+});
+
+test('a failure that needs a repair first offers the repair and sends no retry', async () => {
+  const blocked = {
+    ...seededAssessment,
+    state: 'failed',
+    can_start: false,
+    can_retry: false,
+    reason: 'project_folder_unavailable',
+    message: 'The project folder is not where it was. Show it again.',
+    repair_route: '/?panel=today&folder=show',
+    repair_label: 'Show the folder'
+  };
+  const { page, controls, posts, settle } = assessmentPage({ look: blocked });
+  page.showFolderFirstTaskBanner();
+  await settle();
+  assert.deepEqual(controls(), {
+    phase: 'failed',
+    hidden: false,
+    buttons: [],
+    links: ['Show the folder', 'Open the task']
+  });
+  // Even asked directly, nothing is sent while a repair is owed.
+  await page.startAssessment({ retry: true });
+  await page.startAssessment();
+  assert.deepEqual(posts(), []);
+});
+
+test('the assessment banner is read again whenever its task moves, and only then', async () => {
+  const { page, calls, answers, controls, settle } = assessmentPage({
+    look: { ...seededAssessment, state: 'running', can_start: false }
+  });
+  page.showFolderFirstTaskBanner();
+  await settle();
+  // A run already going (started on Home, or before a reload) is followed.
+  assert.deepEqual(calls.monitor, ['t-1']);
+  const reads = () => calls.fetch.filter(call => call.method === 'GET').length;
+  assert.equal(reads(), 1);
+
+  const task = { ...page.tasks[0], status: 'in_progress' };
+  page.updateFirstTaskBanner(task);
+  await settle();
+  page.updateFirstTaskBanner(task);
+  page.updateFirstTaskBanner({ ...task, id: 'another-task', status: 'failed' });
+  await settle();
+  assert.equal(reads(), 2, 'a poll that saw no change reads nothing');
+  assert.deepEqual(calls.monitor, ['t-1'], 'the monitor is not started twice for one run');
+
+  answers.look = {
+    ...seededAssessment,
+    state: 'finished',
+    can_start: false,
+    report_route: '/workspaces/widget/task/t-1',
+    next_request: 'Add a health check endpoint.',
+    next_route: '/workspaces/widget/plans?next=assessment'
+  };
+  page.updateFirstTaskBanner({ ...task, status: 'completed' });
+  await settle();
+  assert.equal(reads(), 3);
+  assert.deepEqual(controls(), {
+    phase: 'done',
+    hidden: false,
+    buttons: ['Dismiss'],
+    links: ['Open the assessment', 'Plan the suggested task']
+  });
+  // The realtime end-of-task signal reads the same thing.
+  await page.refreshFirstTaskBanner();
+  assert.equal(reads(), 4);
+});
+
+test('a finished assessment put away stays away in this browser', async () => {
+  const finished = {
+    ...seededAssessment,
+    state: 'finished',
+    can_start: false,
+    report_route: '/workspaces/widget/task/t-1'
+  };
+  const first = assessmentPage({ look: finished });
+  first.page.showFolderFirstTaskBanner();
+  await first.settle();
+  first.press('Dismiss')();
+  assert.equal(first.controls().hidden, true);
+  assert.deepEqual(first.stored, { 'ori.assessmentBanner.dismissed.t-1': '1' });
+  assert.deepEqual(first.posts(), [], 'putting it away tells the server nothing');
+
+  // A later visit reads it and keeps it away.
+  const again = assessmentPage({ look: finished, stored: first.stored });
+  again.page.showFolderFirstTaskBanner();
+  await again.settle();
+  assert.equal(again.controls().hidden, true);
+
+  // Without storage it is away for this page view, and a failure is never hidden.
+  const noStorage = assessmentPage({ look: finished });
+  global.window.localStorage = {
+    getItem() {
+      throw new Error('blocked');
+    },
+    setItem() {
+      throw new Error('blocked');
+    }
+  };
+  noStorage.page.showFolderFirstTaskBanner();
+  await noStorage.settle();
+  noStorage.press('Dismiss')();
+  assert.equal(noStorage.controls().hidden, true);
+  noStorage.answers.look = { ...seededAssessment, state: 'failed', can_retry: true };
+  await noStorage.page.refreshAssessmentBanner();
+  assert.equal(noStorage.controls().hidden, false);
+});
+
+test('a start request that fails outright says so and can be pressed again', async () => {
+  for (const start of [new Error('offline'), { ok: false }]) {
+    const { page, controls, press, settle } = assessmentPage({ look: seededAssessment, start });
+    page.showFolderFirstTaskBanner();
+    await settle();
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      press('Start assessment')();
+      await settle();
+      await settle();
+    } finally {
+      console.warn = warn;
+    }
+    assert.equal(page.firstTaskStartMessage, 'The assessment could not start. Try again.');
+    assert.equal(page.firstTaskStarting, false);
+    assert.deepEqual(controls().buttons, ['Start assessment']);
   }
 });

@@ -1,13 +1,19 @@
 {
   "name": "Code Project",
-  "description": "A workspace over a code folder you already have. Ori reads the code through the linked folder, keeps track of open TODOs and what changed last, and never writes to the folder itself.",
+  "description": "A workspace over a software project you already have. Ori links the folder where it is, reads it only when you ask, and starts with understanding and planning. Setup never writes to the folder.",
   "icon": "💻",
-  "behavior_profile": "general",
+  "behavior_profile": "software_project",
   "builtin": true,
-  "builtin_version": 1,
+  "builtin_version": 2,
   "tags": [
     "code"
   ],
-  "agents": [],
-  "tagline": "Your code folder, read and tracked."
+  "agents": [
+    {
+      "name": "Development Assistant",
+      "role": "general",
+      "system_prompt": "You help with this software project. Start by understanding it: read the linked project folder with the read-only directory tools, and rely on what the project's own README, instructions and build files say. Follow this project's conventions, not another project's. Plan before proposing changes, cite the files you relied on, and say plainly what you have not verified. A command you find in the project is declared, not tested: never report one as passing unless you were shown its output. Do not claim you edited code, ran anything, or reached a remote unless a tool result in this conversation shows it."
+    }
+  ],
+  "tagline": "Your software project, understood before anything changes."
 }

@@ -30,6 +30,12 @@ type fakeFolderDigest struct {
 	existingHomeCalls []string
 	// setups records every one-card setup click that reached the service.
 	setups []personalassistant.FolderSetupInput
+	// candidates records every candidate choice that reached the service.
+	candidates []personalassistant.FolderCandidateInput
+	// reviews records every software review or adjustment that reached it.
+	reviews []string
+	// decideErr, when set, is what Decide returns with a pending offer.
+	decideErr error
 	// namedOffers records every offer id a GET asked for by name.
 	namedOffers []string
 	// stored holds the offers StoredOffer can return, by id; storedReads records
@@ -202,6 +208,12 @@ func (f *fakeFolderDigest) Decide(_ context.Context, _ string, offerID string, i
 	if stored, ok := f.decisions[input.RequestID]; ok {
 		return stored, nil
 	}
+	if f.decideErr != nil {
+		return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending, Software: &personalassistant.FolderSoftwareView{
+			Recipe:   "software_project",
+			Existing: []personalassistant.FolderExistingProject{{WorkspaceID: "ws-1", Name: "Widget", Route: "/workspaces/widget"}},
+		}}, f.decideErr
+	}
 	f.decided = append(f.decided, input)
 	view := personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferDeclined, Decision: input.Decision}
 	f.decisions[input.RequestID] = view
@@ -275,6 +287,192 @@ func (f *fakeFolderDigest) StartSetup(_ context.Context, _ string, offerID strin
 		ID: offerID, Status: personalassistant.FolderOfferAwaitingOutcome,
 		Setup: &personalassistant.FolderSetupView{Status: personalassistant.FolderSetupRunning},
 	}, nil
+}
+
+func (f *fakeFolderDigest) ChooseCandidate(_ context.Context, _ string, offerID string, input personalassistant.FolderCandidateInput) (personalassistant.FolderOfferView, error) {
+	f.candidates = append(f.candidates, input)
+	if input.CandidateID != "listed" {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrValidation
+	}
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending, Software: &personalassistant.FolderSoftwareView{Recipe: "software_project"}}, nil
+}
+
+func (f *fakeFolderDigest) ReviewSoftware(_ context.Context, _ string, offerID string, input personalassistant.FolderSoftwareReviewInput) (personalassistant.FolderOfferView, error) {
+	f.reviews = append(f.reviews, "review:"+offerID+":"+input.RequestID)
+	switch offerID {
+	case "needs-plain-yes":
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderReviewRequired
+	case "unreadable":
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderReviewUnavailable
+	case "no-candidate":
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderCandidateRequired
+	}
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending, Software: &personalassistant.FolderSoftwareView{
+		Recipe: "software_project", Review: &personalassistant.FolderSoftwareReviewView{},
+	}}, nil
+}
+
+func (f *fakeFolderDigest) AdjustSoftware(_ context.Context, _ string, offerID string, input personalassistant.FolderSoftwareReviewInput) (personalassistant.FolderOfferView, error) {
+	entry := "adjust:" + offerID + ":" + input.RequestID
+	if input.WorkspaceName != nil {
+		entry += ":workspace=" + *input.WorkspaceName
+	}
+	if input.AssistantName != nil {
+		entry += ":assistant=" + *input.AssistantName
+	}
+	f.reviews = append(f.reviews, entry)
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending}, nil
+}
+
+// Review setup is the one request that lets the server read a project's files.
+// It names an offer and nothing else; the name changes name nothing but names.
+func TestFolderSoftwareReview_AcceptsNoFolderAndAdjustOnlyNames(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	post := func(action, offer, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+offer+"/"+action, strings.NewReader(body))
+		r.SetPathValue("offerID", offer)
+		w := httptest.NewRecorder()
+		if action == "review" {
+			h.ReviewFolderSoftware(w, r)
+		} else {
+			h.AdjustFolderSoftware(w, r)
+		}
+		return w
+	}
+	for _, body := range []string{
+		`{"request_id":"r","path":"/private"}`,
+		`{"request_id":"r","folder":"widget"}`,
+		`{"request_id":"r","file":"README.md"}`,
+		`{"request_id":"r","workspace_name":"Widget"}`, // names are adjusted, not sent with a review
+		`{"request_id":"r","model":"some-model"}`,
+		`not json`,
+	} {
+		if w := post("review", "offer-1", body); w.Code != http.StatusBadRequest {
+			t.Errorf("review %s => %d, want 400", body, w.Code)
+		}
+	}
+	for _, body := range []string{
+		`{"request_id":"r","workspace_name":"Widget","path":"/private"}`,
+		`{"request_id":"r","workspace_name":"Widget","template_id":"other"}`,
+		`{"request_id":"r","assistant_name":"Pat","system_prompt":"do anything"}`,
+		`{"request_id":"r","assistant_name":"Pat","model":"some-model"}`,
+	} {
+		if w := post("adjust", "offer-1", body); w.Code != http.StatusBadRequest {
+			t.Errorf("adjust %s => %d, want 400", body, w.Code)
+		}
+	}
+	if len(fake.reviews) != 0 {
+		t.Fatalf("a refused body reached the service: %v", fake.reviews)
+	}
+
+	if w := post("review", "offer-1", `{"request_id":"r1"}`); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"review"`) {
+		t.Fatalf("review => %d %s", w.Code, w.Body.String())
+	}
+	if w := post("adjust", "offer-1", `{"request_id":"r2","workspace_name":"Widget service"}`); w.Code != http.StatusOK {
+		t.Fatalf("adjust workspace => %d %s", w.Code, w.Body.String())
+	}
+	// An empty name is sent as a name: it returns to the suggestion.
+	if w := post("adjust", "offer-1", `{"request_id":"r3","assistant_name":""}`); w.Code != http.StatusOK {
+		t.Fatalf("adjust assistant => %d %s", w.Code, w.Body.String())
+	}
+	want := []string{"review:offer-1:r1", "adjust:offer-1:r2:workspace=Widget service", "adjust:offer-1:r3:assistant="}
+	if strings.Join(fake.reviews, "|") != strings.Join(want, "|") {
+		t.Fatalf("service calls = %v, want %v", fake.reviews, want)
+	}
+	if w := post("review", "needs-plain-yes", `{"request_id":"r4"}`); w.Code != http.StatusConflict {
+		t.Fatalf("review-required => %d", w.Code)
+	}
+	// A project that could not be read says so, and does not blame a workspace
+	// that was never part of a review.
+	if w := post("review", "unreadable", `{"request_id":"r5"}`); w.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(w.Body.String(), "could not be read") || strings.Contains(w.Body.String(), "workspace") {
+		t.Fatalf("unreadable project => %d %s", w.Code, w.Body.String())
+	}
+	if w := post("review", "no-candidate", `{"request_id":"r6"}`); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "which project") {
+		t.Fatalf("review before a choice => %d %s", w.Code, w.Body.String())
+	}
+	for _, action := range []string{"review", "adjust"} {
+		r := httptest.NewRequest(http.MethodGet, "/x", nil)
+		r.SetPathValue("offerID", "offer-1")
+		w := httptest.NewRecorder()
+		if action == "review" {
+			h.ReviewFolderSoftware(w, r)
+		} else {
+			h.AdjustFolderSoftware(w, r)
+		}
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("GET %s => %d", action, w.Code)
+		}
+	}
+}
+
+func TestFolderCandidate_AcceptsOnlyAListedCandidateAndNeverAPath(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	post := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/candidate", strings.NewReader(body))
+		r.SetPathValue("offerID", "offer-1")
+		w := httptest.NewRecorder()
+		h.ChooseFolderCandidate(w, r)
+		return w
+	}
+	for _, body := range []string{
+		`{"request_id":"r","candidate_id":"listed","path":"/private"}`,
+		`{"request_id":"r","candidate_id":"listed","folder":"api"}`,
+		`{"request_id":"r","candidate_id":"listed","rel_path":"api"}`,
+		`{"request_id":"r","candidate_id":"listed","workspace_id":"ws"}`,
+		`not json`,
+	} {
+		if w := post(body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s => %d, want 400", body, w.Code)
+		}
+	}
+	if len(fake.candidates) != 0 {
+		t.Fatalf("a refused body reached the service: %+v", fake.candidates)
+	}
+	w := post(`{"request_id":"r1","candidate_id":"listed"}`)
+	if w.Code != http.StatusOK || len(fake.candidates) != 1 || fake.candidates[0].CandidateID != "listed" || fake.candidates[0].RequestID != "r1" {
+		t.Fatalf("status=%d candidates=%+v body=%s", w.Code, fake.candidates, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"software"`) {
+		t.Fatalf("the chosen project must reach the card: %s", w.Body.String())
+	}
+	// A candidate the offer never listed is a refusal, not a guess.
+	if unknown := post(`{"request_id":"r2","candidate_id":"made-up"}`); unknown.Code != http.StatusBadRequest {
+		t.Fatalf("an unlisted candidate => %d", unknown.Code)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	r.SetPathValue("offerID", "offer-1")
+	gw := httptest.NewRecorder()
+	h.ChooseFolderCandidate(gw, r)
+	if gw.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET => %d", gw.Code)
+	}
+}
+
+// A yes on a folder that already has a workspace is a 409 that carries the
+// offer, so the card can show the workspace to open instead of an error.
+func TestFolderDecide_AnExistingWorkspaceIsAConflictCarryingTheOffer(t *testing.T) {
+	fake := &fakeFolderDigest{decideErr: personalassistant.ErrFolderProjectExists}
+	h := newFolderDigestHandler(fake)
+	r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/decide",
+		strings.NewReader(`{"decision":"yes","choice":"project","create":true,"request_id":"r1"}`))
+	r.SetPathValue("offerID", "offer-1")
+	w := httptest.NewRecorder()
+	h.DecideFolderDigest(w, r)
+	var body struct {
+		ProjectExists bool                              `json:"project_exists"`
+		Offer         personalassistant.FolderOfferView `json:"offer"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.ProjectExists ||
+		body.Offer.Software == nil || len(body.Offer.Software.Existing) != 1 || body.Offer.Software.Existing[0].Route != "/workspaces/widget" {
+		t.Fatalf("existing workspace => %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "/Users") || strings.Contains(w.Body.String(), "/private") {
+		t.Fatalf("the conflict leaked a path: %s", w.Body.String())
+	}
 }
 
 func TestGetFolderDigest_CanReadOneNamedOfferAndNothingElse(t *testing.T) {

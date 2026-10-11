@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
@@ -103,6 +104,15 @@ type Handler struct {
 	// orchestration task handler); used by the template-setup first-open
 	// auto-start after the consumed marker is stamped.
 	templateSetupStarter func(workspaceID, taskID string) error
+	// firstTaskRecipeGate answers, for a first task seeded under a host recipe,
+	// why it could not be run within that recipe's restriction right now ("" when
+	// it could). Unset means no recipe can run here: such a task stays seeded and
+	// is never started as an ordinary agent task.
+	firstTaskRecipeGate func(task workspace.Task) string
+	// firstTaskViewer reads a workspace's first task with what only the server
+	// knows added (what it needs and can use right now). Unset, the handler's
+	// own reading is served.
+	firstTaskViewer func(ctx context.Context, workspaceID string) (personalassistant.FolderFirstTaskView, bool)
 
 	// pathSelections resolves the opaque token Ori's native folder picker
 	// issued. A create request may attach an existing project only through
@@ -342,6 +352,18 @@ func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 // the manual-execution path, used by the template-setup first-open auto-start.
 func (h *Handler) SetTemplateSetupTaskStarter(fn func(workspaceID, taskID string) error) {
 	h.templateSetupStarter = fn
+}
+
+// SetFirstTaskRecipeGate injects the check a first task under a host recipe
+// must pass before it is started: the reason it could not run now, or "".
+func (h *Handler) SetFirstTaskRecipeGate(fn func(task workspace.Task) string) {
+	h.firstTaskRecipeGate = fn
+}
+
+// SetFirstTaskViewer injects the server's fuller reading of a first task, so
+// the workspace page is served the same view Home is.
+func (h *Handler) SetFirstTaskViewer(fn func(ctx context.Context, workspaceID string) (personalassistant.FolderFirstTaskView, bool)) {
+	h.firstTaskViewer = fn
 }
 
 // SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which

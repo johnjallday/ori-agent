@@ -262,7 +262,10 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	subtasks := foundWorkspace.GetSubtasks(foundTask.ID)
-	if len(subtasks) > 0 {
+	// A task under a host recipe is never run as a sequence of its sub-tasks:
+	// they are ordinary agent tasks with tools, and their combined output would
+	// be recorded as the recipe's report. Running it runs the recipe.
+	if len(subtasks) > 0 && workspace.FirstTaskRecipe(foundTask) == "" {
 		if foundTask.Status == workspace.TaskStatusInProgress {
 			orihttp.BadRequest(w, "Task is already in progress")
 			return
@@ -670,6 +673,11 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		return
 	}
 
+	if workspace.FirstTaskRecipe(parentTask) != "" {
+		logger.Warn("A recipe task is not run as a sequence of its sub-tasks", logger.Fields{"task_id": parentTaskID})
+		return
+	}
+
 	subtasks := ws.GetSubtasks(parentTaskID)
 	if len(subtasks) == 0 {
 		logger.Warn("No subtasks found for parent task sequence", logger.Fields{"task_id": parentTaskID})
@@ -964,6 +972,17 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 	delete(task.Context, "human_loop")
 	delete(task.Context, "structured_output")
+	recipe := workspace.FirstTaskRecipe(task)
+	if recipe != "" {
+		// A recipe run that is tried again is running again: the failure of the
+		// attempt before it is no longer what the task says about itself.
+		delete(task.Context, workspace.TaskContextFirstTaskFailure)
+		if task.Status == workspace.TaskStatusFailed || task.Status == workspace.TaskStatusTimeout || task.Status == workspace.TaskStatusPending {
+			if err := task.SetStatus(workspace.TaskStatusInProgress); err != nil {
+				logger.Debug("Recipe task was not moved back to in progress", logger.Fields{"task_id": task.ID, "error": err})
+			}
+		}
+	}
 
 	if err := ws.UpdateTask(*task); err != nil {
 		return "", fmt.Errorf("failed to update task status: %w", err)
@@ -1025,7 +1044,13 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	var result string
 	var execErr error
 	inferredExecutionSteps := workspace.InferTaskExecutionSteps(taskForExecution)
-	if len(task.ExecutionSteps) > 0 && len(inferredExecutionSteps) == 0 {
+	if recipe != "" {
+		// A task under a host recipe is exactly one call, made by that recipe. It
+		// is not split into steps by the words in its description, not tried again
+		// because of how its answer is phrased, and not retried on an error: a
+		// second attempt is the user's own click.
+		result, execErr = th.executeRecipeTaskOnce(ctx, task, taskForExecution)
+	} else if len(task.ExecutionSteps) > 0 && len(inferredExecutionSteps) == 0 {
 		if cachedResult := strings.TrimSpace(workspace.BuildTaskExecutionSummary(task)); cachedResult != "" {
 			workspace.SkipPendingExecutionSteps(task)
 			result = cachedResult
@@ -1499,6 +1524,12 @@ func buildUserAssistMessage(message string, selectedChoice *workspace.TaskBlocke
 }
 
 func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace.Workspace, persistedTask *workspace.Task, taskForExecution workspace.Task, manual bool) (string, error) {
+	// A task under a host recipe is one call, whoever asks for it. It has no
+	// attempts to spend: the loop below reads an answer's wording to decide the
+	// model "needs input" and runs it again.
+	if workspace.FirstTaskRecipe(persistedTask) != "" {
+		return th.executeRecipeTaskOnce(ctx, persistedTask, taskForExecution)
+	}
 	maxAttempts := resolveTaskExecutionAttempts(persistedTask)
 	retryPolicy := llm.DefaultRetryPolicy()
 	baseContext := cloneTaskContext(taskForExecution.Context)
@@ -2215,6 +2246,13 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 	if len(task.InputTaskIDs) == 0 {
 		return nil
 	}
+	// A task under a host recipe starts nothing else. Its recipe is given what
+	// the host collects, not other tasks' results, so running its inputs would
+	// only spend other agents' tools and tokens on a click that asked for none.
+	if workspace.FirstTaskRecipe(task) != "" {
+		logger.Info("Recipe task has input tasks; none is run for it", logger.Fields{"task_id": task.ID, "input_count": len(task.InputTaskIDs)})
+		return nil
+	}
 
 	logger.Info("Checking input tasks for execution", logger.Fields{"task_id": task.ID, "input_count": len(task.InputTaskIDs)})
 
@@ -2223,6 +2261,13 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 		if err != nil {
 			logger.Warn("Input task not found, skipping", logger.Fields{"input_task_id": inputTaskID})
 			continue
+		}
+
+		// A task under a host recipe runs when the user starts it and at no other
+		// time. Another task that lists it as an input does not start it; one
+		// that is finished is used like any other finished input.
+		if workspace.FirstTaskRecipe(inputTask) != "" && inputTask.Status != workspace.TaskStatusCompleted {
+			return fmt.Errorf("cannot auto-execute input task %s: it is a first assessment, which runs only when you start it yourself", inputTaskID)
 		}
 
 		// A Backlog input task must be promoted before it can be auto-executed

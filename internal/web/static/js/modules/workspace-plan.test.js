@@ -353,3 +353,128 @@ test('an API failure surfaces the server message and preserves its code', async 
     error => error.code === 'plan_not_deletable' && error.status === 409
   );
 });
+
+// --- The first assessment's suggested next task ------------------------------
+
+// A plans page reached from a finished assessment, with what its APIs answer.
+function assessmentPage({ search = '?next=assessment', look, planning = true, typed = '' } = {}) {
+  const elements = {
+    '#plan-disabled-banner': fakeEl(),
+    '#plan-create-panel': fakeEl(),
+    '#plan-create-request': fakeEl({ value: typed, focused: 0 }),
+    '#plan-status': fakeEl(),
+    '#plan-active-list': fakeEl(),
+    '#plan-active-empty': fakeEl(),
+    '#plan-history-list': fakeEl(),
+    '#plan-history-empty': fakeEl(),
+    '#plan-history-section': fakeEl()
+  };
+  elements['#plan-create-request'].focus = function focus() {
+    this.focused += 1;
+  };
+  const calls = [];
+  const replaced = [];
+  const doc = {
+    querySelector: selector => elements[selector] || null,
+    defaultView: {
+      location: { href: '', pathname: '/workspaces/widget/plans', search, hash: '' },
+      history: { state: null, replaceState: (_state, _title, url) => replaced.push(url) }
+    }
+  };
+  const page = new WorkspacePlansPage('ws-1', {
+    workspaceSlug: 'widget',
+    document: doc,
+    fetch: async (url, options = {}) => {
+      calls.push({ url, method: options.method || 'GET' });
+      if (url.endsWith('/settings'))
+        return jsonResponse({ settings: { planning: { enabled: planning } } });
+      if (url.endsWith('/folder-first-task')) return jsonResponse({ first_task: look ?? null });
+      return jsonResponse({ plans: [] });
+    }
+  });
+  return { page, elements, calls, replaced };
+}
+
+const finishedAssessment = {
+  recipe: 'software_assessment',
+  state: 'finished',
+  folder_name: 'widget',
+  next_request: 'Add a health check endpoint to the service.'
+};
+
+test('a finished assessment places its suggestion in the box and submits nothing', async () => {
+  const { page, elements, calls, replaced } = assessmentPage({ look: finishedAssessment });
+  await page.init();
+
+  assert.equal(
+    elements['#plan-create-request'].value,
+    'Add a health check endpoint to the service.\n\n(Suggested by the first assessment of widget.)'
+  );
+  assert.equal(elements['#plan-create-request'].focused, 1);
+  assert.match(elements['#plan-status'].textContent, /Nothing is created until you do/);
+  // Arriving created nothing: every request was a read.
+  assert.ok(calls.length > 0);
+  assert.deepEqual(
+    calls.filter(call => call.method !== 'GET'),
+    []
+  );
+  assert.ok(calls.some(call => call.url === '/api/workspaces/ws-1/folder-first-task'));
+  // The address no longer asks for it, so a reload does not fill the box again.
+  assert.deepEqual(replaced, ['/workspaces/widget/plans']);
+});
+
+test('the suggestion never replaces what the user has typed', async () => {
+  const { page, elements } = assessmentPage({ look: finishedAssessment, typed: 'My own request' });
+  await page.init();
+  assert.equal(elements['#plan-create-request'].value, 'My own request');
+});
+
+test('without the link the page reads no assessment and fills nothing', async () => {
+  const { page, elements, calls } = assessmentPage({ search: '', look: finishedAssessment });
+  await page.init();
+  assert.equal(elements['#plan-create-request'].value, '');
+  assert.equal(
+    calls.some(call => call.url.endsWith('/folder-first-task')),
+    false
+  );
+});
+
+test('with planning off the suggestion is shown with the step that is missing', async () => {
+  const { page, elements } = assessmentPage({ look: finishedAssessment, planning: false });
+  await page.init();
+  assert.equal(elements['#plan-create-request'].value, '');
+  assert.equal(elements['#plan-create-panel'].hidden, true);
+  assert.match(
+    elements['#plan-status'].textContent,
+    /^The first assessment suggested: “Add a health check endpoint to the service\.” Structured planning is off for this workspace/
+  );
+  assert.match(elements['#plan-status'].textContent, /Turn it on in Workspace Settings first\.$/);
+});
+
+test('an assessment with nothing to suggest fills nothing and says so', async () => {
+  for (const look of [
+    null,
+    { ...finishedAssessment, next_request: '' },
+    { ...finishedAssessment, state: 'running' },
+    // A first look that is not an assessment is never read as one.
+    { ...finishedAssessment, recipe: '' }
+  ]) {
+    const { page, elements } = assessmentPage({ look });
+    await page.init();
+    assert.equal(elements['#plan-create-request'].value, '');
+    assert.match(elements['#plan-status'].textContent, /no finished assessment/);
+  }
+});
+
+test('a suggestion is only ever text', async () => {
+  const hostile = {
+    ...finishedAssessment,
+    next_request: '<img src=x onerror=alert(1)> Run `rm -rf` now'
+  };
+  const { page, elements } = assessmentPage({ look: hostile });
+  await page.init();
+  // It goes into the box's value and nowhere that parses markup.
+  assert.ok(elements['#plan-create-request'].value.startsWith('<img src=x onerror=alert(1)>'));
+  for (const selector of ['#plan-active-list', '#plan-history-list', '#plan-status'])
+    assert.equal(elements[selector].innerHTML, '', selector);
+});

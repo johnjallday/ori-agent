@@ -390,6 +390,48 @@ body.home-command-page .home-command-bridge * {
   }
 }
 
+/* A software project's review: what was read, and what the setup needs. Each
+   row is a label and a sentence; a row's state is written out, never colour
+   alone. */
+.pa-folder__facts {
+  display: grid;
+  gap: 4px;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pa-folder__facts[hidden] {
+  display: none;
+}
+
+.pa-folder__facts li {
+  padding-left: 8px;
+  border-left: 2px solid var(--hc-line);
+  color: var(--hc-ink-dim);
+}
+
+.pa-folder__facts strong {
+  color: var(--hc-ink);
+  font-weight: 650;
+}
+
+.pa-folder__facts li[data-state="absent"][data-required="true"],
+.pa-folder__facts li[data-state="unknown"] {
+  border-left-color: var(--hc-amber);
+}
+
+.pa-folder__facts li[data-state="verified"] {
+  border-left-color: var(--hc-signal);
+}
+
+.pa-folder__facts a {
+  margin-left: 4px;
+}
+
 .pa-hq-card #personalAssistantHQPlan {
   display: grid;
   gap: 0.45rem;
