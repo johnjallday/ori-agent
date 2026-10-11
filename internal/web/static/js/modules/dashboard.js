@@ -10821,23 +10821,75 @@
     return true;
   }
 
+  // A prepared proposal only pre-fills the existing manual wizard. It does
+  // not start a build/model, inherit a parent/binding, or submit Create.
+  function openPreparedWorkspaceReview(args, routeContext) {
+    var conversations = window.PersonalAssistantConversation;
+    var name = String(args.name || '').trim();
+    var description = String(args.description || '').trim();
+    var currentPage = buildHomeRouteContext();
+    var expected = normalizeHomeRouteContext(routeContext);
+    var panel = window.PersonalAssistantPanel;
+    var state = panel && panel._state && panel._state.personalAssistant;
+    if (
+      !conversations ||
+      conversations.currentId() !== String(args.conversation_id || '') ||
+      String(window.location.pathname || '/') !== expected.page_path ||
+      String(currentPage.workspace_id || '') !== String(expected.workspace_id || '') ||
+      String(currentPage.selection_workspace_id || '') !==
+        String(expected.selection_workspace_id || '') ||
+      !['active', 'paused'].includes(String((state && state.state) || '')) ||
+      Number((state && state.state_version) || 0) !== Number(args.state_version || 0) ||
+      (window.PersonalAssistantFolderContext && window.PersonalAssistantFolderContext.request()) ||
+      !name ||
+      Array.from(name).length > 80 ||
+      !description ||
+      Array.from(description).length > 1600 ||
+      !window.sessionManager ||
+      typeof window.sessionManager.showAddWorkspaceModal !== 'function'
+    ) {
+      conversations &&
+        conversations.notify(
+          'Reopen the original conversation before reviewing this workspace proposal. Nothing was created.'
+        );
+      return;
+    }
+    panel.close({ restoreFocus: false });
+    window.sessionManager.showAddWorkspaceModal({
+      entryPoint: 'assistant_workspace_review',
+      name: name,
+      description: description,
+      stayAfterCreate: true
+    });
+  }
+
   // confirmHomeAction shows an explicit confirm/cancel step before executing a
   // state-changing action; on confirm it re-calls /ask with confirmed_action.
   // A build_workspace confirmation is the exception: the server never runs it,
   // and Confirm opens the assistant's build in this browser (FR41).
   function confirmHomeAction(confirmation, routeContext, intent, summaryShown) {
-    if (!summaryShown)
+    if (!summaryShown && confirmation.action_type !== 'prepare_workspace')
       appendHomeAssistantMessage(
         'assistant',
         String(confirmation.summary || 'Confirm this change?')
       );
-    setHomeAssistantRoutingSummary('Confirm', 'Review and confirm this change.');
+    var prepared = confirmation.action_type === 'prepare_workspace';
+    setHomeAssistantRoutingSummary(
+      prepared ? 'Review' : 'Confirm',
+      prepared
+        ? 'Review an editable proposal; nothing is created yet.'
+        : 'Review and confirm this change.'
+    );
     var args = confirmation.arguments || {};
     renderHomeAssistantActions([
       {
-        label: 'Confirm',
+        label: prepared ? 'Review workspace setup' : 'Confirm',
         variant: 'primary',
         onClick: async function () {
+          if (prepared) {
+            openPreparedWorkspaceReview(args, routeContext);
+            return;
+          }
           if (confirmation.action_type === 'build_workspace') {
             var first = String(args.first_message || homeAssistantState.pendingPrompt || '');
             if (await openBuildWithAssistant(first)) return;

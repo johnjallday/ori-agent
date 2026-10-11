@@ -22,6 +22,23 @@ new permission boundary.
   supported action still uses its existing reviewed owner; neither keywords nor
   old history authorize setup. Route checks canonical ownership metadata; Ask
   independently reads bounded owned history and pins its mutation revision.
+- Conversation may offer an optional workspace proposal once the user has an
+  actionable agreed goal; it must not pitch setup repeatedly or ignore a
+  decline. A current explicit “prepare a workspace review” / “set up a workspace
+  for this plan” request uses the same bounded canonical history in a tool-free
+  configured-system-model call (12 seconds, 700 output tokens). Strict JSON
+  allows only a suggested name (80 runes) and editable brief (1,600 runes);
+  malformed/secret/tool-calling output or a failed revision-pinned atomic save
+  offers no review. No Profile/HQ memory, catalog scan, native authority or
+  alternate provider is forwarded to this call. The brief describes goals,
+  latest constraints, proposed starter work and unresolved questions, not grants.
+  “Review workspace setup” pre-fills only name/description in the existing
+  manual creator; thread/page/selection/relationship/folder changes refuse its
+  stale opener. No builder session, parent, blueprint, team, install or task is
+  inferred. Blueprint, placement, team and final **Create** remain that creator's
+  explicit decisions. Cancelling leaves the conversation/draft usable. A bare
+  yes still does not prepare or create anything; named creation keeps its
+  original reviewed action owner.
 - Installed Skills-folder metadata and registered MCP configuration are narrow
   read-only observations. Compiled/cached MCP catalog reads use the existing
   source store, never an implicit refresh/server start. The same inventory,

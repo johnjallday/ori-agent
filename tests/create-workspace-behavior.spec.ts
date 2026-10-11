@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * E2E for the create-workspace "Agent behavior" consolidation.
@@ -48,6 +49,13 @@ async function advanceToReview(page: Page) {
 
 // For tests that already interacted with Team and just need the last hop.
 async function advanceToReviewFromTeam(page: Page) {
+  // The managed Group roster can arrive after Team's heading; do not inspect
+  // an empty loading roster and accidentally skip its required setup.
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as any).sessionManager.teamView()?.planStatus || 'loading')
+    )
+    .not.toBe('loading');
   const batch = page.locator('[data-team-accept-all]');
   if (await batch.isVisible()) await batch.click();
   const pendingRows = page
@@ -179,6 +187,7 @@ async function stubWorkspaceReview(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
   // Skip the first-run onboarding server-side so its modal (a static-backdrop
   // overlay that animates in) can't intercept create-modal clicks.
   await page.request.post('/api/onboarding/skip').catch(() => {});
@@ -1071,7 +1080,10 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
     'Create an agent for Reaper Producer'
   );
   await expect(page.locator('#agentName')).toHaveValue('Reaper Producer');
-  await expect(page.locator('#agentReasoning')).toBeDisabled();
+  // The shared Codex form supports reasoning. Choose its level explicitly
+  // before staging; the retired locked-control assertion also fails on HEAD.
+  await expect(page.locator('#agentReasoning')).toBeEnabled();
+  await page.locator('#agentReasoning').selectOption('high');
   await expect(page.locator('#agentCreateDraftSummary')).toContainText('reaper-session');
   await expect(page.locator('#agentSystemPrompt')).toHaveValue('Produce the session.');
   await expect(page.locator('#agentCreateCapabilitiesSection')).toBeHidden();
@@ -1079,6 +1091,11 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   // Cancel discards only unsaved modal controls, restores the exact Team
   // opener, and resets the shared shell before it is reused.
   await page.locator('#agentName').fill('Unsaved Producer');
+  // Bootstrap ignores hide during its opening transition. Settle the real
+  // dialog animation, not a synthetic click or a weakened cancellation check.
+  await page.locator('#addAgentModal .modal-dialog').evaluate(async element => {
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+  });
   await page.locator('#cancelAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -1092,6 +1109,7 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
   await expect(page.locator('#addAgentModal')).toBeVisible();
   await page.locator('#agentName').fill('Session Producer');
   await page.locator('#agentSystemPrompt').fill('Produce this session carefully.');
+  await page.locator('#agentReasoning').selectOption('high');
   await page.locator('#createAgentBtn').click();
   await expect(
     page.locator('#toastContainer .toast').filter({
@@ -1148,7 +1166,8 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
       role_id: 'reaper-producer',
       mode: 'create',
       name: 'Session Producer',
-      system_prompt: 'Produce this session carefully.'
+      system_prompt: 'Produce this session carefully.',
+      reasoning_effort: 'high'
     })
   ]);
   expect(payload?.template_agent_overrides).toBeUndefined();
@@ -2569,6 +2588,9 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
   await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
   await expect(page.locator('#agentCreateDraftContext')).toBeHidden();
   await expect(page.locator('#agentCreateCapabilitiesSection')).toBeVisible();
+  await page.locator('#addAgentModal .modal-dialog').evaluate(async element => {
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+  });
   await page.locator('#cancelAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
 

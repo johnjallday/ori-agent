@@ -19,6 +19,25 @@ const {
   lockedRenameRefusal
 } = creatorState();
 
+test('a conversational proposal only prefills editable text, without a build or target', () => {
+  const api = creatorState();
+  const context = api.createCreatorContext({
+    entryPoint: 'assistant_workspace_review',
+    name: ' Membership ',
+    description: ' Membership only, not talent coaching. ',
+    stayAfterCreate: true
+  });
+  assert.equal(context.name, 'Membership');
+  assert.equal(context.description, 'Membership only, not talent coaching.');
+  assert.equal(context.parentId, '');
+  assert.equal(context.blueprint, '');
+  assert.equal(context.folderOfferId, '');
+  assert.equal(context.stageBlueprintRoles, false);
+  assert.equal(context.buildFirstMessage, '');
+  assert.equal(api.buildEntryPointEligible(context), false);
+  assert.equal(createCreatorContext({}).description, '');
+});
+
 test('only a caller that asks for it gets a connection-only creator', () => {
   assert.equal(createCreatorContext({ connectionOnly: true }).connectionOnly, true);
   for (const options of [{}, { connectionOnly: false }, { stayAfterCreate: true }, undefined]) {

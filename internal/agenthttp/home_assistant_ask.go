@@ -39,6 +39,8 @@ const (
 	// HomeActionBuildWorkspace opens "Build with your assistant" in the
 	// browser. It is deliberately not a mutation: the server never executes it.
 	HomeActionBuildWorkspace = "build_workspace"
+	// Opens an editable form only; never executed through ConfirmedAction.
+	HomeActionPrepareWorkspace = "prepare_workspace"
 )
 
 // homeMutatingActionTypes are the only action types that change state and thus
@@ -492,6 +494,10 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			RequiresConfirmation: true,
 			Confirmation:         conf,
 		}
+	}
+
+	if req.Context != nil && req.Context.Origin == "personal_assistant_panel" && conversation != nil && conversation.id != "" && isAssistantWorkspaceReviewRequest(prompt) {
+		return h.prepareWorkspaceReview(ctx, prompt, identity, workContext, conversation)
 	}
 
 	h.prepareContinuity(ctx, prompt, conversation)

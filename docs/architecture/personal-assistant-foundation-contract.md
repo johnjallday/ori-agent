@@ -53,7 +53,12 @@ or execution authority. Session-owned source-grounded historical references
 supplement bounded recent history; they are not Profile/HQ memory. See
 [conversation context](assistant-conversation-context.md) for lifecycle and
 bounds and [workspace awareness](assistant-workspace-awareness.md#conversation-discovery-amendment)
-for source, provider and manual-setup boundaries.
+for source, provider and manual-setup boundaries. Conversation may proactively
+suggest an optional workspace review when an agreed goal becomes actionable.
+An explicit preparation request produces bounded editable name/brief data from
+that canonical thread, not execution. The existing creator still owns blueprint,
+placement, team and final Create; cancellation creates nothing, and proposed
+starter work is not automatically saved or assigned.
 
 ## Purpose
 

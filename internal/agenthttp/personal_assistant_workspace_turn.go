@@ -212,7 +212,7 @@ func (t *assistantWorkspaceTurn) saveOwner() assistantcontext.SaveOwner {
 // Current imperative + target, not a build word somewhere in the sentence.
 // History, quoted instructions and a bare agreement never supply the target.
 func panelExplicitExecution(prompt string) bool {
-	if isCompositionRequest(prompt) || panelExploratoryRequest(prompt) {
+	if isCompositionRequest(prompt) || panelExploratoryRequest(prompt) || isAssistantWorkspaceReviewRequest(prompt) {
 		return false
 	}
 	text := stripCompositionPolitePrefixes(normalizeRouteToken(prompt))
