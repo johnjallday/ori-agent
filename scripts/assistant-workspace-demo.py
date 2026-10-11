@@ -481,6 +481,30 @@ def folder_response_step(content):
                       "They do not establish contents or progress. What would you like to work out first?"}
 
 
+def requested_workspace(own_words):
+    """The proposal a stand-in model makes when Ori sends it a request to build a workspace.
+
+    Ori's router, not this fixture, decides that a sentence asks for a
+    workspace; such a turn opens "User request: <words>" and is followed by
+    "(classified intent: …)". The proposal repeats the purpose the user stated
+    and nothing else. No subject is recognized here: understanding the purpose
+    is the real model's work, and this only shows that Ori passed it on.
+    """
+    asked = own_words.split("\n\n(classified intent:", 1)[0].removeprefix("User request: ").strip()
+    lead = "build a workspace"
+    if not asked.lower().startswith(lead):
+        return None
+    purpose = asked[len(lead):].strip(" .!")
+    for opening in ("for ", "about ", "to ", "on "):
+        if purpose.lower().startswith(opening):
+            purpose = purpose[len(opening):]
+            break
+    if not purpose:
+        return None
+    return {"name": purpose[:1].upper() + purpose[1:],
+            "description": "Goal: " + purpose + ". Proposed starter work: agree what done looks like, list what is already known, and plan the first step. Nothing has been looked up or verified."}
+
+
 def conversation_reply(prompt):
     """Explicit synthetic scenario only; never infer it from workspace metadata."""
     if prompt in {
@@ -658,7 +682,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
                 proposal_step = None
-                if own_words.lower().startswith(("prepare a workspace review", "let's set up a workspace")) or own_words == "how they started. can we create a workspace":
+                requested = requested_workspace(own_words)
+                if own_words.lower().startswith(("prepare a workspace review", "let's set up a workspace")) or requested or own_words == "how they started. can we create a workspace":
                     history = request["messages"][1:-1]
                     body = "\n".join(message.get("content", "") for message in history)
                     tool_offered = any(tool.get("function", {}).get("name") == "assistant_propose_workspace" for tool in request.get("tools", []))
@@ -679,6 +704,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     proposal = {"name": "Fictional Membership Pilot", "description": "Goal: recurring community membership, not talent coaching. Proposed starter work: identify the audience, compare membership workflows, and outline a small pilot. Telegram compatibility remains unknown; no integration is installed."}
                     if "okgo band" in body:
                         proposal = {"name": "OK Go — How They Started", "description": "Goal: research how OK Go started. Proposed starter work: find interviews, build an early-years timeline, and write a sourced origin story. Dates and first-break details need verification."}
+                    if requested:
+                        proposal = requested
                     if (state_dir / "workspace-proposal-invalid").exists():
                         (state_dir / "workspace-proposal-invalid").unlink()
                         proposal["description"] = "x" * 1601

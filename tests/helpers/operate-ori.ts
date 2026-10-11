@@ -140,3 +140,35 @@ export async function readOperation(request: APIRequestContext, id: string, tab:
   );
   return { status: response.status(), body: await response.json() };
 }
+
+/**
+ * Record a Bootstrap dialog's lifecycle on the current page.
+ *
+ * Bootstrap ignores Close and Escape until a dialog has finished opening, and
+ * a dialog is already "visible" before that. A check that closes a dialog
+ * waits for `opened()` first; a dialog that still does not close leaves its
+ * events here to say why. Call this before the dialog opens: a navigation
+ * discards it.
+ */
+export async function watchDialog(page: Page, selector: string) {
+  await page.evaluate(target => {
+    const seen: string[] = [];
+    const all = ((window as any).__oriDialogEvents ||= {});
+    all[target] = seen;
+    const dialog = document.querySelector(target);
+    for (const name of ['show', 'shown', 'hide', 'hidden'])
+      dialog?.addEventListener(`${name}.bs.modal`, () => seen.push(name));
+  }, selector);
+  const events = (): Promise<string[]> =>
+    page.evaluate(target => ((window as any).__oriDialogEvents || {})[target] || [], selector);
+  return {
+    events,
+    async opened() {
+      await expect.poll(events, { timeout: 10_000 }).toContain('shown');
+    },
+    /** Fails with the events seen, so "never asked to hide" reads differently from "reopened". */
+    async closed() {
+      await expect.poll(events, { timeout: 10_000 }).toContain('hidden');
+    }
+  };
+}

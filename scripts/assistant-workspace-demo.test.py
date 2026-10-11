@@ -140,6 +140,20 @@ class DemoProviderTests(unittest.TestCase):
         self.assertLess(len(reply), 6000, "canonical message bound")
         self.assertEqual(reply.count("Section "), 20)
 
+    def test_workspace_request_fixture_repeats_the_stated_purpose_and_recognizes_no_subject(self):
+        turn = "User request: Build a workspace for research about ok go\n\n(classified intent: workspace_create)\n\nsnapshot"
+        proposal = demo.requested_workspace(turn)
+        self.assertEqual(proposal["name"], "Research about ok go")
+        self.assertTrue(proposal["description"].startswith("Goal: research about ok go. "))
+        # Another purpose gets the same words around it: nothing is keyed on a subject.
+        other = demo.requested_workspace("Build a workspace to track the tour.")
+        self.assertEqual(other["name"], "Track the tour")
+        self.assertEqual(other["description"].replace("track the tour", "*"),
+                         proposal["description"].replace("research about ok go", "*"))
+        for not_one in ["What should Mixer do next?", "How do I build a workspace?", "Build a workspace",
+                        "User request: Create a task for Engineer\n\n(classified intent: general_task)"]:
+            self.assertIsNone(demo.requested_workspace(not_one))
+
     def test_current_user_projection_not_history(self):
         projection = demo.workspace_projection([message("Old"), message("Current")])
         self.assertEqual(projection["subject"]["name"], "Current")

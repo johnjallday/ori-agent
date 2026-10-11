@@ -408,6 +408,12 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	// panel conversation. Keep explicit specialist/execution intents on their
 	// existing gates; answer ordinary project questions in this conversation.
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() {
+		// "Build / make / set up a workspace for …" is a request for a
+		// workspace here, and gets the reviewed proposal that "create a
+		// workspace for …" gets.
+		if asksForWorkspaceInOtherWords(prompt) {
+			intent = homeAssistantWorkspaceCreateIntent
+		}
 		if isAssistantWorkspaceReviewRequest(prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
@@ -1281,6 +1287,75 @@ func shouldClassifyWorkspaceCreate(prompt string) bool {
 		strings.HasPrefix(normalized, "create a workspace") ||
 		strings.HasPrefix(normalized, "create an workspace") ||
 		strings.HasPrefix(normalized, "new workspace")
+}
+
+// workspaceRequestLeads open a request for a new workspace: the verbs people
+// use for it besides "create" and "new", with the object forms that name a
+// workspace to be made rather than an existing one ("set up the workspace
+// settings" is not here).
+var workspaceRequestLeads = func() []string {
+	var leads []string
+	for _, verb := range []string{"create", "build", "make", "set up", "setup"} {
+		for _, object := range []string{"a workspace", "a new workspace", "me a workspace", "me a new workspace", "us a workspace", "us a new workspace"} {
+			leads = append(leads, verb+" "+object)
+		}
+	}
+	return leads
+}()
+
+// workspaceRequestContinuations are what may follow the word "workspace" in
+// such a request: a purpose, a topic or a name. Anything else ("make a
+// workspace summary", "build a workspace template") is about something that
+// merely has "workspace" in its name, and stays where it went before.
+var workspaceRequestContinuations = []string{"for ", "about ", "to ", "on ", "around ", "where ", "that ", "which ", "with ", "so ", "called ", "named ", "dedicated ", "focused "}
+
+// asksForWorkspaceInOtherWords recognizes "build / make / set up a workspace
+// for …", with or without a polite opening ("please", "can you", "let's").
+// In the hired assistant's conversation these mean what "create a workspace
+// for …" means, and are answered by the same reviewed proposal. Before this
+// they were general work there, which sent a request such as "Build a
+// workspace for research about a band" to the system assistant's
+// implementation brief instead.
+//
+// Only the opening is read. The purpose that follows ("research about a
+// band") is not interpreted here: it reaches the model in the user's words,
+// and the model writes the proposal. A question ("how do I build a
+// workspace?"), a hypothetical ("should we make a workspace?") and a negation
+// do not open with one of these verbs, so they are not requests.
+//
+// This is not part of shouldClassifyWorkspaceCreate, which every surface
+// shares: outside the assistant's conversation the page reads "create a
+// workspace …" itself before it asks for a route, so the same intent would
+// lead somewhere else there.
+func asksForWorkspaceInOtherWords(prompt string) bool {
+	normalized := normalizeRouteToken(prompt)
+	if normalized == "" {
+		return false
+	}
+	if _, ok := parseHomeAssistantAppLaunchPrompt(prompt); ok {
+		return false
+	}
+	text := stripCompositionPolitePrefixes(normalized)
+	for _, lead := range workspaceRequestLeads {
+		rest, found := strings.CutPrefix(text, lead)
+		if !found {
+			continue
+		}
+		if strings.Trim(rest, " .!") == "" {
+			return true
+		}
+		if !strings.HasPrefix(rest, " ") {
+			// "a workspaces…", "a workspace-wide…": not the word "workspace".
+			continue
+		}
+		rest = strings.TrimLeft(rest, " ")
+		for _, continuation := range workspaceRequestContinuations {
+			if strings.HasPrefix(rest, continuation) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func promptContainsAnyRoutePhrase(normalizedPrompt string, phrases []string) bool {

@@ -22,6 +22,24 @@ new permission boundary.
   supported action still uses its existing reviewed owner; neither keywords nor
   old history authorize setup. Route checks canonical ownership metadata; Ask
   independently reads bounded owned history and pins its mutation revision.
+- In the hired assistant's drawer, a request for a workspace is recognized by
+  its opening, whatever the verb: “create / build / make / set up a
+  workspace” (also “a new workspace”, “me a workspace”), with or without a
+  polite opening, followed by nothing, or by a purpose or a name (“for …”,
+  “about …”, “to …”, “called …”). All of them route as `workspace_create`
+  and are answered in the conversation by the reviewed proposal below. Before
+  this, every verb but “create” was general work there: with no agent to match
+  it went to the system assistant, whose reply to the user was an
+  implementation brief for a developer. Only the opening is read. The purpose
+  (“research about …”) is not interpreted by the router; it reaches the model
+  in the user's words and the model writes the proposal. “Build a workspace
+  summary”, questions, hypotheticals and negations are not such requests and
+  keep their previous owner. Other surfaces are unchanged: the classification
+  they share (`shouldClassifyWorkspaceCreate`) still knows only “create” and
+  “new”, because outside the drawer the page reads “create a workspace …”
+  itself before it asks for a route, and those other wordings already reach
+  the assistant's conversation there
+  (`asksForWorkspaceInOtherWords`, `home_assistant_workspace_request_test.go`).
 - Conversation may offer an optional workspace proposal once the user has an
   actionable agreed goal; it must not pitch setup repeatedly or ignore a
   decline. Natural multi-clause requests (for example, “how they started. can

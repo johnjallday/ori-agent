@@ -6,7 +6,8 @@ import {
   seedHiredAssistant,
   seedWorkspace,
   drawer,
-  readOperation
+  readOperation,
+  watchDialog
 } from './helpers/operate-ori';
 
 // Operate Ori, group 4: the result of the request's own run, a rerun that is
@@ -166,14 +167,17 @@ test('wt demo (seed): results belong to the request own run; reruns, input and l
   facts.recap = lines;
 
   // Open the actual result in the page's own result view, from the keyboard.
+  const resultDialog = await watchDialog(page, '#workspace-detail-task-result-modal');
   await openResult.focus();
   await page.keyboard.press('Enter');
   await expect(result.modal).toBeVisible({ timeout: 30_000 });
   await expect(result.title).toHaveText('Bounce the stems');
   await expect(result.body).toContainText('Fixture worker result for: Bounce the stems');
+  // Bootstrap ignores Close and Escape until the dialog has finished opening.
+  await resultDialog.opened();
   await shot('02-the-actual-result.png');
-  // The dialog's own Close (Escape works once its opening transition is over).
   await result.modal.locator('button', { hasText: 'Close' }).click();
+  await resultDialog.closed();
   await expect(result.modal).toBeHidden();
 
   // --- 2. The user reruns the task from its own controls. The later run's
