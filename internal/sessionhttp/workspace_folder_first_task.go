@@ -99,9 +99,17 @@ func (h *Handler) folderFirstTaskStartsOnClick(ws *agentworkspace.Workspace) boo
 		if task.Status != agentworkspace.TaskStatusPending || assignee == "" || strings.EqualFold(assignee, "unassigned") {
 			return false
 		}
-		return !h.setupWizardOpening(ws.ID)
+		return !h.setupWizardOpening(ws.ID) && !h.firstTaskRecipeBlocked(task)
 	}
 	return false
+}
+
+// firstTaskRecipeBlocked reports a first task seeded under a host recipe that
+// this server cannot run within the recipe's restriction. It is never started
+// some other way: the restriction is the reason the task exists in that form.
+func (h *Handler) firstTaskRecipeBlocked(task *agentworkspace.Task) bool {
+	recipe := agentworkspace.FirstTaskRecipe(task)
+	return recipe != "" && (h.firstTaskRecipeRunnable == nil || !h.firstTaskRecipeRunnable(recipe))
 }
 
 var errFolderFirstTaskNoChange = errors.New("no folder first task to start")
@@ -157,6 +165,12 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 			assignee := strings.TrimSpace(task.To)
 			if assignee == "" || strings.EqualFold(assignee, "unassigned") {
 				reason = "unassigned"
+				return errFolderFirstTaskNoChange
+			}
+			if h.firstTaskRecipeBlocked(task) {
+				// Left seeded and unspent: a later click starts it once the
+				// recipe can be run here.
+				reason = personalassistant.FolderFirstTaskReasonRecipeUnavailable
 				return errFolderFirstTaskNoChange
 			}
 			task.Context[taskContextFolderFirstTaskConsumedAt] = time.Now().UTC().Format(time.RFC3339)

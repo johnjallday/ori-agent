@@ -153,8 +153,6 @@ type FolderSoftwareIntent struct {
 	Outcome       string `json:"outcome"`
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name"`
-	// WorkspaceVersion witnesses a reused workspace's record as reviewed.
-	WorkspaceVersion int64 `json:"workspace_version,omitempty"`
 	// Template and TemplateRevision are the blueprint a new workspace is made
 	// from, exactly as reviewed.
 	Template         string `json:"template,omitempty"`
@@ -182,6 +180,11 @@ type FolderSoftwareIntent struct {
 	// with understanding and planning and nothing runs during setup.
 	Scope    string `json:"scope"`
 	Planning bool   `json:"planning"`
+	// Workflow names the effective workflow a new workspace is given (its
+	// profile, preset, how approved work starts, and where planning documents
+	// go), or "keep" for a workspace whose own settings are left alone. A
+	// change in what those defaults do is a change in what was reviewed.
+	Workflow string `json:"workflow"`
 	// Conversation is the conversation revision the review belongs to, when it
 	// was made from one.
 	Conversation string `json:"conversation,omitempty"`
@@ -219,6 +222,10 @@ func (i FolderSoftwareIntent) Validate() error {
 	}
 	if i.Scope != FolderSoftwareScopeReadOnly || !i.Planning {
 		return fmt.Errorf("%w: software scope", errFolderDigestInvalid)
+	}
+	if kept := i.Workflow == FolderSoftwareKeep; i.Workflow == "" || len(i.Workflow) > 120 || strings.ContainsAny(i.Workflow, "\\\x00\r\n") ||
+		kept != (i.Outcome == FolderSoftwareReuse) {
+		return fmt.Errorf("%w: software workflow", errFolderDigestInvalid)
 	}
 	if validateFolderKey(i.SubjectKey) != nil || strings.TrimSpace(i.SubjectIdentity) == "" || validateFolderName(i.WorkspaceName) != nil {
 		return fmt.Errorf("%w: software subject", errFolderDigestInvalid)

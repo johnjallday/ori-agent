@@ -1457,13 +1457,14 @@ Ends an open build without creating anything (Start over, or Discard from Today)
   "result_excerpt": "one line, at most 280 characters",
   "ticket_route": "/workspaces/thesis?ticket=<task id>",
   "can_start": true,
-  "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | needs_input | start_failed | run_failed",
+  "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | assessment_unavailable | needs_input | start_failed | run_failed",
   "message": "one plain sentence for the reason",
-  "detail": "what the receipt's task row says now"
+  "detail": "what the receipt's task row says now",
+  "recipe": "software_assessment (present only for a task that runs under a host recipe)"
 }
 ```
 
-`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). For a task with a `recipe`, a `detail` for one that cannot start says what it waits for ("Needs a model before it can start", "Cannot start here yet") and never that it is ready. Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
 
 `offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist (none in a sandboxed home). `picker_available` is false where the native dialog cannot run — outside macOS, or under `ORI_NO_DESKTOP_OPEN` as every sandboxed demo server runs. `picker_note` explains what can still be chosen: it is empty only when there are chips and a dialog; otherwise it names the missing folders, the switched-off or unsupported dialog, or both.
 
@@ -1551,6 +1552,14 @@ It also carries `plan`, the same shape as the one-card plan below with five line
 Changes the workspace name, the assistant's name, or both, on a reviewed software offer. Either field may be left out to keep its current value, and an empty string returns that name to the suggested one; a body with neither is `400`. It reads nothing from the project and creates nothing; the returned offer's plan, and so its digest, reflects the new names. `400` for a name longer than 120 characters or containing a slash or a line break; `409` when the offer has not been reviewed or is no longer pending.
 
 The setup action below takes a reviewed software offer's `plan_digest` like any other. Before it runs, the server reads the project again; when what it reads differs from the review the plan was drawn from, it answers `409` with `"plan_changed": true` and the fresh offer, and nothing is created.
+
+A software setup is the server's own: nothing is installed and there is no step-by-step journey behind it. The run creates the workspace from the Code Project blueprint with exactly the reviewed assistant (or completes the one existing workspace the review named), links the folder where it is as the workspace's primary directory, records which directory was confirmed (`software_project` in the workspace's shared data: the linked directory's id and the directory's own identity, never a path), gives a new workspace the planning-first workflow (the software profile's planner preset with planning documents kept in Ori), and seeds one first assessment. It runs nothing in the project, calls no model, and writes nothing into the folder. Every pass starts from what is saved, so a repeated click, a second offer about the same folder, or a pass after a restart continues on the same workspace instead of making another; two offers about one folder end with one workspace, and the offer that did not create it resolves to it with `outcome.existing: true`. A sibling worktree or a clone of the same repository is a different folder and is never matched.
+
+A software run stops with one of these `stop_reason`s and keeps what it finished: `needs_model` (the assistant has no model; for a new workspace this is before anything is created — choose a model and send the same digest again), `needs_pick` (the server no longer holds the folder, or the directory there was replaced), `plan_changed` (what is saved no longer matches the review, for example a saved agent of the reviewed name appeared), `failed`, or `interrupted`. After `plan_changed` the review action above may be called again on the offer: it puts the stopped run aside and returns a plan drawn from what is saved, whose digest must be confirmed anew; the old digest no longer starts anything.
+
+A workspace with a `software_project` record resolves its code root from that record alone: when the folder is missing or a different directory is at that path, the workspace has no code root, and neither repository checks nor planning documents fall back to Ori's own folder for the workspace.
+
+The seeded first assessment is the workspace's first task (see `first_task` under Get Folder Digest) with `recipe: "software_assessment"`. A task under a recipe is run by that recipe or not at all: it is never started as an ordinary agent task, the recipe marker cannot be set or removed through the task API, and while this server cannot run the recipe `first_task.can_start` is false with `reason: "assessment_unavailable"` and the start action answers `started: false` without spending the task's one start.
 
 ### Resolve a Project Offer
 

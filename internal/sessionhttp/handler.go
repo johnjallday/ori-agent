@@ -103,6 +103,11 @@ type Handler struct {
 	// orchestration task handler); used by the template-setup first-open
 	// auto-start after the consumed marker is stamped.
 	templateSetupStarter func(workspaceID, taskID string) error
+	// firstTaskRecipeRunnable says whether this server can run a first task
+	// seeded under the named host recipe within that recipe's restriction. Unset
+	// means none can run: such a task stays seeded and is never started as an
+	// ordinary agent task.
+	firstTaskRecipeRunnable func(recipe string) bool
 
 	// pathSelections resolves the opaque token Ori's native folder picker
 	// issued. A create request may attach an existing project only through
@@ -342,6 +347,12 @@ func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 // the manual-execution path, used by the template-setup first-open auto-start.
 func (h *Handler) SetTemplateSetupTaskStarter(fn func(workspaceID, taskID string) error) {
 	h.templateSetupStarter = fn
+}
+
+// SetFirstTaskRecipeRunnable injects the answer to whether a first task seeded
+// under a host recipe can be run within that recipe's restriction here.
+func (h *Handler) SetFirstTaskRecipeRunnable(fn func(recipe string) bool) {
+	h.firstTaskRecipeRunnable = fn
 }
 
 // SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which

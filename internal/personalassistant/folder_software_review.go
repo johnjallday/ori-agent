@@ -181,9 +181,22 @@ func validateSoftwareReview(review *FolderSoftwareReview) error {
 }
 
 // softwareReviewable is true for an offer whose setup can be reviewed now: one
-// recognized software project, chosen, still waiting for its answer.
+// recognized software project, chosen, with no setup under way. That is an
+// offer still waiting for its answer, and one whose confirmed setup stopped:
+// a review made again there puts the stopped run aside, and the plan it shows
+// is drawn from what that run saved.
 func softwareReviewable(offer FolderOffer) bool {
-	return isSoftwareOffer(offer) && offer.Status == FolderOfferPending && !offer.NeedsCandidate
+	if !isSoftwareOffer(offer) || offer.NeedsCandidate {
+		return false
+	}
+	return planPending(offer) || softwareRunStopped(offer)
+}
+
+// softwareRunStopped reports a confirmed software setup that has a run on
+// record and no outcome. Whether that run is still live is the caller's check.
+func softwareRunStopped(offer FolderOffer) bool {
+	return offer.Status == FolderOfferAwaitingOutcome && offer.Choice == FolderChoiceProject &&
+		offer.Setup != nil && offer.Setup.Status != FolderSetupDone
 }
 
 // softwarePlannable says whether a plan may be shown for a software offer: the
@@ -428,6 +441,16 @@ func (s *FolderDigestService) changeSoftwareReview(ctx context.Context, userID, 
 		}
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
+	// A setup that stopped is put aside only by a fresh review, and never while
+	// it is still running in this process.
+	if softwareRunStopped(*offer) {
+		if s.isRunning(offerID) {
+			return FolderOfferView{}, ErrFolderOfferDecided
+		}
+		if !inspect {
+			return FolderOfferView{}, ErrFolderReviewRequired
+		}
+	}
 	release, err := s.acquireConversationReview(ctx, *offer)
 	if err != nil {
 		return FolderOfferView{}, err
@@ -490,6 +513,11 @@ func (s *FolderDigestService) changeSoftwareReview(ctx context.Context, userID, 
 			return err
 		}
 		item.SoftwareReview = &review
+		if inspection != nil && softwareRunStopped(*item) {
+			// The stopped run is put aside. What it saved is still saved; the
+			// plan drawn next starts from that, and needs its own confirmation.
+			item.Setup = nil
+		}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: item.ID, Action: action, At: now})
 		pruneFolderDigest(d)
 		result = *item

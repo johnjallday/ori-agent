@@ -90,9 +90,14 @@ func (h *folderSetupHost) softwarePlan(ctx context.Context, req personalassistan
 		Linked: req.Offer.Subject.Repository == string(folderdigest.RepositoryFile),
 		Guides: append([]string(nil), review.Guides...), EvidenceRevision: review.EvidenceRevision,
 	}
-	if facts.ProjectName == "" {
+	// The workflow a new workspace gets is read from what its settings would
+	// really do. Defaults that would start work unasked, skip confirmation or
+	// write into the project are not something this review can promise.
+	workflow, safe := softwareWorkflowSignature()
+	if facts.ProjectName == "" || !safe {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
 	}
+	facts.Workflow = workflow
 	if facts.WorkspaceName == "" {
 		facts.WorkspaceName = facts.ProjectName
 	}
@@ -138,7 +143,7 @@ func (h *folderSetupHost) softwareExisting(userID string, listed personalassista
 		return nil, folderSetupPreviewError("project_exists")
 	}
 	return &foldersetup.SoftwareExisting{
-		WorkspaceID: ws.ID, Name: ws.Name, Version: ws.Version, EntryAgent: strings.TrimSpace(ws.EntryAgentName()),
+		WorkspaceID: ws.ID, Name: ws.Name, EntryAgent: strings.TrimSpace(ws.EntryAgentName()),
 		HasFirstLook: personalassistant.FindFolderFirstTask(ws) != nil,
 	}, nil
 }
@@ -168,7 +173,10 @@ func (h *folderSetupHost) softwarePrerequisites(ctx context.Context, facts folde
 	model.Source = source
 	if strings.TrimSpace(name) == "" {
 		model.State = personalassistant.FolderPrerequisiteAbsent
-		model.Detail = assistant + " has no model yet. Setup can finish without one; the assessment waits until you choose a model."
+		model.Detail = assistant + " has no model yet. Setup pauses, before anything is created, until you choose one."
+		if facts.Existing != nil && facts.Existing.EntryAgent != "" {
+			model.Detail = assistant + " has no model yet. Setup does not change that; its first assessment cannot start until it has one."
+		}
 	} else {
 		model.State = personalassistant.FolderPrerequisiteConfigured
 		model.Detail = assistant + " is set to use " + name
@@ -215,14 +223,4 @@ func (h *folderSetupHost) githubConnected(ctx context.Context) (bool, error) {
 		return false, errSetupUnavailable
 	}
 	return h.builder.githubHandler.Connection().IsConnected(ctx)
-}
-
-// SoftwareSetupAvailable says whether this host can carry out a reviewed
-// software setup. Until its run and its verification exist the card shows the
-// review and offers no Set up.
-func (h *folderSetupHost) SoftwareSetupAvailable() bool { return false }
-
-// softwareRun carries out a reviewed software setup. Not available yet.
-func (h *folderSetupHost) softwareRun(context.Context, personalassistant.FolderSetupRequest) error {
-	return errSetupUnavailable
 }

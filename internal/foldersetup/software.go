@@ -36,16 +36,18 @@ type SoftwareFacts struct {
 	// them; EvidenceRevision is that inspection.
 	Guides           []string
 	EvidenceRevision string
-	Destination      *personalassistant.FolderSetupDestination
-	Conversation     string
-	Prerequisites    []personalassistant.FolderPrerequisite
+	// Workflow names the effective workflow a new workspace is given, as the
+	// host read it from the settings it will write.
+	Workflow      string
+	Destination   *personalassistant.FolderSetupDestination
+	Conversation  string
+	Prerequisites []personalassistant.FolderPrerequisite
 }
 
 // SoftwareExisting is a workspace the setup would reuse, as it stands now.
 type SoftwareExisting struct {
 	WorkspaceID string
 	Name        string
-	Version     int64
 	// EntryAgent is its entry agent, empty when it has none.
 	EntryAgent string
 	// HasFirstLook says it already has a first look task, which is kept.
@@ -76,6 +78,11 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 		Provider: facts.Assistant.Provider, Model: facts.Assistant.Model, RosterRevision: facts.Assistant.RosterRevision,
 		Assessment: personalassistant.FolderSoftwareSeed, EvidenceRevision: facts.EvidenceRevision,
 		Scope: personalassistant.FolderSoftwareScopeReadOnly, Planning: true, Conversation: facts.Conversation,
+		Workflow: facts.Workflow,
+	}
+	mode := personalassistant.FolderPlanLine{
+		Kind: personalassistant.FolderPlanMode, Name: "Starts with understanding and planning",
+		Detail: "Setup runs no code, installs nothing and changes nothing in the project. Work is planned first: nothing is made from a plan until you approve it, approved work waits for you to start it, and planning documents stay in Ori. The project's own conventions apply.",
 	}
 
 	workspace := personalassistant.FolderPlanLine{
@@ -96,8 +103,13 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 	}
 
 	if existing := facts.Existing; existing != nil {
-		software.Outcome, software.WorkspaceID, software.WorkspaceVersion = personalassistant.FolderSoftwareReuse, existing.WorkspaceID, existing.Version
+		software.Outcome, software.WorkspaceID = personalassistant.FolderSoftwareReuse, existing.WorkspaceID
 		software.WorkspaceName, software.Template, software.TemplateRevision = existing.Name, "", ""
+		software.Workflow = personalassistant.FolderSoftwareKeep
+		mode = personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanMode, Name: "Keeps this workspace's settings as they are",
+			Detail: "Setup runs no code, installs nothing and changes nothing in the project. The project's own conventions apply.",
+		}
 		workspace = personalassistant.FolderPlanLine{
 			Kind: personalassistant.FolderPlanWorkspace, Name: "Uses your existing workspace " + existing.Name,
 			Detail: "No second workspace is made. Its notes, tasks and settings stay as they are.",
@@ -120,10 +132,6 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 		}
 	}
 
-	mode := personalassistant.FolderPlanLine{
-		Kind: personalassistant.FolderPlanMode, Name: "Starts with understanding and planning",
-		Detail: "Setup runs no code, installs nothing and changes nothing in the project. The project's own conventions apply.",
-	}
 	if guides := joinAnd(facts.Guides); guides != "" {
 		mode.Detail += " Its instructions were found in " + guides + "."
 	}
@@ -159,7 +167,7 @@ func assistantLine(assistant SoftwareAssistant) personalassistant.FolderPlanLine
 func modelSentence(assistant SoftwareAssistant, subject string) string {
 	model := strings.TrimSpace(assistant.Model)
 	if model == "" {
-		return subject + " has no model yet, so it cannot run until you choose one."
+		return subject + " has no model yet. Setup pauses, before anything is created, for you to choose one."
 	}
 	if provider := strings.TrimSpace(assistant.Provider); provider != "" {
 		return subject + " uses " + model + " through " + provider + "."

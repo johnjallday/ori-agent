@@ -177,6 +177,42 @@ func TestApplyBasicFieldUpdates_KanbanColumnID(t *testing.T) {
 	}
 }
 
+// A host recipe marker decides how a task may run. A task update can neither
+// add one to an ordinary task nor remove or change one on a restricted task;
+// the rest of the same request is still applied.
+func TestApplyBasicFieldUpdates_CannotWriteTheRecipeMarker(t *testing.T) {
+	h := &TaskHandler{}
+
+	ordinary := workspace.Task{ID: "task-1"}
+	h.applyBasicFieldUpdates(&ordinary, &taskUpdateRequest{TaskID: ordinary.ID, Context: map[string]any{
+		workspace.TaskContextFirstTaskRecipe:        workspace.FirstTaskRecipeSoftwareAssessment,
+		workspace.TaskContextFirstTaskRecipeVersion: 1,
+		"note": "kept",
+	}})
+	if workspace.FirstTaskRecipe(&ordinary) != "" || ordinary.Context[workspace.TaskContextFirstTaskRecipeVersion] != nil {
+		t.Fatalf("an update gave an ordinary task a recipe: %v", ordinary.Context)
+	}
+	if ordinary.Context["note"] != "kept" {
+		t.Fatalf("the rest of the update was dropped: %v", ordinary.Context)
+	}
+
+	restricted := workspace.Task{ID: "task-2", Context: map[string]any{
+		workspace.TaskContextFirstTaskRecipe:        workspace.FirstTaskRecipeSoftwareAssessment,
+		workspace.TaskContextFirstTaskRecipeVersion: 1,
+	}}
+	for name, attempt := range map[string]map[string]any{
+		"remove":  {workspace.TaskContextFirstTaskRecipe: nil, workspace.TaskContextFirstTaskRecipeVersion: nil},
+		"replace": {workspace.TaskContextFirstTaskRecipe: "something_looser"},
+		"blank":   {workspace.TaskContextFirstTaskRecipe: ""},
+	} {
+		h.applyBasicFieldUpdates(&restricted, &taskUpdateRequest{TaskID: restricted.ID, Context: attempt})
+		if workspace.FirstTaskRecipe(&restricted) != workspace.FirstTaskRecipeSoftwareAssessment ||
+			restricted.Context[workspace.TaskContextFirstTaskRecipeVersion] != 1 {
+			t.Fatalf("%s changed a restricted task's recipe: %v", name, restricted.Context)
+		}
+	}
+}
+
 func TestApplyBasicFieldUpdates_KanbanMetadata(t *testing.T) {
 	h := &TaskHandler{}
 

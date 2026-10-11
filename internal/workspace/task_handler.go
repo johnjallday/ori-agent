@@ -259,6 +259,11 @@ func (h *LLMTaskHandler) SetUtilityToolProvider(provider UtilityToolProvider) {
 func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task Task) (string, error) {
 	logger.Debug("🤖 Executing task for agent", logger.Fields{"task_id": task.ID, "agentName": agentName})
 
+	// A task seeded under a host recipe is run by that recipe or not at all.
+	if recipe := FirstTaskRecipe(&task); recipe != "" {
+		return h.executeRecipeTask(agentName, task, recipe)
+	}
+
 	// Publish thinking event
 	if h.eventBus != nil {
 		event := NewTaskEvent(EventTaskThinking, task.WorkspaceID, task.ID, agentName, map[string]any{

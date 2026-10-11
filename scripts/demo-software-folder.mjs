@@ -1,15 +1,25 @@
 // Drive the software-project folder card in a seeded demo sandbox and capture
-// its states. Phases, each on a fresh seeded sandbox:
+// its states. Phases; recognize, review and setup each start on a fresh seeded
+// sandbox, and resume continues the sandbox setup left behind:
 //
 //   recognize  a recognized project and a choice among several
 //   review     Review setup: what was read, the plan, prerequisites, adjusting
 //              names, a missing model, a replaced folder, and a music project
 //              whose review still lists its integration
+//   setup      Set up with no model chosen: the run pauses before it creates
+//              anything
+//   resume     after the server was restarted on the same sandbox: the paused
+//              setup is still there; a model is chosen, Continue finishes it,
+//              the receipt is what was saved, the same folder shown again opens
+//              that workspace, and a sibling worktree is a different project
 //
 // Usage:
 //   ./scripts/demo-server.sh 8947 "$TMPDIR/ori-software-demo"      (background)
 //   ./scripts/software-folder-seed.sh "$TMPDIR/ori-software-demo" --ori
 //   node scripts/demo-software-folder.mjs http://localhost:8947 "$TMPDIR/ori-software-demo" <shots-dir> [phase]
+//
+// For resume: run setup, stop the server (./scripts/stop-demo-server.sh 8947),
+// start it again on the same sandbox, then run resume with the same shots dir.
 //
 // The script reads the seeded folders only to hash them: every folder it did
 // not replace itself must be byte-for-byte the same at the end.
@@ -28,11 +38,13 @@ import {
 import { join, relative } from 'node:path';
 
 const [base, sandbox, output, phase = 'review'] = process.argv.slice(2);
-if (!base || !sandbox || !output || !['recognize', 'review'].includes(phase))
+if (!base || !sandbox || !output || !['recognize', 'review', 'setup', 'resume'].includes(phase))
   throw new Error(
-    'usage: demo-software-folder.mjs <base-url> <sandbox-dir> <shots-dir> [recognize|review]'
+    'usage: demo-software-folder.mjs <base-url> <sandbox-dir> <shots-dir> [recognize|review|setup|resume]'
   );
 mkdirSync(output, { recursive: true });
+// What setup saw before it changed anything, for resume to compare against.
+const carried = join(output, 'setup-state.json');
 
 const oriCheckout = join(sandbox, 'Documents', 'ori-agent');
 const isOri = existsSync(oriCheckout);
@@ -106,7 +118,15 @@ async function show(chip) {
   await page.goto('/?panel=today&folder=show');
   const chooser = page.locator('#personalAssistantFolderChooser');
   await chooser.waitFor({ state: 'visible', timeout: 30000 });
+  // The card of an earlier folder may still be on screen; what this look found
+  // is on it only once the scan has answered.
+  const scanned = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' && /\/folder-digest\/scan$/.test(response.url()),
+    { timeout: 60000 }
+  );
   await chooser.getByRole('button', { name: chip, exact: true }).click();
+  await scanned;
   await card.waitFor({ state: 'visible', timeout: 30000 });
   await page.locator('#personalAssistantFolderOfferHeadline').waitFor({ state: 'visible' });
   await card.scrollIntoViewIfNeeded();
@@ -170,7 +190,11 @@ async function recognize() {
     buttons: await buttons()
   };
   console.log('choice:', JSON.stringify(choice));
-  expect(/holds 2 software projects/.test(choice.headline), `no choice: ${choice.headline}`);
+  // With the Ori seed, a sibling worktree of the Documents checkout sits here too.
+  expect(
+    new RegExp(`holds ${isOri ? 3 : 2} software projects`).test(choice.headline),
+    `no choice: ${choice.headline}`
+  );
   expect(
     !choice.buttons.some(label => /^(Set up|Review setup)/.test(label)),
     `an action was offered before a choice: ${choice.buttons}`
@@ -392,6 +416,211 @@ async function reviewPhase() {
   }
 }
 
+// The run pop-up: what it says, its steps, its receipt, and its buttons.
+const runModal = page.locator('#folderSetupRunModal');
+async function runModalState() {
+  return {
+    eyebrow: await text('#folderSetupRunEyebrow'),
+    title: await text('#folderSetupRunTitle'),
+    status: await text('#folderSetupRunStatus'),
+    count: await text('#folderSetupRunCount'),
+    steps: await page.locator('#folderSetupRunSteps li').allInnerTexts(),
+    receipt: await page.locator('#folderSetupRunReceipt li').allInnerTexts(),
+    buttons: await page.locator('#folderSetupRunActions').locator('button, a').allInnerTexts()
+  };
+}
+async function developmentAssistants() {
+  const listed = await api('GET', '/api/agents');
+  const agents = Array.isArray(listed) ? listed : listed.agents || listed.data || [];
+  return agents.filter(
+    agent => (typeof agent === 'string' ? agent : agent?.name) === 'Development Assistant'
+  ).length;
+}
+
+async function setupPhase(before) {
+  // 9. Set up with no model chosen. The run pauses before it creates anything
+  //    and says what it needs.
+  await show('Documents');
+  await review();
+  const reviewed = await list('#personalAssistantFolderPlan');
+  expect(reviewed.length === 5, `no plan to confirm: ${reviewed}`);
+  expect(/has no model yet/.test(reviewed[2]), `the plan hides the missing model: ${reviewed[2]}`);
+  expect((await buttons())[0] === 'Set up', `first action: ${await buttons()}`);
+  await press('Set up');
+  await runModal.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(
+    () => /needs you/.test(document.getElementById('folderSetupRunTitle')?.textContent || ''),
+    null,
+    { timeout: 30000 }
+  );
+  const paused = await runModalState();
+  console.log('paused setup:', JSON.stringify(paused, null, 1));
+  expect(/^0 of 5 steps finished/.test(paused.count), `steps finished: ${paused.count}`);
+  expect(/has no model yet/.test(paused.status), `no reason given: ${paused.status}`);
+  expect(
+    paused.buttons.join(',') === 'Set up a model,Continue',
+    `paused actions: ${paused.buttons}`
+  );
+  expect((await workspaceCount()) === before.workspaces, 'a paused setup created a workspace');
+  expect((await developmentAssistants()) === 0, 'a paused setup created the assistant');
+  await shot('20-setup-paused-for-a-model');
+  writeFileSync(
+    carried,
+    JSON.stringify({
+      hashes: before.hashes,
+      workspaces: before.workspaces,
+      offer: (await currentOffer())?.id
+    }),
+    { mode: 0o600 }
+  );
+}
+
+async function resumePhase(untouched) {
+  expect(existsSync(carried), `run the setup phase first: ${carried} is missing`);
+  const before = JSON.parse(readFileSync(carried, 'utf8'));
+
+  // 10. The server was restarted. The paused setup is still on Home.
+  await comeBack();
+  const afterRestart = {
+    headline: await text('#personalAssistantFolderOfferHeadline'),
+    question: await text('#personalAssistantFolderOfferQuestion'),
+    buttons: await buttons()
+  };
+  console.log('after a restart:', JSON.stringify(afterRestart));
+  expect((await currentOffer())?.id === before.offer, 'the paused offer was replaced');
+  expect(
+    /has no model yet/.test(afterRestart.question),
+    `the pause was lost: ${afterRestart.question}`
+  );
+  expect(
+    afterRestart.buttons.join(',') === 'Set up a model,Continue',
+    `actions after a restart: ${afterRestart.buttons}`
+  );
+  expect((await workspaceCount()) === before.workspaces, 'a restart created a workspace');
+  await shot('21-paused-setup-after-restart');
+
+  // 11. Choose a model the way Settings does, then Continue.
+  const configured = await context.request.post('/api/settings/system-model', {
+    data: { provider: 'codex', model: 'gpt-5.6-luna' }
+  });
+  expect(configured.ok(), `no model provider in this sandbox (${configured.status()})`);
+  await press('Continue');
+  await runModal.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(
+    () => /is ready/.test(document.getElementById('folderSetupRunTitle')?.textContent || ''),
+    null,
+    { timeout: 60000 }
+  );
+  const done = await runModalState();
+  console.log('finished setup:', JSON.stringify(done, null, 1));
+  // A finished setup ends on its receipt, read back from what was saved; the
+  // run's own step list is gone with the run.
+  expect(done.eyebrow === 'ALL SET', `the pop-up did not end on done: ${done.eyebrow}`);
+  expect(
+    /Nothing in the project was run or changed/.test(done.status),
+    `the receipt's summary: ${done.status}`
+  );
+  const receipt = done.receipt.join(' | ').replace(/\n/g, ' ');
+  for (const wanted of [
+    new RegExp(`${projectName} \\(created\\)`),
+    /linked where it is, read-only/,
+    /Code Project \(planning first; approved work waits for you/,
+    /Development Assistant \(development assistant, added\)/,
+    // The assessment waits: it is startable on a click, or it says why not.
+    /Assess this project and suggest a first task \((Cannot start here yet|Needs a model before it can start|Starts when you press [^)]*)\)/
+  ])
+    expect(wanted.test(receipt), `receipt lacks ${wanted}: ${receipt}`);
+  expect(!/Ready to start/.test(receipt), `the receipt promises a start: ${receipt}`);
+  expect(
+    (await workspaceCount()) === before.workspaces + 1,
+    'the setup did not make one workspace'
+  );
+  expect((await developmentAssistants()) === 1, 'the setup did not make exactly one assistant');
+  await shot('22-setup-receipt');
+
+  // 12. The card afterwards: the same receipt, and an assessment that waits.
+  await page.locator('#folderSetupRunModal .btn-close').click();
+  await runModal.waitFor({ state: 'hidden' });
+  await card.scrollIntoViewIfNeeded();
+  const resolved = await currentOffer();
+  console.log('first assessment:', JSON.stringify(resolved?.first_task));
+  expect(resolved?.status === 'resolved', `the offer is ${resolved?.status}`);
+  expect(resolved?.first_task?.state === 'seeded', 'the assessment was started by setup');
+  await shot('23-card-receipt');
+
+  // 13. The same folder shown again opens that workspace; nothing new is offered.
+  await show('Documents');
+  const again = {
+    headline: await text('#personalAssistantFolderOfferHeadline'),
+    question: await text('#personalAssistantFolderOfferQuestion'),
+    buttons: await buttons()
+  };
+  console.log('same folder again:', JSON.stringify(again));
+  expect(
+    /already has a workspace/.test(again.headline),
+    `not recognized as set up: ${again.headline}`
+  );
+  expect(again.buttons[0] === `Open ${projectName}`, `first action: ${again.buttons}`);
+  expect(
+    !again.buttons.some(label => /^(Set up|Review setup)/.test(label)),
+    `a second setup was offered: ${again.buttons}`
+  );
+  await shot('24-same-folder-again');
+
+  // 14. A sibling worktree of the same repository is another folder: it is not
+  //     the workspace above, and its review plans a workspace of its own.
+  if (isOri) {
+    await show('Desktop');
+    await card.getByRole('button', { name: /^ori-agent-hotfix/ }).click();
+    await page.waitForFunction(() =>
+      /ori-agent-hotfix looks like/.test(
+        document.getElementById('personalAssistantFolderOfferHeadline')?.textContent || ''
+      )
+    );
+    expect(
+      !/already has a workspace/.test(await text('#personalAssistantFolderOfferHeadline')),
+      'a sibling worktree was taken for the first checkout'
+    );
+    await review();
+    const sibling = {
+      evidence: await list('#personalAssistantFolderEvidence'),
+      plan: await list('#personalAssistantFolderPlan')
+    };
+    console.log('sibling worktree:', JSON.stringify([sibling.plan[0], sibling.plan[2]]));
+    expect(
+      /Creates a Code project workspace named ori-agent-hotfix/.test(sibling.plan[0]),
+      `the sibling's plan: ${sibling.plan[0]}`
+    );
+    // The assistant made for the first project is saved now, so the sibling
+    // would use it as it is rather than make a second one.
+    expect(
+      /Uses your saved agent Development Assistant/.test(sibling.plan[2]),
+      `the sibling's assistant: ${sibling.plan[2]}`
+    );
+    expect(
+      sibling.evidence.some(line =>
+        /branch hotfix\/demo.*github\.com\/johnjallday\/ori-agent\.git/.test(line)
+      ),
+      `the sibling's own branch was not read: ${sibling.evidence}`
+    );
+    await shot('25-sibling-worktree-is-its-own-project');
+  } else {
+    console.log('sibling worktree NOT SHOWN: seed with --ori to include one');
+  }
+
+  expect(
+    (await workspaceCount()) === before.workspaces + 1,
+    'showing folders again changed the workspaces'
+  );
+  expect((await developmentAssistants()) === 1, 'a second assistant appeared');
+  expect(
+    JSON.stringify(hashes(untouched)) === JSON.stringify(before.hashes),
+    'a seeded folder changed during setup'
+  );
+  expect(errors.length === 0, `page errors: ${errors.join('; ')}`);
+  console.log('OK (resume): one workspace, one assistant, folders unchanged, no page errors');
+}
+
 try {
   await api('POST', '/api/onboarding/skip');
   await api('POST', '/api/settings/workspace-root', { workspace_root: '' });
@@ -413,19 +642,27 @@ try {
     });
   }
   const untouched = ['documents', 'api', 'site'];
-  const before = { hashes: hashes(untouched), workspaces: await workspaceCount() };
+  if (phase === 'resume') {
+    await resumePhase(untouched);
+  } else {
+    const before = { hashes: hashes(untouched), workspaces: await workspaceCount() };
 
-  await recognize();
-  expect((await workspaceCount()) === before.workspaces, 'showing folders created a workspace');
-  if (phase === 'review') await reviewPhase();
+    await recognize();
+    expect((await workspaceCount()) === before.workspaces, 'showing folders created a workspace');
+    if (phase === 'review') await reviewPhase();
+    if (phase === 'setup') await setupPhase(before);
 
-  expect((await workspaceCount()) === before.workspaces, 'a review created a workspace');
-  expect(
-    JSON.stringify(hashes(untouched)) === JSON.stringify(before.hashes),
-    'a seeded folder changed during the demo'
-  );
-  expect(errors.length === 0, `page errors: ${errors.join('; ')}`);
-  console.log(`OK (${phase}): folders unchanged, no workspace created, no page errors`);
+    expect(
+      (await workspaceCount()) === before.workspaces,
+      'a review or a paused setup created a workspace'
+    );
+    expect(
+      JSON.stringify(hashes(untouched)) === JSON.stringify(before.hashes),
+      'a seeded folder changed during the demo'
+    );
+    expect(errors.length === 0, `page errors: ${errors.join('; ')}`);
+    console.log(`OK (${phase}): folders unchanged, no workspace created, no page errors`);
+  }
 } finally {
   await browser.close();
 }

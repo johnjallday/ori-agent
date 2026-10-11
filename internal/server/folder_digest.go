@@ -28,6 +28,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		return
 	}
 	store := personalassistant.NewFolderDigestStore(knowledge)
+	setupHost := &folderSetupHost{builder: b}
 	service := personalassistant.NewFolderDigestService(store, personalassistant.FolderDigestDeps{
 		ValidateRoot: validateShownFolder,
 		Picker:       nativeFolderPicker{},
@@ -48,6 +49,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 			return softwareExistingProjects(b.workspaceFileStore, userID, folderPath, identity)
 		},
 		InspectSoftware: inspectSoftwareProject,
+		SoftwareProject: setupHost.softwareProject,
 		LegacyDeclined: func(ctx context.Context, userID, domain string) (bool, error) {
 			if b.personalAssistantStore == nil || domain != "music_production" {
 				return false, nil
@@ -72,7 +74,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		Tidier:      b.newFolderTidyRunner(),
 		Journey:     folderJourneyVerifier{builder: b},
 		HomeJourney: folderHomeVerifier{builder: b},
-		Setup:       &folderSetupHost{builder: b},
+		Setup:       setupHost,
 		FirstTask:   folderFirstTaskSeeder{builder: b},
 		// Read at call time: the session handler and the assistant's model
 		// reading are both wired in other phases.
@@ -181,6 +183,29 @@ type folderWorkspaceLinker struct {
 }
 
 func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassistant.FolderLinkRequest) (personalassistant.FolderLinkResult, error) {
+	return l.link(ctx, req, folderLinkOptions{})
+}
+
+// folderLinkOptions adapt the one linking path to a caller that has proved more
+// than the default caller has, and wants more recorded.
+type folderLinkOptions struct {
+	// reviewedWorkspace says the caller has verified this exact workspace as the
+	// one a reviewed setup names (owner, kind, and the review's own witness), so
+	// it need not be the workspace created for req.OfferID. Its recorded offer id
+	// is left as it is.
+	reviewedWorkspace bool
+	// record, when set, writes more shared data in the same save as the link: it
+	// is given the workspace's shared data and the linked directory's id and
+	// returns the shared data to store. It is applied to workspace.json and to
+	// the session row alike, and again on a replay, so it must be idempotent. A
+	// failure to store either copy fails the link, because a session row without
+	// what was recorded would later overwrite the workspace.json that has it.
+	record func(shared map[string]any, directoryID string) (map[string]any, error)
+	// noFirstTask leaves the first task to the caller.
+	noFirstTask bool
+}
+
+func (l folderWorkspaceLinker) link(ctx context.Context, req personalassistant.FolderLinkRequest, opts folderLinkOptions) (personalassistant.FolderLinkResult, error) {
 	if l.files == nil || l.sessions == nil {
 		return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderOutcomeUnavailable
 	}
@@ -193,7 +218,7 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 	if (ws.OwnerUserID != "" && ws.OwnerUserID != req.UserID) || ws.IsGroup() {
 		return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderWorkspaceRefused
 	}
-	if recorded, _ := ws.SharedData[projecttemplates.FolderOfferIDKey].(string); strings.TrimSpace(recorded) != req.OfferID {
+	if recorded, _ := ws.SharedData[projecttemplates.FolderOfferIDKey].(string); !opts.reviewedWorkspace && strings.TrimSpace(recorded) != req.OfferID {
 		return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderWorkspaceRefused
 	}
 	folderWS, err := l.files.Get(req.WorkspaceID)
@@ -201,6 +226,7 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 		return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderWorkspaceNotFound
 	}
 	route := "/workspaces/" + ws.FolderSlug
+	firstTask := func() bool { return !opts.noFirstTask && l.seedShownFolderTask(folderWS, req) }
 
 	// A workspace that already has a primary directory is linked only if
 	// that directory is this same folder (a replayed resolve) or a scaffold
@@ -208,14 +234,15 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 	// folder supersedes: the user already has the manuscript. A primary that
 	// points at some other outside folder means this workspace was linked to
 	// something else, and is refused.
+	dirID := ""
 	if existing, _ := folderWS.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string); strings.TrimSpace(existing) != "" {
 		ref, err := folderWS.GetDirectoryReference(existing)
 		switch {
 		case err == nil && ref != nil && filepath.Clean(ref.Path) == filepath.Clean(req.Path):
-			return personalassistant.FolderLinkResult{
-				Route: route, DirectoryID: existing,
-				FirstTaskSeeded: l.seedShownFolderTask(folderWS, req),
-			}, nil
+			if opts.record == nil {
+				return personalassistant.FolderLinkResult{Route: route, DirectoryID: existing, FirstTaskSeeded: firstTask()}, nil
+			}
+			dirID = existing // already linked; what is recorded is stored again
 		case err != nil || ref == nil:
 			// A dangling primary id; the shown folder takes over.
 		case l.insideWorkspaceFolder(req.WorkspaceID, ref.Path):
@@ -225,10 +252,20 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 		}
 	}
 
-	dirID, err := projecttemplates.AttachLinkedDirectory(folderWS, req.Name, req.Path)
-	if err != nil {
-		logger.Warn("Failed to link shown folder", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
-		return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderOutcomeUnavailable
+	if dirID == "" {
+		dirID, err = projecttemplates.AttachLinkedDirectory(folderWS, req.Name, req.Path)
+		if err != nil {
+			logger.Warn("Failed to link shown folder", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
+			return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
+	}
+	if opts.record != nil {
+		recorded, err := opts.record(folderWS.SharedData, dirID)
+		if err != nil {
+			logger.Warn("Failed to record a linked folder's setup", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
+			return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
+		folderWS.SharedData = recorded
 	}
 	now := time.Now()
 	folderWS.UpdatedAt = now
@@ -242,16 +279,26 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 		ws.SharedData = make(map[string]any)
 	}
 	projecttemplates.SetPrimaryDirectoryID(ws.SharedData, dirID)
+	if opts.record != nil {
+		recorded, err := opts.record(ws.SharedData, dirID)
+		if err != nil {
+			return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
+		ws.SharedData = recorded
+	}
 	if refs, err := json.Marshal(folderWS.DirectoryReferences); err == nil {
 		ws.DirectoryReferencesJSON = refs
 	}
 	ws.UpdatedAt = now
 	if err := l.sessions.UpdateWorkspace(ctx, ws); err != nil {
 		logger.Warn("Failed to sync workspace metadata after linking a folder", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
+		if opts.record != nil {
+			return personalassistant.FolderLinkResult{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
 	}
 
 	result := personalassistant.FolderLinkResult{Route: route, DirectoryID: dirID}
-	result.FirstTaskSeeded = l.seedShownFolderTask(folderWS, req)
+	result.FirstTaskSeeded = firstTask()
 	logger.Debug("Linked shown folder to workspace", logger.Fields{"workspace_id": req.WorkspaceID, "directory_id": dirID, "shape": string(req.Shape)})
 	return result, nil
 }

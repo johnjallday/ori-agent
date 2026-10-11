@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/testutil/softwarefixture"
 )
 
 // fakeSoftwareSetup stands in for the host's built-in software recipe. Its
@@ -60,11 +61,12 @@ func (f *fakeSoftwareSetup) Plan(_ context.Context, req FolderSetupRequest) (Fol
 		SubjectKey: req.Offer.Subject.Key, SubjectIdentity: req.Software.Identity,
 		Assistant: assistant, AssistantAction: FolderSoftwareCreate, Model: f.model, RosterRevision: "roster-" + f.model,
 		Assessment: FolderSoftwareSeed, EvidenceRevision: review.EvidenceRevision,
-		Scope: FolderSoftwareScopeReadOnly, Planning: true,
+		Scope: FolderSoftwareScopeReadOnly, Planning: true, Workflow: "software_project/planner/step_through/documents_in_ori",
 	}
 	workspace := "Creates a Code project workspace named " + name
 	if len(req.Software.Existing) == 1 {
 		intent.Outcome, intent.WorkspaceID, intent.Template, intent.TemplateRevision = FolderSoftwareReuse, req.Software.Existing[0].WorkspaceID, "", ""
+		intent.Workflow = FolderSoftwareKeep
 		workspace = "Uses your existing workspace " + req.Software.Existing[0].Name
 	}
 	plan := NewFolderSetupPlan([]FolderPlanLine{
@@ -451,6 +453,113 @@ func TestFolderSoftwareSetup_AnUnverifiedRunDoesNotResolveTheOffer(t *testing.T)
 		// One inspection for the review and one for the first Set up; a resumed
 		// run is held to the plan it was confirmed on and reads nothing again.
 		t.Fatalf("resumed run: runs=%d inspections=%d", s2.setup.runCount(), len(s2.inspected))
+	}
+}
+
+// A setup that stopped because what is saved no longer matches the review is
+// not resumed on that review. Reviewing again puts the stopped run aside and
+// draws a new plan, which needs its own confirmation before anything runs.
+func TestFolderSoftwareSetup_AStoppedSetupCanBeReviewedAgainAndNeedsANewConfirmation(t *testing.T) {
+	s := newSoftwareFixture(t)
+	ctx := context.Background()
+	s.setup.set(func(f *fakeSoftwareSetup) {
+		f.finish = func() FolderSetupUpdate {
+			return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopPlanChanged}
+		}
+	})
+	view := s.pick(t, s.set.GoNode)
+	reviewed := s.review(t, view.ID)
+	s.setUp(t, reviewed)
+	stopped := s.stored(t, view.ID)
+	if stopped.Status != FolderOfferAwaitingOutcome || stopped.Setup == nil || stopped.Setup.StopReason != FolderStopPlanChanged {
+		t.Fatalf("stopped = %s %+v", stopped.Status, stopped.Setup)
+	}
+	current, err := s.service.CurrentOffer(ctx, "local", view.ID)
+	if err != nil || current.Offer == nil {
+		t.Fatalf("read the stopped offer: %v", err)
+	}
+	if shown := current.Offer; shown.Plan != nil || shown.Setup == nil || shown.Setup.StopReason != FolderStopPlanChanged {
+		t.Fatalf("a stopped run shows plan=%v setup=%+v", shown.Plan, shown.Setup)
+	}
+
+	// Names are not adjusted on a run that stopped; it has to be reviewed first.
+	name := "Other name"
+	if _, err := s.service.AdjustSoftware(ctx, "local", view.ID, FolderSoftwareReviewInput{RequestID: "adjust-stopped", WorkspaceName: &name}); !errors.Is(err, ErrFolderReviewRequired) {
+		t.Fatalf("adjusting a stopped setup: %v", err)
+	}
+
+	// The model changed meanwhile: the fresh plan carries it.
+	s.setup.set(func(f *fakeSoftwareSetup) { f.model, f.finish = "another-model", nil })
+	runs, inspections := s.setup.runCount(), len(s.inspected)
+	again := s.review(t, view.ID)
+	if again.Setup != nil || again.Plan == nil || again.Plan.Digest == reviewed.Plan.Digest {
+		t.Fatalf("reviewing again: setup=%+v plan=%+v", again.Setup, again.Plan)
+	}
+	if s.setup.runCount() != runs || len(s.inspected) != inspections+1 {
+		t.Fatalf("a review ran a setup or skipped the read: runs %d->%d, inspections %d->%d", runs, s.setup.runCount(), inspections, len(s.inspected))
+	}
+	if after := s.stored(t, view.ID); after.Setup != nil || after.Status != FolderOfferAwaitingOutcome {
+		t.Fatalf("after reviewing again: %s %+v", after.Status, after.Setup)
+	}
+	// The digest the stopped run was confirmed on no longer starts anything.
+	if _, err := s.service.StartSetup(ctx, "local", view.ID, FolderSetupInput{RequestID: "old-digest", PlanDigest: reviewed.Plan.Digest}); !errors.Is(err, ErrFolderPlanChanged) {
+		t.Fatalf("the old confirmation: %v", err)
+	}
+	if s.setup.runCount() != runs {
+		t.Fatal("the old confirmation started a run")
+	}
+	// The new one does, and the offer resolves.
+	if _, err := s.service.StartSetup(ctx, "local", view.ID, FolderSetupInput{RequestID: "new-digest", PlanDigest: again.Plan.Digest}); err != nil {
+		t.Fatalf("the new confirmation: %v", err)
+	}
+	waitFor(t, "the re-reviewed setup to resolve", func() bool { return s.stored(t, view.ID).Status == FolderOfferResolved })
+	if run := s.setup.lastRun(); run.Plan.Intent.Software.Model != "another-model" {
+		t.Fatalf("the run used the model of the stale review: %+v", run.Plan.Intent.Software)
+	}
+}
+
+// A paused setup is resumed only for the directory it was confirmed on. When
+// the folder is picked again after a restart the same directory carries on;
+// a different directory at that path does not, however the path reads.
+func TestFolderSoftwareSetup_AResumeIsForTheSameDirectoryOnly(t *testing.T) {
+	s := newSoftwareFixture(t)
+	ctx := context.Background()
+	s.setup.set(func(f *fakeSoftwareSetup) {
+		f.finish = func() FolderSetupUpdate {
+			return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsModel}
+		}
+	})
+	view := s.pick(t, s.set.Clone)
+	s.setUp(t, s.review(t, view.ID))
+	stopped := s.stored(t, view.ID)
+	resume := func(request string) error {
+		_, err := s.service.StartSetup(ctx, "local", view.ID, FolderSetupInput{RequestID: request, PlanDigest: stopped.Setup.PlanDigest})
+		return err
+	}
+	runs := s.setup.runCount()
+
+	// After a restart the server holds no folder for the offer.
+	s.service.mu.Lock()
+	delete(s.service.paths, view.ID)
+	s.service.mu.Unlock()
+	if err := resume("lost"); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("resuming with no folder held: %v", err)
+	}
+	// Picking the same folder again gives the paused offer its folder back.
+	again := s.pick(t, s.set.Clone)
+	if again.ID != view.ID || again.Setup == nil || again.Setup.StopReason != FolderStopNeedsModel {
+		t.Fatalf("picking the folder again: offer %s setup %+v", again.ID, again.Setup)
+	}
+
+	// The folder is deleted and another is made at the same path: not resumed.
+	if err := softwarefixture.Replace(s.set.Clone); err != nil {
+		t.Fatal(err)
+	}
+	if err := resume("replaced"); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("resuming on a replaced folder: %v", err)
+	}
+	if s.setup.runCount() != runs || s.stored(t, view.ID).Status != FolderOfferAwaitingOutcome {
+		t.Fatal("a setup ran, or the offer moved, for a folder that was lost or replaced")
 	}
 }
 

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   conversationFolderOfferView,
   folderOfferView,
+  setupModalView,
   softwareOfferView
 } from './personal-assistant-folder.js';
 
@@ -517,6 +518,138 @@ test('a reviewed project shows what was read, the whole plan, and what the setup
   // A missing model is said twice, in words, and neither place blocks the review.
   assert.equal(view.prerequisites[1].text, 'No model yet.');
   assert.equal(view.prerequisites[1].source, "Ori's system model setting");
+});
+
+// A confirmed setup, as the server sends it while it runs or after it stopped.
+const runningOffer = (setup = {}, overrides = {}) => {
+  const reviewed = reviewedOffer();
+  return {
+    ...reviewed,
+    status: 'awaiting_outcome',
+    decision: 'yes',
+    choice: 'project',
+    plan: undefined,
+    setup: {
+      plan_digest: 'd'.repeat(64),
+      status: 'running',
+      lines: reviewed.plan.lines.map((line, index) => ({
+        ...line,
+        state: index === 0 ? 'done' : index === 1 ? 'working' : 'waiting'
+      })),
+      ...setup
+    },
+    ...overrides
+  };
+};
+
+test('a running setup shows its steps and offers nothing to press', () => {
+  const view = folderOfferView(runningOffer());
+  assert.equal(headlineText(view), 'Setting up widget.');
+  assert.equal(view.setup.status, 'running');
+  assert.equal(view.setup.statusLine, 'Working on: Links widget where it is');
+  assert.deepEqual(
+    view.setup.lines.map(line => line.state),
+    ['done', 'working', 'waiting', 'waiting', 'waiting']
+  );
+  assert.deepEqual(view.actions, []);
+  assert.equal(view.plan, null);
+  assert.deepEqual(view.evidence, []);
+});
+
+test('a setup that stopped says what is kept and offers the repair for that stop', () => {
+  const stopped = reason =>
+    folderOfferView(runningOffer({ status: 'stopped', stop_reason: reason }));
+
+  const model = stopped('needs_model');
+  assert.match(model.question, /^1 of 5 steps finished\. The assistant has no model yet/);
+  assert.deepEqual(actionIds(model), ['model', 'retry']);
+  assert.equal(model.actions[0].href, '/settings#system-model');
+  assert.equal(model.actions[1].label, 'Continue');
+  assert.equal(model.actions[1].oneCard, true);
+
+  const changed = stopped('plan_changed');
+  assert.match(changed.question, /no longer matches what you reviewed/);
+  assert.deepEqual(actionIds(changed), ['review']);
+  assert.equal(changed.actions[0].softwareReview, true);
+  // A changed plan is never confirmed again from the card it was stopped on.
+  assert.equal(changed.actions.some(setsUp), false);
+
+  const lost = stopped('needs_pick');
+  assert.match(lost.question, /not the one you showed me/);
+  assert.deepEqual(actionIds(lost), ['repick']);
+
+  for (const reason of ['failed', 'interrupted', 'some_new_reason']) {
+    const view = stopped(reason);
+    assert.deepEqual(actionIds(view), ['retry'], reason);
+    assert.match(view.question, /kept/, reason);
+  }
+  // There is no step-by-step journey behind a software setup to continue.
+  for (const reason of ['needs_model', 'plan_changed', 'needs_pick', 'failed'])
+    assert.equal(
+      stopped(reason).actions.some(action => action.journey === true),
+      false,
+      reason
+    );
+  // The project folder is never said to have changed, and no raw code is shown.
+  assert.doesNotMatch(stopped('failed').question, /failed|needs_/);
+  // The card draws a decided offer's buttons only for one it can carry on
+  // with. Without this the repair above would be described and not offered.
+  for (const reason of ['needs_model', 'plan_changed', 'needs_pick', 'failed'])
+    assert.equal(stopped(reason).resume, true, reason);
+});
+
+test('a plan drawn again after a stop is confirmed or left, never declined', () => {
+  const again = folderOfferView({
+    ...reviewedOffer(),
+    status: 'awaiting_outcome',
+    decision: 'yes',
+    choice: 'project'
+  });
+  assert.equal(headlineText(again), 'Here is what I found in widget.');
+  assert.equal(again.plan.lines.length, 5);
+  assert.deepEqual(actionIds(again), ['setup', 'adjust', 'review']);
+  assert.equal(
+    again.actions.some(action => action.decision),
+    false
+  );
+  assert.equal(again.resume, true);
+  // An offer still waiting for its answer is not one being carried on with.
+  assert.notEqual(folderOfferView(reviewedOffer()).resume, true);
+});
+
+test('the run pop-up uses the same software wording and ends on what was saved', () => {
+  const stopped = setupModalView(runningOffer({ status: 'stopped', stop_reason: 'needs_model' }));
+  assert.equal(stopped.phase, 'stopped');
+  assert.match(stopped.status, /^The assistant has no model yet/);
+  assert.deepEqual(
+    stopped.actions.map(action => action.id),
+    ['model', 'retry']
+  );
+
+  const done = setupModalView({
+    ...reviewedOffer(),
+    status: 'resolved',
+    decision: 'yes',
+    plan: undefined,
+    outcome: {
+      kind: 'project',
+      workspace_id: 'ws-1',
+      route: '/workspaces/widget',
+      receipt: [
+        { kind: 'workspace', name: 'widget', detail: 'created' },
+        { kind: 'folder', name: 'widget', detail: 'linked where it is, read-only' },
+        { kind: 'agent', name: 'Development Assistant', detail: 'development assistant, added' },
+        { kind: 'task', name: 'Assess this project and suggest a first task', detail: 'Ready' }
+      ]
+    }
+  });
+  assert.equal(done.phase, 'done');
+  assert.equal(
+    done.status,
+    'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
+  );
+  assert.equal(done.openLabel, 'Open widget');
+  assert.equal(done.receiptRows.length, 4);
 });
 
 test('a long list of commands names the first few and counts the rest', () => {

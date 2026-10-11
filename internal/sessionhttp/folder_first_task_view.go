@@ -47,7 +47,7 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 		State: state, TaskID: task.ID, WorkspaceID: ws.ID, WorkspaceName: ws.Name,
 		WorkspaceRoute: route, TicketRoute: route + "?" + ticket.Encode(),
 		FolderName: folder, Description: task.Description,
-		StartedAt: task.StartedAt,
+		StartedAt: task.StartedAt, Recipe: agentworkspace.FirstTaskRecipe(task),
 	}
 	if assignee := strings.TrimSpace(task.To); assignee != "" && !strings.EqualFold(assignee, "unassigned") {
 		view.Agent = assignee
@@ -57,6 +57,9 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 	case personalassistant.FolderFirstTaskSeeded:
 		view.StartedAt = nil
 		view.Reason = h.folderFirstTaskBlockedReason(ctx, ws, view.Agent)
+		if view.Reason == "" && h.firstTaskRecipeBlocked(task) {
+			view.Reason = personalassistant.FolderFirstTaskReasonRecipeUnavailable
+		}
 		view.CanStart = view.Reason == ""
 	case personalassistant.FolderFirstTaskWaiting:
 		view.Reason = personalassistant.FolderFirstTaskReasonNeedsInput
@@ -68,7 +71,7 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 		view.Reason = personalassistant.FolderFirstTaskFailureReason(task)
 	}
 	view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, ws.Name)
-	view.Detail = personalassistant.FolderFirstTaskRowDetail(state, view.CanStart, task.Result)
+	view.Detail = personalassistant.FolderFirstTaskViewDetail(view, task.Result)
 	return view, true
 }
 

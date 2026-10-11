@@ -227,9 +227,9 @@ func (s *FolderDigestService) attachSoftware(ctx context.Context, userID string,
 		// Nothing is decided about any one of them yet, so no setup is offered.
 		v.CreateAvailable = false
 	}
-	// Only an offer still waiting for its answer asks which workspaces cover the
+	// Only an offer with no setup under way asks which workspaces cover the
 	// folder: that is the one moment the answer changes what the card offers.
-	if offer.Status == FolderOfferPending {
+	if planPending(offer) {
 		existing, err := s.softwareExisting(ctx, userID, offer)
 		switch {
 		case errors.Is(err, ErrFolderPathLost):

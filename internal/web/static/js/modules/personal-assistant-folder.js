@@ -249,12 +249,45 @@ const PORTFOLIO_STOP_COPY = {
     `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to list it.`
 };
 
+// A software project's setup is the host's own: there is no step-by-step
+// journey behind it, so a stop is explained by what is saved and repaired from
+// the card itself.
+const SOFTWARE_STOP_COPY = {
+  plan_changed:
+    'What is saved no longer matches what you reviewed, so I stopped before going further. Anything that finished is kept. Review the setup again to carry on.',
+  needs_pick: subject =>
+    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  needs_model:
+    'The assistant has no model yet, so setup paused. Choose a model, then continue; nothing is lost.',
+  interrupted:
+    'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
+  failed:
+    'A step did not finish. What finished is kept and nothing in the project folder was changed; Try again carries on from there.'
+};
+
 const CONTINUE_SETUP = {
   id: 'resume',
   label: 'Continue setup',
   style: 'outline',
   journey: true
 };
+
+function softwareStoppedActions(reason) {
+  const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
+  switch (reason) {
+    case 'plan_changed':
+      return [{ id: 'review', label: 'Review again', style: 'primary', softwareReview: true }];
+    case 'needs_pick':
+      return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
+    case 'needs_model':
+      return [
+        { id: 'model', label: 'Set up a model', style: 'primary', href: MODEL_SETTINGS_URL },
+        { ...retry, label: 'Continue', style: 'outline' }
+      ];
+    default:
+      return [retry];
+  }
+}
 
 function stoppedActions(reason, setup) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
@@ -297,7 +330,7 @@ function stoppedActions(reason, setup) {
 // setup: the plan lines with a state each, one status line, and — only when
 // stopped — one plain sentence saying what finished and what is needed. A raw
 // stop reason code is never shown.
-export function setupRunView(setup, subject, { portfolio = false } = {}) {
+export function setupRunView(setup, subject, { portfolio = false, software = false } = {}) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
   if (status !== 'stopped') {
@@ -315,13 +348,14 @@ export function setupRunView(setup, subject, { portfolio = false } = {}) {
   const progress = lines.length ? `${finished} of ${lines.length} steps finished. ` : '';
   let sentence =
     (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
+  if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   return {
     status,
     lines,
     statusLine: '',
     question: `${progress}${sentence}`,
-    actions: stoppedActions(reason, setup || {})
+    actions: software ? softwareStoppedActions(reason) : stoppedActions(reason, setup || {})
   };
 }
 
@@ -342,7 +376,11 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   if (!offer.setup && !receipt.visible) return { visible: false };
   const folder = String(offer.folder || '').trim() || 'this project';
   const subject = String(offer.subject?.name || '').trim() || folder;
-  const run = setupRunView(offer.setup, subject, { portfolio: Boolean(offer.portfolio) });
+  const software = Boolean(offer.software);
+  const run = setupRunView(offer.setup, subject, {
+    portfolio: Boolean(offer.portfolio),
+    software
+  });
   const steps = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
@@ -361,7 +399,9 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
       status: receipt.home
         ? 'Here is what I set up. Open a project from the library when you want to work on it.'
-        : 'Here is what I set up. The first task starts when you open the workspace.',
+        : software
+          ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
+          : 'Here is what I set up. The first task starts when you open the workspace.',
       count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
       percent: 100,
       lines: settled,
@@ -601,12 +641,17 @@ export function folderOfferView(offer, options = {}) {
     };
   }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
-  if (view.visible && status === 'pending' && offer.software)
-    return softwareOfferView(
+  if (view.visible && offer.software && (status === 'pending' || status === 'awaiting_outcome')) {
+    const software = softwareOfferView(
       offer,
       { ...enclosingView(offer, view), softwareAdjusting: options?.softwareAdjusting === true },
       { subject, folder }
     );
+    // A confirmed setup that has not finished still has something to press
+    // (Continue, Try again, Review again): the card draws a decided offer's
+    // actions only when it is marked as one to carry on with.
+    return status === 'awaiting_outcome' ? { ...software, resume: true } : software;
+  }
   if (view.visible && !view.decided) {
     enclosingView(offer, view);
     if (view.enclosing && !view.capabilityDetail) view.capabilityDetail = view.enclosing;
@@ -690,10 +735,32 @@ export function softwareOfferView(offer, view, { subject, folder }) {
   if (!offer?.software || typeof offer.software !== 'object') return view;
   const software = offer.software;
   const enclosing = view.enclosing || '';
-  const decline = [
-    { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
-    { id: 'later', label: 'Later', style: 'link', decision: 'later' }
-  ];
+  // A setup that is running, or stopped, is shown as its run: the lines with a
+  // state each, and what the user can do about a stop.
+  if (offer.setup && typeof offer.setup === 'object') {
+    const run = setupRunView(offer.setup, subject, { software: true });
+    return {
+      ...view,
+      confirming: false,
+      headline: segments(['Setting up ', { text: subject }, '.']),
+      question: run.question,
+      reason: '',
+      capabilityDetail: '',
+      evidence: [],
+      prerequisites: [],
+      plan: null,
+      setup: run,
+      actions: run.actions
+    };
+  }
+  // The yes has been given once a setup was confirmed; a plan drawn again after
+  // a stop is confirmed or left, not declined.
+  const decline = view.decided
+    ? []
+    : [
+        { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
+        { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+      ];
   const candidates = (Array.isArray(software.candidates) ? software.candidates : []).filter(
     candidate =>
       candidate && String(candidate.id || '').trim() && String(candidate.name || '').trim()

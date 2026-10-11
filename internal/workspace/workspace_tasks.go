@@ -42,6 +42,7 @@ func (w *Workspace) AddTasks(tasks []Task) error {
 			t.CreatedAt = now
 		}
 		t.WorkspaceID = w.ID
+		t.Context = withoutReservedTaskContext(t.Context)
 
 		w.Tasks = append(w.Tasks, t)
 		w.taskIndex[t.ID] = len(w.Tasks) - 1
@@ -83,6 +84,7 @@ func (w *Workspace) AddTask(task Task) error {
 
 	// Ensure workspace ID matches
 	task.WorkspaceID = w.ID
+	task.Context = withoutReservedTaskContext(task.Context)
 
 	w.Tasks = append(w.Tasks, task)
 	// Update task index for O(1) lookups

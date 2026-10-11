@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/testutil/softwarefixture"
 )
@@ -20,6 +22,9 @@ type softwareCardFixture struct {
 	provider *capturingChatProvider
 	dir      string
 	offer    string
+	// set is every fixture; all but the one in Documents are still in staging,
+	// where no chip looks.
+	set softwarefixture.Set
 }
 
 // newSoftwareCardFixture moves one fixture into Documents and scans it. The
@@ -30,6 +35,9 @@ func newSoftwareCardFixture(t *testing.T, fixture string) *softwareCardFixture {
 	f := &softwareCardFixture{draftServerFixture: newDraftServerFixture(t), provider: &capturingChatProvider{}}
 	f.builder.llmFactory.Register("claude_code", f.provider)
 	home := os.Getenv("HOME") // sandboxed by the fixture
+	// Registered after the fixture's temporary folder, so it runs before that
+	// folder is removed.
+	t.Cleanup(func() { waitForQuietTree(home) })
 	staging := filepath.Join(home, "Staging")
 	documents := filepath.Join(home, "Documents")
 	for _, dir := range []string{staging, documents} {
@@ -42,8 +50,13 @@ func newSoftwareCardFixture(t *testing.T, fixture string) *softwareCardFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { softwarefixture.Restore(set.Unreadable) })
+	f.set = set
 	f.dir = filepath.Join(documents, fixture)
 	if err := os.Rename(filepath.Join(set.Root, fixture), f.dir); err != nil {
+		t.Fatal(err)
+	}
+	// The server holds, links and reports the canonical path.
+	if f.dir, err = filepath.EvalSymlinks(f.dir); err != nil {
 		t.Fatal(err)
 	}
 	status, body := f.call(t, http.MethodPost, softwareDigestAPI+"/scan", map[string]any{"chip": "documents"})
@@ -52,6 +65,34 @@ func newSoftwareCardFixture(t *testing.T, fixture string) *softwareCardFixture {
 	}
 	f.offer = body["offer"].(map[string]any)["id"].(string)
 	return f
+}
+
+// waitForQuietTree returns once nothing under dir has changed for a moment. A
+// finished setup still has listeners writing behind it (quests, the Home's own
+// records); the test's temporary folder must not be removed under them.
+func waitForQuietTree(dir string) {
+	snapshot := func() string {
+		var out strings.Builder
+		_ = filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info, statErr := entry.Info(); statErr == nil {
+				out.WriteString(path + "|" + info.ModTime().String() + "|" + strconv.FormatInt(info.Size(), 10) + "\n")
+			}
+			return nil
+		})
+		return out.String()
+	}
+	previous, quiet := snapshot(), 0
+	for deadline := time.Now().Add(5 * time.Second); quiet < 3 && time.Now().Before(deadline); {
+		time.Sleep(60 * time.Millisecond)
+		if current := snapshot(); current == previous {
+			quiet++
+		} else {
+			previous, quiet = current, 0
+		}
+	}
 }
 
 func (f *softwareCardFixture) post(t *testing.T, action string, body map[string]any) (int, map[string]any) {
@@ -195,13 +236,14 @@ func TestSoftwareReview_RealPlanAndPrerequisitesWithNoSideEffects(t *testing.T) 
 		prerequisite(offer, "model")["route"] != "/settings#system-model" || prerequisite(offer, "github")["route"] != "/settings#github-account" {
 		t.Fatalf("prerequisite routes or requirement: %v %v", prerequisite(offer, "model"), prerequisite(offer, "github"))
 	}
-	// This host cannot carry the plan out yet, and says so rather than offering it.
-	if software["setup_available"] != false {
+	// The production host can carry this plan out, so the card may offer it.
+	if software["setup_available"] != true {
 		t.Fatalf("setup_available = %v", software["setup_available"])
 	}
 	digest := offer["plan"].(map[string]any)["digest"].(string)
-	if status, body := f.post(t, "setup", map[string]any{"request_id": "too-early", "plan_digest": digest}); status == http.StatusOK {
-		t.Fatalf("a setup started on a host that cannot run it: %v", body)
+	// A plain yes is still refused: the setup is confirmed on its reviewed plan.
+	if status, body := f.post(t, "decide", map[string]any{"request_id": "plain-yes", "decision": "yes", "choice": "project", "create": true}); status != http.StatusConflict {
+		t.Fatalf("a plain yes on a software project: %d %v", status, body)
 	}
 
 	// Nothing was created, installed or spent, and the project is untouched.

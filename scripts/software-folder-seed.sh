@@ -16,6 +16,8 @@
 #   Documents/widget      (without --ori) one checkout holding a Go module and a
 #                         Node package: one recognized project
 #   Desktop/api, site     two separate checkouts: a choice of project
+#   Desktop/ori-agent-hotfix  (--ori) a sibling worktree of the same repository
+#                         as Documents/ori-agent: another folder, another project
 #   Downloads/scratchpad  a Node package with no Git: an unrelated project
 #
 # The fixtures come from internal/testutil/softwarefixture, the same trees the
@@ -89,6 +91,18 @@ if [[ "$with_ori" == "1" ]]; then
 	printf 'ref: refs/heads/dev\n' >"$main_git/HEAD"
 	printf '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://github.com/johnjallday/ori-agent.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' >"$main_git/config"
 	echo "DOCUMENTS_ORI=$checkout"
+
+	# A sibling worktree of the same repository, on another branch, beside the
+	# two unrelated checkouts: the same remote and history, a different folder.
+	sibling="$sandbox/Desktop/ori-agent-hotfix"
+	sibling_admin="$main_git/worktrees/ori-agent-hotfix"
+	mkdir -p "$sibling" "$sibling_admin"
+	git -C "$repo_root" archive HEAD | tar -x -C "$sibling"
+	printf 'gitdir: %s\n' "$sibling_admin" >"$sibling/.git"
+	printf 'ref: refs/heads/hotfix/demo\n' >"$sibling_admin/HEAD"
+	printf '../..\n' >"$sibling_admin/commondir"
+	printf '%s\n' "$sibling/.git" >"$sibling_admin/gitdir"
+	echo "DESKTOP_ORI_SIBLING=$sibling"
 else
 	mv "$staging/widget" "$sandbox/Documents/widget"
 	echo "DOCUMENTS_WIDGET=$sandbox/Documents/widget"

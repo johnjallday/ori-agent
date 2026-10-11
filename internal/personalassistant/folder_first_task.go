@@ -31,6 +31,15 @@ const (
 	FolderFirstTaskExcerptMax = 280
 )
 
+// FolderSoftwareAssessmentTask is the first task a software project's setup
+// seeds: what the ticket says before it is started. The task runs under a host
+// recipe, which gives the model what a bounded inspection read and offers it no
+// tools; the details describe that to the person reading the ticket.
+func FolderSoftwareAssessmentTask() (description, details string) {
+	return "Assess this project and suggest a first task",
+		"A read-only first assessment from the project's own README, instructions and build files: what it is, how it is laid out, what it is built with, the build and test commands it declares, the rules it sets for contributors, what is missing, and one small next task. Nothing in the project is run or changed, and a command it lists is reported as declared, not as tested."
+}
+
 // FolderFirstTaskState is where a folder's first look stands.
 type FolderFirstTaskState string
 
@@ -61,6 +70,10 @@ const (
 	FolderFirstTaskReasonNeedsInput      = "needs_input"
 	FolderFirstTaskReasonStartFailed     = "start_failed"
 	FolderFirstTaskReasonRunFailed       = "run_failed"
+	// FolderFirstTaskReasonRecipeUnavailable means the first task runs under a
+	// host recipe this server cannot run within its restriction. The task is
+	// not started some other way.
+	FolderFirstTaskReasonRecipeUnavailable = "assessment_unavailable"
 )
 
 // FolderFirstTaskView is a folder's first look as the browser sees it: a state,
@@ -93,6 +106,33 @@ type FolderFirstTaskView struct {
 	// Detail is what the receipt's task row says now. The receipt stored on an
 	// offer is from the moment of setup, so the card shows this instead.
 	Detail string `json:"detail,omitempty"`
+	// Recipe names the host recipe the task runs under, when it has one. The
+	// browser words such a task as what it is (an assessment) and never offers
+	// to run it any other way.
+	Recipe string `json:"recipe,omitempty"`
+}
+
+// FolderFirstTaskViewDetail is the receipt row for a first task as it stands.
+// A task under a host recipe that cannot start yet says what it is waiting
+// for: "Ready to start" there would promise a start the click cannot deliver.
+func FolderFirstTaskViewDetail(view FolderFirstTaskView, result string) string {
+	if view.Recipe != "" && view.State == FolderFirstTaskSeeded && !view.CanStart {
+		switch view.Reason {
+		case FolderFirstTaskReasonNoModel:
+			return "Needs a model before it can start"
+		case FolderFirstTaskReasonUnassigned:
+			return "Needs an assistant before it can start"
+		case FolderFirstTaskReasonLocalActivation:
+			return "Needs this workspace activated on this computer first"
+		case FolderFirstTaskReasonSetupOpen:
+			return "Waits for the workspace's own setup to finish"
+		case FolderFirstTaskReasonRecipeUnavailable:
+			return "Cannot start here yet"
+		default:
+			return "Not ready to start yet"
+		}
+	}
+	return FolderFirstTaskRowDetail(view.State, view.CanStart, result)
 }
 
 // IsFolderFirstTask reports whether a task is the first look a shown folder's
@@ -265,6 +305,8 @@ func FolderFirstTaskMessage(reason, workspaceName string) string {
 		return "The first look could not start. Try again."
 	case FolderFirstTaskReasonRunFailed:
 		return "The first look did not finish. Try again."
+	case FolderFirstTaskReasonRecipeUnavailable:
+		return "The first assessment cannot run here yet. It stays ready, and nothing is sent to a model until it can."
 	default:
 		return ""
 	}

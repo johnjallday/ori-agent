@@ -2,7 +2,7 @@
   "name": "Code Project",
   "description": "A workspace over a software project you already have. Ori links the folder where it is, reads it only when you ask, and starts with understanding and planning. Setup never writes to the folder.",
   "icon": "💻",
-  "behavior_profile": "general",
+  "behavior_profile": "software_project",
   "builtin": true,
   "builtin_version": 2,
   "tags": [

@@ -18,6 +18,7 @@ func softwareFacts() SoftwareFacts {
 			Provider: "codex", Model: "some-model", RosterRevision: "rev-roster",
 		},
 		Guides: []string{"AGENTS.md"}, EvidenceRevision: strings.Repeat("b", 32),
+		Workflow: "software_project/planner/step_through/documents_in_ori",
 	}
 }
 
@@ -76,7 +77,7 @@ func TestBuildSoftwarePlanSaysWhatItCannotPromise(t *testing.T) {
 	facts.Linked = true
 	facts.Guides = nil
 	plan := BuildSoftwarePlan(facts)
-	if got := line(plan, personalassistant.FolderPlanAgents).Detail; got != "It has no model yet, so it cannot run until you choose one." {
+	if got := line(plan, personalassistant.FolderPlanAgents).Detail; got != "It has no model yet. Setup pauses, before anything is created, for you to choose one." {
 		t.Errorf("agents detail without a model = %q", got)
 	}
 	if got := line(plan, personalassistant.FolderPlanFolder).Detail; !strings.HasSuffix(got, "other worktrees of the same repository are not included.") {
@@ -97,7 +98,7 @@ func TestBuildSoftwarePlanSaysWhatItCannotPromise(t *testing.T) {
 
 func TestBuildSoftwarePlanCompletesAnExistingWorkspaceWithoutReplacingAnything(t *testing.T) {
 	facts := softwareFacts()
-	facts.Existing = &SoftwareExisting{WorkspaceID: "ws-1", Name: "Old widget", Version: 7, EntryAgent: "Robin", HasFirstLook: true}
+	facts.Existing = &SoftwareExisting{WorkspaceID: "ws-1", Name: "Old widget", EntryAgent: "Robin", HasFirstLook: true}
 	plan := BuildSoftwarePlan(facts)
 	if got := kindsOf(plan); got != "workspace,folder,agents,mode,task" {
 		t.Fatalf("lines = %s", got)
@@ -106,6 +107,7 @@ func TestBuildSoftwarePlanCompletesAnExistingWorkspaceWithoutReplacingAnything(t
 		personalassistant.FolderPlanWorkspace: "Uses your existing workspace Old widget",
 		personalassistant.FolderPlanFolder:    "Keeps widget linked where it is",
 		personalassistant.FolderPlanAgents:    "Keeps Robin as this workspace's assistant",
+		personalassistant.FolderPlanMode:      "Keeps this workspace's settings as they are",
 		personalassistant.FolderPlanTask:      "Keeps the first look this workspace already has",
 	} {
 		if got := line(plan, kind).Name; got != want {
@@ -116,7 +118,8 @@ func TestBuildSoftwarePlanCompletesAnExistingWorkspaceWithoutReplacingAnything(t
 	if err := software.Validate(); err != nil {
 		t.Fatalf("the reuse intent is not valid: %v", err)
 	}
-	if software.Outcome != personalassistant.FolderSoftwareReuse || software.WorkspaceID != "ws-1" || software.WorkspaceVersion != 7 ||
+	if software.Outcome != personalassistant.FolderSoftwareReuse || software.WorkspaceID != "ws-1" ||
+		software.Workflow != personalassistant.FolderSoftwareKeep ||
 		software.WorkspaceName != "Old widget" || software.Template != "" || software.TemplateRevision != "" ||
 		software.Assistant != "Robin" || software.AssistantAction != personalassistant.FolderSoftwareKeep ||
 		software.Model != "" || software.RosterRevision != "" || software.Assessment != personalassistant.FolderSoftwareKeep {
@@ -124,7 +127,7 @@ func TestBuildSoftwarePlanCompletesAnExistingWorkspaceWithoutReplacingAnything(t
 	}
 
 	// A workspace with no entry agent and no first look gets both, and says so.
-	facts.Existing = &SoftwareExisting{WorkspaceID: "ws-1", Name: "Old widget", Version: 7}
+	facts.Existing = &SoftwareExisting{WorkspaceID: "ws-1", Name: "Old widget"}
 	bare := BuildSoftwarePlan(facts)
 	if got := line(bare, personalassistant.FolderPlanAgents).Name; got != "Adds one development assistant, Development Assistant" {
 		t.Errorf("agents line for a workspace with no assistant = %q", got)
@@ -144,6 +147,7 @@ func TestBuildSoftwarePlanDigestFollowsThePromiseAndNotItsStatusRows(t *testing.
 		"template revision": func(f *SoftwareFacts) { f.TemplateRevision = "rev-template-2" },
 		"directory":         func(f *SoftwareFacts) { f.SubjectIdentity = "dev:1:ino:3" },
 		"conversation":      func(f *SoftwareFacts) { f.Conversation = "conversation-2" },
+		"workflow":          func(f *SoftwareFacts) { f.Workflow = "software_project/autonomous/auto/documents_in_ori" },
 	} {
 		facts := softwareFacts()
 		change(&facts)
