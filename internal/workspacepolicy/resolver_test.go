@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/testutil/softwarefixture"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -90,9 +91,14 @@ func TestResolverReportsNoCodeRootWhenTheBoundFolderIsNotTheConfirmedOne(t *test
 			}
 		},
 		"a different directory is at that path": func(t *testing.T, dir string) {
-			if err := os.RemoveAll(dir); err != nil {
+			// The old checkout outlives the making of the new one: a
+			// filesystem that reuses a deleted directory's inode number would
+			// otherwise hand the replacement the same identity.
+			discard, err := softwarefixture.Vacate(dir)
+			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = discard() })
 			if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 				t.Fatal(err)
 			}

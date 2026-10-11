@@ -51,6 +51,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -399,11 +400,17 @@ async function reviewPhase() {
     (await list('#personalAssistantFolderPlan')).length === 5,
     'no plan for the small project'
   );
-  rmSync(folders.scratchpad, { recursive: true });
+  // The old folder is moved away and deleted only once the new one exists: a
+  // filesystem may give a new directory the inode number of one just deleted,
+  // and the replacement would then pass for the original.
+  const aside = join(sandbox, '.replaced-scratchpad');
+  rmSync(aside, { recursive: true, force: true });
+  renameSync(folders.scratchpad, aside);
   mkdirSync(folders.scratchpad, { mode: 0o750 });
   writeFileSync(join(folders.scratchpad, 'package.json'), '{ "name": "scratchpad" }\n', {
     mode: 0o600
   });
+  rmSync(aside, { recursive: true });
   await comeBack();
   const stale = {
     question: await text('#personalAssistantFolderOfferQuestion'),

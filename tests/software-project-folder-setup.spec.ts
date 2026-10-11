@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -516,9 +517,15 @@ test.describe('a fresh server', () => {
     expect(await list(page, '#personalAssistantFolderPlan')).toHaveLength(5);
 
     // The folder is replaced by another of the same name. It is not the folder
-    // that was reviewed, so its plan is gone and it has to be shown again.
-    rmSync(folders.scratchpad, { recursive: true });
+    // that was reviewed, so its plan is gone and it has to be shown again. The
+    // old folder is moved away and deleted only once the new one exists: a
+    // filesystem may give a new directory the inode number of one just
+    // deleted, and the replacement would then pass for the original.
+    const aside = join(sandbox, 'e2e-software', 'replaced-scratchpad');
+    rmSync(aside, { recursive: true, force: true });
+    renameSync(folders.scratchpad, aside);
     seedScratchpad('another-scratchpad');
+    rmSync(aside, { recursive: true });
     await comeBack(page);
     await expect(question(page)).toContainText('not the one you showed me');
     expect(await list(page, '#personalAssistantFolderPlan')).toHaveLength(0);

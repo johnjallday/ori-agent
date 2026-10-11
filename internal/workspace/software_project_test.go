@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/testutil/softwarefixture"
 )
 
 // testWitness is a stand-in directory witness: two directories are the same
@@ -146,8 +148,11 @@ func TestSoftwareProjectFolder_ResolvesTheConfirmedFolderOrNothing(t *testing.T)
 	unlinked.DirectoryReferences = nil
 	unavailable("the reference removed", unlinked, witness)
 
-	// The folder is deleted and another is made at the same path.
-	if err := os.RemoveAll(dir); err != nil {
+	// The folder is gone, and then another is made at the same path. The old
+	// one is kept until the new one exists, so the two cannot share an identity
+	// on a filesystem that reuses a deleted directory's inode number.
+	discard, err := softwarefixture.Vacate(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
 	unavailable("the folder missing", ws, witness)
@@ -155,6 +160,9 @@ func TestSoftwareProjectFolder_ResolvesTheConfirmedFolderOrNothing(t *testing.T)
 		t.Fatal(err)
 	}
 	unavailable("a different folder at the path", ws, witness)
+	if err := discard(); err != nil {
+		t.Fatal(err)
+	}
 
 	malformed := &Workspace{ID: "bad", SharedData: map[string]any{SoftwareProjectKey: "not a binding"}}
 	if folder, bound, err := SoftwareProjectFolder(malformed, witness); folder != "" || !bound || !errors.Is(err, ErrInvalidSoftwareProject) {

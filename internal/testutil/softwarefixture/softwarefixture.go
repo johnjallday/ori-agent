@@ -110,13 +110,36 @@ func Build(root string) (Set, error) {
 	return set, nil
 }
 
-// Replace removes dir and writes a Go and Node checkout in its place: the same
-// path, a different directory.
+// Replace writes a Go and Node checkout where dir was: the same path, a
+// different directory.
 func Replace(dir string) error {
-	if err := os.RemoveAll(dir); err != nil {
+	discard, err := Vacate(dir)
+	if err != nil {
 		return err
 	}
-	return writeGoNode(dir, RemoteURL)
+	if err := writeGoNode(dir, RemoteURL); err != nil {
+		return err
+	}
+	return discard()
+}
+
+// Vacate frees dir's path without deleting the directory yet: it is moved
+// aside, and the returned function deletes it. A test that needs a different
+// directory at the same path must make the new one while the old one still
+// exists. A directory is told apart by its device and inode number, and a
+// filesystem may give a new directory the number of one just deleted (ext4 and
+// tmpfs do, APFS does not), which would make the replacement indistinguishable
+// from what it replaced.
+func Vacate(dir string) (discard func() error, err error) {
+	aside, err := os.MkdirTemp(filepath.Dir(dir), ".vacated-")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Rename(dir, filepath.Join(aside, filepath.Base(dir))); err != nil {
+		_ = os.RemoveAll(aside)
+		return nil, err
+	}
+	return func() error { return os.RemoveAll(aside) }, nil
 }
 
 // Restore makes every file under dir readable again, so a test's temporary

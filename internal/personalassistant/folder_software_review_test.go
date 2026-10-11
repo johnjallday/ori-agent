@@ -670,16 +670,21 @@ func TestFolderSoftwareReview_ExistingWorkspacesDecideWhetherThereIsAPlan(t *tes
 	}
 }
 
-// softwarefixtureReplace is softwarefixture.Replace, named here so this file's
-// imports stay small.
+// softwarefixtureReplace puts a different, smaller project where dir was. Like
+// softwarefixture.Replace, it makes the new directory before the old one is
+// deleted, so the two cannot share an identity.
 func softwarefixtureReplace(dir string) error {
-	if err := os.RemoveAll(dir); err != nil {
+	discard, err := softwarefixture.Vacate(dir)
+	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module replaced\n"), 0o600)
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module replaced\n"), 0o600); err != nil {
+		return err
+	}
+	return discard()
 }
 
 // Music's one-card plans are untouched: a plan with no recipe has the digest
