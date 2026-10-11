@@ -20,6 +20,8 @@ from rc_test_report import add_report_links, build_report, report_links
 STABLE = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 RC = re.compile(r"(v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-rc\.([1-9][0-9]*)\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+HOLD = {"1", "true", "yes", "on"}
+PENDING = {"requested", "queued", "waiting", "pending", "in_progress"}
 
 
 class Refusal(Exception):
@@ -64,8 +66,23 @@ def summary(text):
 
 
 def check_hold():
-    if os.environ.get("AUTO_RELEASE_HOLD", "").lower() in {"1", "true", "yes", "on"}:
+    if os.environ.get("AUTO_RELEASE_HOLD", "").lower() in HOLD:
         raise NotReady("AUTO_RELEASE_HOLD is set")
+
+
+def hold_active():
+    """The brake as a workflow sees it: the runner's variable, or the repository variable behind it.
+
+    None when the token cannot read repository variables (a personal token
+    without Actions scope): unknown must not be reported as released.
+    """
+    if os.environ.get("AUTO_RELEASE_HOLD", "").lower() in HOLD:
+        return True
+    try:
+        variables = gh("variable", "list", "--json", "name,value")
+    except Refusal:
+        return None
+    return any(item["name"] == "AUTO_RELEASE_HOLD" and str(item["value"]).lower() in HOLD for item in variables)
 
 
 class Repository:
@@ -145,7 +162,8 @@ class Repository:
             raise Refusal(f"Multiple active candidates: {', '.join(active)}")
         return active
 
-    def successful_workflow(self, workflow, sha, branch):
+    def workflow_state(self, workflow, sha, branch):
+        """The latest push run of a workflow for this exact commit and branch/tag, or None."""
         # Match the event, exact SHA AND branch/tag. An unrelated green check or
         # an older successful attempt must not authorize this candidate.
         pages = gh("api", "--paginate", "--slurp",
@@ -155,10 +173,16 @@ class Repository:
                 if item["head_sha"] == sha and item["head_branch"] == branch
                 and item["event"] == "push"]
         if not runs:
-            raise NotReady(f"No {workflow} push run for {branch}@{sha[:7]}")
+            return None
         latest = max(runs, key=lambda item: item["id"])
-        if latest["status"] != "completed" or latest["conclusion"] != "success":
-            raise NotReady(f"{workflow} is not green for {branch}@{sha[:7]}: {latest['html_url']}")
+        return {"status": latest["status"], "conclusion": latest["conclusion"], "url": latest["html_url"]}
+
+    def successful_workflow(self, workflow, sha, branch):
+        state = self.workflow_state(workflow, sha, branch)
+        if state is None:
+            raise NotReady(f"No {workflow} push run for {branch}@{sha[:7]}")
+        if state["status"] != "completed" or state["conclusion"] != "success":
+            raise NotReady(f"{workflow} is not green for {branch}@{sha[:7]}: {state['url']}")
 
     def candidates(self, version):
         return sorted((tag for tag in self.tags if RC.fullmatch(tag)
@@ -208,6 +232,14 @@ def landed_pr(subject):
     return bool(merged) and not merged[1].startswith("release/")
 
 
+def landed(since, sha):
+    """dev's own line since the stable tag: every subject, and the ones that are landed PRs."""
+    # dev's own line holds one commit per landed PR, whichever merge button
+    # was used; a merged branch's commits sit behind the second parent.
+    subjects = git("log", "--first-parent", f"{since}..{sha}", "--format=%s").splitlines()
+    return subjects, [subject for subject in subjects if landed_pr(subject)]
+
+
 def evaluate(repo, candidate=""):
     output(ready=False)
     check_hold()
@@ -230,10 +262,7 @@ def evaluate(repo, candidate=""):
         if not repo.ancestor(repo.branches["main"], sha) or not repo.ancestor(repo.tags[latest], sha):
             summary("HOLD — merge the last release branch back into dev with a merge commit (not squash).")
             return
-        # dev's own line holds one commit per landed PR, whichever merge button
-        # was used; a merged branch's commits sit behind the second parent.
-        subjects = git("log", "--first-parent", f"{repo.tags[latest]}..{sha}", "--format=%s").splitlines()
-        prs = [subject for subject in subjects if landed_pr(subject)]
+        subjects, prs = landed(repo.tags[latest], sha)
         minimum = int(os.environ.get("RELEASE_MIN_PRS", "10"))
         if minimum < 1:
             raise Refusal("RELEASE_MIN_PRS must be positive")
@@ -443,6 +472,16 @@ def sync_pr(repo, version):
     summary(f"Merge-back PR: {url}\nAuto-merge (merge commit) is enabled; it lands once dev's checks pass. dev remains open.")
 
 
+def pending_promotion(tag):
+    """The Promote Release run for this tag still queued or awaiting approval, if any."""
+    runs = gh("run", "list", "--workflow", "promote-release.yml", "--limit", "50",
+              "--json", "status,displayTitle,url")
+    for item in runs:
+        if item["status"] in PENDING and f" {tag} " in f" {item['displayTitle']} ":
+            return item
+    return None
+
+
 def request_promotion(repo, tag):
     """Ask for the human approval once an RC has every automated check green.
 
@@ -459,10 +498,7 @@ def request_promotion(repo, tag):
         return
     # Every other promotion precondition; failing one here is a real inconsistency.
     repo.promotion(tag)
-    pending = {"requested", "queued", "waiting", "pending", "in_progress"}
-    runs = gh("run", "list", "--workflow", "promote-release.yml", "--limit", "50",
-              "--json", "status,displayTitle")
-    if any(item["status"] in pending and f" {tag} " in f" {item['displayTitle']} " for item in runs):
+    if pending_promotion(tag):
         summary(f"Promotion of {tag} is already awaiting approval.")
         return
     run("gh", "workflow", "run", "promote-release.yml", "--ref", "main",
@@ -528,6 +564,128 @@ def react(repo, workflow, event, branch, sha, conclusion):
         summary(f"Nothing to do: {workflow} on {branch}.")
 
 
+def conclusion(state):
+    """One word for a workflow_state: its conclusion, else its status, else missing."""
+    if state is None:
+        return "missing"
+    return state["conclusion"] if state["status"] == "completed" else state["status"]
+
+
+def failed(state):
+    """A finished run that did not succeed; waiting or missing runs are not failures."""
+    return state is not None and state["status"] == "completed" and state["conclusion"] != "success"
+
+
+def describe(report):
+    """One plain line: what happens next, and whether a workflow, a script or a person does it."""
+    if "problem" in report:
+        return f"Inspect by hand: {report['problem']}"
+    prefix = "HOLD is set; nothing automatic runs. " if report["hold"] else ""
+    if report["hold"] is None:
+        prefix = "Hold unknown (this token cannot read repository variables). "
+    dev, release = report["dev"], report["release"]
+    if release is None:
+        if not dev["merged_back"]:
+            where = report["merge_back_pr"] or "no PR is open"
+            return prefix + f"Merge {report['latest_stable']} back into dev with a merge commit ({where})."
+        count = f"{dev['unreleased_prs']}/{dev['minimum_prs']} PRs toward {report['next_version']}"
+        if failed(dev["ci"]):
+            # Red dev CI blocks the cut whatever the count; it is the one thing a person or ci-triage must act on.
+            return prefix + f"dev CI failed for {dev['sha'][:7]} ({dev['ci']['url']}); run ci-triage. {count}."
+        if dev["unreleased_prs"] < dev["minimum_prs"]:
+            return prefix + f"{count}; the daily gate cuts it at the minimum, or ./scripts/release.sh candidate --force."
+        if conclusion(dev["ci"]) != "success":
+            return prefix + f"dev CI is {conclusion(dev['ci'])} for {dev['sha'][:7]}; the gate waits for it."
+        return prefix + (f"Ready: the daily gate cuts {report['next_version']} from dev {dev['sha'][:7]}, "
+                         "or ./scripts/release.sh candidate.")
+    suffix = f" Sync PR waiting for green dev CI: {', '.join(release['sync_prs'])}." if release["sync_prs"] else ""
+    tag = release["latest_candidate"]
+    if not release["candidate_at_head"]:
+        if conclusion(release["ci"]) == "success":
+            return prefix + (f"{release['branch']} is green at {release['sha'][:7]} and untagged; react tags the "
+                             f"next RC, or ./scripts/release.sh candidate {release['version']}.") + suffix
+        if failed(release["ci"]):
+            return prefix + (f"{release['branch']} head {release['sha'][:7]} is untagged and its CI failed "
+                             f"({release['ci']['url']}); run ci-triage.") + suffix
+        return prefix + (f"{release['branch']} head {release['sha'][:7]} is untagged and its CI is "
+                         f"{conclusion(release['ci'])}; it is tagged once green.") + suffix
+    promotion = release["promotion"]
+    if promotion["state"] == "awaiting_approval":
+        return prefix + (f"Approve the release environment on the Promote Release run for {tag}: "
+                         f"{promotion.get('url') or 'see Actions'}.") + suffix
+    if promotion["state"] == "ready":
+        return prefix + (f"{tag} is ready: react dispatches Promote Release, or ./scripts/release.sh promote {tag}; "
+                         "then approve the release environment.") + suffix
+    return prefix + f"{tag} is not promotable yet: {promotion['reason']}" + suffix
+
+
+def status(repo):
+    """Where the lifecycle stands, as JSON for people and agents. Reads only; never a hold or refusal."""
+    latest = repo.latest_stable()
+    dev = repo.branches["dev"]
+    _, prs = landed(repo.tags[latest], dev)
+    report = {
+        "hold": hold_active(),
+        "latest_stable": latest,
+        "next_version": repo.next_version(),
+        "dev": {
+            "sha": dev,
+            "ci": repo.workflow_state("ci.yml", dev, "dev"),
+            "unreleased_prs": len(prs),
+            "minimum_prs": int(os.environ.get("RELEASE_MIN_PRS", "10")),
+            "merged_back": repo.ancestor(repo.tags[latest], dev) and repo.ancestor(repo.branches["main"], dev),
+        },
+        "merge_back_pr": None,
+        "release": None,
+    }
+    if not report["dev"]["merged_back"]:
+        open_prs = gh("pr", "list", "--state", "open", "--base", "dev", "--head", f"release/{latest}", "--json", "url")
+        report["merge_back_pr"] = open_prs[0]["url"] if open_prs else None
+    try:
+        active = repo.active()
+    except Refusal as error:
+        # The gate would refuse here; the status says why instead of hiding the rest.
+        report["problem"] = str(error)
+        active = []
+    if active:
+        version = active[0]
+        branch = f"release/{version}"
+        sha = repo.branches[branch]
+        tags = repo.candidates(version)
+        tag = tags[-1] if tags else None
+        release = {
+            "version": version, "branch": branch, "sha": sha,
+            "ci": repo.workflow_state("ci.yml", sha, branch),
+            "candidates": tags, "latest_candidate": tag,
+            "candidate_at_head": bool(tag) and repo.tags[tag] == sha,
+            "prerelease": None, "release_workflow": None, "promotion": None,
+            "sync_prs": [pr["url"] for pr in gh("pr", "list", "--state", "open", "--base", branch,
+                                                 "--json", "url,headRefName")
+                         if pr.get("headRefName", "").startswith("release-sync/")],
+        }
+        if tag:
+            try:
+                published = repo.release(tag)
+                release["prerelease"] = ("draft" if published["isDraft"]
+                                         else "published" if published["isPrerelease"] else "not_prerelease")
+            except Refusal:
+                release["prerelease"] = "missing"
+            release["release_workflow"] = repo.workflow_state("release.yml", repo.tags[tag], tag)
+            pending = pending_promotion(tag)
+            if pending:
+                release["promotion"] = {"state": "awaiting_approval", "url": pending.get("url")}
+            else:
+                try:
+                    repo.promotion(tag)
+                    release["promotion"] = {"state": "ready"}
+                except Refusal as error:
+                    release["promotion"] = {"state": "blocked", "reason": str(error)}
+        report["release"] = release
+    report["next"] = describe(report)
+    print(json.dumps(report, indent=2))
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -552,6 +710,7 @@ def main():
     react_parser = commands.add_parser("react")
     for name in ("workflow", "event", "branch", "sha", "conclusion"):
         react_parser.add_argument(f"--{name}", required=True)
+    commands.add_parser("status")
     args = parser.parse_args()
     try:
         repo = Repository()
@@ -574,6 +733,8 @@ def main():
             attach_test_report(repo, args.rc, args.previous, args.repository)
         elif args.command == "react":
             react(repo, args.workflow, args.event, args.branch, args.sha, args.conclusion)
+        elif args.command == "status":
+            status(repo)
     except NotReady as error:
         if args.command in ("evaluate", "react"):
             summary(f"HOLD — {error}")

@@ -172,7 +172,9 @@ then a `release-sync/*` PR into the release branch. `auto-release.yml` reacts to
 finished runs: it merges that sync PR once dev CI is green for the exact commit,
 re-cuts the RC when the release branch turns green, and dispatches Promote
 Release once every automated check is green. The one human step is approving
-the `release` environment review on that run.
+the `release` environment review on that run. `./scripts/release.sh status` is
+the shared read-only view of where the lifecycle stands; `docs/CI_TRIAGE.md` is
+the runbook the watcher and the local `ci-triage` agent follow for red CI.
 
 Each prerelease includes `rc-test-report-<tag>.md`. Follow
 `docs/RC_TEST_PROTOCOL.md`, leave observations NOT RUN until exercised, and share
