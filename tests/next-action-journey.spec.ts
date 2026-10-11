@@ -14,8 +14,20 @@ test('persisted attention tasks project once and open their real owner', async (
   });
   expect(response.ok()).toBe(true);
   const { folder } = await response.json();
+  const agentName = `Next-action Writer ${Date.now()}`;
+  expect(
+    (
+      await page.request.post('/api/agents', { data: { name: agentName, type: 'orchestration' } })
+    ).ok()
+  ).toBe(true);
+  expect(
+    (
+      await page.request.post(`/api/workspaces/${folder.id}/agents`, {
+        data: { agent_name: agentName }
+      })
+    ).ok()
+  ).toBe(true);
   try {
-    const taskIDs: string[] = [];
     for (const task of [
       {
         status: 'waiting_for_choice',
@@ -47,7 +59,6 @@ test('persisted attention tasks project once and open their real owner', async (
       });
       expect(created.ok(), await created.text()).toBe(true);
       const { task: record } = await created.json();
-      taskIDs.push(record.id);
       const started = await page.request.post(
         `/api/workspaces/${folder.id}/tickets/${record.id}/transition`,
         { data: { to: 'in_progress' } }
@@ -90,13 +101,46 @@ test('persisted attention tasks project once and open their real owner', async (
     await expect(page.locator('.ws-cmd-drawer')).toBeVisible();
     await expect(page.locator('.ws-cmd-drawer')).toContainText('Choose the launch outline');
     await page.screenshot({ path: testInfo.outputPath('workspace-real-attention.png') });
-    const failed = await page.request.put('/api/orchestration/tasks', {
-      data: { task_id: taskIDs[0], status: 'failed' }
-    });
-    expect(failed.ok(), await failed.text()).toBe(true);
-    await page.reload();
+    await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
+    const work = page.getByRole('region', { name: 'Next action', exact: true });
+    await expect(work).toContainText('Choose the launch outline');
+    await expect(work).toContainText('Latest result');
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: testInfo.outputPath('workspace-work-first.png') });
+    await work.getByRole('button', { name: 'Respond', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/task\/[^?]+\?return=/);
+    // Exercise the existing non-provider response: stop this synthetic task.
+    await page.getByRole('button', { name: 'Mark as Failed', exact: true }).click();
+    await expect(page.locator('#workspace-task-status')).toHaveText('Failed');
+    await page.locator('#workspace-task-backlink').click();
+    await expect(page).toHaveURL(/panel=tasks/);
     await expect(page.locator('.ws-cmd-drawer')).toContainText('Failed');
     await page.screenshot({ path: testInfo.outputPath('workspace-real-failed.png') });
+    await page.goBack();
+    await expect(page).toHaveURL(/\/task\/[^?]+\?return=/);
+    await page.goForward();
+    await expect(page.locator('.ws-cmd-drawer-preview')).toContainText('Choose the launch outline');
+    await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
+    await work.getByRole('button', { name: 'View Result', exact: true }).click();
+    const result = page.locator('#workspace-detail-task-result-modal');
+    await expect(result).toContainText('Launch checklist ready.');
+    await page.waitForTimeout(350);
+    await page.screenshot({ path: testInfo.outputPath('workspace-real-result.png') });
+    await result.locator('[data-bs-dismiss="modal"]').first().click();
+    await expect(result).toBeHidden();
+    await page.getByRole('button', { name: 'Close tasks', exact: true }).click();
+    await page.route('**/api/orchestration/tasks?workspace_id=*', route =>
+      route.fulfill({ status: 503, body: 'Injected read failure' })
+    );
+    await page.evaluate(() => (window as any).workspaceDetail.loadTasks());
+    await expect(work).toContainText('Tasks couldn’t be loaded');
+    await expect(work).not.toContainText('No open work');
+    await page.unroute('**/api/orchestration/tasks?workspace_id=*');
+    await work.getByRole('button', { name: 'Retry tasks' }).click();
+    await expect(
+      work.getByRole('button', { name: 'Review connection', exact: true })
+    ).toBeVisible();
   } finally {
     await page.request.delete(`/api/workspaces/${folder.id}`);
   }

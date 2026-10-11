@@ -1265,13 +1265,11 @@ export class WorkspaceCommandView {
     } catch (err) {
       agents = Array.isArray(ws.agent_instances) ? ws.agent_instances.length : 0;
     }
-    // Canonical "open" = pending + in-progress, matching the server-side
-    // open_task_count Map/Cards/Tree all read (see workspace.ComputeMapSummaryFields).
+    // Same actionable-task projection as ComputeMapSummaryFields. Backlog and
+    // closed history never contribute; failed attempts remain open work.
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    const openTasks = tasks.filter(t => {
-      const s = String((t && t.status) || '').toLowerCase();
-      return s === 'pending' || s === 'in_progress';
-    }).length;
+    const openTasks =
+      page.tasksLoadFailed || page.tasksLoading ? '—' : resolveTaskCounts(tasks)[FILTER.ACTIONABLE];
     const mcp = Array.isArray(ws.mcp_bindings) ? ws.mcp_bindings.length : 0;
     const skills = Array.isArray(ws.skill_bindings) ? ws.skill_bindings.length : 0;
     // "Tools" groups the capability providers (MCP + Skills + Plugins). Plugins install
@@ -1369,10 +1367,7 @@ export class WorkspaceCommandView {
   hasAttentionTasks() {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
-    return tasks.some(task => {
-      const status = String((task && task.status) || '').toLowerCase();
-      return status === 'failed' || status === 'blocked';
-    });
+    return tasks.some(task => taskMatchesFilter(task, FILTER.NEEDS_ATTENTION));
   }
 
   statBoxHTML(value, label, sectionKey, ariaLabel, extraClass = '') {
@@ -1620,9 +1615,11 @@ export class WorkspaceCommandView {
       '<a class="ws-cmd-nav-btn" href="' +
       escapeHtml(this.workspaceRoute('/canvas')) +
       '">Canvas</a>' +
-      '<a class="ws-cmd-nav-btn" href="' +
-      escapeHtml(this.workspaceRoute('/diagnostics')) +
-      '">Diagnostics</a>' +
+      (this.viewMode === 'details'
+        ? ''
+        : '<a class="ws-cmd-nav-btn" href="' +
+          escapeHtml(this.workspaceRoute('/diagnostics')) +
+          '">Diagnostics</a>') +
       '<a class="ws-cmd-nav-btn" href="' +
       escapeHtml(workflowHref) +
       '">Orchestration Skills</a>' +
@@ -1646,7 +1643,9 @@ export class WorkspaceCommandView {
       // Portability status ("Ready to move", imported/routines off) is owned by
       // workspace-continuity-status.js, which keeps its chip in this mount.
       '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
-      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
+      (this.viewMode === 'details'
+        ? ''
+        : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>') +
       '</div>' +
       this.groupTemplateStatusHTML() +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
@@ -1662,7 +1661,9 @@ export class WorkspaceCommandView {
       '">' +
       escapeHtml(descriptionText) +
       '</p>' +
-      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>' +
+      (this.viewMode === 'details'
+        ? ''
+        : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="description" aria-label="Edit workspace description and intent">Edit</button>') +
       (isLongDescription
         ? '<button type="button" class="ws-cmd-mini-btn" data-cmd-toggle-description aria-expanded="' +
           (this.identityExpanded ? 'true' : 'false') +
@@ -1676,9 +1677,11 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-tags">' +
       this.commandTagsHTML(tags) +
       '</div>' +
-      '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="tags" aria-label="Edit workspace tags">Edit</button>' +
+      (this.viewMode === 'details'
+        ? ''
+        : '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="tags" aria-label="Edit workspace tags">Edit</button>') +
       '</div>' +
-      this.identityEditorHTML(name, description) +
+      (this.viewMode === 'details' ? '' : this.identityEditorHTML(name, description)) +
       '</div>' +
       '<div class="ws-cmd-readout">' +
       this.statBoxHTML(stats.agents, 'Agents', 'agents', 'View agents') +
@@ -1980,6 +1983,138 @@ export class WorkspaceCommandView {
     return '';
   }
 
+  nextWork() {
+    const page = this.page || {};
+    if (page.tasksLoadFailed) return { state: 'unavailable' };
+    if (page.tasksLoading || page.initialListsLoaded === false || !Array.isArray(page.tasks))
+      return { state: 'loading' };
+    const tasks = this.drawerTasks();
+    const attention = tasks.filter(task => taskMatchesFilter(task, FILTER.NEEDS_ATTENTION));
+    const current = tasks.find(task => resolveTaskPresentation(task).state === 'running');
+    const result = tasks.find(
+      task => taskMatchesFilter(task, FILTER.COMPLETED) && (task.result || task.structured_result)
+    );
+    const next =
+      attention[0] ||
+      current ||
+      tasks.find(task => taskMatchesFilter(task, FILTER.ACTIONABLE)) ||
+      tasks.find(task => resolveTaskPresentation(task).isUnknown) ||
+      result;
+    return {
+      state: next ? 'work' : 'idle',
+      next,
+      current,
+      result,
+      attention: attention.length,
+      unknown: tasks.filter(task => resolveTaskPresentation(task).isUnknown).length
+    };
+  }
+
+  workActionHTML(task, label) {
+    if (!task || !String(task.id || '').trim()) return '';
+    const action = resolveTaskPresentation(task).primaryAction;
+    if (!action) return '';
+    return `<button type="button" class="ws-cmd-agent-action${label ? '' : ' is-primary'}" data-cmd-work-action="${escapeHtml(action.id)}" data-cmd-work-task="${escapeHtml(task.id)}" data-cmd-work-key="${escapeHtml(action.id + ':' + task.id)}">${escapeHtml(label || action.label)}</button>`;
+  }
+
+  renderWorkFirst() {
+    // Groups remain containers, not another task/execution owner.
+    if (this.isGroupWorkspace()) return '';
+    const view = this.nextWork();
+    const title = task =>
+      escapeHtml(task.description || task.name || task.title || 'Untitled task');
+    let body;
+    if (view.state === 'loading') body = '<p role="status">Loading workspace tasks…</p>';
+    else if (view.state === 'unavailable')
+      body =
+        '<p role="status">Tasks couldn’t be loaded. This workspace may still have work waiting.</p><button type="button" class="ws-cmd-agent-action" data-cmd-work-retry data-cmd-work-key="retry">Retry tasks</button>';
+    else if (view.state === 'idle')
+      body = '<h3>No open work</h3><p>Give your team a task to start something new.</p>';
+    else {
+      const presentation = resolveTaskPresentation(view.next);
+      body =
+        `<p class="ws-cmd-work-state">${escapeHtml(presentation.label)}${view.attention ? ` · ${view.attention} task${view.attention === 1 ? '' : 's'} needing attention` : ''}</p>` +
+        `<h3>${title(view.next)}</h3>` +
+        this.workActionHTML(view.next) +
+        (view.unknown
+          ? '<p>Some task states are unrecognized. Open Tasks to inspect them.</p>'
+          : '') +
+        '<div class="ws-cmd-work-context">' +
+        (view.current && view.current !== view.next
+          ? `<div><span>Current work</span><p>${title(view.current)}</p>${this.workActionHTML(view.current, 'Track')}</div>`
+          : '') +
+        (view.result && view.result !== view.next
+          ? `<div><span>Latest result</span><p>${title(view.result)}</p>${this.workActionHTML(view.result, 'View Result')}</div>`
+          : '') +
+        '</div>';
+    }
+    return (
+      '<section class="ws-cmd-work-first" aria-label="Next action">' +
+      '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
+      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-task-drawer data-cmd-work-key="tasks">All Tasks</button></div>' +
+      (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
+      body +
+      (view.state === 'idle' || (view.result === view.next && view.state === 'work')
+        ? '<button type="button" class="ws-cmd-agent-action" data-cmd-work-create data-cmd-work-key="create">Give Task</button>'
+        : '') +
+      '</section>'
+    );
+  }
+
+  renderWorkspaceAdmin() {
+    const ws = this.page?.workspace || {};
+    return (
+      `<details class="ws-cmd-work-admin" data-cmd-admin${this.adminExpanded || this.identityEditMode ? ' open' : ''}><summary>Workspace details &amp; settings</summary>` +
+      '<div class="ws-cmd-work-admin-actions">' +
+      ['name', 'description', 'tags']
+        .map(
+          field =>
+            `<button type="button" class="ws-cmd-agent-action" data-cmd-edit-identity="${field}">Edit workspace ${field}</button>`
+        )
+        .join('') +
+      `<a class="ws-cmd-agent-action" href="${escapeHtml(this.workspaceRoute('/diagnostics'))}">Diagnostics</a></div>` +
+      this.identityEditorHTML(String(ws.name || ''), String(ws.description || '')) +
+      '</details>'
+    );
+  }
+
+  runWorkAction(action, id, trigger) {
+    const task = this.drawerTasks().find(task => String(task.id) === String(id));
+    const currentAction = task && resolveTaskPresentation(task).primaryAction?.id;
+    this.workNotice =
+      currentAction !== action ? 'This task changed. Review its current state in Tasks.' : '';
+    this.taskDrawerSelectedId = String(id || '');
+    this.openTaskDrawer(trigger);
+    if (currentAction && currentAction === action) this.runDrawerAction(action, id);
+  }
+
+  bindWorkFirst() {
+    const root = this.container?.querySelector('.ws-cmd-work-first');
+    if (!root) return;
+    root.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      if (button.hasAttribute('data-cmd-work-retry')) {
+        void this.page?.loadTasks?.();
+        return;
+      }
+      if (button.hasAttribute('data-cmd-work-create')) {
+        this.page?.showAddTaskModal?.();
+        return;
+      }
+      if (button.hasAttribute('data-cmd-open-task-drawer')) {
+        this.openTaskDrawer(button);
+        return;
+      }
+      if (button.hasAttribute('data-cmd-work-action'))
+        this.runWorkAction(
+          button.getAttribute('data-cmd-work-action'),
+          button.getAttribute('data-cmd-work-task'),
+          button
+        );
+    });
+  }
+
   // Whether this render rebuilds a Details view that has already arrived.
   //
   // The entrance fade belongs to arriving in Details, not to each rebuild of
@@ -2014,6 +2149,12 @@ export class WorkspaceCommandView {
     // Same for a gesture inside the Detachment map: this render would move its
     // host node out from under the pointer (group-map-build FR-5).
     if (this._detachmentDragActive) return;
+    const workFocus =
+      typeof document !== 'undefined'
+        ? document.activeElement?.getAttribute?.('data-cmd-work-key')
+        : null;
+    const admin = this.container.querySelector?.('[data-cmd-admin]');
+    if (admin) this.adminExpanded = admin.open;
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
     this.rememberRailFocus();
@@ -2052,6 +2193,8 @@ export class WorkspaceCommandView {
           ? this.renderOperationsMap()
           : '<div class="ws-cmd-layout">' +
             '<main class="ws-cmd-main">' +
+            this.renderWorkFirst() +
+            this.renderWorkspaceAdmin() +
             this.renderUnstaffedBanner() +
             this.renderMissionPanel() +
             '<section class="ws-cmd-garrison">' +
@@ -2075,6 +2218,14 @@ export class WorkspaceCommandView {
       this.loadoutAddModalHTML(this.loadoutAddAgent);
 
     this.bindIdentityControls();
+    this.bindIdentityControls(this.container.querySelector('[data-cmd-admin]'));
+    this.bindWorkFirst();
+    if (workFocus) {
+      const replacement = Array.from(this.container.querySelectorAll('[data-cmd-work-key]')).find(
+        el => el.getAttribute('data-cmd-work-key') === workFocus
+      );
+      replacement?.focus({ preventScroll: true });
+    }
     this.bindBuildSummary();
     this.bindReadout();
     this.bindMissionPanel();
@@ -2155,8 +2306,7 @@ export class WorkspaceCommandView {
     }
   }
 
-  bindIdentityControls() {
-    const root = this.container && this.container.querySelector('.ws-cmd-topbar');
+  bindIdentityControls(root = this.container && this.container.querySelector('.ws-cmd-topbar')) {
     if (!root) return;
 
     root.addEventListener('click', event => {
@@ -5278,6 +5428,7 @@ export class WorkspaceCommandView {
   }
 
   openTaskDrawer(trigger) {
+    this._drawerAnnounce = '';
     this.taskDrawerTrigger = trigger || null;
     // Close the Objectives Map window so the drawer never opens beneath it (FR11).
     if (this.activeMapWindow) this.activeMapWindow = '';
@@ -5315,8 +5466,11 @@ export class WorkspaceCommandView {
     this.taskDrawerOpen = false;
     this.taskDrawerTrigger = null;
     if (this.taskDrawerEl) this.taskDrawerEl.hidden = true;
-    // Return focus to the control that opened the drawer, or its Map equivalent (FR28).
-    let target = trigger && typeof trigger.focus === 'function' ? trigger : null;
+    // Renders may have replaced the opener; never focus a detached element.
+    let target =
+      trigger && trigger.isConnected !== false && typeof trigger.focus === 'function'
+        ? trigger
+        : null;
     if (!target && this.container) {
       const fallback = this.container.querySelector('[data-cmd-open-task-drawer]');
       if (fallback && typeof fallback.focus === 'function') target = fallback;
@@ -5341,6 +5495,7 @@ export class WorkspaceCommandView {
   selectDrawerTask(taskId) {
     const id = String(taskId || '').trim();
     if (!id) return;
+    this._drawerAnnounce = '';
     this.taskDrawerSelectedId = id;
     this.renderTaskDrawerBody();
     this.syncURLState();
@@ -5373,6 +5528,10 @@ export class WorkspaceCommandView {
         if (typeof this.openTaskComposer === 'function') this.openTaskComposer();
         return;
       }
+      if (event.target.closest('[data-cmd-drawer-retry]')) {
+        void this.page?.loadTasks?.();
+        return;
+      }
       const filterBtn = event.target.closest('[data-cmd-drawer-filter]');
       if (filterBtn) {
         this.setDrawerFilter(filterBtn.getAttribute('data-cmd-drawer-filter'));
@@ -5397,8 +5556,22 @@ export class WorkspaceCommandView {
   // If the selected task vanished on a live refresh (deleted/became unavailable),
   // announce it and pick the next task by deterministic order (FR27).
   reconcileDrawerSelection() {
-    this._drawerAnnounce = '';
-    if (!this.taskDrawerSelectedId) return;
+    this._drawerAnnounce ||= '';
+    if (
+      this.page?.tasksLoading ||
+      this.page?.tasksLoadFailed ||
+      this.page?.initialListsLoaded === false
+    )
+      return;
+    if (!this.taskDrawerSelectedId) {
+      // Summary-only links can arrive before tasks. Select once data lands,
+      // without moving focus or overriding an explicit selection.
+      if (this.taskDrawerOpen) {
+        const first = this.drawerFilteredTasks()[0];
+        if (first) this.taskDrawerSelectedId = String(first.id || '');
+      }
+      return;
+    }
     const stillHere = this.drawerTasks().some(
       t => String(t.id || '') === this.taskDrawerSelectedId
     );
@@ -5415,9 +5588,31 @@ export class WorkspaceCommandView {
     // Preserve list scroll across body repaints (live refresh — FR25).
     const prevList = el.querySelector('.ws-cmd-drawer-list');
     const prevScroll = prevList ? prevList.scrollTop : 0;
+    const focusAttrs = [
+      'data-cmd-drawer-select',
+      'data-cmd-drawer-filter',
+      'data-cmd-drawer-action',
+      'data-cmd-drawer-task',
+      'data-cmd-drawer-retry'
+    ];
+    const focused =
+      typeof document !== 'undefined' && el.contains?.(document.activeElement)
+        ? document.activeElement
+        : null;
+    const focusKey = focused
+      ? focusAttrs
+          .filter(attr => focused.hasAttribute?.(attr))
+          .map(attr => [attr, focused.getAttribute(attr)])
+      : [];
     el.innerHTML = this.taskDrawerHTML();
     const nextList = el.querySelector('.ws-cmd-drawer-list');
     if (nextList) nextList.scrollTop = prevScroll;
+    if (focusKey.length) {
+      const replacement = Array.from(el.querySelectorAll('button')).find(button =>
+        focusKey.every(([attr, value]) => button.getAttribute(attr) === value)
+      );
+      (replacement || el.querySelector('.ws-cmd-drawer-title'))?.focus({ preventScroll: true });
+    }
   }
 
   taskDrawerHTML() {
@@ -5431,7 +5626,8 @@ export class WorkspaceCommandView {
     ]
       .map(f => {
         const active = this.taskDrawerFilter === f.key;
-        const count = counts[f.key] || 0;
+        const count =
+          this.page?.tasksLoading || this.page?.tasksLoadFailed ? '—' : counts[f.key] || 0;
         return (
           '<button type="button" class="ws-cmd-drawer-filter' +
           (active ? ' is-active' : '') +
@@ -5471,6 +5667,9 @@ export class WorkspaceCommandView {
   }
 
   drawerListHTML() {
+    if (this.page?.tasksLoading) return '<p role="status">Loading tasks…</p>';
+    if (this.page?.tasksLoadFailed)
+      return '<div class="ws-cmd-drawer-empty"><strong>Tasks unavailable</strong><button type="button" class="ws-cmd-drawer-action" data-cmd-drawer-retry>Retry tasks</button></div>';
     const tasks = this.drawerFilteredTasks();
     if (!tasks.length) {
       return (
@@ -5593,13 +5792,13 @@ export class WorkspaceCommandView {
         break;
       case 'view_result':
         if (typeof page.showTaskResult === 'function') page.showTaskResult(id);
-        else if (typeof page.openTask === 'function') page.openTask(id);
+        else if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
         break;
       case 'track':
       case 'respond':
       case 'inspect':
       default:
-        if (typeof page.openTask === 'function') page.openTask(id);
+        if (typeof page.openTask === 'function') page.openTask(id, { fromCommand: true });
         break;
     }
   }
