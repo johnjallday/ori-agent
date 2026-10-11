@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * E2E for the create-workspace "Agent behavior" consolidation.
@@ -48,6 +49,9 @@ async function advanceToReview(page: Page) {
 
 // For tests that already interacted with Team and just need the last hop.
 async function advanceToReviewFromTeam(page: Page) {
+  // Wait before reading rows: a newly opened Team can still be empty while its
+  // plan loads. Otherwise the helper skips the required Group Manager setup.
+  await expect.poll(() => page.evaluate(() => (window as any).sessionManager.teamView()?.planStatus)).toBe('ready');
   const batch = page.locator('[data-team-accept-all]');
   if (await batch.isVisible()) await batch.click();
   const pendingRows = page
@@ -179,6 +183,8 @@ async function stubWorkspaceReview(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   // Skip the first-run onboarding server-side so its modal (a static-backdrop
   // overlay that animates in) can't intercept create-modal clicks.
   await page.request.post('/api/onboarding/skip').catch(() => {});
@@ -1071,7 +1077,9 @@ test('proposed setup reuses Create New Agent in draft mode and submits one stric
     'Create an agent for Reaper Producer'
   );
   await expect(page.locator('#agentName')).toHaveValue('Reaper Producer');
-  await expect(page.locator('#agentReasoning')).toBeDisabled();
+  // The canonical presenter supports Codex; this is an editable draft field.
+  await expect(page.locator('#agentReasoning')).toBeEnabled();
+  await page.locator('#agentReasoning').selectOption('high');
   await expect(page.locator('#agentCreateDraftSummary')).toContainText('reaper-session');
   await expect(page.locator('#agentSystemPrompt')).toHaveValue('Produce the session.');
   await expect(page.locator('#agentCreateCapabilitiesSection')).toBeHidden();

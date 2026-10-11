@@ -1,9 +1,10 @@
 import { test, expect, Page, Route } from '@playwright/test';
 import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assistant';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * E2E for "Build with your assistant" (tasks/prd-build-with-your-assistant.md):
- * Create Workspace with the assistant's pane beside the wizard.
+ * Create Workspace with one active surface and one shared draft.
  *
  * The build-session endpoints are answered by a scripted fake in this file, so
  * no model runs; everything else — Home, the wizard and its setters, the team
@@ -15,8 +16,6 @@ import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assist
  *   ./scripts/demo-server.sh 8931 "$TMPDIR/ori-e2e.<n>"
  *   ./scripts/e2e.sh tests/create-workspace-build-mode.spec.ts -- --workers=1
  */
-
-test.describe.configure({ mode: 'serial' });
 
 type Choice = { id: string; label: string };
 type Entry = {
@@ -78,7 +77,13 @@ const FIELD_OF: Record<string, string> = {
 async function fakeBuildServer(
   page: Page,
   script: Reply[],
-  options: { available?: boolean } = {}
+  options: {
+    available?: boolean;
+    availabilityGate?: () => Promise<void>;
+    turnGate?: () => Promise<void>;
+    draftFailures?: number;
+    turnFailures?: number;
+  } = {}
 ): Promise<FakeBuild> {
   const fake: FakeBuild = { session: null, creates: [], turns: [], drafts: [], abandons: [] };
   let sequence = 0;
@@ -122,6 +127,7 @@ async function fakeBuildServer(
     const method = request.method();
     const path = new URL(request.url()).pathname.replace('/api/workspaces/build-sessions', '');
     if (method === 'GET' && path === '/availability') {
+      await options.availabilityGate?.();
       return respond(
         route,
         200,
@@ -172,6 +178,10 @@ async function fakeBuildServer(
       });
     }
     if (match[2] === 'turns') {
+      await options.turnGate?.();
+      if (options.turnFailures && options.turnFailures-- > 0) {
+        return respond(route, 503, { error: 'Injected turn failure' });
+      }
       fake.turns.push(body);
       let text = String(body.text || '');
       if (body.choice_id) {
@@ -194,6 +204,9 @@ async function fakeBuildServer(
     // The draft is the form: a sync records it quietly; the user's own edit is
     // said back, and a new blueprint asks the assistant to re-staff.
     fake.drafts.push(body);
+    if (options.draftFailures && options.draftFailures-- > 0) {
+      return respond(route, 503, { error: 'Injected draft failure' });
+    }
     const before = String(session.draft.template_id || '');
     session.draft = { ...(body.draft || {}) };
     if (body.team_state) session.team_state = body.team_state;
@@ -271,14 +284,24 @@ async function placeOnMap(page: Page) {
   await expect(preview).toBeHidden();
 }
 
-async function visibleStep(page: Page) {
-  for (const step of [4, 3, 2, 1]) {
-    if (await page.locator(`#wizardStep${step}`).isVisible()) return step;
-  }
-  return 0;
+async function currentStep(page: Page) {
+  return page.evaluate(() => (window as any).sessionManager.wizardStep);
+}
+
+async function manual(page: Page) {
+  await pane(page).getByRole('button', { name: 'Set up manually' }).click();
+  await expect(pane(page)).toBeHidden();
+  await expect(page.locator(`#wizardStep${await currentStep(page)}Title`)).toBeFocused();
+}
+
+async function assisted(page: Page) {
+  await page.locator('#workspaceBuildWithBtn').click();
+  await expect(pane(page)).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.route('**/api/onboarding/status', route => route.fulfill({ json: { needs_onboarding: false, completed: true } }));
   await mockHiredAssistant(page);
 });
 
@@ -384,13 +407,17 @@ test('a blueprint switched on the form is said back and the assistant re-staffs'
   await say(page, 'A place for my weekly field notes');
   await expect(page.locator('#folderNameInput')).toHaveValue(name);
 
-  // The user goes back to the Blueprint step on the form and picks another card.
-  while ((await visibleStep(page)) > 1) await page.locator('#wizardBackBtn').click();
+  // The user deliberately reveals the shared form, then picks another card.
+  await manual(page);
+  while ((await currentStep(page)) > 1) await page.locator('#wizardBackBtn').click();
   await expect(cardByLabel(page, 'Content Production')).toContainText('Chosen by Atlas');
   const autoTurn = page.waitForRequest(
     request => request.method() === 'POST' && isTurn(request.url())
   );
   await cardByLabel(page, 'Research Project').click();
+  await expect.poll(() => fake.drafts.some(draft => draft.draft?.template_id === 'research-project')).toBe(true);
+  expect(fake.turns).toHaveLength(1); // Manual mode does not run hidden assistant work.
+  await assisted(page);
 
   const turn = await autoTurn;
   expect(turn.postDataJSON().text).toBe('(I changed the blueprint)');
@@ -421,7 +448,7 @@ test('closing mid-build and reopening offers Resume, which restores the form and
   await openFromHome(page);
   await say(page, 'Notes for my course');
   await expect(page.locator('#folderNameInput')).toHaveValue(name);
-  const step = await visibleStep(page);
+  const step = await currentStep(page);
   expect(step).toBeGreaterThan(1);
 
   await page.locator('#addFolderModal').getByRole('button', { name: 'Cancel' }).click();
@@ -435,7 +462,8 @@ test('closing mid-build and reopening offers Resume, which restores the form and
 
   await pane(page).getByRole('button', { name: 'Resume' }).click();
   await expect(page.locator('#folderNameInput')).toHaveValue(name);
-  await expect(page.locator(`#wizardStep${step}`)).toBeVisible();
+  await expect(page.locator(`#wizardStep${step}`)).toBeHidden();
+  await expect.poll(() => currentStep(page)).toBe(step);
   await expect(pane(page)).toContainText('Notes for my course');
   await expect(pane(page).getByRole('button', { name: 'Create a Research Lead' })).toBeEnabled();
   await expect(composer(page)).toBeFocused();
@@ -531,3 +559,130 @@ test('the assistant’s create confirmation opens the build with the request as 
   });
   expect(asks, 'Confirm opens the build; it never re-asks the server to run it').toHaveLength(1);
 });
+
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+test('slow availability keeps a manual draft active until an explicit switch', async ({ page }) => {
+  const wait = gate();
+  const fake = await fakeBuildServer(page, [], { availabilityGate: () => wait.promise });
+  await openFromHome(page);
+  await cardByLabel(page, 'Blank').click();
+  await page.locator('#wizardNextBtn').click();
+  await page.locator('#folderNameInput').fill('My manual draft');
+  wait.release();
+  await expect(page.locator('#workspaceBuildWithBtn')).toBeVisible();
+  await expect(pane(page)).toBeHidden();
+  await expect(page.locator('#folderNameInput')).toBeFocused();
+  expect(fake.creates).toHaveLength(0);
+  await assisted(page);
+  await expect.poll(() => fake.drafts.some(draft => draft.draft.name === 'My manual draft')).toBe(true);
+  await manual(page);
+  await expect(page.locator('#folderNameInput')).toHaveValue('My manual draft');
+  expect(await currentStep(page)).toBe(2);
+});
+
+test('late scripted turn keeps newer manual values and cannot create or reopen assisted setup', async ({ page }) => {
+  const wait = gate();
+  let hold = false;
+  const fake = await fakeBuildServer(page, [
+    { text: 'Here is your draft.', set: { template_id: 'content-production', name: 'Original draft' } },
+    { text: 'Here is the late reply.', set: { name: 'Late overwritten name' }, createNow: true }
+  ], { turnGate: () => hold ? wait.promise : Promise.resolve() });
+  let creates = 0;
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/workspaces') creates++;
+  });
+  await openFromHome(page);
+  await say(page, 'A content workspace');
+  hold = true;
+  await composer(page).fill('Rename and create it');
+  const sent = page.waitForRequest(request => isTurn(request.url()));
+  await composer(page).press('Enter');
+  await sent;
+  await manual(page);
+  while ((await currentStep(page)) > 2) await page.locator('#wizardBackBtn').click();
+  await page.locator('#folderNameInput').fill('Newer manual name');
+  wait.release();
+  await expect.poll(() => fake.drafts.some(draft => draft.draft.name === 'Newer manual name')).toBe(true);
+  await expect(page.locator('#folderNameInput')).toHaveValue('Newer manual name');
+  await expect(page.locator('#folderNameInput')).toBeFocused();
+  await expect(pane(page)).toBeHidden();
+  expect(creates).toBe(0);
+  await assisted(page);
+  await expect(pane(page)).toContainText('Your manual draft was kept');
+  await expect(page.locator('#folderNameInput')).toHaveValue('Newer manual name');
+  expect(fake.abandons).toHaveLength(0);
+});
+
+test('scripted turn failure offers Retry and preserves the populated shared draft', async ({ page }) => {
+  const options = { turnFailures: 0 };
+  const fake = await fakeBuildServer(page, [
+    { text: 'Draft ready.', set: { blank: true, name: 'Kept draft' } },
+    { text: 'Recovered without losing your draft.' }
+  ], options);
+  await openFromHome(page);
+  await say(page, 'A blank workspace');
+  options.turnFailures = 1;
+  await say(page, 'Continue');
+  await expect(pane(page)).toContainText('couldn’t reach my model');
+  await expect(page.locator('#folderNameInput')).toHaveValue('Kept draft');
+  await pane(page).getByRole('button', { name: 'Try again' }).click();
+  await expect(pane(page)).toContainText('Recovered without losing your draft');
+  expect(fake.turns).toHaveLength(2);
+});
+
+test('failed draft sync stays local, blocks new turns, and recovers through Retry', async ({ page }) => {
+  const options = { draftFailures: 0 };
+  const fake = await fakeBuildServer(page, [] , options);
+  await openFromHome(page);
+  await expect(composer(page)).toBeEnabled();
+  options.draftFailures = 1;
+  await manual(page);
+  await page.locator('#wizardNextBtn').click();
+  await page.locator('#folderNameInput').fill('Unsaved shared draft');
+  await expect(page.locator('#workspaceBuildModeStatus')).toContainText('Draft not saved');
+  expect(fake.turns).toHaveLength(0);
+  await assisted(page);
+  await expect(page.locator('#workspaceBuildModeStatus')).not.toContainText('Draft not saved');
+  await expect.poll(() => fake.session?.draft.name).toBe('Unsaved shared draft');
+  await expect(page.locator('#folderNameInput')).toHaveValue('Unsaved shared draft');
+  expect(fake.turns).toHaveLength(0);
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`one active creation mode, keyboard switch and readable narrow layout (${theme})`, async ({ page }, testInfo) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await fakeBuildServer(page, [{ text: 'We can review this draft together.', set: { blank: true, name: 'Shared draft' } }]);
+    await openFromHome(page);
+    await say(page, 'A simple workspace');
+    await expect(page.locator('.workspace-create-modal-body')).toBeHidden();
+    await expect(page.locator('#wizardNextBtn')).toBeHidden();
+    await expect(page.locator('#workspaceBuildDraftSummary')).toContainText('Shared draft');
+    const switcher = pane(page).getByRole('button', { name: 'Set up manually' });
+    await switcher.focus();
+    await expect(switcher).toHaveCSS('outline-style', 'solid');
+    await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+    const scan = await page.evaluate(async () => {
+      const result = await (window as any).axe.run('#addFolderModal', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } });
+      return { violations: result.violations, contrast: result.passes.find((rule: any) => rule.id === 'color-contrast')?.nodes.length || 0 };
+    });
+    expect(scan.violations).toEqual([]);
+    expect(scan.contrast).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false);
+    await page.screenshot({ path: testInfo.outputPath(`creation-assisted-${theme}.png`), fullPage: true });
+    await page.keyboard.press('Enter');
+    await expect(pane(page)).toBeHidden();
+    await expect(page.locator(`#wizardStep${await currentStep(page)}Title`)).toBeFocused();
+    await expect(page.locator('.workspace-create-modal-body')).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`creation-manual-${theme}.png`), fullPage: true });
+    await assisted(page);
+    await expect(composer(page)).toBeFocused();
+    await expect(page.locator('#folderNameInput')).toHaveValue('Shared draft');
+  });
+}

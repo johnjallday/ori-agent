@@ -2320,44 +2320,60 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 }
 
 /* ---------- build with your assistant ---------- */
-/* Build mode puts the assistant's conversation beside the wizard: the header,
-   body, and footer keep their column on the left and the pane spans the right
-   one. The pane comes after the footer in the DOM, so keyboard order reaches it
-   once the wizard is done; the grid decides only where it is drawn. */
+/* One active surface, in DOM order. The shared form remains mounted but hidden
+   during conversation; no duplicated Team or Review editor. */
 .workspace-create-modal.workspace-create-modal--build .workspace-create-modal-dialog {
-  width: min(1180px, calc(100vw - 2rem));
-  max-width: min(1180px, calc(100vw - 2rem));
+  width: min(760px, calc(100vw - 2rem));
+  max-width: min(760px, calc(100vw - 2rem));
 }
 .workspace-create-modal.workspace-create-modal--build .modal-content {
-  /* A fixed height keeps the dialog still while the conversation and the
-     wizard grow; each column scrolls on its own instead. */
-  height: min(860px, calc(100vh - 3.5rem));
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(320px, 32vw, 420px);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "head pane"
-    "body pane"
-    "foot pane";
+  height: min(820px, calc(100dvh - 3.5rem));
 }
-.workspace-create-modal.workspace-create-modal--build .modal-header {
-  grid-area: head;
+.workspace-create-modal .workspace-build-mode-status {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--wc-line);
+  color: var(--wc-ink);
+  font-size: 12px;
 }
-.workspace-create-modal.workspace-create-modal--build .modal-body {
-  grid-area: body;
-  min-height: 0;
+.workspace-create-modal .workspace-build-draft-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+  overflow-wrap: anywhere;
 }
-.workspace-create-modal.workspace-create-modal--build .modal-footer {
-  grid-area: foot;
+.workspace-create-modal .workspace-build-draft-summary h2 {
+  margin: 0 0 4px;
+  font-family: var(--wc-font-display);
+  font-size: 14px;
+  color: var(--wc-ink-heading);
+}
+.workspace-create-modal .workspace-build-draft-summary p {
+  margin: 0;
+  color: var(--wc-ink);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-draft-summary button {
+  flex-shrink: 0;
 }
 .workspace-create-modal .workspace-build-pane {
-  grid-area: pane;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-left: 1px solid var(--wc-line);
+  overflow: hidden;
   background: var(--wc-bg-2);
+}
+.workspace-create-modal .workspace-build-pane button:focus-visible,
+.workspace-create-modal .workspace-build-with-btn:focus-visible,
+.workspace-create-modal .workspace-build-draft-summary button:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 3px;
 }
 .workspace-create-modal .workspace-build-with-btn {
   margin-left: auto;
@@ -2590,38 +2606,26 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   }
 }
 
-/* Narrow viewports: the pane becomes a strip above the wizard, showing only
-   the assistant's latest line (and its choices) with the composer always in
-   reach. The full transcript returns on a wider viewport. */
+/* Narrow viewports keep the full conversation reachable, not a latest-line
+   strip competing with a second editor. */
 @media (max-width: 1023.98px) {
   .workspace-create-modal.workspace-create-modal--build .workspace-create-modal-dialog {
     width: min(760px, calc(100vw - 1.5rem));
     max-width: min(760px, calc(100vw - 1.5rem));
   }
   .workspace-create-modal.workspace-create-modal--build .modal-content {
-    height: calc(100vh - 2rem);
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-    grid-template-areas:
-      "head"
-      "pane"
-      "body"
-      "foot";
+    height: calc(100dvh - 2rem);
   }
-  .workspace-create-modal .workspace-build-pane {
-    border-left: 0;
-    border-bottom: 1px solid var(--wc-line);
-    max-height: 45vh;
+  .workspace-create-modal .workspace-build-draft-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
   .workspace-create-modal .workspace-build-pane__head {
     padding: 8px 12px;
   }
   .workspace-create-modal .workspace-build-pane__transcript {
     padding: 8px 12px;
-  }
-  .workspace-create-modal .workspace-build-entry:not(.is-latest),
-  .workspace-create-modal .workspace-build-pane__earlier {
-    display: none;
   }
   .workspace-create-modal .workspace-build-pane__composer {
     padding: 8px 12px;
