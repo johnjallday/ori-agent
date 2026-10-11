@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/publicsearch"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
 
@@ -95,24 +96,13 @@ type AirQualityResponse struct {
 }
 
 // WebSearchRequest is the normalized request contract for web search.
-type WebSearchRequest struct {
-	Query   string `json:"query"`
-	Recency string `json:"recency,omitempty"`
-}
+type WebSearchRequest = publicsearch.WebSearchRequest
 
 // WebSearchResult holds one ranked search result item.
-type WebSearchResult struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Snippet string `json:"snippet"`
-}
+type WebSearchResult = publicsearch.WebSearchResult
 
 // WebSearchResponse is the normalized response contract for web search.
-type WebSearchResponse struct {
-	Query   string            `json:"query"`
-	Results []WebSearchResult `json:"results"`
-	Source  string            `json:"source,omitempty"`
-}
+type WebSearchResponse = publicsearch.WebSearchResponse
 
 // WebFetchRequest is the normalized request contract for web page fetch.
 type WebFetchRequest struct {

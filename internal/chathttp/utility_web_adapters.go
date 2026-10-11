@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/publicsearch"
 	"github.com/johnjallday/ori-agent/internal/urlsafety"
 	"golang.org/x/net/html"
 )
@@ -98,22 +99,7 @@ func NewDuckDuckGoWebSearchAdapter(client *http.Client) *DuckDuckGoWebSearchAdap
 	}
 }
 
-type duckDuckGoResponse struct {
-	Heading       string           `json:"Heading"`
-	AbstractText  string           `json:"AbstractText"`
-	AbstractURL   string           `json:"AbstractURL"`
-	RelatedTopics []duckDuckGoItem `json:"RelatedTopics"`
-}
-
-type duckDuckGoItem struct {
-	Text      string           `json:"Text"`
-	FirstURL  string           `json:"FirstURL"`
-	Topics    []duckDuckGoItem `json:"Topics"`
-	Icon      map[string]any   `json:"Icon"`
-	Result    string           `json:"Result"`
-	Name      string           `json:"Name"`
-	MatchType string           `json:"MatchType"`
-}
+type duckDuckGoResponse = publicsearch.DuckDuckGoResponse
 
 // WebSearch performs a keyless search using DuckDuckGo.
 func (a *DuckDuckGoWebSearchAdapter) WebSearch(ctx context.Context, req WebSearchRequest) (WebSearchResponse, error) {
@@ -146,38 +132,7 @@ func (a *DuckDuckGoWebSearchAdapter) WebSearch(ctx context.Context, req WebSearc
 		return WebSearchResponse{}, fmt.Errorf("failed to parse duckduckgo response: %w", err)
 	}
 
-	results := make([]WebSearchResult, 0, a.MaxResults)
-	if strings.TrimSpace(payload.AbstractURL) != "" {
-		title := strings.TrimSpace(payload.Heading)
-		if title == "" {
-			title = query
-		}
-		results = append(results, WebSearchResult{
-			Title:   title,
-			URL:     payload.AbstractURL,
-			Snippet: strings.TrimSpace(payload.AbstractText),
-		})
-	}
-
-	for _, item := range flattenDuckDuckGoItems(payload.RelatedTopics) {
-		if len(results) >= a.MaxResults {
-			break
-		}
-		u := strings.TrimSpace(item.FirstURL)
-		if u == "" {
-			continue
-		}
-		text := strings.TrimSpace(item.Text)
-		if text == "" {
-			text = "Related result"
-		}
-		results = append(results, WebSearchResult{
-			Title:   truncateRunes(text, 96),
-			URL:     u,
-			Snippet: text,
-		})
-	}
-
+	results := publicsearch.DuckDuckGoResults(payload, query, a.MaxResults)
 	source := "duckduckgo.com"
 	if len(results) == 0 {
 		if fallbackResults := a.pollenComSearchFallback(ctx, query); len(fallbackResults) > 0 {
@@ -185,12 +140,7 @@ func (a *DuckDuckGoWebSearchAdapter) WebSearch(ctx context.Context, req WebSearc
 			source = "pollen.com"
 		}
 	}
-
-	return WebSearchResponse{
-		Query:   query,
-		Results: results,
-		Source:  source,
-	}, nil
+	return WebSearchResponse{Query: query, Results: results, Source: source}, nil
 }
 
 func (a *DuckDuckGoWebSearchAdapter) pollenComSearchFallback(ctx context.Context, query string) []WebSearchResult {
@@ -219,22 +169,6 @@ func (a *DuckDuckGoWebSearchAdapter) pollenComSearchFallback(ctx context.Context
 		URL:     buildPollenComForecastURL(location.ID),
 		Snippet: snippet,
 	}}
-}
-
-func flattenDuckDuckGoItems(items []duckDuckGoItem) []duckDuckGoItem {
-	out := make([]duckDuckGoItem, 0, len(items))
-	var visit func([]duckDuckGoItem)
-	visit = func(list []duckDuckGoItem) {
-		for _, item := range list {
-			if len(item.Topics) > 0 {
-				visit(item.Topics)
-				continue
-			}
-			out = append(out, item)
-		}
-	}
-	visit(items)
-	return out
 }
 
 type pollenComLocationSearchResponse struct {

@@ -129,7 +129,7 @@ func (h *HomeAssistantAskHandler) folderState(ctx context.Context, target folder
 	if store == nil {
 		return state, foldercontext.ErrInvalid
 	}
-	record, messages, err := store.ReadFolderConversation(ctx, target.ConversationID)
+	record, messages, err := h.readCanonicalFolderEvents(ctx, target.ConversationID, "", "")
 	if err != nil {
 		return state, err
 	}
@@ -148,7 +148,7 @@ func (h *HomeAssistantAskHandler) resolveFolderObservation(ctx context.Context, 
 		if store == nil {
 			return nil, foldercontext.ErrInvalid
 		}
-		record, messages, err := store.ReadFolderConversation(ctx, target.ConversationID)
+		record, messages, err := h.readCanonicalFolderEvents(ctx, target.ConversationID, "", "")
 		scope := personalAssistantConversationScope{workspaceID: target.WorkspaceID, agentName: target.AgentName}
 		if err != nil || !scope.owns(record) {
 			return nil, foldercontext.ErrInvalid
@@ -158,7 +158,11 @@ func (h *HomeAssistantAskHandler) resolveFolderObservation(ctx context.Context, 
 			if h.FolderObservations.WasSaved(target, id) {
 				return nil, foldercontext.ErrInvalid
 			}
-			for _, message := range messages {
+			_, saved, err := h.readCanonicalFolderEvents(ctx, target.ConversationID, "", id)
+			if err != nil {
+				return nil, foldercontext.ErrInvalid
+			}
+			for _, message := range saved {
 				if !message.Imported && message.FolderContext != nil && message.FolderContext.Observation != nil && message.FolderContext.Observation.ID == id {
 					return nil, foldercontext.ErrInvalid
 				}

@@ -51,15 +51,49 @@ class DemoProviderTests(unittest.TestCase):
                     demo.main()
                 self.assertEqual(failure.exception.code, 2)
 
+    def test_extra_browser_specs_are_existing_worktree_local_files_not_globs(self):
+        import argparse
+        self.assertEqual(demo.browser_spec('tests/contextual-help-assistant.spec.ts'), 'tests/contextual-help-assistant.spec.ts')
+        for path in ['/tmp/outside.spec.ts', 'tests/../scripts/wt.sh', 'tests/*.spec.ts', 'tests/missing.spec.ts']:
+            with self.assertRaises(argparse.ArgumentTypeError):
+                demo.browser_spec(path)
+
     def test_every_plain_demo_names_an_existing_spec_and_its_own_sandbox_variable_and_log(self):
         runs = list(demo.PLAIN_DEMOS.values()) + [demo.DEFAULT_DEMO]
         for spec, variable, log in runs:
             self.assertTrue((demo.ROOT / spec).is_file(), spec)
-            self.assertRegex(variable, r"^ORI_WORKSPACE_[A-Z]+_SANDBOX$")
+            self.assertRegex(variable, r"^ORI_(?:WORKSPACE|DISCOVERY)_[A-Z]+_SANDBOX$")
             self.assertIn(variable, (demo.ROOT / spec).read_text())
             self.assertTrue(log.endswith(".log"))
         for column in range(3):
             self.assertEqual(len({run[column] for run in runs}), len(runs), "two runs share a spec, variable or log")
+
+    def test_continuity_summary_selects_only_exact_local_user_sources(self):
+        request = {"messages": [{"role": "system", "content": "Select a compact conversation recap"},
+                                {"role": "user", "content": json.dumps({"sources": [
+                                    {"id": "local", "role": "user", "content": "My goal is community membership."},
+                                    {"id": "suggestion", "role": "assistant", "content": "My goal is community membership."},
+                                    {"id": "imported", "role": "user", "imported": True, "content": "My goal is community membership."}]})}]}
+        result = json.loads(demo.continuity_summary(request))
+        self.assertEqual(result["items"], [{"kind": "user_goal", "message_id": "local", "quote": "My goal is community membership."}])
+        request["tools"] = [{"name": "unexpected"}]
+        with self.assertRaises(ValueError):
+            demo.continuity_summary(request)
+        self.assertIsNone(demo.continuity_summary({"messages": [message()]}))
+
+    def test_continuity_input_audit_is_data_not_a_pleasant_answer_score(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            messages = [{"role": "system", "content": "fixture"},
+                        {"role": "user", "content": "<conversation_reference>No, I do not want to develop anyone's talent.</conversation_reference>"},
+                        {"role": "user", "content": "current request"}]
+            self.assertIn("bounded", demo.continuity_answer(root, messages)["answer"])
+            audit = json.loads((root / "continuity-input.json").read_text())
+            self.assertTrue(audit["early_correction_present"])
+            self.assertTrue(audit["recap_user_role"])
+            self.assertEqual(audit["history_runes"], len(messages[1]["content"]))
+            demo.continuity_answer(root, [messages[0], messages[-1]])
+            self.assertFalse(json.loads((root / "continuity-input.json").read_text())["recap_present"])
 
     def test_folder_response_fixture_requires_the_current_typed_snapshot(self):
         self.assertIsNone(demo.folder_response_step("Hello, no attachment"))

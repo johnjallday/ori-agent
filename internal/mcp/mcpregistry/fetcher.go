@@ -1,8 +1,8 @@
 package mcpregistry
 
 import (
-	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -271,11 +271,20 @@ func (f *Fetcher) FetchAll(sources []RegistrySource) []RegistryEntry {
 
 // FetchSource fetches entries from a single registry source.
 func (f *Fetcher) FetchSource(src RegistrySource) ([]RegistryEntry, error) {
+	entries, err := f.fetchSource(src)
+	for i := range entries {
+		entries[i].SourceID = src.ID
+	}
+	return entries, err
+}
+
+func (f *Fetcher) fetchSource(src RegistrySource) ([]RegistryEntry, error) {
 	switch src.SourceType {
 	case "builtin":
 		entries := make([]RegistryEntry, len(builtinServers))
 		copy(entries, builtinServers)
 		for i := range entries {
+			entries[i] = cloneEntry(entries[i])
 			entries[i].Source = src.Name
 		}
 		return entries, nil
@@ -300,8 +309,12 @@ func (f *Fetcher) fetchURL(url, sourceName string) ([]RegistryEntry, error) {
 		return nil, fmt.Errorf("unexpected HTTP status %d from %s", resp.StatusCode, url)
 	}
 
-	var reg RemoteRegistry
-	if err := json.NewDecoder(resp.Body).Decode(&reg); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read registry JSON: %w", err)
+	}
+	reg, err := ParseRemoteRegistry(body)
+	if err != nil {
 		return nil, fmt.Errorf("failed to decode registry JSON from %s: %w", url, err)
 	}
 

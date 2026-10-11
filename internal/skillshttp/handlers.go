@@ -22,38 +22,37 @@ import (
 )
 
 type Handler struct {
-	manager        *skills.Manager
-	store          store.Store
-	llmFactory     *llm.Factory
-	configManager  *config.Manager
-	skillsCLIInDir func(ctx context.Context, workingDir string, args ...string) (string, error)
+	manager           *skills.Manager
+	store             store.Store
+	llmFactory        *llm.Factory
+	configManager     *config.Manager
+	skillsCLIInDir    func(ctx context.Context, workingDir string, args ...string) (string, error)
+	marketplaceSearch skills.MarketplaceCatalog
 }
 
 var (
 	ansiEscapePattern           = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 	marketplacePackagePattern   = regexp.MustCompile(`^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[A-Za-z0-9._-]+)\b`)
-	marketplaceInstallsPattern  = regexp.MustCompile(`([0-9][0-9.,]*(?:[KMB])?\s+installs)\b`)
 	marketplaceSkillNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
 const (
-	marketplaceSearchTimeout  = 45 * time.Second
 	marketplaceInstallTimeout = 2 * time.Minute
 	marketplaceUpdateTimeout  = 2 * time.Minute
 	skillCreateTimeout        = 75 * time.Second
 	skillPromptTimeout        = 45 * time.Second
-	marketplaceMaxResults     = 24
 	marketplaceMaxInstalled   = 200
 	marketplaceOutputMaxChars = 3500
 )
 
 func New(manager *skills.Manager, st store.Store, llmFactory *llm.Factory, cfg *config.Manager) *Handler {
 	return &Handler{
-		manager:        manager,
-		store:          st,
-		llmFactory:     llmFactory,
-		configManager:  cfg,
-		skillsCLIInDir: runSkillsCLIInDir,
+		manager:           manager,
+		store:             st,
+		llmFactory:        llmFactory,
+		configManager:     cfg,
+		skillsCLIInDir:    runSkillsCLIInDir,
+		marketplaceSearch: skills.NewPublicMarketplaceSearcher(),
 	}
 }
 
@@ -160,13 +159,9 @@ type skillPromptGenerateRequest struct {
 	Description string `json:"description"`
 }
 
-type marketplaceSkillResult struct {
-	Package    string `json:"package"`
-	Repository string `json:"repository"`
-	Skill      string `json:"skill"`
-	URL        string `json:"url,omitempty"`
-	Installs   string `json:"installs,omitempty"`
-}
+// MarketplaceCatalog is the shared search-only service used by the marketplace
+// UI and assistant broker. It does not expose the install/update/remove runner.
+func (h *Handler) MarketplaceCatalog() skills.MarketplaceCatalog { return h.marketplaceSearch }
 
 func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
 	agentName := resolveAgentName(r, h.store)
@@ -186,8 +181,9 @@ func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]any{
-		"agent":  agentName,
-		"skills": skillsList,
+		"agent":               agentName,
+		"skills":              skillsList,
+		"discovery_inventory": skills.MetadataInventory(skillsList, 200),
 	}
 	if loadout := h.agentLoadout(agentName, skillsList); loadout != nil {
 		response["loadout"] = loadout
@@ -827,47 +823,39 @@ func (h *Handler) searchMarketplace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req marketplaceSearchRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.BadRequest(w, "invalid request body")
 		return
 	}
 
-	query := sanitizeMarketplaceQuery(req.Query)
-	if query == "" {
-		orihttp.BadRequest(w, "query is required")
+	if err := skills.ValidateMarketplaceQuery(req.Query); err != nil {
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
-
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 8
+	result := h.marketplaceSearch.Search(r.Context(), req.Query, req.Limit)
+	status := http.StatusOK
+	message := ""
+	switch result.State {
+	case "missing_runtime":
+		status = http.StatusServiceUnavailable
+		message = "A preinstalled skills 1.7.2 CLI and compatible Node.js are required for marketplace search. Search never downloads them."
+		if result.Reason == "node_required" {
+			message = nodeRequiredMessage
+		}
+	case "unavailable", "malformed_output":
+		status = http.StatusBadGateway
+		message = "The skills marketplace search could not be verified. Try again later."
 	}
-	if limit > marketplaceMaxResults {
-		limit = marketplaceMaxResults
+	response := map[string]any{
+		"query": req.Query, "results": result.Results, "count": len(result.Results),
+		"availability": result.State, "reason": result.Reason, "truncated": result.Truncated,
+		"observed_at": result.ObservedAt, "runtime_version": result.RuntimeVersion,
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), marketplaceSearchTimeout)
-	defer cancel()
-
-	output, err := h.runSkillsCLIInDir(ctx, "", "find", query)
-	if errors.Is(err, exec.ErrNotFound) {
-		respondNodeRequired(w)
-		return
+	if message != "" {
+		response["error"] = message
 	}
-	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to search skills marketplace",
-			"details": truncateMarketplaceOutput(output),
-		})
-		return
-	}
-
-	results := parseSkillsFindOutput(output, limit)
-	orihttp.Success(w, map[string]any{
-		"query":   query,
-		"results": results,
-		"count":   len(results),
-	})
+	_ = orihttp.RespondJSON(w, status, response)
 }
 
 func (h *Handler) installMarketplaceSkill(w http.ResponseWriter, r *http.Request) {
@@ -1080,18 +1068,6 @@ func (h *Handler) removeMarketplaceSkill(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func sanitizeMarketplaceQuery(query string) string {
-	normalized := strings.TrimSpace(query)
-	if normalized == "" {
-		return ""
-	}
-	normalized = strings.Join(strings.Fields(normalized), " ")
-	if len(normalized) > 160 {
-		normalized = normalized[:160]
-	}
-	return normalized
-}
-
 func stripANSI(input string) string {
 	if input == "" {
 		return ""
@@ -1131,78 +1107,6 @@ func parsePackageSpec(spec string) (repository, skillName string) {
 		return trimmed, ""
 	}
 	return parts[0], parts[1]
-}
-
-func parseSkillsFindOutput(output string, limit int) []marketplaceSkillResult {
-	cleaned := stripANSI(output)
-	if cleaned == "" {
-		return []marketplaceSkillResult{}
-	}
-
-	if limit <= 0 || limit > marketplaceMaxResults {
-		limit = 8
-	}
-
-	lines := strings.Split(cleaned, "\n")
-	results := make([]marketplaceSkillResult, 0, limit)
-	indexByPackage := make(map[string]int)
-	currentIndex := -1
-
-	for _, rawLine := range lines {
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			continue
-		}
-
-		line = strings.TrimSpace(strings.TrimLeft(line, "│└├─•·"))
-		if line == "" {
-			continue
-		}
-
-		if packageMatch := marketplacePackagePattern.FindStringSubmatch(line); len(packageMatch) > 1 {
-			packageSpec := strings.TrimSpace(packageMatch[1])
-			resultIndex, exists := indexByPackage[packageSpec]
-			if !exists {
-				if len(results) >= limit {
-					currentIndex = -1
-					continue
-				}
-				repository, skillName := parsePackageSpec(packageSpec)
-				results = append(results, marketplaceSkillResult{
-					Package:    packageSpec,
-					Repository: repository,
-					Skill:      skillName,
-				})
-				resultIndex = len(results) - 1
-				indexByPackage[packageSpec] = resultIndex
-			}
-			currentIndex = resultIndex
-			if installMatch := marketplaceInstallsPattern.FindStringSubmatch(line); len(installMatch) > 1 {
-				results[currentIndex].Installs = strings.TrimSpace(installMatch[1])
-			}
-			continue
-		}
-
-		if currentIndex < 0 || currentIndex >= len(results) {
-			continue
-		}
-
-		if urlIndex := strings.Index(line, "https://skills.sh/"); urlIndex >= 0 {
-			url := strings.TrimSpace(line[urlIndex:])
-			if url != "" {
-				results[currentIndex].URL = url
-			}
-			continue
-		}
-
-		if results[currentIndex].Installs == "" {
-			if installMatch := marketplaceInstallsPattern.FindStringSubmatch(line); len(installMatch) > 1 {
-				results[currentIndex].Installs = strings.TrimSpace(installMatch[1])
-			}
-		}
-	}
-
-	return results
 }
 
 func runSkillsCLIInDir(ctx context.Context, workingDir string, args ...string) (string, error) {

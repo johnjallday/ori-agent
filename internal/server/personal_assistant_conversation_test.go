@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
@@ -43,6 +45,9 @@ func newConversationServerFixture(t *testing.T) *conversationServerFixture {
 	if err := sessions.CreateWorkspace(ctx, hq); err != nil {
 		t.Fatalf("create HQ workspace: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO personal_assistant_state(user_id,assistant_id,status,hq_workspace_id,global_agent_profile_name,state_version,created_at,updated_at) VALUES('local','fixture','active',?,'Atlas',3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, hq.ID); err != nil {
+		t.Fatal(err)
+	}
 	provider := &capturingChatProvider{}
 	factory := llm.NewFactory()
 	factory.Register("claude_code", provider)
@@ -61,6 +66,45 @@ func (f *conversationServerFixture) say(prompt, conversationID string) agenthttp
 		Prompt: prompt, Intent: "assistant_conversation",
 		Conversation: &agenthttp.HomeAssistantConversationRef{ID: conversationID},
 	})
+}
+
+func TestAssistantConversationRoute_ProductionAdapterChecksCanonicalOwner(t *testing.T) {
+	f := newConversationServerFixture(t)
+	ctx := context.Background()
+	chat := &session.Session{AgentName: "Atlas", FolderID: f.hq}
+	if err := f.sessions.CreateSession(ctx, chat); err != nil {
+		t.Fatal(err)
+	}
+	ref := &agenthttp.HomeAssistantConversationRef{ID: chat.ID}
+	refs := &agenthttp.HomeAssistantRouteContext{Origin: "personal_assistant_panel", WorkspaceID: "browsing-is-not-owner"}
+	if err := f.handler.ValidateRouteConversation(ctx, ref, refs); err != nil {
+		t.Fatal("canonical route refused", err)
+	}
+	// Database ownership changes cannot be concealed by a cached Session or
+	// an unchanged browser relationship projection.
+	if _, err := f.sessions.GetSession(ctx, chat.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.sessions.DB().ExecContext(ctx, `UPDATE sessions SET agent_name='Other' WHERE id=?`, chat.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.handler.ValidateRouteConversation(ctx, ref, refs); err == nil {
+		t.Fatal("foreign cached reference accepted")
+	}
+	if err := f.sessions.DeleteSession(ctx, chat.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.handler.ValidateRouteConversation(ctx, ref, refs); err == nil {
+		t.Fatal("deleted reference accepted")
+	}
+	_, err := (personalAssistantConversationAdapter{store: f.sessions}).ReadConversationOwner(ctx, chat.ID,
+		assistantcontext.SaveOwner{UserID: "local", WorkspaceID: f.hq, AgentName: "Atlas", StateVersion: 3})
+	if !errors.Is(err, agenthttp.ErrPersonalAssistantConversationNotFound) {
+		t.Fatal("adapter lost refusal identity", err)
+	}
+	if len(f.provider.requests) != 0 {
+		t.Fatal("metadata route invoked provider")
+	}
 }
 
 // A conversation is a canonical Session in Personal HQ: its turns are ordinary
@@ -123,7 +167,12 @@ func TestAssistantConversation_IsACanonicalSessionInPersonalHQ(t *testing.T) {
 	if stale := f.say("still there?", id); stale.Conversation == nil || stale.Conversation.Error != agenthttp.PersonalAssistantConversationOutOfScope {
 		t.Fatalf("old profile key kept the thread: %+v", stale.Conversation)
 	}
-	f.context.ConversationAgent, f.context.DisplayName = "Aria", "Aria"
+	f.context.ConversationAgent, f.context.DisplayName, f.context.StateVersion = "Aria", "Aria", 4
+	// The production rename owner updates the relationship as well as Sessions;
+	// this fixture's context stand-in must reflect that canonical binding.
+	if _, err := f.sessions.DB().ExecContext(ctx, `UPDATE personal_assistant_state SET global_agent_profile_name='Aria',state_version=4 WHERE user_id='local'`); err != nil {
+		t.Fatal(err)
+	}
 	if renamed := f.say("still there?", id); renamed.Conversation == nil || renamed.Conversation.ID != id || !renamed.Conversation.Stored {
 		t.Fatalf("renamed assistant lost its thread: %+v", renamed.Conversation)
 	}

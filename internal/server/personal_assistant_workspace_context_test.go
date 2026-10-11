@@ -169,11 +169,13 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 	if request.WorkspaceID != "" || request.WorkspaceDir != "" || request.ExecutionScope != nil || len(request.MCPServers) != 0 {
 		t.Fatal("panel context became CLI execution authority")
 	}
-	// Every panel tool is a read. Nothing here saves a note, changes a task,
-	// writes memory, manages agents or delegates.
+	// Every panel tool is a read or a data-only research proposal. Nothing here
+	// sends unapproved requests, saves a note, changes a task, writes memory,
+	// manages agents, installs, grants access or delegates.
 	allowed := map[string]bool{"home_workspaces": true, "home_tasks": true, "home_sessions": true, "home_opportunities": true, "home_usage": true, "home_agents": true, "assistant_workspace_discovery": true,
 		"assistant_workspace_notes": true, "assistant_workspace_note": true, "assistant_workspace_tasks": true, "assistant_workspace_task": true,
-		"assistant_workspace_files": true, "assistant_workspace_folder": true, "assistant_workspace_file": true}
+		"assistant_workspace_files": true, "assistant_workspace_folder": true, "assistant_workspace_file": true,
+		"assistant_installed_capabilities": true, "assistant_mcp_catalog": true, "assistant_public_registry_sources": true, "assistant_propose_research_lookup": true, "assistant_propose_workspace": true}
 	for _, tool := range request.Tools {
 		if !allowed[tool.Name] {
 			t.Fatalf("unexpected panel tool %q", tool.Name)

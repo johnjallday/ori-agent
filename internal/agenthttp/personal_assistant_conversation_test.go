@@ -450,7 +450,9 @@ func TestConversation_ModelFailureStoresNothing(t *testing.T) {
 			if len(f.store.sessions) != sessionsBefore || f.store.messageCount() != 0 {
 				t.Fatalf("a failed turn was stored")
 			}
-			if strings.Contains(resp.Response, "workspace(s)") || !strings.Contains(resp.Response, "not sent") {
+			// A provider may have received the prompt before failing. Promise
+			// only what Ori knows: no answer saved, never "not sent".
+			if strings.Contains(resp.Response, "workspace(s)") || !strings.Contains(resp.Response, "no answer was saved") || resp.FailureReason != "provider_unavailable" {
 				t.Fatalf("failure text=%q", resp.Response)
 			}
 		})

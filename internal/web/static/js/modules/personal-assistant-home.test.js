@@ -6,6 +6,7 @@ import {
   MEETING_BADGES,
   meetingsSectionView,
   needsHireBanner,
+  partialTodaySummary,
   personalAssistantLauncherCue,
   personalAssistantLauncherCueTone,
   personalAssistantTodayView,
@@ -229,6 +230,18 @@ test('Today view distinguishes active, paused, partial, no-model, empty, and fat
   assert.equal(personalAssistantTodayView({ state: 'model_unavailable' }).modelUnavailable, true);
   assert.equal(personalAssistantTodayView({ state: 'healthy_empty' }).active, true);
   assert.equal(personalAssistantTodayView({ state: 'unavailable' }).unavailable, true);
+});
+
+test('partial Today always names the limitation even without a source list or generated opening', () => {
+  assert.match(partialTodaySummary({ state: 'partial' }), /sources are unavailable.*no all-clear/);
+  assert.match(
+    partialTodaySummary({ brief: { opening_summary: 'Prior records are still stored.' } }),
+    /unavailable.*Prior records are still stored/
+  );
+  assert.match(
+    summaryStripText({ brief: 'Brief ready', unavailable: true }),
+    /Brief ready.*sources unavailable/
+  );
 });
 
 test('Today distinguishes a hired assistant with no HQ from needs_hire and does not claim active/paused', () => {

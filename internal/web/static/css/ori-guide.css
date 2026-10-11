@@ -665,6 +665,19 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   gap: 12px;
 }
 
+/* This actual-width class also covers CSS/native zoom. Compact the pinned
+   stack so model/folder guidance cannot starve its one conversation viewport;
+   controls retain their 44px targets and the composer remains pinned. */
+.personal-assistant-panel.personal-assistant-panel--explorer-narrow {
+  gap: 4px;
+}
+
+/* Shrink the already-ellipsized label beside Add folder instead of adding a
+   pinned row for hostile/long names. Its full accessible text is unchanged. */
+.personal-assistant-panel--explorer-narrow #personalAssistantActiveFolder {
+  flex: 1 1 90px;
+}
+
 [data-bs-theme="dark"] .personal-assistant-panel {
   --pa-accent-text: var(--ori-accent);
 }
@@ -811,7 +824,8 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   display: none;
 }
 
-.personal-assistant-panel__links a {
+.personal-assistant-panel__links a,
+.personal-assistant-panel__links button {
   display: flex;
   min-height: 40px;
   align-items: center;
@@ -827,8 +841,18 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   display: none;
 }
 
+.personal-assistant-panel__links button {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+}
+
 .personal-assistant-panel__links a:hover,
-.personal-assistant-panel__links a:focus-visible {
+.personal-assistant-panel__links a:focus-visible,
+.personal-assistant-panel__links button:hover,
+.personal-assistant-panel__links button:focus-visible {
   background: var(--ori-paper);
 }
 

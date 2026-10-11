@@ -68,12 +68,27 @@ func IsPrivateIP(addr netip.Addr) bool {
 }
 
 func NewSafeTransport() *http.Transport {
+	return newSafeTransport(IsPrivateIP, net.DefaultResolver.LookupNetIP, (&net.Dialer{Timeout: DefaultTimeout}).DialContext)
+}
+
+// NewPublicTransport additionally excludes non-public/reserved address space
+// for research. Existing callers keep their original NewSafeTransport policy.
+func NewPublicTransport() *http.Transport {
+	transport := newSafeTransport(IsNonPublicIP, net.DefaultResolver.LookupNetIP, (&net.Dialer{Timeout: DefaultTimeout}).DialContext)
+	transport.MaxIdleConns, transport.MaxIdleConnsPerHost, transport.MaxConnsPerHost = 8, 2, 4
+	transport.IdleConnTimeout = 30 * time.Second
+	transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout = DefaultTimeout, DefaultTimeout
+	transport.MaxResponseHeaderBytes = 64 << 10
+	return transport
+}
+
+func newSafeTransport(blocked func(netip.Addr) bool, lookup func(context.Context, string, string) ([]netip.Addr, error), dial func(context.Context, string, string) (net.Conn, error)) *http.Transport {
 	return &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, fmt.Errorf("ssrf check: invalid address %q: %w", addr, err)
 		}
-		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		ips, err := lookup(ctx, "ip", host)
 		if err != nil {
 			return nil, fmt.Errorf("ssrf check: dns lookup failed for %q: %w", host, err)
 		}
@@ -81,16 +96,15 @@ func NewSafeTransport() *http.Transport {
 			return nil, fmt.Errorf("ssrf check: dns lookup returned no addresses for %q", host)
 		}
 		for _, ip := range ips {
-			if IsPrivateIP(ip) {
+			if blocked(ip) {
 				return nil, fmt.Errorf("ssrf check: resolved to private IP %s", ip)
 			}
 		}
-		dialer := &net.Dialer{Timeout: DefaultTimeout}
 		var dialErr error
 		for _, ip := range ips {
 			// Dial the address that passed validation instead of resolving the
 			// hostname again, which would leave a DNS-rebinding window.
-			conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			conn, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
 			if err == nil {
 				return conn, nil
 			}
@@ -98,6 +112,32 @@ func NewSafeTransport() *http.Transport {
 		}
 		return nil, fmt.Errorf("ssrf check: connect to %q: %w", host, dialErr)
 	}}
+}
+
+var nonPublicRanges = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"), netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("2001::/32"), netip.MustParsePrefix("2002::/16"),
+}
+
+func IsNonPublicIP(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() || IsPrivateIP(addr) {
+		return true
+	}
+	for _, prefix := range nonPublicRanges {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsNonPublicLiteral(host string) bool {
+	addr, err := netip.ParseAddr(host)
+	return err == nil && IsNonPublicIP(addr)
 }
 
 func MatchesAllowedDomain(host string, allowed []string) bool {

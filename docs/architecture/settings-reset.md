@@ -15,6 +15,19 @@ implies Start Fresh.
 > Their milestone-specific delivery limits are superseded by the current status
 > above and the final validation boundary at the end of this document.
 
+## Disposable assistant context amendment
+
+Conversation/app-record reset explicitly inventories and deletes
+`assistant_conversation_checkpoints`, including reset's foreign-key-disabled
+apply path; it does not rely only on Session cascades. Ordinary Session deletion
+cascades, while message edits/imports/deletion and owner/relationship changes
+invalidate derived context through canonical source/epoch checks. HQ deletion
+cannot transfer an orphan recap to a replacement identity. Portable history
+contains no recap or mutation epoch. These are disposable historical references,
+not a second transcript, saved Ticket, reviewed memory or global Profile; those
+owners retain their own reset/deletion rules. See
+[assistant conversation context](assistant-conversation-context.md).
+
 ## Evidence and isolation
 
 The approved contract is four distinct intents: Replay Setup, Reset Getting

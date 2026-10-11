@@ -22,6 +22,7 @@ func ResetRecordTables() []string {
 		// Encrypted local credentials/grants are not part of retained folders.
 		"workspace_local_config",
 		"users", "user_preference_revisions", "workspaces", "sessions", "messages", "session_tags", "tool_calls",
+		"assistant_conversation_checkpoints", // disposable Session-owned derived context, never retained memory
 		"review_issues", "review_runs", "session_review_status", "session_tasks",
 		"scheduled_task_reminders", "smart_input_overrides", "workspace_notes",
 		"note_links", "note_tags", "note_headings", "workspace_runs", "workspace_run_trace",

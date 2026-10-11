@@ -175,7 +175,23 @@ func (h *HomeAssistantAskHandler) draftSourceMessage(ctx context.Context, scope 
 	if conversationID == "" || messageID == "" {
 		return none, &draftRefusal{http.StatusBadRequest, PersonalAssistantDraftSourceMissing, "Choose the message to save. Nothing was saved.", "", nil}
 	}
-	record, err := h.Conversations.Get(ctx, conversationID)
+	var record PersonalAssistantConversationRecord
+	var messages []PersonalAssistantConversationMessage
+	var err error
+	if reader, ok := h.Conversations.(PersonalAssistantCanonicalMessageReader); ok {
+		owner, ownerErr := h.canonicalConversationOwner(ctx)
+		if ownerErr != nil || owner.WorkspaceID != scope.workspaceID || !strings.EqualFold(owner.AgentName, scope.agentName) {
+			return none, &draftRefusal{http.StatusConflict, PersonalAssistantConversationOutOfScope, "The conversation owner changed. Nothing was saved.", "", nil}
+		}
+		var message PersonalAssistantConversationMessage
+		record, message, err = reader.ReadCanonicalMessage(ctx, conversationID, owner, messageID)
+		messages = []PersonalAssistantConversationMessage{message}
+	} else {
+		record, err = h.Conversations.Get(ctx, conversationID)
+	}
+	if errors.Is(err, ErrPersonalAssistantConversationOwnerChanged) {
+		return none, &draftRefusal{http.StatusConflict, PersonalAssistantConversationOutOfScope, "That conversation does not belong to your assistant's Personal HQ. Nothing was saved.", "", nil}
+	}
 	if errors.Is(err, ErrPersonalAssistantConversationNotFound) {
 		return none, &draftRefusal{http.StatusNotFound, PersonalAssistantConversationNotFound, "That conversation no longer exists, so its draft cannot be saved from here. Nothing was saved.", "", nil}
 	}
@@ -185,7 +201,9 @@ func (h *HomeAssistantAskHandler) draftSourceMessage(ctx context.Context, scope 
 	if !scope.owns(record) {
 		return none, &draftRefusal{http.StatusConflict, PersonalAssistantConversationOutOfScope, "That conversation does not belong to your assistant's Personal HQ. Nothing was saved.", "", nil}
 	}
-	messages, err := h.Conversations.Messages(ctx, record.ID)
+	if messages == nil {
+		messages, err = h.Conversations.Messages(ctx, record.ID)
+	}
 	if err != nil {
 		return none, &draftRefusal{http.StatusServiceUnavailable, PersonalAssistantConversationUnavailable, "The conversation could not be read right now. Nothing was saved.", "", nil}
 	}
@@ -524,7 +542,7 @@ const (
 // handleDraftSaveRequest answers a typed draft-save or reminder request without
 // a model. A save request opens the same review the message action opens; it
 // never writes. handled is false when the prompt is neither.
-func (h *HomeAssistantAskHandler) handleDraftSaveRequest(prompt, intent string, identity *HomeAssistantIdentity, workContext *PersonalAssistantWorkContext, conversation *openConversation) (HomeAssistantAskResponse, bool) {
+func (h *HomeAssistantAskHandler) handleDraftSaveRequest(ctx context.Context, prompt, intent string, identity *HomeAssistantIdentity, workContext *PersonalAssistantWorkContext, conversation *openConversation) (HomeAssistantAskResponse, bool) {
 	if h.Drafts == nil || workContext == nil || !workContext.ReadyForWork() {
 		return HomeAssistantAskResponse{}, false
 	}
@@ -565,6 +583,13 @@ func (h *HomeAssistantAskHandler) handleDraftSaveRequest(prompt, intent string, 
 	}
 	if referent == nil {
 		return reply("There is no reply in this conversation to save yet. Ask me to write something first.")
+	}
+	if _, ok := h.Conversations.(PersonalAssistantCanonicalMessageReader); ok {
+		message, refusal := h.draftSourceMessage(ctx, conversation.scope, PersonalAssistantDraftSource{ConversationID: conversation.id, MessageID: referent.ID})
+		if refusal != nil {
+			return reply(refusal.message)
+		}
+		referent = &message
 	}
 	target, refusal := h.draftTarget(conversation.scope)
 	if refusal != nil {

@@ -59,10 +59,10 @@ func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*Session, erro
 
 	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, agent_name, workspace_id, message_count, created_at, updated_at
+		SELECT id, title, agent_name, workspace_id, message_count, created_at, updated_at, assistant_context_epoch
 		FROM sessions WHERE id = ?
 	`, id).Scan(&session.ID, &session.Title, &session.AgentName, &workspaceID,
-		&session.MessageCount, &session.CreatedAt, &session.UpdatedAt)
+		&session.MessageCount, &session.CreatedAt, &session.UpdatedAt, &session.ContextEpoch)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrSessionNotFound

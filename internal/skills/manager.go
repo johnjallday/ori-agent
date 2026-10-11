@@ -595,61 +595,7 @@ func (m *Manager) loadPluginSkills(agentName string, includePrompt bool) []Skill
 }
 
 func (m *Manager) loadSkillsFromDir(skillsDir, source string, includePrompt bool, allowSingleFile bool, allowCategories bool) ([]Skill, error) {
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []Skill{}, nil
-		}
-		return nil, err
-	}
-
-	var skills []Skill
-	for _, entry := range entries {
-		if entry.IsDir() {
-			skillDir := filepath.Join(skillsDir, entry.Name())
-			skillPath := filepath.Join(skillDir, "SKILL.md")
-			if _, err := os.Stat(skillPath); err == nil {
-				skill, err := m.loadSkillEntry(skillPath, entry.Name(), source, skillDir, includePrompt)
-				if err == nil {
-					skills = append(skills, skill)
-				}
-				continue
-			}
-
-			if allowCategories {
-				subEntries, err := os.ReadDir(skillDir)
-				if err != nil {
-					continue
-				}
-				for _, sub := range subEntries {
-					if !sub.IsDir() {
-						continue
-					}
-					subDir := filepath.Join(skillDir, sub.Name())
-					subPath := filepath.Join(subDir, "SKILL.md")
-					if _, err := os.Stat(subPath); err != nil {
-						continue
-					}
-					skill, err := m.loadSkillEntry(subPath, sub.Name(), source, subDir, includePrompt)
-					if err == nil {
-						skills = append(skills, skill)
-					}
-				}
-			}
-			continue
-		}
-
-		if allowSingleFile && strings.HasSuffix(entry.Name(), ".md") {
-			skillPath := filepath.Join(skillsDir, entry.Name())
-			baseName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			skill, err := m.loadSkillEntry(skillPath, baseName, source, filepath.Dir(skillPath), includePrompt)
-			if err == nil {
-				skills = append(skills, skill)
-			}
-		}
-	}
-
-	return skills, nil
+	return m.readSkillsDirectory(skillsDir, source, includePrompt, allowSingleFile, allowCategories, nil)
 }
 
 func (m *Manager) loadSkillEntry(skillPath, defaultName, source, skillDir string, includePrompt bool) (Skill, error) {
@@ -761,7 +707,15 @@ type skillFrontmatter struct {
 }
 
 func parseSkillFile(path string, defaultName string, includePrompt bool) (Skill, error) {
-	content, err := os.ReadFile(path)
+	var content []byte
+	var err error
+	if includePrompt {
+		// #nosec G304 -- skill loaders compose this path from Manager-owned roots;
+		// full prompts remain with explicit skill owners, never discovery reads.
+		content, err = os.ReadFile(path)
+	} else {
+		content, err = readSkillSummaryFile(path)
+	}
 	if err != nil {
 		return Skill{}, err
 	}

@@ -43,7 +43,11 @@ func (h *HomeAssistantAskHandler) validateFolderReview(ctx context.Context, offe
 	if store == nil {
 		return foldercontext.ErrInvalid
 	}
-	record, messages, err := store.ReadFolderConversation(ctx, target.ConversationID)
+	eventOffer, eventObservation := "", ""
+	if offer.DecidedAt != nil {
+		eventOffer, eventObservation = offer.ID, review.ObservationID
+	}
+	record, messages, err := h.readCanonicalFolderEvents(ctx, target.ConversationID, eventOffer, eventObservation)
 	if err != nil || !scope.owns(record) {
 		return foldercontext.ErrInvalid
 	}
@@ -222,8 +226,8 @@ func (h *HomeAssistantAskHandler) CloseFolderReviewHandler(w http.ResponseWriter
 		// block every future review. This explicit closure still requires the
 		// original user/HQ/profile provenance checked by ReadReview above. Read
 		// failures are not evidence of deletion, and no foreign Session is edited.
-		record, _, readErr := h.folderStore().ReadFolderConversation(r.Context(), target.ConversationID)
-		orphaned := errors.Is(readErr, ErrPersonalAssistantConversationNotFound) || (readErr == nil && !scope.owns(record))
+		record, _, readErr := h.readCanonicalFolderEvents(r.Context(), target.ConversationID, "", "")
+		orphaned := errors.Is(readErr, ErrPersonalAssistantConversationNotFound) || errors.Is(readErr, ErrPersonalAssistantConversationOwnerChanged) || (readErr == nil && !scope.owns(record))
 		if !orphaned {
 			writeFolderError(w, err)
 			return

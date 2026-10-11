@@ -18,10 +18,12 @@ import (
 // input, across every call in every round, and it is the only thing a citation
 // can resolve against. It holds references and counts, never a source body.
 type evidenceLedger struct {
-	mu      sync.Mutex
-	used    int
-	sources []assistantcontext.SourceRef
-	now     func() time.Time
+	mu            sync.Mutex
+	used          int
+	sources       []assistantcontext.SourceRef
+	research      []assistantcontext.ResearchRef
+	shownResearch []assistantcontext.ResearchRef
+	now           func() time.Time
 	// Reader outcomes and time, kept for the turn's diagnostics line.
 	outcomes map[string]int
 	readTime time.Duration
@@ -123,7 +125,7 @@ func (l *evidenceLedger) record(source assistantcontext.SourceRef) assistantcont
 		prior.Coverage = sourceCoverage(prior.Start, prior.End, prior.Total, source.Coverage)
 		return *prior
 	}
-	source.Key = "S" + strconv.Itoa(len(l.sources)+1)
+	source.Key = "S" + strconv.Itoa(len(l.sources)+len(l.research)+1)
 	source.Coverage = sourceCoverage(source.Start, source.End, source.Total, source.Coverage)
 	l.sources = append(l.sources, source)
 	return source
@@ -159,6 +161,9 @@ func (l *evidenceLedger) cite(answer string) (string, []assistantcontext.SourceR
 	for _, source := range l.sources {
 		cited[source.Key] = false
 	}
+	for _, source := range l.research {
+		cited[source.Key] = false
+	}
 	for _, marker := range citationMarker.FindAllString(answer, -1) {
 		key := strings.Trim(marker, " []")
 		if _, read := cited[key]; read {
@@ -171,6 +176,18 @@ func (l *evidenceLedger) cite(answer string) (string, []assistantcontext.SourceR
 			if cited[source.Key] == wanted && len(shown) < assistantcontext.SourceLimit {
 				shown[source.Key] = true
 			}
+		}
+		for _, source := range l.research {
+			if cited[source.Key] == wanted && len(shown) < assistantcontext.SourceLimit {
+				shown[source.Key] = true
+			}
+		}
+	}
+	l.shownResearch = nil
+	for _, source := range l.research {
+		if shown[source.Key] {
+			source.Cited = cited[source.Key]
+			l.shownResearch = append(l.shownResearch, source)
 		}
 	}
 	var sources []assistantcontext.SourceRef

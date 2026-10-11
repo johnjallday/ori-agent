@@ -36,6 +36,7 @@ type HomeAssistantRouteHandler struct {
 	UserID                   string
 	PanelContext             func(context.Context, string, *HomeAssistantRouteContext) (*assistantcontext.Attribution, error)
 	FolderConversation       func(context.Context, *HomeAssistantConversationRef, *HomeAssistantFolderRef, *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error)
+	ConversationRoute        func(context.Context, *HomeAssistantConversationRef, *HomeAssistantRouteContext) error
 	RuntimeResolver          interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
@@ -301,6 +302,27 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if req.Conversation != nil {
+		if h.ConversationRoute == nil && strings.TrimSpace(req.Conversation.ID) != "" {
+			writeConversationRouteRefusal(w, &conversationRouteRefusal{code: PersonalAssistantConversationUnavailable})
+			return
+		}
+		if h.ConversationRoute != nil {
+			if err := h.ConversationRoute(r.Context(), req.Conversation, req.Context); err != nil {
+				if !writeConversationRouteRefusal(w, err) {
+					writeConversationRouteRefusal(w, &conversationRouteRefusal{code: PersonalAssistantConversationUnavailable})
+				}
+				return
+			}
+		}
+		// Like Ask, an opaque conversation reference identifies the panel
+		// path, never a workspace execution principal.
+		if req.Context == nil {
+			req.Context = &HomeAssistantRouteContext{Origin: "personal_assistant_panel"}
+		} else if req.Context.Origin == "" {
+			req.Context.Origin = "personal_assistant_panel"
+		}
+	}
 	if req.FolderContext != nil {
 		if h.FolderConversation == nil {
 			writeFolderError(w, ErrPersonalAssistantFolderConflict)
@@ -382,10 +404,16 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	// panel conversation. Keep explicit specialist/execution intents on their
 	// existing gates; answer ordinary project questions in this conversation.
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() {
+		if isAssistantWorkspaceReviewRequest(prompt) {
+			return assistantConversationRoute(workContext), nil
+		}
 		if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {
 			return &HomeAssistantRouteResponse{Intent: intent.Key, IntentLabel: intent.Label, RouteMode: homeAssistantRouteModeInline, TargetSurface: "current", ContextMode: homeAssistantContextDirect, HandoffPolicy: homeAssistantHandoffAssistant, PersonalAssistantState: workContext.State}, nil
 		}
-		if isAssistantDraftSaveRequest(prompt) || isAssistantMemoryRequest(prompt) || (intent.Key == homeAssistantDefaultIntent.Key && !shouldRecommendWorkspace(prompt, intent) && !panelExplicitExecution(prompt)) {
+		if isAssistantDraftSaveRequest(prompt) || isAssistantMemoryRequest(prompt) || panelExploratoryRequest(prompt) ||
+			((intent.Key == homeAssistantDefaultIntent.Key || intent.Key == homeAssistantWorkspaceCreateIntent.Key) && !panelExplicitExecution(prompt)) ||
+			((intent.Key == homeAssistantEmailIntent.Key || intent.Key == homeAssistantCalendarIntent.Key || intent.Key == homeAssistantTravelIntent.Key) &&
+				!panelExplicitExecution(prompt) && !isCompositionRequest(prompt) && !panelSpecialistRequest(prompt)) {
 			return assistantConversationRoute(workContext), nil
 		}
 	}
@@ -420,7 +448,8 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() && isCompositionRequest(prompt) && (match == nil || isAssistantOwnAgent(match.Name, workContext)) {
 		return assistantConversationRoute(workContext), nil
 	}
-	if routesToAssistantConversation(workContext, prompt, intent, routeContext, workspaceRecommended, match) {
+	if (context == nil || context.Origin != "personal_assistant_panel" || !panelExplicitExecution(prompt)) &&
+		routesToAssistantConversation(workContext, prompt, intent, routeContext, workspaceRecommended, match) {
 		return assistantConversationRoute(workContext), nil
 	}
 

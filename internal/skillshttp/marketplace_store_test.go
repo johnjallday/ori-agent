@@ -208,6 +208,7 @@ func TestAMissingNodeSaysNodeIsRequired(t *testing.T) {
 	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "Node.js is required") {
 		t.Fatalf("install status %d body %s", rr.Code, rr.Body.String())
 	}
+	f.handler.marketplaceSearch = &fakeMarketplaceCatalog{result: skills.MarketplaceSearchResult{State: "missing_runtime", Reason: "node_required"}}
 	rr = f.post(t, "marketplace/search", `{"query":"find"}`)
 	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "Node.js is required") {
 		t.Fatalf("search status %d body %s", rr.Code, rr.Body.String())
