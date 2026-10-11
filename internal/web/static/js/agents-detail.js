@@ -1,6 +1,7 @@
 // Agent Detail Page JavaScript
 
 let currentAgent = null;
+let workspaceEditor = null;
 let agentName = '';
 let isEditingConfig = false;
 let isEditingPrompt = false;
@@ -566,6 +567,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     skillsPageLink.href = `/skills?agent=${encodeURIComponent(agentName)}`;
   }
 
+  workspaceEditor = window.AgentWorkspaceEditor?.mount({
+    root: document.getElementById('agentWorkspacesSection'),
+    readAgent: fetchAgentDetail,
+    onSaved: membership => {
+      if (currentAgent) Object.assign(currentAgent, membership);
+    }
+  });
+
   // Load providers in parallel with agent details
   await Promise.all([loadAvailableProviders(), loadGlobalMCPServers(), loadAgentDetails()]);
 
@@ -622,11 +631,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 // of a long page (agents-page-ux FR-47).
 //
 // This page is one scrolling document, not a tabbed one, so a "tab" resolves to
-// a section to scroll to. A value with no section here — overview, and
-// workspaces, which this page does not present — correctly lands at the top.
+// a section to scroll to. Overview still lands at the top.
 const TAB_SECTIONS = {
   prompt: 'promptSection',
-  toolbox: 'capabilitiesSection'
+  toolbox: 'capabilitiesSection',
+  workspaces: 'agentWorkspacesSection'
 };
 
 function focusRequestedSection() {
@@ -650,6 +659,8 @@ function focusRequestedSection() {
       // Arriving from a deep link should also just BE at the destination rather
       // than animating there.
       section.scrollIntoView({ block: 'start', behavior: 'instant' });
+      if (tab === 'workspaces')
+        document.getElementById('agentWorkspacesTitle')?.focus({ preventScroll: true });
       return;
     }
     if (++attempts < 20) window.setTimeout(tryScroll, 100);
@@ -723,6 +734,7 @@ function renderAgentDetails() {
   if (descEl) descEl.textContent = description;
 
   renderAgentOrigin();
+  workspaceEditor?.setAgent(currentAgent);
 
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';

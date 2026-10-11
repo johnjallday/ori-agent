@@ -5078,3 +5078,151 @@ test('collectCreatePayload returns exactly what Create posts, without a request'
   assert.equal(collected.assistantHireConfig, null);
   assert.deepEqual(JSON.parse(JSON.stringify(collected.payload)), expectedFixturePayload);
 });
+
+function prepareModeWizard() {
+  const fixture = loadBuildWizard();
+  const { manager } = fixture;
+  const context = { mode: 'ordinary', entryPoint: 'home_cockpit_create' };
+  manager.workspaceCreatorContext = context;
+  manager.workspaceBuild.context = context;
+  manager.workspaceBuild.session = { id: 'b-1', version: 1, status: 'open' };
+  manager.wizardStep = 3;
+  manager.refreshWizardChrome = () => {};
+  const lines = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: { manualPreserved: 'Draft kept', draftFailure: 'Draft not saved', tryAgain: 'Try again' },
+    applySession() {},
+    setBusy() {},
+    collapse() {},
+    expand() {},
+    showLine: text => lines.push(text)
+  });
+  manager.scheduleWorkspaceBuildDraft = options => {
+    manager.workspaceBuild.draftUser = options?.user !== false;
+  };
+  manager.flushWorkspaceBuildDraft = async () => {};
+  return { ...fixture, context, lines };
+}
+
+function deferredBuildResult() {
+  let resolve;
+  const promise = new Promise(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const buildReply = (version = 2) => ({
+  ok: true,
+  status: 200,
+  body: {
+    session: {
+      id: 'b-1',
+      version,
+      status: 'open',
+      applied: ['name', 'team'],
+      draft: { name: 'Assistant name' },
+      team_patch: { mode: 'staffed' },
+      create_now: true
+    }
+  }
+});
+
+test('mode switches preserve the shared draft, step, transcript and operation context', async () => {
+  const { manager, context, nameInput } = prepareModeWizard();
+  nameInput.value = 'Manual name';
+  manager.teamDraft = { role_fills: ['chosen teammate'] };
+  const team = manager.teamDraft;
+  const session = manager.workspaceBuild.session;
+  manager.collapseWorkspaceBuild();
+  assert.equal(manager.workspaceBuildAssisted(), false);
+  assert.equal(context.mode, 'ordinary');
+  assert.equal(nameInput.value, 'Manual name');
+  assert.equal(manager.wizardStep, 3);
+  await manager.expandWorkspaceBuild();
+  assert.equal(manager.workspaceBuildAssisted(), true);
+  assert.equal(manager.workspaceBuild.session, session);
+  assert.equal(manager.teamDraft, team);
+  assert.equal(nameInput.value, 'Manual name');
+  assert.equal(manager.wizardStep, 3);
+});
+
+test('a late turn cannot overwrite manual edits or create, even after switching back', async () => {
+  const { manager, window, nameInput, lines } = prepareModeWizard();
+  const response = deferredBuildResult();
+  let sent = 0;
+  manager.workspaceBuildApi = () => ({
+    turn: () => {
+      sent++;
+      return response.promise;
+    }
+  });
+  window.WorkspaceCreatorState = { buildPatchFromSession: session => session.draft };
+  let created = 0;
+  manager.createFromWorkspaceBuild = async () => {
+    created++;
+  };
+  const first = manager.sendWorkspaceBuildTurn({ text: 'Set it up' });
+  await manager.sendWorkspaceBuildTurn({ text: 'Set it up' });
+  await Promise.resolve();
+  assert.equal(sent, 1, 'repeated activation does not start overlapping turns');
+  manager.collapseWorkspaceBuild();
+  nameInput.value = 'Newer manual name';
+  manager.noteWorkspaceBuildUserEdit({ target: nameInput, isTrusted: true });
+  await manager.expandWorkspaceBuild();
+  response.resolve(buildReply());
+  await first;
+  assert.equal(nameInput.value, 'Newer manual name');
+  assert.equal(created, 0);
+  assert.equal(manager.wizardStep, 3);
+  assert.deepEqual(lines, ['Draft kept']);
+  assert.equal(manager.workspaceBuild.session.version, 2);
+  assert.equal(manager.workspaceBuild.draftUser, true);
+});
+
+test('a reply from a closed build cannot touch a later dialog', async () => {
+  const { manager, nameInput } = prepareModeWizard();
+  const response = deferredBuildResult();
+  manager.workspaceBuildApi = () => ({ turn: () => response.promise });
+  const pending = manager.sendWorkspaceBuildTurn({ text: 'Set it up' });
+  await Promise.resolve();
+  await Promise.resolve();
+  manager.workspaceBuild = null;
+  nameInput.value = 'Next dialog';
+  response.resolve(buildReply());
+  await pending;
+  assert.equal(nameInput.value, 'Next dialog');
+});
+
+test('delayed blueprint preparation checks manual ownership before applying fields', async () => {
+  const { manager, nameInput } = prepareModeWizard();
+  const selected = deferredBuildResult();
+  manager.selectWorkspaceBuildBlueprint = () => selected.promise;
+  const revision = manager.workspaceBuildRevision();
+  const build = manager.workspaceBuild;
+  const pending = manager.applyBuildPatchToWizard(
+    { template_id: 'research-project', name: 'Old' },
+    'Luna',
+    {
+      animate: false,
+      current: () => manager.workspaceBuildCanApply(build, revision)
+    }
+  );
+  manager.collapseWorkspaceBuild();
+  nameInput.value = 'New';
+  manager.noteWorkspaceBuildUserEdit({ target: nameInput, isTrusted: true });
+  selected.resolve(true);
+  await pending;
+  assert.equal(nameInput.value, 'New');
+  assert.equal(manager.workspaceBuild.draftUser, true);
+  assert.equal(manager.workspaceBuildApplyDepth, 0);
+});
+
+test('an obsolete session cannot roll a completed draft sync back', async () => {
+  const { manager, nameInput } = prepareModeWizard();
+  manager.workspaceBuild.session.version = 7;
+  nameInput.value = 'Latest';
+  await manager.applyWorkspaceBuildSession(buildReply(6).body.session);
+  assert.equal(manager.workspaceBuild.session.version, 7);
+  assert.equal(nameInput.value, 'Latest');
+});

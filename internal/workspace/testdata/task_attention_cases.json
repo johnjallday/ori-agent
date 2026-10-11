@@ -1,0 +1,159 @@
+[
+  {
+    "name": "two attention tasks in one workspace",
+    "tasks": [
+      { "status": "waiting_for_choice", "to": "Writer" },
+      {
+        "status": "blocked",
+        "to": "Writer",
+        "context": {
+          "human_loop": {
+            "state": "blocked",
+            "repair": { "label": "Connect Google", "url": "/agents" }
+          }
+        }
+      }
+    ],
+    "states": ["needs_input", "blocked"],
+    "attention": 2,
+    "open": 2,
+    "active": false
+  },
+  {
+    "name": "step pause outranks running",
+    "tasks": [{ "status": "in_progress", "context": { "execution_step_waiting": true } }],
+    "states": ["needs_input"],
+    "attention": 1,
+    "open": 1,
+    "active": false
+  },
+  {
+    "name": "failed and timeout ignore stale choice",
+    "tasks": [
+      { "status": "failed", "context": { "human_loop": { "state": "waiting_for_choice" } } },
+      { "status": "timeout" }
+    ],
+    "states": ["failed", "timed_out"],
+    "attention": 2,
+    "open": 2,
+    "active": false
+  },
+  {
+    "name": "closed outcomes ignore stale repair",
+    "tasks": [
+      {
+        "status": "completed",
+        "context": {
+          "human_loop": { "state": "blocked", "repair": { "label": "Connect", "url": "/agents" } }
+        }
+      },
+      { "status": "cancelled", "context": { "execution_step_waiting": true } },
+      { "status": "skipped", "context": { "human_loop": { "state": "waiting_for_choice" } } }
+    ],
+    "states": ["completed", "cancelled", "skipped"],
+    "attention": 0,
+    "open": 0,
+    "active": false
+  },
+  {
+    "name": "backlog ignores stale input",
+    "tasks": [
+      { "status": "backlog", "context": { "human_loop": { "state": "waiting_for_choice" } } }
+    ],
+    "states": ["backlog"],
+    "attention": 0,
+    "open": 0,
+    "active": false,
+    "backlog": 1
+  },
+  {
+    "name": "assignment placeholders",
+    "tasks": [
+      { "status": "pending", "to": " Unassigned " },
+      { "status": "ready", "to": " " },
+      { "status": "assigned" }
+    ],
+    "states": ["needs_assignment", "needs_assignment", "needs_assignment"],
+    "attention": 3,
+    "open": 3,
+    "active": false
+  },
+  {
+    "name": "named assignment is not provider verification",
+    "tasks": [
+      { "status": "assigned", "to": "Writer" },
+      { "status": "in_progress", "to": "Writer" }
+    ],
+    "states": ["ready", "running"],
+    "attention": 0,
+    "open": 2,
+    "active": true
+  },
+  {
+    "name": "input outranks block counted once",
+    "tasks": [
+      {
+        "status": "blocked",
+        "context": {
+          "human_loop": { "state": "waiting_for_choice" },
+          "execution_step_waiting": true
+        }
+      }
+    ],
+    "states": ["needs_input"],
+    "attention": 1,
+    "open": 1,
+    "active": false
+  },
+  {
+    "name": "explicit closed lifecycle",
+    "tasks": [
+      { "ticket_state": "done", "status": "failed" },
+      { "ticket_state": "review", "status": "in_progress" },
+      { "ticket_state": "cancelled", "status": "waiting_for_choice" },
+      { "ticket_state": "backlog", "status": "pending" }
+    ],
+    "states": ["completed", "completed", "cancelled", "backlog"],
+    "attention": 0,
+    "open": 0,
+    "active": false,
+    "backlog": 1
+  },
+  {
+    "name": "unknown stays unknown",
+    "tasks": [
+      {
+        "status": "future_state",
+        "context": { "human_loop": { "repair": { "label": "Stale repair" } } }
+      }
+    ],
+    "states": ["unknown"],
+    "attention": 0,
+    "open": 0,
+    "active": false,
+    "unknown": 1
+  },
+  {
+    "name": "legacy normalization",
+    "tasks": [
+      { "status": " SUCCESS " },
+      { "status": "error" },
+      { "status": "queued", "to": "Writer" },
+      { "status": "todo", "to": "Writer" },
+      { "status": "not_started", "to": "Writer" },
+      { "to": "Writer" }
+    ],
+    "states": ["completed", "failed", "ready", "ready", "ready", "ready"],
+    "attention": 1,
+    "open": 5,
+    "active": false
+  },
+  {
+    "name": "empty is known zero",
+    "tasks": [],
+    "states": [],
+    "attention": 0,
+    "open": 0,
+    "active": false
+  }
+]

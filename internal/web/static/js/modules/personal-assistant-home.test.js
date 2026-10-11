@@ -25,6 +25,33 @@ import {
   todaySectionRows
 } from './personal-assistant-home.js';
 
+test('partial assistant requests retain canonical identity and deduplicate only within an owner', () => {
+  const item = {
+    id: 'same',
+    kind: 'ticket',
+    title: 'Respond',
+    route: '/workspaces/hq?ticket=same',
+    ref: { workspace_id: 'hq', entity_type: 'task', entity_id: 'same' }
+  };
+  const section = {
+    health: { status: 'unavailable' },
+    items: [
+      item,
+      { ...item, kind: 'brief' },
+      { ...item, ref: { ...item.ref, workspace_id: 'other' } }
+    ]
+  };
+  const rows = todaySectionItems(section);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0].ref, item.ref);
+  assert.equal(rows[0].route, item.route);
+  assert.equal(
+    todaySectionRows(section).length,
+    4,
+    'legacy rows retain verified facts with a warning'
+  );
+});
+
 test('an unfinished build keeps its id and only the controls Today knows', () => {
   const [build, other] = todaySectionItems({
     items: [
@@ -40,7 +67,7 @@ test('an unfinished build keeps its id and only the controls Today knows', () =>
   assert.equal(build.id, 'build-1');
   assert.deepEqual(build.actions, ['resume', 'discard']);
   assert.equal('actions' in other, false, 'other rows stay links');
-  assert.equal('id' in other, false);
+  assert.equal(other.id, 'o1');
 });
 
 test('Resume opens the dialog in build mode, or goes Home where the dialog is', () => {

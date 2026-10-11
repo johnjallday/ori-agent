@@ -30,7 +30,7 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
 	}
-	tmpDir := t.TempDir()
+	tmpDir := newServerFixtureRoot(t)
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
@@ -41,6 +41,7 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	// user's home directory. t.Setenv restores the original HOME after the
 	// test.
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("ORI_DATA_DIR", tmpDir)
 
 	builder, err := NewServerBuilder()
 	if err != nil {
@@ -50,6 +51,7 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
+	closeInjectionTestServer(t, srv)
 	if builder.dailyBriefService == nil {
 		t.Fatal("expected dailyBriefService to be wired")
 	}

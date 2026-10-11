@@ -363,8 +363,10 @@ export function findWorkspace(flattened, id) {
  */
 export function workspaceSignals(workspace) {
   const ws = workspace || {};
-  const attention = readCount(ws.needs_attention_count);
-  const openTasks = readCount(ws.open_task_count);
+  const available = ws.task_summary_available !== false;
+  const unknown = readCount(ws.unknown_task_count) || 0;
+  const attention = available ? readCount(ws.needs_attention_count) : null;
+  const openTasks = available ? readCount(ws.open_task_count) : null;
   const agents = readCount(
     ws.agent_count !== undefined
       ? ws.agent_count
@@ -372,13 +374,13 @@ export function workspaceSignals(workspace) {
         ? ws.agents.length
         : undefined
   );
-  const active = ws.active === true;
+  const active = available && ws.active === true;
 
   let status;
   if (attention !== null && attention > 0) status = 'attention';
   else if (active) status = 'running';
   else if (openTasks !== null && openTasks > 0) status = 'active';
-  else if (attention === null && openTasks === null && !('active' in ws)) status = 'unknown';
+  else if (attention === null || openTasks === null || unknown > 0) status = 'unknown';
   else status = 'idle';
 
   const label = {
@@ -389,7 +391,16 @@ export function workspaceSignals(workspace) {
     unknown: 'Status unavailable'
   }[status];
 
-  return { status, label, attention, openTasks, agents, active };
+  return {
+    status,
+    label,
+    attention,
+    openTasks,
+    agents,
+    active,
+    unknown,
+    partial: attention === null || openTasks === null || unknown > 0
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +430,7 @@ export const SIGNAL_TODAY = 'today';
 export const SIGNALS = [SIGNAL_ATTENTION, SIGNAL_RUNNING, SIGNAL_TODAY];
 
 export const SIGNAL_LABELS = {
-  [SIGNAL_ATTENTION]: 'Attention',
+  [SIGNAL_ATTENTION]: 'Workspaces needing attention',
   [SIGNAL_RUNNING]: 'Running',
   [SIGNAL_TODAY]: 'Today'
 };
@@ -480,10 +491,16 @@ export function matchesSignal(workspace, signal, scheduleIndex, now) {
   if (isGroupWorkspace(ws)) return false;
   const signals = workspaceSignals(ws);
   if (signal === SIGNAL_ATTENTION) {
-    return signals.attention === null ? null : signals.attention > 0;
+    return signals.attention === null || (signals.attention === 0 && signals.unknown > 0)
+      ? null
+      : signals.attention > 0;
   }
   if (signal === SIGNAL_RUNNING) {
-    return 'active' in ws ? signals.active : null;
+    return ws.task_summary_available === false || (!signals.active && signals.unknown > 0)
+      ? null
+      : 'active' in ws
+        ? signals.active
+        : null;
   }
   return hasWorkTodayFor(String(ws.id || ''), scheduleIndex, now);
 }
@@ -517,18 +534,13 @@ export function signalCounts(workspaces, scheduleIndex, now) {
 /**
  * The Updates badge's count and visibility (FR15-FR17).
  *
- * Combines workspace attention with global plugin updates because both now
- * render inside the existing Updates flyout. Progression/onboarding state is
- * still never a valid input. Hidden at zero rather than showing a "0".
+ * Counts attention workspaces only. Maintenance has its own labelled section
+ * and count; adding plugin updates here would mix incompatible units.
  */
-export function updatesBadgeView(flattened, scheduleIndex, pluginUpdateCount = 0) {
+export function updatesBadgeView(flattened, scheduleIndex) {
   const counts = signalCounts(flattened, scheduleIndex);
   const attention = counts ? counts[SIGNAL_ATTENTION] : null;
-  const workspaceCount = typeof attention === 'number' ? attention : 0;
-  const pluginCount = Number.isFinite(Number(pluginUpdateCount))
-    ? Math.max(0, Math.floor(Number(pluginUpdateCount)))
-    : 0;
-  const count = workspaceCount + pluginCount;
+  const count = typeof attention === 'number' ? attention : 0;
   return { count, visible: count > 0 };
 }
 
@@ -572,7 +584,7 @@ export function filterResultMessage(signal, count) {
     : `${label} filter applied. ${count} workspaces match.`;
 }
 
-export function renderSignalFiltersHTML(counts, activeSignal) {
+export function renderSignalFiltersHTML(counts, activeSignal, partialSignals = []) {
   return SIGNALS.map(signal => {
     const isActive = signal === activeSignal;
     const count = counts ? counts[signal] : null;
@@ -585,7 +597,10 @@ export function renderSignalFiltersHTML(counts, activeSignal) {
       `aria-pressed="${isActive ? 'true' : 'false'}">` +
       `<span class="cockpit-signal-label">${escapeHtml(label)}</span>` +
       `<span class="cockpit-signal-count"${count === null ? ' data-unavailable="true"' : ''}>` +
-      `${escapeHtml(formatCount(count))}</span>` +
+      `${escapeHtml(formatCount(count))}${count !== null && partialSignals.includes(signal) ? '+' : ''}</span>` +
+      (partialSignals.includes(signal)
+        ? '<span class="visually-hidden">Known workspaces only; some task data is unavailable.</span>'
+        : '') +
       '</button>'
     );
   }).join('');
@@ -608,9 +623,12 @@ export function recommendedNextMove(workspace) {
       kind: 'attention',
       label:
         signals.attention === 1
-          ? 'Resolve 1 item needing attention'
-          : `Resolve ${signals.attention} items needing attention`,
-      detail: 'Flagged by this workspace, waiting on you.'
+          ? 'Review 1 task needing attention'
+          : `Review ${signals.attention} tasks needing attention`,
+      detail:
+        signals.unknown > 0
+          ? 'Some task states are unavailable. Review the known tasks first.'
+          : 'In this workspace. Open Tasks to respond, assign, or inspect.'
     };
   }
   if (ws.setup_required === true || ws.setup_pending === true) {
@@ -742,6 +760,7 @@ export function groupAggregates(group, flattened) {
     childCount: rows.filter(row => row && row.parent_id === groupId).length,
     descendantWorkspaces: workspaces.length,
     descendantGroups: groups.length,
+    partialWorkspaces: workspaces.filter(ws => workspaceSignals(ws).partial).length,
     agents: sum(ws => workspaceSignals(ws).agents),
     openTasks: sum(ws => workspaceSignals(ws).openTasks),
     attention: sum(ws => workspaceSignals(ws).attention)
@@ -838,6 +857,7 @@ export function summaryView(flattened, scheduleIndex, now) {
   return {
     workspaces: workspaces.length,
     groups: groups.length,
+    partialWorkspaces: workspaces.filter(ws => workspaceSignals(ws).partial).length,
     agents: sum(ws => workspaceSignals(ws).agents),
     openTasks: sum(ws => workspaceSignals(ws).openTasks),
     attention: sum(ws => workspaceSignals(ws).attention),
@@ -954,7 +974,9 @@ export function workspaceRailView(workspace) {
     isPersonalHQ: ws.is_personal_hq === true || ws.designation === 'personal_hq',
     status: signals,
     nextMove: recommendedNextMove(ws),
-    openHref: ws.folder_slug ? `/workspaces/${encodeURIComponent(ws.folder_slug)}` : '',
+    openHref: ws.folder_slug
+      ? workspacePageURL(ws.folder_slug, [], { search: signals.attention > 0 ? 'panel=tasks' : '' })
+      : '',
     commander,
     // FR68: the action exists only with a resolved entry agent; otherwise the
     // rail explains what is missing rather than offering a dead control.
@@ -965,6 +987,12 @@ export function workspaceRailView(workspace) {
     roster: agentRoster(ws),
     rosterState: rosterState(ws)
   };
+}
+
+function taskCoverageHTML(count) {
+  return count
+    ? `<p class="cockpit-rail-note">Known task totals only. ${escapeHtml(count)} workspace(s) have unavailable or unclassified task data.</p>`
+    : '';
 }
 
 function metricHTML(label, value) {
@@ -1090,8 +1118,9 @@ export function renderGroupRailHTML(view) {
     '<div class="cockpit-rail-metrics" aria-label="Group totals">' +
     aggregateHTML('Open tasks', a.openTasks) +
     aggregateHTML('Agents', a.agents) +
-    aggregateHTML('Attention', a.attention) +
+    aggregateHTML('Attention tasks', a.attention) +
     '</div>' +
+    taskCoverageHTML(a.partialWorkspaces) +
     '<p class="cockpit-rail-note">Totals cover every workspace inside this group. ' +
     'A group holds workspaces; it does not run work itself.</p>' +
     mapLayoutSectionHTML(view.mapLayout) +
@@ -1219,9 +1248,10 @@ export function renderSummaryRailHTML(view) {
     '</div>' +
     '<div class="cockpit-rail-metrics" aria-label="Work totals">' +
     metricHTML('Open tasks', view.openTasks) +
-    metricHTML('Attention', view.attention) +
-    metricHTML('Due today', view.dueToday) +
+    metricHTML('Attention tasks', view.attention) +
+    metricHTML('Workspaces due today', view.dueToday) +
     '</div>' +
+    taskCoverageHTML(view.partialWorkspaces) +
     // Deliberately no "Needs attention" LIST here. Today — the default rail
     // state, zero clicks away — already lists the same workspaces from the same
     // state. Summary owns the cross-workspace *counts* plus the one thing Today
@@ -1273,7 +1303,9 @@ export function renderWorkspaceRailHTML(view) {
       : '') +
     '</section>' +
     '<div class="cockpit-rail-actions">' +
-    `<a class="modern-btn modern-btn-primary cockpit-rail-open" href="${escapeHtml(view.openHref)}" data-cockpit-rail-open data-workspace-id="${escapeHtml(view.id)}">Open Workspace</a>` +
+    (view.openHref
+      ? `<a class="modern-btn modern-btn-primary cockpit-rail-open" href="${escapeHtml(view.openHref)}" data-cockpit-rail-open data-workspace-id="${escapeHtml(view.id)}">${view.nextMove.kind === 'attention' ? 'Review Tasks' : 'Open Workspace'}</a>`
+      : '<p class="cockpit-rail-note">Workspace destination unavailable.</p>') +
     (view.canAskCommander
       ? `<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-rail-ask data-workspace-id="${escapeHtml(view.id)}">Open assistant</button>`
       : `<p class="cockpit-rail-note">${escapeHtml(view.commanderUnavailableReason)}</p>`) +
@@ -1281,8 +1313,9 @@ export function renderWorkspaceRailHTML(view) {
     '<div class="cockpit-rail-metrics" aria-label="Workspace metrics">' +
     metricHTML('Open tasks', view.status.openTasks) +
     metricHTML('Agents', view.status.agents) +
-    metricHTML('Attention', view.status.attention) +
+    metricHTML('Attention tasks', view.status.attention) +
     '</div>' +
+    taskCoverageHTML(view.status.partial ? 1 : 0) +
     (view.commander
       ? '<section class="cockpit-rail-section" aria-label="Commander">' +
         '<h3 class="cockpit-rail-section-title">Commander</h3>' +
@@ -1315,7 +1348,14 @@ export function attentionItems(flattened) {
     .map(ws => ({ ws, count: workspaceSignals(ws).attention || 0 }))
     .filter(row => row.count > 0)
     .sort((a, b) => b.count - a.count)
-    .map(row => ({ id: row.ws.id, name: row.ws.name || 'Untitled workspace', count: row.count }));
+    .map(row => ({
+      id: row.ws.id,
+      name: row.ws.name || 'Untitled workspace',
+      count: row.count,
+      href: row.ws.folder_slug
+        ? workspacePageURL(row.ws.folder_slug, [], { search: 'panel=tasks' })
+        : ''
+    }));
 }
 
 /**
@@ -1349,17 +1389,19 @@ export function scheduledTodayItems(flattened, scheduleIndex, now = new Date()) 
 export function renderAttentionSectionHTML(items) {
   if (!items.length) return '';
   return (
-    '<h3 class="cockpit-today-title">Needs attention</h3>' +
+    '<h3 class="cockpit-today-title">Workspaces needing attention</h3>' +
     '<ul class="cockpit-today-list">' +
     items
       .slice(0, 6)
       .map(
         item =>
           '<li class="cockpit-today-row is-attention">' +
-          `<button type="button" class="cockpit-today-link" data-cockpit-select="${escapeHtml(item.id)}">` +
+          (item.href
+            ? `<a class="cockpit-today-link" href="${escapeHtml(item.href)}">`
+            : '<span class="cockpit-today-link">') +
           `<span class="cockpit-today-name">${escapeHtml(item.name)}</span>` +
-          `<span class="cockpit-today-count">${escapeHtml(String(item.count))} needing attention</span>` +
-          '</button></li>'
+          `<span class="cockpit-today-count">${escapeHtml(String(item.count))} tasks needing attention${item.href ? '' : ' · Workspace destination unavailable'}</span>` +
+          (item.href ? '</a></li>' : '</span></li>')
       )
       .join('') +
     (items.length > 6 ? `<li class="cockpit-today-more">+${items.length - 6} more</li>` : '') +
@@ -1974,7 +2016,14 @@ import {
   function renderAreaStatus() {
     const status = currentAreaState();
     if (els.areaStatus) {
-      els.areaStatus.innerHTML = renderWorkspaceAreaStatusHTML(status);
+      els.areaStatus.innerHTML =
+        renderWorkspaceAreaStatusHTML(status) +
+        (state.refreshError
+          ? '<p role="status">Couldn’t refresh workspaces. Showing last-loaded information. <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-cockpit-refresh-retry>Retry</button></p>'
+          : '');
+      els.areaStatus
+        .querySelector('[data-cockpit-refresh-retry]')
+        ?.addEventListener('click', () => void refreshQuietly());
       const retry = els.areaStatus.querySelector('[data-cockpit-retry]');
       if (retry) retry.addEventListener('click', () => refresh());
       const onboardingRetry = els.areaStatus.querySelector('[data-cockpit-onboarding-retry]');
@@ -2006,7 +2055,15 @@ import {
   function renderFilters() {
     if (!els.filters) return;
     const counts = signalCounts(state.flattened, state.scheduleIndex);
-    els.filters.innerHTML = renderSignalFiltersHTML(counts, state.signal);
+    const partial = SIGNALS.filter(signal =>
+      state.flattened.some(
+        ws =>
+          !isGroupWorkspace(ws) &&
+          (matchesSignal(ws, signal, state.scheduleIndex) === null ||
+            (signal !== SIGNAL_TODAY && workspaceSignals(ws).unknown > 0))
+      )
+    );
+    els.filters.innerHTML = renderSignalFiltersHTML(counts, state.signal, partial);
     els.filters.querySelectorAll('[data-cockpit-signal]').forEach(btn => {
       btn.addEventListener('click', () => {
         // Single-select: clicking the active chip clears it (FR31, FR33).
@@ -3603,8 +3660,10 @@ import {
 
   function updateUpdatesBadge() {
     if (!els.railToggleCount) return;
-    const badge = updatesBadgeView(state.flattened, state.scheduleIndex, state.pluginUpdateCount);
+    const badge = updatesBadgeView(state.flattened, state.scheduleIndex);
     els.railToggleCount.textContent = badge.visible ? String(badge.count) : '';
+    els.railToggleCount.title = `${badge.count} workspaces needing attention`;
+    els.railToggleCount.setAttribute('aria-label', els.railToggleCount.title);
     els.railToggleCount.hidden = !badge.visible;
   }
 
@@ -4620,8 +4679,10 @@ import {
         state.flattened = flattenWorkspaceTree(state.tree);
         state.metadata = buildMapMetadata(state.flattened, state.tree);
         state.error = null;
+        state.refreshError = false;
         pruneTreeTabs();
       } catch (err) {
+        state.refreshError = true;
         // A failed background refresh keeps the last good data on screen rather
         // than blanking a working cockpit.
         console.warn('home-workspace-cockpit: background refresh failed', err);

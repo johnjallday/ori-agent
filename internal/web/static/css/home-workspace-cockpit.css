@@ -2943,7 +2943,7 @@ body.home-command-page {
 }
 
 .cockpit-today-count {
-  color: var(--hc-ink-faint);
+  color: var(--hc-ink);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 9.5px;
 }

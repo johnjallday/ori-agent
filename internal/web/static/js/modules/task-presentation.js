@@ -36,7 +36,8 @@ export const PRESENTATION_STATE = Object.freeze({
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
   SKIPPED: 'skipped',
-  UNKNOWN: 'unknown'
+  UNKNOWN: 'unknown',
+  BACKLOG: 'backlog'
 });
 
 // Drawer filter keys (FR16).
@@ -55,6 +56,14 @@ export const FILTER = Object.freeze({
 // className preserves the task pages' CSS buckets; it is not a semantic state.
 // In particular, Timed Out and Failed share styling but keep distinct labels.
 const STATE_META = Object.freeze({
+  [PRESENTATION_STATE.BACKLOG]: {
+    label: 'Backlog',
+    className: 'backlog',
+    tone: 'neutral',
+    counts: [],
+    sortPriority: 9,
+    primaryAction: null
+  },
   [PRESENTATION_STATE.NEEDS_INPUT]: {
     label: 'Needs Input',
     className: 'blocked',
@@ -181,6 +190,15 @@ export function taskHumanLoopState(task) {
  * @returns {{code:string,label:string,url:string,reason:string,message:string}|null}
  */
 export function taskBlockedRepair(task) {
+  if (
+    ![
+      PRESENTATION_STATE.NEEDS_INPUT,
+      PRESENTATION_STATE.BLOCKED,
+      PRESENTATION_STATE.FAILED,
+      PRESENTATION_STATE.TIMED_OUT
+    ].includes(resolveTaskState(task))
+  )
+    return null;
   const loop = task && task.context && task.context.human_loop;
   const repair = loop && loop.repair;
   if (!repair || !String(repair.label || '').trim()) return null;
@@ -205,7 +223,8 @@ export function isRepairGatedTask(task) {
 /** Assignee display string, mirroring the existing `to || agent_name || assigned_to` order. */
 export function taskAssignee(task) {
   if (!task) return '';
-  return String(task.to || task.agent_name || task.assigned_to || '').trim();
+  const assignee = String(task.to || task.agent_name || task.assigned_to || '').trim();
+  return lc(assignee) === 'unassigned' ? '' : assignee;
 }
 
 /**
@@ -278,9 +297,15 @@ function retrySupported(task, opts) {
  * blocked, per FR34), then running, then ready-ish, then a safe unknown.
  */
 export function resolveTaskState(task, opts) {
+  if (!task) return PRESENTATION_STATE.UNKNOWN;
+  const lifecycle = lc(task.ticket_state);
+  if (lifecycle === 'backlog') return PRESENTATION_STATE.BACKLOG;
+  if (lifecycle === 'review' || lifecycle === 'done') return PRESENTATION_STATE.COMPLETED;
+  if (lifecycle === 'cancelled') return PRESENTATION_STATE.CANCELLED;
   const status = lc(task && task.status);
   const humanLoop = taskHumanLoopState(task);
 
+  if (status === 'backlog') return PRESENTATION_STATE.BACKLOG;
   if (COMPLETED_STATUSES.has(status)) return PRESENTATION_STATE.COMPLETED;
   if (status === 'cancelled') return PRESENTATION_STATE.CANCELLED;
   if (status === 'skipped') return PRESENTATION_STATE.SKIPPED;

@@ -1,0 +1,128 @@
+/* Triage keeps Ori's editorial typography and theme; only this page owns these rules. */
+.action-center-page [hidden] {
+  display: none !important;
+}
+
+#action-center-status,
+#action-center-retained {
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+#action-center-error h3,
+#action-center-empty h3 {
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+
+#action-center-error p,
+#action-center-empty p {
+  color: var(--text-secondary);
+}
+
+.action-center-empty-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.action-center-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.75rem 1rem;
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  align-items: start;
+}
+
+.action-center-row:last-child {
+  border-bottom: 0;
+}
+
+.action-center-row[data-unread] {
+  background: var(--primary-color-light);
+}
+
+.action-center-chips,
+.action-center-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.action-center-chips {
+  align-items: flex-start;
+}
+
+.action-center-backlog {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.action-center-actions .btn {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+  background: transparent;
+}
+
+.action-center-actions .btn:hover {
+  background: var(--bg-secondary);
+}
+
+.action-center-actions [data-action="dismiss"] {
+  color: #9c2030;
+}
+
+[data-bs-theme="dark"] .action-center-actions [data-action="dismiss"] {
+  color: #ff9aa5;
+}
+
+.action-center-title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.action-center-title a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.action-center-copy,
+.action-center-unavailable {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.action-center-unavailable {
+  max-width: 10rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.action-center-page :is(a, button, select, #action-center-status):focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 700px) {
+  .action-center-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .action-center-chips,
+  .action-center-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .action-center-page :is(.modern-btn, .form-select) {
+    max-width: 100%;
+    white-space: normal;
+  }
+}

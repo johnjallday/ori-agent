@@ -25,20 +25,23 @@ func newBuiltTestBuilder(t *testing.T) *ServerBuilder {
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
 	}
-	tmpDir := t.TempDir()
+	tmpDir := newServerFixtureRoot(t)
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(originalWD) })
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("ORI_DATA_DIR", tmpDir)
 
 	builder, err := NewServerBuilder()
 	if err != nil {
 		t.Fatalf("NewServerBuilder failed: %v", err)
 	}
-	if _, err := builder.Build(); err != nil {
+	srv, err := builder.Build()
+	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
+	closeInjectionTestServer(t, srv)
 	return builder
 }
 

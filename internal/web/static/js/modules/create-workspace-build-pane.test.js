@@ -212,7 +212,7 @@ test('the pane opens with the fixed opening line, the assistant, and a composer'
   const text = root.textContent;
   assert.match(text, /Luna/);
   assert.match(text, /Personal Assistant/);
-  assert.match(text, /I’ll do it myself/);
+  assert.match(text, /Set up manually/);
   assert.match(text, /Start over/);
   const [first] = entries(root);
   assert.match(first.textContent, /What should this workspace do\?/);
