@@ -114,13 +114,24 @@ func missionFirstTaskOf(view personalassistant.FolderFirstTaskView) progression.
 		WorkspaceName: view.WorkspaceName, WorkspaceRoute: view.WorkspaceRoute,
 		FolderName: view.FolderName, State: progression.MissionFirstTaskState(view.State),
 		CanStart: view.CanStart, TicketRoute: view.TicketRoute,
+		Assessment: view.Recipe != "", CanRetry: view.CanRetry,
 	}
 	switch {
+	case view.Recipe != "" && view.State == personalassistant.FolderFirstTaskFailed:
+		// An assessment that did not finish says why, and where that is repaired
+		// when it has to be before another try.
+		task.Blocked = view.Message
+		task.BlockedURL, task.BlockedLabel = view.RepairRoute, view.RepairLabel
 	case view.State == personalassistant.FolderFirstTaskWaiting:
 		task.Blocked = view.Message
 	case view.State == personalassistant.FolderFirstTaskSeeded && !view.CanStart:
 		task.Blocked = view.Message
-		if view.Reason == personalassistant.FolderFirstTaskReasonNoModel {
+		switch {
+		case view.Recipe != "":
+			// An assessment names its own repair: the assistant's model is
+			// chosen on the Agents page, not in the system settings.
+			task.BlockedURL, task.BlockedLabel = view.RepairRoute, view.RepairLabel
+		case view.Reason == personalassistant.FolderFirstTaskReasonNoModel:
 			// A missing model is fixed in Settings, not in the workspace.
 			task.BlockedURL, task.BlockedLabel = systemModelSettingsURL, "Open Settings"
 		}
@@ -142,11 +153,18 @@ func (b *ServerBuilder) folderFirstTaskView(ctx context.Context, workspaceID str
 	if !ok {
 		return personalassistant.FolderFirstTaskView{}, false
 	}
+	if view.Recipe != "" {
+		// An assessment runs on its own workspace's assistant and that
+		// assistant's model, which its gate has already checked. The personal
+		// assistant's model has nothing to do with it.
+		view.Readiness = b.softwareAssessmentReadiness(ctx, view)
+		return view, true
+	}
 	if view.State == personalassistant.FolderFirstTaskSeeded && view.CanStart && !modelConfigured {
 		view.CanStart = false
 		view.Reason = personalassistant.FolderFirstTaskReasonNoModel
 		view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, view.WorkspaceName)
-		view.Detail = personalassistant.FolderFirstTaskRowDetail(view.State, false, "")
+		view.Detail = personalassistant.FolderFirstTaskViewDetail(view, "")
 	}
 	return view, true
 }

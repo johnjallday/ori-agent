@@ -77,6 +77,10 @@ type FolderCandidateRecord struct {
 	// the table row it came from (".git"), for revalidation and tools.
 	Marker     string `json:"marker,omitempty"`
 	MarkerName string `json:"marker_name,omitempty"`
+	// Repository is how the candidate's version-control marker appeared in the
+	// directory listing: "directory", "file" (a worktree or submodule), or empty.
+	// It was never opened, so it does not say the checkout is valid.
+	Repository string `json:"repository,omitempty"`
 	// DominantExtension is the candidate's most common file kind (".tex"),
 	// for tool candidates.
 	DominantExtension string `json:"dominant_ext,omitempty"`
@@ -143,11 +147,15 @@ type FolderOffer struct {
 	FolderName         string                    `json:"folder_name"`
 	// RootIdentity is an opaque device/inode witness from the original scan;
 	// it is not a filesystem path or a durable discovery authorization.
-	RootIdentity string    `json:"root_identity,omitempty"`
-	Verdict      string    `json:"verdict"`
-	Reason       string    `json:"reason"`
-	Partial      bool      `json:"partial,omitempty"`
-	ScannedAt    time.Time `json:"scanned_at"`
+	RootIdentity string `json:"root_identity,omitempty"`
+	// SubjectIdentity is the same kind of witness for the directory a software
+	// offer is about, which may be a subfolder of the root. A yes is honoured
+	// only while that directory is still the one there.
+	SubjectIdentity string    `json:"subject_identity,omitempty"`
+	Verdict         string    `json:"verdict"`
+	Reason          string    `json:"reason"`
+	Partial         bool      `json:"partial,omitempty"`
+	ScannedAt       time.Time `json:"scanned_at"`
 	// Subject is what the offer asks about: the named project, or the root
 	// for a dump, ambiguous, or empty verdict.
 	Subject FolderCandidateRecord `json:"subject"`
@@ -156,6 +164,18 @@ type FolderOffer struct {
 	Queue         []FolderCandidateRecord  `json:"queue,omitempty"`
 	ProjectsCount int                      `json:"projects_count,omitempty"`
 	Portfolio     *FolderPortfolioEvidence `json:"portfolio,omitempty"`
+	// NeedsCandidate says the folder holds several software projects and the
+	// user has not said which one this offer is about. Nothing can be set up
+	// until they choose; the subject is only the first of them.
+	NeedsCandidate bool `json:"needs_candidate,omitempty"`
+	// Enclosing says the subject sits inside a larger repository, found by the
+	// bounded marker check above the selection. It names that folder so the
+	// card can ask for it; it is not access to it.
+	Enclosing *FolderEnclosingHint `json:"enclosing,omitempty"`
+	// SoftwareReview is the stored part of a software project's setup review:
+	// what an explicit inspection read, and the user's changes to the suggested
+	// names. Nil until the user asks for a review.
+	SoftwareReview *FolderSoftwareReview `json:"software_review,omitempty"`
 	// The proactive capability decision is frozen when this scan is offered.
 	CapabilitySuppressed bool           `json:"capability_suppressed,omitempty"`
 	CapabilityRevived    bool           `json:"capability_revived,omitempty"`
@@ -174,6 +194,13 @@ type FolderOffer struct {
 	DecidedAt  *time.Time      `json:"decided_at,omitempty"`
 	LaterUntil *time.Time      `json:"later_until,omitempty"`
 	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+}
+
+// FolderEnclosingHint names the repository a subject sits inside: how many
+// folders up its root is, and that folder's base name. Never a path.
+type FolderEnclosingHint struct {
+	Levels int    `json:"levels"`
+	Name   string `json:"name"`
 }
 
 // FolderDecision is the durable record of one answer (FR23).
@@ -340,6 +367,20 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		if offer.CapabilitySuppressed && offer.CapabilityRevived {
 			return fmt.Errorf("%w: capability offer", errFolderDigestInvalid)
 		}
+		if len(offer.SubjectIdentity) > 200 || strings.ContainsAny(offer.SubjectIdentity, "/\\\x00\r\n") {
+			return fmt.Errorf("%w: subject identity", errFolderDigestInvalid)
+		}
+		if hint := offer.Enclosing; hint != nil {
+			if hint.Levels < 1 || hint.Levels > folderdigest.EnclosingMaxLevels || validateFolderName(hint.Name) != nil {
+				return fmt.Errorf("%w: enclosing repository", errFolderDigestInvalid)
+			}
+		}
+		if err := validateSoftwareReview(offer.SoftwareReview); err != nil {
+			return err
+		}
+		if offer.NeedsCandidate && len(offer.Queue) == 0 && (offer.Status == FolderOfferPending || offer.Status == FolderOfferLater) {
+			return fmt.Errorf("%w: candidate choice", errFolderDigestInvalid)
+		}
 		if err := validateFolderKey(offer.FolderKey); err != nil {
 			return err
 		}
@@ -442,6 +483,11 @@ func validateFolderCandidate(c FolderCandidateRecord) error {
 	}
 	if c.Kind != FolderChoiceProject && c.Kind != FolderChoiceTidy {
 		return fmt.Errorf("%w: candidate kind", errFolderDigestInvalid)
+	}
+	switch folderdigest.RepositoryMarker(c.Repository) {
+	case folderdigest.RepositoryNone, folderdigest.RepositoryDirectory, folderdigest.RepositoryFile:
+	default:
+		return fmt.Errorf("%w: candidate repository", errFolderDigestInvalid)
 	}
 	return validateFolderReason(c.Reason)
 }

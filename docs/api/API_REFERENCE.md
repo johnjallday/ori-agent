@@ -1457,13 +1457,22 @@ Ends an open build without creating anything (Start over, or Discard from Today)
   "result_excerpt": "one line, at most 280 characters",
   "ticket_route": "/workspaces/thesis?ticket=<task id>",
   "can_start": true,
-  "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | needs_input | start_failed | run_failed",
+  "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | assessment_unavailable | needs_input | start_failed | run_failed",
   "message": "one plain sentence for the reason",
-  "detail": "what the receipt's task row says now"
+  "detail": "what the receipt's task row says now",
+  "recipe": "software_assessment (present only for a task that runs under a host recipe)",
+  "can_retry": true,
+  "repair_route": "/agents", "repair_label": "Choose a model",
+  "next_request": "the one next task a finished assessment suggested, as plain text",
+  "next_route": "/workspaces/thesis/plans?next=assessment",
+  "report_route": "/workspaces/thesis/task/<task id>",
+  "readiness": [ { "id": "folder | model | github", "label": "…", "state": "verified | configured | absent | unknown", "required": true, "detail": "…", "source": "…", "route": "…" } ]
 }
 ```
 
 `can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+
+The last six fields are sent only for a task with a `recipe` (a software project's first assessment; see "The first assessment" under Review a Software Project's Setup). For such a task `reason` is also one of `assistant_unavailable`, `model_unavailable`, `model_unsupported`, `project_folder_unavailable`, `workspace_unavailable` (each must be repaired before a start or a retry) or `tool_call_refused`, `context_too_small`, `nothing_to_assess`, `timed_out`, `provider_configuration_required`, `provider_quota_exhausted` (how one run ended). `can_retry` is true only for a `failed` assessment that could be run again now; when something must be repaired first it is false and `repair_route`/`repair_label` name the existing page that repairs it. `detail` for one that cannot start says what it waits for ("Needs a model before it can start", "Needs the project folder back before it can start") and never that it is ready. `readiness` is read live without opening a project file or calling a model or GitHub: a model that is set reads `configured` ("set, not checked"), never `verified`, and a saved GitHub connection does not claim the repository can be reached. `next_request` is text the model wrote; `next_route` opens the workspace's Plans page with it placed, unsubmitted, in the "Start a plan" box. `report_route` is sent for a finished assessment and opens the task's own page, where the whole result is shown (the `ticket_route` detail lists the work and its runs but not what a run wrote).
 
 `offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist (none in a sandboxed home). `picker_available` is false where the native dialog cannot run — outside macOS, or under `ORI_NO_DESKTOP_OPEN` as every sandboxed demo server runs. `picker_note` explains what can still be chosen: it is empty only when there are chips and a dialog; otherwise it names the missing folders, the switched-off or unsupported dialog, or both.
 
@@ -1497,7 +1506,80 @@ No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
 { "decision": "yes", "choice": "project", "create": true, "request_id": "…" }
 ```
 
+A recognized software project adds two refusals to a `yes` with `project`: `400` while the offer's `software.needs_candidate` is true (choose a candidate first, below), and `409` with `"project_exists": true` and the offer when a workspace of the user's already has this exact folder as its primary linked folder (the offer's `software.existing` lists it; no second workspace is made). `409` with `"needs_pick": true` also covers a folder that was deleted and made again at the same path since it was shown.
+
 `decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` and `create: true` — the card's confirmed plan ("Set up Thesis as a Writing project workspace?") — has the server set the workspace up itself (the folder's name, the shape's installed blueprint or blank, the folder linked as the primary directory, the first task seeded) and the returned offer is `resolved` with `outcome.workspace_id`, `outcome.route` and `outcome.blueprint`; a retried click reuses the workspace already made for the offer. It is offered only while the offer's `create_available` is true. A `yes` with `project` and no `create` (the card's Adjust…) leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered; `503` when the workspace could not be created (the offer stays pending).
+
+### Choose a Software Project
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/candidate`
+
+```json
+{ "candidate_id": "<id from software.candidates>", "request_id": "…" }
+```
+
+An offer about a recognized software project carries `software`: `recipe` (`software_project`), `marker` (the plain label of what marked it, such as `Go module`), `repository` (`directory` for an ordinary Git checkout, `file` for a worktree or submodule, absent when the folder is not under Git), and, when relevant, `needs_candidate` with `candidates`, `existing`, or `existing_unavailable`. Recognition reads directory entries only; no file in the folder is opened.
+
+When the shown folder has no marker of its own and holds two or more software projects, `needs_candidate` is true and `candidates` lists them (`id`, `name`, `marker`, `repository`, and `current` on the provisional subject). Nothing can be set up until one is chosen. This action makes the named candidate the offer's subject and returns the offer; the others stay queued for later offers. It accepts exactly the two fields above. A candidate `id` is opaque and valid only for its own offer; there is no path or folder field, nothing is scanned again, and nothing is created. `400` for an id the offer did not list; `409` when the offer is no longer pending, was made from a conversation review (which already names one candidate), or has no choice outstanding; `409` with `"needs_pick": true` when the server no longer holds the folder.
+
+`software.existing` lists the user's active workspaces whose primary linked folder is this exact directory (`workspace_id`, `name`, `route`, `software`, and `replaced` when the workspace was set up for a directory at this path that has since been replaced). A sibling worktree or a clone of the same repository is a different directory and is never listed. `existing_unavailable` means the server could not read which workspaces cover the folder, so it offers no setup.
+
+An offer may also carry `enclosing` (`levels`, `name`) when the subject sits inside a larger repository. The server finds that by checking for a repository marker's name in at most six folders above the selection, stopping below the user's home folder; it lists nothing and opens nothing there, and the user must show that folder for Ori to look at it.
+
+### Review a Software Project's Setup
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/review`
+
+```json
+{ "request_id": "…" }
+```
+
+A recognized software project is never set up from its name alone: a `yes` with `project` on the decide action answers `409` ("Review this project's setup first") and the offer stays pending; its setup is confirmed on the reviewed plan instead. Review reads a short, fixed list of the project's own files (its README, instruction files such as `AGENTS.md` and `CLAUDE.md`, build manifests, a `Makefile` or `justfile`, up to four CI workflow files, and Git's own branch and remote records) within fixed size and time limits. It runs nothing, follows no link out of the folder, never opens `.env` or key files, and replaces any credential-shaped line it meets with a placeholder. It creates nothing. It accepts exactly the field above; there is no path field.
+
+The returned offer carries `software.review`:
+
+- `inspected_at`, `evidence_revision` (changes when what was read changes), `partial` and `partial_reason` when a limit cut the read short
+- `stack` (what the manifests declare), `guides` (instruction files read), `files` (everything read, as paths relative to the project)
+- `git`: `layout` (`repository`, `worktree`, `none`, or `unverified` when the marker points somewhere that was not followed), `branch`, `remote` (host and path only, never credentials)
+- `tools`: development tools the project carries configuration for; a configuration file is not proof the tool is installed
+- `gaps`: what was missing or not read (`code`, `source`)
+- `purpose`, `purpose_source` and `commands` (`kind`, `command`, `source`, `declared`): excerpts held in server memory only. `declared` is false for a command that is merely usual for the project's files. `evidence_held` is false after a restart, when the facts above remain and the excerpts need another review
+
+It also carries `plan`, the same shape as the one-card plan below with five lines (`workspace`, `folder`, `agents`, `mode`, `task`) and no integration line, and `plan.prerequisites`: rows of `id`, `label`, `state`, `detail`, `source`, `required` and an optional `route` to an existing settings page. `state` is `verified` (Ori checked it), `configured` (a setting exists and was not exercised), `absent`, or `unknown`; nothing is reported as ready unless it was checked. Prerequisites are not part of the plan's digest. `software.workspace_name` and `software.assistant` are the names the plan uses, and `software.setup_available` says whether this server can carry the plan out; when false the review is shown and no setup is offered.
+
+`400` while a candidate has not been chosen; `409` when the offer is no longer pending; `409` with `"needs_pick": true` when the server no longer holds the folder or the folder was replaced since it was shown; `503` when the project could not be read (nothing was changed, and the review can be asked for again).
+
+### Adjust a Software Project's Names
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/adjust`
+
+```json
+{ "request_id": "…", "workspace_name": "Project notebook", "assistant_name": "Dev Pat" }
+```
+
+Changes the workspace name, the assistant's name, or both, on a reviewed software offer. Either field may be left out to keep its current value, and an empty string returns that name to the suggested one; a body with neither is `400`. It reads nothing from the project and creates nothing; the returned offer's plan, and so its digest, reflects the new names. `400` for a name longer than 120 characters or containing a slash or a line break; `409` when the offer has not been reviewed or is no longer pending.
+
+The setup action below takes a reviewed software offer's `plan_digest` like any other. Before it runs, the server reads the project again; when what it reads differs from the review the plan was drawn from, it answers `409` with `"plan_changed": true` and the fresh offer, and nothing is created.
+
+A software setup is the server's own: nothing is installed and there is no step-by-step journey behind it. The run creates the workspace from the Code Project blueprint with exactly the reviewed assistant (or completes the one existing workspace the review named), links the folder where it is as the workspace's primary directory, records which directory was confirmed (`software_project` in the workspace's shared data: the linked directory's id and the directory's own identity, never a path), gives a new workspace the planning-first workflow (the software profile's planner preset with planning documents kept in Ori), and seeds one first assessment. It runs nothing in the project, calls no model, and writes nothing into the folder. Every pass starts from what is saved, so a repeated click, a second offer about the same folder, or a pass after a restart continues on the same workspace instead of making another; two offers about one folder end with one workspace, and the offer that did not create it resolves to it with `outcome.existing: true`. A sibling worktree or a clone of the same repository is a different folder and is never matched.
+
+A software run stops with one of these `stop_reason`s and keeps what it finished: `needs_model` (the assistant has no model; for a new workspace this is before anything is created — choose a model and send the same digest again), `needs_pick` (the server no longer holds the folder, or the directory there was replaced), `plan_changed` (what is saved no longer matches the review, for example a saved agent of the reviewed name appeared), `failed`, or `interrupted`. After `plan_changed` the review action above may be called again on the offer: it puts the stopped run aside and returns a plan drawn from what is saved, whose digest must be confirmed anew; the old digest no longer starts anything.
+
+A workspace with a `software_project` record resolves its code root from that record alone: when the folder is missing or a different directory is at that path, the workspace has no code root, and neither repository checks nor planning documents fall back to Ori's own folder for the workspace.
+
+#### The first assessment
+
+The seeded first assessment is the workspace's first task (see `first_task` under Get Folder Digest) with `recipe: "software_assessment"`. A task under a recipe is run by that recipe or not at all: it is never started as an ordinary agent task, and the recipe marker cannot be set or removed through the task API. It starts only on **Start assessment** (`POST /api/workspaces/{id}/folder-first-task/start`, once) on Home's receipt or mission card or on the workspace page's banner; setup, a page load, a refresh and polling never start it or call a model.
+
+A run is one model call and nothing else. The server checks that the workspace still points at the directory the user confirmed (the `software_project` record; a missing or replaced folder is `project_folder_unavailable` and nothing is read), reads the project itself with the same bounded, read-only inspector the review uses (README, repository instructions, declared build and test files, and the names at the top level, leaving out dot-entries other than `.github`, dependency folders and key-like names), and sends that text to the assistant's model as evidence, marked as data and not as instructions. Lines that look like credentials (token formats, `NAME_SECRET=value` assignments, a password in a URL, a bearer header, a whole PEM block) are withheld from it; a reference such as `${{ secrets.X }}` is not a credential and is kept. The model is given no tools, no MCP servers, no agent system prompt and no access to the folder; the request is flagged isolated, carries Ori's rules as its system prompt and the evidence as its one message, and a provider that cannot guarantee a tool-free call refuses it before anything is sent (`model_unsupported`). API and local providers support it. The Codex CLI is used only in a posture built from that CLI's own feature list: read-only sandbox, user config, rules and instruction files ignored, an empty working directory, and every feature that is on switched off except a short list that only concerns transport, sign-in and the CLI's own guard, so a feature a newer CLI adds is off by default; a CLI that no longer lists its command tools as features is refused. The Claude Code CLI is refused. A reply that asks for a tool is discarded and the run ends `tool_call_refused`. The assistant's own provider is used or none: when it is not set up on this computer the run is `model_unavailable`, never moved to another provider. The evidence is cut to fit the model's context window (`context_too_small` when even the compact form does not fit).
+
+These hold whichever part of the server runs the task, because they are enforced where the model is called. One task is run once at a time (`already_running` for a second start). A run is never retried, split into steps, run as a sequence of sub-tasks, or handed to a coordinating agent. It is never started by the background executor, by a schedule of other work, or by another task that lists it as an input (that task is told the assessment must be started by the user first), and starting it runs none of the tasks listed as its own inputs. Whatever stops a run is recorded as one plain sentence with a code; a provider's own error text is written to the server log and nowhere else.
+
+The result is the task's result: the project's purpose and structure, detected stack, declared (never "tested") build and test commands, repository instructions, readiness gaps, and one line `Next task: …`, followed by Ori's own note of which files it was based on and what was not read. Nothing is written into the project folder. A run that does not finish leaves the task `failed` with one plain sentence and its `reason`; **Try again** is the ordinary manual run of the same task (`POST /api/orchestration/tasks/execute` with `{"task_id": …}`), offered only while `can_retry` is true, and it never creates a second task. Concurrent starts of one task are refused by the executor, so two clicks or two tabs do not produce two runs.
+
+**Endpoint:** `GET /api/workspaces/{id}/folder-first-task`
+
+Answers `200` with `{ "first_task": <the shape above> }` for the workspace's first task as it stands now, or `{ "first_task": null }` when the workspace has none. It is a read: it starts nothing and spends nothing. The workspace page's banner and the Plans page (`?next=assessment`) use it so every surface shows the server's one reading of the task.
 
 ### Resolve a Project Offer
 

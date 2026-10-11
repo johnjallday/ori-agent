@@ -304,6 +304,24 @@ type FolderDigestDeps struct {
 	// project still holds this exact folder as a linked directory. Nil, a missing
 	// workspace or an unreadable one reports false, so no reuse is claimed.
 	ProjectLinked func(ctx context.Context, userID, workspaceID, folderPath string) bool
+	// ExistingProjects is an owner-scoped canonical read: the user's active
+	// workspaces whose saved primary folder is this exact directory. folderPath
+	// is canonical and identity is that directory's witness, both taken from the
+	// selection the server holds. It reads saved bindings only, never a file in
+	// the folder. Nil means the host has nothing to reuse; an error means it
+	// cannot say, and no new workspace is promised.
+	ExistingProjects func(ctx context.Context, userID, folderPath, identity string) ([]FolderExistingProject, error)
+	// InspectSoftware reads the bounded set of README, instruction and build
+	// files of a software project, for an explicit Review setup or Set up click.
+	// folderPath is the canonical directory of a selection the server holds. It
+	// runs nothing, calls no model, and changes nothing. Nil leaves software
+	// projects without a review.
+	InspectSoftware func(ctx context.Context, folderPath string) (FolderSoftwareInspection, error)
+	// SoftwareProject re-reads, from canonical state, the workspace a finished
+	// software setup made or reused for this exact directory and intent. It is
+	// how a run's "done" is checked before the offer says so. Nil leaves a
+	// finished run unverified, and an unverified run never resolves an offer.
+	SoftwareProject func(ctx context.Context, userID string, offer FolderOffer, folderPath, identity string) (FolderCreateResult, error)
 	// LegacyDeclined reads the pre-folder app-card answer once per domain.
 	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
@@ -500,6 +518,8 @@ type FolderDigestService struct {
 	paths    map[string]string // offer id → canonical root; memory only (FR27)
 	scanning map[string]bool   // user id → a scan is in flight
 	running  map[string]bool   // offer id → a one-card setup is running in this process
+	// offer id → what a software review copied out of the project; memory only
+	evidence map[string]FolderSoftwareEvidence
 }
 
 // NewFolderDigestService builds the service.
@@ -595,6 +615,12 @@ type FolderOfferView struct {
 	// Capability is derived from the host table and the saved digest evidence;
 	// it is never accepted as a client-supplied action or plugin declaration.
 	Capability *FolderCapabilityView `json:"capability,omitempty"`
+	// Software describes a recognized software project: its marker, a pending
+	// choice among several, and any workspace that already covers the folder.
+	Software *FolderSoftwareView `json:"software,omitempty"`
+	// Enclosing names the larger repository the subject sits inside, when the
+	// bounded check found one.
+	Enclosing *FolderEnclosingHint `json:"enclosing,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
 	Plan                   *FolderSetupPlan        `json:"plan,omitempty"`
@@ -1006,6 +1032,15 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		// The picked file names the project file; only its base name is kept.
 		offer.EntryName = filepath.Base(pickedFile)
 	}
+	if offer.Portfolio == nil {
+		// The folder the offer is about: the root, or the one project inside it.
+		subjectPath, repository := root, string(result.RootCandidate().Repository)
+		if offer.Subject.Kind == FolderChoiceProject && !offer.Subject.IsRoot && offer.Subject.RelPath != "" {
+			subjectPath, repository = filepath.Join(root, offer.Subject.RelPath), offer.Subject.Repository
+		}
+		offer.Enclosing = s.enclosingHint(repository, subjectPath)
+		s.witnessSoftwareSubject(&offer, subjectPath)
+	}
 	domain, evidence := folderOfferDomainClass(offer)
 	legacyDeclined := false
 	if domain != "" && doc.DeclineFor(domain) == nil && s.deps.LegacyDeclined != nil {
@@ -1145,6 +1180,22 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 			choice, err := folderOfferChoice(*offer, input.Choice)
 			if err != nil {
 				return FolderOfferView{}, err
+			}
+			if choice == FolderChoiceProject {
+				// A yes never guesses among several projects and never makes a
+				// second workspace for a folder that already has one.
+				if guardErr := s.guardSoftwareYes(ctx, userID, *offer); guardErr != nil {
+					if errors.Is(guardErr, ErrFolderProjectExists) {
+						return s.viewFor(ctx, userID, *offer, binding.Paused), guardErr
+					}
+					return FolderOfferView{}, guardErr
+				}
+				// A software project is set up through its reviewed plan (Review
+				// setup, then Set up), never by a bare yes or the generic creator:
+				// the plan is what ties the workspace to this exact folder.
+				if isSoftwareOffer(*offer) {
+					return FolderOfferView{}, ErrFolderReviewRequired
+				}
 			}
 			switch {
 			case choice == FolderChoiceTidy:
@@ -1461,7 +1512,9 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 	// An arbitrary workspace ID from the browser cannot prove that the
 	// reviewed journey created it. The journey completion path will provide
 	// a canonical receipt before the digest can resolve this offer.
-	if isProjectCapabilityOffer(*offer) {
+	// A software project is set up only through its reviewed plan, which is
+	// what binds the workspace to this exact folder.
+	if isProjectCapabilityOffer(*offer) || isSoftwareOffer(*offer) {
 		return FolderOfferView{}, ErrFolderWorkspaceRefused
 	}
 	if s.deps.Linker == nil {
@@ -2001,7 +2054,8 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 	if parent == nil {
 		return nil, nil
 	}
-	if _, ok := s.rootPath(*parent); !ok {
+	parentRoot, ok := s.rootPath(*parent)
+	if !ok {
 		return nil, nil
 	}
 	parentID := parent.ID
@@ -2025,6 +2079,8 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 			rest = append(rest, q)
 		}
 		p.Queue = nil
+		// The choice among its candidates moves to the offer made from them.
+		p.NeedsCandidate = false
 		if next == nil {
 			return errFolderReplay
 		}
@@ -2041,6 +2097,15 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 		} else {
 			offer.Verdict = string(folderdigest.KindProject)
 			offer.ProjectsCount = 1
+		}
+		markCandidateChoice(&offer)
+		if next.Kind == FolderChoiceProject {
+			subjectPath := parentRoot
+			if !next.IsRoot && next.RelPath != "" {
+				subjectPath = filepath.Join(parentRoot, next.RelPath)
+			}
+			offer.Enclosing = s.enclosingHint(next.Repository, subjectPath)
+			s.witnessSoftwareSubject(&offer, subjectPath)
 		}
 		d.Offers = append(d.Offers, offer)
 		pruneFolderDigest(d)
@@ -2197,6 +2262,7 @@ func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer 
 			return v
 		}
 	}
+	s.attachSoftware(ctx, userID, offer, &v)
 	s.attachSetupPlan(ctx, userID, offer, &v)
 	return v
 }
@@ -2346,6 +2412,7 @@ func buildFolderOffer(v folderdigest.Verdict, r folderdigest.Result, chip string
 	if len(offer.Queue) > folderDigestMaxQueue {
 		offer.Queue = offer.Queue[:folderDigestMaxQueue]
 	}
+	markCandidateChoice(&offer)
 	return offer
 }
 
@@ -2355,6 +2422,7 @@ func folderCandidateRecord(c folderdigest.Candidate, kind, reason string) Folder
 		Shape: string(folderdigest.ShapeFor(c)), Reason: reason,
 		DominantExtension: c.DominantExtension,
 		IsRoot:            c.IsRoot, RelPath: c.RelPath,
+		Repository: string(c.Repository),
 	}
 	if c.Marker != nil {
 		record.Marker = c.Marker.Label

@@ -257,7 +257,9 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 			result.Controls = []string{"Continue setup"}
 		} else if view.Status == personalassistant.FolderOfferPending {
 			result.Status = "awaiting_confirmation"
-			if view.Capability != nil {
+			if view.Software != nil {
+				softwareReviewState(view, result)
+			} else if view.Capability != nil {
 				if view.Plan != nil {
 					result.Controls = []string{"Set up", "Adjust…", "Keep chatting"}
 				} else {
@@ -282,6 +284,40 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 		result.Controls = nil
 	}
 	return result
+}
+
+// softwareReviewState describes a pending software project card. Such a card
+// is never confirmed by a bare yes: it first offers to look at the project,
+// then shows what it read and the plan, and only that plan is set up. Without
+// this the card read as "setup is not available" while it offered a review.
+func softwareReviewState(view *personalassistant.FolderOfferView, result *personalAssistantReviewContext) {
+	software := view.Software
+	// One workspace linked to the folder some other way can be completed by a
+	// review; any other workspace for it is only ever opened.
+	completes := len(software.Existing) == 1 && !software.Existing[0].Software && !software.Existing[0].Replaced
+	reviewed := software.Review != nil && software.Review.EvidenceRevision != ""
+	switch {
+	case software.ExistingUnavailable:
+		result.Status, result.Blocker, result.Controls = "setup_unavailable", "existing_workspace_unreadable", nil
+	case len(software.Existing) > 0 && !completes:
+		result.Status, result.Blocker, result.Controls = "setup_unavailable", "project_exists", []string{"Open workspace"}
+	case !reviewed:
+		result.Controls = []string{"Review setup", "Keep chatting"}
+		result.Effects = []reviewContextEffect{{
+			Name:   "Review setup reads the project's README, instructions and build files to suggest a setup",
+			Detail: "Nothing is run, nothing in the folder is changed, and nothing is created until Set up is pressed on the reviewed plan.",
+		}}
+	case view.Plan == nil:
+		result.Status, result.Controls = "setup_unavailable", []string{"Review again", "Keep chatting"}
+		if result.Blocker == "" {
+			result.Blocker = "setup_path_unavailable"
+		}
+	case !software.SetupAvailable:
+		result.Status, result.Blocker = "setup_unavailable", "setup_path_unavailable"
+		result.Controls = []string{"Adjust names…", "Review again", "Keep chatting"}
+	default:
+		result.Controls = []string{"Set up", "Adjust names…", "Review again", "Keep chatting"}
+	}
 }
 
 func reviewStoppedControls(setup *personalassistant.FolderSetupView) []string {

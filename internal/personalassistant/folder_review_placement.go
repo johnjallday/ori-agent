@@ -89,7 +89,7 @@ func (s *FolderObservationService) CompletedProject(ctx context.Context, target 
 		return nil, foldercontext.ErrInvalid
 	}
 	linked := s.digest.deps.ProjectLinked
-	if linked == nil {
+	if linked == nil && s.digest.deps.ExistingProjects == nil {
 		return nil, nil
 	}
 	held, _, err := s.resolve(ctx, target, observationID)
@@ -110,7 +110,7 @@ func (s *FolderObservationService) CompletedProject(ctx context.Context, target 
 	}
 	key := FolderKey(candidate.Path)
 	placement := folderReviewPlacement(ctx)
-	for i := len(doc.Offers) - 1; i >= 0; i-- {
+	for i := len(doc.Offers) - 1; linked != nil && i >= 0; i-- {
 		offer := doc.Offers[i]
 		review := offer.ConversationReview
 		if offer.Status != FolderOfferResolved || offer.Portfolio != nil || offer.Subject.Key != key || offer.Outcome == nil ||
@@ -137,6 +137,24 @@ func (s *FolderObservationService) CompletedProject(ctx context.Context, target 
 		}
 		view := s.digest.viewFor(ctx, target.UserID, offer, held.binding.Paused)
 		return &view, nil
+	}
+	// A software project's workspace can cover this folder without any offer in
+	// this record having made it (it was set up from another conversation, or
+	// linked by hand). One such workspace is the project to open. Several are a
+	// choice, and a replaced directory is not the same folder; both are left to
+	// the review card, which lists them and offers no setup.
+	if lookup := s.digest.deps.ExistingProjects; lookup != nil && placement.Operation != FolderOperationSupport {
+		subject := folderCandidateRecord(candidate, FolderChoiceProject, "")
+		if _, software := softwareCapability(subject); software {
+			existing, err := lookup(ctx, target.UserID, candidate.Path, identity)
+			if err == nil && len(existing) == 1 && !existing[0].Replaced {
+				return &FolderOfferView{
+					Status:  FolderOfferResolved,
+					Subject: FolderSubjectView{Name: subject.Name, Kind: subject.Kind, Shape: subject.Shape, Marker: subject.Marker, IsRoot: subject.IsRoot},
+					Outcome: &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: existing[0].WorkspaceID, Route: existing[0].Route, Existing: true},
+				}, nil
+			}
+		}
 	}
 	return nil, nil
 }

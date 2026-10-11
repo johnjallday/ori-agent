@@ -97,6 +97,12 @@ type Candidate struct {
 	// Marker is the highest-precedence marker found directly inside the
 	// candidate, if any (FR14).
 	Marker *Marker
+	// Repository says a version-control marker sits directly inside the
+	// candidate, and how: RepositoryDirectory for an ordinary checkout,
+	// RepositoryFile for a worktree or submodule, whose marker is a file that
+	// points elsewhere. It is read from the directory listing alone; the
+	// marker is never opened, so a file is not proved to be a valid pointer.
+	Repository RepositoryMarker
 	// NewestModTime is the most recent modification time among the
 	// candidate's files. Zero when it has none.
 	NewestModTime time.Time
@@ -113,6 +119,15 @@ type Candidate struct {
 	// LooseExtensions counts the root's loose files per extension. Root only.
 	LooseExtensions map[string]int
 }
+
+// RepositoryMarker is how a candidate's version-control marker appears on disk.
+type RepositoryMarker string
+
+const (
+	RepositoryNone      RepositoryMarker = ""
+	RepositoryDirectory RepositoryMarker = "directory"
+	RepositoryFile      RepositoryMarker = "file"
+)
 
 // HasMarker reports whether a project marker sits directly inside the
 // candidate.
@@ -172,6 +187,16 @@ func (r Result) Subfolders() []Candidate {
 		return nil
 	}
 	return r.Candidates[1:]
+}
+
+// SoftwareRoot reports whether the scanned folder is itself a software
+// project: a marker of one sits directly inside it. Its subfolders are then
+// its packages, documents and scripts, not projects of their own, and a
+// repository with several manifests is one project. A folder that only holds
+// separate projects has no marker of its own, so its subfolders stay
+// candidates.
+func (r Result) SoftwareRoot() bool {
+	return ShapeFor(r.RootCandidate()) == ShapeCode
 }
 
 // HasMarker reports whether the marker row named markerName still sits
@@ -302,7 +327,7 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 		// skipped for everything else just below.
 		if markerOwner != nil && !isLink {
 			if m, ok := MatchMarker(name, isDir); ok {
-				markerOwner.noteMarker(m)
+				markerOwner.noteMarker(m, isDir)
 			}
 		}
 		if isLink {
@@ -385,7 +410,13 @@ func newAccumulator(path, rel string, isRoot bool) *accumulator {
 	return &accumulator{cand: c}
 }
 
-func (a *accumulator) noteMarker(m Marker) {
+func (a *accumulator) noteMarker(m Marker, isDir bool) {
+	if m.Repository {
+		a.cand.Repository = RepositoryFile
+		if isDir {
+			a.cand.Repository = RepositoryDirectory
+		}
+	}
 	if a.cand.Marker == nil || markerRank(m) < markerRank(*a.cand.Marker) {
 		marker := m
 		a.cand.Marker = &marker

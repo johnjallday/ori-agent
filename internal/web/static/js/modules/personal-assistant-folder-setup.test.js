@@ -9,7 +9,8 @@ import {
   subjectPlacement,
   existingProjectView,
   reviewStatusView,
-  reviewStateKey
+  reviewStateKey,
+  suggestionNote
 } from './personal-assistant-folder-setup.js';
 import {
   conversationFolderOfferView,
@@ -45,6 +46,22 @@ test('local choice binding uses exact conversation, observation and revision, ne
     assert.equal(choiceIsCurrent(binding, { ...state, ...changed }), false);
   assert.equal(choiceIsCurrent(null, state), false);
   assert.equal(choiceIsCurrent(binding, null), false);
+});
+
+test('a proposal about one folder does not ask for a scope to be chosen', () => {
+  const one = suggestionNote({ options: [{ candidate_id: 'candidate-0' }] });
+  assert.match(one, /Review its effects before confirming\. Nothing is set up here\./);
+  assert.doesNotMatch(one, /Choose scope/);
+  assert.match(
+    suggestionNote({ options: [{ candidate_id: 'candidate-0' }, { candidate_id: 'candidate-1' }] }),
+    /Choose scope and review effects/
+  );
+  // A named workspace and an existing review keep their own lines.
+  assert.match(
+    suggestionNote({ options: [{}], subject: { name: 'Album' } }),
+    /Workspace you named: Album/
+  );
+  assert.match(suggestionNote({ offer_id: 'offer-a' }), /existing canonical review only/);
 });
 
 test('candidate choices use only disclosed IDs and distinguish the whole root', () => {
@@ -225,6 +242,16 @@ test('the status sentence names the reviewed destination and why a control is bl
   assert.match(
     reviewStatusView({ ...base, status: 'setup_unavailable', blocker: 'destination_changed' }).text,
     /destination for Album-5 has changed\. Use Review setup to refresh/
+  );
+  // A folder that already has its workspace is not "unavailable here".
+  assert.match(
+    reviewStatusView({ ...base, status: 'setup_unavailable', blocker: 'project_exists' }).text,
+    /Album-5 already has a workspace\. Open it from its card/
+  );
+  assert.match(
+    reviewStatusView({ ...base, status: 'setup_unavailable', blocker: 'setup_path_unavailable' })
+      .text,
+    /Setup is not available for Album-5 here/
   );
   assert.match(
     reviewStatusView({ ...base, status: 'awaiting_confirmation', historical: true }).text,

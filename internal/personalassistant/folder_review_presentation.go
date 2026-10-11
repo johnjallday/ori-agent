@@ -16,7 +16,9 @@ type FolderReviewPresentation struct {
 
 func folderReviewPresentation(offer FolderOffer, view FolderOfferView) *FolderReviewPresentation {
 	p := &FolderReviewPresentation{Version: 1, Kind: "unknown", State: "unavailable", Effect: "unknown", DestinationState: "unknown"}
-	if view.CreateAvailable || view.Plan != nil {
+	// A software project is proposed before it has a plan: its plan comes from
+	// the review the option leads to.
+	if view.CreateAvailable || view.Plan != nil || isSoftwareOffer(offer) {
 		p.State = "proposed"
 		if offer.Portfolio == nil {
 			p.Kind, p.Effect = "workspace", "workspace"

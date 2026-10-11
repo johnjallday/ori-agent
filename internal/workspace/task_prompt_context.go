@@ -457,6 +457,23 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 		PreparedAt: time.Now(),
 	}
 
+	// A task under a host recipe is given what the recipe gives it and nothing
+	// else. None of the surfaces below reach it, and above all the agent's
+	// tools are not resolved for it: doing so can start the agent's tool
+	// servers, which a recipe run must never cause.
+	if recipe := FirstTaskRecipe(&task); recipe != "" {
+		prepared.Strategy = "host_recipe"
+		prepared.AvailableTools = []string{}
+		prepared.Items = []TaskPreparedContextItem{{
+			Kind:   "host_recipe",
+			Name:   "Host recipe: " + recipe,
+			Access: "injected",
+			Detail: "The model is given only what the recipe itself reads and lays out. It has no tools, no workspace snapshot, and none of the assigned agent's prompt, skills or permissions.",
+		}}
+		prepared.Summary = buildTaskPreparedContextSummary(prepared.Items)
+		return prepared, nil
+	}
+
 	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {
 		prepared.Items = append(prepared.Items, TaskPreparedContextItem{
 			Kind:   "workspace_snapshot",

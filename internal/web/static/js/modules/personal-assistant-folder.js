@@ -249,12 +249,45 @@ const PORTFOLIO_STOP_COPY = {
     `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to list it.`
 };
 
+// A software project's setup is the host's own: there is no step-by-step
+// journey behind it, so a stop is explained by what is saved and repaired from
+// the card itself.
+const SOFTWARE_STOP_COPY = {
+  plan_changed:
+    'What is saved no longer matches what you reviewed, so I stopped before going further. Anything that finished is kept. Review the setup again to carry on.',
+  needs_pick: subject =>
+    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  needs_model:
+    'The assistant has no model yet, so setup paused. Choose a model, then continue; nothing is lost.',
+  interrupted:
+    'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
+  failed:
+    'A step did not finish. What finished is kept and nothing in the project folder was changed; Try again carries on from there.'
+};
+
 const CONTINUE_SETUP = {
   id: 'resume',
   label: 'Continue setup',
   style: 'outline',
   journey: true
 };
+
+function softwareStoppedActions(reason) {
+  const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
+  switch (reason) {
+    case 'plan_changed':
+      return [{ id: 'review', label: 'Review again', style: 'primary', softwareReview: true }];
+    case 'needs_pick':
+      return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
+    case 'needs_model':
+      return [
+        { id: 'model', label: 'Set up a model', style: 'primary', href: MODEL_SETTINGS_URL },
+        { ...retry, label: 'Continue', style: 'outline' }
+      ];
+    default:
+      return [retry];
+  }
+}
 
 function stoppedActions(reason, setup) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
@@ -297,7 +330,7 @@ function stoppedActions(reason, setup) {
 // setup: the plan lines with a state each, one status line, and — only when
 // stopped — one plain sentence saying what finished and what is needed. A raw
 // stop reason code is never shown.
-export function setupRunView(setup, subject, { portfolio = false } = {}) {
+export function setupRunView(setup, subject, { portfolio = false, software = false } = {}) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
   if (status !== 'stopped') {
@@ -315,13 +348,14 @@ export function setupRunView(setup, subject, { portfolio = false } = {}) {
   const progress = lines.length ? `${finished} of ${lines.length} steps finished. ` : '';
   let sentence =
     (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
+  if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   return {
     status,
     lines,
     statusLine: '',
     question: `${progress}${sentence}`,
-    actions: stoppedActions(reason, setup || {})
+    actions: software ? softwareStoppedActions(reason) : stoppedActions(reason, setup || {})
   };
 }
 
@@ -342,7 +376,11 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   if (!offer.setup && !receipt.visible) return { visible: false };
   const folder = String(offer.folder || '').trim() || 'this project';
   const subject = String(offer.subject?.name || '').trim() || folder;
-  const run = setupRunView(offer.setup, subject, { portfolio: Boolean(offer.portfolio) });
+  const software = Boolean(offer.software);
+  const run = setupRunView(offer.setup, subject, {
+    portfolio: Boolean(offer.portfolio),
+    software
+  });
   const steps = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
@@ -361,7 +399,9 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
       status: receipt.home
         ? 'Here is what I set up. Open a project from the library when you want to work on it.'
-        : 'Here is what I set up. The first task starts when you open the workspace.',
+        : software
+          ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
+          : 'Here is what I set up. The first task starts when you open the workspace.',
       count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
       percent: 100,
       lines: settled,
@@ -592,7 +632,30 @@ export function folderOfferView(offer, options = {}) {
       actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
     };
   }
+  if (view.visible && view.needsPick && !view.decided && offer.software) {
+    // A software project's folder can also be lost by being replaced: a folder
+    // deleted and made again at the same place is not the one that was shown.
+    return {
+      ...repickView(view, subject),
+      question: `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`
+    };
+  }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
+  if (view.visible && offer.software && (status === 'pending' || status === 'awaiting_outcome')) {
+    const software = softwareOfferView(
+      offer,
+      { ...enclosingView(offer, view), softwareAdjusting: options?.softwareAdjusting === true },
+      { subject, folder }
+    );
+    // A confirmed setup that has not finished still has something to press
+    // (Continue, Try again, Review again): the card draws a decided offer's
+    // actions only when it is marked as one to carry on with.
+    return status === 'awaiting_outcome' ? { ...software, resume: true } : software;
+  }
+  if (view.visible && !view.decided) {
+    enclosingView(offer, view);
+    if (view.enclosing && !view.capabilityDetail) view.capabilityDetail = view.enclosing;
+  }
   if (view.visible && !view.setup && !view.plan && offer.setup_unavailable_reason) {
     const reasons = {
       integration_unavailable: 'integration readiness could not be verified',
@@ -623,6 +686,454 @@ export function folderOfferView(offer, options = {}) {
     };
   }
   return view;
+}
+
+// enclosingView adds, to any undecided card, that the folder sits inside a
+// larger repository. The server found that by checking for a marker's name
+// above the selection; it read nothing there, and only the user choosing that
+// folder lets Ori look at it.
+function enclosingView(offer, view) {
+  const name = String(offer?.enclosing?.name || '').trim();
+  const levels = Number(offer?.enclosing?.levels) || 0;
+  if (!name || levels < 1) return view;
+  const where = levels === 1 ? 'the folder above it' : `${levels} folders up`;
+  view.enclosing = `This folder is inside the repository ${name} (${where}). To set up the whole project, show me ${name} instead.`;
+  if (!(view.actions || []).some(action => action.open))
+    view.actions = [
+      ...(view.actions || []),
+      { id: 'enclosing', label: `Show me ${name} instead`, style: 'link', open: true }
+    ];
+  return view;
+}
+
+// softwareRecognizedNote says what marked a folder as a software project. The
+// scan read names only, and the note says so.
+function softwareRecognizedNote(software) {
+  const marker = String(software?.marker || '').trim();
+  const from = marker && marker.toLowerCase() !== 'git repository' ? `its ${marker}` : '';
+  let note;
+  switch (String(software?.repository || '')) {
+    case 'directory':
+      note = `Recognized from ${from ? `${from} and its` : 'its'} Git repository.`;
+      break;
+    case 'file':
+      note = `Recognized from ${from || 'its Git marker'}. It is a linked Git checkout (a worktree or submodule).`;
+      break;
+    default:
+      note = `Recognized from ${from || 'its project files'}. It is not under Git.`;
+  }
+  return `${note} Nothing in it was opened.`;
+}
+
+// softwareOfferView is the pending card for a recognized software project. It
+// replaces the plan with a question when several projects were found and the
+// user has not said which, and with the workspace to open when one already
+// covers this exact folder. Ori never guesses among projects and never sets up
+// a second workspace for the same folder.
+export function softwareOfferView(offer, view, { subject, folder }) {
+  // Only the server says a folder is a software project.
+  if (!offer?.software || typeof offer.software !== 'object') return view;
+  const software = offer.software;
+  const enclosing = view.enclosing || '';
+  // A setup that is running, or stopped, is shown as its run: the lines with a
+  // state each, and what the user can do about a stop.
+  if (offer.setup && typeof offer.setup === 'object') {
+    const run = setupRunView(offer.setup, subject, { software: true });
+    return {
+      ...view,
+      confirming: false,
+      headline: segments(['Setting up ', { text: subject }, '.']),
+      question: run.question,
+      reason: '',
+      capabilityDetail: '',
+      evidence: [],
+      prerequisites: [],
+      plan: null,
+      setup: run,
+      actions: run.actions
+    };
+  }
+  // The yes has been given once a setup was confirmed; a plan drawn again after
+  // a stop is confirmed or left, not declined.
+  const decline = view.decided
+    ? []
+    : [
+        { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
+        { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+      ];
+  const candidates = (Array.isArray(software.candidates) ? software.candidates : []).filter(
+    candidate =>
+      candidate && String(candidate.id || '').trim() && String(candidate.name || '').trim()
+  );
+  if (software.needs_candidate === true && candidates.length > 1) {
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline: segments([
+        { text: folder },
+        ` holds ${plural(candidates.length, 'software project')}.`
+      ]),
+      question:
+        'Which one do you want to set up? Nothing is set up until you choose, and the others stay as they are.',
+      capabilityDetail: enclosing,
+      actions: [
+        ...candidates.map((candidate, index) => ({
+          id: `candidate-${index}`,
+          label: candidate.marker
+            ? `${String(candidate.name).trim()} · ${String(candidate.marker).trim()}`
+            : String(candidate.name).trim(),
+          style: 'outline',
+          candidate: String(candidate.id).trim()
+        })),
+        { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+      ]
+    };
+  }
+  if (software.needs_candidate === true) {
+    // The server says a choice is owed but sent nothing usable to choose from.
+    // No setup is offered on a guess; showing the folder again lists them.
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline: segments([{ text: folder }, ' holds more than one software project.']),
+      question:
+        'I could not list them here. Show me the folder again, or show me the one project you want.',
+      capabilityDetail: enclosing,
+      actions: [
+        { id: 'another', label: 'Show another folder', style: 'outline', open: true },
+        { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+      ]
+    };
+  }
+  const listed = Array.isArray(software.existing) ? software.existing : [];
+  const existing = listed.filter(
+    project =>
+      project &&
+      String(project.name || '').trim() &&
+      String(project.route || '').startsWith('/workspaces/')
+  );
+  // One workspace linked to the folder some other way can be completed by a
+  // review. One already set up for it, one made for a folder since replaced,
+  // or several, are only ever opened.
+  const completable =
+    existing.length === 1 &&
+    listed.length === 1 &&
+    existing[0].software !== true &&
+    existing[0].replaced !== true
+      ? existing[0]
+      : null;
+  if (existing.length && !completable) {
+    const first = existing[0];
+    const name = String(first.name).trim();
+    let question;
+    if (existing.length > 1)
+      question = 'Open the one you want. I will not set up another for the same folder.';
+    else if (first.replaced === true)
+      question = `${name} was set up for a folder that used to be at this place. The folder here now is a different one, so I have not connected them. Open ${name} to look at it.`;
+    else question = `It is set up as ${name}. Open it instead of setting up another.`;
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline:
+        existing.length > 1
+          ? segments([{ text: subject }, ` already has ${existing.length} workspaces.`])
+          : segments([{ text: subject }, ' already has a workspace.']),
+      question,
+      capabilityDetail: enclosing,
+      actions: [
+        ...existing.map((project, index) => ({
+          id: `open-existing-${index}`,
+          label: `Open ${String(project.name).trim()}`,
+          style: index === 0 ? 'primary' : 'outline',
+          href: String(project.route)
+        })),
+        ...decline
+      ]
+    };
+  }
+  // A workspace the server reported but this page cannot link to is still a
+  // workspace: no second one is offered.
+  if (software.existing_unavailable === true || (listed.length && !completable)) {
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      question:
+        'I could not check whether this folder already has a workspace, so I will not set up another. Try again in a moment.',
+      capabilityDetail: enclosing,
+      actions: decline
+    };
+  }
+
+  // The reviewed setup. A software project is never set up by a bare yes: the
+  // card first offers to look at it, then shows what it read and everything
+  // Set up will do, and only that plan is confirmed.
+  const recognized = softwareRecognizedNote(software);
+  const openExisting = completable
+    ? [
+        {
+          id: 'open-existing-0',
+          label: `Open ${String(completable.name).trim()}`,
+          style: 'outline',
+          href: String(completable.route)
+        }
+      ]
+    : [];
+  // The way to the enclosing repository, when the card found one, stays on
+  // offer through the review.
+  const elsewhere = (view.actions || []).filter(action => action.id === 'enclosing');
+  const reviewAction = (label, style) => ({ id: 'review', label, style, softwareReview: true });
+  const review = software.review && typeof software.review === 'object' ? software.review : null;
+  if (!review || !String(review.evidence_revision || '').trim()) {
+    const already = completable
+      ? `${subject} is already linked to your workspace ${String(completable.name).trim()}. A review can complete that workspace for software work instead of making another. `
+      : '';
+    // The headline names the one project the card is about, whatever kind of
+    // folder it was found in.
+    const marker = String(software.marker || '').trim();
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline: segments([
+        { text: subject },
+        marker ? ` looks like a ${marker}.` : ' looks like a software project.'
+      ]),
+      question: `${already}Want me to look at how ${subject} is set up? Review setup reads its README, instructions and build files to suggest a setup. Nothing is run, and nothing in the folder is changed.`,
+      capabilityDetail: enclosing ? `${recognized} ${enclosing}` : recognized,
+      actions: [reviewAction('Review setup', 'primary'), ...openExisting, ...elsewhere, ...decline]
+    };
+  }
+  const evidence = softwareEvidenceLines(review);
+  const planLines = setupLinesView(offer.plan?.lines);
+  const prerequisites = softwarePrerequisiteRows(offer.plan?.prerequisites);
+  const reviewed = {
+    ...view,
+    confirming: false,
+    headline: segments(['Here is what I found in ', { text: subject }, '.']),
+    capabilityDetail: enclosing,
+    evidence,
+    prerequisites: planLines.length ? prerequisites : [],
+    plan: planLines.length ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null
+  };
+  if (!planLines.length) {
+    const reasons = {
+      project_exists:
+        'This folder already has a workspace that I cannot complete from here. Open it instead.',
+      assistant_unavailable:
+        'The Code project blueprint or its assistant is not available, so I cannot plan this setup.'
+    };
+    return {
+      ...reviewed,
+      question:
+        reasons[offer.setup_unavailable_reason] ||
+        'I could not plan this setup just now. Review again in a moment.',
+      actions: [reviewAction('Review again', 'outline'), ...openExisting, ...decline]
+    };
+  }
+  if (view.softwareAdjusting === true) {
+    return {
+      ...reviewed,
+      adjusting: true,
+      question: 'Change the names this setup will use. Nothing is created until you press Set up.',
+      actions: [
+        { id: 'save-names', label: 'Save names', style: 'primary', softwareSave: true },
+        { id: 'cancel-names', label: 'Cancel', style: 'link', softwareCancel: true }
+      ]
+    };
+  }
+  const workspace = `${String(offer.blueprint_label || 'Code project').trim()} workspace`;
+  const available = software.setup_available === true;
+  let question = completable
+    ? `Complete your workspace ${String(completable.name).trim()} for ${subject}? Here is everything Set up will do:`
+    : `Set up ${subject} as a ${workspace}? Here is everything Set up will do:`;
+  if (!available) {
+    const doing = completable
+      ? `completing your workspace ${String(completable.name).trim()} for ${subject}`
+      : `setting up ${subject} as a ${workspace}`;
+    question = `Here is what ${doing} would do. Setting it up from this review is not available here yet; nothing below has been done.`;
+  }
+  return {
+    ...reviewed,
+    question,
+    actions: [
+      ...(available ? [{ id: 'setup', label: 'Set up', style: 'primary', oneCard: true }] : []),
+      { id: 'adjust', label: 'Adjust names…', style: 'outline', softwareAdjust: true },
+      reviewAction('Review again', 'link'),
+      ...openExisting,
+      ...elsewhere,
+      ...decline
+    ]
+  };
+}
+
+// What an inspection could not establish, said in a few plain words each.
+const SOFTWARE_GAPS = {
+  no_readme: () => 'no README',
+  no_instructions: () => 'no instructions file for contributors or agents',
+  no_declared_commands: () => 'no declared build or test command',
+  several_instruction_files: source =>
+    `more than one instruction file (${source}), which may not agree`,
+  truncated: source => `${source} was cut short`,
+  withheld_lines: source => `lines in ${source} that looked like credentials were withheld`,
+  skipped_link: source => `${source} is a link and was not followed`,
+  skipped_binary: source => `${source} is not text`,
+  unreadable: source => `${source} could not be opened`,
+  unsupported_format: source => `${source} is not in a format I can read`,
+  git_layout_unverified: () => 'its Git marker points somewhere I did not follow',
+  remote_unreadable: () => 'its Git remote could not be read',
+  more_workflows: () => 'only its first few CI workflow files were read'
+};
+
+// How many commands a line names before it counts the rest. The server sends
+// the plainly named ones first.
+const COMMANDS_SHOWN = 8;
+
+function commandList(commands) {
+  const names = commands.map(command => String(command.command).trim());
+  const shown = names.slice(0, COMMANDS_SHOWN).join(', ');
+  return names.length > COMMANDS_SHOWN
+    ? `${shown}, and ${names.length - COMMANDS_SHOWN} more`
+    : shown;
+}
+
+const SOFTWARE_PARTIAL = {
+  files: 'there were more files than I read',
+  bytes: 'there was more text than I read',
+  time: 'I ran out of time'
+};
+
+const textList = value =>
+  (Array.isArray(value) ? value : []).map(item => String(item || '').trim()).filter(Boolean);
+
+// softwareEvidenceLines turns a review into the short lines the card shows:
+// what the project says it is, what it is built with, the commands it declares
+// (none of which was run), what was read, and what was not established. Every
+// string is the server's; nothing here is inferred by the page.
+export function softwareEvidenceLines(review) {
+  if (!review || typeof review !== 'object') return [];
+  const lines = [];
+  const files = textList(review.files);
+  if (review.evidence_held === true) {
+    const purpose = String(review.purpose || '').trim();
+    if (purpose) {
+      const source = String(review.purpose_source || '').trim();
+      lines.push({ label: 'It says', text: source ? `${purpose} (${source})` : purpose });
+    }
+  } else {
+    lines.push({
+      label: 'Read earlier',
+      text: `${plural(files.length, 'file')}. Press Review again to see what they say.`
+    });
+  }
+  const stack = textList(review.stack);
+  if (stack.length) lines.push({ label: 'Built with', text: stack.join(', ') });
+  const commands = (Array.isArray(review.commands) ? review.commands : []).filter(
+    command => command && String(command.command || '').trim()
+  );
+  const declared = commands.filter(command => command.declared === true);
+  const inferred = commands.filter(command => command.declared !== true);
+  if (declared.length)
+    lines.push({
+      label: 'It declares',
+      text: `${commandList(declared)}. None of these was run.`
+    });
+  if (inferred.length)
+    lines.push({
+      label: 'Usual for its files',
+      text: `${commandList(inferred)}. Not declared by the project, and not run.`
+    });
+  const guides = textList(review.guides);
+  if (guides.length) lines.push({ label: 'Its instructions', text: guides.join(', ') });
+  if (files.length && review.evidence_held === true)
+    lines.push({ label: 'I read', text: files.join(', ') });
+  const git = review.git && typeof review.git === 'object' ? review.git : null;
+  if (git) {
+    const branch = String(git.branch || '').trim();
+    const remote = String(git.remote || '').trim();
+    const on = branch ? ` on branch ${branch}` : '';
+    const from = remote ? `, with origin ${remote}` : '';
+    const layouts = {
+      repository: `A Git repository${on}${from}.`,
+      worktree: `A linked Git worktree${on}${from}. Other worktrees of the same repository are separate folders.`,
+      unverified: 'A Git marker that points somewhere I did not follow.',
+      none: 'Not under Git.'
+    };
+    if (layouts[git.layout]) lines.push({ label: 'Version control', text: layouts[git.layout] });
+  }
+  const tools = (Array.isArray(review.tools) ? review.tools : []).filter(
+    tool => tool && String(tool.name || '').trim()
+  );
+  if (tools.length)
+    lines.push({
+      label: 'Tool configuration',
+      text: `${tools
+        .map(tool => `${String(tool.name).trim()} (${String(tool.source || '').trim()})`)
+        .join(', ')}. Not checked to be installed or working.`
+    });
+  const gaps = (Array.isArray(review.gaps) ? review.gaps : [])
+    .map(gap => {
+      const describe = gap && SOFTWARE_GAPS[gap.code];
+      return describe ? describe(String(gap.source || '').trim() || 'a file') : '';
+    })
+    .filter(Boolean);
+  if (gaps.length) lines.push({ label: 'Not found or not read', text: `${gaps.join('; ')}.` });
+  if (review.partial === true)
+    lines.push({
+      label: 'A partial look',
+      text: `${SOFTWARE_PARTIAL[review.partial_reason] || 'I stopped early'}, so some project files were not read.`
+    });
+  return lines;
+}
+
+// The words for a prerequisite's state. They are kept apart on purpose: set is
+// not checked, and could-not-check is not missing.
+const PREREQUISITE_STATES = {
+  verified: () => 'Ready',
+  configured: () => 'Set, not checked',
+  absent: required => (required ? 'Needed' : 'Not set (optional)'),
+  unknown: () => 'Could not check'
+};
+
+const PREREQUISITE_LINKS = { model: 'Set up a model', github: 'Connect GitHub' };
+// What an assessment needs is repaired elsewhere than a setup's prerequisites:
+// its assistant's own model is chosen on the Agents page, and its folder is
+// shown again.
+const READINESS_LINKS = {
+  model: 'Choose a model',
+  folder: 'Show the folder',
+  github: 'Connect GitHub'
+};
+
+// softwarePrerequisiteRows normalizes the server's prerequisite rows. A link is
+// offered only to one of Ori's own pages, and only when there is something to
+// do there. links names the link for each row id; rows without a name get none.
+export function softwarePrerequisiteRows(rows, links = PREREQUISITE_LINKS) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter(row => row && String(row.label || '').trim() && PREREQUISITE_STATES[row.state])
+    .map(row => {
+      const id = String(row.id || '').trim();
+      const required = row.required === true;
+      const route = String(row.route || '').trim();
+      const actionable = row.state === 'absent' || row.state === 'unknown';
+      // One of Ori's own pages, or Home with the folder chooser open.
+      const ownPage = /^\/[a-z]/.test(route) || route === '/?panel=today&folder=show';
+      const linked = Boolean(actionable && links[id] && ownPage);
+      return {
+        id,
+        label: String(row.label).trim(),
+        state: row.state,
+        stateWord: PREREQUISITE_STATES[row.state](required),
+        text: String(row.detail || '').trim(),
+        source: String(row.source || '').trim(),
+        required,
+        href: linked ? route : '',
+        linkLabel: linked ? links[id] : ''
+      };
+    });
 }
 
 // repickView keeps what the scan said and swaps the yes for "Pick it again".
@@ -833,6 +1344,149 @@ export function firstLookStartMessage(reason, workspaceName) {
   }
 }
 
+// What Start assessment costs and does not do, said beside the button.
+export const ASSESSMENT_HINT =
+  'Spends model tokens once. The model gets what Ori read from the project and no tools; nothing in the project is run or changed.';
+const ASSESSMENT_NOT_STARTED = 'The assessment could not start. Try again.';
+
+// assessmentStartMessage is what a refused start of an assessment says at
+// once. A reason the server can explain has no sentence here: the card is
+// read again, and the server's own sentence and repair are shown instead.
+export function assessmentStartMessage(reason) {
+  switch (String(reason || '').trim()) {
+    case 'start_failed':
+    case 'execution_unavailable':
+    case 'workspace_unavailable':
+    case 'admission_unavailable':
+    case 'no_task_store':
+      return ASSESSMENT_NOT_STARTED;
+    default:
+      return '';
+  }
+}
+
+// assessmentLookView is the first look of a software project: a read-only
+// assessment run under Ori's own recipe. Whether it can start or be tried
+// again, why not, where that is repaired, and what it suggests next all come
+// from the server; nothing is worked out here.
+function assessmentLookView(look, { state, base, open, busy, said, local }) {
+  const repairRoute = local(look.repair_route);
+  const repairLabel = String(look.repair_label || '').trim();
+  const repair =
+    repairRoute && repairLabel
+      ? [{ id: 'repair', label: repairLabel, style: 'primary', href: repairRoute }]
+      : [];
+  const readiness = softwarePrerequisiteRows(look.readiness, READINESS_LINKS);
+  switch (state) {
+    case 'seeded':
+      if (look.can_start === true)
+        return {
+          ...base,
+          assessment: true,
+          readiness,
+          message: '',
+          hint: ASSESSMENT_HINT,
+          actions: [
+            {
+              id: 'start-first-look',
+              label: busy ? 'Starting…' : 'Start assessment',
+              style: 'primary',
+              start: true,
+              busy
+            },
+            ...open('outline')
+          ]
+        };
+      return {
+        ...base,
+        assessment: true,
+        readiness,
+        message: said || 'The assessment cannot start yet.',
+        actions: [...repair, ...open(repair.length ? 'outline' : 'primary')]
+      };
+    case 'running':
+      return {
+        ...base,
+        assessment: true,
+        status: 'Assessing… the model is reading what Ori gathered. Nothing is being run.',
+        actions: open('primary')
+      };
+    case 'waiting':
+      return {
+        ...base,
+        assessment: true,
+        message: said || 'The assessment is paused.',
+        actions: open('primary')
+      };
+    case 'finished': {
+      // The assessment is read on its task's own page, which shows what the
+      // run wrote. A ticket's detail lists the work and its runs, not that.
+      const report = String(look.report_route || '').trim();
+      const link = ASSESSMENT_REPORT_ROUTE.test(report)
+        ? [{ id: 'report', label: 'Open the assessment', style: 'primary', href: report }]
+        : [];
+      // The one next request the assessment suggested. The link opens the
+      // workspace's Plans page with it in the "Start a plan" box, unsubmitted,
+      // for the user to edit or discard.
+      const nextRequest = String(look.next_request || '').trim();
+      const nextRoute = local(look.next_route);
+      const next =
+        nextRequest && ASSESSMENT_NEXT_ROUTE.test(nextRoute)
+          ? [
+              {
+                id: 'next',
+                label: 'Plan the suggested task',
+                style: 'outline',
+                href: nextRoute
+              }
+            ]
+          : [];
+      return {
+        ...base,
+        assessment: true,
+        excerpt: String(look.result_excerpt || '').trim(),
+        next: next.length ? nextRequest : '',
+        actions: [...link, ...next, ...open(link.length || next.length ? 'outline' : 'primary')]
+      };
+    }
+    default: {
+      const message = said || 'The assessment did not finish.';
+      if (look.can_retry === true)
+        return {
+          ...base,
+          assessment: true,
+          readiness,
+          message,
+          actions: [
+            {
+              id: 'retry-first-look',
+              label: busy ? 'Starting…' : 'Try again',
+              style: 'primary',
+              retry: true,
+              busy
+            },
+            ...repair.map(action => ({ ...action, style: 'outline' })),
+            ...open('outline')
+          ]
+        };
+      return {
+        ...base,
+        assessment: true,
+        readiness,
+        message,
+        actions: [...repair, ...open(repair.length ? 'outline' : 'primary')]
+      };
+    }
+  }
+}
+
+// The link that opens a workspace's Plans page with the assessment's
+// suggestion placed, unsubmitted, in its "Start a plan" box. Nothing else is
+// accepted as that link.
+const ASSESSMENT_NEXT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/plans\?next=assessment$/;
+// The page of the assessment's own task in its workspace, and nothing else.
+const ASSESSMENT_REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
+
 // folderFirstLookView is the render decision for a folder's first look on its
 // receipt (FR13, FR15, FR18): one primary action, the workspace as the other,
 // and one line of status. Nothing is inferred: the state, whether a click would
@@ -845,9 +1499,15 @@ export function folderFirstLookView(look, options = {}) {
     return { visible: false };
   }
   const openLabel = String(options.openLabel || '').trim() || 'Open workspace';
+  // A path on this site and nothing else. A browser reads a backslash in a URL
+  // as a slash, so "/\host" is another site just as "//host" is.
   const local = value => {
     const target = String(value || '').trim();
-    return target.startsWith('/') && !target.startsWith('//') ? target : '';
+    if (!target.startsWith('/') || target.startsWith('//')) return '';
+    for (const char of target) {
+      if (char === '\\' || char.charCodeAt(0) < 0x20) return '';
+    }
+    return target;
   };
   const route = local(options.route) || local(look.workspace_route);
   const open = style => (route ? [{ id: 'open', label: openLabel, style, href: route }] : []);
@@ -862,6 +1522,10 @@ export function folderFirstLookView(look, options = {}) {
     excerpt: '',
     actions: []
   };
+  // A first task under a host recipe is an assessment, with its own wording,
+  // its own repairs, and no retry while something must be repaired first.
+  if (String(look.recipe || '').trim())
+    return assessmentLookView(look, { state, base, open, busy, said, local });
 
   switch (state) {
     case 'seeded': {
@@ -1035,6 +1699,10 @@ const state = {
   reviewGeneration: 0,
   workspaceName: '',
   editingName: false,
+  // A software review's names being changed on the card: which offer, and the
+  // assistant's name as typed. The workspace name shares workspaceName above.
+  softwareAdjusting: '',
+  assistantName: '',
   digest: null,
   offer: null,
   busy: false,
@@ -1196,6 +1864,10 @@ function elements() {
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     nameLabel: document.getElementById('personalAssistantFolderWorkspaceNameLabel'),
     workspaceName: document.getElementById('personalAssistantFolderWorkspaceName'),
+    assistantLabel: document.getElementById('personalAssistantFolderAssistantNameLabel'),
+    assistantName: document.getElementById('personalAssistantFolderAssistantName'),
+    evidence: document.getElementById('personalAssistantFolderEvidence'),
+    prerequisites: document.getElementById('personalAssistantFolderPrerequisites'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
@@ -1596,6 +2268,32 @@ function renderScene() {
   }
 }
 
+// renderFacts draws a software review's rows: a label, a sentence, and, for a
+// prerequisite, its state in words and a link to the page that fixes it. Every
+// string is set as text, never as markup.
+function renderFacts(list, rows) {
+  if (!list) return;
+  const items = Array.isArray(rows) ? rows : [];
+  list.replaceChildren();
+  list.hidden = items.length === 0;
+  items.forEach(row => {
+    const item = document.createElement('li');
+    if (row.state) item.dataset.state = row.state;
+    if (row.state) item.dataset.required = row.required ? 'true' : 'false';
+    const label = document.createElement('strong');
+    label.textContent = row.stateWord ? `${row.label} · ${row.stateWord}` : row.label;
+    item.append(label, ` ${row.text}`);
+    if (row.source) item.append(` Source: ${row.source}.`);
+    if (row.href) {
+      const link = document.createElement('a');
+      link.href = row.href;
+      link.textContent = row.linkLabel;
+      item.append(link);
+    }
+    list.append(item);
+  });
+}
+
 export function conversationFolderOfferView(offer, options = {}) {
   const view = folderOfferView(offer, options);
   if (offer?.conversation_id && offer.status === 'closed')
@@ -1615,7 +2313,12 @@ export function conversationFolderOfferView(offer, options = {}) {
         offer.create_available ||
         (!action.modal && !action.create))
   );
-  if (!offer.needs_pick && !offer.capability && !offer.create_available)
+  // A folder that already has a workspace, or whose workspaces could not be
+  // read, has said why no setup is offered; that is not "unavailable here".
+  // A software project's card always says what it offers and why: a review, a
+  // workspace to open, or the reason neither is possible.
+  const softwareExplained = Boolean(offer.software);
+  if (!offer.needs_pick && !offer.capability && !offer.create_available && !softwareExplained)
     view.question =
       'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
   // A blocked review says only why it is blocked and how to refresh it; it does
@@ -1641,7 +2344,11 @@ function renderOffer(place) {
       ? document.activeElement.dataset.folderAction
       : '';
   if (state.reviewSlot) window.PersonalAssistantTranscript?.beforeChange?.();
-  const view = conversationFolderOfferView(state.offer, { confirm: state.confirm });
+  const view = conversationFolderOfferView(state.offer, {
+    confirm: state.confirm,
+    softwareAdjusting:
+      Boolean(state.softwareAdjusting) && state.softwareAdjusting === state.offer?.id
+  });
   const receipt = folderReceiptView(state.offer, {
     busy: state.firstLookBusy,
     message: state.firstLookMessage
@@ -1677,13 +2384,25 @@ function renderOffer(place) {
   setText(els.question, view.question, false);
   if (els.nameLabel)
     els.nameLabel.hidden = !(
-      state.reviewSlot &&
-      state.editingName &&
-      state.offer?.status === 'pending' &&
-      !state.offer?.capability
+      view.adjusting === true ||
+      (state.reviewSlot &&
+        state.editingName &&
+        state.offer?.status === 'pending' &&
+        !state.offer?.capability &&
+        !state.offer?.software)
     );
   if (els.workspaceName && document.activeElement !== els.workspaceName)
     els.workspaceName.value = state.workspaceName;
+  if (els.assistantLabel) els.assistantLabel.hidden = view.adjusting !== true;
+  if (els.assistantName && document.activeElement !== els.assistantName)
+    els.assistantName.value = state.assistantName;
+  renderFacts(els.evidence, view.evidence);
+  // Before setup the list is what the setup needs; once a project is set up it
+  // is what its assessment needs and can use, read now.
+  renderFacts(
+    els.prerequisites,
+    firstLook.visible && firstLook.readiness?.length ? firstLook.readiness : view.prerequisites
+  );
   setText(els.capability, view.capabilityDetail);
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
@@ -1691,8 +2410,16 @@ function renderOffer(place) {
     els.receipt.hidden = !receipt.visible;
     renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
-  // What the agent found, once its first look has finished.
+  // What the agent found, once its first look has finished, and for an
+  // assessment the one next request it suggested. Both are text the model
+  // wrote: they are set as text, never as markup.
   setText(els.result, firstLook.visible ? firstLook.excerpt : '');
+  if (els.result && firstLook.visible && firstLook.next) {
+    const label = document.createElement('strong');
+    label.textContent = 'Suggested next task: ';
+    els.result.append(document.createElement('br'), label, firstLook.next);
+    els.result.hidden = false;
+  }
   if (els.plan) {
     const lines = view.setup?.lines || view.plan?.lines || [];
     renderSetupLines(els.plan, lines);
@@ -1880,6 +2607,36 @@ function runAction(action) {
   }
   if (action.href) {
     window.location.assign(action.href);
+    return;
+  }
+  if (action.candidate) {
+    void chooseCandidate(action);
+    return;
+  }
+  if (action.softwareReview) {
+    void reviewSoftware();
+    return;
+  }
+  if (action.softwareAdjust) {
+    // The fields start from the names the plan uses now, as the server gave them.
+    const software = state.offer?.software || {};
+    state.softwareAdjusting = state.offer?.id || '';
+    state.workspaceName = String(software.workspace_name || state.offer?.subject?.name || '');
+    state.assistantName = String(software.assistant || '');
+    showError('');
+    render();
+    elements()?.workspaceName?.focus();
+    return;
+  }
+  if (action.softwareCancel) {
+    state.softwareAdjusting = '';
+    showError('');
+    render();
+    focusFolderAction('adjust');
+    return;
+  }
+  if (action.softwareSave) {
+    void saveSoftwareNames();
     return;
   }
   if (action.oneCard) {
@@ -2079,6 +2836,9 @@ async function startFirstLook() {
   if (!look || state.firstLookBusy) return idle;
   const retry = look.state === 'failed';
   if (!retry && !(look.state === 'seeded' && look.can_start === true)) return idle;
+  // An assessment is tried again only when nothing has to be repaired first.
+  const assessment = Boolean(String(look.recipe || '').trim());
+  if (retry && assessment && look.can_retry !== true) return idle;
   const workspaceID = String(look.workspace_id || '').trim();
   const taskID = String(look.task_id || '').trim();
   if (!workspaceID || (retry && !taskID)) return idle;
@@ -2119,6 +2879,8 @@ async function startFirstLook() {
       message: '',
       detail: 'Running…'
     });
+  } else if (assessment) {
+    state.firstLookMessage = retry ? ASSESSMENT_NOT_STARTED : assessmentStartMessage(reason);
   } else {
     state.firstLookMessage = retry
       ? FIRST_LOOK_NOT_STARTED
@@ -2574,6 +3336,118 @@ function showOfferFailure(payload) {
   showError(String(payload?.error || 'That could not be saved. Try again.'));
 }
 
+// focusFolderAction moves focus to the first of the named card actions that is
+// there, so a keyboard user lands on what the card now offers.
+function focusFolderAction(...ids) {
+  const actions = elements()?.actions;
+  for (const id of ids) {
+    const control = actions?.querySelector(`[data-folder-action="${id}"]`);
+    if (control) {
+      control.focus({ preventScroll: true });
+      return;
+    }
+  }
+}
+
+// reviewSoftware is the click on Review setup (or Review again). It is the one
+// request that lets the server read the project's README, instructions and
+// build files; the card says so while it waits. It sends no folder and no file
+// name, and it sets nothing up.
+async function reviewSoftware() {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const generation = state.reviewGeneration;
+  const subject = String(offer.subject?.name || offer.folder || '').trim() || 'the project';
+  state.busy = true;
+  state.softwareAdjusting = '';
+  state.progress = `Reading ${subject}'s README, instructions and build files…`;
+  showError('');
+  render();
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'review', {});
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) showOfferFailure(payload);
+  } catch (_) {
+    if (generation === state.reviewGeneration)
+      showError('The project could not be read just now. Try again.');
+  } finally {
+    state.progress = '';
+    state.busy = false;
+    render();
+    focusFolderAction('setup', 'adjust', 'review');
+  }
+}
+
+// saveSoftwareNames sends the names typed on the card. The server redraws the
+// plan for them; nothing is created. A refused name keeps what was typed, so
+// it can be corrected rather than typed again.
+async function saveSoftwareNames() {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const els = elements();
+  if (els?.workspaceName && !els.workspaceName.reportValidity()) return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  let saved = false;
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'adjust', {
+      workspace_name: String(state.workspaceName || '').trim(),
+      assistant_name: String(state.assistantName || '').trim()
+    });
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) {
+      if (payload?.needs_pick) showOfferFailure(payload);
+      else
+        showError(
+          'Those names could not be used. A name cannot be empty, longer than 120 characters, or contain a slash or a line break.'
+        );
+      return;
+    }
+    saved = true;
+    state.softwareAdjusting = '';
+  } catch (_) {
+    if (generation === state.reviewGeneration)
+      showError('The names could not be saved. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+    if (saved) focusFolderAction('adjust');
+  }
+}
+
+// chooseCandidate tells the server which of the software projects a folder
+// holds the card is about. It names a candidate the server listed for this
+// offer, never a folder, and sets nothing up: the chosen project's plan is the
+// next thing the card shows.
+async function chooseCandidate(action) {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'candidate', {
+      candidate_id: action.candidate
+    });
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) {
+      showOfferFailure(payload);
+      return;
+    }
+    // The choice was the "which project" answer; go straight to its plan.
+    if (state.offer?.verdict === 'mixed' || state.offer?.verdict === 'ambiguous')
+      state.confirm = 'project';
+  } catch (_) {
+    if (generation === state.reviewGeneration) showError('That could not be saved. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
 export function folderDecisionProgress(offer, action) {
   const subject = String(offer?.subject?.name || offer?.folder || '').trim() || 'the folder';
   if (action.walkthrough) return `Setting up File Janitor for ${subject}…`;
@@ -2811,6 +3685,9 @@ function init() {
   });
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
+  els.assistantName?.addEventListener('input', () => {
+    state.assistantName = els.assistantName.value;
+  });
   els.workspaceName?.addEventListener('input', () => {
     state.workspaceName = els.workspaceName.value;
   });

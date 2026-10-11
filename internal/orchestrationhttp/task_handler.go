@@ -690,6 +690,12 @@ func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpd
 			task.Context = map[string]any{}
 		}
 		for key, value := range req.Context {
+			// A host recipe marker decides how a task may run. Only the server
+			// that seeded the task writes it: a request can neither add one to
+			// an ordinary task nor strip it from a restricted one.
+			if workspace.ReservedTaskContextKey(key) {
+				continue
+			}
 			if value == nil {
 				delete(task.Context, key)
 				continue

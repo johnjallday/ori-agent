@@ -3,6 +3,7 @@ package projecttemplates
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,11 +31,27 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 		}
 	}
 
-	// Code Project is the workspace "show me a folder" sets up over a code
-	// folder: metadata only, no scaffold to supersede, no roles to staff.
-	if code := byID["code-project"]; !code.Builtin || code.HasSkeleton || code.HasAgents() ||
-		len(code.Tags) != 1 || code.Tags[0] != "code" || code.Icon == "" {
+	// Code Project is the workspace "show me a folder" sets up over a software
+	// project: metadata only, no scaffold to supersede, and exactly one
+	// development assistant as its entry agent.
+	code := byID["code-project"]
+	if !code.Builtin || code.HasSkeleton || len(code.Tags) != 1 || code.Tags[0] != "code" || code.Icon == "" || code.BuiltinVersion != 2 {
 		t.Errorf("code-project: %+v", code)
+	}
+	if len(code.Agents) != 1 || code.Agents[0].Name != "Development Assistant" || code.Agents[0].Role != "general" ||
+		code.Agents[0].Model != "" || code.Agents[0].Provider != "" || !code.Agents[0].Tools.IsEmpty() {
+		t.Errorf("code-project roster: %+v", code.Agents)
+	}
+	// The assistant's own instructions keep it to understanding and planning and
+	// to what it can show: it is told not to report an unrun command as passing.
+	prompt := code.Agents[0].SystemPrompt
+	for _, required := range []string{"read-only directory tools", "this project's conventions", "declared, not tested", "say plainly what you have not verified"} {
+		if !strings.Contains(prompt, required) {
+			t.Errorf("code-project assistant prompt lacks %q", required)
+		}
+	}
+	if len(code.StarterTasks) != 0 || len(code.CapabilityRequirements) != 0 || code.SetupWizard != nil {
+		t.Errorf("code-project gained tasks, capabilities or a wizard: %+v", code)
 	}
 
 	// Scaffold starters keep their files and are flagged builtin.
@@ -142,6 +159,81 @@ func TestEnsureLibraryRefreshesBuiltinManifestOnVersionBump(t *testing.T) {
 	if again, _ := os.Stat(manifestPath); again.ModTime() != stamp.ModTime() {
 		t.Error("manifest was rewritten when versions already matched")
 	}
+}
+
+// An install that already has the agent-less Code Project (version 1) gets the
+// shipped roster on the next start. Only that built-in's manifest is rewritten:
+// other files in its folder, an edited built-in, and a user's own template that
+// happens to look like it are left exactly as they are.
+func TestEnsureLibraryUpgradesAnOlderCodeProjectAndNothingElse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "templates")
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	code := filepath.Join(dir, "code-project")
+	older := `{"name":"Code Project","description":"A workspace over a code folder you already have.","icon":"💻","behavior_profile":"general","builtin":true,"builtin_version":1,"tags":["code"],"agents":[]}`
+	if err := os.WriteFile(filepath.Join(code, ManifestFileName), []byte(older), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(code, "my-notes.md")
+	if err := os.WriteFile(notes, []byte("kept by the user"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// A template the user made, with an agent named like the shipped one.
+	custom := filepath.Join(dir, "my-code-project")
+	if err := os.MkdirAll(custom, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	customManifest := `{"name":"My Code Project","builtin_version":1,"agents":[{"name":"Development Assistant","role":"general","system_prompt":"Mine."}]}`
+	if err := os.WriteFile(filepath.Join(custom, ManifestFileName), []byte(customManifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Another built-in the user has not been given a newer version of.
+	research, err := os.ReadFile(filepath.Join(dir, "research-project", ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if before, err := FindLibraryTemplate(dir, "code-project"); err != nil || before.HasAgents() || before.BuiltinVersion != 1 {
+		t.Fatalf("the older install was not simulated: %+v %v", before, err)
+	}
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary (upgrade): %v", err)
+	}
+	upgraded, err := FindLibraryTemplate(dir, "code-project")
+	if err != nil || upgraded.BuiltinVersion != 2 || len(upgraded.Agents) != 1 || upgraded.Agents[0].Name != "Development Assistant" {
+		t.Fatalf("code-project after upgrade: %+v %v", upgraded, err)
+	}
+	if data, err := os.ReadFile(notes); err != nil || string(data) != "kept by the user" {
+		t.Fatalf("a file beside the manifest was touched: %q %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(custom, ManifestFileName)); err != nil || string(data) != customManifest {
+		t.Fatalf("the user's own template was rewritten: %q %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "research-project", ManifestFileName)); err != nil || string(data) != string(research) {
+		t.Fatalf("an up-to-date built-in was rewritten: %v", err)
+	}
+
+	// A built-in the user edited at the current version is not replaced.
+	edited := strings.Replace(mustReadFile(t, filepath.Join(code, ManifestFileName)), "Development Assistant", "Pat", 1)
+	if err := os.WriteFile(filepath.Join(code, ManifestFileName), []byte(edited), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary (no-op): %v", err)
+	}
+	if kept, err := FindLibraryTemplate(dir, "code-project"); err != nil || len(kept.Agents) != 1 || kept.Agents[0].Name != "Pat" {
+		t.Fatalf("an edited current built-in was overwritten: %+v %v", kept.Agents, err)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestStarterInstantiatesEndToEnd(t *testing.T) {

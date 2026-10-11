@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -69,6 +70,13 @@ type LLMTaskHandler struct {
 	// usageRecorder records token usage for a task's LLM calls. Nil means
 	// nothing is recorded, which is exactly what happened before this existed.
 	usageRecorder UsageRecorder
+	// recipes are the host recipes this handler can run, by name. A task seeded
+	// under a recipe that is not here is refused; see executeRecipeTask.
+	recipes map[string]RecipeRunner
+	// recipeRuns holds the recipe tasks being run right now, by task id, so a
+	// task is never run twice at once whichever executor asked.
+	recipeRunsMu sync.Mutex
+	recipeRuns   map[string]struct{}
 }
 
 // UsageRecorder records token usage from a completed provider call.
@@ -258,6 +266,11 @@ func (h *LLMTaskHandler) SetUtilityToolProvider(provider UtilityToolProvider) {
 // ExecuteTask executes a task by sending it to the agent's LLM
 func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task Task) (string, error) {
 	logger.Debug("🤖 Executing task for agent", logger.Fields{"task_id": task.ID, "agentName": agentName})
+
+	// A task seeded under a host recipe is run by that recipe or not at all.
+	if recipe := FirstTaskRecipe(&task); recipe != "" {
+		return h.executeRecipeTask(ctx, agentName, task, recipe)
+	}
 
 	// Publish thinking event
 	if h.eventBus != nil {
@@ -1481,6 +1494,13 @@ func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *resolvedTaskA
 // executeToolCall executes a single tool call
 func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
 	logger.Debug("Executing tool", logger.Fields{"tool": toolCall.Name})
+
+	// A task under a host recipe has no tools. Its run never reaches the tool
+	// loop; this refusal is here so that no future path into the loop can
+	// dispatch a tool for one.
+	if recipe := FirstTaskRecipe(&task); recipe != "" {
+		return toolCallResult{Name: toolCall.Name, Error: fmt.Errorf("tool %q refused: a task under the host recipe %q has no tools", toolCall.Name, recipe)}
+	}
 
 	// Autonomy gate. Applies to mission runs (policy from the mission context)
 	// and to delegated subtasks (policy from the workspace) — interactive chat

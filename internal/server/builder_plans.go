@@ -64,6 +64,14 @@ func (b *ServerBuilder) attachWorkspacePlanMaterializer() {
 
 func (b *ServerBuilder) workspacePlanArtifactRoot(workspaceID, relativePath string) string {
 	if isRepositoryPlanningArtifact(relativePath) {
+		// A workspace bound to one outside software project writes its planning
+		// documents there or nowhere. An unavailable folder yields no root, which
+		// the writer refuses, rather than Ori's own storage for the workspace.
+		if b.workspacePlanPolicy != nil {
+			if folder, bound := b.workspacePlanPolicy.BoundCodeFolder(workspaceID); bound {
+				return folder
+			}
+		}
 		if root := b.workspacePlanProjectRoot(workspaceID); root != "" {
 			return root
 		}

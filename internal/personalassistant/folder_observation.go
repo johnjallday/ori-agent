@@ -288,8 +288,14 @@ func summarizeFolder(result folderdigest.Result, id string) foldercontext.Observ
 		observation.Kinds = observation.Kinds[:foldercontext.MaxNames]
 	}
 	// Root plus immediate subfolder summaries; a separate optional tree retains
-	// bounded relationships genuinely recorded during this same scan.
+	// bounded relationships genuinely recorded during this same scan. A folder
+	// that is itself a software project is one candidate: its subfolders are
+	// parts of it, still named in the tree, and never setups of their own.
+	single := result.SoftwareRoot()
 	for index, candidate := range result.Candidates {
+		if single && !candidate.IsRoot {
+			continue
+		}
 		if len(observation.Projects) >= foldercontext.MaxNames {
 			observation.Coverage.ProjectsOmitted++
 			continue

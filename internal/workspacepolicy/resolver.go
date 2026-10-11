@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
@@ -61,6 +62,26 @@ func (r *Resolver) CodeFolder(workspaceID string) string {
 	return r.codeFolder(ws)
 }
 
+// BoundCodeFolder answers for a workspace that was set up for one outside
+// software project. bound is false for every other workspace, and the caller
+// then uses CodeFolder as before. When bound is true the folder is the answer
+// even when it is empty: the confirmed folder is unavailable, and nothing may
+// be substituted for it.
+func (r *Resolver) BoundCodeFolder(workspaceID string) (folder string, bound bool) {
+	if r == nil || r.store == nil {
+		return "", false
+	}
+	ws, err := r.store.Get(workspaceID)
+	if err != nil || ws == nil {
+		return "", false
+	}
+	folder, bound, err = workspace.SoftwareProjectFolder(ws, projectlibrary.DirectoryIdentity)
+	if !bound || err != nil {
+		return "", bound
+	}
+	return folder, true
+}
+
 // codeFolder returns the directory whose version control matters.
 //
 // A workspace folder under the workspaces root is Ori's own storage; it is
@@ -71,6 +92,19 @@ func (r *Resolver) CodeFolder(workspaceID string) string {
 func (r *Resolver) codeFolder(ws *workspace.Workspace) string {
 	if ws == nil {
 		return ""
+	}
+
+	// A software-project workspace was set up for one outside folder the user
+	// confirmed. That folder is the code root, and the answer is final: when the
+	// binding cannot be honoured (the folder is gone, or a different directory is
+	// now at that path) there is no code root. Falling back to the workspace's
+	// own files would inspect, and later write planning documents into, a folder
+	// the user never chose for them.
+	if folder, bound, err := workspace.SoftwareProjectFolder(ws, projectlibrary.DirectoryIdentity); bound {
+		if err != nil {
+			return ""
+		}
+		return folder
 	}
 
 	if strings.TrimSpace(ws.ProjectPath) != "" {

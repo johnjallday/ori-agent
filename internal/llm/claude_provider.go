@@ -78,6 +78,8 @@ func (p *ClaudeProvider) Type() ProviderType {
 func (p *ClaudeProvider) Capabilities() ProviderCapabilities {
 	caps := CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
 	caps.SupportsStreaming = false
+	// A plain API call: this provider adds no tool of its own to a request.
+	caps.SupportsIsolatedChat = true
 	return caps
 }
 
@@ -97,6 +99,9 @@ func (p *ClaudeProvider) DefaultModels() []string {
 
 // Chat sends a chat completion request to Claude
 func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := CheckIsolatedRequest(req); err != nil {
+		return nil, err
+	}
 	// Convert messages to Claude format
 	messages := p.convertMessages(req.Messages)
 

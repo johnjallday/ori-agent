@@ -451,7 +451,11 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, workspaceID string, task
 	// Adaptive delegation (opt-in): when a loop is wired and the outcome warrants
 	// it, let the coordinator adapt before this is recorded as a failure. With no
 	// loop configured, behavior is unchanged.
-	if o.delegationLoop != nil {
+	//
+	// A task under a host recipe is never adapted: the loop would hand its
+	// work to a coordinator that runs as an ordinary agent, with that agent's
+	// tools, and record what it wrote as the recipe's report.
+	if o.delegationLoop != nil && FirstTaskRecipe(&task) == "" {
 		if trigger := ClassifyDelegationTrigger(task, result, err); trigger.Trigger {
 			loopRes, loopErr := o.delegationLoop.Run(ctx, workspaceID, task, trigger)
 			switch {

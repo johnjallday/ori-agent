@@ -43,7 +43,7 @@ func TestMatchMarker_TableRows(t *testing.T) {
 		ok    bool
 	}{
 		{".git", true, ShapeCode, true},
-		{".git", false, "", false}, // a .git file (worktree pointer) is not the marker
+		{".git", false, ShapeCode, true}, // a worktree's .git is a file; its name is the marker, never its contents
 		{"package.json", false, ShapeCode, true},
 		{"package.json", true, "", false},
 		{"PACKAGE.JSON", false, "", false}, // exact-name manifests keep their case
