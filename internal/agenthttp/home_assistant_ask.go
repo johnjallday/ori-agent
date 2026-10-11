@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
@@ -125,6 +126,8 @@ type HomeAssistantAskResponse struct {
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
+	// Safe failure category only; never raw provider errors or private output.
+	FailureReason string `json:"failure_reason,omitempty"`
 	// DraftReview opens the save-to-backlog review for a typed "save this
 	// draft" request. Nothing has been written when it is set.
 	DraftReview *PersonalAssistantDraftReview `json:"draft_review,omitempty"`
@@ -496,8 +499,14 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 	}
 
-	if req.Context != nil && req.Context.Origin == "personal_assistant_panel" && conversation != nil && conversation.id != "" && isAssistantWorkspaceReviewRequest(prompt) {
-		return h.prepareWorkspaceReview(ctx, prompt, identity, workContext, conversation)
+	// A proposal is part of the normal model turn, not a second generation
+	// hidden behind magic wording. Folder setup retains its own review owner.
+	if proposal := h.workspaceProposalTurn(conversation); proposal != nil {
+		ctx = context.WithValue(ctx, workspaceProposalKey{}, proposal)
+		defer func() { proposal.finalize(&response) }()
+	}
+	if isAssistantWorkspaceReviewRequest(prompt) && conversation != nil {
+		intent = homeAssistantConversationIntent.Key
 	}
 
 	h.prepareContinuity(ctx, prompt, conversation)
@@ -544,6 +553,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext, history)
 	if err != nil {
+		if conversation != nil {
+			return h.conversationModelUnavailable(ctx, prompt, intent, workContext, conversation, err)
+		}
 		resp := h.modelUnavailableResponse(ctx, prompt, intent, snapshot, workContext, err)
 		resp.Conversation = unstoredConversation(conversation)
 		return resp
@@ -580,23 +592,41 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 	if name == "" {
 		name = "Your assistant"
 	}
-	msg := fmt.Sprintf("%s could not reach the system model, so there is no answer yet. Your message was not sent; try again in a moment.", name)
+	msg := fmt.Sprintf("%s could not get an answer from the system model. Your draft is kept and no answer was saved. You can retry or open the workspace form manually.", name)
+	reason := "provider_unavailable"
 	state := unstoredConversation(conversation)
-	if errors.Is(err, errHomeModelNotConfigured) {
-		msg = fmt.Sprintf("%s needs a system model to answer. Choose one in Settings, then send your message again.", name)
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	switch {
+	case errors.Is(err, errWorkspaceProposalInvalid):
+		reason = "invalid_workspace_proposal"
+		msg = "The model returned a workspace proposal that couldn't be safely used. No review was prepared and nothing was created. Your draft is kept; open the workspace form manually or try again."
+	case errors.Is(err, context.DeadlineExceeded):
+		reason = "model_timeout"
+		msg = "The model took too long to answer. Your draft is kept and nothing was created; open the workspace form manually or try again."
+	case errors.Is(err, context.Canceled):
+		reason = "request_cancelled"
+		msg = "The request was cancelled. No answer was saved and nothing was created. Your draft is kept."
+	case errors.Is(err, errHomeModelNotConfigured):
+		reason = "model_not_configured"
+		msg = fmt.Sprintf("%s needs a system model to answer. Choose one in Settings, or open the workspace form manually without a model.", name)
 	}
 	if errors.Is(err, assistantdiscovery.ErrReviewRefused) || errors.Is(err, errAssistantWorkspaceScopeChanged) {
+		reason = "context_changed"
 		msg = "The conversation or its permissions changed while this reply was being prepared. No answer was saved and no setup ran; reopen the context before trying again."
 		if state != nil {
 			state.Error = "context_save_failed"
 		}
 	}
+	logger.Info("Home assistant answer unavailable", logger.Fields{"reason": reason})
 	h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "model_unavailable", ActionCount: 1})
 	return HomeAssistantAskResponse{
 		Response: msg, Intent: intent, Identity: homeAssistantIdentity(workContext),
 		Actions:          []HomeAction{{ID: "nav-settings", Type: HomeActionNavigate, Label: "Go to Settings", Href: "/settings"}},
 		Conversation:     state,
 		ModelUnavailable: true,
+		FailureReason:    reason,
 	}
 }
 
@@ -672,6 +702,13 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if research != nil {
 		registry = &assistantResearchRegistry{base: registry, research: research}
 	}
+	proposal := workspaceProposalFromContext(ctx)
+	if proposal != nil {
+		if err := proposal.revalidate(ctx); err != nil {
+			return "", err
+		}
+		registry = &workspaceProposalRegistry{base: registry, turn: proposal}
+	}
 	// A reader is offered only on a path that can run it; the prompt then says
 	// exactly which readers exist, so no path claims a read it cannot make.
 	var tools []llm.Tool
@@ -690,7 +727,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
-	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)))
+	proposalPrompt := workspaceProposalManualInstructions
+	if proposal != nil && provider.Capabilities().SupportsTools {
+		proposalPrompt = workspaceProposalInstructions
+	}
+	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt))
 	conversation = append(conversation, turn.history...)
 	researchEvidence := ""
 	if research != nil && research.result != nil {
@@ -716,6 +757,23 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		})
 		if chatErr != nil {
 			return "", chatErr
+		}
+		if resp == nil {
+			return "", errors.New("provider returned no response")
+		}
+		// The terminal proposal is validated/rendered by Ori, not followed by
+		// another completion that could claim creation. Reject mixed batches
+		// before executing ANY call; this tool grants no other operations.
+		for _, call := range resp.ToolCalls {
+			if call.Name == workspaceProposalTool {
+				if proposal == nil || len(tools) == 0 || len(resp.ToolCalls) != 1 {
+					return "", errWorkspaceProposalInvalid
+				}
+				if research != nil && research.revalidate(ctx) != nil {
+					return "", assistantdiscovery.ErrReviewRefused
+				}
+				return registry.Execute(ctx, call.Name, call.Arguments)
+			}
 		}
 		if len(resp.ToolCalls) > 8 {
 			return "", errors.New("tool call batch exceeds bounded turn limit")

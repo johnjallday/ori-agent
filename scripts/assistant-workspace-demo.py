@@ -451,21 +451,6 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                 raw = self.rfile.read(size)
                 audit_provider_input(state_dir, raw.decode("utf-8", "replace"))
                 request = json.loads(raw)
-                if request.get("messages") and request["messages"][0].get("content", "").startswith("The current user explicitly requests an editable workspace proposal"):
-                    history = request["messages"][1:-1]
-                    body = "\n".join(message.get("content", "") for message in history)
-                    (state_dir / "workspace-proposal-input.json").write_text(json.dumps({
-                        "tool_free": not request.get("tools"),
-                        "correction_present": "not talent coaching" in body,
-                        "membership_present": "membership" in body,
-                        "early_correction_present": "No, I do not want to develop anyone's talent." in body,
-                        "latest_correction_present": "No, I want recurring membership only, not one-off sales or talent coaching." in body,
-                        "history_runes": len(body),
-                    }))
-                    proposal = {"name": "Fictional Membership Pilot", "description": "Goal: recurring community membership, not talent coaching. Proposed starter work: identify the audience, compare membership workflows, and outline a small pilot. Telegram compatibility remains unknown; no integration is installed."}
-                    self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": json.dumps(proposal)}, "done": True,
-                                     "prompt_eval_count": 1, "eval_count": 1})
-                    return
                 summary = continuity_summary(request) if discovery_continuity else None
                 if summary is not None:
                     self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": summary}, "done": True,
@@ -486,7 +471,36 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": "Deterministic discussion fixture: a workspace could organize the agreed membership pilot. Would you like a workspace proposal? Nothing is created or installed."}, "done": True,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
-                step = ((research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
+                proposal_step = None
+                if own_words.lower().startswith(("prepare a workspace review", "let's set up a workspace")) or own_words == "how they started. can we create a workspace":
+                    history = request["messages"][1:-1]
+                    body = "\n".join(message.get("content", "") for message in history)
+                    tool_offered = any(tool.get("function", {}).get("name") == "assistant_propose_workspace" for tool in request.get("tools", []))
+                    if not tool_offered:
+                        raise ValueError("proposal-only tool missing")
+                    audit_path = state_dir / "workspace-proposal-input.json"
+                    prior = json.loads(audit_path.read_text()) if audit_path.exists() else {}
+                    audit_path.write_text(json.dumps({
+                        "broker_tool_offered": tool_offered,
+                        "proposal_model_calls": prior.get("proposal_model_calls", 0) + 1,
+                        "correction_present": "not talent coaching" in body,
+                        "membership_present": "membership" in body,
+                        "okgo_present": "okgo band" in body,
+                        "early_correction_present": "No, I do not want to develop anyone's talent." in body,
+                        "latest_correction_present": "No, I want recurring membership only, not one-off sales or talent coaching." in body,
+                        "history_runes": len(body),
+                    }))
+                    proposal = {"name": "Fictional Membership Pilot", "description": "Goal: recurring community membership, not talent coaching. Proposed starter work: identify the audience, compare membership workflows, and outline a small pilot. Telegram compatibility remains unknown; no integration is installed."}
+                    if "okgo band" in body:
+                        proposal = {"name": "OK Go — How They Started", "description": "Goal: research how OK Go started. Proposed starter work: find interviews, build an early-years timeline, and write a sourced origin story. Dates and first-break details need verification."}
+                    if (state_dir / "workspace-proposal-invalid").exists():
+                        (state_dir / "workspace-proposal-invalid").unlink()
+                        proposal["description"] = "x" * 1601
+                    if (state_dir / "workspace-proposal-slow").exists():
+                        (state_dir / "workspace-proposal-slow").unlink()
+                        time.sleep(13)  # Cross the former hard 12-second failure.
+                    proposal_step = {"tool": "assistant_propose_workspace", "arguments": proposal}
+                step = (proposal_step or (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
                         (continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
                         (folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))

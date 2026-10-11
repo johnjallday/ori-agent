@@ -55,10 +55,16 @@ supplement bounded recent history; they are not Profile/HQ memory. See
 bounds and [workspace awareness](assistant-workspace-awareness.md#conversation-discovery-amendment)
 for source, provider and manual-setup boundaries. Conversation may proactively
 suggest an optional workspace review when an agreed goal becomes actionable.
-An explicit preparation request produces bounded editable name/brief data from
-that canonical thread, not execution. The existing creator still owns blueprint,
+The built-in `assistant_propose_workspace` tool produces bounded editable
+name/brief data within the current conversational turn, not a phrase-triggered
+second generation or an installed skill. Ori offers that review only after a
+successful canonical atomic save. Prose alone, historical instructions and a
+bare yes cannot create anything. The existing creator still owns blueprint,
 placement, team and final Create; cancellation creates nothing, and proposed
-starter work is not automatically saved or assigned.
+starter work is not automatically saved or assigned. A permanent **Open workspace
+form manually** drawer option needs no model and passes no inferred fields.
+Failures preserve the draft, expose bounded honest reasons and offer the same
+blank-form recovery; they are not reported as successful app-data answers.
 
 ## Purpose
 
@@ -959,6 +965,10 @@ A conversation stores answered turns and nothing else. A request for an action
 confirmation prompt, and its outcome are shown in the panel but are not written
 into the conversation. Every assistant message in a conversation is therefore a
 reply the user can point at, and no stored text ever stands in for an approval.
+The nonmutating workspace-proposal tool is a descriptive-reply exception: its
+validated name/brief is saved as conversation text, but its ephemeral form-opening
+confirmation is not stored. Reopening history does not restore a grant or create
+anything; the final creator remains a separately confirmed owner.
 
 ### History is not memory
 

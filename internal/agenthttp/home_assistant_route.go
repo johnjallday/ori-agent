@@ -404,6 +404,9 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	// panel conversation. Keep explicit specialist/execution intents on their
 	// existing gates; answer ordinary project questions in this conversation.
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() {
+		if isAssistantWorkspaceReviewRequest(prompt) {
+			return assistantConversationRoute(workContext), nil
+		}
 		if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {
 			return &HomeAssistantRouteResponse{Intent: intent.Key, IntentLabel: intent.Label, RouteMode: homeAssistantRouteModeInline, TargetSurface: "current", ContextMode: homeAssistantContextDirect, HandoffPolicy: homeAssistantHandoffAssistant, PersonalAssistantState: workContext.State}, nil
 		}

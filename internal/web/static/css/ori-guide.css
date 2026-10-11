@@ -824,7 +824,8 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   display: none;
 }
 
-.personal-assistant-panel__links a {
+.personal-assistant-panel__links a,
+.personal-assistant-panel__links button {
   display: flex;
   min-height: 40px;
   align-items: center;
@@ -840,8 +841,18 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   display: none;
 }
 
+.personal-assistant-panel__links button {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+}
+
 .personal-assistant-panel__links a:hover,
-.personal-assistant-panel__links a:focus-visible {
+.personal-assistant-panel__links a:focus-visible,
+.personal-assistant-panel__links button:hover,
+.personal-assistant-panel__links button:focus-visible {
   background: var(--ori-paper);
 }
 

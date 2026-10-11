@@ -10505,6 +10505,8 @@
         return;
       }
       if (conversationRef) window.PersonalAssistantTranscript?.beforeChange?.();
+      // Ask is authoritative when it refines a route into a conversation.
+      if (data && data.intent === 'assistant_conversation') isConversation = true;
       var responseText = String((data && data.response) || '').trim();
       var assistantRow = responseText
         ? appendHomeAssistantMessage('assistant', responseText)
@@ -10645,6 +10647,10 @@
         setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
       }
       var buttons = buildHomeActionButtons(data && data.actions, routeContext, intent);
+      if (conversationRef && data && (data.model_unavailable || data.conversation?.error)) {
+        buttons.unshift(manualWorkspaceReviewButton());
+        setHomeAssistantRoutingSummary('Not completed', formatHomeAskSummary(data));
+      }
       // A conversation continues in the composer above it; it needs no
       // "ask another task" prompt after every reply.
       if (!isConversation) {
@@ -10682,6 +10688,7 @@
         return;
       }
       renderHomeAssistantActions([
+        ...(conversationRef ? [manualWorkspaceReviewButton()] : []),
         {
           label: 'Retry',
           variant: 'primary',
@@ -10821,6 +10828,30 @@
     return true;
   }
 
+  // Deterministic escape hatch: no model, prior proposal, context, or fields
+  // are copied. The existing creator still owns every choice and final Create.
+  function openManualWorkspaceReview() {
+    var menu = document.getElementById('personalAssistantMore');
+    if (menu) menu.open = false;
+    window.PersonalAssistantPanel?.close({ restoreFocus: false });
+    if (typeof window.sessionManager?.showAddWorkspaceModal === 'function') {
+      window.sessionManager.showAddWorkspaceModal({
+        entryPoint: 'assistant_workspace_manual',
+        stayAfterCreate: true
+      });
+    } else {
+      window.location.href = '/workspaces';
+    }
+  }
+
+  function manualWorkspaceReviewButton() {
+    return {
+      label: 'Open workspace form manually',
+      variant: 'secondary',
+      onClick: openManualWorkspaceReview
+    };
+  }
+
   // A prepared proposal only pre-fills the existing manual wizard. It does
   // not start a build/model, inherit a parent/binding, or submit Create.
   function openPreparedWorkspaceReview(args, routeContext) {
@@ -10931,6 +10962,19 @@
   }
 
   function formatHomeAskSummary(data) {
+    if (data?.conversation?.error)
+      return 'The conversation changed or could not be saved. Nothing was created.';
+    if (data?.model_unavailable) {
+      var failures = {
+        invalid_workspace_proposal:
+          'The proposal could not be used. Open the workspace form manually.',
+        model_timeout: 'The model timed out. Your draft is kept.',
+        request_cancelled: 'Request cancelled. Your draft is kept.',
+        model_not_configured: 'No system model is configured. Manual workspace setup is available.',
+        context_changed: 'The context changed. Reopen the original conversation.'
+      };
+      return failures[data.failure_reason] || 'No answer was completed. Your draft is kept.';
+    }
     var meta = data && data.snapshot_meta;
     if (!meta) return 'Answered from your app data.';
     var parts = [];
@@ -14014,6 +14058,9 @@
   }
 
   function initHomeAssistant() {
+    document
+      .getElementById('personalAssistantCreateWorkspace')
+      ?.addEventListener('click', openManualWorkspaceReview);
     var els = getHomeAssistantElements();
     var supportsRecentSessions = Boolean(
       els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn

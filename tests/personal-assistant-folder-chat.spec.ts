@@ -822,29 +822,39 @@ for (const theme of ['light', 'dark']) {
       // Half the desktop CSS viewport exercises 200%-zoom-equivalent reflow,
       // not an OS/browser zoom automation claim.
       await page.setViewportSize({ width, height });
-      const layout = await page.evaluate(() => {
-        const input = document.getElementById('personalAssistantInput')!.getBoundingClientRect();
-        const panel = document.getElementById('personalAssistantPanel')!;
-        const bounds = panel.getBoundingClientRect();
-        const log = document.getElementById('homeAssistantConversation')!;
-        return {
-          inputVisible: input.top >= 0 && input.bottom <= innerHeight + 1,
-          // Settings already overflows at phone width with the drawer closed;
-          // scope this contract to the changed assistant surface.
-          overflow:
-            panel.scrollWidth > panel.clientWidth + 1 ||
-            bounds.left < -1 ||
-            bounds.right > innerWidth + 1,
-          nestedScroll: ['auto', 'scroll'].includes(getComputedStyle(log).overflowY),
-          mounts: document.querySelectorAll('#homeAssistantConversation').length
-        };
-      });
-      expect(layout, `${theme} ${width}px zoom=${zoom}`).toEqual({
-        inputVisible: true,
-        overflow: false,
-        nestedScroll: false,
-        mounts: 1
-      });
+      // Viewport setters precede resize/observer/focus settlement. This race
+      // reproduces on committed HEAD too; poll the same geometry invariants,
+      // not a sleep or relaxed overflow/visibility assertion.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const input = document
+                .getElementById('personalAssistantInput')!
+                .getBoundingClientRect();
+              const panel = document.getElementById('personalAssistantPanel')!;
+              const bounds = panel.getBoundingClientRect();
+              const log = document.getElementById('homeAssistantConversation')!;
+              return {
+                inputVisible: input.top >= 0 && input.bottom <= innerHeight + 1,
+                // Settings already overflows at phone width with the drawer closed;
+                // scope this contract to the changed assistant surface.
+                overflow:
+                  panel.scrollWidth > panel.clientWidth + 1 ||
+                  bounds.left < -1 ||
+                  bounds.right > innerWidth + 1,
+                nestedScroll: ['auto', 'scroll'].includes(getComputedStyle(log).overflowY),
+                mounts: document.querySelectorAll('#homeAssistantConversation').length
+              };
+            }),
+          { message: `${theme} ${width}px zoom=${zoom}`, timeout: 2000 }
+        )
+        .toEqual({
+          inputVisible: true,
+          overflow: false,
+          nestedScroll: false,
+          mounts: 1
+        });
     }
     for (let i = 0; i < 3; i++) {
       await page.locator('#personalAssistantClose').press('Enter');

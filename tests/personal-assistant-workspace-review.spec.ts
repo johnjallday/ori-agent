@@ -3,7 +3,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
-test('a restarted long conversation supplies bounded historical constraints to a tool-free workspace proposal', async ({
+test('a restarted long conversation supplies bounded historical constraints to the proposal-only tool', async ({
   request
 }) => {
   const fixture = process.env.ORI_WORKSPACE_PROVIDER_FIXTURE;
@@ -26,7 +26,7 @@ test('a restarted long conversation supplies bounded historical constraints to a
   expect(prepared.conversation.continuity.recap_used).toBe(true);
   expect(prepared.confirmation.action_type).toBe('prepare_workspace');
   const audit = JSON.parse(await readFile(join(fixture!, 'workspace-proposal-input.json'), 'utf8'));
-  expect(audit.tool_free).toBe(true);
+  expect(audit.broker_tool_offered).toBe(true);
   expect(audit.membership_present).toBe(true);
   expect(audit.correction_present).toBe(true);
   expect(audit.early_correction_present).toBe(true);
@@ -41,7 +41,7 @@ test('a restarted long conversation supplies bounded historical constraints to a
     JSON.stringify(
       {
         evidence:
-          'actual restarted host and canonical Session, deterministic tool-free system model; not live reasoning quality',
+          'actual restarted host and canonical Session, deterministic proposal-only broker call; not live reasoning quality',
         ...audit,
         recap_used: prepared.conversation.continuity.recap_used,
         workspace_created: false
@@ -100,33 +100,27 @@ test('discussion becomes a bounded editable workspace proposal, then actual crea
     await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
     return result;
   };
-  const discussion = await send('I want recurring community membership, not talent coaching.');
+  const discussion = await send('wanna research on okgo band');
   const id = discussion.conversation.id;
-  const offered = await send('Suggest a useful next step for our membership plan.');
-  expect(offered.response).toContain('Would you like a workspace proposal?');
-  expect(offered.requires_confirmation).not.toBe(true);
-  const policy = JSON.parse(await readFile(join(fixture!, 'workspace-offer-input.json'), 'utf8'));
-  expect(policy.optional_review_allowed).toBe(true);
-  expect(policy.decline_respected).toBe(true);
   const ambiguous = await send('yes');
   expect(ambiguous.requires_confirmation).not.toBe(true);
   expect(writes).toHaveLength(0);
-  const prepared = await send('Prepare a workspace review for this idea');
+  // Actual provider transport waits 13 seconds, beyond the retired deadline.
+  await writeFile(join(fixture!, 'workspace-proposal-slow'), 'controlled delay', { mode: 0o600 });
+  const prepared = await send('how they started. can we create a workspace');
   expect(prepared.conversation.id).toBe(id);
   expect(prepared.conversation.stored).toBe(true);
   expect(prepared.confirmation.action_type).toBe('prepare_workspace');
-  expect(prepared.confirmation.arguments.description).toContain('not talent coaching');
+  expect(prepared.confirmation.arguments.description).toContain('how OK Go started');
   const audit = JSON.parse(await readFile(join(fixture!, 'workspace-proposal-input.json'), 'utf8'));
-  expect(audit.tool_free).toBe(true);
-  expect(audit.correction_present).toBe(true);
-  expect(audit.membership_present).toBe(true);
+  expect(audit.broker_tool_offered).toBe(true);
+  expect(audit.okgo_present).toBe(true);
+  expect(audit.proposal_model_calls).toBe(1);
   expect(audit.history_runes).toBeLessThanOrEqual(24000);
   expect(await folders()).toHaveLength(before);
-  await input.fill('Keep my unsent follow-up about membership pricing.');
+  await input.fill('Keep my unsent OK Go follow-up.');
   const reviewButton = drawer.getByRole('button', { name: 'Review workspace setup', exact: true });
-  await drawer
-    .locator(`[data-message-id="${prepared.conversation.assistant_message_id}"]`)
-    .scrollIntoViewIfNeeded();
+  await reviewButton.scrollIntoViewIfNeeded();
   await drawer.screenshot({ path: join(evidence, 'workspace-proposal-in-conversation.png') });
   await reviewButton.scrollIntoViewIfNeeded();
   await reviewButton.click();
@@ -134,7 +128,7 @@ test('discussion becomes a bounded editable workspace proposal, then actual crea
   await expect(modal).toBeVisible();
   expect(builds).toHaveLength(0);
   await expect(page.locator('#workspaceBuildPane')).toBeHidden();
-  await expect(page.locator('#folderNameInput')).toHaveValue('Fictional Membership Pilot');
+  await expect(page.locator('#folderNameInput')).toHaveValue('OK Go — How They Started');
   await expect(page.locator('#folderDescriptionInput')).toHaveValue(
     prepared.confirmation.arguments.description
   );
@@ -143,11 +137,36 @@ test('discussion becomes a bounded editable workspace proposal, then actual crea
   await modal.getByRole('button', { name: 'Close create workspace', exact: true }).click();
   await expect(modal).toBeHidden();
   await page.locator('#personalAssistantLauncher').click();
-  await expect(input).toHaveValue('Keep my unsent follow-up about membership pricing.');
+  await expect(input).toHaveValue('Keep my unsent OK Go follow-up.');
   expect(await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId())).toBe(
     id
   );
   expect(writes).toHaveLength(0);
+
+  // Invalid provider output is a recoverable failure, not app-data success.
+  await writeFile(join(fixture!, 'workspace-proposal-invalid'), 'invalid output', { mode: 0o600 });
+  const failedPrompt = 'Prepare a workspace review for researching how OK Go started.';
+  const failed = await send(failedPrompt);
+  expect(failed.failure_reason).toBe('invalid_workspace_proposal');
+  expect(failed.conversation.id).toBe(id);
+  expect(failed.conversation.stored).not.toBe(true);
+  await expect(input).toHaveValue(failedPrompt);
+  await expect(drawer.getByText('Answered from your app data.', { exact: true })).toHaveCount(0);
+  await drawer
+    .getByRole('button', { name: 'Open workspace form manually', exact: true })
+    .scrollIntoViewIfNeeded();
+  await drawer.screenshot({ path: join(evidence, 'workspace-proposal-invalid-output.png') });
+  await drawer.getByRole('button', { name: 'Open workspace form manually', exact: true }).click();
+  await expect(modal).toBeVisible();
+  await expect(page.locator('#folderDescriptionInput')).toHaveValue('');
+  await expect(page.locator('#folderNameInput')).not.toHaveValue('OK Go — How They Started');
+  await modal.screenshot({ path: join(evidence, 'workspace-proposal-manual-recovery.png') });
+  expect(writes).toHaveLength(0);
+  expect(builds).toHaveLength(0);
+  await modal.getByRole('button', { name: 'Close create workspace', exact: true }).click();
+  await expect(modal).toBeHidden();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(input).toHaveValue(failedPrompt);
 
   // A fresh explicit preparation still does not create. The ordinary wizard
   // owns blueprint, placement, team and the final human Create control.
@@ -155,8 +174,8 @@ test('discussion becomes a bounded editable workspace proposal, then actual crea
   expect(next.confirmation.action_type).toBe('prepare_workspace');
   await drawer.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
   await expect(modal).toBeVisible();
-  const name = 'Fictional Membership — reviewed';
-  const description = `${next.confirmation.arguments.description}\nUser-reviewed edit: a small pilot first.`;
+  const name = 'OK Go origins — reviewed';
+  const description = `${next.confirmation.arguments.description}\nUser-reviewed edit: only early interviews; no outreach.`;
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await page.locator('#folderNameInput').fill(name);
