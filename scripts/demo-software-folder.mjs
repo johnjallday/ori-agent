@@ -114,6 +114,17 @@ async function shot(name) {
   await page.screenshot({ path });
   console.log(path);
 }
+// phoneShot captures the same state at phone width. What is shown must wrap
+// inside its own box instead of scrolling sideways.
+async function phoneShot(name, locator) {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await locator.scrollIntoViewIfNeeded();
+  const overflow = await locator.evaluate(el => el.scrollWidth - el.clientWidth);
+  if (overflow > 1) throw new Error(`${name} scrolls sideways at phone width (${overflow}px)`);
+  await shot(`${name}-phone`);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await locator.scrollIntoViewIfNeeded();
+}
 async function api(method, path, data) {
   const response = await context.request.fetch(path, { method, data });
   const text = await response.text();
@@ -683,6 +694,7 @@ async function assessInterruptPhase(untouched) {
   expect(writes.length === 0, `looking at the card sent: ${writes}`);
   expect((await firstTask(before.resolved)).state === 'seeded', 'the page load started it');
   await shot('30-assessment-ready');
+  await phoneShot('30-assessment-ready', card);
 
   // 16. Start assessment, pressed twice. One start is sent, and the card says
   //     the model is reading and offers nothing more to press. The phase ends
@@ -793,7 +805,9 @@ async function runAssessment(before, { writes, waiting, left, retry, tasksBefore
   // 18. One click runs it: the same task, with the real model. While it runs
   //     the card says so and offers nothing to press twice.
   await press(label);
-  await waitForLook(before.resolved, ['running', 'finished', 'failed'], 30000);
+  // A run that is tried again reads "failed" until the new run is picked up,
+  // so "failed" here would be the old run, not this one's outcome.
+  await waitForLook(before.resolved, ['running', 'finished'], 60000);
   const running = await assessmentCard();
   console.log('assessment running:', JSON.stringify(running));
   if ((await firstTask(before.resolved)).state === 'running') {
@@ -855,6 +869,7 @@ async function readAssessment(before, { writes, done, tasksBefore }) {
     );
   await card.scrollIntoViewIfNeeded();
   await shot('34-assessment-finished');
+  await phoneShot('34-assessment-finished', card);
 
   // 20. Open the assessment: the task's own page, where the whole report can
   //     be read. (A ticket's detail lists the work and its runs, not this.)
@@ -921,6 +936,7 @@ async function readAssessment(before, { writes, done, tasksBefore }) {
   );
   expect(bannerSays.report === reportPage.url, `the banner's report link: ${bannerSays.report}`);
   await shot('37-workspace-banner');
+  await phoneShot('37-workspace-banner', banner);
 
   // 22. Plan the suggested task: the Plans page with the suggestion in its box.
   //     Nothing is created by arriving, and nothing is written into the project.
@@ -963,6 +979,7 @@ async function readAssessment(before, { writes, done, tasksBefore }) {
   );
   expect(acted.length === 0, `following the suggestion sent: ${acted}`);
   await shot('38-suggestion-on-plans-page');
+  await phoneShot('38-suggestion-on-plans-page', page.locator('#plan-create-panel'));
 
   expect(
     JSON.stringify(await taskIDs(before.workspace)) === JSON.stringify(tasksBefore),

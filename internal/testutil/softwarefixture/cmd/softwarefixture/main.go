@@ -35,8 +35,10 @@ func run(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: softwarefixture <empty-dir> | softwarefixture hash <dir>")
 	}
+	// A developer tool: the directory is the operator's own command-line
+	// argument, and nothing is written unless it is empty.
 	root := args[0]
-	if err := os.MkdirAll(root, 0o750); err != nil {
+	if err := os.MkdirAll(root, 0o750); err != nil { // #nosec G703 -- the operator's own argument to a fixture tool
 		return err
 	}
 	entries, err := os.ReadDir(root)

@@ -124,7 +124,7 @@ func Replace(dir string) error {
 func Restore(dir string) {
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err == nil && d.Type().IsRegular() {
-			_ = os.Chmod(path, 0o600) // #nosec G302 -- test fixture cleanup
+			_ = os.Chmod(path, 0o600) // #nosec G302 G122 -- test fixture cleanup under the caller's own disposable root
 		}
 		return nil
 	})
