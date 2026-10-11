@@ -17,6 +17,18 @@ import (
 // one is never made for the same checkout.
 var ErrFolderProjectExists = errors.New("personal assistant: this folder already has a workspace")
 
+// ErrFolderReviewRequired means a software project was answered with a plain
+// yes. Its setup is confirmed on its reviewed plan instead.
+var ErrFolderReviewRequired = errors.New("personal assistant: review this project's setup before setting it up")
+
+// ErrFolderCandidateRequired means the shown folder holds several software
+// projects and none has been chosen. It is a kind of missing choice.
+var ErrFolderCandidateRequired = fmt.Errorf("%w: which project", ErrFolderOfferChoice)
+
+// ErrFolderReviewUnavailable means the project's files could not be read for a
+// review. Nothing was changed, and the same review can be asked for again.
+var ErrFolderReviewUnavailable = errors.New("personal assistant: the project could not be read for a review")
+
 // FolderExistingProject is a workspace of the user's whose saved primary folder
 // is the exact directory an offer is about. It never carries a path.
 type FolderExistingProject struct {
@@ -59,6 +71,14 @@ type FolderSoftwareView struct {
 	// ExistingUnavailable says Ori could not read which workspaces already
 	// cover this folder, so it will not offer to make another.
 	ExistingUnavailable bool `json:"existing_unavailable,omitempty"`
+	// Review is the setup review, once the user has asked for one.
+	Review *FolderSoftwareReviewView `json:"review,omitempty"`
+	// SetupAvailable says a reviewed plan can be carried out here. When false
+	// the card shows the review and offers no Set up.
+	SetupAvailable bool `json:"setup_available"`
+	// WorkspaceName and Assistant are the names the current plan uses.
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	Assistant     string `json:"assistant,omitempty"`
 }
 
 // softwareCapability returns the host's software setup for a subject whose own
@@ -193,7 +213,10 @@ func (s *FolderDigestService) attachSoftware(ctx context.Context, userID string,
 	view := &FolderSoftwareView{
 		Recipe: row.Builtin.Recipe, Marker: offer.Subject.Marker, Repository: offer.Subject.Repository,
 		NeedsCandidate: offer.NeedsCandidate,
+		Review:         s.softwareReviewView(offer), SetupAvailable: s.softwareSetupAvailable(),
 	}
+	// A software project is set up only through its reviewed plan.
+	v.CreateAvailable = false
 	if offer.NeedsCandidate {
 		view.Candidates = append(view.Candidates, softwareCandidateView(offer.ID, offer.Subject, true))
 		for _, queued := range offer.Queue {
@@ -239,7 +262,7 @@ func (s *FolderDigestService) guardSoftwareYes(ctx context.Context, userID strin
 		return nil
 	}
 	if offer.NeedsCandidate {
-		return ErrFolderOfferChoice
+		return ErrFolderCandidateRequired
 	}
 	existing, err := s.softwareExisting(ctx, userID, offer)
 	if err != nil {

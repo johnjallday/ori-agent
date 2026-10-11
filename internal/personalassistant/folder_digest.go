@@ -311,6 +311,17 @@ type FolderDigestDeps struct {
 	// the folder. Nil means the host has nothing to reuse; an error means it
 	// cannot say, and no new workspace is promised.
 	ExistingProjects func(ctx context.Context, userID, folderPath, identity string) ([]FolderExistingProject, error)
+	// InspectSoftware reads the bounded set of README, instruction and build
+	// files of a software project, for an explicit Review setup or Set up click.
+	// folderPath is the canonical directory of a selection the server holds. It
+	// runs nothing, calls no model, and changes nothing. Nil leaves software
+	// projects without a review.
+	InspectSoftware func(ctx context.Context, folderPath string) (FolderSoftwareInspection, error)
+	// SoftwareProject re-reads, from canonical state, the workspace a finished
+	// software setup made or reused for this exact directory and intent. It is
+	// how a run's "done" is checked before the offer says so. Nil leaves a
+	// finished run unverified, and an unverified run never resolves an offer.
+	SoftwareProject func(ctx context.Context, userID string, offer FolderOffer, folderPath, identity string) (FolderCreateResult, error)
 	// LegacyDeclined reads the pre-folder app-card answer once per domain.
 	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
@@ -507,6 +518,8 @@ type FolderDigestService struct {
 	paths    map[string]string // offer id → canonical root; memory only (FR27)
 	scanning map[string]bool   // user id → a scan is in flight
 	running  map[string]bool   // offer id → a one-card setup is running in this process
+	// offer id → what a software review copied out of the project; memory only
+	evidence map[string]FolderSoftwareEvidence
 }
 
 // NewFolderDigestService builds the service.
@@ -1177,6 +1190,12 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 					}
 					return FolderOfferView{}, guardErr
 				}
+				// A software project is set up through its reviewed plan (Review
+				// setup, then Set up), never by a bare yes or the generic creator:
+				// the plan is what ties the workspace to this exact folder.
+				if isSoftwareOffer(*offer) {
+					return FolderOfferView{}, ErrFolderReviewRequired
+				}
 			}
 			switch {
 			case choice == FolderChoiceTidy:
@@ -1493,7 +1512,9 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 	// An arbitrary workspace ID from the browser cannot prove that the
 	// reviewed journey created it. The journey completion path will provide
 	// a canonical receipt before the digest can resolve this offer.
-	if isProjectCapabilityOffer(*offer) {
+	// A software project is set up only through its reviewed plan, which is
+	// what binds the workspace to this exact folder.
+	if isProjectCapabilityOffer(*offer) || isSoftwareOffer(*offer) {
 		return FolderOfferView{}, ErrFolderWorkspaceRefused
 	}
 	if s.deps.Linker == nil {

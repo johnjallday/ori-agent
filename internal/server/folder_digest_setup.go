@@ -264,6 +264,12 @@ func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.Folder
 	if req.Offer.Portfolio != nil {
 		return h.portfolioPlan(ctx, req)
 	}
+	// A built-in recipe is the host's own setup: it is planned here and never
+	// looked up in the reviewed-integration registry, which lists installable
+	// plugins only.
+	if row, builtin := softwareRow(req.Offer); builtin {
+		return h.softwarePlan(ctx, req, row)
+	}
 	target, err := h.target(req.Offer)
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
@@ -279,7 +285,20 @@ func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.Folder
 // quest to the end or to the first stop. Progress is reported through req.Update;
 // only an unexpected error is returned.
 func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderSetupRequest) error {
-	if h == nil || h.builder == nil || h.builder.setupJourneyService == nil {
+	if h == nil || h.builder == nil {
+		return errSetupUnavailable
+	}
+	// A built-in recipe needs no setup journey; it is dispatched before the
+	// journey service is required, and an intent naming any other recipe is
+	// refused rather than run as something else.
+	_, builtin := softwareRow(req.Offer)
+	if builtin || req.Plan.Intent.Recipe != "" {
+		if !builtin || req.Plan.Intent.Recipe != folderdigest.BuiltinSoftwareProject {
+			return errSetupUnavailable
+		}
+		return h.softwareRun(ctx, req)
+	}
+	if h.builder.setupJourneyService == nil {
 		return errSetupUnavailable
 	}
 	if err := h.ValidateSetupDestination(ctx, req); err != nil {

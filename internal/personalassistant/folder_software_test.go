@@ -26,6 +26,12 @@ type softwareFixture struct {
 	existing    map[string][]FolderExistingProject
 	existingErr error
 	lookups     []string
+	// setup stands in for the host's built-in software recipe; inspected and
+	// verified record every folder the inspector and the verifier were given.
+	setup     *fakeSoftwareSetup
+	inspected []string
+	verified  []string
+	verifyErr error
 }
 
 func newSoftwareFixture(t *testing.T) *softwareFixture {
@@ -58,6 +64,10 @@ func newSoftwareFixture(t *testing.T) *softwareFixture {
 		}
 		return s.existing[path], s.existingErr
 	}
+	s.setup = &fakeSoftwareSetup{available: true, model: "test-model"}
+	f.service.deps.Setup = s.setup
+	f.service.deps.InspectSoftware = s.inspect
+	f.service.deps.SoftwareProject = s.verify
 	return s
 }
 
@@ -190,8 +200,9 @@ func TestFolderSoftware_SeveralProjectsNeedAChoiceBeforeAnythingIsSetUp(t *testi
 	if chosen.Subject.Name != second.Name || chosen.Software == nil || chosen.Software.NeedsCandidate || len(chosen.Software.Candidates) != 0 {
 		t.Fatalf("after the choice: %+v software=%+v", chosen.Subject, chosen.Software)
 	}
-	if !chosen.CreateAvailable {
-		t.Fatal("the chosen project cannot be set up")
+	// Choosing is not consenting: a plain yes still needs the reviewed plan.
+	if _, err := s.service.Decide(ctx, "local", view.ID, yesCreate("req-plain")); !errors.Is(err, ErrFolderReviewRequired) {
+		t.Fatalf("a plain yes on a software project: %v", err)
 	}
 	// The same click again changes nothing.
 	replay, err := s.service.ChooseCandidate(ctx, "local", view.ID, FolderCandidateInput{CandidateID: second.ID, RequestID: "req-choose"})
@@ -213,19 +224,23 @@ func TestFolderSoftware_SeveralProjectsNeedAChoiceBeforeAnythingIsSetUp(t *testi
 		t.Fatalf("a second choice: %v", err)
 	}
 
-	// Setup now links exactly the chosen folder, not the folder that held it.
-	if _, err := s.service.Decide(ctx, "local", view.ID, yesCreate("req-setup")); err != nil {
-		t.Fatal(err)
-	}
+	// The reviewed setup is about exactly the chosen folder, not the folder
+	// that held it, and the generic creator is never used for it.
 	want := filepath.Join(s.set.Container, second.Name)
-	if len(s.creator.requests) != 1 || s.creator.requests[0].Path != want || s.creator.requests[0].Name != second.Name {
-		t.Fatalf("create request = %+v, want the folder %q", s.creator.requests, second.Name)
+	run := s.setUp(t, s.review(t, view.ID))
+	if run.Path != want || run.Offer.Subject.Name != second.Name {
+		t.Fatalf("the run was given %q for %q, want the folder %q", run.Path, run.Offer.Subject.Name, second.Name)
+	}
+	if got := s.inspected[len(s.inspected)-1]; got != want {
+		t.Fatalf("the inspection read %q, want only the chosen folder", got)
+	}
+	if len(s.creator.requests) != 0 {
+		t.Fatalf("the generic creator was used: %+v", s.creator.requests)
 	}
 }
 
 func TestFolderSoftware_ASubfolderOfARepositoryIsExplainedAndNotBroadened(t *testing.T) {
 	s := newSoftwareFixture(t)
-	ctx := context.Background()
 
 	// A package inside a checkout stands as a project, and says what it is in.
 	web := s.pick(t, filepath.Join(s.set.GoNode, "web"))
@@ -233,11 +248,14 @@ func TestFolderSoftware_ASubfolderOfARepositoryIsExplainedAndNotBroadened(t *tes
 		t.Fatalf("package in a checkout: software=%+v enclosing=%+v", web.Software, web.Enclosing)
 	}
 	noPathIn(t, s.home, web)
-	if _, err := s.service.Decide(ctx, "local", web.ID, yesCreate("req-web")); err != nil {
-		t.Fatal(err)
+	if run := s.setUp(t, s.review(t, web.ID)); run.Path != filepath.Join(s.set.GoNode, "web") {
+		t.Fatalf("setting up the package was given %q, not the package", run.Path)
 	}
-	if got := s.creator.requests[len(s.creator.requests)-1].Path; got != filepath.Join(s.set.GoNode, "web") {
-		t.Fatalf("setting up the package linked %q, not the package", got)
+	// Nothing above the selection was read to explain it.
+	for _, read := range s.inspected {
+		if read == s.set.GoNode {
+			t.Fatal("the enclosing repository was inspected without being selected")
+		}
 	}
 
 	// A folder with no marker of its own is not offered as software; the card
@@ -290,7 +308,7 @@ func TestFolderSoftware_AnExistingWorkspaceIsOpenedAndNeverDuplicated(t *testing
 	// A sibling worktree and a clone of the same repository are other folders.
 	for _, other := range []string{s.set.Worktree, s.set.SiblingWorktree, s.set.Clone} {
 		view := s.pick(t, other)
-		if len(view.Software.Existing) != 0 || !view.CreateAvailable {
+		if len(view.Software.Existing) != 0 || view.NeedsPick {
 			t.Fatalf("%s was treated as the checkout that has a workspace: %+v", filepath.Base(other), view.Software)
 		}
 	}
@@ -324,7 +342,7 @@ func TestFolderSoftware_AReplacedOrMissingFolderNeedsAFreshPick(t *testing.T) {
 	ctx := context.Background()
 
 	view := s.pick(t, s.set.Clone)
-	if view.NeedsPick || !view.CreateAvailable {
+	if view.NeedsPick || view.Software == nil {
 		t.Fatalf("a fresh pick: %+v", view)
 	}
 	// The folder is deleted and another is made at the same path.
@@ -355,7 +373,7 @@ func TestFolderSoftware_AReplacedOrMissingFolderNeedsAFreshPick(t *testing.T) {
 
 	// Picking the folder again is a new offer about the directory that is there.
 	again := s.pick(t, s.set.Clone)
-	if again.ID == view.ID || again.NeedsPick || !again.CreateAvailable {
+	if again.ID == view.ID || again.NeedsPick || again.Software == nil {
 		t.Fatalf("a fresh pick of the replaced folder: %+v", again)
 	}
 }
@@ -385,7 +403,7 @@ func TestFolderSoftware_OtherShapesAndDeclinesAreUnchanged(t *testing.T) {
 		t.Fatalf("one project's no became a domain-wide no: %+v", doc.DomainDeclines)
 	}
 	other := s.pick(t, s.set.RustPython)
-	if other.Software == nil || !other.CreateAvailable {
+	if other.Software == nil || other.NeedsPick {
 		t.Fatalf("a different project lost its offer after a no: %+v", other)
 	}
 }

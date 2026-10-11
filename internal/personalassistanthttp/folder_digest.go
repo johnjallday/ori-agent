@@ -37,6 +37,8 @@ type FolderDigestService interface {
 	ResolveExistingHome(ctx context.Context, userID, offerID, requestID string) (personalassistant.FolderOfferView, error)
 	StartSetup(ctx context.Context, userID, offerID string, input personalassistant.FolderSetupInput) (personalassistant.FolderOfferView, error)
 	ChooseCandidate(ctx context.Context, userID, offerID string, input personalassistant.FolderCandidateInput) (personalassistant.FolderOfferView, error)
+	ReviewSoftware(ctx context.Context, userID, offerID string, input personalassistant.FolderSoftwareReviewInput) (personalassistant.FolderOfferView, error)
+	AdjustSoftware(ctx context.Context, userID, offerID string, input personalassistant.FolderSoftwareReviewInput) (personalassistant.FolderOfferView, error)
 }
 
 // FolderProjectSelectionIssuer mints the existing project-connection picker's
@@ -347,6 +349,71 @@ func (h *Handler) ChooseFolderCandidate(w http.ResponseWriter, r *http.Request) 
 	offer, err := h.folderDigest.ChooseCandidate(r.Context(), userID, offerID, personalassistant.FolderCandidateInput{
 		CandidateID: req.CandidateID, RequestID: req.RequestID,
 	})
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
+}
+
+type folderSoftwareReviewRequest struct {
+	RequestID     string  `json:"request_id"`
+	WorkspaceName *string `json:"workspace_name"`
+	AssistantName *string `json:"assistant_name"`
+}
+
+// ReviewFolderSoftware is the click on Review setup for a recognized software
+// project. It is the one request that lets the server read the project's
+// README, instructions and build files, through its bounded inspector, and it
+// returns the offer with what was read and the plan Set up would carry out. It
+// accepts a request id only: no folder, path or file name. It creates nothing
+// and calls no model.
+func (h *Handler) ReviewFolderSoftware(w http.ResponseWriter, r *http.Request) {
+	h.changeFolderSoftwareReview(w, r, false)
+}
+
+// AdjustFolderSoftware changes the workspace or assistant name a software
+// review suggests. It reads nothing from the project and creates nothing; the
+// returned offer carries the plan, and so the digest, for the new names.
+func (h *Handler) AdjustFolderSoftware(w http.ResponseWriter, r *http.Request) {
+	h.changeFolderSoftwareReview(w, r, true)
+}
+
+func (h *Handler) changeFolderSoftwareReview(w http.ResponseWriter, r *http.Request, adjust bool) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req folderSoftwareReviewRequest
+	allowed := []string{"request_id"}
+	if adjust {
+		allowed = append(allowed, "workspace_name", "assistant_name")
+	}
+	if !decodeFolderDigestBody(w, r, &req, allowed...) {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	input := personalassistant.FolderSoftwareReviewInput{RequestID: req.RequestID, WorkspaceName: req.WorkspaceName, AssistantName: req.AssistantName}
+	var (
+		offer personalassistant.FolderOfferView
+		err   error
+	)
+	if adjust {
+		offer, err = h.folderDigest.AdjustSoftware(r.Context(), userID, offerID, input)
+	} else {
+		offer, err = h.folderDigest.ReviewSoftware(r.Context(), userID, offerID, input)
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return
@@ -675,6 +742,10 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.BadRequest(w, "That is not one of the folders Ori can look at")
 	case errors.Is(err, personalassistant.ErrFolderChipMissing):
 		orihttp.BadRequest(w, "That folder is not on this computer")
+	case errors.Is(err, personalassistant.ErrFolderCandidateRequired):
+		orihttp.BadRequest(w, "Choose which project this is about first")
+	case errors.Is(err, personalassistant.ErrFolderReviewUnavailable):
+		orihttp.ServiceUnavailable(w, "The project could not be read just now. Nothing was changed. Try again in a moment")
 	case errors.Is(err, personalassistant.ErrFolderOfferChoice):
 		orihttp.BadRequest(w, "Say whether this is a project or a tidy")
 	case errors.Is(err, personalassistant.ErrValidation):
@@ -695,6 +766,10 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.Conflict(w, "Ori is still looking at a folder. Try again in a moment")
 	case errors.Is(err, personalassistant.ErrFolderPickerUnavailable):
 		orihttp.Conflict(w, "The folder dialog is unavailable here. Pick a folder from the list")
+	case errors.Is(err, personalassistant.ErrFolderReviewRequired):
+		orihttp.Conflict(w, "Review this project's setup first, then use Set up")
+	case errors.Is(err, personalassistant.ErrFolderPlanChanged):
+		orihttp.Conflict(w, "The reviewed setup has changed. Review it again")
 	case errors.Is(err, personalassistant.ErrFolderOfferDecided):
 		orihttp.Conflict(w, "That offer was already answered")
 	case errors.Is(err, personalassistant.ErrFolderPathLost), errors.Is(err, personalassistant.ErrFolderSelection):

@@ -1517,6 +1517,41 @@ When the shown folder has no marker of its own and holds two or more software pr
 
 An offer may also carry `enclosing` (`levels`, `name`) when the subject sits inside a larger repository. The server finds that by checking for a repository marker's name in at most six folders above the selection, stopping below the user's home folder; it lists nothing and opens nothing there, and the user must show that folder for Ori to look at it.
 
+### Review a Software Project's Setup
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/review`
+
+```json
+{ "request_id": "…" }
+```
+
+A recognized software project is never set up from its name alone: a `yes` with `project` on the decide action answers `409` ("Review this project's setup first") and the offer stays pending; its setup is confirmed on the reviewed plan instead. Review reads a short, fixed list of the project's own files (its README, instruction files such as `AGENTS.md` and `CLAUDE.md`, build manifests, a `Makefile` or `justfile`, up to four CI workflow files, and Git's own branch and remote records) within fixed size and time limits. It runs nothing, follows no link out of the folder, never opens `.env` or key files, and replaces any credential-shaped line it meets with a placeholder. It creates nothing. It accepts exactly the field above; there is no path field.
+
+The returned offer carries `software.review`:
+
+- `inspected_at`, `evidence_revision` (changes when what was read changes), `partial` and `partial_reason` when a limit cut the read short
+- `stack` (what the manifests declare), `guides` (instruction files read), `files` (everything read, as paths relative to the project)
+- `git`: `layout` (`repository`, `worktree`, `none`, or `unverified` when the marker points somewhere that was not followed), `branch`, `remote` (host and path only, never credentials)
+- `tools`: development tools the project carries configuration for; a configuration file is not proof the tool is installed
+- `gaps`: what was missing or not read (`code`, `source`)
+- `purpose`, `purpose_source` and `commands` (`kind`, `command`, `source`, `declared`): excerpts held in server memory only. `declared` is false for a command that is merely usual for the project's files. `evidence_held` is false after a restart, when the facts above remain and the excerpts need another review
+
+It also carries `plan`, the same shape as the one-card plan below with five lines (`workspace`, `folder`, `agents`, `mode`, `task`) and no integration line, and `plan.prerequisites`: rows of `id`, `label`, `state`, `detail`, `source`, `required` and an optional `route` to an existing settings page. `state` is `verified` (Ori checked it), `configured` (a setting exists and was not exercised), `absent`, or `unknown`; nothing is reported as ready unless it was checked. Prerequisites are not part of the plan's digest. `software.workspace_name` and `software.assistant` are the names the plan uses, and `software.setup_available` says whether this server can carry the plan out; when false the review is shown and no setup is offered.
+
+`400` while a candidate has not been chosen; `409` when the offer is no longer pending; `409` with `"needs_pick": true` when the server no longer holds the folder or the folder was replaced since it was shown; `503` when the project could not be read (nothing was changed, and the review can be asked for again).
+
+### Adjust a Software Project's Names
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/adjust`
+
+```json
+{ "request_id": "…", "workspace_name": "Project notebook", "assistant_name": "Dev Pat" }
+```
+
+Changes the workspace name, the assistant's name, or both, on a reviewed software offer. Either field may be left out to keep its current value, and an empty string returns that name to the suggested one; a body with neither is `400`. It reads nothing from the project and creates nothing; the returned offer's plan, and so its digest, reflects the new names. `400` for a name longer than 120 characters or containing a slash or a line break; `409` when the offer has not been reviewed or is no longer pending.
+
+The setup action below takes a reviewed software offer's `plan_digest` like any other. Before it runs, the server reads the project again; when what it reads differs from the review the plan was drawn from, it answers `409` with `"plan_changed": true` and the fresh offer, and nothing is created.
+
 ### Resolve a Project Offer
 
 **Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/resolve`

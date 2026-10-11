@@ -172,6 +172,10 @@ type FolderOffer struct {
 	// bounded marker check above the selection. It names that folder so the
 	// card can ask for it; it is not access to it.
 	Enclosing *FolderEnclosingHint `json:"enclosing,omitempty"`
+	// SoftwareReview is the stored part of a software project's setup review:
+	// what an explicit inspection read, and the user's changes to the suggested
+	// names. Nil until the user asks for a review.
+	SoftwareReview *FolderSoftwareReview `json:"software_review,omitempty"`
 	// The proactive capability decision is frozen when this scan is offered.
 	CapabilitySuppressed bool           `json:"capability_suppressed,omitempty"`
 	CapabilityRevived    bool           `json:"capability_revived,omitempty"`
@@ -370,6 +374,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			if hint.Levels < 1 || hint.Levels > folderdigest.EnclosingMaxLevels || validateFolderName(hint.Name) != nil {
 				return fmt.Errorf("%w: enclosing repository", errFolderDigestInvalid)
 			}
+		}
+		if err := validateSoftwareReview(offer.SoftwareReview); err != nil {
+			return err
 		}
 		if offer.NeedsCandidate && len(offer.Queue) == 0 && (offer.Status == FolderOfferPending || offer.Status == FolderOfferLater) {
 			return fmt.Errorf("%w: candidate choice", errFolderDigestInvalid)

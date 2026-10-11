@@ -272,7 +272,15 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 		view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
 		s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
 		kind := "Blank workspace"
-		if view.Capability != nil {
+		if row, software := softwareCapability(offer.Subject); software {
+			// A software project's setup is reviewed on its own card; the option
+			// only names what that review is for. A host that cannot review one
+			// offers nothing rather than a control that leads nowhere.
+			if s.digest.deps.InspectSoftware == nil || s.digest.deps.Setup == nil {
+				continue
+			}
+			kind = row.Builtin.Workspace
+		} else if view.Capability != nil {
 			if view.Plan == nil {
 				continue
 			}

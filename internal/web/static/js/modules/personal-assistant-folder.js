@@ -602,7 +602,11 @@ export function folderOfferView(offer, options = {}) {
   }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
   if (view.visible && status === 'pending' && offer.software)
-    return softwareOfferView(offer, enclosingView(offer, view), { subject, folder });
+    return softwareOfferView(
+      offer,
+      { ...enclosingView(offer, view), softwareAdjusting: options?.softwareAdjusting === true },
+      { subject, folder }
+    );
   if (view.visible && !view.decided) {
     enclosingView(offer, view);
     if (view.enclosing && !view.capabilityDetail) view.capabilityDetail = view.enclosing;
@@ -682,7 +686,9 @@ function softwareRecognizedNote(software) {
 // covers this exact folder. Ori never guesses among projects and never sets up
 // a second workspace for the same folder.
 export function softwareOfferView(offer, view, { subject, folder }) {
-  const software = offer?.software || {};
+  // Only the server says a folder is a software project.
+  if (!offer?.software || typeof offer.software !== 'object') return view;
+  const software = offer.software;
   const enclosing = view.enclosing || '';
   const decline = [
     { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
@@ -741,7 +747,17 @@ export function softwareOfferView(offer, view, { subject, folder }) {
       String(project.name || '').trim() &&
       String(project.route || '').startsWith('/workspaces/')
   );
-  if (existing.length) {
+  // One workspace linked to the folder some other way can be completed by a
+  // review. One already set up for it, one made for a folder since replaced,
+  // or several, are only ever opened.
+  const completable =
+    existing.length === 1 &&
+    listed.length === 1 &&
+    existing[0].software !== true &&
+    existing[0].replaced !== true
+      ? existing[0]
+      : null;
+  if (existing.length && !completable) {
     const first = existing[0];
     const name = String(first.name).trim();
     let question;
@@ -773,7 +789,7 @@ export function softwareOfferView(offer, view, { subject, folder }) {
   }
   // A workspace the server reported but this page cannot link to is still a
   // workspace: no second one is offered.
-  if (software.existing_unavailable === true || listed.length) {
+  if (software.existing_unavailable === true || (listed.length && !completable)) {
     return {
       ...view,
       confirming: false,
@@ -784,12 +800,263 @@ export function softwareOfferView(offer, view, { subject, folder }) {
       actions: decline
     };
   }
+
+  // The reviewed setup. A software project is never set up by a bare yes: the
+  // card first offers to look at it, then shows what it read and everything
+  // Set up will do, and only that plan is confirmed.
   const recognized = softwareRecognizedNote(software);
-  return {
+  const openExisting = completable
+    ? [
+        {
+          id: 'open-existing-0',
+          label: `Open ${String(completable.name).trim()}`,
+          style: 'outline',
+          href: String(completable.route)
+        }
+      ]
+    : [];
+  // The way to the enclosing repository, when the card found one, stays on
+  // offer through the review.
+  const elsewhere = (view.actions || []).filter(action => action.id === 'enclosing');
+  const reviewAction = (label, style) => ({ id: 'review', label, style, softwareReview: true });
+  const review = software.review && typeof software.review === 'object' ? software.review : null;
+  if (!review || !String(review.evidence_revision || '').trim()) {
+    const already = completable
+      ? `${subject} is already linked to your workspace ${String(completable.name).trim()}. A review can complete that workspace for software work instead of making another. `
+      : '';
+    // The headline names the one project the card is about, whatever kind of
+    // folder it was found in.
+    const marker = String(software.marker || '').trim();
+    return {
+      ...view,
+      confirming: false,
+      plan: null,
+      headline: segments([
+        { text: subject },
+        marker ? ` looks like a ${marker}.` : ' looks like a software project.'
+      ]),
+      question: `${already}Want me to look at how ${subject} is set up? Review setup reads its README, instructions and build files to suggest a setup. Nothing is run, and nothing in the folder is changed.`,
+      capabilityDetail: enclosing ? `${recognized} ${enclosing}` : recognized,
+      actions: [reviewAction('Review setup', 'primary'), ...openExisting, ...elsewhere, ...decline]
+    };
+  }
+  const evidence = softwareEvidenceLines(review);
+  const planLines = setupLinesView(offer.plan?.lines);
+  const prerequisites = softwarePrerequisiteRows(offer.plan?.prerequisites);
+  const reviewed = {
     ...view,
-    capabilityDetail:
-      view.capabilityDetail || (enclosing ? `${recognized} ${enclosing}` : recognized)
+    confirming: false,
+    headline: segments(['Here is what I found in ', { text: subject }, '.']),
+    capabilityDetail: enclosing,
+    evidence,
+    prerequisites: planLines.length ? prerequisites : [],
+    plan: planLines.length ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null
   };
+  if (!planLines.length) {
+    const reasons = {
+      project_exists:
+        'This folder already has a workspace that I cannot complete from here. Open it instead.',
+      assistant_unavailable:
+        'The Code project blueprint or its assistant is not available, so I cannot plan this setup.'
+    };
+    return {
+      ...reviewed,
+      question:
+        reasons[offer.setup_unavailable_reason] ||
+        'I could not plan this setup just now. Review again in a moment.',
+      actions: [reviewAction('Review again', 'outline'), ...openExisting, ...decline]
+    };
+  }
+  if (view.softwareAdjusting === true) {
+    return {
+      ...reviewed,
+      adjusting: true,
+      question: 'Change the names this setup will use. Nothing is created until you press Set up.',
+      actions: [
+        { id: 'save-names', label: 'Save names', style: 'primary', softwareSave: true },
+        { id: 'cancel-names', label: 'Cancel', style: 'link', softwareCancel: true }
+      ]
+    };
+  }
+  const workspace = `${String(offer.blueprint_label || 'Code project').trim()} workspace`;
+  const available = software.setup_available === true;
+  let question = completable
+    ? `Complete your workspace ${String(completable.name).trim()} for ${subject}? Here is everything Set up will do:`
+    : `Set up ${subject} as a ${workspace}? Here is everything Set up will do:`;
+  if (!available) {
+    const doing = completable
+      ? `completing your workspace ${String(completable.name).trim()} for ${subject}`
+      : `setting up ${subject} as a ${workspace}`;
+    question = `Here is what ${doing} would do. Setting it up from this review is not available here yet; nothing below has been done.`;
+  }
+  return {
+    ...reviewed,
+    question,
+    actions: [
+      ...(available ? [{ id: 'setup', label: 'Set up', style: 'primary', oneCard: true }] : []),
+      { id: 'adjust', label: 'Adjust names…', style: 'outline', softwareAdjust: true },
+      reviewAction('Review again', 'link'),
+      ...openExisting,
+      ...elsewhere,
+      ...decline
+    ]
+  };
+}
+
+// What an inspection could not establish, said in a few plain words each.
+const SOFTWARE_GAPS = {
+  no_readme: () => 'no README',
+  no_instructions: () => 'no instructions file for contributors or agents',
+  no_declared_commands: () => 'no declared build or test command',
+  several_instruction_files: source =>
+    `more than one instruction file (${source}), which may not agree`,
+  truncated: source => `${source} was cut short`,
+  withheld_lines: source => `lines in ${source} that looked like credentials were withheld`,
+  skipped_link: source => `${source} is a link and was not followed`,
+  skipped_binary: source => `${source} is not text`,
+  unreadable: source => `${source} could not be opened`,
+  unsupported_format: source => `${source} is not in a format I can read`,
+  git_layout_unverified: () => 'its Git marker points somewhere I did not follow',
+  remote_unreadable: () => 'its Git remote could not be read',
+  more_workflows: () => 'only its first few CI workflow files were read'
+};
+
+// How many commands a line names before it counts the rest. The server sends
+// the plainly named ones first.
+const COMMANDS_SHOWN = 8;
+
+function commandList(commands) {
+  const names = commands.map(command => String(command.command).trim());
+  const shown = names.slice(0, COMMANDS_SHOWN).join(', ');
+  return names.length > COMMANDS_SHOWN
+    ? `${shown}, and ${names.length - COMMANDS_SHOWN} more`
+    : shown;
+}
+
+const SOFTWARE_PARTIAL = {
+  files: 'there were more files than I read',
+  bytes: 'there was more text than I read',
+  time: 'I ran out of time'
+};
+
+const textList = value =>
+  (Array.isArray(value) ? value : []).map(item => String(item || '').trim()).filter(Boolean);
+
+// softwareEvidenceLines turns a review into the short lines the card shows:
+// what the project says it is, what it is built with, the commands it declares
+// (none of which was run), what was read, and what was not established. Every
+// string is the server's; nothing here is inferred by the page.
+export function softwareEvidenceLines(review) {
+  if (!review || typeof review !== 'object') return [];
+  const lines = [];
+  const files = textList(review.files);
+  if (review.evidence_held === true) {
+    const purpose = String(review.purpose || '').trim();
+    if (purpose) {
+      const source = String(review.purpose_source || '').trim();
+      lines.push({ label: 'It says', text: source ? `${purpose} (${source})` : purpose });
+    }
+  } else {
+    lines.push({
+      label: 'Read earlier',
+      text: `${plural(files.length, 'file')}. Press Review again to see what they say.`
+    });
+  }
+  const stack = textList(review.stack);
+  if (stack.length) lines.push({ label: 'Built with', text: stack.join(', ') });
+  const commands = (Array.isArray(review.commands) ? review.commands : []).filter(
+    command => command && String(command.command || '').trim()
+  );
+  const declared = commands.filter(command => command.declared === true);
+  const inferred = commands.filter(command => command.declared !== true);
+  if (declared.length)
+    lines.push({
+      label: 'It declares',
+      text: `${commandList(declared)}. None of these was run.`
+    });
+  if (inferred.length)
+    lines.push({
+      label: 'Usual for its files',
+      text: `${commandList(inferred)}. Not declared by the project, and not run.`
+    });
+  const guides = textList(review.guides);
+  if (guides.length) lines.push({ label: 'Its instructions', text: guides.join(', ') });
+  if (files.length && review.evidence_held === true)
+    lines.push({ label: 'I read', text: files.join(', ') });
+  const git = review.git && typeof review.git === 'object' ? review.git : null;
+  if (git) {
+    const branch = String(git.branch || '').trim();
+    const remote = String(git.remote || '').trim();
+    const on = branch ? ` on branch ${branch}` : '';
+    const from = remote ? `, with origin ${remote}` : '';
+    const layouts = {
+      repository: `A Git repository${on}${from}.`,
+      worktree: `A linked Git worktree${on}${from}. Other worktrees of the same repository are separate folders.`,
+      unverified: 'A Git marker that points somewhere I did not follow.',
+      none: 'Not under Git.'
+    };
+    if (layouts[git.layout]) lines.push({ label: 'Version control', text: layouts[git.layout] });
+  }
+  const tools = (Array.isArray(review.tools) ? review.tools : []).filter(
+    tool => tool && String(tool.name || '').trim()
+  );
+  if (tools.length)
+    lines.push({
+      label: 'Tool configuration',
+      text: `${tools
+        .map(tool => `${String(tool.name).trim()} (${String(tool.source || '').trim()})`)
+        .join(', ')}. Not checked to be installed or working.`
+    });
+  const gaps = (Array.isArray(review.gaps) ? review.gaps : [])
+    .map(gap => {
+      const describe = gap && SOFTWARE_GAPS[gap.code];
+      return describe ? describe(String(gap.source || '').trim() || 'a file') : '';
+    })
+    .filter(Boolean);
+  if (gaps.length) lines.push({ label: 'Not found or not read', text: `${gaps.join('; ')}.` });
+  if (review.partial === true)
+    lines.push({
+      label: 'A partial look',
+      text: `${SOFTWARE_PARTIAL[review.partial_reason] || 'I stopped early'}, so some project files were not read.`
+    });
+  return lines;
+}
+
+// The words for a prerequisite's state. They are kept apart on purpose: set is
+// not checked, and could-not-check is not missing.
+const PREREQUISITE_STATES = {
+  verified: () => 'Ready',
+  configured: () => 'Set, not checked',
+  absent: required => (required ? 'Needed' : 'Not set (optional)'),
+  unknown: () => 'Could not check'
+};
+
+const PREREQUISITE_LINKS = { model: 'Set up a model', github: 'Connect GitHub' };
+
+// softwarePrerequisiteRows normalizes the server's prerequisite rows. A link is
+// offered only to one of Ori's own pages, and only when there is something to
+// do there.
+export function softwarePrerequisiteRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter(row => row && String(row.label || '').trim() && PREREQUISITE_STATES[row.state])
+    .map(row => {
+      const id = String(row.id || '').trim();
+      const required = row.required === true;
+      const route = String(row.route || '').trim();
+      const actionable = row.state === 'absent' || row.state === 'unknown';
+      const linked = actionable && PREREQUISITE_LINKS[id] && /^\/[a-z]/.test(route);
+      return {
+        id,
+        label: String(row.label).trim(),
+        state: row.state,
+        stateWord: PREREQUISITE_STATES[row.state](required),
+        text: String(row.detail || '').trim(),
+        source: String(row.source || '').trim(),
+        required,
+        href: linked ? route : '',
+        linkLabel: linked ? PREREQUISITE_LINKS[id] : ''
+      };
+    });
 }
 
 // repickView keeps what the scan said and swaps the yes for "Pick it again".
@@ -1202,6 +1469,10 @@ const state = {
   reviewGeneration: 0,
   workspaceName: '',
   editingName: false,
+  // A software review's names being changed on the card: which offer, and the
+  // assistant's name as typed. The workspace name shares workspaceName above.
+  softwareAdjusting: '',
+  assistantName: '',
   digest: null,
   offer: null,
   busy: false,
@@ -1363,6 +1634,10 @@ function elements() {
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     nameLabel: document.getElementById('personalAssistantFolderWorkspaceNameLabel'),
     workspaceName: document.getElementById('personalAssistantFolderWorkspaceName'),
+    assistantLabel: document.getElementById('personalAssistantFolderAssistantNameLabel'),
+    assistantName: document.getElementById('personalAssistantFolderAssistantName'),
+    evidence: document.getElementById('personalAssistantFolderEvidence'),
+    prerequisites: document.getElementById('personalAssistantFolderPrerequisites'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
@@ -1763,6 +2038,32 @@ function renderScene() {
   }
 }
 
+// renderFacts draws a software review's rows: a label, a sentence, and, for a
+// prerequisite, its state in words and a link to the page that fixes it. Every
+// string is set as text, never as markup.
+function renderFacts(list, rows) {
+  if (!list) return;
+  const items = Array.isArray(rows) ? rows : [];
+  list.replaceChildren();
+  list.hidden = items.length === 0;
+  items.forEach(row => {
+    const item = document.createElement('li');
+    if (row.state) item.dataset.state = row.state;
+    if (row.state) item.dataset.required = row.required ? 'true' : 'false';
+    const label = document.createElement('strong');
+    label.textContent = row.stateWord ? `${row.label} · ${row.stateWord}` : row.label;
+    item.append(label, ` ${row.text}`);
+    if (row.source) item.append(` Source: ${row.source}.`);
+    if (row.href) {
+      const link = document.createElement('a');
+      link.href = row.href;
+      link.textContent = row.linkLabel;
+      item.append(link);
+    }
+    list.append(item);
+  });
+}
+
 export function conversationFolderOfferView(offer, options = {}) {
   const view = folderOfferView(offer, options);
   if (offer?.conversation_id && offer.status === 'closed')
@@ -1784,8 +2085,9 @@ export function conversationFolderOfferView(offer, options = {}) {
   );
   // A folder that already has a workspace, or whose workspaces could not be
   // read, has said why no setup is offered; that is not "unavailable here".
-  const softwareExplained =
-    (offer.software?.existing || []).length > 0 || offer.software?.existing_unavailable === true;
+  // A software project's card always says what it offers and why: a review, a
+  // workspace to open, or the reason neither is possible.
+  const softwareExplained = Boolean(offer.software);
   if (!offer.needs_pick && !offer.capability && !offer.create_available && !softwareExplained)
     view.question =
       'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
@@ -1812,7 +2114,11 @@ function renderOffer(place) {
       ? document.activeElement.dataset.folderAction
       : '';
   if (state.reviewSlot) window.PersonalAssistantTranscript?.beforeChange?.();
-  const view = conversationFolderOfferView(state.offer, { confirm: state.confirm });
+  const view = conversationFolderOfferView(state.offer, {
+    confirm: state.confirm,
+    softwareAdjusting:
+      Boolean(state.softwareAdjusting) && state.softwareAdjusting === state.offer?.id
+  });
   const receipt = folderReceiptView(state.offer, {
     busy: state.firstLookBusy,
     message: state.firstLookMessage
@@ -1848,13 +2154,20 @@ function renderOffer(place) {
   setText(els.question, view.question, false);
   if (els.nameLabel)
     els.nameLabel.hidden = !(
-      state.reviewSlot &&
-      state.editingName &&
-      state.offer?.status === 'pending' &&
-      !state.offer?.capability
+      view.adjusting === true ||
+      (state.reviewSlot &&
+        state.editingName &&
+        state.offer?.status === 'pending' &&
+        !state.offer?.capability &&
+        !state.offer?.software)
     );
   if (els.workspaceName && document.activeElement !== els.workspaceName)
     els.workspaceName.value = state.workspaceName;
+  if (els.assistantLabel) els.assistantLabel.hidden = view.adjusting !== true;
+  if (els.assistantName && document.activeElement !== els.assistantName)
+    els.assistantName.value = state.assistantName;
+  renderFacts(els.evidence, view.evidence);
+  renderFacts(els.prerequisites, view.prerequisites);
   setText(els.capability, view.capabilityDetail);
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
@@ -2055,6 +2368,32 @@ function runAction(action) {
   }
   if (action.candidate) {
     void chooseCandidate(action);
+    return;
+  }
+  if (action.softwareReview) {
+    void reviewSoftware();
+    return;
+  }
+  if (action.softwareAdjust) {
+    // The fields start from the names the plan uses now, as the server gave them.
+    const software = state.offer?.software || {};
+    state.softwareAdjusting = state.offer?.id || '';
+    state.workspaceName = String(software.workspace_name || state.offer?.subject?.name || '');
+    state.assistantName = String(software.assistant || '');
+    showError('');
+    render();
+    elements()?.workspaceName?.focus();
+    return;
+  }
+  if (action.softwareCancel) {
+    state.softwareAdjusting = '';
+    showError('');
+    render();
+    focusFolderAction('adjust');
+    return;
+  }
+  if (action.softwareSave) {
+    void saveSoftwareNames();
     return;
   }
   if (action.oneCard) {
@@ -2749,6 +3088,87 @@ function showOfferFailure(payload) {
   showError(String(payload?.error || 'That could not be saved. Try again.'));
 }
 
+// focusFolderAction moves focus to the first of the named card actions that is
+// there, so a keyboard user lands on what the card now offers.
+function focusFolderAction(...ids) {
+  const actions = elements()?.actions;
+  for (const id of ids) {
+    const control = actions?.querySelector(`[data-folder-action="${id}"]`);
+    if (control) {
+      control.focus({ preventScroll: true });
+      return;
+    }
+  }
+}
+
+// reviewSoftware is the click on Review setup (or Review again). It is the one
+// request that lets the server read the project's README, instructions and
+// build files; the card says so while it waits. It sends no folder and no file
+// name, and it sets nothing up.
+async function reviewSoftware() {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const generation = state.reviewGeneration;
+  const subject = String(offer.subject?.name || offer.folder || '').trim() || 'the project';
+  state.busy = true;
+  state.softwareAdjusting = '';
+  state.progress = `Reading ${subject}'s README, instructions and build files…`;
+  showError('');
+  render();
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'review', {});
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) showOfferFailure(payload);
+  } catch (_) {
+    if (generation === state.reviewGeneration)
+      showError('The project could not be read just now. Try again.');
+  } finally {
+    state.progress = '';
+    state.busy = false;
+    render();
+    focusFolderAction('setup', 'adjust', 'review');
+  }
+}
+
+// saveSoftwareNames sends the names typed on the card. The server redraws the
+// plan for them; nothing is created. A refused name keeps what was typed, so
+// it can be corrected rather than typed again.
+async function saveSoftwareNames() {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const els = elements();
+  if (els?.workspaceName && !els.workspaceName.reportValidity()) return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  let saved = false;
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'adjust', {
+      workspace_name: String(state.workspaceName || '').trim(),
+      assistant_name: String(state.assistantName || '').trim()
+    });
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) {
+      if (payload?.needs_pick) showOfferFailure(payload);
+      else
+        showError(
+          'Those names could not be used. A name cannot be empty, longer than 120 characters, or contain a slash or a line break.'
+        );
+      return;
+    }
+    saved = true;
+    state.softwareAdjusting = '';
+  } catch (_) {
+    if (generation === state.reviewGeneration)
+      showError('The names could not be saved. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+    if (saved) focusFolderAction('adjust');
+  }
+}
+
 // chooseCandidate tells the server which of the software projects a folder
 // holds the card is about. It names a candidate the server listed for this
 // offer, never a folder, and sets nothing up: the chosen project's plan is the
@@ -3017,6 +3437,9 @@ function init() {
   });
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
+  els.assistantName?.addEventListener('input', () => {
+    state.assistantName = els.assistantName.value;
+  });
   els.workspaceName?.addEventListener('input', () => {
     state.workspaceName = els.workspaceName.value;
   });
