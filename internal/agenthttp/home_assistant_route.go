@@ -37,7 +37,11 @@ type HomeAssistantRouteHandler struct {
 	PanelContext             func(context.Context, string, *HomeAssistantRouteContext) (*assistantcontext.Attribution, error)
 	FolderConversation       func(context.Context, *HomeAssistantConversationRef, *HomeAssistantFolderRef, *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error)
 	ConversationRoute        func(context.Context, *HomeAssistantConversationRef, *HomeAssistantRouteContext) error
-	RuntimeResolver          interface {
+	// OperationRequest reports an explicit request to operate the app that
+	// this installation can carry out. Such a request stays in the hired
+	// assistant's conversation, whatever else its words resemble.
+	OperationRequest func(context.Context, string) bool
+	RuntimeResolver  interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
 	SystemModelReader interface {
@@ -405,6 +409,12 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	// existing gates; answer ordinary project questions in this conversation.
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() {
 		if isAssistantWorkspaceReviewRequest(prompt) {
+			return assistantConversationRoute(workContext), nil
+		}
+		// One owner per request: where Ori can operate, "open the Album
+		// workspace" is the assistant's to carry out, not a navigation answer,
+		// an app launch or a specialist handoff. Elsewhere those keep it.
+		if h.OperationRequest != nil && h.OperationRequest(ctx, prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
 		if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {

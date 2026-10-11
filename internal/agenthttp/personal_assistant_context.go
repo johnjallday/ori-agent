@@ -30,8 +30,12 @@ type PersonalAssistantContextSource struct {
 // the current user on every turn. It intentionally has no stable assistant ID,
 // credentials, or tool configuration: those values are not prompt material.
 type PersonalAssistantWorkContext struct {
-	State         string
-	StateVersion  int64
+	State        string
+	StateVersion int64
+	// AssistantID is the relationship's stable identity. Like ConversationAgent
+	// it is a binding key only: it scopes assistant operations to the hire that
+	// requested them and is never rendered into a prompt.
+	AssistantID   string
 	DisplayName   string
 	Role          string
 	Mandate       string

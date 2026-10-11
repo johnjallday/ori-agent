@@ -418,6 +418,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		if s.Storage.PersonalAssistantFolderObservations != nil {
 			handler.SetFolderSetups(s.Storage.PersonalAssistantFolderObservations)
 		}
+		// Operations belong to a hired assistant's conversations; without the
+		// relationship above there is nothing to bind them to.
+		s.wireAssistantOperations(handler)
 	}
 
 	// Help uses reviewed deterministic copy only. The model remains wired to

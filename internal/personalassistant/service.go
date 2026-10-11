@@ -67,6 +67,11 @@ type Availability struct {
 	AgentInstance SourceAvailability `json:"agent_instance"`
 	DailyBrief    SourceAvailability `json:"daily_brief"`
 	Model         SourceAvailability `json:"model"`
+	// Operations says whether the assistant can operate the app ("Operate
+	// Ori") on this installation right now. It is set only for a relationship
+	// that is ready for work, by the host that owns the operation tools; absent
+	// means unknown, and the drawer then offers no Watch control.
+	Operations *SourceAvailability `json:"operations,omitempty"`
 }
 
 // BriefConfigProjection is the bounded Daily Brief configuration included in

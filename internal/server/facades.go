@@ -6,6 +6,7 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
+	"github.com/johnjallday/ori-agent/internal/assistantops"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
@@ -99,6 +100,9 @@ type StorageSystemFacade struct {
 	// PersonalAssistantKnowledge is the current, server-bound reviewed HQ context reader.
 	PersonalAssistantKnowledge          *personalassistant.KnowledgeContextReader
 	PersonalAssistantFolderObservations *personalassistant.FolderObservationService
+	// AssistantOperations stores what the hired assistant asked Ori to do in
+	// the app ("Operate Ori"). Nil leaves operations unavailable.
+	AssistantOperations assistantops.Store
 	// PersonalHQ is the raw domain service (not the HTTP handler), so
 	// non-HTTP callers like serveIndex's first-run classification can read
 	// onboarding status directly.

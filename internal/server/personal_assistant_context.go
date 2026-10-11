@@ -46,6 +46,7 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantRelationship(ct
 	}
 
 	out.DisplayName = projection.DisplayName
+	out.AssistantID = projection.AssistantID
 	out.HQWorkspaceID = projection.HQWorkspaceID
 	out.ConversationAgent = projection.GlobalAgentProfile
 	out.Mandate = projection.Mandate

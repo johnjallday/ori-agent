@@ -54,6 +54,8 @@ PLAIN_DEMOS = {
                    "ORI_WORKSPACE_INTEGRATED_SANDBOX", "group6-wt-demo-integrated.log"),
     "slow_reply": ("tests/personal-assistant-workspace-slow-reply.spec.ts",
                    "ORI_WORKSPACE_SLOW_SANDBOX", "group6-wt-demo-slow-reply.log"),
+    "operate": ("tests/operate-ori-navigation.spec.ts",
+                "ORI_WORKSPACE_OPERATE_SANDBOX", "operate-ori-navigation.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -145,6 +147,62 @@ def reader_step(prompt, results, tools_offered):
     # A marker for something that was never read; Ori must remove it.
     parts.append("Not read this turn: [S9].")
     return {"answer": " ".join(parts)}
+
+
+OPERATE_TOOL = "assistant_operate_open"
+OPERATE_OPEN = re.compile(
+    r"^(?:please\s+)?(?:open|go to|take me to|show me)\s+(?:the\s+|my\s+)?(.+?)(?:\s+workspace)?"
+    r"(?:\s+and\s+(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?)?[.!]?$", re.I)
+OPERATE_SELECT = re.compile(r"^(?:please\s+)?(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?[.!]?$", re.I)
+
+
+def operate_step(prompt, results, tools):
+    """A deterministic stand-in for a tool-using model asked to operate Ori.
+
+    It acts only when Ori offered the operation tool for this turn, names the
+    target with the user's own words and leaves resolving it to Ori. It holds no
+    workspace data. Its answer repeats only what Ori's tool returned, and never
+    says a page changed: Ori reports a request, not a view.
+    """
+    offered = {tool.get("function", {}).get("name") for tool in tools}
+    if OPERATE_TOOL not in offered:
+        return None
+    words = prompt.strip()
+    opened, selected = OPERATE_OPEN.match(words), OPERATE_SELECT.match(words)
+    if not opened and not selected:
+        return None
+
+    def parsed(text):
+        try:
+            value = json.loads(text)
+            return value if isinstance(value, dict) else {}
+        except ValueError:
+            return {}
+
+    if not results:
+        arguments = {"workspace_name": opened.group(1).strip()} if opened else {}
+        agent = (opened.group(2) if opened else selected.group(1)) or ""
+        if agent.strip():
+            arguments["agent_name"] = agent.strip()
+        return {"tool": OPERATE_TOOL, "arguments": arguments}
+    result = parsed(results[-1])
+    status = result.get("status")
+    if status == "requested":
+        name = (result.get("workspace") or {}).get("name", "the workspace")
+        agent = (result.get("agent") or {}).get("name")
+        what = "open " + name + (" and select " + agent if agent else "")
+        if result.get("delivery") == "watching":
+            return {"answer": "I asked Ori to " + what + " in this tab."}
+        return {"answer": "Ori has a button ready to " + what + ". Nothing moves until you choose."}
+    if status == "choose":
+        names = ", ".join(str(choice.get("name")) for choice in result.get("choices", []))
+        return {"answer": "More than one matches: " + names + ". Which one do you mean? Nothing was requested."}
+    if status == "not_found":
+        names = ", ".join(str(choice.get("name")) for choice in result.get("closest", []))
+        return {"answer": "I could not find that (" + str(result.get("reason")) + ")." +
+                          (" The closest are: " + names + "." if names else "") + " Nothing was requested."}
+    return {"answer": "Ori could not prepare that (" + str(result.get("reason", "unavailable")) +
+                      "). You can open it from the Workspaces page. Nothing was requested."}
 
 
 def file_step(prompt, results, tools_offered):
@@ -421,7 +479,7 @@ def stop_owned_process(process):
             process.wait(timeout=10)
 
 
-def provider_handler(state_dir, folder_response=False, discovery_research=False, discovery_continuity=False):
+def provider_handler(state_dir, folder_response=False, discovery_research=False, discovery_continuity=False, operate=False):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass  # Never print prompt bodies, paths or credentials.
@@ -500,7 +558,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                         (state_dir / "workspace-proposal-slow").unlink()
                         time.sleep(13)  # Cross the former hard 12-second failure.
                     proposal_step = {"tool": "assistant_propose_workspace", "arguments": proposal}
-                step = (proposal_step or (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
+                step = (proposal_step or (operate_step(own_words, results, request.get("tools") or []) if operate else None) or
+                        (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
                         (continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
                         (folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))
@@ -600,6 +659,9 @@ def main():
     parser.add_argument("--slow-reply", action="store_true",
                         help="wt demo: a reply held longer than 30 seconds still arrives, and a failed request "
                              "is named after the hired assistant")
+    parser.add_argument("--operate", action="store_true",
+                        help="wt demo: Operate Ori — open a workspace and select an agent for one watching tab, "
+                             "Watch off, a lost acknowledgement, user navigation and an unavailable provider")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
@@ -624,14 +686,15 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = args.evidence_dir or (ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
+    evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if args.operate else
+                ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
                 ROOT / "tasks/evidence/assistant-folder-response-ux" / (args.folder_response_evidence_stage or "group-3") if args.folder_response else
                 ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity, operate=args.operate))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.

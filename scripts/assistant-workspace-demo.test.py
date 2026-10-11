@@ -179,6 +179,44 @@ class DemoProviderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             demo.current_turn(turn + [{"role": "tool", "content": "{}"}, {"role": "system", "content": "x"}, {"role": "tool", "content": "{}"}])
 
+    def test_operate_fixture_acts_only_when_offered_and_repeats_only_what_ori_returned(self):
+        tool = [{"function": {"name": "home_workspaces"}}, {"function": {"name": demo.OPERATE_TOOL}}]
+        ask = "Open the Album-1 operate fixture workspace and select Mixer"
+        # The user's own words name the target; Ori resolves it. No ID is invented.
+        self.assertEqual(demo.operate_step(ask, [], tool), {"tool": demo.OPERATE_TOOL, "arguments": {
+            "workspace_name": "Album-1 operate fixture", "agent_name": "Mixer"}})
+        self.assertEqual(demo.operate_step("Please open my Thesis workspace.", [], tool)["arguments"],
+                         {"workspace_name": "Thesis"})
+        self.assertEqual(demo.operate_step("Select the Mixer agent", [], tool)["arguments"], {"agent_name": "Mixer"})
+        # Without the tool there is no operation, whatever the words say.
+        self.assertIsNone(demo.operate_step(ask, [], [{"function": {"name": "home_workspaces"}}]))
+        self.assertIsNone(demo.operate_step(ask, [], []))
+        # Discussion is not a request, even with the tool on offer.
+        for words in ["What do you think about the Album-1 workspace?", "Hello there", "Don't open Album-1"]:
+            self.assertIsNone(demo.operate_step(words, [], tool))
+
+        def answer(result):
+            return demo.operate_step(ask, [json.dumps(result)], tool)["answer"]
+
+        watching = answer({"status": "requested", "delivery": "watching",
+                           "workspace": {"name": "Album-1 operate fixture"}, "agent": {"name": "Mixer"}})
+        self.assertEqual(watching, "I asked Ori to open Album-1 operate fixture and select Mixer in this tab.")
+        button = answer({"status": "requested", "delivery": "open_button", "workspace": {"name": "Second"}, "agent": None})
+        self.assertEqual(button, "Ori has a button ready to open Second. Nothing moves until you choose.")
+        # A request is never reported as a page that changed.
+        for text in (watching, button):
+            for claim in ("is open", "is now open", "opened", "is selected", "selected Mixer."):
+                self.assertNotIn(claim, text)
+        choose = answer({"status": "choose", "choices": [{"name": "Second Project"}, {"name": "Second Project"}]})
+        self.assertIn("Which one do you mean? Nothing was requested.", choose)
+        missing = answer({"status": "not_found", "reason": "agent_not_in_workspace", "closest": [{"name": "Engineer"}]})
+        self.assertIn("agent_not_in_workspace", missing)
+        self.assertIn("Engineer", missing)
+        self.assertIn("Nothing was requested.", missing)
+        self.assertIn("Workspaces page", answer({"status": "unavailable", "reason": "workspace_listing_unavailable"}))
+        # A result that is not JSON is treated as unavailable, not as success.
+        self.assertIn("Nothing was requested.", demo.operate_step(ask, ["not json"], tool)["answer"])
+
     def test_file_fixture_walks_listing_folder_file_and_quotes_only_what_was_read(self):
         listing = json.dumps({"status": "available", "attachments": [{"attachment_id": "a1", "name": "mix.wav", "readable": "not_supported"},
                                                                     {"attachment_id": "a2", "name": "art.md", "readable": "supported"}],

@@ -28,6 +28,16 @@ not a second transcript, saved Ticket, reviewed memory or global Profile; those
 owners retain their own reset/deletion rules. See
 [assistant conversation context](assistant-conversation-context.md).
 
+## Assistant operations amendment
+
+`assistant_operations` (migration 80) is in the same explicit app-record
+inventory. It holds device-local operation and receipt state for "Operate Ori":
+which workspace an operation named, what a tab observed and which task it
+produced. Reset deletes it with the conversations; ordinary Session deletion
+cascades to it. A task an operation created or started is a workspace record
+and follows the workspace's own reset rules, not this table's. See
+[assistant operations](assistant-operations.md).
+
 ## Evidence and isolation
 
 The approved contract is four distinct intents: Replay Setup, Reset Getting

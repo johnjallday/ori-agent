@@ -332,6 +332,13 @@
     <span id="personalAssistantReplyAnnouncement" class="visually-hidden" role="status" aria-live="polite"></span>
     <p id="personalAssistantWorkspaceContext" class="personal-assistant-panel__context" role="status" aria-live="polite" aria-atomic="true">Checking workspace context…</p>
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+    <!-- Operate Ori: what happened to an operation the assistant requested.
+         Shown only while there is one; the line says only what a page or the
+         server confirmed. The Watch choice itself is a chip in the composer. -->
+    <section id="personalAssistantOperation" class="pa-operation" aria-label="Ori in your app" hidden>
+      <p id="personalAssistantOperationStatus" class="pa-operation__status" role="status" aria-live="polite" hidden></p>
+      <div id="personalAssistantOperationActions" class="pa-operation__actions" hidden></div>
+    </section>
     <a id="personalAssistantModelSetup" class="personal-assistant-conversation__button" href="/settings#system-model" hidden>Configure a model for conversational replies</a>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">
       <div id="personalAssistantChips" class="personal-assistant-panel__chips personal-assistant-panel__attachments" hidden>
@@ -346,6 +353,13 @@
         <button type="button" id="personalAssistantExploreAttachedFolder" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantFolderExplorer" hidden>Tree + Chat</button>
         <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
         <span id="personalAssistantFolderSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Explore this folder”</span>
+        <!-- Watch Ori is this tab's own choice. Shown only where the assistant
+             can operate the app; it takes no row of its own. -->
+        <label id="personalAssistantWatchRow" class="personal-assistant-panel__chip pa-operation__watch" for="personalAssistantWatch" hidden>
+          <input type="checkbox" id="personalAssistantWatch" role="switch" aria-describedby="personalAssistantWatchHint">
+          <span>Watch Ori</span>
+          <span id="personalAssistantWatchHint" class="visually-hidden"></span>
+        </label>
       </div>
       <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
       <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="2"

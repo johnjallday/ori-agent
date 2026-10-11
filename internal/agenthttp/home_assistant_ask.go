@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/assistantdiscovery"
+	"github.com/johnjallday/ori-agent/internal/assistantops"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -97,6 +99,9 @@ type HomeAssistantAskRequest struct {
 	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
 	// Supplied only by the user's exact lookup-review submission, never tools.
 	ResearchApproval *assistantdiscovery.Review `json:"research_approval,omitempty"`
+	// Operation names the asking tab and whether it chose to watch. It scopes
+	// command delivery for an operation this turn may request; it grants nothing.
+	Operation *HomeAssistantOperationRef `json:"operation,omitempty"`
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
@@ -142,6 +147,15 @@ type HomeAssistantAskResponse struct {
 	ResearchFolderContext *HomeAssistantFolderRef        `json:"research_folder_context,omitempty"`
 	ResearchResult        *assistantdiscovery.Result     `json:"research_result,omitempty"`
 	ResearchCapability    *AssistantResearchCapability   `json:"research_capability,omitempty"`
+	// Operation is an operation this stored turn requested, as the asking tab
+	// may see it. It reports a request, never that a page changed.
+	Operation *assistantops.Snapshot `json:"operation,omitempty"`
+	// OperationError says why a requested operation was not recorded, so the
+	// drawer never shows a pending step that does not exist.
+	OperationError string `json:"operation_error,omitempty"`
+	// OperationCapability is set on a panel turn so the drawer can offer or
+	// explain the Watch control.
+	OperationCapability *AssistantOperationCapability `json:"operation_capability,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -217,7 +231,11 @@ type HomeAssistantAskHandler struct {
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.
 	Drafts PersonalAssistantDraftSaver
-	UserID string
+	// Operations records what the assistant asked Ori to do in the app and what
+	// the watching tab observed. Nil registers no operation tool and loads no
+	// operating skill.
+	Operations *assistantops.Service
+	UserID     string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool
@@ -509,6 +527,20 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		intent = homeAssistantConversationIntent.Key
 	}
 
+	// An explicit request to operate the app is answered in the conversation,
+	// with the named operation tools and the operating skill for this turn
+	// only. The legacy confirmations above keep their own requests, so one
+	// request has one owner. Nothing is recorded until the turn is stored.
+	if scope != nil && conversation != nil {
+		capability := h.operationCapability()
+		defer func() { response.OperationCapability = &capability }()
+	}
+	if operations := h.operationTurn(prompt, req.Operation, conversation, workContext, scope); operations != nil {
+		ctx = context.WithValue(ctx, operationTurnKey{}, operations)
+		defer func() { operations.finalize(ctx, &response) }()
+		intent = homeAssistantConversationIntent.Key
+	}
+
 	h.prepareContinuity(ctx, prompt, conversation)
 	promptSources := h.scopedPanelSources(ctx, personalAssistantPromptSources(h.Sources, workContext), scope)
 	var history []llm.Message
@@ -709,11 +741,20 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		}
 		registry = &workspaceProposalRegistry{base: registry, turn: proposal}
 	}
+	operations := operationTurnFromContext(ctx)
+	if operations != nil {
+		registry = &operationRegistry{base: registry, turn: operations}
+	}
 	// A reader is offered only on a path that can run it; the prompt then says
 	// exactly which readers exist, so no path claims a read it cannot make.
 	var tools []llm.Tool
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()
+	}
+	// The operating skill is loaded only beside the operations it names.
+	operatingSkill := ""
+	if operations != nil {
+		operatingSkill = operations.prompt(tools)
 	}
 	for _, tool := range tools {
 		readers, files = readers || isReader(tool.Name), files || isFileReader(tool.Name)
@@ -731,7 +772,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if proposal != nil && provider.Capabilities().SupportsTools {
 		proposalPrompt = workspaceProposalInstructions
 	}
-	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt))
+	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt+operatingSkill))
 	conversation = append(conversation, turn.history...)
 	researchEvidence := ""
 	if research != nil && research.result != nil {
@@ -799,6 +840,14 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			}
 		}
 		conversation = append(conversation, llm.Message{Role: llm.RoleAssistant, Content: resp.Content, ToolCalls: calls})
+		// An operation is validated before anything in its batch acts: mixed
+		// with any other call, the whole batch is refused and nothing runs.
+		if len(calls) > 1 && slices.ContainsFunc(calls, func(call llm.ToolCall) bool { return assistantops.IsTool(call.Name) }) {
+			for _, tc := range calls {
+				conversation = append(conversation, llm.NewToolMessage(tc.ID, "ERROR: an Ori operation must be the only tool call in its step. Nothing in this step was run; read first, then call the operation by itself."))
+			}
+			continue
+		}
 		for i, tc := range calls {
 			result, toolErr := registry.Execute(ctx, resp.ToolCalls[i].Name, resp.ToolCalls[i].Arguments)
 			if toolErr != nil {

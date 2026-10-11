@@ -459,6 +459,38 @@ and these response fields:
 Conversations are canonical Sessions; they are renamed and deleted through the
 Sessions API. Deleting one never deletes a saved Ticket or a remembered fact.
 
+**Assistant operations ("Operate Ori"):** an explicit request such as "open the
+Album workspace and select Mixer" lets the assistant ask Ori to carry out a
+named operation in the app. The contract is
+[`docs/architecture/assistant-operations.md`](../architecture/assistant-operations.md).
+
+A conversation turn may send `operation`: `{ "tab_id", "watch" }` — which tab is
+asking and whether it chose to let its view be moved. Neither is authority. The
+response may carry:
+
+- `operation`: the operation the stored turn requested, as the asking tab may
+  see it (`id`, `kind`, `status`, `revision`, `context`, `watching`, `pending`,
+  `commands`, `receipts`, `expires_at`). `commands` are named actions
+  (`open_workspace`, `select_agent`) with host-resolved references; they are
+  present only for the watching tab.
+- `operation_error`: why a requested operation was not recorded
+  (`turn_not_saved`, or an operation error code). Nothing will open.
+- `operation_capability`: `{ "available", "reason" }`.
+
+| Endpoint | Body | Effect |
+|---|---|---|
+| `GET /api/home-assistant/operations/capability` | — | `{ available, reason }`: `operations_unavailable`, `model_not_configured` or `provider_cannot_run_ori_tools` when unavailable. The same answer is in `GET /api/personal-assistant` as `availability.operations`. |
+| `GET /api/home-assistant/operations/{id}?tab=<tab id>` | — | Returns `operation` as that tab may see it. An ended operation stays readable for a day. |
+| `POST /api/home-assistant/operations/{id}/ack` | `command_id`, `revision`, `tab_id`, `outcome` (`acknowledged` or `unavailable`), `observed` (`path`, `agent_key`), `reason` | Records what the watching tab observed for one step. Steps are reported in order; a repeat of a recorded outcome changes nothing. It is view evidence only. |
+| `POST /api/home-assistant/operations/{id}/watch` | `tab_id`, `revision`, `watch`, `adopt` | Turns watching on or off for that tab. Taking it from another tab needs `adopt`. Off cancels nothing. |
+| `POST /api/home-assistant/operations/{id}/cancel` | `tab_id`, `revision` | Dismisses the operation. No workspace, agent or task is touched. |
+
+Refusals are `{ "code", "message" }`: `operation_not_found` (404, also another
+user's operation), `operation_conflict`, `operation_tab_mismatch`,
+`operation_ended` (409), `operation_expired`, `operation_invalidated` (410),
+`operation_invalid` (400) and `operation_unavailable` (503). All responses are
+`Cache-Control: no-store`.
+
 **Saved drafts:**
 
 | Endpoint | Body | Effect |

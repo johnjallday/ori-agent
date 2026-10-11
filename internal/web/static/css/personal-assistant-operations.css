@@ -1,0 +1,103 @@
+/* Operate Ori: the Watch chip in the composer, the operation status in the
+   assistant drawer, and the highlight on the control Ori just used. Scoped to
+   its own classes; the drawer's paper, ink and accent tokens own the colors in
+   light and dark. */
+.pa-operation {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--pa-ink-dim, var(--ori-ink));
+}
+.pa-operation[hidden] {
+  display: none;
+}
+/* The Watch chip sits in the composer's existing chip row, at its end, so it
+   takes no row of its own. */
+.pa-operation__watch {
+  min-height: 40px;
+  margin: 0 0 0 auto;
+  cursor: pointer;
+}
+.pa-operation__watch[hidden] {
+  display: none;
+}
+.pa-operation__watch input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--pa-accent-text, var(--ori-accent-strong));
+}
+.pa-operation__watch:focus-within {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
+  outline-offset: 2px;
+}
+.pa-operation__status {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--ori-ink) 24%, transparent);
+  color: var(--ori-ink);
+  overflow-wrap: anywhere;
+}
+.pa-operation__status[data-tone="working"],
+.pa-operation__status[data-tone="done"] {
+  border-left-color: var(--pa-accent-text, var(--ori-accent-strong));
+}
+.pa-operation__status[data-tone="attention"] {
+  border-left-color: var(--ori-warning, #b7791f);
+}
+.pa-operation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.pa-operation__action {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--ori-ink) 30%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ori-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pa-operation__action.is-primary {
+  border-color: var(--pa-accent-text, var(--ori-accent-strong));
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+}
+.pa-operation__action:focus-visible,
+.pa-operation__link:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
+  outline-offset: 2px;
+}
+.pa-operation__link {
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  text-decoration: underline;
+}
+
+/* The control on the page that Ori just used. The outline is the signal; the
+   pulse only draws the eye and is dropped for reduced motion. */
+.ori-operation-highlight {
+  outline: 3px solid var(--ori-accent-strong, #2f6f4f);
+  outline-offset: 3px;
+  border-radius: 8px;
+  animation: ori-operation-pulse 1.2s ease-out 2;
+}
+@keyframes ori-operation-pulse {
+  from {
+    outline-offset: 10px;
+    outline-color: color-mix(in srgb, var(--ori-accent-strong, #2f6f4f) 30%, transparent);
+  }
+  to {
+    outline-offset: 3px;
+    outline-color: var(--ori-accent-strong, #2f6f4f);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ori-operation-highlight {
+    animation: none;
+  }
+}
