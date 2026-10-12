@@ -84,6 +84,26 @@ func (h *HomeAssistantAskHandler) reviewedIntegrationTurn(ctx context.Context, p
 	return turn
 }
 
+// dropNamedOnlyInPath forgets an integration whose name appears only inside a
+// folder path the user wrote, once there is nothing left to set up for it. A
+// folder named after an application is not a mention of the integration, and
+// "it is installed and set up" above every pasted path is noise. While its
+// guided setup is still open the name stays: that path may be the only place a
+// new user ever writes it, and the setup is what they need. rest is the user's
+// message without the path.
+func (t *reviewedIntegrationTurn) dropNamedOnlyInPath(rest string) {
+	if t == nil {
+		return
+	}
+	kept := t.named[:0]
+	for _, integration := range t.named {
+		if integration.SetupQuest != nil || assistantdiscovery.MentionsName(rest, integration.DisplayName) {
+			kept = append(kept, integration)
+		}
+	}
+	t.named = kept
+}
+
 // reviewedIntegrationsRule is the standing rule for a model that can call the
 // reader. It names no integration: the reader's result does.
 const reviewedIntegrationsRule = "Ori reviews a small set of integrations itself and sets each one up through its own Guided Setup. " +
@@ -210,11 +230,20 @@ const reviewedLookupNotNeeded = `{"status":"not_needed","sent":false,"note":"Ori
 // Ori's own rendering of a workspace proposal (which the model's prose never
 // reaches), still starts by saying it exists. It is applied before the turn
 // is stored, so the saved conversation reads the same as the reply.
-func (t *reviewedIntegrationTurn) withLead(answer string) string {
+//
+// ignoring are names in the reply that are not the integration even when they
+// contain its name (a folder called after the application): the opening is read
+// without them.
+func (t *reviewedIntegrationTurn) withLead(answer string, ignoring ...string) string {
 	if t == nil || strings.TrimSpace(answer) == "" {
 		return answer
 	}
 	opening := firstLine(answer)
+	for _, name := range ignoring {
+		if name = strings.TrimSpace(name); name != "" {
+			opening = strings.ReplaceAll(opening, name, "")
+		}
+	}
 	var lead []string
 	for _, integration := range t.named {
 		if !assistantdiscovery.MentionsName(opening, integration.DisplayName) {

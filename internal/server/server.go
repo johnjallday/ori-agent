@@ -69,6 +69,9 @@ type Server struct {
 	// setupJourneys lets the assistant's reviewed-integration reader name an
 	// installed plugin's own guided setup and say whether it is finished.
 	setupJourneys *setupjourney.Service
+	// folderPaths lets the assistant answer a folder path written in the chat
+	// with a card to explore or link it; nil when no selection store is wired.
+	folderPaths agenthttp.FolderPaths
 	// reviewedReleases finds and verifies reviewed releases. Blueprint recovery
 	// uses it to install a reviewed Home provider; nil when plugins are off.
 	reviewedReleases *reviewedIntegrationUpdates

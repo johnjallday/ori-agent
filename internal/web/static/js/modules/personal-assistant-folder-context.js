@@ -16,7 +16,7 @@ export { observationSummary, coverageSummary } from './personal-assistant-folder
 
 const ENDPOINT = '/api/home-assistant/folder-context';
 export const FOLDER_DISCLOSURE =
-  'File contents have not been read. Send shares the recorded file/folder and project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
+  'File contents have not been read. Send shares the recorded file/folder and project names, kinds, counts, project markers, last-changed dates, scan time and coverage with your configured model. Selecting a folder stays local.';
 
 /** Pure state machine with injected I/O: stale picker/network results cannot
  * cross a conversation switch, removal or replacement. */
@@ -728,6 +728,10 @@ const api = {
     lastEventKey = undefined;
   },
   request: () => controller?.request() || null,
+  // Attaches the folder a server-held selection names (a typed path the
+  // server checked): the same local preview the chooser makes.
+  selectHeld: selectionToken =>
+    controller ? controller.select('selection', '', selectionToken) : Promise.resolve(false),
   accepted: (id, saved) => controller?.accepted(id, saved),
   adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,

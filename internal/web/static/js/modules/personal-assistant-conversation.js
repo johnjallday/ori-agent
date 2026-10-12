@@ -9,6 +9,9 @@ import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-wor
 import { renderResearchSources } from './personal-assistant-research.js';
 import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
+// Installs window.PersonalAssistantFolderProposal, the reply card the work
+// controller draws for a folder path the user wrote.
+import './personal-assistant-folder-proposal.js';
 
 const LIST_ENDPOINT = '/api/home-assistant/conversations';
 const STORAGE_KEY = 'ori.personalAssistant.conversation';

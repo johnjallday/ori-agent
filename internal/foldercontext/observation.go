@@ -20,6 +20,9 @@ const (
 	SelectionTTL = 30 * time.Minute
 )
 
+// DateLayout is how an observation writes a date: a day, with no time of day.
+const DateLayout = "2006-01-02"
+
 // Allow the bounded snapshot plus its envelope and all 64 opaque focus IDs.
 // The observation itself retains its existing 8 KiB metadata limit.
 const MaxEventBytes = MaxBytes + 1024
@@ -52,6 +55,10 @@ type Project struct {
 	Files  int    `json:"files"`
 	Marker string `json:"marker,omitempty"` // known marker label, not arbitrary filename
 	Root   bool   `json:"root,omitempty"`
+	// LastChanged is the date (YYYY-MM-DD) of the newest file seen in the
+	// project when it was scanned; "" when none was seen. A date, never a
+	// time, and never a file's name.
+	LastChanged string `json:"last_changed,omitempty"`
 }
 
 type Coverage struct {
@@ -129,6 +136,11 @@ func (o Observation) Validate() error {
 	for _, project := range o.Projects {
 		if !name(project.ID) || !name(project.Name) || !count(project.Files) || (project.Marker != "" && !name(project.Marker)) {
 			return ErrInvalid
+		}
+		if project.LastChanged != "" {
+			if _, err := time.Parse(DateLayout, project.LastChanged); err != nil {
+				return ErrInvalid
+			}
 		}
 	}
 	if o.Tree != nil && (o.Tree.Validate() != nil || len(o.Tree.Nodes) > o.Entries) {

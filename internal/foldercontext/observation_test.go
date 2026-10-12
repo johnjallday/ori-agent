@@ -41,3 +41,28 @@ func TestObservationBoundsAndNames(t *testing.T) {
 		t.Fatal("snapshot exceeds budget")
 	}
 }
+
+// A project may say when it was last changed: a calendar day, and nothing a
+// caller could smuggle a name, a path or a time of day through.
+func TestObservationProjectLastChangedIsADayOrAbsent(t *testing.T) {
+	observation := validObservation()
+	observation.Projects[0].LastChanged = "2026-10-09"
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("a day was refused: %v", err)
+	}
+	data, err := json.Marshal(observation)
+	if err != nil || !strings.Contains(string(data), `"last_changed":"2026-10-09"`) {
+		t.Fatalf("encoded = %s %v", data, err)
+	}
+	for _, value := range []string{"2026-10-09T16:30:00Z", "yesterday", "2026-13-40", "../notes.txt", "2026-10-09 "} {
+		invalid := validObservation()
+		invalid.Projects[0].LastChanged = value
+		if invalid.Validate() == nil {
+			t.Fatalf("last_changed %q was accepted", value)
+		}
+	}
+	// An observation saved before the field existed still reads back valid.
+	if data, _ = json.Marshal(validObservation()); strings.Contains(string(data), "last_changed") {
+		t.Fatalf("an absent date was written: %s", data)
+	}
+}

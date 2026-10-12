@@ -1364,3 +1364,67 @@ textarea.form-control:focus {
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+/* The card under an assistant reply for a folder path the user wrote
+   (personal-assistant-folder-proposal.js). It sits inside the reply's bubble,
+   so it borrows the drawer's ink and accent rather than a surface of its own. */
+.personal-assistant-folder-proposal {
+  margin-top: 14px;
+  padding: 14px 0 4px;
+  border-top: 1px solid color-mix(in srgb, var(--ori-ink) 18%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-folder-proposal__title {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.personal-assistant-folder-proposal__path,
+.personal-assistant-folder-proposal__detail,
+.personal-assistant-folder-proposal__warning,
+.personal-assistant-folder-proposal__status {
+  margin: 6px 0;
+}
+
+.personal-assistant-folder-proposal__path {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+}
+
+.personal-assistant-folder-proposal__warning {
+  font-weight: 600;
+}
+
+.personal-assistant-folder-proposal__status:empty {
+  display: none;
+}
+
+.personal-assistant-folder-proposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.personal-assistant-folder-proposal__actions button {
+  min-height: 44px;
+  padding: 7px 12px;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+}
+
+.personal-assistant-folder-proposal__actions button:disabled {
+  opacity: 0.6;
+}
+
+.personal-assistant-folder-proposal__actions button:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
+  outline-offset: 3px;
+}

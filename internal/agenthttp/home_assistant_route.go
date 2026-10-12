@@ -46,7 +46,11 @@ type HomeAssistantRouteHandler struct {
 	// answers it, naming the integration and offering that setup; no
 	// specialist or workspace owns that answer.
 	ReviewedIntegrationSetup func(context.Context, string) bool
-	RuntimeResolver          interface {
+	// FolderPathNamed reports a message that points at a folder by its path.
+	// The hired assistant answers it with the card to explore or link that
+	// folder; no specialist or workspace chat can offer that card.
+	FolderPathNamed func(context.Context, string) bool
+	RuntimeResolver interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
 	SystemModelReader interface {
@@ -433,6 +437,12 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		// specialist or the workspace's own chat. While its guided setup is
 		// open, a named reviewed integration is the assistant's to answer.
 		if h.ReviewedIntegrationSetup != nil && h.ReviewedIntegrationSetup(ctx, prompt) {
+			return assistantConversationRoute(workContext), nil
+		}
+		// A message that leads with a path reads as a slash command below, and
+		// "add", "open" or "connect" read as execution. A folder the user
+		// pointed at is the assistant's to answer, with its card.
+		if h.FolderPathNamed != nil && h.FolderPathNamed(ctx, prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
 		if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {

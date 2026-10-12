@@ -333,6 +333,12 @@ func summarizeFolder(result folderdigest.Result, id string) foldercontext.Observ
 		if candidate.Marker != nil {
 			project.Marker = foldercontext.DisplayName(candidate.Marker.Name)
 		}
+		// When it was last worked on: the scan already knows the newest file's
+		// time, and "which of these is the most recent" is the first thing a
+		// person asks about a folder of projects.
+		if !candidate.NewestModTime.IsZero() {
+			project.LastChanged = candidate.NewestModTime.Format(foldercontext.DateLayout)
+		}
 		observation.Projects = append(observation.Projects, project)
 	}
 	if result.Metadata != nil {

@@ -10601,6 +10601,54 @@
         });
       }
 
+      // A folder the user's message pointed at by its path: one card, drawn on
+      // the reply, confirms it. Nothing in the folder has been read, and the
+      // confirmation sends the server-held selection, never the path.
+      if (
+        assistantRow &&
+        data &&
+        data.folder_proposal &&
+        conversationRef &&
+        window.PersonalAssistantFolderProposal
+      ) {
+        var proposalContext = normalizedContext;
+        var proposalConversationId = String((data.conversation && data.conversation.id) || '');
+        var proposalPage = String(window.location.pathname || '/');
+        var continueWithFolder = function (view) {
+          // The assistant carries on by itself: the turn the user would have
+          // typed next, sent the way the composer sends it.
+          void handleHomeAssistantPrompt(view.followUp, { routeContext: proposalContext });
+        };
+        window.PersonalAssistantFolderProposal.render(assistantRow, data.folder_proposal, {
+          isCurrent: function () {
+            return (
+              !homeAssistantState.busy &&
+              Boolean(proposalConversationId) &&
+              Boolean(conversations) &&
+              conversations.currentId() === proposalConversationId &&
+              String(window.location.pathname || '/') === proposalPage
+            );
+          },
+          explore: async function (view) {
+            var folders = window.PersonalAssistantFolderContext;
+            if (!folders || typeof folders.selectHeld !== 'function')
+              throw new Error('Folders are unavailable on this page. Nothing was opened.');
+            if (!(await folders.selectHeld(view.token))) {
+              var state = folders.current && folders.current();
+              throw new Error(String((state && state.notice) || '').trim());
+            }
+            continueWithFolder(view);
+          },
+          link: async function (view) {
+            await API.post(
+              '/api/workspaces/' + encodeURIComponent(view.workspaceId) + '/directories',
+              { selection_token: view.token }
+            );
+            continueWithFolder(view);
+          }
+        });
+      }
+
       if (data && data.requires_confirmation && data.confirmation) {
         inlineReview = true;
         confirmHomeAction(

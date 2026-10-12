@@ -84,6 +84,40 @@ func TestFolderObservation_LocalOnlyAndBounded(t *testing.T) {
 	}
 }
 
+// "Which of these did I work on last?" is answered from the scan's own dates:
+// each project carries the day of its newest file, and nothing else about it.
+func TestFolderObservation_ProjectsSayWhenTheyWereLastChanged(t *testing.T) {
+	older := time.Date(2026, time.March, 14, 10, 30, 0, 0, time.Local)
+	newer := time.Date(2026, time.October, 9, 16, 30, 0, 0, time.Local)
+	observation := summarizeFolder(folderdigest.Result{
+		Name: "Song Projects", ScannedAt: newer.Add(time.Hour), Entries: 6,
+		Candidates: []folderdigest.Candidate{
+			{Name: "Song Projects", IsRoot: true, FileCount: 4, NewestModTime: newer},
+			{Name: "Harbor Lights", FileCount: 2, NewestModTime: older},
+			{Name: "Night Drive", FileCount: 2, NewestModTime: newer},
+			{Name: "Empty Idea"},
+		},
+	}, "observation-1")
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("observation invalid: %v (%+v)", err, observation)
+	}
+	dates := map[string]string{}
+	for _, project := range observation.Projects {
+		dates[project.Name] = project.LastChanged
+	}
+	if dates["Harbor Lights"] != "2026-03-14" || dates["Night Drive"] != "2026-10-09" || dates["Song Projects"] != "2026-10-09" {
+		t.Fatalf("dates = %v", dates)
+	}
+	// A project with no file seen has no date, rather than an invented one.
+	if date, listed := dates["Empty Idea"]; !listed || date != "" {
+		t.Fatalf("empty project date = %q (listed %v)", date, listed)
+	}
+	encoded, err := json.Marshal(observation)
+	if err != nil || strings.Contains(string(encoded), "16:30") || strings.Contains(string(encoded), "T16") {
+		t.Fatalf("a time of day was written: %s %v", encoded, err)
+	}
+}
+
 // The drawer's chooser is told why the dialog is missing in Home's words. A
 // picker's reason is a code and must never be the note.
 func TestFolderObservation_ChoicesExplainAMissingDialogInWords(t *testing.T) {

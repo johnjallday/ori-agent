@@ -133,6 +133,9 @@ type HomeAssistantAskResponse struct {
 	// this turn: description only, with no offer ID, digest or control.
 	FolderReviewContext   *personalAssistantReviewContext `json:"folder_review_context,omitempty"`
 	FolderReviewElsewhere *reviewElsewhere                `json:"folder_review_elsewhere,omitempty"`
+	// FolderProposal is the card for a folder the user's message pointed at by
+	// its path. Nothing in the folder was read, and the card is not stored.
+	FolderProposal *HomeFolderProposal `json:"folder_proposal,omitempty"`
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
@@ -223,7 +226,10 @@ type HomeAssistantAskHandler struct {
 	ResearchReviews *assistantdiscovery.ReviewGate
 	// Files resolves the host-owned folders of a workspace's readable files, for
 	// the panel's file readers. Nil leaves file reading unsupported.
-	Files       AssistantFileSource
+	Files AssistantFileSource
+	// FolderPaths checks and holds a folder path written in the chat. Nil keeps
+	// such a message an ordinary turn.
+	FolderPaths FolderPaths
 	CurrentUser interface {
 		CurrentUserID(context.Context) (string, error)
 	}
@@ -384,7 +390,15 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	if refs == nil && req.Conversation != nil {
 		refs = &HomeAssistantRouteContext{Origin: "personal_assistant_panel"}
 	}
-	scope := h.bindWorkspaceTurn(ctx, prompt, refs, workContext)
+	// A folder path in the message is the user pointing at a folder. The turn
+	// binds its workspace from the rest of what they wrote, so a folder that
+	// shares a workspace's name is not taken for that workspace.
+	folderPath, namesFolder := h.folderPathFound(prompt, req)
+	bindPrompt := prompt
+	if namesFolder {
+		bindPrompt = withoutFolderPath(prompt, folderPath)
+	}
+	scope := h.bindWorkspaceTurn(ctx, bindPrompt, refs, workContext)
 	if scope != nil {
 		defer func() { response.WorkspaceContext = scope.attribution() }()
 		if scope.projection.Status != assistantcontext.Available {
@@ -556,8 +570,21 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// An integration Ori has reviewed is named back with its guided setup
 	// whenever the user's message names it, whatever else the turn does.
 	if reviewed := h.reviewedIntegrationTurn(ctx, prompt); reviewed != nil {
+		if namesFolder {
+			// A folder called after an application is not the user naming it.
+			reviewed.dropNamedOnlyInPath(bindPrompt)
+		}
 		ctx = context.WithValue(ctx, reviewedIntegrationTurnKey{}, reviewed)
 		defer func() { reviewed.finalize(&response) }()
+	}
+
+	// A folder the user pointed at by its path gets a card to explore or link
+	// it, never a refusal. Nothing in it is read before they confirm.
+	if namesFolder {
+		if folder := h.folderPathTurn(folderPath, scope); folder != nil {
+			ctx = context.WithValue(ctx, folderPathTurnKey{}, folder)
+			defer func() { folder.finalize(&response) }()
+		}
 	}
 
 	h.prepareContinuity(ctx, prompt, conversation)
@@ -586,7 +613,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			resp.DraftContext = draftContext
 			return resp
 		}
-		answer = reviewedIntegrationTurnFromContext(ctx).withLead(strings.TrimSpace(answer))
+		answer = withHostLeads(ctx, answer)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "answered"})
 		return HomeAssistantAskResponse{
 			Response: answer, Intent: intent, Identity: identity,
@@ -611,7 +638,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		resp.Conversation = unstoredConversation(conversation)
 		return resp
 	}
-	answer = reviewedIntegrationTurnFromContext(ctx).withLead(strings.TrimSpace(answer))
+	answer = withHostLeads(ctx, answer)
 
 	actions := h.buildNextStepActions(intent, prompt, snapshot)
 	meta := snapshot.Meta
@@ -800,7 +827,8 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if research != nil && research.result != nil {
 		researchEvidence = researchReferencePrompt(*research.result)
 	}
-	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence+reviewedIntegrationTurnFromContext(ctx).referencePrompt()))
+	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence+
+		reviewedIntegrationTurnFromContext(ctx).referencePrompt()+folderPathTurnFromContext(ctx).referencePrompt()))
 	if len(tools) == 0 && scope != nil {
 		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}
