@@ -206,22 +206,17 @@ test('Create Workspace builds and staffs the required Home before two project te
     }
   };
   const createReviewedProject = async (workspaceName: string, mapPlacement = false) => {
-    const reviewPromise = page.waitForResponse(
-      response =>
-        response.url().endsWith('/api/workspaces') &&
-        response.request().method() === 'POST' &&
-        response.request().postDataJSON()?.group_requirement_review === true
-    );
-    await page.locator('#createFolderBtn').click();
-    const review = await reviewPromise;
-    expect(review.ok(), await review.text()).toBeTruthy();
+    // One card, one confirm: the placement was reviewed as Review was shown and
+    // the card states it, so nothing here waits for a review of its own.
+    await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
     if (mapPlacement) {
+      // From the map the first press only begins placement; confirming there
+      // is the one that creates.
+      await page.locator('#createFolderBtn').click();
       await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
       await captureEvidence(page, 'music-producer-07-map-placement.png');
     } else {
-      await expect(page.locator('#createFolderBtn')).toHaveText(
-        `Confirm create “${workspaceName}”`
-      );
+      await expect(page.locator('#createFolderBtn')).toHaveText(`Create “${workspaceName}”`);
     }
 
     const createPromise = page.waitForResponse(

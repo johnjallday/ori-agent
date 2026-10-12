@@ -453,16 +453,10 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
     fullPage: true
   });
   await page.setViewportSize({ width: 1280, height: 900 });
-  const placementReviewPromise = page.waitForResponse(
-    response =>
-      response.url().endsWith('/api/workspaces') &&
-      response.request().method() === 'POST' &&
-      response.request().postDataJSON()?.group_requirement_review === true
-  );
-  await page.locator('#createFolderBtn').click();
-  const placementReview = await placementReviewPromise;
-  expect(placementReview.ok(), await placementReview.text()).toBeTruthy();
-  await expect(page.locator('#createFolderBtn')).toHaveText(`Confirm create “${projectName}”`);
+  // One card, one confirm: the placement was reviewed as Review was shown, the
+  // card says so, and the one Create button commits it.
+  await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
+  await expect(page.locator('#createFolderBtn')).toHaveText(`Create “${projectName}”`);
 
   const createPromise = page.waitForResponse(
     response =>
@@ -533,14 +527,14 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   await page.locator('[data-agent-create-field="name"]').fill(secondProjectLead);
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
-  await page.locator('#wizardNextBtn').click();
+  // The placement is reviewed as Review is shown, not by a first press of Create.
   const secondPlacementReviewPromise = page.waitForResponse(
     response =>
       response.url().endsWith('/api/workspaces') &&
       response.request().method() === 'POST' &&
       response.request().postDataJSON()?.group_requirement_review === true
   );
-  await page.locator('#createFolderBtn').click();
+  await page.locator('#wizardNextBtn').click();
   const secondPlacementReview = await secondPlacementReviewPromise;
   expect(secondPlacementReview.ok(), await secondPlacementReview.text()).toBeTruthy();
   const secondCreatePromise = page.waitForResponse(

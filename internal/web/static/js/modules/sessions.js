@@ -8097,6 +8097,11 @@ const sessionManager = {
       document.getElementById('workspaceReviewIssues')?.setAttribute('hidden', '');
       document.getElementById('workspaceReviewReadiness')?.replaceChildren();
       this.renderSetupPreview(null);
+      // Guided group setup reviews its group as Review is shown, so its one
+      // button creates it.
+      if (this.isFinalWizardStep() && this.workspaceCreatorContext?.mode === 'guided') {
+        void this.workspaceCreatorContext.guided?.ensureReview?.();
+      }
       return;
     }
     this.stageGuidedBlueprintRoles();
@@ -8155,6 +8160,8 @@ const sessionManager = {
     if (!groupRoster) this.renderBlueprintAgentSummary();
     this.syncWorkspaceBuildChosenTags();
     window.SetupWorkspaceCreator?.refreshReview();
+    // One card, one confirm: the placement is reviewed as Review is shown.
+    if (!groupRoster) void this.ensureGroupRequirementReview();
   },
 
   renderOrdinaryGroupReceipt(view = null) {
@@ -9664,7 +9671,9 @@ const sessionManager = {
     if (this.workspaceCreatorContext?.mode === 'guided' && guided) {
       if (guided.error && guided.review?.pending) return 'Retry Confirmed Change';
       if (guided.review?.existing) return `Use existing group “${guided.review.name || 'Group'}”`;
-      if (guided.review) return `Create group “${guided.review.name || 'Group'}” only`;
+      if (guided.review) return `Create group “${guided.review.name || 'Group'}”`;
+      // Only while the review that Review itself asks for is missing: it is
+      // still on its way, or it failed and this button asks again.
       return 'Review group';
     }
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
@@ -9674,9 +9683,6 @@ const sessionManager = {
       !window.SetupWorkspaceCreator?.isActive?.()
     ) {
       return name ? `Place “${name}” on map →` : 'Place on map →';
-    }
-    if (this.groupRequirementDraft?.review?.review_token) {
-      return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
     }
     if (this.usesManagedGroupTemplate()) return window.GroupTemplateCreator.ctaLabel(this);
     if (this.isGroupCreator()) return name ? `Create group “${name}”` : 'Create Group';
@@ -10013,15 +10019,26 @@ const sessionManager = {
     }
   },
 
-  async prepareGroupRequirementCommit(endpoint, payload) {
+  // The placement review for a blueprint with a group requirement.
+  //
+  // It runs twice at most: quietly when Review is shown, so the card states the
+  // reviewed destination before anything is pressed, and on Create only if no
+  // review for this exact request is at hand. Either way the one Create button
+  // commits: a review prepared by the click is used by the same click. A quiet
+  // review reports nothing; whatever is not ready is left for Create to say.
+  // Returns true when the request carries a reviewed placement and may be sent.
+  async prepareGroupRequirementCommit(endpoint, payload, { quiet = false } = {}) {
     const draft = this.groupRequirementDraft;
     if (!draft || window.SetupWorkspaceCreator?.isActive()) return true;
     payload.group_composition = draft.composition;
     const payloadKey = JSON.stringify(payload);
-    if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
+    const carryReview = () => {
       payload.group_review_token = draft.review.review_token;
       payload.idempotency_key = draft.review.idempotencyKey;
       return true;
+    };
+    if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
+      return quiet ? false : carryReview();
     }
 
     const requestReview = async () => {
@@ -10042,6 +10059,7 @@ const sessionManager = {
 
     const review = await requestReview();
     if (review.state === 'home_creation_review_required') {
+      if (quiet) return false;
       this.showWorkspaceCreateError(
         'Prepare the required group from Details before reviewing project creation.'
       );
@@ -10050,31 +10068,90 @@ const sessionManager = {
       return false;
     }
     if (review.state !== 'ready_grouped' && review.state !== 'ready_standalone') {
+      if (quiet) return false;
       const actions = Array.isArray(review.actions) ? review.actions.join(', ') : '';
       this.showWorkspaceCreateError(
         `${String(review.summary || 'This placement is not ready.')}${actions ? ` Available actions: ${actions}.` : ''}`
       );
       return false;
     }
-    if (!review.review_token) throw new Error('The placement receipt is unavailable.');
+    if (!review.review_token) {
+      if (quiet) return false;
+      throw new Error('The placement receipt is unavailable.');
+    }
     draft.review = {
       ...review,
-      payloadKey: JSON.stringify(payload),
+      payloadKey,
       idempotencyKey: crypto.randomUUID()
     };
     this.refreshWorkspaceReview();
     this.refreshWizardChrome();
+    // The card states the reviewed destination from here on (see
+    // renderReviewReadiness, which keeps it through repaints).
     const readiness = document.getElementById('workspaceReviewReadiness');
     if (readiness) {
       readiness.hidden = false;
-      readiness.textContent = draft.preparedHome
-        ? `${draft.preparedHome.home_created ? 'Created' : 'Reused'} “${draft.preparedHome.home_name || review.home_name}” as the required group. No workspace was created. Reviewed destination: ${review.home_name}. Click Confirm create to create the workspace separately.`
-        : review.selected_composition === 'grouped'
-          ? `Reviewed destination: ${review.home_name}. Click Confirm create to apply.`
-          : 'Reviewed destination: standalone, with no Home membership. Click Confirm create to apply.';
-      readiness.focus?.();
+      readiness.textContent = this.reviewedDestinationLine();
+      // A review prepared while the card was only being shown must not take
+      // focus from whatever the user is doing.
+      if (!quiet) readiness.focus?.();
     }
-    return false;
+    return quiet ? false : carryReview();
+  },
+
+  // The create request as the form stands now, assembled the way Create
+  // assembles it. Null while there is no name to create anything under.
+  currentCreateRequest() {
+    const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    if (!name) return null;
+    const teamView = this.usesTeamRosterCreator() ? this.teamView() : null;
+    const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
+    const parentSelect = document.getElementById('folderParentSelect');
+    const { payload, endpoint } = this.collectCreatePayload({
+      importEnabled: false,
+      importPath: '',
+      name,
+      description: String(document.getElementById('folderDescriptionInput')?.value || '').trim(),
+      parentId: this.lockedParentId() || parentSelect?.value?.trim() || '',
+      color: colorBtn?.dataset.color || '',
+      workspaceBootstrap: this.getWorkspaceBootstrapFromModal(),
+      teamPayload: teamView?.payload || {}
+    });
+    // The same destination adjustments Create makes before it reviews.
+    if (!payload.parent_id && this.workspaceMapOrigin) {
+      const pending = window.OriWorkspaceMap?.getPendingBuild?.();
+      if (pending?.group?.id) payload.parent_id = pending.group.id;
+    }
+    const lockedParent = this.lockedParentId();
+    if (lockedParent) payload.parent_id = lockedParent;
+    return { payload, endpoint };
+  },
+
+  // Asks for the placement review as soon as Review is shown, once per exact
+  // request. A repaint asks nothing; a changed name, team or destination does.
+  async ensureGroupRequirementReview() {
+    const draft = this.groupRequirementDraft;
+    if (
+      !draft ||
+      this.isCreatingFolder ||
+      this.importModeEnabled ||
+      !this.isFinalWizardStep() ||
+      this.isOrdinaryGroupCreator() ||
+      window.SetupWorkspaceCreator?.isActive?.() ||
+      this.groupRequirementBlocked() ||
+      this.hasBlockingTeamIssue()
+    )
+      return;
+    const request = this.currentCreateRequest();
+    if (!request) return;
+    const key = JSON.stringify({ ...request.payload, group_composition: draft.composition });
+    if (draft.review?.payloadKey === key || draft.quietReviewKey === key) return;
+    draft.quietReviewKey = key;
+    try {
+      await this.prepareGroupRequirementCommit(request.endpoint, request.payload, { quiet: true });
+    } catch (_) {
+      // Create asks again and says what is wrong.
+    }
   },
 
   // Keeps the create button's label in step with the workspace name without
@@ -13759,7 +13836,16 @@ const sessionManager = {
     host.textContent = '';
     if (this.importModeEnabled) return;
     const readiness = window.ProjectTemplateCard?.getSelectedReadiness?.();
-    if (!readiness || readiness.state === 'ready') return;
+    if (!readiness || readiness.state === 'ready') {
+      // The placement this request was reviewed for stays stated on the card,
+      // through every repaint, until the request changes.
+      const reviewed = this.reviewedDestinationLine();
+      if (reviewed) {
+        host.hidden = false;
+        host.textContent = reviewed;
+      }
+      return;
+    }
     const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
     const panel = window.BlueprintReadiness?.renderPanel(readiness, {
       blueprintName: template?.name || template?.id || '',
@@ -13769,6 +13855,19 @@ const sessionManager = {
       onAction: () => this.goToWizardStep(1)
     });
     if (panel) host.appendChild(panel);
+  },
+
+  // The reviewed placement in words, or '' while this request has no review.
+  reviewedDestinationLine() {
+    const draft = this.groupRequirementDraft;
+    const review = draft?.review;
+    if (!review?.review_token) return '';
+    if (draft.preparedHome) {
+      return `${draft.preparedHome.home_created ? 'Created' : 'Reused'} “${draft.preparedHome.home_name || review.home_name}” as the required group. No workspace was created. Reviewed destination: ${review.home_name}.`;
+    }
+    return review.selected_composition === 'grouped'
+      ? `Reviewed destination: ${review.home_name}.`
+      : 'Reviewed destination: standalone, with no Home membership.';
   },
 
   // Renders the server's own failure message on Review with a route back to the

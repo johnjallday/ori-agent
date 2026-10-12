@@ -336,6 +336,77 @@ func TestReviewedIntegrationReviewGoesStaleWhenTheLatestReleaseChanges(t *testin
 	}
 }
 
+// One card, one confirm: the UI asks for a step's review as the step is shown,
+// so a step may be reviewed more than once in a visit, and a card may sit open
+// past its expiry. Reviewing again never moves the run, a stale token changes
+// nothing, and the fresh review the UI then asks for commits.
+func TestReviewedIntegrationStaleReviewIsRefusedAndAFreshReviewCommits(t *testing.T) {
+	entry, descriptor, _, _ := readyIntegrationFixture(t)
+	target := latestRelease(entry, "0.6.0", "e")
+	latest, latestReport := releaseDescriptor(descriptor, target.Version, target.Source)
+	manager := &fakeReviewedIntegrationManager{descriptor: latest, report: latestReport}
+	adapter := newReviewedIntegrationAdapter(manager, integrationResolver(entry), "darwin/arm64")
+	adapter.releases = &stubReleases{resolution: target}
+	service := integrationServiceForReplacementTest(t, adapter)
+	ctx := context.Background()
+	journey, err := service.Read(ctx, "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := func(key string) *ActionResult {
+		t.Helper()
+		result, err := service.Mutate(ctx, "local", journey.RunID, ActionReviewInstall, ActionMutation{
+			IfRevision: journey.StateRevision, IdempotencyKey: key, Input: json.RawMessage(`{}`),
+		})
+		if err != nil || result.Review == nil || result.Review.Token == "" || result.Review.CommitAction != ActionInstall {
+			t.Fatalf("review %s: %#v err=%v", key, result, err)
+		}
+		return result
+	}
+	commit := func(key, token string) (*ActionResult, error) {
+		return service.Mutate(ctx, "local", journey.RunID, ActionInstall, ActionMutation{
+			IfRevision: journey.StateRevision, IdempotencyKey: key, ReviewToken: token, Input: json.RawMessage(`{}`),
+		})
+	}
+
+	// Shown, then shown again: two live reviews of the same step, and the run
+	// has not moved, so either could still be confirmed.
+	first, second := review("review-shown"), review("review-shown-again")
+	if first.Review.Token == second.Review.Token || second.Journey.StateRevision != journey.StateRevision {
+		t.Fatalf("a second review reused the token or moved the run: %q %q rev %d→%d",
+			first.Review.Token, second.Review.Token, journey.StateRevision, second.Journey.StateRevision)
+	}
+
+	// The card sat open past its expiry. Every clock moves together.
+	store, ok := service.store.(*SQLiteStore)
+	if !ok {
+		t.Fatalf("store is %T, want the SQLite store", service.store)
+	}
+	later := func() time.Time { return time.Now().Add(actionReviewTTL + time.Minute) }
+	service.now, store.now = later, later
+	for name, token := range map[string]string{"first": first.Review.Token, "second": second.Review.Token} {
+		_, err := commit("commit-"+name+"-stale", token)
+		var failure *Failure
+		if !errors.As(err, &failure) || failure.ReasonCode != ReasonReviewStale || manager.installCalls != 0 {
+			t.Fatalf("%s expired review: failure=%#v err=%v installs=%d", name, failure, err, manager.installCalls)
+		}
+		if failure.StateRevision != journey.StateRevision {
+			t.Fatalf("%s expired review moved the run to %d", name, failure.StateRevision)
+		}
+	}
+
+	// The UI reviews again, and the same button commits.
+	fresh := review("review-again")
+	committed, err := commit("commit-fresh", fresh.Review.Token)
+	if err != nil || committed == nil || manager.installCalls != 1 {
+		t.Fatalf("fresh review did not commit: %#v err=%v installs=%d", committed, err, manager.installCalls)
+	}
+	// A consumed review cannot be confirmed twice under another key.
+	if _, err := commit("commit-fresh-twice", fresh.Review.Token); err == nil || manager.installCalls != 1 {
+		t.Fatalf("a consumed review committed again: err=%v installs=%d", err, manager.installCalls)
+	}
+}
+
 func TestReviewedIntegrationCommitInstallsTheReviewedSourceNotAFreshResolution(t *testing.T) {
 	entry, descriptor, _, scope := readyIntegrationFixture(t)
 	target := latestRelease(entry, "0.6.0", "e")

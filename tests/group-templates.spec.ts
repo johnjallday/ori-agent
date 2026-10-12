@@ -503,19 +503,21 @@ test('a project blueprint reuses the renamed template group for two independent 
     await expect(page.locator('#addAgentModal')).toBeHidden();
     await expect(projectRole).toContainText(lead);
 
-    await page.locator('#wizardNextBtn').click();
-    const review = page.locator('#workspaceReviewSummary');
-    await expect(review).toContainText(homeName);
-    await expect(review).toContainText(templateMeta);
-    await expect(review).toContainText(`${coordinator} · already staffed on the group`);
+    // One card, one confirm: the placement is reviewed as Review is shown, and
+    // the one Create button then commits it.
     const placement = page.waitForResponse(
       response =>
         new URL(response.url()).pathname === '/api/workspaces' &&
         response.request().method() === 'POST' &&
         response.request().postDataJSON()?.group_requirement_review === true
     );
-    await page.locator('#createFolderBtn').click();
+    await page.locator('#wizardNextBtn').click();
+    const review = page.locator('#workspaceReviewSummary');
+    await expect(review).toContainText(homeName);
+    await expect(review).toContainText(templateMeta);
+    await expect(review).toContainText(`${coordinator} · already staffed on the group`);
     expect((await placement).ok()).toBeTruthy();
+    await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
     const commit = page.waitForResponse(
       response =>
         new URL(response.url()).pathname === '/api/workspaces' &&

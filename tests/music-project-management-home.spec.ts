@@ -248,14 +248,9 @@ async function createGroupedSong(page: Page, request: APIRequestContext, index: 
   );
   if (index === 0) await evidence(page, '04-grouped-song-review');
 
-  const reviewResponse = page.waitForResponse(
-    response =>
-      new URL(response.url()).pathname === '/api/workspaces' &&
-      response.request().method() === 'POST' &&
-      response.request().postDataJSON()?.group_requirement_review === true
-  );
-  await creator.locator('#createFolderBtn').click();
-  expect((await reviewResponse).ok()).toBeTruthy();
+  // One card, one confirm: the placement was reviewed as Review was shown and
+  // the card states it; the one Create button commits.
+  await expect(creator.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
 
   const commitResponse = page.waitForResponse(
     response =>
@@ -1016,14 +1011,11 @@ test('REAPER alone creates only an explicit Home-free standalone variant', async
   await expect(creator.locator('#workspaceReviewSummary')).toContainText('Tempo: 127 BPM');
   await evidence(page, '01-standalone-review');
 
-  const reviewResponse = page.waitForResponse(
-    response =>
-      new URL(response.url()).pathname === '/api/workspaces' &&
-      response.request().method() === 'POST' &&
-      response.request().postDataJSON()?.group_requirement_review === true
+  // One card, one confirm: the placement was reviewed as Review was shown and
+  // the card states it; the one Create button commits.
+  await expect(creator.locator('#workspaceReviewReadiness')).toContainText(
+    'Reviewed destination: standalone'
   );
-  await creator.locator('#createFolderBtn').click();
-  expect((await reviewResponse).ok()).toBeTruthy();
 
   const commitResponse = page.waitForResponse(
     response =>

@@ -2035,20 +2035,200 @@ test('group requirement creation reviews before committing and reuses only the e
   manager.refreshWizardChrome = () => {};
   const payload = { name: 'Standalone', template_id: 'variant' };
 
-  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
+  // Shown: the review is prepared quietly and nothing is committed by it.
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+    false
+  );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.group_requirement_review, true);
   assert.equal(calls[0].body.group_composition, 'standalone');
   assert.equal(payload.group_review_token, undefined, 'review request must not become a commit');
+  // Shown again: the same request asks nothing.
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+    false
+  );
+  assert.equal(calls.length, 1, 'a repaint does not review again');
 
+  // Create: one press commits the review the card already shows.
   assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), true);
   assert.equal(calls.length, 1, 'unchanged payload reuses the visible receipt');
   assert.equal(payload.group_review_token, 'receipt-1');
   assert.equal(payload.idempotency_key, 'review-key');
 
+  // Create with a request nothing reviewed yet: the same press reviews it and
+  // carries that review. There is no second "confirm" press.
   const changed = { name: 'Changed', template_id: 'variant' };
-  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', changed), false);
-  assert.equal(calls.length, 2, 'changed request gets a fresh inert review');
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', changed), true);
+  assert.equal(calls.length, 2, 'changed request gets a fresh review');
+  assert.equal(calls[1].body.group_requirement_review, true);
+  assert.equal(calls[1].body.group_review_token, undefined, 'the review itself carries no token');
+  assert.equal(changed.group_review_token, 'receipt-1');
+  assert.equal(manager.workspaceCreateCtaLabel().startsWith('Confirm'), false);
+});
+
+test('showing Review asks for the placement review once per exact request, and nowhere else', async () => {
+  const manager = loadSessionManager();
+  const asked = [];
+  let request = {
+    endpoint: '/api/workspaces',
+    payload: { name: 'Night Drive', template_id: 'song' }
+  };
+  let finalStep = true;
+  manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+  manager.isFinalWizardStep = () => finalStep;
+  manager.isOrdinaryGroupCreator = () => false;
+  manager.groupRequirementBlocked = () => false;
+  manager.hasBlockingTeamIssue = () => false;
+  manager.currentCreateRequest = () => request && { ...request, payload: { ...request.payload } };
+  manager.prepareGroupRequirementCommit = async (endpoint, payload, options) => {
+    asked.push({ endpoint, name: payload.name, quiet: options?.quiet });
+    return false;
+  };
+
+  await manager.ensureGroupRequirementReview();
+  assert.deepEqual(asked, [{ endpoint: '/api/workspaces', name: 'Night Drive', quiet: true }]);
+  // Repaints of the same card ask nothing more.
+  await manager.ensureGroupRequirementReview();
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 1);
+
+  // A different request is a different card.
+  request = { endpoint: '/api/workspaces', payload: { name: 'Slow Tide', template_id: 'song' } };
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 2);
+  assert.equal(asked[1].name, 'Slow Tide');
+
+  // Not on Review, while creating, without a name, in import, for a group, in
+  // the guided quest's own creator, or with a blocked team: nothing is asked.
+  request = { endpoint: '/api/workspaces', payload: { name: 'Third', template_id: 'song' } };
+  const quiet = [
+    () => (finalStep = false),
+    () => (manager.isCreatingFolder = true),
+    () => (manager.importModeEnabled = true),
+    () => (manager.isOrdinaryGroupCreator = () => true),
+    () => (manager.groupRequirementBlocked = () => true),
+    () => (manager.hasBlockingTeamIssue = () => true),
+    () => (manager.currentCreateRequest = () => null)
+  ];
+  for (const block of quiet) {
+    const restore = {
+      finalStep,
+      creating: manager.isCreatingFolder,
+      importing: manager.importModeEnabled,
+      group: manager.isOrdinaryGroupCreator,
+      blocked: manager.groupRequirementBlocked,
+      team: manager.hasBlockingTeamIssue,
+      current: manager.currentCreateRequest
+    };
+    block();
+    await manager.ensureGroupRequirementReview();
+    finalStep = restore.finalStep;
+    manager.isCreatingFolder = restore.creating;
+    manager.importModeEnabled = restore.importing;
+    manager.isOrdinaryGroupCreator = restore.group;
+    manager.groupRequirementBlocked = restore.blocked;
+    manager.hasBlockingTeamIssue = restore.team;
+    manager.currentCreateRequest = restore.current;
+  }
+  assert.equal(asked.length, 2, 'a card that is not the Review step asked for a review');
+
+  // No group requirement, no review at all.
+  manager.groupRequirementDraft = null;
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 2);
+});
+
+test('the reviewed destination stays on the Review card through repaints', () => {
+  const host = { textContent: 'stale', hidden: true, appendChild() {} };
+  const manager = loadSessionManager(
+    async () => ({ ok: true, json: async () => ({}) }),
+    { ProjectTemplateCard: { getSelectedReadiness: () => ({ state: 'ready' }) } },
+    { getElementById: id => (id === 'workspaceReviewReadiness' ? host : null) }
+  );
+  manager.groupRequirementDraft = { composition: 'grouped', review: null, preparedHome: null };
+
+  // No review yet: the card says nothing about a destination.
+  assert.equal(manager.reviewedDestinationLine(), '');
+  manager.renderReviewReadiness();
+  assert.equal(host.textContent, '');
+
+  manager.groupRequirementDraft.review = {
+    review_token: 'receipt-1',
+    selected_composition: 'grouped',
+    home_name: 'Music Production Home'
+  };
+  for (let repaint = 0; repaint < 3; repaint++) {
+    manager.renderReviewReadiness();
+    assert.equal(host.textContent, 'Reviewed destination: Music Production Home.');
+    assert.equal(host.hidden, false);
+  }
+  // No second press is asked for anywhere in the line.
+  assert.doesNotMatch(host.textContent, /Confirm|Click/);
+
+  manager.groupRequirementDraft.review.selected_composition = 'standalone';
+  assert.equal(
+    manager.reviewedDestinationLine(),
+    'Reviewed destination: standalone, with no Home membership.'
+  );
+  manager.groupRequirementDraft.preparedHome = { home_created: true, home_name: 'Studio' };
+  assert.match(manager.reviewedDestinationLine(), /^Created “Studio” as the required group\./);
+
+  // Import has no placement to state.
+  manager.importModeEnabled = true;
+  manager.renderReviewReadiness();
+  assert.equal(host.textContent, '');
+});
+
+test('the guided group button creates the group once its review is shown', () => {
+  const manager = loadSessionManager();
+  const guided = { review: null, error: '' };
+  manager.workspaceCreatorContext = { mode: 'guided', guided };
+  // Before the review Review itself asks for has arrived, or after it failed.
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Review group');
+  guided.review = { name: 'Music Production Home', existing: false, pending: false };
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create group “Music Production Home”');
+  guided.review = { name: 'Music Production Home', existing: true };
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Use existing group “Music Production Home”');
+});
+
+test('a placement review asked for by showing Review reports nothing that is not ready', async () => {
+  const states = [
+    { state: 'home_creation_review_required', home_name: 'Music Production Home' },
+    { state: 'blocked', summary: 'This placement is not ready.' },
+    { state: 'ready_grouped', home_name: 'Music Production Home' }
+  ];
+  for (const review of states) {
+    const errors = [];
+    let moved = 0;
+    const manager = loadSessionManager(async () => ({
+      ok: true,
+      json: async () => ({ group_requirement_review: review })
+    }));
+    manager.groupRequirementDraft = {
+      policy: 'required',
+      composition: 'grouped',
+      review: null,
+      preparedHome: null
+    };
+    manager.refreshWorkspaceReview = () => {};
+    manager.refreshWizardChrome = () => {};
+    manager.showWorkspaceCreateError = message => errors.push(message);
+    manager.goToWizardStep = () => {
+      moved++;
+    };
+    const payload = { name: 'Song', template_id: 'song' };
+    assert.equal(
+      await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+      false,
+      review.state
+    );
+    assert.deepEqual(errors, [], review.state);
+    assert.equal(moved, 0, review.state);
+    assert.equal(manager.groupRequirementDraft.review, null, review.state);
+    assert.equal(payload.group_review_token, undefined, review.state);
+  }
 });
 
 test('final placement review never creates a missing required Home as a surprise consequence', async () => {

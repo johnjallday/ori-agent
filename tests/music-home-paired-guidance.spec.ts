@@ -170,14 +170,9 @@ test('paired candidates preserve order and create only the declared local projec
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await creator.locator('#wizardNextBtn').click();
   await screenshot(page, 'guidance-project-review');
-  const review = page.waitForResponse(
-    response =>
-      new URL(response.url()).pathname === '/api/workspaces' &&
-      response.request().method() === 'POST' &&
-      response.request().postDataJSON()?.group_requirement_review === true
-  );
-  await creator.locator('#createFolderBtn').click();
-  expect((await review).ok()).toBeTruthy();
+  // One card, one confirm: the placement was reviewed as Review was shown and
+  // the card states it; the one Create button commits.
+  await expect(creator.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
   const commit = page.waitForResponse(
     response =>
       new URL(response.url()).pathname === '/api/workspaces' &&

@@ -21,6 +21,10 @@ const {
   integrationHandoffNavigation,
   integrationReleaseCheckNote,
   integrationReviewPresentation,
+  stepReviewAction,
+  stepReviewKey,
+  staleReviewCanRepeat,
+  STALE_REVIEW_NOTICE,
   libraryReturnTarget,
   setupJourneyActionLabel,
   setupJourneyPreconditionView,
@@ -191,7 +195,8 @@ test('integration reviews are named by their outcome', () => {
       'Install Ori REAPER Plugin'
     ),
     {
-      title: 'Install Ori REAPER Plugin?',
+      // A heading, not a question: the card is the step and its button answers.
+      title: 'Install Ori REAPER Plugin',
       description:
         'Ori downloads the reviewed 0.5.0 release from johnjallday/reaper-plugin, checks its fingerprint, and installs it. Nothing runs until you enable it.',
       confirm: 'Install'
@@ -204,18 +209,31 @@ test('integration reviews are named by their outcome', () => {
   );
   assert.equal(
     integrationReviewPresentation({ commit_action: 'install', integration }).title,
-    'Install this plugin?'
+    'Install this plugin'
   );
   const enable = integrationReviewPresentation({ commit_action: 'enable', integration });
-  assert.equal(enable.title, 'Enable this plugin?');
+  assert.equal(enable.title, 'Enable this plugin');
   assert.equal(enable.confirm, 'Enable');
   for (const review of [
     { commit_action: 'update', integration },
     { commit_action: 'install', integration: { ...integration, replacement_required: true } }
   ]) {
     const replace = integrationReviewPresentation(review, 'Install Ori REAPER Plugin');
-    assert.equal(replace.title, 'Replace installed integration?');
+    assert.equal(replace.title, 'Replace installed integration');
     assert.equal(replace.confirm, 'Replace with reviewed version');
+  }
+  // No card carries an expiry clock; a stale review is simply reviewed again.
+  for (const review of [
+    { commit_action: 'install', integration, expires_at: '2035-01-01T00:00:00Z' },
+    { commit_action: 'enable', integration, expires_at: '2035-01-01T00:00:00Z' },
+    { workspace_setup: { mode_label: 'File-only' }, expires_at: '2035-01-01T00:00:00Z' }
+  ]) {
+    const labels = reviewRows(review).map(([label]) => label);
+    assert.equal(
+      labels.some(label => /expire/i.test(label)),
+      false,
+      labels.join(', ')
+    );
   }
   const enabledAfter = review =>
     reviewRows(review).find(([label]) => label === 'Enabled after this action')[1];
@@ -292,6 +310,90 @@ test('integration reviews are named by their outcome', () => {
   }
   assert.equal(integrationReviewPresentation({ commit_action: 'install' }), null);
   assert.equal(integrationReviewPresentation({ commit_action: 'other', integration }), null);
+});
+
+// One card, one confirm: an install or enable step opens with its own review.
+test('a step opens with its review only when install or enable is its one decision', () => {
+  const offer = (...ids) => ({
+    id: 'integration',
+    actions: ids.map(id => ({ id, effect: id.startsWith('review_') ? 'review' : 'navigation' }))
+  });
+  assert.equal(stepReviewAction(offer('review_install')).id, 'review_install');
+  assert.equal(stepReviewAction(offer('review_enable', 'manage_integration')).id, 'review_enable');
+  // Replacing an installed integration, and every other review, stays behind
+  // the button that asks for it.
+  for (const step of [
+    offer('review_update'),
+    offer('review_new_project', 'review_existing_project'),
+    offer('review_create_group'),
+    offer('manage_integration'),
+    offer(),
+    // Two such offers at once is not one decision.
+    offer('review_install', 'review_enable'),
+    // The id alone is not enough: the action has to be a review.
+    { actions: [{ id: 'review_install', effect: 'navigation' }] },
+    null
+  ]) {
+    assert.equal(stepReviewAction(step), null, JSON.stringify(step));
+  }
+});
+
+test('a step review is asked for once per run, step and action', () => {
+  const journey = { run_id: 'run-1', state_revision: 4 };
+  const install = { id: 'review_install' };
+  const key = stepReviewKey(journey, { id: 'integration' }, install);
+  // A repaint, or a revision bump from the review itself, is the same visit.
+  assert.equal(
+    stepReviewKey({ ...journey, state_revision: 5 }, { id: 'integration' }, install),
+    key
+  );
+  // Another action on the same step (enable, after install) is a new review.
+  assert.notEqual(stepReviewKey(journey, { id: 'integration' }, { id: 'review_enable' }), key);
+  assert.notEqual(stepReviewKey(journey, { id: 'summary' }, install), key);
+  assert.notEqual(stepReviewKey({ run_id: 'run-2' }, { id: 'integration' }, install), key);
+});
+
+test('only a stale review is reviewed again, and never a project change', () => {
+  const stale = { reason: 'review_stale' };
+  assert.equal(staleReviewCanRepeat(stale, { actionID: 'review_install' }), true);
+  assert.equal(
+    staleReviewCanRepeat(stale, { actionID: 'review_enable', current: { busy: false } }),
+    true
+  );
+  // A project change keeps its own recovery and its entries.
+  assert.equal(
+    staleReviewCanRepeat(stale, { actionID: 'review_new_project', projectChange: true }),
+    false
+  );
+  // A journey still checking a previous change is checked first.
+  assert.equal(
+    staleReviewCanRepeat(stale, { actionID: 'review_install', current: { busy: true } }),
+    false
+  );
+  assert.equal(staleReviewCanRepeat(stale, { actionID: '' }), false);
+  assert.equal(
+    staleReviewCanRepeat({ reason: 'owner_unavailable' }, { actionID: 'review_install' }),
+    false
+  );
+  assert.equal(staleReviewCanRepeat(null, { actionID: 'review_install' }), false);
+  assert.equal(STALE_REVIEW_NOTICE, 'This review expired, so here it is again.');
+});
+
+// The pieces that need a page are pinned by reading the module: the card has
+// no Back when it is the step's own review, and no clock anywhere.
+test('the step-review card has one button and no expiry clock', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('./setup-journey.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /Consent expires/);
+  assert.match(source, /if \(!stepsOwn\) \{\s*const cancel = makeText\('button'/);
+  // The review opens once per visit and is reset when the step is revisited or
+  // a commit moves the journey on.
+  assert.match(source, /if \(state\.stepReview\?\.key === key\) return;/);
+  assert.match(source, /Coming back to a step is a new visit[\s\S]{0,80}state\.stepReview = null;/);
+  assert.match(
+    source,
+    /reviewAction\(reviewAgain\.actionID, reviewAgain\.input, \{ notice: STALE_REVIEW_NOTICE \}\)/
+  );
 });
 
 test('installation and enablement never imply verified release provenance', () => {

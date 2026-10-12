@@ -250,14 +250,11 @@ for (const [index, song] of ['First Song', 'Second Song'].entries()) {
     await expect(review).toContainText(TEMPLATE_META);
     await expect(review).toContainText(`${COORDINATOR} · already staffed on the group`);
     if (index === 0) await evidence(page, '06-song-review');
-    const placement = page.waitForResponse(
-      response =>
-        new URL(response.url()).pathname === '/api/workspaces' &&
-        response.request().method() === 'POST' &&
-        response.request().postDataJSON()?.group_requirement_review === true
+    // One card, one confirm: the placement was reviewed as Review was shown and
+    // the card states it; the one Create button commits.
+    await expect(creator.locator('#workspaceReviewReadiness')).toContainText(
+      'Reviewed destination:'
     );
-    await creator.locator('#createFolderBtn').click();
-    expect((await placement).ok()).toBeTruthy();
     const commit = page.waitForResponse(
       response =>
         new URL(response.url()).pathname === '/api/workspaces' &&
