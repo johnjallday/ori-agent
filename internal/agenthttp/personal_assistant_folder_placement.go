@@ -80,10 +80,8 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 		return ctx, false
 	}
 	subject := turn.projection.Subject
-	choice := func(message string, options []folderPlacementOption) (context.Context, bool) {
-		orihttp.WriteJSON(w, map[string]any{"folder_placement_choice": map[string]any{
-			"candidate_id": candidateID, "subject": preview.Subject.Name, "message": message, "options": options,
-		}})
+	choice := func(message string, options []folderPlacementOption, actions ...HomeAction) (context.Context, bool) {
+		writeFolderPlacementChoice(w, candidateID, preview.Subject.Name, message, options, actions)
 		return ctx, false
 	}
 	createOption := folderPlacementOption{Operation: personalassistant.FolderOperationCreate, Label: "Review a separate project"}
@@ -121,6 +119,14 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 	// Resolve the exact selected destination before allocating any offer.
 	selected, err := previewer.PreviewReview(bound, target, selectionID, candidateID)
 	if err != nil || selected.DestinationStatus == "unavailable" {
+		if err == nil {
+			// The destination is missing because its integration is not set
+			// up: say which, and open its guided setup instead of offering the
+			// same review again.
+			if message, actions, ok := h.folderDestinationBlockedChoice(ctx, turn.userID, placementBlocker(selected, preview, operation)); ok {
+				return choice(message, nil, actions...)
+			}
+		}
 		return choice("That destination is not compatible or is unavailable. No setup has been prepared there.", []folderPlacementOption{createOption})
 	}
 	// This exact folder may already be a project. Point at it rather than

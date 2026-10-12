@@ -25,6 +25,12 @@ import (
 // Home cannot be read.
 var ErrPortfolioSetupUnavailable = errors.New("collection setup is unavailable")
 
+// ErrPortfolioHomeTemplateNotReady is the one ErrPortfolioSetupUnavailable the
+// user can clear: the provider's Home template is not in the catalog, or its
+// source is not ready, which is what an uninstalled, disabled or unloadable
+// provider plugin looks like. A catalog that cannot be read at all is not it.
+var ErrPortfolioHomeTemplateNotReady = errors.New("the reviewed Home template is missing or not ready")
+
 // PortfolioHomeReview is what reviewing the provider's Home template disclosed.
 type PortfolioHomeReview struct {
 	GroupTemplateID string
@@ -50,8 +56,11 @@ func (h *Handler) portfolioHomeTemplate(ctx context.Context, providerPluginID st
 			matches = append(matches, entry)
 		}
 	}
+	if len(matches) == 0 {
+		return groupTemplateView{}, fmt.Errorf("%w: %w", ErrPortfolioSetupUnavailable, ErrPortfolioHomeTemplateNotReady)
+	}
 	if len(matches) != 1 || matches[0].Representative == nil {
-		return groupTemplateView{}, fmt.Errorf("%w: the reviewed Home template is missing or ambiguous", ErrPortfolioSetupUnavailable)
+		return groupTemplateView{}, fmt.Errorf("%w: the reviewed Home template is ambiguous or has no representative", ErrPortfolioSetupUnavailable)
 	}
 	return matches[0], nil
 }

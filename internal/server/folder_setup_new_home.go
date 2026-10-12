@@ -5,18 +5,30 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// errHomeTemplateNotReady is newHomeDestination's answer when the provider's
+// Home template is missing or not ready, which is what an uninstalled or
+// disabled provider plugin looks like. It is still errSetupUnavailable to every
+// caller that only asks whether setup is possible.
+var errHomeTemplateNotReady = fmt.Errorf("%w: the provider's Home template is not ready", errSetupUnavailable)
 
 func (h *folderSetupHost) newHomeDestination(ctx context.Context, userID string, provider reviewedintegration.HomeProvider) (*personalassistant.FolderSetupDestination, error) {
 	if h == nil || h.builder == nil || h.builder.sessionHandler == nil {
 		return nil, errSetupUnavailable
 	}
 	entry, err := h.builder.sessionHandler.PortfolioHomeTemplate(ctx, provider.PluginID)
+	if errors.Is(err, sessionhttp.ErrPortfolioHomeTemplateNotReady) {
+		return nil, errHomeTemplateNotReady
+	}
 	if err != nil || entry.Representative == nil || entry.Representative.AssistantProgram == nil || entry.Representative.ProgramHomeOwner == nil {
 		return nil, errSetupUnavailable
 	}
