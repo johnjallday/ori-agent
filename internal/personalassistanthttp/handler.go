@@ -119,6 +119,7 @@ type Handler struct {
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
 	onHired                    func()
+	operations                 func() personalassistant.SourceAvailability
 }
 
 // NewHandler constructs a personal-assistant HTTP handler.
@@ -233,7 +234,21 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	personalassistant.RecordStateViewed(projection)
+	if h.operations != nil && projection != nil &&
+		(projection.State == personalassistant.APIStateActive || projection.State == personalassistant.APIStatePaused) {
+		operations := h.operations()
+		projection.Availability.Operations = &operations
+	}
 	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
+// SetOperationsAvailability wires the host's answer to "can the assistant
+// operate the app right now". The drawer already reads this status, so the
+// answer costs no extra request. It reports a capability and grants nothing.
+func (h *Handler) SetOperationsAvailability(fn func() personalassistant.SourceAvailability) {
+	if h != nil {
+		h.operations = fn
+	}
 }
 
 // GetToday handles GET /api/personal-assistant/today.

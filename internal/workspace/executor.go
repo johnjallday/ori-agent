@@ -321,6 +321,9 @@ func (te *TaskExecutor) reconcileTasksAtBoot() {
 						continue
 					}
 					task.StartedAt = nil
+					// An assistant operation's start that was running here
+					// will never record an execution now.
+					abandonOperationRun(task)
 					resetCount++
 				case TaskStatusAssigned:
 					if !holdBacklog {

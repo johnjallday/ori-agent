@@ -16,6 +16,9 @@ function loadController(overrides = {}) {
     querySelectorAll() {
       return [];
     },
+    createElement(tagName) {
+      return { tagName, value: '', textContent: '' };
+    },
     addEventListener() {}
   };
   const window = {};
@@ -490,4 +493,269 @@ test('workflow auto-save payload routes output contract to final step only', () 
     JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 1, 2, true)),
     JSON.stringify(autoSaveData)
   );
+});
+
+test('a named agent instance is added to the assignment list instead of becoming no agent', () => {
+  const { Controller, elements } = loadController();
+  const controller = new Controller();
+  const added = [];
+  const select = {
+    options: [
+      { value: '', textContent: '-- No agent (manual task) --' },
+      { value: 'node:Mixer-node-1', textContent: 'Mixer' }
+    ],
+    appendChild(option) {
+      added.push(option);
+      this.options.push(option);
+    }
+  };
+  elements.set('taskModalAssignment', select);
+
+  // An instance the app-wide list already offers is left alone.
+  assert.equal(controller.ensureAssignmentOption('node:Mixer-node-1', 'Mixer'), true);
+  assert.equal(added.length, 0);
+  // An instance with another node is added with its own label.
+  assert.equal(controller.ensureAssignmentOption('node:Mixer-node-2', 'Mixer'), true);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].value, 'node:Mixer-node-2');
+  assert.equal(added[0].textContent, 'Mixer');
+  // Asking again adds nothing; an empty value is never an option.
+  assert.equal(controller.ensureAssignmentOption('node:Mixer-node-2', 'Mixer'), true);
+  assert.equal(added.length, 1);
+  assert.equal(controller.ensureAssignmentOption('', 'Nobody'), false);
+  // The form still reads the agent's name back from the node on save.
+  assert.equal(controller.parseAssignmentValue('node:Mixer-node-2').to, 'Mixer');
+  assert.equal(controller.parseAssignmentValue('node:Mixer-node-2').assignedNodeId, 'Mixer-node-2');
+});
+
+test('the save callback receives what was saved, and callers that ignore it still work', async () => {
+  const { Controller } = loadController();
+  const controller = new Controller();
+  // Closing the form touches the page; this test is about the callback.
+  controller.close = () => true;
+  const received = [];
+  controller.onSaveCallback = async payload => {
+    received.push(payload);
+  };
+  controller.workspaceId = 'ws-1';
+  await controller.finalizeSuccessfulSave('task:created', { task: { id: 'task-9', to: 'Mixer' } });
+  assert.equal(received.length, 1);
+  assert.equal(received[0].task.id, 'task-9');
+
+  let called = 0;
+  controller.onSaveCallback = () => {
+    called += 1;
+  };
+  await controller.finalizeSuccessfulSave('task:created');
+  assert.equal(called, 1);
+});
+
+// ---- saving a draft the personal assistant prepared ----
+
+/** A manual-mode form, ready to save one plain task. */
+function loadSavingForm({ respond, schedule = { schedule_enabled: false }, inputs = [] } = {}) {
+  const calls = [];
+  const toasts = [];
+  const { Controller, elements } = loadController({
+    console: { ...console, error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      calls.push({ url, method: options?.method, body });
+      const reply = respond(body, calls.length);
+      return {
+        ok: reply.status < 400,
+        status: reply.status,
+        json: async () => reply.body,
+        text: async () => JSON.stringify(reply.body)
+      };
+    }
+  });
+  const controller = new Controller();
+  controller.workspaceId = 'ws-album';
+  controller.showToast = (message, kind) => toasts.push({ message, kind });
+  controller.getReferenceURLValue = () => '';
+  controller.getSelectedInputRefs = () => inputs;
+  controller.resolveInputRefs = refs => refs;
+  controller.collectSubtasks = () => ({ subtasks: [], invalidInput: null });
+  controller.getScheduleData = () => schedule;
+  controller.getAutoSaveData = () => ({});
+  controller._economyRefusal = async () => null;
+  controller.announceEconomyCharge = () => {};
+  controller._reportUploadFailures = () => {};
+  controller._safeAttachUploads = async () => {};
+  controller._clearSubtaskGraphErrors = () => {};
+  const saved = [];
+  controller.finalizeSuccessfulSave = async (_event, payload) => saved.push(payload);
+  elements.set('taskModalDescription', { value: 'Bounce the stems at 48k', focus() {} });
+  elements.set('taskModalDetails', { value: 'Export stems for mastering.' });
+  elements.set('taskModalPriority', { value: '3' });
+  elements.set('taskModalAssignment', { value: 'node:Engineer-node-1' });
+  return { controller, calls, toasts, saved };
+}
+
+test('a prepared draft is saved once by the form, naming its operation', async () => {
+  const created = {
+    id: 'task-9',
+    to: 'Engineer',
+    description: 'Bounce the stems at 48k',
+    assistant_operation_id: 'op-task'
+  };
+  const { controller, calls, saved } = loadSavingForm({
+    respond: () => ({ status: 201, body: { success: true, task: created } })
+  });
+  controller.assistantOperation = controller.normalizeAssistantOperation({
+    id: 'op-task',
+    revision: 2
+  });
+  await controller.save();
+
+  assert.equal(calls.length, 1, 'the form is the only create owner');
+  assert.equal(calls[0].url, '/api/orchestration/tasks');
+  assert.equal(calls[0].method, 'POST');
+  // The human's edits are what is sent, with the operation and its revision.
+  assert.equal(calls[0].body.description, 'Bounce the stems at 48k');
+  assert.equal(calls[0].body.to, 'Engineer');
+  assert.equal(calls[0].body.assigned_node_id, 'Engineer-node-1');
+  assert.equal(calls[0].body.assistant_operation_id, 'op-task');
+  assert.equal(calls[0].body.assistant_draft_revision, 2);
+  // The save receipt is the server's own record of the task.
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].task.id, 'task-9');
+  assert.equal(saved[0].task.assistant_operation_id, 'op-task');
+});
+
+test('an ordinary save, a scheduled one and one with inputs name no operation', async () => {
+  const respond = body => ({ status: 201, body: { task: { id: 'task-1', ...body } } });
+  const ordinary = loadSavingForm({ respond });
+  await ordinary.controller.save();
+  assert.equal('assistant_operation_id' in ordinary.calls[0].body, false);
+  assert.equal('assistant_draft_revision' in ordinary.calls[0].body, false);
+
+  for (const options of [
+    { schedule: { schedule_enabled: true, schedule: { type: 'daily', time: '09:00' } } },
+    { schedule: { schedule_enabled: false, schedule: { type: 'daily', time: '09:00' } } },
+    { inputs: ['other-task'] }
+  ]) {
+    const form = loadSavingForm({ respond, ...options });
+    form.controller.assistantOperation = { id: 'op-task', revision: 1 };
+    await form.controller.save();
+    assert.equal(form.calls.length, 1);
+    assert.equal(
+      'assistant_operation_id' in form.calls[0].body,
+      false,
+      "more than one plain task is the user's own task"
+    );
+  }
+});
+
+test('a malformed operation reference is not a reference', () => {
+  const { Controller } = loadController();
+  const controller = new Controller();
+  for (const value of [
+    null,
+    {},
+    { id: 'op-task' },
+    { id: '', revision: 1 },
+    { id: 'op-task', revision: 0 },
+    { id: 'op-task', revision: 1.5 },
+    { id: 'op-task', revision: 'x' }
+  ]) {
+    assert.equal(controller.normalizeAssistantOperation(value), null);
+  }
+  const normalized = controller.normalizeAssistantOperation({ id: ' op-task ', revision: 3 });
+  assert.equal(normalized.id, 'op-task');
+  assert.equal(normalized.revision, 3);
+});
+
+test('a refused assignee keeps the form bound so the corrected save is still the reviewed one', async () => {
+  const { controller, calls, toasts, saved } = loadSavingForm({
+    respond: (_body, n) =>
+      n === 1
+        ? {
+            status: 409,
+            body: {
+              code: 'operation_assignee',
+              message:
+                'That agent is not in this workspace. Choose an agent from this workspace, then save again.'
+            }
+          }
+        : { status: 201, body: { task: { id: 'task-9', assistant_operation_id: 'op-task' } } }
+  });
+  controller.assistantOperation = { id: 'op-task', revision: 1 };
+  await controller.save();
+  assert.equal(saved.length, 0, 'nothing was created');
+  assert.match(toasts[0].message, /not in this workspace/);
+  assert.doesNotMatch(toasts[0].message, /your own task/);
+  assert.equal(controller.assistantOperation.id, 'op-task');
+
+  await controller.save();
+  assert.equal(calls[1].body.assistant_operation_id, 'op-task');
+  assert.equal(saved.length, 1);
+});
+
+test('an ended request is said plainly, and only the next Save makes an ordinary task', async () => {
+  for (const code of [
+    'operation_expired',
+    'operation_invalidated',
+    'operation_not_found',
+    'operation_ended',
+    'operation_conflict',
+    'operation_invalid',
+    'operation_not_plain'
+  ]) {
+    const { controller, calls, toasts, saved } = loadSavingForm({
+      respond: (body, n) =>
+        n === 1
+          ? {
+              status: 410,
+              body: { code, message: "The assistant's request ran out of time. Nothing was saved." }
+            }
+          : { status: 201, body: { task: { id: 'task-1', description: body.description } } }
+    });
+    controller.assistantOperation = { id: 'op-task', revision: 1 };
+    await controller.save();
+    // The refused save created nothing and was not retried by itself.
+    assert.equal(calls.length, 1, code);
+    assert.equal(saved.length, 0, code);
+    assert.equal(controller.assistantOperation, null, code);
+    assert.equal(toasts.length, 1, code);
+    assert.equal(toasts[0].kind, 'error');
+    assert.match(
+      toasts[0].message,
+      /Nothing was saved\. Save again to create this as your own task\./
+    );
+
+    // The user's own second click is an ordinary create.
+    await controller.save();
+    assert.equal(calls.length, 2, code);
+    assert.equal('assistant_operation_id' in calls[1].body, false, code);
+    assert.equal(saved.length, 1, code);
+  }
+});
+
+test('a transient operation error keeps the binding, and other errors are untouched', async () => {
+  const { Controller } = loadController();
+  const controller = new Controller();
+  controller.assistantOperation = { id: 'op-task', revision: 1 };
+  for (const code of ['operation_unavailable', 'operation_create_in_flight']) {
+    const message = controller.explainAssistantOperationRefusal({ code, message: 'Try again.' });
+    assert.equal(message, 'Try again.');
+    assert.equal(controller.assistantOperation.id, 'op-task');
+  }
+  assert.equal(
+    controller.explainAssistantOperationRefusal(new Error('description is required')),
+    ''
+  );
+  assert.equal(controller.explainAssistantOperationRefusal({ code: 'bad_request' }), '');
+  assert.equal(controller.assistantOperation.id, 'op-task');
+
+  // The server's code survives parsing, so the form can tell these apart.
+  const parsed = await controller._parseTaskApiError(
+    {
+      text: async () => JSON.stringify({ code: 'operation_expired', message: 'Ran out of time.' })
+    },
+    'Failed to create task'
+  );
+  assert.equal(parsed.code, 'operation_expired');
+  assert.equal(parsed.message, 'Ran out of time.');
 });

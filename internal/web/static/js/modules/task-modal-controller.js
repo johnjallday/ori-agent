@@ -10,6 +10,7 @@ class TaskModalController {
     this.editingTaskId = null;
     this.workspaceId = null;
     this.onSaveCallback = null;
+    this.assistantOperation = null;
     this.initialFormState = null;
     this.initialized = false;
     this.isSaving = false;
@@ -363,8 +364,81 @@ class TaskModalController {
     }
 
     if (typeof modalContext.onSaveCallback === 'function') {
-      await modalContext.onSaveCallback();
+      // The callback receives what was saved (for a create, `{ task }` with
+      // the server's own record). Callers that take no argument are unaffected.
+      await modalContext.onSaveCallback(eventPayload);
     }
+  }
+
+  /** A draft's operation reference, or null when it is not a usable one. */
+  normalizeAssistantOperation(value) {
+    const id = String((value && value.id) || '').trim();
+    const revision = Number(value && value.revision);
+    if (!id || !Number.isInteger(revision) || revision <= 0) return null;
+    return { id, revision };
+  }
+
+  /**
+   * The fields that bind a create to the assistant operation that prepared the
+   * draft. Only one ordinary task is bound: with a schedule or input tasks the
+   * save is the user's own task and names no operation, exactly as the server
+   * requires.
+   */
+  assistantOperationFields(scheduleData, inputTaskIds) {
+    const operation = this.assistantOperation;
+    if (!operation) return {};
+    const scheduled = Boolean(
+      scheduleData && (scheduleData.schedule_enabled || scheduleData.schedule)
+    );
+    const hasInputs = Array.isArray(inputTaskIds) && inputTaskIds.length > 0;
+    if (scheduled || hasInputs) return {};
+    return {
+      assistant_operation_id: operation.id,
+      assistant_draft_revision: operation.revision
+    };
+  }
+
+  /**
+   * A save the server refused because of its operation. When the assistant's
+   * request has ended there is nothing left to bind to: the form lets go of it
+   * and says so, and the user's next Save creates an ordinary task of their
+   * own. Returns the message to show, or '' when the error is not about the
+   * operation.
+   */
+  explainAssistantOperationRefusal(error) {
+    const code = String((error && error.code) || '');
+    if (!code.startsWith('operation_')) return '';
+    const message = String((error && error.message) || '').trim();
+    const ended = [
+      'operation_not_found',
+      'operation_expired',
+      'operation_invalidated',
+      'operation_ended',
+      'operation_conflict',
+      'operation_invalid',
+      'operation_not_plain'
+    ];
+    if (!ended.includes(code)) return message || 'Nothing was saved. Try again.';
+    this.assistantOperation = null;
+    return `${message || "The assistant's request has ended. Nothing was saved."} Save again to create this as your own task.`;
+  }
+
+  /**
+   * Make sure the assignment list can hold a specific agent instance. The list
+   * is built from the app-wide agents with a guessed node; an instance whose
+   * node differs would otherwise silently become "no agent" when selected.
+   * Returns whether the list now has that exact value.
+   */
+  ensureAssignmentOption(value, label) {
+    const selectEl = document.getElementById('taskModalAssignment');
+    const wanted = String(value || '').trim();
+    if (!selectEl || !wanted) return false;
+    if (Array.from(selectEl.options || []).some(option => option.value === wanted)) return true;
+    const option = document.createElement('option');
+    option.value = wanted;
+    option.textContent = String(label || '').trim() || wanted;
+    selectEl.appendChild(option);
+    return true;
   }
 
   getModalRoot() {
@@ -840,6 +914,9 @@ class TaskModalController {
     this.onSaveCallback = onSave;
     this.initialFormState = null;
     this.currentTask = null;
+    // Set only when the personal assistant prepared this draft. The save then
+    // names that operation, so the server binds the one task it creates.
+    this.assistantOperation = this.normalizeAssistantOperation(createOptions.assistantOperation);
     this.resetResultSection();
 
     const modal = document.getElementById('taskModal');
@@ -915,6 +992,11 @@ class TaskModalController {
       this.setMainInputTaskRefs(draftMainInputRefs);
     }
     this.refreshSubtaskInputOptions();
+    // A caller that names the exact instance (with its label) gets that
+    // instance in the list, so the proposed assignment is what is shown.
+    if (draftAssignmentValue && createOptions.draftAssignmentLabel) {
+      this.ensureAssignmentOption(draftAssignmentValue, createOptions.draftAssignmentLabel);
+    }
     if (assignmentInput) assignmentInput.value = draftAssignmentValue;
 
     // Reset subtasks
@@ -962,6 +1044,7 @@ class TaskModalController {
     this.editingTaskId = task.id;
     this.workspaceId = task.workspace_id;
     this.onSaveCallback = onSave;
+    this.assistantOperation = null;
     this.initialFormState = null;
     this.currentTask = task; // Store for auto edit mode
     this.currentResultFollowUpPending = false;
@@ -1142,6 +1225,7 @@ class TaskModalController {
     this.editingTaskId = null;
     this.workspaceId = null;
     this.onSaveCallback = null;
+    this.assistantOperation = null;
     this.initialFormState = null;
     this.currentTask = null;
     this.resetResultSection();
@@ -2690,7 +2774,8 @@ class TaskModalController {
           assigned_node_id: assignedNodeId || undefined,
           input_task_ids: mainInputIds,
           ...scheduleData,
-          ...autoSaveData
+          ...autoSaveData,
+          ...this.assistantOperationFields(scheduleData, mainInputIds)
         });
 
         await this._safeAttachUploads(createdTask?.id);
@@ -2725,7 +2810,10 @@ class TaskModalController {
       }
       console.error('Failed to save task:', error);
       const issues = Array.isArray(error?.issues) ? error.issues : [];
-      if (issues.length > 0) {
+      const operationRefusal = this.explainAssistantOperationRefusal(error);
+      if (operationRefusal) {
+        this.showToast(operationRefusal, 'error');
+      } else if (issues.length > 0) {
         this._applySubtaskGraphErrors(issues);
         const summary = issues[0]?.message || error.message || 'Workflow has invalid dependencies';
         this.showToast(summary, 'error');
@@ -2859,6 +2947,9 @@ class TaskModalController {
     const error = new Error(message || fallbackMessage);
     if (parsed && Array.isArray(parsed.issues)) {
       error.issues = parsed.issues;
+    }
+    if (parsed && typeof parsed.code === 'string') {
+      error.code = parsed.code;
     }
     return error;
   }

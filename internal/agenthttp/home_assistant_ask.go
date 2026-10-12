@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/assistantdiscovery"
+	"github.com/johnjallday/ori-agent/internal/assistantops"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -97,6 +99,9 @@ type HomeAssistantAskRequest struct {
 	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
 	// Supplied only by the user's exact lookup-review submission, never tools.
 	ResearchApproval *assistantdiscovery.Review `json:"research_approval,omitempty"`
+	// Operation names the asking tab and whether it chose to watch. It scopes
+	// command delivery for an operation this turn may request; it grants nothing.
+	Operation *HomeAssistantOperationRef `json:"operation,omitempty"`
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
@@ -142,6 +147,15 @@ type HomeAssistantAskResponse struct {
 	ResearchFolderContext *HomeAssistantFolderRef        `json:"research_folder_context,omitempty"`
 	ResearchResult        *assistantdiscovery.Result     `json:"research_result,omitempty"`
 	ResearchCapability    *AssistantResearchCapability   `json:"research_capability,omitempty"`
+	// Operation is an operation this stored turn requested, as the asking tab
+	// may see it. It reports a request, never that a page changed.
+	Operation *assistantops.Snapshot `json:"operation,omitempty"`
+	// OperationError says why a requested operation was not recorded, so the
+	// drawer never shows a pending step that does not exist.
+	OperationError string `json:"operation_error,omitempty"`
+	// OperationCapability is set on a panel turn so the drawer can offer or
+	// explain the Watch control.
+	OperationCapability *AssistantOperationCapability `json:"operation_capability,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -217,7 +231,11 @@ type HomeAssistantAskHandler struct {
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.
 	Drafts PersonalAssistantDraftSaver
-	UserID string
+	// Operations records what the assistant asked Ori to do in the app and what
+	// the watching tab observed. Nil registers no operation tool and loads no
+	// operating skill.
+	Operations *assistantops.Service
+	UserID     string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool
@@ -485,9 +503,17 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{Response: decline, Intent: intent, Identity: identity}
 	}
 
+	// Whether this turn may operate the app is decided once, from the user's
+	// own current words, before the legacy confirmations are consulted.
+	operations := h.operationTurn(prompt, req.Operation, conversation, workContext, scope)
+
 	// Explicit, supported mutation request: ask for confirmation before doing
 	// anything (FR #24). Execution happens only on a follow-up with ConfirmedAction.
-	if conf := h.detectHomeMutationRequest(prompt); conf != nil {
+	// One request has one owner: where Ori can prepare a task in the real task
+	// form, "create a task for Mixer…" is that operation's, not also the
+	// one-click create that would hand the task to the entry agent unreviewed.
+	// Every other confirmation keeps its request.
+	if conf := h.detectHomeMutationRequest(prompt); conf != nil && !operations.owns(conf) {
 		conf = h.buildInsteadOfCreate(ctx, conf, prompt, identity)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
 		return HomeAssistantAskResponse{
@@ -506,6 +532,19 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		defer func() { proposal.finalize(&response) }()
 	}
 	if isAssistantWorkspaceReviewRequest(prompt) && conversation != nil {
+		intent = homeAssistantConversationIntent.Key
+	}
+
+	// An explicit request to operate the app is answered in the conversation,
+	// with the named operation tools and the operating skill for this turn
+	// only. Nothing is recorded until the turn is stored.
+	if scope != nil && conversation != nil {
+		capability := h.operationCapability()
+		defer func() { response.OperationCapability = &capability }()
+	}
+	if operations != nil {
+		ctx = context.WithValue(ctx, operationTurnKey{}, operations)
+		defer func() { operations.finalize(ctx, &response) }()
 		intent = homeAssistantConversationIntent.Key
 	}
 
@@ -709,11 +748,23 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		}
 		registry = &workspaceProposalRegistry{base: registry, turn: proposal}
 	}
+	operations := operationTurnFromContext(ctx)
+	if operations != nil {
+		registry = &operationRegistry{base: registry, turn: operations}
+	}
 	// A reader is offered only on a path that can run it; the prompt then says
 	// exactly which readers exist, so no path claims a read it cannot make.
 	var tools []llm.Tool
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()
+	}
+	// The operating skill is loaded only beside the operations it names, and
+	// it travels as the request's system prompt: every provider sends that,
+	// while the Anthropic API provider drops system-role messages. Tools must
+	// never reach a model without the rules for using them.
+	operatingSkill := ""
+	if operations != nil {
+		operatingSkill = operations.prompt(tools)
 	}
 	for _, tool := range tools {
 		readers, files = readers || isReader(tool.Name), files || isFileReader(tool.Name)
@@ -750,10 +801,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			return "", err
 		}
 		resp, chatErr := provider.Chat(ctx, llm.ChatRequest{
-			Model:       model,
-			Messages:    conversation,
-			Tools:       tools,
-			Temperature: turn.temperature,
+			Model:        model,
+			SystemPrompt: operatingSkill,
+			Messages:     conversation,
+			Tools:        tools,
+			Temperature:  turn.temperature,
 		})
 		if chatErr != nil {
 			return "", chatErr
@@ -799,6 +851,14 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			}
 		}
 		conversation = append(conversation, llm.Message{Role: llm.RoleAssistant, Content: resp.Content, ToolCalls: calls})
+		// An operation is validated before anything in its batch acts: mixed
+		// with any other call, the whole batch is refused and nothing runs.
+		if len(calls) > 1 && slices.ContainsFunc(calls, func(call llm.ToolCall) bool { return assistantops.IsTool(call.Name) }) {
+			for _, tc := range calls {
+				conversation = append(conversation, llm.NewToolMessage(tc.ID, "ERROR: an Ori operation must be the only tool call in its step. Nothing in this step was run; read first, then call the operation by itself."))
+			}
+			continue
+		}
 		for i, tc := range calls {
 			result, toolErr := registry.Execute(ctx, resp.ToolCalls[i].Name, resp.ToolCalls[i].Arguments)
 			if toolErr != nil {
@@ -816,7 +876,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		// present what it managed to read as the whole picture.
 		conversation[0].Content += readerRoundsExhausted
 	}
-	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
+	// The closing reply of an operating turn still needs the skill's rules for
+	// reporting what Ori returned.
+	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, SystemPrompt: operatingSkill, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr
 	}

@@ -140,6 +140,20 @@ class DemoProviderTests(unittest.TestCase):
         self.assertLess(len(reply), 6000, "canonical message bound")
         self.assertEqual(reply.count("Section "), 20)
 
+    def test_workspace_request_fixture_repeats_the_stated_purpose_and_recognizes_no_subject(self):
+        turn = "User request: Build a workspace for research about ok go\n\n(classified intent: workspace_create)\n\nsnapshot"
+        proposal = demo.requested_workspace(turn)
+        self.assertEqual(proposal["name"], "Research about ok go")
+        self.assertTrue(proposal["description"].startswith("Goal: research about ok go. "))
+        # Another purpose gets the same words around it: nothing is keyed on a subject.
+        other = demo.requested_workspace("Build a workspace to track the tour.")
+        self.assertEqual(other["name"], "Track the tour")
+        self.assertEqual(other["description"].replace("track the tour", "*"),
+                         proposal["description"].replace("research about ok go", "*"))
+        for not_one in ["What should Mixer do next?", "How do I build a workspace?", "Build a workspace",
+                        "User request: Create a task for Engineer\n\n(classified intent: general_task)"]:
+            self.assertIsNone(demo.requested_workspace(not_one))
+
     def test_current_user_projection_not_history(self):
         projection = demo.workspace_projection([message("Old"), message("Current")])
         self.assertEqual(projection["subject"]["name"], "Current")
@@ -178,6 +192,143 @@ class DemoProviderTests(unittest.TestCase):
         self.assertEqual((user["content"].split("\n\n##", 1)[0], results), ("Hi", ["{}"]))
         with self.assertRaises(ValueError):
             demo.current_turn(turn + [{"role": "tool", "content": "{}"}, {"role": "system", "content": "x"}, {"role": "tool", "content": "{}"}])
+
+    def test_operate_fixture_acts_only_when_offered_and_repeats_only_what_ori_returned(self):
+        tool = [{"function": {"name": "home_workspaces"}}, {"function": {"name": demo.OPERATE_TOOL}}]
+        ask = "Open the Album-1 operate fixture workspace and select Mixer"
+        # The user's own words name the target; Ori resolves it. No ID is invented.
+        self.assertEqual(demo.operate_step(ask, [], tool), {"tool": demo.OPERATE_TOOL, "arguments": {
+            "workspace_name": "Album-1 operate fixture", "agent_name": "Mixer"}})
+        self.assertEqual(demo.operate_step("Please open my Thesis workspace.", [], tool)["arguments"],
+                         {"workspace_name": "Thesis"})
+        self.assertEqual(demo.operate_step("Select the Mixer agent", [], tool)["arguments"], {"agent_name": "Mixer"})
+        # A task draft: the user's words become the title and brief; the
+        # workspace and agent are named, never resolved by the stand-in.
+        both = tool + [{"function": {"name": demo.OPERATE_TASK_TOOL}}]
+        request = "Create a task for Engineer in the Album-1 task fixture workspace to bounce the stems"
+        self.assertEqual(demo.operate_step(request, [], both), {"tool": demo.OPERATE_TASK_TOOL, "arguments": {
+            "title": "Bounce the stems", "brief": request, "agent_name": "Engineer",
+            "workspace_name": "Album-1 task fixture"}})
+        self.assertEqual(demo.operate_step("Create a task for Mixer to mix the chorus.", [], both)["arguments"],
+                         {"title": "Mix the chorus", "brief": "Create a task for Mixer to mix the chorus.", "agent_name": "Mixer"})
+        # No agent named: the stand-in does not pick one.
+        self.assertNotIn("agent_name", demo.operate_step("Create a task to tidy the session", [], both)["arguments"])
+        # Without the task tool the same words prepare nothing.
+        self.assertIsNone(demo.operate_step(request, [], tool))
+
+        def prepared(result):
+            return demo.operate_step(request, [json.dumps(result)], both)["answer"]
+
+        form = prepared({"status": "prepared", "delivery": "watching", "agent": {"name": "Engineer"},
+                         "draft": {"title": "Bounce the stems"}})
+        self.assertEqual(form, "A draft for Engineer is ready in the task form: “Bounce the stems”. "
+                               "Nothing is created until you save it.")
+        button = prepared({"status": "prepared", "delivery": "open_button", "agent": {"name": "Engineer"},
+                           "draft": {"title": "Bounce the stems"}})
+        self.assertIn("behind Ori's Open draft button", button)
+        # A draft is never reported as a task that exists.
+        for text in (form, button):
+            for claim in ("created a task", "task was created", "assigned", "started", "is running"):
+                self.assertNotIn(claim, text)
+        self.assertIn("agent_not_named", prepared({"status": "choose", "reason": "agent_not_named",
+                                                   "choices": [{"name": "Mixer"}, {"name": "Engineer"}]}))
+        self.assertIn("Nothing was prepared.", prepared({"status": "not_found", "reason": "agent_not_in_workspace"}))
+        self.assertIn("Nothing was prepared.", prepared({"status": "unavailable", "reason": "secret_like_text"}))
+        # Without the tool there is no operation, whatever the words say.
+        self.assertIsNone(demo.operate_step(ask, [], [{"function": {"name": "home_workspaces"}}]))
+        self.assertIsNone(demo.operate_step(ask, [], []))
+        # Discussion is not a request, even with the tool on offer.
+        for words in ["What do you think about the Album-1 workspace?", "Hello there", "Don't open Album-1"]:
+            self.assertIsNone(demo.operate_step(words, [], tool))
+
+        def answer(result):
+            return demo.operate_step(ask, [json.dumps(result)], tool)["answer"]
+
+        watching = answer({"status": "requested", "delivery": "watching",
+                           "workspace": {"name": "Album-1 operate fixture"}, "agent": {"name": "Mixer"}})
+        self.assertEqual(watching, "I asked Ori to open Album-1 operate fixture and select Mixer in this tab.")
+        button = answer({"status": "requested", "delivery": "open_button", "workspace": {"name": "Second"}, "agent": None})
+        self.assertEqual(button, "Ori has a button ready to open Second. Nothing moves until you choose.")
+        # A request is never reported as a page that changed.
+        for text in (watching, button):
+            for claim in ("is open", "is now open", "opened", "is selected", "selected Mixer."):
+                self.assertNotIn(claim, text)
+        choose = answer({"status": "choose", "choices": [{"name": "Second Project"}, {"name": "Second Project"}]})
+        self.assertIn("Which one do you mean? Nothing was requested.", choose)
+        missing = answer({"status": "not_found", "reason": "agent_not_in_workspace", "closest": [{"name": "Engineer"}]})
+        self.assertIn("agent_not_in_workspace", missing)
+        self.assertIn("Engineer", missing)
+        self.assertIn("Nothing was requested.", missing)
+        self.assertIn("Workspaces page", answer({"status": "unavailable", "reason": "workspace_listing_unavailable"}))
+        # A result that is not JSON is treated as unavailable, not as success.
+        self.assertIn("Nothing was requested.", demo.operate_step(ask, ["not json"], tool)["answer"])
+
+    def test_harness_audit_records_facts_about_what_ori_sent_and_none_of_the_words(self):
+        def tool(name, properties, closed=True):
+            return {"function": {"name": name, "parameters": {"type": "object", "properties": properties,
+                                                             "additionalProperties": not closed}}}
+        request = {"messages": [
+            {"role": "system", "content": "You are Atlas.\n\n# Ori skill: operate-ori (v3)\n\nUse `assistant_operate_open` or "
+                                          "`assistant_operate_prepare_task`. Saving does not start it. **Start task** is theirs."},
+            {"role": "user", "content": "Create a task for Engineer to bounce the SECRET-STEMS"}],
+            "tools": [tool("home_agents", {}), tool(demo.OPERATE_TOOL, {"workspace_id": {}, "agent_name": {}}),
+                      tool(demo.OPERATE_TASK_TOOL, {"title": {}, "brief": {}}, closed=False)]}
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            # A turn that offers no operation tool is not an operating turn.
+            demo.audit_operate_harness(state, {"messages": request["messages"], "tools": [tool("home_agents", {})]})
+            demo.audit_operate_harness(state, {})
+            self.assertFalse((state / "operate-harness.json").exists())
+
+            demo.audit_operate_harness(state, request)
+            text = (state / "operate-harness.json").read_text()
+            record = json.loads(text)
+            self.assertEqual(record["skill_version"], 3)
+            self.assertTrue(record["skill_loaded"] and record["skill_names_each_operation"]
+                            and record["skill_says_save_and_start_are_the_users"])
+            self.assertEqual(record["offered_tools"], ["assistant_operate_open", "assistant_operate_prepare_task", "home_agents"])
+            self.assertEqual(record["operations"][demo.OPERATE_TOOL], {"parameters": ["agent_name", "workspace_id"], "closed_schema": True})
+            self.assertEqual(record["operations"][demo.OPERATE_TASK_TOOL], {"parameters": ["brief", "title"], "closed_schema": False})
+            # Nothing the user or the assistant said is kept.
+            self.assertNotIn("SECRET-STEMS", text)
+            self.assertNotIn("Atlas", text)
+
+            # Tools without their skill are reported as exactly that.
+            demo.audit_operate_harness(state, {"messages": [{"role": "system", "content": "You are Atlas."}], "tools": request["tools"]})
+            bare = json.loads((state / "operate-harness.json").read_text())
+            self.assertFalse(bare["skill_loaded"] or bare["skill_names_each_operation"])
+            self.assertEqual(bare["skill_version"], 0)
+
+    def test_worker_fixture_answers_only_a_task_ori_is_running_and_decides_nothing(self):
+        run = {"messages": [{"role": "system", "content": "You are Engineer."},
+                            {"role": "user", "content": demo.WORKER_MARK + "\n\n## Task Description\n\nBounce the stems\n\n## Task Details\n\nBy Friday."}]}
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            # An assistant turn, a chat, or an empty request is not a task run.
+            for other in ({"messages": [{"role": "user", "content": "Create a task for Engineer to bounce the stems"}]},
+                          {"messages": []}, {}):
+                self.assertIsNone(demo.worker_reply(state, other))
+            self.assertFalse((state / "worker-requests.log").exists())
+
+            self.assertEqual(demo.worker_reply(state, run),
+                             {"answer": "Fixture worker result for: Bounce the stems. No file was changed."})
+            # The record counts requests and holds none of the task's words.
+            self.assertEqual((state / "worker-requests.log").read_text(), "request\n")
+
+            (state / "worker-fail").touch()
+            self.assertEqual(demo.worker_reply(state, run), {"error": "fixture worker failure"})
+            (state / "worker-fail").unlink()
+
+            # A hold ends only when the spec, or the runner's own shutdown, releases it.
+            (state / "worker-hold").touch()
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                held = pool.submit(demo.worker_reply, state, run)
+                self.assertFalse(held.done())
+                threading.Event().wait(0.2)
+                self.assertFalse(held.done())
+                (state / "worker-release").touch()
+                self.assertIn("Fixture worker result", held.result(timeout=5)["answer"])
+            self.assertEqual((state / "worker-requests.log").read_text().count("request"), 3)
 
     def test_file_fixture_walks_listing_folder_file_and_quotes_only_what_was_read(self):
         listing = json.dumps({"status": "available", "attachments": [{"attachment_id": "a1", "name": "mix.wav", "readable": "not_supported"},

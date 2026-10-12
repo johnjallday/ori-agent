@@ -335,7 +335,16 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
 	homeAssistantRouteHandler.ConversationRoute = homeAssistantAskHandler.ValidateRouteConversation
+	homeAssistantRouteHandler.OperationRequest = homeAssistantAskHandler.OperationRequestSupported
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
+	// Assistant operations ("Operate Ori"): the asking tab reads an operation
+	// and reports what it observed. None of these can create or start work.
+	mux.HandleFunc("GET /api/home-assistant/operations/capability", homeAssistantAskHandler.OperationCapabilityHandler)
+	mux.HandleFunc("GET /api/home-assistant/operations/{id}", homeAssistantAskHandler.OperationHandler)
+	mux.HandleFunc("POST /api/home-assistant/operations/{id}/ack", homeAssistantAskHandler.OperationAckHandler)
+	mux.HandleFunc("POST /api/home-assistant/operations/{id}/watch", homeAssistantAskHandler.OperationWatchHandler)
+	mux.HandleFunc("POST /api/home-assistant/operations/{id}/cancel", homeAssistantAskHandler.OperationCancelHandler)
+	mux.HandleFunc("POST /api/home-assistant/operations/{id}/start", homeAssistantAskHandler.OperationStartHandler)
 	// Review/cancel are data-only. Only Ask consumes a canonical exact approval,
 	// through the dedicated budgeted research broker; there is no URL proxy.
 	mux.HandleFunc("POST /api/home-assistant/research/review", homeAssistantAskHandler.ResearchReviewHandler)

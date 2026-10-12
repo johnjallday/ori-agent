@@ -219,7 +219,9 @@ func ProjectContinuityWorkspace(record workspacecontinuity.Record, data []byte, 
 	ws.NextMissionRunAt = nil
 	for i := range ws.Tasks {
 		task := &ws.Tasks[i]
-		task.CurrentRunID = "" // old process/run handles never resume
+		task.CurrentRunID = ""         // old process/run handles never resume
+		task.AssistantOperationID = "" // operations belong to the source installation
+		task.AssistantOperationRun = nil
 		task.NextRun = nil
 		task.WakeMacEnabled = false
 		if task.Status == TaskStatusInProgress || task.Status == TaskStatusWaitingForChoice || task.Status == TaskStatusAssigned {

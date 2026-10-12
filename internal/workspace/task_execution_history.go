@@ -36,6 +36,8 @@ func RecordTaskExecution(task *Task, status, summary string, executedAt time.Tim
 
 	task.LastRun = &startedAt
 	task.ExecutionCount++
+	// If an assistant operation launched this execution, this is its record.
+	recordOperationRun(task, startedAt)
 
 	trimmedStatus := strings.TrimSpace(status)
 	trimmedSummary := strings.TrimSpace(summary)

@@ -10483,6 +10483,12 @@
         if (draftRef && !confirmedAction) {
           payload.draft = draftRef;
         }
+        // Which tab is asking and whether it chose to watch. This scopes the
+        // delivery of an operation the turn may request; it grants nothing.
+        var operations = window.PersonalAssistantOperations;
+        if (!confirmedAction && operations && typeof operations.askRef === 'function') {
+          payload.operation = operations.askRef();
+        }
       }
 
       // One reply can be several model calls. Wait for it as long as the
@@ -10671,6 +10677,11 @@
         });
       }
       renderHomeAssistantActions(buttons);
+      // An operation this stored turn requested goes to its own owner last,
+      // once the reply is shown: a watching tab may navigate from here.
+      if (conversationRef && window.PersonalAssistantOperations?.handleReply) {
+        window.PersonalAssistantOperations.handleReply(data);
+      }
     } catch (error) {
       dashLog.debug('Home inline ask failed', { error: (error && error.message) || error });
       // Say which kind of failure it was: the wait ran out, Ori could not be

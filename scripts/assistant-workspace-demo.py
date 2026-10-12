@@ -54,6 +54,16 @@ PLAIN_DEMOS = {
                    "ORI_WORKSPACE_INTEGRATED_SANDBOX", "group6-wt-demo-integrated.log"),
     "slow_reply": ("tests/personal-assistant-workspace-slow-reply.spec.ts",
                    "ORI_WORKSPACE_SLOW_SANDBOX", "group6-wt-demo-slow-reply.log"),
+    "operate": ("tests/operate-ori-navigation.spec.ts",
+                "ORI_WORKSPACE_OPERATE_SANDBOX", "operate-ori-navigation.log"),
+    "operate_task": ("tests/operate-ori-task.spec.ts",
+                     "ORI_WORKSPACE_OPERATETASK_SANDBOX", "operate-ori-task.log"),
+    "operate_start": ("tests/operate-ori-start.spec.ts",
+                      "ORI_WORKSPACE_OPERATESTART_SANDBOX", "operate-ori-start.log"),
+    "operate_result": ("tests/operate-ori-result.spec.ts",
+                       "ORI_WORKSPACE_OPERATERESULT_SANDBOX", "operate-ori-result.log"),
+    "operate_journey": ("tests/operate-ori-journey.spec.ts",
+                        "ORI_WORKSPACE_OPERATEJOURNEY_SANDBOX", "operate-ori-journey.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -145,6 +155,167 @@ def reader_step(prompt, results, tools_offered):
     # A marker for something that was never read; Ori must remove it.
     parts.append("Not read this turn: [S9].")
     return {"answer": " ".join(parts)}
+
+
+OPERATE_TOOL = "assistant_operate_open"
+OPERATE_OPEN = re.compile(
+    r"^(?:please\s+)?(?:open|go to|take me to|show me)\s+(?:the\s+|my\s+)?(.+?)(?:\s+workspace)?"
+    r"(?:\s+and\s+(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?)?[.!]?$", re.I)
+OPERATE_SELECT = re.compile(r"^(?:please\s+)?(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?[.!]?$", re.I)
+OPERATE_TASK_TOOL = "assistant_operate_prepare_task"
+OPERATE_TASK = re.compile(
+    r"^(?:please\s+)?(?:create|prepare|draft|add|make)\s+a\s+task"
+    r"(?:\s+for\s+(?:the\s+)?(?P<agent>.+?))?(?:\s+in\s+(?:the\s+)?(?P<workspace>.+?)\s+workspace)?"
+    r"\s+to\s+(?P<what>.+?)[.!]?$", re.I)
+
+
+def operate_step(prompt, results, tools):
+    """A deterministic stand-in for a tool-using model asked to operate Ori.
+
+    It acts only when Ori offered the operation tool for this turn, names the
+    target with the user's own words and leaves resolving it to Ori. It holds no
+    workspace data. Its answer repeats only what Ori's tool returned, and never
+    says a page changed: Ori reports a request, not a view.
+    """
+    offered = {tool.get("function", {}).get("name") for tool in tools}
+    if OPERATE_TOOL not in offered:
+        return None
+    words = prompt.strip()
+
+    def parsed(text):
+        try:
+            value = json.loads(text)
+            return value if isinstance(value, dict) else {}
+        except ValueError:
+            return {}
+
+    def refused(result, nothing):
+        status = result.get("status")
+        if status == "choose":
+            names = ", ".join(str(choice.get("name")) for choice in result.get("choices", []))
+            return {"answer": "Which one do you mean: " + names + "? (" + str(result.get("reason")) + ") " + nothing}
+        if status == "not_found":
+            names = ", ".join(str(choice.get("name")) for choice in result.get("closest", []))
+            return {"answer": "I could not find that (" + str(result.get("reason")) + ")." +
+                              (" The closest are: " + names + "." if names else "") + " " + nothing}
+        return {"answer": "Ori could not prepare that (" + str(result.get("reason", "unavailable")) +
+                          "). You can do it from the app yourself. " + nothing}
+
+    task = OPERATE_TASK.match(words) if OPERATE_TASK_TOOL in offered else None
+    if task:
+        # The title and brief are the user's own words; nothing is added.
+        what = task.group("what").strip()
+        title = what[:1].upper() + what[1:]
+        if not results:
+            arguments = {"title": title, "brief": words}
+            if task.group("agent"):
+                arguments["agent_name"] = task.group("agent").strip()
+            if task.group("workspace"):
+                arguments["workspace_name"] = task.group("workspace").strip()
+            return {"tool": OPERATE_TASK_TOOL, "arguments": arguments}
+        result = parsed(results[-1])
+        if result.get("status") != "prepared":
+            return refused(result, "Nothing was prepared.")
+        agent = (result.get("agent") or {}).get("name", "the agent")
+        shown = (result.get("draft") or {}).get("title", title)
+        where = "in the task form" if result.get("delivery") == "watching" else "behind Ori's Open draft button"
+        return {"answer": "A draft for " + agent + " is ready " + where + ": “" + shown +
+                          "”. Nothing is created until you save it."}
+
+    opened, selected = OPERATE_OPEN.match(words), OPERATE_SELECT.match(words)
+    if not opened and not selected:
+        return None
+
+    if not results:
+        arguments = {"workspace_name": opened.group(1).strip()} if opened else {}
+        agent = (opened.group(2) if opened else selected.group(1)) or ""
+        if agent.strip():
+            arguments["agent_name"] = agent.strip()
+        return {"tool": OPERATE_TOOL, "arguments": arguments}
+    result = parsed(results[-1])
+    status = result.get("status")
+    if status == "requested":
+        name = (result.get("workspace") or {}).get("name", "the workspace")
+        agent = (result.get("agent") or {}).get("name")
+        what = "open " + name + (" and select " + agent if agent else "")
+        if result.get("delivery") == "watching":
+            return {"answer": "I asked Ori to " + what + " in this tab."}
+        return {"answer": "Ori has a button ready to " + what + ". Nothing moves until you choose."}
+    if status == "choose":
+        names = ", ".join(str(choice.get("name")) for choice in result.get("choices", []))
+        return {"answer": "More than one matches: " + names + ". Which one do you mean? Nothing was requested."}
+    if status == "not_found":
+        names = ", ".join(str(choice.get("name")) for choice in result.get("closest", []))
+        return {"answer": "I could not find that (" + str(result.get("reason")) + ")." +
+                          (" The closest are: " + names + "." if names else "") + " Nothing was requested."}
+    return {"answer": "Ori could not prepare that (" + str(result.get("reason", "unavailable")) +
+                      "). You can open it from the Workspaces page. Nothing was requested."}
+
+
+def audit_operate_harness(state_dir, request):
+    """Record what Ori actually handed the model on an operating turn.
+
+    This is the request Ori's own harness built, as the model receives it: the
+    skill text Ori loaded and the tool definitions Ori advertised. The record
+    holds facts about them (version, names, parameter names) and none of the
+    turn's words, so it can be kept beside the run's log. It is written only
+    for a turn that offers an operation tool.
+    """
+    offered = [tool.get("function", {}) for tool in request.get("tools") or []]
+    operations = {fn.get("name"): fn for fn in offered if fn.get("name") in (OPERATE_TOOL, OPERATE_TASK_TOOL)}
+    if not operations:
+        return
+    system = "\n".join(str(message.get("content", "")) for message in request.get("messages", [])
+                       if message.get("role") == "system")
+    version = re.search(r"# Ori skill: operate-ori \(v(\d+)\)", system)
+    record = {
+        "skill_loaded": bool(version),
+        "skill_version": int(version.group(1)) if version else 0,
+        "skill_names_each_operation": all(name in system for name in operations),
+        "skill_says_save_and_start_are_the_users": "Saving does not start it" in system and "Start task" in system,
+        "operations": {name: {
+            "parameters": sorted(((fn.get("parameters") or {}).get("properties") or {}).keys()),
+            "closed_schema": (fn.get("parameters") or {}).get("additionalProperties") is False,
+        } for name, fn in sorted(operations.items())},
+        "offered_tools": sorted(fn.get("name", "") for fn in offered),
+    }
+    (state_dir / "operate-harness.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+
+
+WORKER_MARK = "You have been assigned a task in a collaborative workspace."
+
+
+def worker_reply(state_dir, request):
+    """A deterministic worker for a task that Ori really started.
+
+    This is the agent's model, not the assistant's: Ori's own executor built the
+    request for a task it is running, and the answer becomes that task's result
+    through the production execution path. The fixture decides nothing about
+    whether, when or how often a task runs. It only answers, optionally after a
+    hold (so a browser can observe the task while it is in progress) or with a
+    failure. Returns None for anything that is not a task run.
+    """
+    text = "\n".join(str(message.get("content", "")) for message in request.get("messages", []))
+    if WORKER_MARK not in text:
+        return None
+    # How many worker requests arrived. A count, never the task's words.
+    with (state_dir / "worker-requests.log").open("a") as record:
+        record.write("request\n")
+    if (state_dir / "worker-hold").exists():
+        deadline = time.monotonic() + 90
+        while not ((state_dir / "worker-release").exists() or (state_dir / "release").exists()):
+            if time.monotonic() >= deadline:
+                raise ValueError("fixture worker hold timed out")
+            time.sleep(0.05)
+    if (state_dir / "worker-fail").exists():
+        return {"error": "fixture worker failure"}
+    if (state_dir / "worker-needs-input").exists():
+        # An unhelpful answer, nothing more. Ori's own analysis of a task result
+        # is what stops the task and asks the user; the fixture does not.
+        return {"answer": "Fill in data later."}
+    described = re.search(r"## Task Description\n\n(.+?)\n", text)
+    title = described.group(1).strip() if described else "the task"
+    return {"answer": "Fixture worker result for: " + title + ". No file was changed."}
 
 
 def file_step(prompt, results, tools_offered):
@@ -310,6 +481,30 @@ def folder_response_step(content):
                       "They do not establish contents or progress. What would you like to work out first?"}
 
 
+def requested_workspace(own_words):
+    """The proposal a stand-in model makes when Ori sends it a request to build a workspace.
+
+    Ori's router, not this fixture, decides that a sentence asks for a
+    workspace; such a turn opens "User request: <words>" and is followed by
+    "(classified intent: …)". The proposal repeats the purpose the user stated
+    and nothing else. No subject is recognized here: understanding the purpose
+    is the real model's work, and this only shows that Ori passed it on.
+    """
+    asked = own_words.split("\n\n(classified intent:", 1)[0].removeprefix("User request: ").strip()
+    lead = "build a workspace"
+    if not asked.lower().startswith(lead):
+        return None
+    purpose = asked[len(lead):].strip(" .!")
+    for opening in ("for ", "about ", "to ", "on "):
+        if purpose.lower().startswith(opening):
+            purpose = purpose[len(opening):]
+            break
+    if not purpose:
+        return None
+    return {"name": purpose[:1].upper() + purpose[1:],
+            "description": "Goal: " + purpose + ". Proposed starter work: agree what done looks like, list what is already known, and plan the first step. Nothing has been looked up or verified."}
+
+
 def conversation_reply(prompt):
     """Explicit synthetic scenario only; never infer it from workspace metadata."""
     if prompt in {
@@ -421,7 +616,7 @@ def stop_owned_process(process):
             process.wait(timeout=10)
 
 
-def provider_handler(state_dir, folder_response=False, discovery_research=False, discovery_continuity=False):
+def provider_handler(state_dir, folder_response=False, discovery_research=False, discovery_continuity=False, operate=False):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass  # Never print prompt bodies, paths or credentials.
@@ -431,8 +626,13 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                # The host that asked was stopped while this answer was held
+                # (the restart demos do that on purpose). Nobody is listening.
+                pass
 
         def do_GET(self):
             if self.path == "/api/tags":
@@ -456,6 +656,16 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": summary}, "done": True,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
+                if operate:
+                    audit_operate_harness(state_dir, request)
+                worker = worker_reply(state_dir, request) if operate else None
+                if worker is not None:
+                    if "error" in worker:
+                        self.reply(500, {"error": worker["error"]})
+                    else:
+                        self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": worker["answer"]},
+                                         "done": True, "prompt_eval_count": 1, "eval_count": 1})
+                    return
                 projection = workspace_projection(request.get("messages", []))
                 subject = projection.get("subject") or {}
                 user, results = current_turn(request["messages"])
@@ -472,7 +682,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
                 proposal_step = None
-                if own_words.lower().startswith(("prepare a workspace review", "let's set up a workspace")) or own_words == "how they started. can we create a workspace":
+                requested = requested_workspace(own_words)
+                if own_words.lower().startswith(("prepare a workspace review", "let's set up a workspace")) or requested or own_words == "how they started. can we create a workspace":
                     history = request["messages"][1:-1]
                     body = "\n".join(message.get("content", "") for message in history)
                     tool_offered = any(tool.get("function", {}).get("name") == "assistant_propose_workspace" for tool in request.get("tools", []))
@@ -493,6 +704,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     proposal = {"name": "Fictional Membership Pilot", "description": "Goal: recurring community membership, not talent coaching. Proposed starter work: identify the audience, compare membership workflows, and outline a small pilot. Telegram compatibility remains unknown; no integration is installed."}
                     if "okgo band" in body:
                         proposal = {"name": "OK Go — How They Started", "description": "Goal: research how OK Go started. Proposed starter work: find interviews, build an early-years timeline, and write a sourced origin story. Dates and first-break details need verification."}
+                    if requested:
+                        proposal = requested
                     if (state_dir / "workspace-proposal-invalid").exists():
                         (state_dir / "workspace-proposal-invalid").unlink()
                         proposal["description"] = "x" * 1601
@@ -500,7 +713,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                         (state_dir / "workspace-proposal-slow").unlink()
                         time.sleep(13)  # Cross the former hard 12-second failure.
                     proposal_step = {"tool": "assistant_propose_workspace", "arguments": proposal}
-                step = (proposal_step or (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
+                step = (proposal_step or (operate_step(own_words, results, request.get("tools") or []) if operate else None) or
+                        (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
                         (continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
                         (folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))
@@ -600,6 +814,22 @@ def main():
     parser.add_argument("--slow-reply", action="store_true",
                         help="wt demo: a reply held longer than 30 seconds still arrives, and a failed request "
                              "is named after the hired assistant")
+    parser.add_argument("--operate", action="store_true",
+                        help="wt demo: Operate Ori — open a workspace and select an agent for one watching tab, "
+                             "Watch off, a lost acknowledgement, user navigation and an unavailable provider")
+    parser.add_argument("--operate-task", action="store_true",
+                        help="wt demo: Operate Ori — a task draft for a non-entry agent in the real task form, "
+                             "edited, dismissed, reopened and saved by the user; zero tasks before save")
+    parser.add_argument("--operate-start", action="store_true",
+                        help="wt demo: Operate Ori — the reviewed save creates one bound task, the user's Start is "
+                             "claimed once, real progress with a deterministic worker, a repeat, a reload and a refusal")
+    parser.add_argument("--operate-result", action="store_true",
+                        help="wt demo: Operate Ori — the result of the request's own run, a rerun that is not "
+                             "attributed to it, needs-input, the recap, leaving the page, and a run interrupted "
+                             "by restarting this same isolated host")
+    parser.add_argument("--operate-journey", action="store_true",
+                        help="wt demo: Operate Ori — the whole journey for a non-entry agent with a second tab open, "
+                             "a failed run, the manual route, and what Ori's harness handed the model")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
@@ -624,14 +854,17 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = args.evidence_dir or (ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
+    operating = (args.operate or args.operate_task or args.operate_start or args.operate_result or
+                 args.operate_journey)
+    evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if operating else
+                ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
                 ROOT / "tasks/evidence/assistant-folder-response-ux" / (args.folder_response_evidence_stage or "group-3") if args.folder_response else
                 ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity, operate=operating))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.
@@ -641,8 +874,12 @@ def main():
         env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
                    ORI_ASSISTANT_EVIDENCE_DIR=str(evidence),
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
-        if args.discovery_continuity:
-            env.update(ORI_KEEP_DEMO_SANDBOX="1", ORI_DISCOVERY_CONTINUITY_PHASE="seed")
+        # Two demos restart the same isolated host on the same data between two
+        # runs of their spec. Each has its own phase variable.
+        restart_phase = ("ORI_DISCOVERY_CONTINUITY_PHASE" if args.discovery_continuity else
+                         "ORI_OPERATE_RESULT_PHASE" if args.operate_result else None)
+        if restart_phase:
+            env.update({"ORI_KEEP_DEMO_SANDBOX": "1", restart_phase: "seed"})
         if args.folder_response:
             env["ORI_FOLDER_RESPONSE_EVIDENCE_DIR"] = str(evidence)
         candidate = bool(args.reaper_source)
@@ -682,7 +919,7 @@ def main():
                 result = subprocess.run(
                     ["npx", "playwright", "test", spec, *args.extra_spec, "--workers=1"], cwd=ROOT, env=env, check=False,
                 )
-                if args.discovery_continuity and result.returncode == 0:
+                if restart_phase and result.returncode == 0:
                     # Preserve only this invocation's verified wt sandbox, stop
                     # its owned process group, then restart the built production
                     # host with the checked-in isolation entrypoint and same data.
@@ -691,7 +928,7 @@ def main():
                                                cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
                                                start_new_session=True)
                     wait_for_demo(process, log, args.port)
-                    env["ORI_DISCOVERY_CONTINUITY_PHASE"] = "reopen"
+                    env[restart_phase] = "reopen"
                     result = subprocess.run(["npx", "playwright", "test", spec, *args.extra_spec, "--workers=1"],
                                             cwd=ROOT, env=env, check=False)
                 output.flush()
@@ -713,7 +950,7 @@ def main():
             # Keep the provider's sanitized records beside the run's log: which
             # readers were chosen and what status each returned, and whether a
             # watched marker reached the provider. Neither holds content.
-            for record in ("provider-trace.jsonl", "provider-audit.json"):
+            for record in ("provider-trace.jsonl", "provider-audit.json", "operate-harness.json"):
                 if (state / record).exists():
                     shutil.copyfile(state / record, evidence / (log.stem + "-" + record))
             # A forced shell termination can skip zsh's always block. Restrict
