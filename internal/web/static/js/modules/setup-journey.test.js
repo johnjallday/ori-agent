@@ -18,6 +18,7 @@ const {
   homeProviderReceiptRow,
   homeProviderRecoveryFailure,
   homeProviderSuccessToast,
+  providerReviewKey,
   integrationHandoffNavigation,
   integrationReleaseCheckNote,
   integrationReviewPresentation,
@@ -845,6 +846,26 @@ test('a switched-off provider offers Enable and an incompatible one Review updat
   // An unreviewed provider is sent to Plugins in every state.
   assert.equal(homeProviderOffer({ ...disabled, reviewed: false, display_name: '' }), null);
   assert.equal(homeProviderOffer({ ...incompatible, reviewed: false, display_name: '' }), null);
+});
+
+test('only a Home provider install is disclosed by itself, once per visit of one run', () => {
+  const journey = { run_id: 'run-1' };
+  const missing = missingMusicProvider();
+  const install = homeProviderOffer(missing);
+  const key = providerReviewKey(journey, missing, install);
+  assert.ok(key.startsWith('run-1|music-project-management|'));
+  // The same screen repainted is the same visit; another run is another one.
+  assert.equal(providerReviewKey(journey, missing, install), key);
+  assert.notEqual(providerReviewKey({ run_id: 'run-2' }, missing, install), key);
+
+  // Enable is already one press, and an update stays behind its own button.
+  const disabled = { ...missing, installed: true, actions: ['enable_plugin'] };
+  assert.equal(providerReviewKey(journey, disabled, homeProviderOffer(disabled)), '');
+  const outdated = { ...missing, installed: true, actions: ['review_plugin_update'] };
+  assert.equal(providerReviewKey(journey, outdated, homeProviderOffer(outdated)), '');
+  // Nothing to key a visit on: nothing opens by itself.
+  assert.equal(providerReviewKey({}, missing, install), '');
+  assert.equal(providerReviewKey(journey, missing, null), '');
 });
 
 test('a completed Home-provider recovery confirms itself in a toast', () => {

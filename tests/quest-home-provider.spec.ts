@@ -209,18 +209,16 @@ test('a missing reviewed Home provider is installed from the group screen', asyn
   await expect(dialog.locator('#specialistSetupJourneyReceipt')).toContainText(
     'Home provider: music-project-management · Not installed'
   );
-  const install = dialog.getByRole('button', { name: 'Install Music Project Management…' });
-  await expect(install).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Open Plugins', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Check Again', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Build Group', exact: true })).toHaveCount(0);
-  await dialog.screenshot({ path: testInfo.outputPath('provider-offer.png') });
-
-  await install.click();
+  // The install is disclosed as the screen opens: no button comes before the
+  // card, and Install is its one decision.
   const review = dialog.locator('.setup-journey__provider-review');
   await expect(review).toContainText(
     'Music Project Management will be able to do the following on this computer:'
   );
+  await expect(
+    dialog.getByRole('button', { name: 'Install Music Project Management…' })
+  ).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Build Group', exact: true })).toHaveCount(0);
   await expect(review).toContainText('Release: 0.1.0');
   await expect(review).toContainText('Minimum reviewed version: 0.1.0');
   await expect(review).toContainText(
@@ -266,14 +264,20 @@ test('a missing reviewed Home provider is installed from the group screen', asyn
 test('cancelling the disclosure installs nothing', async ({ page }) => {
   const { recoveries } = await mockQuest(page, missingProvider());
   const dialog = await openQuest(page);
-  await dialog.getByRole('button', { name: 'Install Music Project Management…' }).click();
   await expect(dialog.locator('.setup-journey__provider-review')).toBeVisible();
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog.locator('.setup-journey__provider-review')).toHaveCount(0);
-  await expect(
-    dialog.getByRole('button', { name: 'Install Music Project Management…' })
-  ).toBeVisible();
+  // Cancelled is cancelled: the card does not come back by itself. The screen's
+  // own buttons are the way to ask again, or to go elsewhere.
+  const install = dialog.getByRole('button', { name: 'Install Music Project Management…' });
+  await expect(install).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Open Plugins', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Check Again', exact: true })).toBeVisible();
   expect(recoveries.map(call => call.body.confirm)).toEqual([false]);
+
+  await install.click();
+  await expect(dialog.locator('.setup-journey__provider-review')).toBeVisible();
+  expect(recoveries.map(call => call.body.confirm)).toEqual([false, false]);
 });
 
 test('a refused confirmation keeps the offer and says why', async ({ page }) => {
@@ -289,7 +293,6 @@ test('a refused confirmation keeps the offer and says why', async ({ page }) => 
     }
   }));
   const dialog = await openQuest(page);
-  await dialog.getByRole('button', { name: 'Install Music Project Management…' }).click();
   await dialog.getByRole('button', { name: 'Install', exact: true }).click();
   await expect(
     dialog.getByRole('alert').filter({ hasText: 'changed while you were reviewing' })

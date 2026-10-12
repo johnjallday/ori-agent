@@ -107,7 +107,11 @@ const state = {
   groupTemplate: null,
   // The in-quest Home-provider recovery: a disclosure awaiting confirmation,
   // or the last refused/failed attempt. Keyed to its run and plugin.
-  providerRecovery: null
+  providerRecovery: null,
+  // The provider install this visit already disclosed by itself, and one that
+  // was due while something else was in flight.
+  providerReview: '',
+  providerReviewDue: null
 };
 
 function byID(id) {
@@ -384,7 +388,10 @@ function setBusy(busy, message = '', { lockClose = false } = {}) {
   });
   // Nothing is in flight any more: a step that opens with its own review can
   // ask for it now.
-  if (!busy) openStepReview();
+  if (!busy) {
+    openStepReview();
+    openDueProviderReview();
+  }
 }
 
 function hideJourneyPresentation() {
@@ -1084,12 +1091,55 @@ function renderHomeProviderGroup(journey, step, button) {
       elements.draft.appendChild(makeText('p', 'setup-journey__scope-note', recovery.detail));
     }
   }
+  // One card, one confirm: an install is disclosed as this screen is shown, so
+  // the disclosure is the screen's content and Install is its one decision.
+  if (openProviderReview(journey, provider, offer, recovery)) return;
   if (offer) button(offer.label, () => startHomeProviderRecovery(provider, offer), true);
   button('Open Plugins', () => window.location.assign(PLUGINS_PAGE_URL));
   button('Check Again', () => {
     state.providerRecovery = null;
     void refreshJourney();
   });
+}
+
+// providerReviewKey names one visit's disclosure of one Home provider install.
+// It is asked for once: Cancel, or a disclosure that cannot be read, leaves the
+// screen's own button as the way to ask again.
+export function providerReviewKey(journey, provider, offer) {
+  if (offer?.action !== 'install_plugin' || !offer.disclose) return '';
+  const runID = String(journey?.run_id || '');
+  const pluginID = String(provider?.plugin_id || '');
+  return runID && pluginID ? `${runID}|${pluginID}|${provider.generation ?? ''}` : '';
+}
+
+// openProviderReview starts that disclosure when the screen is drawn and says
+// whether it did. A screen drawn while something is in flight (the journey is
+// still loading) records it as due; openDueProviderReview picks it up.
+function openProviderReview(journey, provider, offer, recovery) {
+  const key = providerReviewKey(journey, provider, offer);
+  if (!key || recovery || state.providerReview === key) return false;
+  if (!window.PluginRecoveryClient || !window.PluginLifecycle) return false;
+  if (state.busy) {
+    state.providerReviewDue = { key, provider, offer };
+    return false;
+  }
+  state.providerReview = key;
+  state.providerReviewDue = null;
+  void startHomeProviderRecovery(provider, offer);
+  return true;
+}
+
+function openDueProviderReview() {
+  const due = state.providerReviewDue;
+  if (!due || state.busy) return;
+  state.providerReviewDue = null;
+  const journey = state.journey;
+  if (!journey || !ui() || state.providerRecovery || state.providerReview === due.key) return;
+  // Only for the screen that asked: the same run, still waiting on this provider.
+  if (providerReviewKey(journey, due.provider, due.offer) !== due.key) return;
+  if (groupBuildState(journey) !== 'provider') return;
+  state.providerReview = due.key;
+  void startHomeProviderRecovery(due.provider, due.offer);
 }
 
 // renderHomeProviderDisclosure shows, in the step itself, exactly what the
@@ -2542,6 +2592,9 @@ export async function openSpecialistSetupJourney(requested = null) {
     state.journey = payload?.setup_journey;
     state.groupTemplate = null;
     state.providerRecovery = null;
+    // Opening setup is a new visit: its provider install is disclosed afresh.
+    state.providerReview = '';
+    state.providerReviewDue = null;
     if (!state.journey) return false;
     // An unresolved owner operation blocks presentation writes, not access
     // to its status. Show the authorized read without claiming another action.
