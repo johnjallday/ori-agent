@@ -172,6 +172,17 @@ checkbox state only.
   owner/preparation, validation, and delivery using the canonical skill's
   assessment fields.
 
+## Cross-Repository Contract
+
+Only when a companion is `required`; see _Cross-repository contract_.
+
+- Host features: `[flag → where Ori declares it; which companion manifest requires it]`
+- Versions: `[protocol / manifest / blueprint / schema: before → after]`
+- Releases: `[companion version to publish; Ori reviewed-floor bump; approval owner]`
+- Candidate path: `[companion worktree; harness flag Ori uses to test against it]`
+- Companion checklist: `[tasks/tasks-<feature>.md inside that companion worktree]`
+- Order: `[contract → candidates → Ori integration → companion PR + release → floor bump → Ori PR]`
+
 ## Tasks
 
 - [ ] 1.0 First vertical outcome `Model: Sonnet 5`
@@ -227,6 +238,41 @@ repository lifecycle. Neither a plan nor an Ori handoff authorizes installing
 into the user's plugin store, editing installed plugin sources, publishing or
 tagging a release, updating a reviewed pin, or resetting real data.
 
+### Cross-repository contract
+
+When the assessment marks a companion `required`, the task list carries a
+`## Cross-Repository Contract` section. It is the only planning text a companion
+builder receives besides its own checklist, so it must stand on its own:
+
+- **Host features:** every new host-feature flag, where Ori declares it
+  (`internal/plugin/surface_descriptor.go`), and which companion manifest
+  requires it.
+- **Versions:** the protocol, manifest, blueprint, program, quest, or Home
+  schema versions that change, with exact before and after numbers.
+- **Releases:** the version each companion will publish and the Ori reviewed
+  floor (`internal/reviewedintegration/entries.go`) that follows, as separate
+  tasks with their approval owner.
+- **Candidate path:** the companion worktree each builder works in and the
+  harness flag Ori uses to test against it before any release
+  (`scripts/reaper-demo.sh --reaper-source` / `--music-source`,
+  `scripts/music-home-demo.sh --source`).
+- **Companion checklist:** one `tasks/tasks-<feature>.md` written into each
+  companion worktree from this contract. It names only that repository's work
+  and the verification Ori will run against the candidate.
+- **Order:** contract, companion candidates, Ori integration against the
+  candidates, companion PRs and releases, the floor bump as the last Ori commit,
+  then the Ori PR.
+
+Each repository gets its own builder session, started inside that repository's
+worktree so its own `AGENTS.md` and permissions apply. The Ori builder never
+adds a companion directory to its session and never edits a companion checkout;
+a companion builder never edits Ori. Only the Ori integration owner changes the
+contract. It tells the affected companion session which field changed, and that
+session updates its own checklist. A companion candidate becomes evidence for an
+Ori task once the owner has built or installed it into disposable demo state;
+the published release and the reviewed floor remain later, separately approved
+states.
+
 ## Implementation dependency preflight
 
 Before initial implementation and on continuation:
@@ -253,6 +299,10 @@ Before initial implementation and on continuation:
 5. Keep source implementation, disposable local installation, and production
    release evidence separate through the final report. Do not claim the feature
    is fully activated while a required release or reviewed pin remains blocked.
+6. A companion builder is a separate session started inside that companion's
+   worktree. It receives the `Cross-Repository Contract` section and its own
+   checklist, not the Ori checklist or an added Ori directory, and follows that
+   repository's `AGENTS.md`.
 
 This preflight is an agent workflow, not automatic multi-repository worktree
 orchestration. Normal independent work adds no human pause; a missing companion
