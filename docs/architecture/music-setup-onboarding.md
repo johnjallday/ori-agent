@@ -404,6 +404,18 @@ Extras" opens), so a connection is followed directly by the staffing review, nev
 by a detour through the child and Today. Staffing remains its own review and
 confirmation; nothing about the connection stages it.
 
+**Revised (reaper-setup-path, 2026-10).** The S7 decision stands for what the
+browser may ask: the creator still has no Team step, collects no agent choice and
+sends none. What changed is what the commit does. Once the project exists, the
+host fills its required roles itself (the Home's missing roles with new agents,
+the project's role with the Home's shared agent: created on the first project,
+bound on every later one) through the same staffing adapter the team step uses,
+and the creator's Review lists them under "Team" first ("created for you" /
+"already on this Home"), so the reviewed create is the consent. It is best-effort:
+with no model for a new agent, or when a fill is refused, the child is created
+unstaffed exactly as before and the team step that follows still offers each
+role. See "Roles the create fills" in `docs/workspace-team-readiness.md`.
+
 *The child's roster.* `GET /api/workspaces/{child}/roles` used to list the
 **Home's** roles for a linked child (the station declaration) and none of its own.
 It now lists the child's snapshotted project roles (project scope only) and only

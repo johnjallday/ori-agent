@@ -234,7 +234,11 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   const requiredRoleIssue = page.locator(
     '#workspaceTeamIssues [data-issue-id="required-roles-missing"]'
   );
-  await expect(requiredRoleIssue).toContainText('Fill all 2 required roles');
+  // This sandbox has no model for a new agent, so Ori cannot fill the roles
+  // itself: the one blocker names the first of them and why.
+  await expect(requiredRoleIssue).toContainText(
+    'Portfolio Coordinator: no model is set up for new agents'
+  );
   await expect(
     requiredRoleIssue.getByRole('button', { name: 'Build Research Program Home' })
   ).toBeVisible();

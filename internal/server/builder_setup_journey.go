@@ -201,6 +201,9 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		b.assistantStaffing = staffingAdapter
 		b.projectStaffing = projectstaffing.New(b.workspaceStore, b.st)
+		if projectAdapter != nil {
+			projectAdapter.SetCreatedProjectStaffer(b.staffCreatedProject)
+		}
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetSharedProjectStaffing(b.projectStaffing, b.systemModelAvailable)
 			if b.setupWizardService != nil {

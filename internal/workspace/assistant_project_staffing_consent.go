@@ -14,6 +14,9 @@ const (
 	ProjectStaffingConsentFolderOffer = "folder_offer"
 	// ProjectStaffingConsentHomeSwitch is the switch on the Home's library panel.
 	ProjectStaffingConsentHomeSwitch = "home_switch"
+	// ProjectStaffingConsentReviewedCreate is a Create Workspace review that
+	// listed the role's agent before the project was created.
+	ProjectStaffingConsentReviewedCreate = "reviewed_create"
 )
 
 // ErrProjectStaffingConsentInvalid means a consent record (stored or requested)
@@ -94,7 +97,9 @@ func (c *ProjectStaffingConsent) Validate() error {
 	if c.GrantedAt.IsZero() {
 		return invalid("granted_at")
 	}
-	if c.Source != ProjectStaffingConsentFolderOffer && c.Source != ProjectStaffingConsentHomeSwitch {
+	switch c.Source {
+	case ProjectStaffingConsentFolderOffer, ProjectStaffingConsentHomeSwitch, ProjectStaffingConsentReviewedCreate:
+	default:
 		return invalid("source")
 	}
 	if !consentText(c.OfferID, 160, true) || !consentText(c.PluginID, 160, false) || !consentText(c.BlueprintID, 160, false) {

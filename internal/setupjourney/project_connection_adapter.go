@@ -23,6 +23,9 @@ type ProjectConnectionAdapter struct {
 	owner     *projectconnection.Service
 	templates ProjectTemplateResolver
 	providers HomeProviderSource
+	// staffCreated fills the required roles of a project this adapter just
+	// committed. It is best-effort by contract: see SetCreatedProjectStaffer.
+	staffCreated func(ctx context.Context, projectWorkspaceID string)
 }
 
 func NewProjectConnectionAdapter(owner *projectconnection.Service, templates ProjectTemplateResolver) *ProjectConnectionAdapter {
@@ -34,6 +37,16 @@ func NewProjectConnectionAdapter(owner *projectconnection.Service, templates Pro
 func (a *ProjectConnectionAdapter) SetHomeProviderSource(source HomeProviderSource) {
 	if a != nil {
 		a.providers = source
+	}
+}
+
+// SetCreatedProjectStaffer supplies what fills a committed project's required
+// roles (the Home's and the project's), the way its review listed them. It
+// reports nothing back: a role it could not fill is still offered by the
+// staffing step that follows, so it can never fail or undo the project.
+func (a *ProjectConnectionAdapter) SetCreatedProjectStaffer(staff func(ctx context.Context, projectWorkspaceID string)) {
+	if a != nil {
+		a.staffCreated = staff
 	}
 }
 
@@ -127,6 +140,9 @@ func (a *ProjectConnectionAdapter) Commit(ctx context.Context, scope ReadScope, 
 	canonical := CanonicalResult{ProjectWorkspaceID: result.ProjectWorkspaceID}
 	if scope.RunKind == RunKindRoot {
 		canonical.HomeWorkspaceID = result.HomeWorkspaceID
+	}
+	if a.staffCreated != nil && strings.TrimSpace(result.ProjectWorkspaceID) != "" {
+		a.staffCreated(ctx, result.ProjectWorkspaceID)
 	}
 	return canonical, nil
 }

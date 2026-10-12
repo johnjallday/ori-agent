@@ -5230,7 +5230,9 @@ const sessionManager = {
     const host = document.getElementById(hostId);
     if (!host) return;
     const view = this.teamView();
-    if (!view) {
+    // A connection-only creator has no Team step and never gates on the team,
+    // so it does not show team blockers nobody can act on from here.
+    if (!view || this.workspaceCreatorContext?.connectionOnly) {
       host.innerHTML = '';
       return;
     }
@@ -5365,6 +5367,9 @@ const sessionManager = {
       case 'fill-required-role': {
         const { issue, role, projection } = this.requiredRoleRecoveryContext();
         if (!role || role.scope !== 'home') {
+          // The blocker is also shown on Review, where the roster is hidden:
+          // open Team first, or focus lands on a row nobody can see.
+          if (this.wizardStep !== 3) this.goToWizardStep(3, { focus: false });
           this.focusWorkspaceRoleRow(issue?.roleId || role?.role_id);
           break;
         }
@@ -7813,6 +7818,23 @@ const sessionManager = {
     text.textContent = `Includes ${summary.count} agent${summary.count === 1 ? '' : 's'}: ${names.join(', ')}.`;
   },
 
+  // The required group roles the destination still lacks that Ori fills when
+  // the workspace is created, exactly as the Team roster shows them.
+  autoFilledGroupRoles(progress) {
+    const missing = Array.isArray(progress?.roles)
+      ? progress.roles.filter(role => role.state !== 'filled')
+      : [];
+    if (!missing.length) return [];
+    const rows = this.teamView()?.roleRoster?.roles || [];
+    return missing
+      .map(role =>
+        rows.find(
+          row => row.role_id === role.role_id && row.scope === 'home' && row.auto && row.agent
+        )
+      )
+      .filter(Boolean);
+  },
+
   renderWorkspaceGroupDestinationCard() {
     const card = document.getElementById('workspaceGroupDestinationCard');
     if (!card) return;
@@ -7844,10 +7866,13 @@ const sessionManager = {
     const actionsHost = document.getElementById('workspaceGroupDestinationActions');
 
     const missingRequiredHomeRoles = Number(progress?.missing);
+    // A missing group role Ori fills on create is not something to set up
+    // first: the destination is ready, and choosing someone else is optional.
+    const autoGroupRoles = this.autoFilledGroupRoles(progress);
     const groupRolesReady =
       progress?.verification === 'verified' &&
       Number.isInteger(missingRequiredHomeRoles) &&
-      missingRequiredHomeRoles === 0;
+      missingRequiredHomeRoles === autoGroupRoles.length;
     if (title) title.textContent = 'Project destination';
     if (badge) {
       badge.className = 'workspace-group-destination-badge';
@@ -7923,6 +7948,16 @@ const sessionManager = {
       if (progress?.verification === 'not_applicable') {
         progressHost.textContent = 'Group coordinator · Not applicable for standalone placement';
         progressHost.classList.add('is-ready');
+      } else if (
+        Number.isInteger(required) &&
+        Number.isInteger(filled) &&
+        autoGroupRoles.length > 0 &&
+        autoGroupRoles.length === missingRoles.length
+      ) {
+        progressHost.textContent = `Group coordinator · ${autoGroupRoles
+          .map(role => `${role.label}: ${role.agent.name}`)
+          .join(', ')} · created for you with this workspace`;
+        progressHost.classList.add('is-ready');
       } else if (Number.isInteger(required) && Number.isInteger(filled)) {
         const noun = required === 1 ? 'required group role' : 'required group roles';
         const missingCopy = missingRoles.length ? ` · Needs ${missingRoles.join(', ')}` : '';
@@ -7988,9 +8023,13 @@ const sessionManager = {
       else if (actions.includes('manage_plugins')) action = 'manage_plugins';
       else if (actions.includes('change_template')) action = 'change_template';
       const missingLabel = progress?.roles?.find?.(role => role.state !== 'filled')?.label;
+      // Setting up a role Ori fills by itself is a choice, not a step.
+      const optionalGroupRoles = action === 'open_group_roles' && groupRolesReady;
       const labels = {
         review_create_home: `Review ${destinationName} setup`,
-        open_group_roles: `Set up ${missingLabel || 'group coordinator'}`,
+        open_group_roles: optionalGroupRoles
+          ? 'Choose a different agent'
+          : `Set up ${missingLabel || 'group coordinator'}`,
         retry: 'Recheck destination',
         open_guided_setup: 'Open guided setup',
         manage_plugins: 'Manage plugin',
@@ -8000,7 +8039,7 @@ const sessionManager = {
         const button = document.createElement('button');
         button.type = 'button';
         button.className =
-          action === 'review_create_home' || action === 'open_group_roles'
+          action === 'review_create_home' || (action === 'open_group_roles' && !optionalGroupRoles)
             ? 'modern-btn modern-btn-primary'
             : 'modern-btn modern-btn-secondary';
         button.dataset.groupDestinationAction = action;
@@ -8431,9 +8470,15 @@ const sessionManager = {
     const requiredHomeRoles = Array.isArray(projection.required_home_roles?.roles)
       ? projection.required_home_roles.roles
       : [];
+    const autoGroupRoles = this.autoFilledGroupRoles(projection.required_home_roles);
     const coordinatorLines = requiredHomeRoles.map(role => {
       const holder = String(role.agent?.name || '').trim();
-      const state = holder ? `${holder} · already staffed on the group` : 'Missing on the group';
+      const created = autoGroupRoles.find(row => row.role_id === role.role_id);
+      const state = holder
+        ? `${holder} · already staffed on the group`
+        : created
+          ? `${created.agent.name} · created for you`
+          : 'Missing on the group';
       return `<span class="workspace-review-hierarchy-role"><b>${this.escapeHtml(role.label)}</b><small>${this.escapeHtml(state)}</small></span>`;
     });
     const groupTemplate = grouped
@@ -8527,6 +8572,30 @@ const sessionManager = {
   // decide whether this is the team the user meant. Never the roster editor.
   renderWorkspaceReceiptTeam(view) {
     if (this.workspaceCreatorContext?.connectionOnly) {
+      // The project's required roles are filled when it is created; this card
+      // is where the person sees who, before they confirm.
+      const planned = Array.isArray(this.templateAgentPlan?.auto_staffing)
+        ? this.templateAgentPlan.auto_staffing
+        : [];
+      const filledOnCreate = planned.filter(row => row?.agent_name && !row.blocked);
+      if (filledOnCreate.length > 0) {
+        const later = planned.filter(row => row?.blocked);
+        const lines = [
+          ...filledOnCreate.map(
+            row =>
+              `${row.label} · ${row.agent_name} · ${row.outcome === 'existing' ? 'already on this Home' : 'created for you'}`
+          ),
+          ...later.map(row => `${row.label} · set up in the next step`)
+        ];
+        return `
+        <div class="workspace-review-card" data-connection-only-team>
+          <div class="workspace-review-card-main">
+            <span class="workspace-review-card-label">Team</span>
+            ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+            <span class="workspace-review-card-note">Ori adds these agents when the project is created. You can change them from the workspace afterwards.</span>
+          </div>
+        </div>`;
+      }
       // Say exactly what this step does and does not do, so a person is never
       // left believing a team was chosen here.
       return `
@@ -8632,7 +8701,11 @@ const sessionManager = {
         row.state === 'filled'
           ? row.source === 'assigned'
             ? `${row.tag.label} · saved agent will be attached`
-            : `${row.tag.label} · new agent will be created`
+            : row.source === 'auto'
+              ? `${row.tag.label} · created for you`
+              : row.source === 'shared'
+                ? `${row.tag.label} · already on this Home`
+                : `${row.tag.label} · new agent will be created`
           : row.tag.label;
       return [row.label, row.designation, state].join(' · ');
     });
@@ -8724,6 +8797,19 @@ const sessionManager = {
       if (projectAssigned) {
         consequences.push(
           `${projectAssigned} saved project agent${projectAssigned === 1 ? '' : 's'} will be attached`
+        );
+      }
+      // Roles nobody was chosen for, which the create fills by itself.
+      const autoCreated = roles.filter(role => role.auto && role.source === 'auto').length;
+      const autoShared = roles.filter(role => role.auto && role.source === 'shared').length;
+      if (autoCreated) {
+        consequences.push(
+          `${autoCreated} agent${autoCreated === 1 ? '' : 's'} will be created for you`
+        );
+      }
+      if (autoShared) {
+        consequences.push(
+          `${autoShared} agent${autoShared === 1 ? '' : 's'} already on this Home will be used`
         );
       }
       if (optionalHomeOpen) {

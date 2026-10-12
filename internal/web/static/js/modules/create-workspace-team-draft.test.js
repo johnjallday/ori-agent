@@ -663,6 +663,179 @@ test('a missing Home prerequisite owns Team recovery even when a project role is
   assert.equal(issue.anchor, 'workspace-role-portfolio-coordinator');
 });
 
+// A song blueprint as the wizard sees it: one required Home role, one required
+// project role, one optional Home role.
+function songProgramPlan() {
+  const program = assistantProgramPlan();
+  program.roles = [
+    {
+      id: 'song-assistant',
+      label: 'Song Assistant',
+      scope: 'project',
+      description: 'Works in this song.',
+      primary: true,
+      required: true
+    },
+    {
+      id: 'portfolio-manager',
+      label: 'Music Portfolio Manager',
+      scope: 'home',
+      description: 'Coordinates the portfolio.',
+      primary: true,
+      required: true
+    },
+    {
+      id: 'library',
+      label: 'Sample Library Manager',
+      scope: 'home',
+      description: 'Keeps samples findable.',
+      primary: false,
+      required: false
+    }
+  ];
+  return program;
+}
+
+function songDraft(autoStaffing) {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:song',
+    planResponse([], { assistant_program: songProgramPlan(), auto_staffing: autoStaffing })
+  );
+  return draft;
+}
+
+test('required roles nobody was chosen for are filled by the create and never block the Team step', () => {
+  const draft = songDraft([
+    {
+      role_id: 'portfolio-manager',
+      label: 'Music Portfolio Manager',
+      scope: 'home',
+      outcome: 'create',
+      agent_name: 'Portfolio Manager'
+    },
+    {
+      role_id: 'song-assistant',
+      label: 'Song Assistant',
+      scope: 'project',
+      outcome: 'create',
+      agent_name: 'Song Assistant'
+    }
+  ]);
+  const view = Draft.derive(draft);
+
+  assert.deepEqual(
+    view.roleRoster.roles.map(role => [role.role_id, role.state, role.source, role.agent?.name]),
+    [
+      ['song-assistant', 'filled', 'auto', 'Song Assistant'],
+      ['portfolio-manager', 'filled', 'auto', 'Portfolio Manager'],
+      ['library', 'empty', undefined, undefined]
+    ]
+  );
+  assert.equal(
+    view.issues.some(issue => issue.id === 'required-roles-missing'),
+    false
+  );
+  assert.equal(view.canContinueFromTeam, true);
+  // Nothing is asked of the server for them: it decides again on create.
+  assert.deepEqual(view.payload.role_staffing, []);
+  assert.equal(view.payload.team_intent.mode, 'staffed');
+  assert.equal(view.payload.assistant_hire, undefined);
+  assert.equal(
+    view.roleSummary,
+    '2 of 2 required roles filled · 2 agents will be created for you · 1 role will stay empty.'
+  );
+  // The project's entry agent is named before it exists.
+  assert.equal(view.primaryName, 'Song Assistant');
+  // The Home role says why it is not editable here, in words about this create.
+  const home = view.roleRoster.roles.find(role => role.role_id === 'portfolio-manager');
+  assert.equal(home.read_only, true);
+  assert.match(home.read_only_reason, /adds this agent to the group/);
+});
+
+test('the Home’s own agent is used for a later song, and the user’s own choice always wins', () => {
+  const draft = songDraft([
+    {
+      role_id: 'song-assistant',
+      label: 'Song Assistant',
+      scope: 'project',
+      outcome: 'existing',
+      agent_name: 'Song Assistant'
+    }
+  ]);
+  const program = draft.plan.data.assistantProgram;
+  program.roles.find(role => role.id === 'portfolio-manager').agentName = 'Portfolio Manager';
+
+  let view = Draft.derive(draft);
+  const shared = view.roleRoster.roles.find(role => role.role_id === 'song-assistant');
+  assert.deepEqual([shared.state, shared.source, shared.auto], ['filled', 'shared', true]);
+  assert.equal(
+    view.roleSummary,
+    '2 of 2 required roles filled · 1 agent already on the group will be used · 1 role will stay empty.'
+  );
+
+  // Choosing someone replaces what Ori would have done, and is what is sent.
+  assert.equal(
+    Draft.setRoleFill(draft, 'song-assistant', { mode: 'create', name: 'My Producer' }),
+    true
+  );
+  view = Draft.derive(draft);
+  const chosen = view.roleRoster.roles.find(role => role.role_id === 'song-assistant');
+  assert.deepEqual(
+    [chosen.source, chosen.auto, chosen.agent.name],
+    ['created', undefined, 'My Producer']
+  );
+  assert.deepEqual(view.payload.role_staffing, [
+    { role_id: 'song-assistant', mode: 'create', name: 'My Producer' }
+  ]);
+
+  // Clearing the choice goes back to Ori's, not to a blocker.
+  Draft.clearRoleFill(draft, 'song-assistant');
+  view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, true);
+  assert.deepEqual(view.payload.role_staffing, []);
+});
+
+test('a role Ori cannot fill is the one blocker, named with its reason', () => {
+  const reason = 'no model is set up for new agents';
+  const draft = songDraft([
+    {
+      role_id: 'portfolio-manager',
+      label: 'Music Portfolio Manager',
+      scope: 'home',
+      outcome: 'existing',
+      agent_name: 'Portfolio Manager'
+    },
+    {
+      role_id: 'song-assistant',
+      label: 'Song Assistant',
+      scope: 'project',
+      outcome: 'create',
+      agent_name: 'Song Assistant',
+      blocked: reason
+    }
+  ]);
+  const view = Draft.derive(draft);
+  const blockers = view.blockingIssues;
+
+  assert.equal(blockers.length, 1);
+  assert.equal(blockers[0].id, 'required-roles-missing');
+  assert.equal(blockers[0].message, `Song Assistant: ${reason}.`);
+  assert.equal(blockers[0].roleId, 'song-assistant');
+  assert.deepEqual(blockers[0].recovery, ['fill-required-role']);
+  const role = view.roleRoster.roles.find(item => item.role_id === 'song-assistant');
+  assert.equal(role.state, 'empty');
+
+  // Assigning an agent the user already has needs no model and clears it.
+  Draft.setSavedRosterReady(draft, [{ name: 'Saved Producer', role: 'specialist' }]);
+  assert.equal(
+    Draft.setRoleFill(draft, 'song-assistant', { mode: 'assign', name: 'Saved Producer' }),
+    true
+  );
+  assert.equal(Draft.derive(draft).canContinueFromTeam, true);
+});
+
 test('scoped Home and project primaries keep separate names and select the project entry role', () => {
   const program = assistantProgramPlan();
   program.default_primary_name = 'Portfolio Lead';

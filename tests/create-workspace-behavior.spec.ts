@@ -1451,6 +1451,149 @@ test('a failed strict create retries the preserved role staffing request', async
   expect(payloads[1].role_staffing).toEqual(payloads[0].role_staffing);
 });
 
+// The plan says how each required role is filled when nobody is chosen for it.
+// Those roles never gate Team, Review names who is created or reused, and the
+// one Create sends no fill for them: the server decides again.
+async function routeAutoStaffedPlan(page: Page, blocked = '') {
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        revision: 'auto-staffed-plan',
+        has_agents: false,
+        agents: [],
+        warnings: [],
+        system_model_configured: !blocked,
+        assistant_program: {
+          id: 'studio',
+          station_name: 'Studio Home',
+          station_description: 'One team for every song.',
+          default_primary_name: 'Portfolio Manager',
+          hire_title: 'Hire your team',
+          hire_description: 'One team for every song.',
+          roles: [
+            {
+              id: 'portfolio',
+              label: 'Portfolio Lead',
+              description: 'Coordinates the portfolio.',
+              primary: true,
+              scope: 'home',
+              required: true
+            },
+            {
+              id: 'song',
+              label: 'Song Assistant',
+              description: 'Works in this song.',
+              primary: true,
+              scope: 'project',
+              required: true
+            }
+          ],
+          stages: [{ id: 'helper', label: 'Helper', description: 'Helps.' }]
+        },
+        auto_staffing: [
+          {
+            role_id: 'portfolio',
+            label: 'Portfolio Lead',
+            scope: 'home',
+            outcome: 'create',
+            agent_name: 'Portfolio Manager',
+            ...(blocked ? { blocked } : {})
+          },
+          {
+            role_id: 'song',
+            label: 'Song Assistant',
+            scope: 'project',
+            outcome: 'existing',
+            agent_name: 'Song Assistant'
+          }
+        ]
+      })
+    });
+  });
+}
+
+test('required roles Ori fills on create never gate Team, and one Create sends no fill for them', async ({
+  page
+}) => {
+  await routeAutoStaffedPlan(page);
+  const payloads: Array<Record<string, any>> = [];
+  await page.route('**/api/workspaces', async route => {
+    payloads.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        folder: { id: 'auto-staffed', folder_slug: 'auto-staffed' },
+        seeded_starter_tasks: 0
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Research Project').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Night Drive');
+  await advanceToTeam(page);
+
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(
+    0
+  );
+  const homeRole = page.locator('#workspaceRoleRoster [data-role-id="portfolio"]');
+  await expect(homeRole).toContainText('Portfolio Manager');
+  await expect(homeRole).toContainText('Created for you');
+  await expect(homeRole.getByRole('button', { name: /^Set up / })).toHaveCount(0);
+  const songRole = page.locator('#workspaceRoleRoster [data-role-id="song"]');
+  await expect(songRole).toContainText('Song Assistant');
+  await expect(songRole).toContainText('Already on this Home');
+  // Choosing someone else stays possible, and is not the row's main action.
+  await expect(
+    songRole.getByRole('button', { name: 'Create an agent for Song Assistant' })
+  ).toHaveClass(/btn-outline-secondary/);
+  await expect(page.locator('#workspaceRoleRoster')).not.toContainText('Missing');
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
+
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  const review = page.locator('#workspaceReviewSummary');
+  await expect(review).toContainText('Song Assistant · already on this Home');
+  await expect(review).toContainText('1 of 1 required role filled');
+  await expect(
+    page.locator('#workspaceReviewIssues .workspace-team-issue.is-blocking')
+  ).toHaveCount(0);
+
+  await page.locator('#createFolderBtn').click();
+  await expect.poll(() => payloads).toHaveLength(1);
+  expect(payloads[0].team_intent).toEqual({
+    version: 1,
+    mode: 'staffed',
+    plan_revision: 'auto-staffed-plan'
+  });
+  expect(payloads[0].role_staffing).toEqual([]);
+  expect(payloads[0].assistant_hire).toBeUndefined();
+});
+
+test('a role Ori cannot fill is the one Team blocker, named with its reason', async ({ page }) => {
+  const reason = 'no model is set up for new agents';
+  await routeAutoStaffedPlan(page, reason);
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Research Project').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('No Model');
+  await advanceToTeam(page);
+
+  const blockers = page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking');
+  await expect(blockers).toHaveCount(1);
+  await expect(blockers).toContainText(`Portfolio Lead: ${reason}.`);
+  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
+  // The role the Home already has an agent for is unaffected.
+  await expect(page.locator('#workspaceRoleRoster [data-role-id="song"]')).toContainText(
+    'Already on this Home'
+  );
+});
+
 test('server prompt validation keeps the reviewed role draft before any create', async ({
   page
 }) => {

@@ -1794,6 +1794,225 @@ test('Team missing-role recovery builds an absent group or opens exact Home staf
   assert.deepEqual(opened, { opener, roleID: 'portfolio-coordinator' });
 });
 
+test('a missing project role’s link opens Team before it focuses the role', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { querySelector: () => null, getElementById: () => null }
+  );
+  manager.teamView = () => ({
+    blockingIssues: [{ id: 'required-roles-missing', roleId: 'song-assistant' }],
+    roleRoster: {
+      roles: [
+        {
+          role_id: 'song-assistant',
+          label: 'Song Assistant',
+          scope: 'project',
+          required: true,
+          state: 'empty'
+        }
+      ]
+    }
+  });
+  assert.equal(manager.teamRecoveryLabel('fill-required-role'), 'Go to Song Assistant');
+
+  const calls = [];
+  manager.goToWizardStep = (step, options) => {
+    calls.push(['step', step, options?.focus]);
+    manager.wizardStep = step;
+  };
+  manager.focusWorkspaceRoleRow = roleId => {
+    calls.push(['focus', roleId, manager.wizardStep]);
+    return true;
+  };
+  // The blocker is repeated on Review, where the roster is hidden: the link
+  // has to show Team, or it focuses a row nobody can see.
+  manager.wizardStep = 4;
+  manager.runTeamRecovery('fill-required-role');
+  assert.deepEqual(calls, [
+    ['step', 3, false],
+    ['focus', 'song-assistant', 3]
+  ]);
+
+  calls.length = 0;
+  manager.runTeamRecovery('fill-required-role');
+  assert.deepEqual(calls, [['focus', 'song-assistant', 3]], 'already on Team: only focus moves');
+});
+
+test('a group role Ori fills on create leaves the destination ready and its setup optional', () => {
+  const ids = [
+    'workspaceGroupDestinationCard',
+    'workspaceGroupDestinationTitle',
+    'workspaceGroupDestinationBadge',
+    'workspaceGroupDestinationRoute',
+    'workspaceGroupDestinationSummary',
+    'workspaceGroupDestinationProgress',
+    'workspaceGroupCompositionChoice',
+    'workspaceGroupHomeReview',
+    'workspaceGroupHomeReviewTitle',
+    'workspaceGroupHomeReviewCopy',
+    'workspaceGroupHomeConfirm',
+    'workspaceGroupHomeCancel',
+    'workspaceGroupDestinationActions',
+    'folderNameInput'
+  ];
+  const elements = new Map(ids.map(id => [id, new CardElement()]));
+  elements.get('folderNameInput').value = 'Night Drive';
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { getElementById: id => elements.get(id) || null, createElement: () => new CardElement() }
+  );
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    status: 'ready',
+    projection: {
+      state: 'ready_grouped',
+      summary: 'Use the exact group.',
+      home: { exists: true, workspace_id: 'home-1', name: 'Music Home' },
+      required_home_roles: {
+        verification: 'verified',
+        required: 1,
+        filled: 0,
+        missing: 1,
+        roles: [{ role_id: 'portfolio', label: 'Music Portfolio Manager', state: 'empty' }]
+      },
+      actions: ['open_group_roles']
+    }
+  };
+  const homeRole = {
+    role_id: 'portfolio',
+    label: 'Music Portfolio Manager',
+    scope: 'home',
+    required: true
+  };
+  manager.teamView = () => ({
+    roleRoster: {
+      roles: [
+        {
+          ...homeRole,
+          state: 'filled',
+          auto: true,
+          source: 'auto',
+          agent: { name: 'Portfolio Manager' }
+        }
+      ]
+    }
+  });
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Ready');
+  assert.equal(
+    elements.get('workspaceGroupDestinationProgress').textContent,
+    'Group coordinator · Music Portfolio Manager: Portfolio Manager · created for you with this workspace'
+  );
+  const optional = elements.get('workspaceGroupDestinationActions').children[0];
+  assert.equal(optional.textContent, 'Choose a different agent');
+  assert.match(optional.className, /modern-btn-secondary/);
+
+  // The Review hierarchy names the same agent with the same words.
+  const receipt = manager.renderWorkspaceGroupRequirementReceipt({
+    group_requirement: { policy: 'required', default_home_name: 'Music Home' }
+  });
+  assert.match(receipt, /Music Portfolio Manager/);
+  assert.match(receipt, /Portfolio Manager · created for you/);
+  assert.doesNotMatch(receipt, /Missing on the group/);
+
+  // A role Ori cannot fill is still a step to take first.
+  manager.teamView = () => ({ roleRoster: { roles: [{ ...homeRole, state: 'empty' }] } });
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Needs setup');
+  assert.equal(
+    elements.get('workspaceGroupDestinationProgress').textContent,
+    '0 of 1 required group role filled · Needs Music Portfolio Manager'
+  );
+  const required = elements.get('workspaceGroupDestinationActions').children[0];
+  assert.equal(required.textContent, 'Set up Music Portfolio Manager');
+  assert.match(required.className, /modern-btn-primary/);
+});
+
+test('the quest’s creator lists the team its create makes, and says so only when it will', () => {
+  const manager = loadSessionManager();
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace', connectionOnly: true };
+  manager.templateAgentPlan = {
+    auto_staffing: [
+      {
+        role_id: 'portfolio',
+        label: 'Music Portfolio Manager',
+        outcome: 'create',
+        agent_name: 'Portfolio Manager'
+      },
+      {
+        role_id: 'song',
+        label: 'Song Assistant',
+        outcome: 'existing',
+        agent_name: 'Song Assistant'
+      }
+    ]
+  };
+  const card = manager.renderWorkspaceReceiptTeam(null);
+  assert.match(card, /data-connection-only-team/);
+  assert.match(card, /Music Portfolio Manager · Portfolio Manager · created for you/);
+  assert.match(card, /Song Assistant · Song Assistant · already on this Home/);
+  assert.doesNotMatch(card, /Set up in the next step|No agent or profile is created/);
+
+  // Nothing Ori can fill (no model for a new agent): the old, exact statement.
+  manager.templateAgentPlan = {
+    auto_staffing: [
+      {
+        role_id: 'song',
+        label: 'Song Assistant',
+        outcome: 'create',
+        agent_name: 'Song Assistant',
+        blocked: 'no model'
+      }
+    ]
+  };
+  assert.match(
+    manager.renderWorkspaceReceiptTeam(null),
+    /No agent or profile is created or attached now/
+  );
+
+  // Part of it: the rest is named as the next step's.
+  manager.templateAgentPlan.auto_staffing.unshift({
+    role_id: 'portfolio',
+    label: 'Music Portfolio Manager',
+    outcome: 'existing',
+    agent_name: 'Portfolio Manager'
+  });
+  const partial = manager.renderWorkspaceReceiptTeam(null);
+  assert.match(partial, /Music Portfolio Manager · Portfolio Manager · already on this Home/);
+  assert.match(partial, /Song Assistant · set up in the next step/);
+});
+
+test('the quest’s creator shows no team blocker on its Review; an ordinary creator still does', () => {
+  const host = { innerHTML: 'stale', querySelectorAll: () => [] };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { getElementById: id => (id === 'workspaceReviewIssues' ? host : null) }
+  );
+  manager.teamView = () => ({
+    issues: [
+      {
+        id: 'required-roles-missing',
+        severity: 'blocking',
+        message: 'Song Assistant: no model is set up for new agents.',
+        recovery: []
+      }
+    ]
+  });
+  // The quest's creator never gates on the team, so a blocker here would name
+  // a step that does not exist in it.
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace', connectionOnly: true };
+  manager.renderWorkspaceTeamIssues('workspaceReviewIssues');
+  assert.equal(host.innerHTML, '');
+
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace' };
+  manager.renderWorkspaceTeamIssues('workspaceReviewIssues');
+  assert.match(host.innerHTML, /Song Assistant: no model is set up for new agents\./);
+});
+
 test('Details destination card distinguishes loading, proposed, existing, standalone, and unavailable state', () => {
   const ids = [
     'workspaceGroupDestinationCard',

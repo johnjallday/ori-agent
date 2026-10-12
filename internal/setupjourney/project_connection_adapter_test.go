@@ -136,6 +136,51 @@ func TestProjectConnectionAdapterReviewsAndCommitsRecommendedStandalone(t *testi
 	}
 }
 
+// The created project is handed to the staffer once it exists, and only then:
+// a commit that did not make a project has nothing to staff.
+func TestProjectConnectionAdapterHandsACommittedProjectToItsStaffer(t *testing.T) {
+	adapter, _ := setupJourneyProjectAdapter(t)
+	resolver := adapter.templates.(staticProjectTemplateResolver)
+	resolver.template.Revision = strings.Repeat("a", 64)
+	resolver.template.GroupRequirement = &projecttemplates.GroupRequirement{
+		SchemaVersion: projecttemplates.GroupRequirementSchemaVersion, Policy: projecttemplates.GroupPolicyRecommended,
+		AssistantProgramID: resolver.template.AssistantProgram.ID, MissingHome: projecttemplates.MissingHomeOfferCreate,
+		DefaultHomeName: resolver.template.AssistantProgram.StationName,
+	}
+	resolver.template.StandaloneComposition = &projecttemplates.StandaloneComposition{
+		SchemaVersion: projecttemplates.StandaloneCompositionSchemaVersion,
+		ProjectRoles:  []projecttemplates.StandaloneRole{{RoleID: "project", SystemPrompt: "Work only in this project."}},
+	}
+	adapter.templates = resolver
+	var staffed []string
+	adapter.SetCreatedProjectStaffer(func(_ context.Context, projectID string) { staffed = append(staffed, projectID) })
+
+	scope := ReadScope{OwnerUserID: "owner-1", RunKind: RunKindRoot, RunID: "staffed-journey", WorkspaceLaunch: true}
+	raw := json.RawMessage(`{"mode_id":"new_project","workspace_name":"Staffed","project_name":"Staffed","group_composition":"standalone"}`)
+	material, err := adapter.Review(context.Background(), scope, ActionReviewNewProject, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staffed) != 0 {
+		t.Fatalf("a review staffed something: %v", staffed)
+	}
+	stale := material
+	stale.InputDigest = strings.Repeat("0", 64)
+	if _, err := adapter.Commit(context.Background(), scope, ActionCreateNewProject, raw, stale); err == nil {
+		t.Fatal("a commit against another review succeeded")
+	}
+	if len(staffed) != 0 {
+		t.Fatalf("a refused commit staffed something: %v", staffed)
+	}
+	result, err := adapter.Commit(context.Background(), scope, ActionCreateNewProject, raw, material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staffed) != 1 || staffed[0] != result.ProjectWorkspaceID || result.ProjectWorkspaceID == "" {
+		t.Fatalf("staffed = %v, project = %q", staffed, result.ProjectWorkspaceID)
+	}
+}
+
 func TestProjectConnectionAdapterRejectsUnknownInputAndActionModeConfusion(t *testing.T) {
 	adapter, _ := setupJourneyProjectAdapter(t)
 	scope := ReadScope{OwnerUserID: "owner-1", RunKind: RunKindRoot, RunID: "run"}

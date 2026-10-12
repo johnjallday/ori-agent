@@ -226,6 +226,7 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 	plan := h.buildTemplateAgentPlanForOwner(tpl, ownerUserID)
 	plan.GroupRequirement = groupPlan
 	plan = finalizeTemplateAgentPlan(plan)
+	plan.AutoStaffing = h.planRoleAutoFills(groupSourceTemplate, tpl, req.GroupComposition, ownerUserID)
 	roles := workspaceTeamRoles(tpl, plan)
 	if len(roles) > 0 && strings.TrimSpace(req.EntryAgentName) != "" {
 		return nil, workspaceTeamConflict("The declared primary role determines this workspace's entry agent.", roles, nil)
@@ -320,17 +321,37 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 	if plan.AssistantProgram != nil && len(normalized) > 0 && h.assistantRoleStaffer == nil {
 		return nil, workspaceTeamConflict("Assistant Program staffing is unavailable; restore it before creating this workspace.", roles, nil)
 	}
-	missing := false
+	// A required role the user left empty is filled by the create itself, as
+	// the review listed it. Only a role the host cannot fill still blocks.
+	autoFills := make(map[string]templateRoleAutoFill, len(plan.AutoStaffing))
+	for _, fill := range plan.AutoStaffing {
+		autoFills[fill.RoleID] = fill
+	}
+	message := ""
 	for index := range roles {
-		if roles[index].Required && roles[index].State != "filled" {
-			if roles[index].Reason == "" {
-				roles[index].Reason = "required role has no verified holder"
+		if !roles[index].Required || roles[index].State == "filled" {
+			continue
+		}
+		if fill, planned := autoFills[roles[index].RoleID]; planned && roles[index].Reason == "" {
+			if fill.Blocked == "" {
+				roles[index].State = "filled"
+				roles[index].Reason = "filled on create"
+				continue
 			}
-			missing = true
+			roles[index].Reason = fill.Blocked
+			if message == "" {
+				message = roles[index].Label + ": " + fill.Blocked + "."
+			}
+		}
+		if roles[index].Reason == "" {
+			roles[index].Reason = "required role has no verified holder"
+		}
+		if message == "" {
+			message = "Fill every required role before creating this workspace."
 		}
 	}
-	if missing {
-		return nil, workspaceTeamConflict("Fill every required role before creating this workspace.", roles, nil)
+	if message != "" {
+		return nil, workspaceTeamConflict(message, roles, nil)
 	}
 	return intent, nil
 }
