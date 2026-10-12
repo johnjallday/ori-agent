@@ -96,7 +96,7 @@ func interviewSuggestionForCandidate(candidate FolderCandidateRecord) (Interview
 	if candidate.Kind != FolderChoiceProject || name == "" {
 		return InterviewSuggestion{}, false
 	}
-	// A whole Downloads, Documents or Desktop is where work is kept, not the
+	// A whole Music, Documents, Desktop or Downloads is where work is kept, not the
 	// work itself. A file picked straight out of one makes that folder the
 	// scan's project; naming it would answer the question with "Downloads".
 	if candidate.IsRoot && isKnownFolderName(name) {
@@ -231,7 +231,7 @@ func (s *KnowledgeInterviewService) rememberedFolderProjects(ctx context.Context
 }
 
 // isKnownFolderName reports whether name is one of the chooser's fixed
-// folders (Downloads, Documents, Desktop).
+// folders (Music, Documents, Desktop, Downloads).
 func isKnownFolderName(name string) bool {
 	for _, chip := range folderChips {
 		if strings.EqualFold(name, chip.Dir) {

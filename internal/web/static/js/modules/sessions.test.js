@@ -95,6 +95,143 @@ test('a copied workspace this build cannot restore blocks the ordinary import an
   assert.equal(elements.get('folderImportContinuityNotice').hidden, true);
 });
 
+// The import field takes a typed path. What is typed goes through the folder
+// picker's typed-path check, like every other "paste a folder path" field.
+function importPathManager(respond) {
+  const note = {
+    textContent: '',
+    hidden: true,
+    revealed: 0,
+    scrollIntoView() {
+      this.revealed++;
+    }
+  };
+  const elements = new Map([
+    ['folderImportPathInput', { value: '', focus() {} }],
+    ['folderImportPathNote', note]
+  ]);
+  const requests = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      requests.push({ url, body: JSON.parse(options.body || '{}') });
+      const result = respond(JSON.parse(options.body || '{}'));
+      return { ok: result.status < 400, status: result.status, json: async () => result.body };
+    },
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.importModeEnabled = true;
+  const checked = [];
+  const named = [];
+  const toasts = [];
+  manager.checkImportDuplicate = async path => {
+    checked.push(path);
+  };
+  manager.prefillWorkspaceNameFromImportPath = path => named.push(path);
+  manager.showToast = (message, kind) => toasts.push([message, kind]);
+  return {
+    manager,
+    requests,
+    checked,
+    named,
+    toasts,
+    input: elements.get('folderImportPathInput'),
+    note: elements.get('folderImportPathNote')
+  };
+}
+
+test('a typed import path is checked, and "~/" becomes the real folder before the import looks at it', async () => {
+  const f = importPathManager(() => ({
+    status: 200,
+    body: {
+      success: true,
+      selected: true,
+      path: '/Users/riley/Music/REAPER Projects',
+      selection_token: 'tok'
+    }
+  }));
+  f.input.value = '~/Music/REAPER Projects';
+  await f.manager.resolveTypedImportPath(f.input.value);
+  assert.deepEqual(f.requests, [
+    { url: '/api/folder-picker/select-path', body: { path: '~/Music/REAPER Projects' } }
+  ]);
+  assert.equal(f.input.value, '/Users/riley/Music/REAPER Projects');
+  assert.deepEqual(f.named, ['/Users/riley/Music/REAPER Projects']);
+  assert.deepEqual(f.checked, ['/Users/riley/Music/REAPER Projects']);
+  assert.equal(f.note.hidden, true);
+});
+
+test('a typed import path outside the home folder keeps its warning under the field', async () => {
+  const f = importPathManager(() => ({
+    status: 200,
+    body: {
+      success: true,
+      selected: true,
+      path: '/Volumes/Sessions',
+      warning: 'outside_home',
+      warning_note: 'This folder is outside your home folder.'
+    }
+  }));
+  f.input.value = '/Volumes/Sessions';
+  await f.manager.resolveTypedImportPath(f.input.value);
+  // Already canonical: nothing is rewritten or renamed.
+  assert.equal(f.input.value, '/Volumes/Sessions');
+  assert.deepEqual(f.named, []);
+  assert.equal(f.note.textContent, 'This folder is outside your home folder.');
+  assert.equal(f.note.hidden, false);
+  assert.doesNotMatch(f.note.textContent, /outside_home/);
+});
+
+test('a refused typed import path says why and leaves the import its own check', async () => {
+  const f = importPathManager(() => ({
+    status: 422,
+    body: { success: false, error: 'Use the full path to the folder, starting with / or ~/.' }
+  }));
+  f.input.value = 'Music/REAPER Projects';
+  await f.manager.resolveTypedImportPath(f.input.value);
+  assert.equal(f.input.value, 'Music/REAPER Projects');
+  assert.equal(f.note.textContent, 'Use the full path to the folder, starting with / or ~/.');
+  assert.deepEqual(f.checked, ['Music/REAPER Projects']);
+  assert.deepEqual(f.toasts, []);
+});
+
+test('an answer about text the user has since changed is dropped', async () => {
+  let f;
+  f = importPathManager(() => {
+    f.input.value = '~/Music/Other';
+    return { status: 200, body: { success: true, selected: true, path: '/Users/riley/Music' } };
+  });
+  f.input.value = '~/Music';
+  await f.manager.resolveTypedImportPath('~/Music');
+  assert.equal(f.input.value, '~/Music/Other');
+  assert.deepEqual(f.checked, []);
+});
+
+test('an empty import path or a closed import asks the server nothing', async () => {
+  const f = importPathManager(() => ({ status: 200, body: {} }));
+  await f.manager.resolveTypedImportPath('   ');
+  f.manager.importModeEnabled = false;
+  await f.manager.resolveTypedImportPath('/Users/riley/Music');
+  assert.deepEqual(f.requests, []);
+  assert.deepEqual(f.checked, ['', '/Users/riley/Music']);
+});
+
+test('Browse with the folder dialog switched off shows the sentence by the field, not an error', async () => {
+  const note = 'The folder dialog is switched off in this session. Paste a folder path instead.';
+  const f = importPathManager(() => ({
+    status: 200,
+    body: { success: false, launched: false, reason: 'dialog_off', note, error: note }
+  }));
+  await f.manager.browseImportFolderPath();
+  assert.equal(f.note.textContent, note);
+  assert.equal(f.note.hidden, false);
+  // The field is low in a scrolling modal, so the note is brought into view.
+  assert.equal(f.note.revealed, 1);
+  assert.deepEqual(f.toasts, []);
+  assert.equal(f.input.value, '');
+  assert.doesNotMatch(f.note.textContent, /dialog_off/);
+});
+
 test('an importable assistant copy offers Import and continue and renders untrusted names as text', () => {
   const list = {
     hidden: true,

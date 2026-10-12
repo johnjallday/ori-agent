@@ -1552,7 +1552,13 @@ or
 { "picker": true }
 ```
 
-Exactly one of `chip` or `picker`. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
+or
+
+```json
+{ "selection_token": "<token from POST /api/folder-picker/select-path>" }
+```
+
+Exactly one of `chip`, `picker`, `file` or `selection_token`. Chips are `music`, `documents`, `desktop` and `downloads`, offered in that order for the folders that exist. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. A `selection_token` names a folder the folder-picker endpoint already accepted, which is how a path the user typed gets here: `POST /api/folder-picker/select-path` with `{ "path": "~/Music/Projects" }` checks the path on a same-origin request (absolute or `~/`, an existing directory, not the home folder itself, not Ori's data or workspace root, not a credential folder) and answers `{ "success": true, "selected": true, "path": "…", "selection_token": "…" }`, with `warning: "outside_home"` and a `warning_note` sentence for a folder outside the home folder, or `422` with the refusal's sentence in `error`. The scan route itself still answers `400` to any `path` or `folder` key; an expired or unknown token is `400` with "That folder selection expired. Paste the path again." The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
 
 ### Open the Picker
 

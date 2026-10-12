@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,10 +15,20 @@ import (
 
 // CreateDirectoryRequest represents the request to create a directory reference
 type CreateDirectoryRequest struct {
-	Name string  `json:"name"`
-	Path string  `json:"path"`
-	X    float64 `json:"x"`
-	Y    float64 `json:"y"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// SelectionToken stands in for Path: a folder the folder-picker endpoint
+	// accepted for this workspace (a checked typed path). The server resolves
+	// it, and Name defaults to the folder's own name.
+	SelectionToken string  `json:"selection_token,omitempty"`
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+}
+
+// scopedPathSelectionResolver reads back a selection the issuer bound to one
+// workspace.
+type scopedPathSelectionResolver interface {
+	ResolveFor(token, scope string) (string, error)
 }
 
 // CreateDirectory handles POST /api/workspaces/:id/directories
@@ -27,6 +38,27 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 	var req CreateDirectoryRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+
+	if token := strings.TrimSpace(req.SelectionToken); token != "" {
+		if req.Path != "" {
+			orihttp.BadRequest(w, "Send a folder selection or a path, not both")
+			return
+		}
+		resolver, ok := h.pathSelectionIssuer.(scopedPathSelectionResolver)
+		if !ok {
+			orihttp.ServiceUnavailable(w, "Trusted folder selection is unavailable")
+			return
+		}
+		selected, err := resolver.ResolveFor(token, workspaceID)
+		if err != nil {
+			orihttp.BadRequest(w, "That folder selection expired. Paste the path again.")
+			return
+		}
+		req.Path = selected
+		if strings.TrimSpace(req.Name) == "" {
+			req.Name = filepath.Base(selected)
+		}
 	}
 
 	if req.Name == "" {

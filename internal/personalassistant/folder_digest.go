@@ -71,9 +71,10 @@ type FolderChip struct {
 var folderChips = []struct {
 	ID, Label, Dir string
 }{
-	{ID: "downloads", Label: "Downloads", Dir: "Downloads"},
+	{ID: "music", Label: "Music", Dir: "Music"},
 	{ID: "documents", Label: "Documents", Dir: "Documents"},
 	{ID: "desktop", Label: "Desktop", Dir: "Desktop"},
+	{ID: "downloads", Label: "Downloads", Dir: "Downloads"},
 }
 
 // FolderPicker opens the native folder dialog on the server (FR5).
@@ -101,10 +102,10 @@ const (
 )
 
 // Chooser notes: the chooser must always say what can be done, never offer a
-// list that may be empty (a sandboxed home has no Downloads, Documents, or
-// Desktop, and its server has the folder dialog switched off).
+// list that may be empty (a sandboxed home has no Music, Documents, Desktop,
+// or Downloads, and its server has the folder dialog switched off).
 const (
-	folderChipsMissingNote    = "Downloads, Documents and Desktop are not under this home"
+	folderChipsMissingNote    = "Music, Documents, Desktop and Downloads are not under this home"
 	folderDialogOffPhrase     = "the folder dialog is switched off in this session"
 	folderDialogMacOnlyPhrase = "the folder dialog is only available on macOS"
 	folderDialogAwayPhrase    = "the folder dialog is unavailable here"
@@ -281,8 +282,13 @@ type FolderDigestDeps struct {
 	// broad (FR7). It returns *FolderRootError for a user-facing refusal.
 	ValidateRoot func(raw string) (string, error)
 	Picker       FolderPicker
-	HomeDir      func() (string, error)
-	Scan         func(root string) (folderdigest.Result, error)
+	// ResolveSelection returns the folder a folder-picker selection token
+	// names: a path the server already accepted, from the dialog or from a
+	// typed path that passed its check. The browser sends the token, never the
+	// path. Nil refuses every selection.
+	ResolveSelection func(token string) (string, error)
+	HomeDir          func() (string, error)
+	Scan             func(root string) (folderdigest.Result, error)
 	// ScanObservation captures bounded entry relationships in the same scan.
 	ScanObservation func(root string) (folderdigest.Result, error)
 	Now             func() time.Time
@@ -878,6 +884,41 @@ func (s *FolderDigestService) ScanPicked(ctx context.Context, userID string) (*F
 		return nil, err
 	}
 	return &offer, nil
+}
+
+// folderSelectionLostMessage is shown when a selection token no longer names a
+// folder: it expired, or the server restarted since the path was accepted.
+const folderSelectionLostMessage = "That folder selection expired. Paste the path again."
+
+// selectionPath resolves a folder-picker selection token to the folder the
+// server holds for it.
+func (s *FolderDigestService) selectionPath(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || s.deps.ResolveSelection == nil {
+		return "", &FolderRootError{Message: folderSelectionLostMessage}
+	}
+	path, err := s.deps.ResolveSelection(token)
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", &FolderRootError{Message: folderSelectionLostMessage}
+	}
+	return path, nil
+}
+
+// ScanSelection scans the folder a selection token names, the way ScanPicked
+// scans a dialog choice. It is how a typed path reaches the chooser: the path
+// was checked where the token was issued, and only the token arrives here.
+func (s *FolderDigestService) ScanSelection(ctx context.Context, userID, token string) (FolderOfferView, error) {
+	if s == nil || s.store == nil {
+		return FolderOfferView{}, ErrRepairNeeded
+	}
+	if _, err := s.store.Binding(ctx, userID); err != nil {
+		return FolderOfferView{}, err
+	}
+	path, err := s.selectionPath(token)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	return s.scanRoot(ctx, userID, path, "")
 }
 
 // ScanPickedFile digests the parent of the file selected on the server. The

@@ -659,11 +659,16 @@ assistant makes one explained offer.
   mission card reach the same flow. Nothing opens by itself: at rest the
   conversation is empty. The chip is disabled while a folder is being chosen
   or explored. Before HQ, Home opens its confirm card instead.
-- **Choosing.** Chips name Downloads, Documents, and Desktop under the server's
-  home; "Pick another folder…" runs the native picker on the server
-  (`platform.ChooseFolder`, osascript). The browser never sends a filesystem
-  path: `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}` or
-  `{picker: true}` and answers 400 to any `path`/`folder` key.
+- **Choosing.** Chips name Music, Documents, Desktop, and Downloads under the
+  server's home; "Pick another folder…" runs the native picker on the server
+  (`platform.ChooseFolder`, osascript). Any other folder can be typed in the
+  "or paste a folder path" field: the text goes to
+  `POST /api/folder-picker/select-path` (`path`), the one route that accepts a
+  typed path, which checks it (`internal/folderpath`, same-origin only) and
+  answers with a selection token. The scan never receives a filesystem path:
+  `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}`,
+  `{picker: true}` or `{selection_token}` and answers 400 to any
+  `path`/`folder` key.
 - **Presentation.** The turn reads as a conversation: the user's request
   ("Explore a folder"), then the assistant's replies in order — the chooser
   ("Which folder should I explore?", the folder buttons, "A read-only peek.

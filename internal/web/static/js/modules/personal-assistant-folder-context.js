@@ -3,6 +3,7 @@
 import { folderSelectionFocus, folderTreeView } from './personal-assistant-folder-tree.js';
 import { initFolderExplorer } from './personal-assistant-folder-explorer.js';
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
+import { createFolderPathEntry } from './folder-path-entry.js';
 import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
 import {
   currentFolderDiscussion,
@@ -71,7 +72,9 @@ export function createFolderContextController({
     });
     changed(state);
   }
-  async function select(mode, chip = '') {
+  // selectionToken goes with mode 'selection': the receipt for a typed path
+  // the folder-picker endpoint accepted. The path itself is never sent here.
+  async function select(mode, chip = '', selectionToken = '') {
     if (isBusy()) {
       notify('Wait for the current reply before changing its folder.');
       return false;
@@ -86,7 +89,8 @@ export function createFolderContextController({
       const result = await post(`${ENDPOINT}/select`, {
         ...target(),
         mode,
-        ...(chip ? { chip } : {})
+        ...(chip ? { chip } : {}),
+        ...(selectionToken ? { selection_token: selectionToken } : {})
       });
       if (generation !== state.generation || owner !== currentId()) return false;
       if (result.cancelled || !result.observation) {
@@ -273,6 +277,16 @@ export function createFolderContextController({
     }
   }
   return { state, select, remove, reset, request, setFocus, accepted, adopt, review, notify };
+}
+
+// folderContextChoices is what the Add folder sheet shows for the server's
+// choices: one button per approved choice, then the sentence that explains a
+// missing dialog. Pure, so the sheet's wording is testable without a page.
+export function folderContextChoices(payload) {
+  const view = folderChooserView(payload);
+  const choices = view.chips.map(chip => ({ label: chip.label, mode: 'chip', chip: chip.id }));
+  if (view.pickerVisible) choices.push({ label: view.pickerLabel, mode: 'picker' });
+  return { choices, note: view.note };
 }
 
 async function jsonRequest(url, body) {
@@ -505,29 +519,33 @@ async function open() {
   // Escape belongs to the chooser even before its asynchronous choices arrive.
   document.getElementById('personalAssistantFolderChooserCancel')?.focus();
   try {
-    const view = folderChooserView(await jsonRequest(`${ENDPOINT}/choices`));
+    const { choices, note } = folderContextChoices(await jsonRequest(`${ENDPOINT}/choices`));
     if (generation !== chooserGeneration) return;
-    const choices = view.chips.map(chip => ({ label: chip.label, mode: 'chip', chip: chip.id }));
-    if (view.pickerVisible) choices.push({ label: view.pickerLabel, mode: 'picker' });
     elements.choices.replaceChildren();
+    const choose = async (mode, chip, selectionToken) => {
+      closeChooser();
+      const selectedGeneration = chooserGeneration;
+      const selected = await controller.select(mode, chip, selectionToken);
+      if (selected && folderTreeView(controller.state.observation))
+        explorer?.explore({ automatic: true });
+      // Disabling Add during selection can move focus to body. Restore it
+      // only if the user has not moved elsewhere or left this conversation.
+      if (selectedGeneration === chooserGeneration && document.activeElement === document.body)
+        elements.add.focus();
+    };
     for (const choice of choices) {
       const button = node('button', choice.label, 'personal-assistant-panel__chip');
       button.type = 'button';
-      button.addEventListener('click', async () => {
-        closeChooser();
-        const selectedGeneration = chooserGeneration;
-        const selected = await controller.select(choice.mode, choice.chip);
-        if (selected && folderTreeView(controller.state.observation))
-          explorer?.explore({ automatic: true });
-        // Disabling Add during selection can move focus to body. Restore it
-        // only if the user has not moved elsewhere or left this conversation.
-        if (selectedGeneration === chooserGeneration && document.activeElement === document.body)
-          elements.add.focus();
-      });
+      button.addEventListener('click', () => choose(choice.mode, choice.chip));
       elements.choices.append(button);
     }
-    if (view.note) elements.choices.append(node('p', view.note));
-    elements.choices.querySelector('button')?.focus();
+    if (note) elements.choices.append(node('p', note));
+    // Any other folder: a typed path, checked by the folder-picker endpoint.
+    const entry = createFolderPathEntry({
+      onSelect: selection => choose('selection', '', selection.selectionToken)
+    });
+    elements.choices.append(entry.element);
+    (elements.choices.querySelector('.personal-assistant-panel__chip') || entry.input).focus();
   } catch (error) {
     if (generation === chooserGeneration)
       elements.choices.replaceChildren(node('p', error.message));

@@ -39,6 +39,14 @@ func desktopOpenDisabled(action, target string) bool {
 	return true
 }
 
+// DesktopLaunchSkipped reports whether desktop launches are switched off, and
+// logs the launch that was skipped. It is for packages that start a desktop
+// application of their own (the folder picker helper) instead of going through
+// this package's openers; they must ask before starting or signalling it.
+func DesktopLaunchSkipped(action, target string) bool {
+	return desktopOpenDisabled(action, target)
+}
+
 // DesktopOpener is the injectable boundary for operations that launch native
 // desktop applications. Production uses NativeDesktopOpener; tests should
 // provide a recording or no-op implementation so automated runs never open

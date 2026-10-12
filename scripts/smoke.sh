@@ -2994,8 +2994,9 @@ smoke_reaper_demo_folders() {
 # smoke_pick_folder answers an open native folder dialog (macOS) with <path>:
 # it waits for the ori-folder-picker sheet, opens Go to Folder (Cmd-Shift-G),
 # types the path, and confirms twice. Browser automation cannot click a native
-# dialog, and the server must never gain a picker bypass, so demos drive the
-# real dialog. Click "Choose project folder" first, then run this.
+# dialog, so a demo that has to prove the dialog itself drives the real one.
+# (A path typed beside the button is a separate, server-checked route:
+# select-path's "path".) Click "Choose project folder" first, then run this.
 smoke_pick_folder() {
   local target="${2:-}"
   [[ -n "$target" && -d "$target" ]] || fail "usage: $0 pick-folder <existing-folder>"

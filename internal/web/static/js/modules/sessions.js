@@ -661,7 +661,7 @@ const sessionManager = {
       this.prefillWorkspaceNameFromImportPath(event?.target?.value || '');
     });
     importPathInput?.addEventListener('blur', event => {
-      void this.checkImportDuplicate(event?.target?.value || '');
+      void this.resolveTypedImportPath(event?.target?.value || '');
     });
 
     const importBrowseBtn = document.getElementById('folderImportBrowseBtn');
@@ -4133,6 +4133,55 @@ const sessionManager = {
     }
   },
 
+  // The line under the import path field: why the dialog did not open, why a
+  // typed path was refused, or a warning about one that was accepted.
+  setImportPathNote(text) {
+    const note = document.getElementById('folderImportPathNote');
+    if (!note) return;
+    note.textContent = String(text || '').trim();
+    note.hidden = !note.textContent;
+    // The field sits low in a scrolling modal; a note nobody sees says nothing.
+    if (!note.hidden) note.scrollIntoView?.({ block: 'nearest' });
+  },
+
+  // A typed import path goes through the folder picker's typed-path check
+  // first, like every other "paste a folder path" field: "~/" is expanded and
+  // the canonical path replaces what was typed. A refusal is shown under the
+  // field; the import's own checks still have the last word.
+  async resolveTypedImportPath(pathValue) {
+    const typed = String(pathValue || '').trim();
+    const input = document.getElementById('folderImportPathInput');
+    this.setImportPathNote('');
+    if (!typed || !this.importModeEnabled || !input) {
+      await this.checkImportDuplicate(typed);
+      return;
+    }
+    let path = typed;
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: typed })
+      });
+      const result = await response.json().catch(() => ({}));
+      // The user kept typing: this answer is about text that is gone.
+      if (input.value.trim() !== typed) return;
+      if (response.ok && result.success && result.selected && result.path) {
+        path = result.path;
+        if (path !== typed) {
+          input.value = path;
+          this.prefillWorkspaceNameFromImportPath(path);
+        }
+        this.setImportPathNote(result.warning_note);
+      } else if (result.error) {
+        this.setImportPathNote(result.error);
+      }
+    } catch (error) {
+      console.error('Failed to check typed import path:', error);
+    }
+    await this.checkImportDuplicate(path);
+  },
+
   setImportBrowseLoading(isLoading) {
     const browseBtn = document.getElementById('folderImportBrowseBtn');
     if (!browseBtn) return;
@@ -4165,6 +4214,12 @@ const sessionManager = {
       });
 
       const result = await response.json().catch(() => ({}));
+      if (result.reason === 'dialog_off') {
+        // No dialog in this session is not a failure: say so by the field,
+        // which takes a typed path.
+        this.setImportPathNote(result.note || 'The folder dialog is switched off in this session.');
+        return;
+      }
       if (!response.ok || !result.success) {
         this.showToast(result.error || 'Failed to open folder picker', 'error');
         return;
@@ -4174,6 +4229,7 @@ const sessionManager = {
         return;
       }
 
+      this.setImportPathNote('');
       importPathInput.value = result.path;
       this.importAllowDuplicate = false;
       this.clearImportDuplicateWarning();

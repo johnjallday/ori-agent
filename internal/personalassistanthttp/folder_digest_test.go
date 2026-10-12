@@ -15,14 +15,16 @@ import (
 )
 
 type fakeFolderDigest struct {
-	chips     []string
-	picks     int
-	filePicks int
-	decisions map[string]personalassistant.FolderOfferView
-	decided   []personalassistant.FolderDecisionInput
-	paused    bool
-	cancel    bool
-	prompted  int
+	chips []string
+	// selections records every selection token a scan carried.
+	selections []string
+	picks      int
+	filePicks  int
+	decisions  map[string]personalassistant.FolderOfferView
+	decided    []personalassistant.FolderDecisionInput
+	paused     bool
+	cancel     bool
+	prompted   int
 	// continuationHomes records every Home ID that reached the service.
 	continuationHomes []string
 	// existingHomeCalls records "offer/request" for every existing-Home resolve
@@ -175,6 +177,17 @@ func (f *fakeFolderDigest) ScanChip(_ context.Context, _ string, chip string) (p
 		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderChipUnknown
 	}
 	return personalassistant.FolderOfferView{ID: "offer-1", Verdict: "dump", Folder: "Downloads", Reason: "25 loose files of 6 kinds", Remember: !f.paused}, nil
+}
+
+func (f *fakeFolderDigest) ScanSelection(_ context.Context, _ string, token string) (personalassistant.FolderOfferView, error) {
+	f.selections = append(f.selections, token)
+	if f.scanErr != nil {
+		return personalassistant.FolderOfferView{}, f.scanErr
+	}
+	if token != "live-token" {
+		return personalassistant.FolderOfferView{}, &personalassistant.FolderRootError{Message: "That folder selection expired. Paste the path again."}
+	}
+	return personalassistant.FolderOfferView{ID: "offer-typed", Verdict: "project", Folder: "REAPER Projects"}, nil
 }
 
 func (f *fakeFolderDigest) ScanPicked(context.Context, string) (*personalassistant.FolderOfferView, error) {
@@ -755,6 +768,41 @@ func TestFolderDigestScan_AcceptsChipsOnly(t *testing.T) {
 	h.ScanFolderDigest(response, httptest.NewRequest(http.MethodGet, "/scan", nil))
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET scan status=%d", response.Code)
+	}
+}
+
+// A typed path never reaches the scan route. The folder-picker endpoint checks
+// it and issues a selection token; the scan takes that token as one more mode.
+func TestFolderDigestScan_SelectionTokenIsAModeNotAPath(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	for _, scenario := range []struct {
+		body     string
+		status   int
+		contains string
+	}{
+		{`{"selection_token":"live-token"}`, http.StatusOK, `"REAPER Projects"`},
+		{`{"selection_token":"  live-token  "}`, http.StatusOK, `"REAPER Projects"`},
+		{`{"selection_token":"gone"}`, http.StatusBadRequest, "That folder selection expired. Paste the path again."},
+		{`{"selection_token":""}`, http.StatusBadRequest, ""},
+		{`{"selection_token":"live-token","chip":"downloads"}`, http.StatusBadRequest, ""},
+		{`{"selection_token":"live-token","picker":true}`, http.StatusBadRequest, ""},
+		{`{"selection_token":"live-token","path":"/Users/me/Music"}`, http.StatusBadRequest, "does not accept a folder path"},
+	} {
+		response := httptest.NewRecorder()
+		h.ScanFolderDigest(response, httptest.NewRequest(http.MethodPost, "/scan", strings.NewReader(scenario.body)))
+		if response.Code != scenario.status || !strings.Contains(response.Body.String(), scenario.contains) {
+			t.Fatalf("%s: status=%d body=%s", scenario.body, response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), "/Users/me") {
+			t.Fatalf("%s: echoed the path: %s", scenario.body, response.Body.String())
+		}
+	}
+	if len(fake.selections) != 3 || fake.selections[0] != "live-token" || fake.selections[1] != "live-token" || fake.selections[2] != "gone" {
+		t.Fatalf("service saw selections %q", fake.selections)
+	}
+	if len(fake.chips) != 0 || fake.picks != 0 {
+		t.Fatalf("a selection scan also ran chips=%v picks=%d", fake.chips, fake.picks)
 	}
 }
 

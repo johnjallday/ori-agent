@@ -8,6 +8,7 @@
 
 import { createWorkspaceDetailDataLoader } from './workspace-detail-data-loader.js';
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
+import { folderDialogOffNote, openFolderPathDialog } from './folder-path-entry.js';
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceNativeMCPManager } from './workspace-native-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
@@ -16532,33 +16533,25 @@ export class WorkspaceDetailPage {
   }
 
   /**
-   * Show add directory modal - launches the folder picker
+   * Link a folder: the native picker, or a pasted path for a session where the
+   * dialog is switched off or for a user who would rather type.
    */
-  async showAddDirectoryModal(triggerButton = null) {
-    const buttons = [];
-    if (this.elements.addDirectoryBtn) {
-      buttons.push(this.elements.addDirectoryBtn);
-    }
-    if (triggerButton && !buttons.includes(triggerButton)) {
-      buttons.push(triggerButton);
-    }
-    if (buttons.length === 0) return;
-
-    const buttonStates = buttons.map(button => ({
-      button,
-      disabled: button.disabled,
-      innerHTML: button.innerHTML
-    }));
-
-    buttons.forEach(button => {
-      button.disabled = true;
-      if (button.classList.contains('workspace-detail-empty-action')) {
-        button.textContent = 'Opening...';
-      } else {
-        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-      }
+  showAddDirectoryModal() {
+    return openFolderPathDialog({
+      heading: 'Link a folder',
+      copy: 'Choose the folder in the dialog, or paste its path.',
+      workspaceId: this.workspaceId,
+      title: 'Link a folder',
+      onChoose: () => this.launchDirectoryPicker(),
+      onSelect: selection => this.linkSelectedDirectory(selection)
     });
+  }
 
+  /**
+   * Open the native folder picker. Resolves with the launcher's answer (which
+   * may say the dialog is switched off), or null when it could not be opened.
+   */
+  async launchDirectoryPicker() {
     try {
       const response = await fetch('/api/launch-folder-picker', {
         method: 'POST',
@@ -16575,18 +16568,36 @@ export class WorkspaceDetailPage {
         // The folder picker will add the directory and trigger a reload via realtime events
         // Schedule a reload in case realtime doesn't trigger
         setTimeout(() => this.loadDirectories(), 2000);
-      } else {
-        throw new Error(result.error || 'Failed to open folder picker');
+        return result;
       }
+      if (folderDialogOffNote(result)) return result;
+      throw new Error(result.error || 'Failed to open folder picker');
     } catch (error) {
       console.error('Failed to launch folder picker:', error);
       if (window.Toast) window.Toast.error('Failed to open folder picker');
-    } finally {
-      buttonStates.forEach(({ button, disabled, innerHTML }) => {
-        button.disabled = disabled;
-        button.innerHTML = innerHTML;
-      });
+      return null;
     }
+  }
+
+  /**
+   * Link the folder a typed path named. The folder-picker endpoint already
+   * checked the path; the link call carries only its selection token.
+   */
+  async linkSelectedDirectory(selection) {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/directories`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selection_token: selection.selectionToken })
+      }
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.message || payload.error || 'That folder could not be linked.');
+    }
+    if (window.Toast) window.Toast.success('Folder linked');
+    await this.loadDirectories();
   }
 
   /**

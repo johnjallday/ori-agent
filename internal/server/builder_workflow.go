@@ -911,13 +911,16 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		b.pathSelectionStore = pathselection.NewStore()
 	}
 	b.workspaceHandler.SetTrustedPathSelectionIssuer(b.pathSelectionStore)
+	guards := filejanitor.DefaultRootGuards()
+	guards.WorkspaceRoot = resolveWorkspaceRoot(b.configManager)
+	// A path typed beside "Choose folder" gets the picker's selection only
+	// after the same-origin and typed-path checks.
+	b.workspaceHandler.SetTypedFolderPathChecker(newTypedFolderPaths(guards))
 	// The create modal attaches an existing project with the token this same
 	// picker issued, so both must share one store. Later phases (the guided
 	// journey, sample libraries) reuse it rather than creating their own.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
-		guards := filejanitor.DefaultRootGuards()
-		guards.WorkspaceRoot = resolveWorkspaceRoot(b.configManager)
 		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
 	}
 	if b.workspaceFileStore != nil {

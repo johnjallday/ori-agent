@@ -417,6 +417,119 @@ test('workspace detail empty project state offers template creation and folder l
   assert.match(markup, /Link Folder/);
 });
 
+// Link folder: the picker's answer is passed back for the dialog to read, and a
+// typed path is linked by its selection token alone.
+async function withLinkFolderStubs(respond, run) {
+  const previous = { fetch: global.fetch, setTimeout: global.setTimeout, toast: window.Toast };
+  const calls = [];
+  const toasts = [];
+  const timers = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, method: options.method, body: JSON.parse(options.body || '{}') });
+    return respond(url);
+  };
+  global.setTimeout = (fn, delay) => timers.push(delay);
+  window.Toast = {
+    info: message => toasts.push(['info', message]),
+    success: message => toasts.push(['success', message]),
+    error: message => toasts.push(['error', message])
+  };
+  const previousError = console.error;
+  console.error = () => {};
+  try {
+    await run({ calls, toasts, timers });
+  } finally {
+    console.error = previousError;
+    global.fetch = previous.fetch;
+    global.setTimeout = previous.setTimeout;
+    window.Toast = previous.toast;
+  }
+}
+
+test('Link folder reports a switched-off dialog as an answer, not a failure', async () => {
+  const off = {
+    success: false,
+    launched: false,
+    reason: 'dialog_off',
+    note: 'The folder dialog is switched off in this session. Paste a folder path instead.'
+  };
+  await withLinkFolderStubs(
+    () => ({ ok: true, json: async () => off }),
+    async ({ calls, toasts }) => {
+      const page = new WorkspaceDetailPage('workspace-1');
+      assert.deepEqual(await page.launchDirectoryPicker(), off);
+      assert.deepEqual(calls, [
+        { url: '/api/launch-folder-picker', method: 'POST', body: { workspace_id: 'workspace-1' } }
+      ]);
+      assert.deepEqual(toasts, []);
+    }
+  );
+
+  await withLinkFolderStubs(
+    () => ({ ok: true, json: async () => ({ success: true }) }),
+    async ({ toasts, timers }) => {
+      const page = new WorkspaceDetailPage('workspace-1');
+      assert.deepEqual(await page.launchDirectoryPicker(), { success: true });
+      assert.equal(toasts[0][0], 'info');
+      assert.deepEqual(timers, [2000]);
+    }
+  );
+
+  await withLinkFolderStubs(
+    () => ({ ok: false, json: async () => ({ success: false, error: 'not found' }) }),
+    async ({ toasts }) => {
+      const page = new WorkspaceDetailPage('workspace-1');
+      assert.equal(await page.launchDirectoryPicker(), null);
+      assert.deepEqual(toasts, [['error', 'Failed to open folder picker']]);
+    }
+  );
+});
+
+test('a typed folder is linked by its selection token, never by a path', async () => {
+  await withLinkFolderStubs(
+    () => ({ ok: true, json: async () => ({ directory: { id: 'dir-1' } }) }),
+    async ({ calls, toasts }) => {
+      const page = new WorkspaceDetailPage('workspace 1');
+      let reloads = 0;
+      page.loadDirectories = async () => {
+        reloads++;
+      };
+      await page.linkSelectedDirectory({
+        path: '/Users/riley/Music/REAPER Projects',
+        selectionToken: 'tok-1'
+      });
+      assert.deepEqual(calls, [
+        {
+          url: '/api/workspaces/workspace%201/directories',
+          method: 'POST',
+          body: { selection_token: 'tok-1' }
+        }
+      ]);
+      assert.deepEqual(toasts, [['success', 'Folder linked']]);
+      assert.equal(reloads, 1);
+    }
+  );
+
+  await withLinkFolderStubs(
+    () => ({
+      ok: false,
+      json: async () => ({ message: 'That folder selection expired. Paste the path again.' })
+    }),
+    async ({ toasts }) => {
+      const page = new WorkspaceDetailPage('workspace-1');
+      let reloads = 0;
+      page.loadDirectories = async () => {
+        reloads++;
+      };
+      await assert.rejects(page.linkSelectedDirectory({ selectionToken: 'gone' }), {
+        message: 'That folder selection expired. Paste the path again.'
+      });
+      assert.deepEqual(toasts, []);
+      assert.equal(reloads, 0);
+    }
+  );
+});
+
 test('workspace detail renders project_path fallback instead of unlinked empty state', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const list = { innerHTML: '' };

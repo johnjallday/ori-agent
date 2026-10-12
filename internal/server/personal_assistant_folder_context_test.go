@@ -23,6 +23,8 @@ import (
 type folderObservationStub struct {
 	observation foldercontext.Observation
 	calls       int
+	// choices records every "mode:choice" that reached the scanner.
+	choices     []string
 	target      foldercontext.Target
 	onObserve   func()
 	status      personalassistant.FolderContinuationReason
@@ -38,14 +40,16 @@ func newFolderObservationStub() *folderObservationStub {
 func (s *folderObservationStub) Choices(context.Context, string) (personalassistant.FolderDigestView, error) {
 	return personalassistant.FolderDigestView{Chips: []personalassistant.FolderChip{{ID: "documents", Label: "Documents"}}}, nil
 }
-func (s *folderObservationStub) Observe(_ context.Context, target foldercontext.Target, mode, chip string) (*foldercontext.Observation, error) {
+func (s *folderObservationStub) Observe(_ context.Context, target foldercontext.Target, mode, choice string) (*foldercontext.Observation, error) {
 	s.calls++
 	s.target = target
 	s.saved = false
+	s.choices = append(s.choices, mode+":"+choice)
 	if s.onObserve != nil {
 		s.onObserve()
 	}
-	if mode != "chip" || chip != "documents" {
+	known := (mode == "chip" && choice == "documents") || (mode == "selection" && choice == "live-token")
+	if !known {
 		return nil, personalassistant.ErrFolderSelection
 	}
 	copy := s.observation
@@ -78,6 +82,49 @@ func folderHTTP(handler http.HandlerFunc, body string) *httptest.ResponseRecorde
 	r.Header.Set("Content-Type", "application/json")
 	handler(w, r)
 	return w
+}
+
+// A typed folder reaches the drawer as a selection token. It is the one choice
+// for its mode: mixed with a chip, sent under another mode, or accompanied by a
+// path, the request never reaches the scanner.
+func TestAssistantFolderSelection_SelectionTokenIsTheOnlyChoiceForItsMode(t *testing.T) {
+	f := newConversationServerFixture(t)
+	observations := newFolderObservationStub()
+	f.handler.FolderObservations = observations
+	draft := func() string { return `"draft_id":"` + uuid.NewString() + `"` }
+	for _, body := range []string{
+		`{` + draft() + `,"mode":"selection","selection_token":"live-token","chip":"documents"}`,
+		`{` + draft() + `,"mode":"chip","chip":"documents","selection_token":"live-token"}`,
+		`{` + draft() + `,"mode":"picker","selection_token":"live-token"}`,
+		`{` + draft() + `,"mode":"selection","selection_token":"live-token","path":"/Users/me/Music"}`,
+		`{` + draft() + `,"mode":"selection","path":"/Users/me/Music"}`,
+	} {
+		w := folderHTTP(f.handler.SelectFolderContextHandler, body)
+		if w.Code < 400 {
+			t.Fatalf("accepted %s: %s", body, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "/Users/me") {
+			t.Fatalf("echoed the path for %s: %s", body, w.Body.String())
+		}
+	}
+	if observations.calls != 0 {
+		t.Fatalf("a mixed request reached the scanner: %q", observations.choices)
+	}
+
+	w := folderHTTP(f.handler.SelectFolderContextHandler, `{`+draft()+`,"mode":"selection","selection_token":"live-token"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"selection-a"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if len(observations.choices) != 1 || observations.choices[0] != "selection:live-token" {
+		t.Fatalf("scanner saw %q", observations.choices)
+	}
+	// A token the server no longer holds is the scanner's refusal, passed on.
+	if w := folderHTTP(f.handler.SelectFolderContextHandler, `{`+draft()+`,"mode":"selection","selection_token":"gone"}`); w.Code < 400 {
+		t.Fatalf("accepted an unknown token: %s", w.Body.String())
+	}
+	if len(f.provider.requests) != 0 {
+		t.Fatal("selection called model")
+	}
 }
 
 func TestAssistantFolderSelection_StrictLocalBoundary(t *testing.T) {

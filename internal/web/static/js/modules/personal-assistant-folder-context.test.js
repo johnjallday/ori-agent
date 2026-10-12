@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   createFolderContextController,
+  folderContextChoices,
   FOLDER_DISCLOSURE,
   observationSummary,
   coverageSummary
@@ -76,6 +78,70 @@ test('select is local, request is references only, and disclosure names provider
   assert.match(FOLDER_DISCLOSURE, /configured model/);
   assert.match(observationSummary(observation('a')), /Partial look: 3 files/);
   assert.match(coverageSummary(observation('a')), /not a complete tree/);
+});
+
+test('the Add folder sheet lists the server chips in order and says why the dialog is missing', () => {
+  const sentence =
+    'Pick a folder from the list; the folder dialog is switched off in this session.';
+  const off = folderContextChoices({
+    chips: [
+      { id: 'music', label: 'Music' },
+      { id: 'documents', label: 'Documents' }
+    ],
+    picker_available: false,
+    picker_note: sentence
+  });
+  assert.deepEqual(off.choices, [
+    { label: 'Music', mode: 'chip', chip: 'music' },
+    { label: 'Documents', mode: 'chip', chip: 'documents' }
+  ]);
+  assert.equal(off.note, sentence);
+
+  const on = folderContextChoices({
+    chips: [{ id: 'music', label: 'Music' }],
+    picker_available: true
+  });
+  assert.deepEqual(on.choices.at(-1), { label: 'Pick another folder…', mode: 'picker' });
+  assert.equal(on.note, '');
+});
+
+test('the Add folder sheet never prints a reason code', () => {
+  for (const code of ['desktop_off', 'platform', 'picker_unavailable']) {
+    const withChips = folderContextChoices({
+      chips: [{ id: 'music', label: 'Music' }],
+      picker_available: false,
+      picker_note: code
+    });
+    assert.equal(withChips.note, 'Pick a folder from the list for now.');
+    const empty = folderContextChoices({ chips: [], picker_available: false, picker_note: code });
+    assert.equal(empty.note, 'No folder can be chosen here.');
+    assert.deepEqual(empty.choices, []);
+  }
+});
+
+test('a typed folder is selected by its token; the drawer never sends a path', async () => {
+  const { controller, calls } = fixture(async () => ({
+    observation: observation('typed'),
+    revision: ''
+  }));
+  assert.equal(await controller.select('selection', '', 'tok-1'), true);
+  assert.deepEqual(calls[0].body, {
+    draft_id: 'opaque-draft',
+    revision: '',
+    mode: 'selection',
+    selection_token: 'tok-1'
+  });
+  assert.equal(controller.state.observation.id, 'typed');
+  assert.equal(controller.state.preview, true);
+
+  // The sheet mounts the shared control, and only a token crosses to select.
+  const source = readFileSync(
+    new URL('./personal-assistant-folder-context.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(source, /createFolderPathEntry\(\{/);
+  assert.match(source, /choose\('selection', '', selection\.selectionToken\)/);
+  assert.doesNotMatch(source, /\bpath\s*:/);
 });
 
 test('cancel and failed replacement retain the exact previous selection', async () => {

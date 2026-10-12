@@ -61,6 +61,24 @@ test('None setup placement is explicitly standalone without a Home', () => {
   assert.deepEqual(placement.availableCompositions, ['standalone']);
 });
 
+// "Choose Project Folder" also takes a typed path. Both arrive as the picker's
+// selection token, and a switched-off dialog is a note by the field, not a
+// button that does nothing.
+test('the project folder can be typed, and a switched-off dialog says so', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('./setup-workspace-creator.js', import.meta.url), 'utf8');
+  assert.match(source, /createFolderPathEntry\(\{\s*title: 'Choose the project folder'/);
+  assert.match(source, /useSelection\(selection\.selectionToken, selection\.path\)/);
+  assert.match(source, /useSelection\(selection\.selection_token, selection\.path\)/);
+  // The dialog-off branch runs before the "nothing selected" return.
+  const off = source.indexOf('folderDialogOffNote(selection)');
+  const nothing = source.indexOf('if (!selection?.selected) return;');
+  assert.ok(off > 0 && nothing > off);
+  assert.match(source, /typed\.setNote\(dialogOff\)/);
+  // The typed control follows the Import Existing Project choice.
+  assert.match(source, /typed\.element\.hidden = pick\.hidden;/);
+});
+
 // The open path is DOM-heavy and is exercised by the paired browser suite; these
 // guard the two facts the rest of the journey depends on.
 test('the journey creator only connects, stays on the page, and counts the steps it shows', async () => {

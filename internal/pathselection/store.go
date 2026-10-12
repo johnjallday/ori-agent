@@ -1,6 +1,9 @@
-// Package pathselection owns opaque, expiring references to paths returned by
-// trusted native pickers. Feature APIs accept the token rather than a browser-
-// supplied path, so typed consumers can revalidate the exact selection.
+// Package pathselection owns opaque, expiring references to folders the server
+// has accepted as a selection: a path returned by a trusted native picker, or a
+// path the user typed that passed the server's typed-path check
+// (internal/folderpath) on a request from Ori's own page. Feature APIs accept
+// the token rather than a browser-supplied path, so typed consumers can
+// revalidate the exact selection.
 package pathselection
 
 import (
@@ -34,7 +37,8 @@ func NewStore() *Store {
 	return &Store{now: func() time.Time { return time.Now().UTC() }, ttl: DefaultTTL, records: make(map[string]record)}
 }
 
-// Issue is called only with a path returned by Ori's native picker. The path is
+// Issue is called only with a path the server accepted: one returned by Ori's
+// native picker, or a typed path that passed the typed-path check. The path is
 // retained in process memory and never embedded in the opaque token.
 func (s *Store) Issue(path string) (string, error) {
 	return s.issue(path, "")
