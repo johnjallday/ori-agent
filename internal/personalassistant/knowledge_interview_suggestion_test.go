@@ -532,6 +532,7 @@ func TestInterviewSuggestionFromOffer(t *testing.T) {
 		{"a whole Downloads folder gives nothing", offer(folderdigest.KindProject, root(project("Downloads", ""))), "", ""},
 		{"a whole documents folder gives nothing", offer(folderdigest.KindProject, root(project("documents", "git repository"))), "", ""},
 		{"a whole Desktop folder gives nothing", offer(folderdigest.KindMixed, root(project("Desktop", ""))), "", ""},
+		{"a whole Music folder gives nothing", offer(folderdigest.KindMixed, root(project("Music", ""))), "", ""},
 		{"any other root folder is proposed", offer(folderdigest.KindProject, root(project("Novel", ""))), "Novel", "Novel"},
 		{"a subfolder that happens to be called Documents is proposed", offer(folderdigest.KindProject, project("Documents", "")), "Documents", "Documents"},
 	} {

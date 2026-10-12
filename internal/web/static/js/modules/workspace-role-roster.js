@@ -28,6 +28,8 @@
 
   var SOURCE_CREATED = 'created';
   var SOURCE_ASSIGNED = 'assigned';
+  var SOURCE_AUTO = 'auto';
+  var SOURCE_SHARED = 'shared';
 
   var SCOPE_HOME = 'home';
   var SCOPE_PROJECT = 'project';
@@ -49,6 +51,11 @@
     sourceCreated: 'New agent',
     sourceAssigned: 'Your saved agent',
     sourceGroup: 'Existing group holder',
+    // A required role nobody was chosen for: Ori fills it when the workspace
+    // is created, with a new agent or with the one the Home already has.
+    sourceAuto: 'Created for you',
+    sourceShared: 'Already on this Home',
+    chooseOther: 'Choose a different agent',
     openEditor: 'Open in Agents',
     emptyRoster: 'This blueprint declares no roles.',
     alsoHere: 'Also in this workspace',
@@ -80,6 +87,8 @@
 
   function sourceLabel(source) {
     if (source === 'group') return COPY.sourceGroup;
+    if (source === SOURCE_AUTO) return COPY.sourceAuto;
+    if (source === SOURCE_SHARED) return COPY.sourceShared;
     return source === SOURCE_ASSIGNED ? COPY.sourceAssigned : COPY.sourceCreated;
   }
 
@@ -112,6 +121,9 @@
           readOnly: Boolean(role && role.read_only),
           readOnlyReason: text(role && role.read_only_reason),
           needsClear: Boolean(role && role.needs_clear),
+          // Filled by the create itself rather than by a choice of the user's:
+          // the row offers the choice instead of Edit and Clear.
+          auto: Boolean(role && role.auto),
           // What the blueprint proposes for this role, so the Create form can
           // show the instructions the agent would actually get rather than an
           // empty box that hides them.
@@ -123,6 +135,7 @@
         if (normalized.state === STATE_FILLED && !normalized.agent) {
           normalized.state = STATE_EMPTY;
         }
+        if (normalized.state !== STATE_FILLED) normalized.auto = false;
         normalized.designation = normalized.primary
           ? normalized.scope === SCOPE_HOME
             ? 'GROUP COORDINATOR'
@@ -271,12 +284,30 @@
         });
         groupActions.append(setupGroupRole);
         item.append(groupActions);
+      } else if (
+        row.auto &&
+        row.scope === SCOPE_HOME &&
+        typeof options.onManageGroupRole === 'function'
+      ) {
+        // Ori fills this role by itself, so choosing someone else is an
+        // option here, never a step the workspace waits on.
+        var otherActions = element('div', 'ws-role-row__actions');
+        var chooseOther = actionButton(
+          COPY.chooseOther,
+          COPY.chooseOther + ' for ' + row.label,
+          'btn btn-sm btn-outline-secondary'
+        );
+        chooseOther.addEventListener('click', function () {
+          options.onManageGroupRole(row.roleId, row, chooseOther);
+        });
+        otherActions.append(chooseOther);
+        item.append(otherActions);
       }
       return item;
     }
 
     var actions = element('div', 'ws-role-row__actions');
-    if (row.state === STATE_FILLED) {
+    if (row.state === STATE_FILLED && !row.auto) {
       if (typeof options.agentHref === 'function') {
         var editor = element('a', 'ws-role-row__link btn btn-sm btn-link', COPY.openEditor);
         editor.href = options.agentHref(row.agent.name);
@@ -319,10 +350,12 @@
       });
       actions.append(clearStale);
     } else {
+      // On a role Ori fills by itself these are a way to choose someone else,
+      // so neither is the row's primary action.
       var create = actionButton(
         COPY.create,
         'Create an agent for ' + row.label,
-        'btn btn-sm btn-primary'
+        row.auto ? 'btn btn-sm btn-outline-secondary' : 'btn btn-sm btn-primary'
       );
       create.addEventListener('click', function () {
         options.onRequestCreate(row.roleId, row);

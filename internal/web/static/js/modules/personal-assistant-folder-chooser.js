@@ -3,6 +3,10 @@
 
 export const FOLDER_CHIP_ICON = '\u{1F4C1}';
 
+// A reason code ("desktop_off") is for code, never for the user. A note that
+// is a single identifier is treated as no note at all.
+const REASON_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
 // folderChooserView is the chooser's render decision: which chips to show,
 // whether the native picker chip appears, and the note that replaces it.
 export function folderChooserView(digest) {
@@ -15,6 +19,7 @@ export function folderChooserView(digest) {
   // The server explains what can be chosen; the fallbacks only cover a
   // payload without a note. A chooser with nothing to press must say so.
   let note = String(digest?.picker_note || '').trim();
+  if (REASON_CODE.test(note)) note = '';
   if (!note && !pickerVisible) {
     note = chips.length ? 'Pick a folder from the list for now.' : 'No folder can be chosen here.';
   }

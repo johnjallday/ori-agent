@@ -1631,6 +1631,25 @@ test('the module never sends a folder path to the server', () => {
   assert.match(source, /request_id: requestId\(\)/);
 });
 
+// A typed path is checked by the folder-picker endpoint (the shared control);
+// the chooser scans the token it answers with, exactly like a chip identifier.
+test('the chooser mounts the typed-path control and scans its selection token', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  assert.match(source, /import \{ createFolderPathEntry \} from '\.\/folder-path-entry\.js';/);
+  assert.match(
+    source,
+    /onSelect: selection => scan\(\{ selection_token: selection\.selectionToken \}\)/
+  );
+  // Mounted once per chooser element so typed text survives a repaint, and
+  // locked while a scan runs.
+  assert.match(source, /mountTypedFolder\(els\)\?\.setDisabled\(state\.busy\)/);
+  const template = readFileSync(
+    new URL('../../../templates/components/personal-assistant-folder.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.match(template, /id="personalAssistantFolderPathEntry"/);
+});
+
 // A set-up folder's first look on its Home receipt (FR13-FR18).
 const lookOffer = look => ({
   id: 'o1',

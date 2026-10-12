@@ -97,7 +97,7 @@ function pluginQuest(options: { groupExists?: boolean; runID?: string } = {}): J
         status: 'active',
         preparation: options.groupExists
           ? { exists: true, name: 'Music Production', group_id: 'existing-home' }
-          : { exists: false, name: 'Music Production' },
+          : { exists: false, name: 'Music Production Home' },
         actions: [{ id: 'review_create_group', label: 'Review Group', effect: 'review' }]
       },
       { id: 'workspace', kind: 'workspace_setup', title: 'Choose a mode', status: 'pending' },
@@ -292,15 +292,20 @@ for (const width of [1280, 390]) {
     await expect(receipt).not.toContainText('Enabled');
     await expect(receipt).not.toContainText('Verification');
     await expect(receipt).not.toContainText('could not be checked');
-    const install = dialog
-      .locator('#specialistSetupJourneyActions')
-      .getByRole('button', { name: 'Install plugin', exact: true });
-    await expect(install).toBeVisible();
-
-    // The install button still reviews first; nothing is committed here.
-    await install.click();
-    await expect(dialog.getByRole('heading', { name: 'Install Ori REAPER Plugin?' })).toBeFocused();
+    // One card, one confirm: the step opens with its own review. Nothing was
+    // pressed, nothing is committed, and there is no separate "Install plugin"
+    // button in front of the card.
     const review = dialog.locator('#specialistSetupJourneyReview');
+    await expect(
+      review.getByRole('heading', { name: 'Install Ori REAPER Plugin', exact: true })
+    ).toBeFocused();
+    await expect(
+      dialog
+        .locator('#specialistSetupJourneyActions')
+        .getByRole('button', { name: 'Install plugin', exact: true })
+    ).toBeHidden();
+    expect(server.calls.filter(call => call.endsWith('/actions/review_install'))).toHaveLength(1);
+    await expect(review).not.toContainText('Consent expires');
     await expect(review).toContainText(
       'Ori downloads the reviewed 0.6.0 release from johnjallday/reaper-plugin, checks its fingerprint, and installs it. Nothing runs until you enable it.'
     );
@@ -326,8 +331,12 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`install-review-${width}.png`) });
     await technical.getByText('Technical details', { exact: true }).click();
     await expect(technical.getByText('Platform: darwin/arm64')).toBeVisible();
-    await review.getByRole('button', { name: 'Back', exact: true }).click();
+    // The card is the step: Install is its only button, and there is no Back.
+    await expect(review.getByRole('button')).toHaveCount(1);
+    await expect(review.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0);
     expect(server.calls.some(call => call.endsWith('/actions/install'))).toBe(false);
+    // Repaints do not review again: still the one review this visit asked for.
+    expect(server.calls.filter(call => call.endsWith('/actions/review_install'))).toHaveLength(1);
 
     // The summary step offers nothing to do until the plugin is installed.
     await rail.nth(1).click();
@@ -358,8 +367,13 @@ test('when the latest release cannot be checked the install step says it install
   await expect(receipt).toContainText(
     'The latest release could not be checked. Ori will install the minimum reviewed version.'
   );
-  // The note is informational: the same review action is offered.
-  await expect(page.getByRole('button', { name: 'Install plugin', exact: true })).toBeVisible();
+  // The note is informational: the same review is shown, as the step's card,
+  // and the card repeats the note it would otherwise cover.
+  const review = page.locator('#specialistSetupJourneyModal #specialistSetupJourneyReview');
+  await expect(review.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+  await expect(review).toContainText(
+    'The latest release could not be checked. Ori will install the minimum reviewed version.'
+  );
   await page.screenshot({ path: testInfo.outputPath('install-quest-release-unchecked.png') });
 });
 
@@ -394,6 +408,10 @@ test('an installed integration hands off into the two-screen plugin quest in pla
   await expect(rail.nth(1)).toContainText('Create New Workspace');
   await expect(dialog.locator('#specialistSetupJourneyStepState')).toHaveText('Step 1 of 2');
   await expect(dialog.getByRole('button', { name: 'Build Group', exact: true })).toBeVisible();
+  // The step names the group its one Create button will name.
+  await expect(dialog.locator('#specialistSetupJourneyStepDescription')).toContainText(
+    'Create “Music Production Home”'
+  );
   await expect(dialog).not.toContainText('Set Up REAPER');
   expect(server.calls).toContain(`GET ${pluginRoot}`);
   expect(server.calls.some(call => call.includes('preparation'))).toBe(false);

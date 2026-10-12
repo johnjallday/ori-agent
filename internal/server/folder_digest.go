@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
+	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
@@ -32,6 +33,13 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	service := personalassistant.NewFolderDigestService(store, personalassistant.FolderDigestDeps{
 		ValidateRoot: validateShownFolder,
 		Picker:       nativeFolderPicker{},
+		// The store may be created by a later phase; look it up at call time.
+		ResolveSelection: func(token string) (string, error) {
+			if b.pathSelectionStore == nil {
+				return "", pathselection.ErrUnavailable
+			}
+			return b.pathSelectionStore.Resolve(token)
+		},
 		AppInstalled: silentAppInstalled(),
 		ProjectQuest: func(ctx context.Context, integrationKey, blueprintID string) (string, string, bool) {
 			return reviewedProjectQuest(ctx, b, integrationKey, blueprintID)

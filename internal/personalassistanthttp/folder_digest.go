@@ -15,8 +15,9 @@ import (
 )
 
 // FolderDigestService is the "show me a folder" boundary. Every folder it
-// looks at is chosen on the server: from a chip identifier or the native
-// dialog. No handler here accepts a filesystem path (FR48).
+// looks at is chosen on the server: from a chip identifier, the native dialog,
+// or a selection token the folder-picker endpoint issued for a path it
+// accepted. No handler here accepts a filesystem path (FR48).
 type FolderDigestService interface {
 	Current(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	CurrentOffer(ctx context.Context, userID, offerID string) (personalassistant.FolderDigestView, error)
@@ -25,6 +26,7 @@ type FolderDigestService interface {
 	StoredOffer(ctx context.Context, userID, offerID string) (personalassistant.FolderOffer, error)
 	MarkFirstPromptShown(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	ScanChip(ctx context.Context, userID, chip string) (personalassistant.FolderOfferView, error)
+	ScanSelection(ctx context.Context, userID, token string) (personalassistant.FolderOfferView, error)
 	ScanPicked(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
 	ScanPickedFile(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
 	Decide(ctx context.Context, userID, offerID string, input personalassistant.FolderDecisionInput) (personalassistant.FolderOfferView, error)
@@ -154,18 +156,26 @@ type folderScanRequest struct {
 	Chip   string `json:"chip"`
 	Picker bool   `json:"picker"`
 	File   bool   `json:"file"`
+	// SelectionToken names a folder the folder-picker endpoint already
+	// accepted (a dialog choice or a checked typed path). It is a receipt the
+	// server resolves, not a path.
+	SelectionToken string `json:"selection_token"`
 }
 
 // decodeFolderScanRequest reads a scan request and requires exactly one mode.
 // Every route that starts a scan shares it, so none can accept a path.
 func decodeFolderScanRequest(w http.ResponseWriter, r *http.Request) (folderScanRequest, bool) {
 	var req folderScanRequest
-	if !decodeFolderDigestBody(w, r, &req, "chip", "picker", "file") {
+	if !decodeFolderDigestBody(w, r, &req, "chip", "picker", "file", "selection_token") {
 		return folderScanRequest{}, false
 	}
 	req.Chip = strings.TrimSpace(req.Chip)
+	req.SelectionToken = strings.TrimSpace(req.SelectionToken)
 	options := 0
 	if req.Chip != "" {
+		options++
+	}
+	if req.SelectionToken != "" {
 		options++
 	}
 	if req.Picker {
@@ -181,9 +191,10 @@ func decodeFolderScanRequest(w http.ResponseWriter, r *http.Request) (folderScan
 	return req, true
 }
 
-// ScanFolderDigest scans a known folder ({"chip": "downloads"}) or opens the
-// native dialog ({"picker": true}). Any other field, a path above all, is
-// refused before anything is looked at.
+// ScanFolderDigest scans a known folder ({"chip": "downloads"}), opens the
+// native dialog ({"picker": true}), or scans a folder the folder-picker
+// endpoint already accepted ({"selection_token": "…"}). Any other field, a
+// path above all, is refused before anything is looked at.
 func (h *Handler) ScanFolderDigest(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
@@ -217,7 +228,13 @@ func (h *Handler) ScanFolderDigest(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	offer, err := h.folderDigest.ScanChip(r.Context(), userID, req.Chip)
+	var offer personalassistant.FolderOfferView
+	var err error
+	if req.SelectionToken != "" {
+		offer, err = h.folderDigest.ScanSelection(r.Context(), userID, req.SelectionToken)
+	} else {
+		offer, err = h.folderDigest.ScanChip(r.Context(), userID, req.Chip)
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return

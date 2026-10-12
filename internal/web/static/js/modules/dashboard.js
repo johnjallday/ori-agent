@@ -10601,13 +10601,70 @@
         });
       }
 
+      // A folder the user's message pointed at by its path: one card, drawn on
+      // the reply, confirms it. Nothing in the folder has been read, and the
+      // confirmation sends the server-held selection, never the path.
+      if (
+        assistantRow &&
+        data &&
+        data.folder_proposal &&
+        conversationRef &&
+        window.PersonalAssistantFolderProposal
+      ) {
+        var proposalContext = normalizedContext;
+        var proposalConversationId = String((data.conversation && data.conversation.id) || '');
+        var proposalPage = String(window.location.pathname || '/');
+        var continueWithFolder = function (view) {
+          // The assistant carries on by itself: the turn the user would have
+          // typed next, sent the way the composer sends it.
+          void handleHomeAssistantPrompt(view.followUp, { routeContext: proposalContext });
+        };
+        window.PersonalAssistantFolderProposal.render(assistantRow, data.folder_proposal, {
+          isCurrent: function () {
+            return (
+              !homeAssistantState.busy &&
+              Boolean(proposalConversationId) &&
+              Boolean(conversations) &&
+              conversations.currentId() === proposalConversationId &&
+              String(window.location.pathname || '/') === proposalPage
+            );
+          },
+          explore: async function (view) {
+            var folders = window.PersonalAssistantFolderContext;
+            if (!folders || typeof folders.selectHeld !== 'function')
+              throw new Error('Folders are unavailable on this page. Nothing was opened.');
+            if (!(await folders.selectHeld(view.token))) {
+              var state = folders.current && folders.current();
+              throw new Error(String((state && state.notice) || '').trim());
+            }
+            continueWithFolder(view);
+          },
+          link: async function (view) {
+            await API.post(
+              '/api/workspaces/' + encodeURIComponent(view.workspaceId) + '/directories',
+              { selection_token: view.token }
+            );
+            continueWithFolder(view);
+          }
+        });
+      }
+
       if (data && data.requires_confirmation && data.confirmation) {
         inlineReview = true;
         confirmHomeAction(
           data.confirmation,
           routeContext,
           intent,
-          String(data.response || '').trim() === String(data.confirmation.summary || '').trim()
+          String(data.response || '').trim() === String(data.confirmation.summary || '').trim(),
+          // A guided setup the reply named is still offered, ahead of the
+          // proposal's own review button.
+          buildHomeActionButtons(
+            (Array.isArray(data.actions) ? data.actions : []).filter(function (action) {
+              return action && action.type === 'open_setup_quest';
+            }),
+            routeContext,
+            intent
+          )
         );
         // This review belongs to the saved proposal, not the activity header
         // above the entire transcript. Settle scrolling after mounting it.
@@ -10808,7 +10865,35 @@
         }
       };
     }
+
+    // A guided setup the assistant named. The action carries the quest's key,
+    // never a link; without a key there is nothing to open.
+    if (type === 'open_setup_quest') {
+      if (!action.arguments || !action.arguments.quest_id) return null;
+      return {
+        label: label,
+        variant: 'primary',
+        onClick: function () {
+          openHomeSetupQuest(action);
+        }
+      };
+    }
     return null;
+  }
+
+  // openHomeSetupQuest opens the guided setup an open_setup_quest action names,
+  // in this tab. The host route helper builds the link from the quest's key.
+  function openHomeSetupQuest(action) {
+    import('/js/modules/setup-quest-links.js')
+      .then(function (links) {
+        var url = links.setupQuestActionURL(action);
+        if (!url) throw new Error('invalid setup quest action');
+        window.location.assign(url);
+      })
+      .catch(function () {
+        if (window.Toast)
+          Toast.error('That guided setup could not be opened. Refresh and try again.');
+      });
   }
 
   // openBuildWithAssistant opens Create Workspace in build mode with the user's
@@ -10917,7 +11002,9 @@
   // state-changing action; on confirm it re-calls /ask with confirmed_action.
   // A build_workspace confirmation is the exception: the server never runs it,
   // and Confirm opens the assistant's build in this browser (FR41).
-  function confirmHomeAction(confirmation, routeContext, intent, summaryShown) {
+  // leadingButtons are offered before the confirm step: a guided setup the
+  // reply named comes ahead of the workspace it also proposed.
+  function confirmHomeAction(confirmation, routeContext, intent, summaryShown, leadingButtons) {
     if (!summaryShown && confirmation.action_type !== 'prepare_workspace')
       appendHomeAssistantMessage(
         'assistant',
@@ -10931,7 +11018,7 @@
         : 'Review and confirm this change.'
     );
     var args = confirmation.arguments || {};
-    renderHomeAssistantActions([
+    var confirmButtons = [
       {
         label: prepared ? 'Review workspace setup' : 'Confirm',
         variant: 'primary',
@@ -10977,7 +11064,10 @@
           ]);
         }
       }
-    ]);
+    ];
+    renderHomeAssistantActions(
+      (Array.isArray(leadingButtons) ? leadingButtons : []).concat(confirmButtons)
+    );
   }
 
   function formatHomeAskSummary(data) {

@@ -219,6 +219,21 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   await expect(setup).not.toContainText('workspace map');
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
   await expect(setup).toBeHidden();
+  // One card, one confirm: setup already names the group, so the creator opens
+  // on its Review with the group reviewed and one button that creates it.
+  const create = creator.locator('#createFolderBtn');
+  await expect(create).toHaveText('Create group “Studio”');
+  await expect(creator.locator('#workspaceReviewSummary')).toContainText(
+    'Setup reviewed this exact group'
+  );
+  expect(reviews).toBe(1);
+  expect(commits).toHaveLength(0);
+  // Details is one step back, for a different name.
+  await creator
+    .locator('#workspaceReviewSummary')
+    .getByRole('button', { name: 'Edit', exact: true })
+    .first()
+    .click();
   await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('Studio');
   // Guided setup has no Blueprint step; its fixed blueprint is described on Details.
   await expect(creator.locator('#wizardStep1')).toBeHidden();
@@ -236,17 +251,18 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
 
   await setup.getByRole('button', { name: 'Build Group', exact: true }).click();
   await expect(creator).toBeVisible();
-  await expect(creator.getByRole('textbox', { name: 'Group name' })).toHaveValue('My Studio');
-  await creator.getByRole('button', { name: 'Review →' }).click();
-  await creator.getByRole('button', { name: 'Review group', exact: true }).click();
+  // The kept name is reviewed as the creator reopens on its Review; from Build
+  // Group to the group existing is this one press.
+  await expect(create).toHaveText('Create group “My Studio”');
   await expect(creator.locator('#workspaceReviewSummary')).toContainText(
     'Setup reviewed this exact group'
   );
   await expect(creator.locator('#workspaceReviewSummary')).toContainText(
     'Template: Studio Program Home · Plugin: neutral-studio 1.0.0'
   );
+  expect(reviews).toBe(2);
   await evidence(page, '25-guided-shared-creator-narrow');
-  await creator.getByRole('button', { name: 'Create group “My Studio” only' }).click();
+  await create.click();
   await expect.poll(() => commits.length).toBe(1);
   await page.keyboard.press('Escape');
   await expect(creator).toBeVisible();
@@ -254,7 +270,10 @@ test('guided setup uses the shared creator with cancellation, exact retry and co
   await creator.getByRole('button', { name: 'Retry Confirmed Change' }).click();
   expect(commits).toHaveLength(2);
   expect(commits[0]).toEqual(commits[1]);
-  expect((commits[1] as any).review_token).toBe('review-1');
+  // The commit carries the review of the name on the card, not the first one.
+  expect((commits[1] as any).review_token).toBe('review-2');
+  expect((commits[1] as any).input).toEqual({ name: 'My Studio' });
+  expect(reviews).toBe(2);
   await expect(creator).toBeHidden();
   // With the group built, the launch view moves straight to the workspace screen.
   await expect(setup.locator('#specialistSetupJourneyStepTitle')).toHaveText(

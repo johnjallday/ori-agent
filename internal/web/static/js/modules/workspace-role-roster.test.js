@@ -89,6 +89,35 @@ test('a filled role names its agent and how it was filled', () => {
   assert.equal(groupHolder.sourceLabel, 'Existing group holder');
 });
 
+test('a role Ori fills on create says so in the user’s words and stays theirs to change', () => {
+  const rows = Roster.rowsFrom({
+    roles: [
+      filled({ source: 'auto', auto: true, agent: { name: 'Song Assistant' } }),
+      filled({
+        role_id: 'producer',
+        label: 'Producer',
+        source: 'shared',
+        auto: true,
+        agent: { name: 'Home Producer' }
+      }),
+      // An auto mark without an agent is an empty role, not a promise.
+      role({ role_id: 'nobody', auto: true })
+    ]
+  });
+  assert.deepEqual(
+    rows.map(row => [row.roleId, row.state, row.auto, row.sourceLabel]),
+    [
+      ['nobody', 'empty', false, ''],
+      ['mix-engineer', 'filled', true, 'Created for you'],
+      ['producer', 'filled', true, 'Already on this Home']
+    ]
+  );
+  assert.equal(rows[1].tag.label, 'Song Assistant');
+  assert.equal(Roster.COPY.chooseOther, 'Choose a different agent');
+  // Counted as filled everywhere a count is shown.
+  assert.equal(Roster.requiredProgress(rows), '2 of 3 required roles filled');
+});
+
 // A projection claiming "filled" with nobody in it would draw a row with an
 // action set the user cannot act on. Treat it as empty instead.
 test('a filled role with no agent falls back to empty', () => {

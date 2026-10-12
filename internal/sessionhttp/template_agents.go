@@ -60,6 +60,10 @@ type templateAgentPlan struct {
 	GroupRequirement      *templateGroupRequirementPlan `json:"group_requirement,omitempty"`
 	Agents                []templateAgentPlanItem       `json:"agents"`
 	Warnings              []string                      `json:"warnings,omitempty"`
+	// AutoStaffing says how each required role the user leaves empty is filled
+	// on create. It is not part of Revision: the create decides again, so a name
+	// taken in between changes the agent's name, not what was agreed.
+	AutoStaffing []templateRoleAutoFill `json:"auto_staffing,omitempty"`
 }
 
 type templateAssistantProgramPlan struct {
@@ -521,6 +525,26 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 	return h.buildTemplateAgentPlanForOwner(tpl, "")
 }
 
+// templateProgramDeclaration is the assistant program a blueprint staffs: its
+// own, or for a split project blueprint the Home's roles followed by the
+// project's. It is nil for an ordinary blueprint.
+func templateProgramDeclaration(tpl projecttemplates.Template) *workspace.AssistantProgramDeclaration {
+	if tpl.AssistantProject == nil {
+		return tpl.AssistantProgram
+	}
+	var declaration *workspace.AssistantProgramDeclaration
+	if tpl.ResolvedAssistantHome != nil {
+		declaration = workspace.CloneAssistantProgramDeclaration(tpl.ResolvedAssistantHome)
+	} else {
+		declaration = &workspace.AssistantProgramDeclaration{
+			SchemaVersion: tpl.AssistantProject.Home.HomeSchemaVersion,
+			ID:            tpl.AssistantProject.Home.ProgramID,
+		}
+	}
+	declaration.Roles = append(declaration.Roles, tpl.AssistantProject.ProgramRoles()...)
+	return declaration
+}
+
 func (h *Handler) buildTemplateAgentPlanForOwner(tpl projecttemplates.Template, ownerUserID string) templateAgentPlan {
 	plan := templateAgentPlan{
 		HasAgents:    tpl.HasAgents(),
@@ -534,18 +558,7 @@ func (h *Handler) buildTemplateAgentPlanForOwner(tpl projecttemplates.Template, 
 		plan.SystemModel = strings.TrimSpace(model)
 		plan.SystemModelConfigured = plan.SystemProvider != "" && plan.SystemModel != ""
 	}
-	declaration := tpl.AssistantProgram
-	if tpl.AssistantProject != nil {
-		if tpl.ResolvedAssistantHome != nil {
-			declaration = workspace.CloneAssistantProgramDeclaration(tpl.ResolvedAssistantHome)
-		} else {
-			declaration = &workspace.AssistantProgramDeclaration{
-				SchemaVersion: tpl.AssistantProject.Home.HomeSchemaVersion,
-				ID:            tpl.AssistantProject.Home.ProgramID,
-			}
-		}
-		declaration.Roles = append(declaration.Roles, tpl.AssistantProject.ProgramRoles()...)
-	}
+	declaration := templateProgramDeclaration(tpl)
 	if declaration != nil {
 		assistantPlan := &templateAssistantProgramPlan{
 			ID:                 declaration.ID,

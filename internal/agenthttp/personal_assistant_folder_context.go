@@ -256,6 +256,10 @@ type folderSelectionRequest struct {
 	Revision       string `json:"revision,omitempty"`
 	Mode           string `json:"mode"`
 	Chip           string `json:"chip,omitempty"`
+	// SelectionToken goes with mode "selection": a folder the folder-picker
+	// endpoint already accepted (a checked typed path). It is a receipt the
+	// server resolves, never a path.
+	SelectionToken string `json:"selection_token,omitempty"`
 }
 
 // SelectFolderContextHandler stages local evidence only. No conversation is
@@ -288,7 +292,19 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 		writeFolderError(w, err)
 		return
 	}
-	observation, err := h.FolderObservations.Observe(r.Context(), target, req.Mode, req.Chip)
+	// One choice per mode: a chip identifier or a selection token, never both.
+	choice := req.Chip
+	if req.Mode == personalassistant.FolderObserveSelection {
+		if req.Chip != "" {
+			writeFolderError(w, personalassistant.ErrFolderSelection)
+			return
+		}
+		choice = req.SelectionToken
+	} else if req.SelectionToken != "" {
+		writeFolderError(w, personalassistant.ErrFolderSelection)
+		return
+	}
+	observation, err := h.FolderObservations.Observe(r.Context(), target, req.Mode, choice)
 	if err != nil {
 		writeFolderError(w, err)
 		return

@@ -64,7 +64,9 @@ The wizard sends this object on every non-import create:
 - `staffed` — every authoritative required role must be satisfied. Optional
   roles may be absent. `role_staffing` is mandatory even when it is an empty
   array. A current inherited group binding may satisfy only its matching
-  group-scoped role.
+  group-scoped role. On a scoped Assistant Program blueprint, a required role
+  with no fill is satisfied by the create itself when the host can fill it (see
+  "Roles the create fills").
 - `agentless` — an explicit Blank-only choice. `role_staffing` must be an empty
   array and no entry agent, saved extra, template override, or team seeding
   request may be combined with it.
@@ -102,8 +104,8 @@ folder, folder grant, plugin operation, watcher, or automation write:
 4. Verify every assigned saved definition still exists and is attachable. Verify
    inherited group bindings against the current station binding, instance,
    workspace snapshot, and saved definition.
-5. Reject Create-name collisions and ensure every required role is either a
-   verified inherited binding or a valid staged fill.
+5. Reject Create-name collisions and ensure every required role is a verified
+   inherited binding, a valid staged fill, or a role the create fills itself.
 6. Preserve the existing independent group-placement review/claim boundary.
 7. Seed ordinary/Blank fills before workspace persistence, retaining the current
    rollback rule: only definitions created by this request can be removed.
@@ -165,6 +167,50 @@ separately confirmed durable consequences. Modal suspension itself is not
 cancellation: workspace name/details, tags/colour, source/composition, valid
 project fills, connection selection, and Map intent remain in memory. Neither
 operation grants runtime readiness or project access.
+
+## Roles the create fills
+
+On a scoped Assistant Program blueprint (declaration schema 2: Home roles and
+project roles), the reviewed wizard create fills the required roles the user
+chose nobody for. Setting up a Home role first, and filling the project role by
+hand, are choices and no longer steps.
+
+- **What is shown.** `POST /api/workspaces/template-agent-plan` returns
+  `auto_staffing`: one entry per required role with no holder,
+  `{role_id, label, scope, outcome, agent_name, blocked?}`. `outcome` is
+  `create` (a new agent is made for the user) or `existing` (an agent the group
+  already has is used). Team shows these roles as filled, "Created for you" or
+  "Already on this Home"; Review lists them with the same words. Nothing exists
+  until Create.
+- **What is sent.** Nothing. `role_staffing` carries only the user's own fills;
+  a fill the user makes for a role replaces what the host would have done. The
+  server decides again when the workspace and its Home link exist.
+- **Names.** A Home role's agent takes the program's `default_primary_name`
+  when the role is primary, otherwise the role label; a project role's agent
+  takes the role label. A taken name gets the next free one ("Label 2"); an
+  agent that merely shares the name is never adopted. `auto_staffing` is not
+  part of the plan revision, so a name taken between review and Create changes
+  the agent's name, not what was agreed.
+- **Hire once.** A split project blueprint's role follows the Home's standing
+  consent: the first project creates the agent and records it, every later
+  project binds that same agent. The reviewed create is the consent (source
+  `reviewed_create`). It also renews a consent given for an older team of the
+  same blueprint, and replaces a recorded agent that no longer exists. A Home
+  that shares another blueprint's agent keeps that consent, and this project
+  gets its own agent.
+- **What blocks.** A role that needs a new agent while no system model is set
+  up is returned with `blocked`, and Team shows one blocker, "<Role>: <reason>."
+  The server's `team_readiness` conflict carries the same sentence. Assigning a
+  saved agent needs no model and clears it. A Home role whose stored holder
+  cannot be verified also still blocks.
+- **Who else gets this.** A setup quest's own project creator fills the same
+  roles when it commits the project, and its Review lists them under "Team".
+  Whatever it could not fill is still offered by the quest's staffing step.
+  A create request without `team_intent` fills nothing by itself: the folder
+  setup, the guided blueprint setups and the Home library each staff after
+  their own create.
+- **After the create.** The project role's agent is the workspace's entry
+  agent, and starter tasks seeded before staffing are assigned to it.
 
 ## Blank
 
@@ -231,7 +277,7 @@ warnings and do not rewrite staffing truth.
 
 | Caller or state | Contract |
 |---|---|
-| Four-step Create Workspace wizard | Sends strict `team_intent` and explicit `role_staffing`; required roles block Team → Review and submit |
+| Four-step Create Workspace wizard | Sends strict `team_intent` and explicit `role_staffing`; a required role blocks Team → Review and submit unless the create fills it (scoped Assistant Program blueprints) |
 | Legacy POST with intent absent and `role_staffing` absent | Historical auto-seeding/entry behavior |
 | Legacy POST with intent absent and `role_staffing` present (including empty) | Historical vacancy semantics retained as a compatibility exception |
 | `CreateFromTemplate` and Personal HQ coordinator | Intent absent; historical template behavior retained |

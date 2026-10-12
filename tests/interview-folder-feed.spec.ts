@@ -248,7 +248,8 @@ test('showing a folder fills question 1, and only Save stores it', async ({ page
   const chooser = wizard.getByRole('group', { name: 'Show me instead' });
 
   await test.step('the chooser shows the seeded folders and what a scan does', async () => {
-    await expect(chooser.getByRole('button')).toHaveText(['Downloads', 'Documents', 'Desktop']);
+    // The sandbox has no Music folder, so the chooser starts at Documents.
+    await expect(chooser.getByRole('button')).toHaveText(['Documents', 'Desktop', 'Downloads']);
     await expect(chooser).toContainText(
       'I only look at file names and types. This also leaves a setup suggestion for the folder on Home.'
     );

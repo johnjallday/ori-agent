@@ -365,7 +365,8 @@ model may call are `home_workspaces`, `home_tasks`, `home_sessions`,
 
 **Action schema:**
 - `id`: Stable action id.
-- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `create_agent`, `remove_agent`, `ask_followup`.
+- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `create_agent`, `remove_agent`, `ask_followup`, `open_setup_quest`.
+- `open_setup_quest` opens a guided setup and is attached by the host, never by the model: when a hired-assistant turn's message names an integration Ori has reviewed (whole word, case-insensitive, from the reviewed registry), or the model read the reviewed list and its reply names an entry, and that integration still has a guided setup to open. It carries no `href`; `arguments` name the quest by key: `quest_id`, `display_name`, `source` (`host` for the install quest, `plugin` for the installed plugin's own quest) and, for `plugin`, `plugin_id`. The label is "Open Guided Setup: <name>" or, once the plugin is installed, "Continue setup: <name>". The reply itself opens with a sentence naming the integration and its install state, and that sentence is part of the saved conversation; the action is not. A panel message that names such an integration is routed to the assistant conversation even when it starts with "set up", "install" or "connect".
 - `label`: Button label.
 - `href` (optional): Destination for navigation/`open_*` actions.
 - `workspace_id` / `task_id` / `session_id` (optional): Resolved target ids.
@@ -1552,7 +1553,13 @@ or
 { "picker": true }
 ```
 
-Exactly one of `chip` or `picker`. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
+or
+
+```json
+{ "selection_token": "<token from POST /api/folder-picker/select-path>" }
+```
+
+Exactly one of `chip`, `picker`, `file` or `selection_token`. Chips are `music`, `documents`, `desktop` and `downloads`, offered in that order for the folders that exist. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. A `selection_token` names a folder the folder-picker endpoint already accepted, which is how a path the user typed gets here: `POST /api/folder-picker/select-path` with `{ "path": "~/Music/Projects" }` checks the path on a same-origin request (absolute or `~/`, an existing directory, not the home folder itself, not Ori's data or workspace root, not a credential folder) and answers `{ "success": true, "selected": true, "path": "…", "selection_token": "…" }`, with `warning: "outside_home"` and a `warning_note` sentence for a folder outside the home folder, or `422` with the refusal's sentence in `error`. The scan route itself still answers `400` to any `path` or `folder` key; an expired or unknown token is `400` with "That folder selection expired. Paste the path again." The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
 
 ### Open the Picker
 

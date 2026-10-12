@@ -1245,3 +1245,186 @@ textarea.form-control:focus {
   display: inline-flex;
   align-items: center;
 }
+
+/* "or paste a folder path": the typed alternative offered beside every button
+   that opens the native folder dialog (folder-path-entry.js). It sits inside
+   very different surfaces (the workspace page, the Create Workspace modal, the
+   assistant's chooser), so it carries its own surface and text tokens instead
+   of inheriting an input style tuned for one of them. */
+.folder-path-entry {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  margin-top: 0.6rem;
+}
+
+/* Inside a row of chips (the assistant's Add folder sheet) the control takes a
+   line of its own rather than sitting among them. */
+.personal-assistant-panel__chips > .folder-path-entry {
+  flex: 1 0 100%;
+}
+
+.folder-path-entry__label {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.folder-path-entry__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.folder-path-entry__input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.folder-path-entry__input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.folder-path-entry__input:focus-visible {
+  outline: 2px solid var(--primary-color, #2a8762);
+  outline-offset: 1px;
+}
+
+.folder-path-entry__use {
+  flex: none;
+  min-height: 2.5rem;
+}
+
+.folder-path-entry__note,
+.folder-path-entry__status {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.folder-path-entry__status.is-error {
+  color: var(--danger-color, #ef4444);
+}
+
+.folder-path-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 1.25rem 1.35rem 1.15rem;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%);
+}
+
+.folder-path-dialog::backdrop {
+  background: rgb(10 12 14 / 62%);
+}
+
+.folder-path-dialog__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.folder-path-dialog__body {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
+.folder-path-dialog__body .folder-path-entry {
+  justify-self: stretch;
+}
+
+.folder-path-dialog__copy {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.folder-path-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* The card under an assistant reply for a folder path the user wrote
+   (personal-assistant-folder-proposal.js). It sits inside the reply's bubble,
+   so it borrows the drawer's ink and accent rather than a surface of its own. */
+.personal-assistant-folder-proposal {
+  margin-top: 14px;
+  padding: 14px 0 4px;
+  border-top: 1px solid color-mix(in srgb, var(--ori-ink) 18%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-folder-proposal__title {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.personal-assistant-folder-proposal__path,
+.personal-assistant-folder-proposal__detail,
+.personal-assistant-folder-proposal__warning,
+.personal-assistant-folder-proposal__status {
+  margin: 6px 0;
+}
+
+.personal-assistant-folder-proposal__path {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+}
+
+.personal-assistant-folder-proposal__warning {
+  font-weight: 600;
+}
+
+.personal-assistant-folder-proposal__status:empty {
+  display: none;
+}
+
+.personal-assistant-folder-proposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.personal-assistant-folder-proposal__actions button {
+  min-height: 44px;
+  padding: 7px 12px;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+}
+
+.personal-assistant-folder-proposal__actions button:disabled {
+  opacity: 0.6;
+}
+
+.personal-assistant-folder-proposal__actions button:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong));
+  outline-offset: 3px;
+}

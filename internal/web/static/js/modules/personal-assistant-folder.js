@@ -20,6 +20,7 @@ import {
   songLineText
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
+import { createFolderPathEntry } from './folder-path-entry.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
@@ -1858,6 +1859,7 @@ function elements() {
     chips: document.getElementById('personalAssistantFolderChips'),
     title: document.getElementById('personalAssistantFolderTitle'),
     note: document.getElementById('personalAssistantFolderNote'),
+    typedFolder: document.getElementById('personalAssistantFolderPathEntry'),
     status: document.getElementById('personalAssistantFolderStatus'),
     offer: document.getElementById('personalAssistantFolderOffer'),
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
@@ -2232,6 +2234,22 @@ function renderChooser() {
     }
   }
   setText(els.note, view.note);
+  mountTypedFolder(els)?.setDisabled(state.busy);
+}
+
+// The typed alternative to the chips, mounted once so what the user typed
+// survives a repaint. The folder-picker endpoint checks the text and answers
+// with a selection token; the scan is sent that token, like a chip identifier.
+let typedFolder = null;
+function mountTypedFolder(els) {
+  if (!els.typedFolder) return null;
+  if (!typedFolder || typedFolder.element.parentNode !== els.typedFolder) {
+    typedFolder = createFolderPathEntry({
+      onSelect: selection => scan({ selection_token: selection.selectionToken })
+    });
+    els.typedFolder.replaceChildren(typedFolder.element);
+  }
+  return typedFolder;
 }
 
 function renderScene() {

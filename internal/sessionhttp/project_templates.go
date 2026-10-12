@@ -149,7 +149,9 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 	)
 	plan := h.buildTemplateAgentPlanForOwner(effectiveTemplate, ownerUserID)
 	plan.GroupRequirement = groupPlan
-	_ = orihttp.RespondSuccess(w, finalizeTemplateAgentPlan(plan))
+	plan = finalizeTemplateAgentPlan(plan)
+	plan.AutoStaffing = h.planRoleAutoFills(sourceTemplate, effectiveTemplate, req.GroupComposition, ownerUserID)
+	_ = orihttp.RespondSuccess(w, plan)
 }
 
 // handleTemplateAgentCreate immediately saves one template-declared agent as a

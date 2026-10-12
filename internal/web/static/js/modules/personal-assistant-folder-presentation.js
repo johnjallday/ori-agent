@@ -210,7 +210,7 @@ export function renderFolderSummary(container, observation, options = {}) {
     details.append(
       node(
         'p',
-        'Send shares the recorded file/folder and project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.'
+        'Send shares the recorded file/folder and project names, kinds, counts, project markers, last-changed dates, scan time and coverage with your configured model. Selecting a folder stays local.'
       )
     );
   else details.append(node('p', 'These are dated observations, not permission to inspect again.'));

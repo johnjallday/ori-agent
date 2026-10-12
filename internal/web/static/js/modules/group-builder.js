@@ -212,6 +212,18 @@ async function commit(state) {
   }
 }
 
+// ensureReview asks for the group's review as soon as the creator shows its
+// Review step, once per name, so the creator's one button creates the group.
+// A review that failed is not repeated by a repaint: the button asks again.
+// A pending commit keeps its own approval and is never reviewed over.
+async function ensureReview(state) {
+  if (active !== state || state.busy || state.pending) return;
+  const name = requestedName(state);
+  if (!name || state.attemptedName === name || state.review?.input.name === name) return;
+  state.attemptedName = name;
+  await review(state, name);
+}
+
 async function submit(state) {
   if (state.busy || active !== state) return;
   const name = requestedName(state);
@@ -285,6 +297,7 @@ export function openGroupBuilder({ journey = null, onJourneyChange, onClose } = 
   const guided = {
     state,
     submit: () => submit(state),
+    ensureReview: () => ensureReview(state),
     review: null,
     error: '',
     // Presentation only: names the catalog entry the creator describes. The
@@ -305,6 +318,11 @@ export function openGroupBuilder({ journey = null, onJourneyChange, onClose } = 
   // crosses this boundary.
   manager.restoreWorkspaceCreatorDetailsDraft?.('group');
   manager.refreshWizardChrome?.();
+  // Setup already names this group, so the creator opens on its Review: one
+  // card, reviewed as it is shown, and one button. Details stays a step back
+  // for a different name, and the creator stays there if the name cannot be
+  // used.
+  if (state.name.trim()) manager.goToWizardStep?.(4);
   const modal = document.getElementById('addFolderModal');
   const blockCommittedClose = event => {
     if (active === state && state.committing) event.preventDefault();

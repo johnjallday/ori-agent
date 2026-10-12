@@ -92,6 +92,13 @@ const state = {
   folderOfferID: '',
   review: null,
   reviewInput: null,
+  // The action that produced the review on screen, so a stale commit can ask
+  // for the same review again; and the line that says it did.
+  reviewActionID: '',
+  reviewNotice: '',
+  // The install or enable review a step shows as its own content: which
+  // step/action it was started for, and whether it is still on its way.
+  stepReview: null,
   pendingCommit: null,
   returnFocus: null,
   busy: false,
@@ -100,7 +107,11 @@ const state = {
   groupTemplate: null,
   // The in-quest Home-provider recovery: a disclosure awaiting confirmation,
   // or the last refused/failed attempt. Keyed to its run and plugin.
-  providerRecovery: null
+  providerRecovery: null,
+  // The provider install this visit already disclosed by itself, and one that
+  // was due while something else was in flight.
+  providerReview: '',
+  providerReviewDue: null
 };
 
 function byID(id) {
@@ -304,6 +315,29 @@ export function homeProviderRecoveryFailure(result) {
   };
 }
 
+// A step whose one decision is "install this" or "enable this" shows that
+// decision's review as the step itself: one card, one button. Every other
+// review stays behind the button that asks for it.
+const STEP_REVIEW_ACTIONS = new Set(['review_install', 'review_enable']);
+
+// stepReviewAction returns the review a step should open with, or null. Two
+// such offers at once is not a single decision, so neither is opened.
+export function stepReviewAction(step) {
+  const offers = (step?.actions || []).filter(
+    action => action?.effect === 'review' && STEP_REVIEW_ACTIONS.has(action.id)
+  );
+  return offers.length === 1 ? offers[0] : null;
+}
+
+// stepReviewKey names one visit's review: this run, this step, this action.
+export function stepReviewKey(journey, step, action) {
+  return [journey?.run_id || '', step?.id || '', action?.id || ''].join('\u001f');
+}
+
+// STALE_REVIEW_NOTICE is shown on a card that was reviewed again because the
+// first review went stale before it was confirmed.
+export const STALE_REVIEW_NOTICE = 'This review expired, so here it is again.';
+
 export const RELEASE_UNCHECKED_NOTE =
   'The latest release could not be checked. Ori will install the minimum reviewed version.';
 
@@ -352,6 +386,12 @@ function setBusy(busy, message = '', { lockClose = false } = {}) {
         setupJourneyControlDisabled(busy, lockClose, isCloseControl);
     }
   });
+  // Nothing is in flight any more: a step that opens with its own review can
+  // ask for it now.
+  if (!busy) {
+    openStepReview();
+    openDueProviderReview();
+  }
 }
 
 function hideJourneyPresentation() {
@@ -378,6 +418,15 @@ function hideJourneyPresentation() {
     elements.root.setAttribute('aria-hidden', 'true');
   }
   state.returnFocus?.focus?.();
+}
+
+// focusCurrentStep puts focus on what the step is showing: its review card
+// when it has one (the card replaces the step's own title), else its title.
+// The modal finishes opening after the card may already have arrived.
+function focusCurrentStep() {
+  const elements = ui();
+  const card = state.review ? elements?.review?.querySelector('h4') : null;
+  (card || elements?.stepTitle)?.focus();
 }
 
 function showError(message = '') {
@@ -650,6 +699,36 @@ function render() {
   elements.live.textContent = journey.busy
     ? 'Ori is checking the previous change. Check its status before trying again.'
     : '';
+  openStepReview();
+}
+
+// openStepReview asks for an install or enable step's review as soon as the
+// step is shown, once per visit. The review is not asked for again on a
+// repaint: only a new visit, a finished commit, or a stale review does that.
+//
+// It is called from render and again whenever a busy operation ends, because
+// most renders happen inside one: the journey is drawn while it is still
+// loading, and the next step is drawn while a commit is still finishing.
+function openStepReview() {
+  const journey = state.journey;
+  if (!journey || !ui() || state.managementView) return;
+  // The precondition and workspace-launch views show no step of their own.
+  if (
+    !journey.declaration_incompatible &&
+    (journey.precondition || journey.journey?.workspace_launch)
+  )
+    return;
+  const step = setupJourneyCurrentStep(journey, state.selectedStepID);
+  const action = stepReviewAction(step);
+  if (!action) return;
+  if (state.review || state.busy || state.pendingCommit || journey.busy) return;
+  const key = stepReviewKey(journey, step, action);
+  if (state.stepReview?.key === key) return;
+  state.stepReview = { key, pending: true };
+  // The step is already drawn with its button: redraw it without one, since
+  // the card that is on its way is the step's button.
+  renderActions(step);
+  void reviewAction(action.id, {});
 }
 
 export const START_OVER_EXPLANATION =
@@ -908,7 +987,8 @@ function renderWorkspaceLaunch(journey) {
         true
       );
     } else {
-      elements.stepDescription.textContent = `Create “${copy.group_name}”, the one group for these projects. Only the group is created now; its coordinator and each project's team are set up afterward.`;
+      // Name the group the creator will show on its one Create button.
+      elements.stepDescription.textContent = `Create “${preparation?.name || copy.group_name}”, the one group for these projects. Only the group is created now; its coordinator and each project's team are set up afterward.`;
       button('Build Group', launchGroupBuilder, true);
     }
   } else {
@@ -1011,12 +1091,55 @@ function renderHomeProviderGroup(journey, step, button) {
       elements.draft.appendChild(makeText('p', 'setup-journey__scope-note', recovery.detail));
     }
   }
+  // One card, one confirm: an install is disclosed as this screen is shown, so
+  // the disclosure is the screen's content and Install is its one decision.
+  if (openProviderReview(journey, provider, offer, recovery)) return;
   if (offer) button(offer.label, () => startHomeProviderRecovery(provider, offer), true);
   button('Open Plugins', () => window.location.assign(PLUGINS_PAGE_URL));
   button('Check Again', () => {
     state.providerRecovery = null;
     void refreshJourney();
   });
+}
+
+// providerReviewKey names one visit's disclosure of one Home provider install.
+// It is asked for once: Cancel, or a disclosure that cannot be read, leaves the
+// screen's own button as the way to ask again.
+export function providerReviewKey(journey, provider, offer) {
+  if (offer?.action !== 'install_plugin' || !offer.disclose) return '';
+  const runID = String(journey?.run_id || '');
+  const pluginID = String(provider?.plugin_id || '');
+  return runID && pluginID ? `${runID}|${pluginID}|${provider.generation ?? ''}` : '';
+}
+
+// openProviderReview starts that disclosure when the screen is drawn and says
+// whether it did. A screen drawn while something is in flight (the journey is
+// still loading) records it as due; openDueProviderReview picks it up.
+function openProviderReview(journey, provider, offer, recovery) {
+  const key = providerReviewKey(journey, provider, offer);
+  if (!key || recovery || state.providerReview === key) return false;
+  if (!window.PluginRecoveryClient || !window.PluginLifecycle) return false;
+  if (state.busy) {
+    state.providerReviewDue = { key, provider, offer };
+    return false;
+  }
+  state.providerReview = key;
+  state.providerReviewDue = null;
+  void startHomeProviderRecovery(provider, offer);
+  return true;
+}
+
+function openDueProviderReview() {
+  const due = state.providerReviewDue;
+  if (!due || state.busy) return;
+  state.providerReviewDue = null;
+  const journey = state.journey;
+  if (!journey || !ui() || state.providerRecovery || state.providerReview === due.key) return;
+  // Only for the screen that asked: the same run, still waiting on this provider.
+  if (providerReviewKey(journey, due.provider, due.offer) !== due.key) return;
+  if (groupBuildState(journey) !== 'provider') return;
+  state.providerReview = due.key;
+  void startHomeProviderRecovery(due.provider, due.offer);
 }
 
 // renderHomeProviderDisclosure shows, in the step itself, exactly what the
@@ -1245,7 +1368,7 @@ function reopenJourneyAfterCreator(runID) {
       }
       render();
       state.modal.show();
-      ui()?.root.addEventListener('shown.bs.modal', () => ui()?.stepTitle?.focus(), {
+      ui()?.root.addEventListener('shown.bs.modal', focusCurrentStep, {
         once: true
       });
     },
@@ -1302,6 +1425,8 @@ function selectStep(stepID, trigger) {
   state.draft = null;
   state.review = null;
   state.reviewInput = null;
+  // Coming back to a step is a new visit: its review is prepared again.
+  state.stepReview = null;
   state.returnFocus = trigger;
   showError('');
   render();
@@ -1333,7 +1458,12 @@ function renderActions(step) {
   }
   if (step?.kind === 'project_connect' && state.draft) return;
   let returnOffered = false;
+  // The step's own review is on its way: its card is the step's one button.
+  // If the review could not be prepared, the button below is the way to ask
+  // again.
+  const opening = state.stepReview?.pending ? stepReviewAction(step) : null;
   (step?.actions || []).forEach(action => {
+    if (opening && action.id === opening.id) return;
     const back =
       action.id === 'continue_integration_setup' || action.id === 'open_plugins'
         ? libraryReturnTarget(String(state.journey?.journey?.id || ''))
@@ -1744,9 +1874,11 @@ function field(labelText, help, type, value, onInput, required = true) {
   return label;
 }
 
-async function reviewAction(actionID, input) {
+// notice is the line shown on the card when this review replaces one that
+// went stale; an ordinary review has none.
+async function reviewAction(actionID, input, { notice = '' } = {}) {
   setBusy(true, 'Preparing an exact review…');
-  showError('');
+  if (!notice) showError('');
   try {
     const payload = await request(runURL(`/actions/${encodeURIComponent(actionID)}`), {
       method: 'POST',
@@ -1769,10 +1901,15 @@ async function reviewAction(actionID, input) {
     }
     state.review = payload.review;
     state.reviewInput = input;
+    state.reviewActionID = actionID;
+    state.reviewNotice = notice;
+    if (state.stepReview) state.stepReview.pending = false;
     render();
     ui()?.review?.querySelector('h4')?.focus();
   } catch (error) {
     if (error.current) state.journey = error.current;
+    // The step's own review could not be prepared: its button comes back.
+    if (state.stepReview) state.stepReview.pending = false;
     const projectDraft = state.draft?.kind === 'new' || state.draft?.kind === 'existing';
     showError(
       projectDraft
@@ -1791,9 +1928,11 @@ async function reviewAction(actionID, input) {
 export function integrationReviewPresentation(review, stepTitle = '') {
   const integration = review?.integration;
   if (!integration) return null;
+  // Titles are headings, not questions: the card is the step, and its one
+  // button is the answer.
   if (integration.replacement_required === true || review.commit_action === 'update') {
     return {
-      title: 'Replace installed integration?',
+      title: 'Replace installed integration',
       description:
         'Replace the current installation with Ori’s reviewed version, even if the version number is unchanged. Its enabled state is preserved. Existing workspaces and project files are not deleted; runtime access may need review again.',
       confirm: 'Replace with reviewed version'
@@ -1804,14 +1943,14 @@ export function integrationReviewPresentation(review, stepTitle = '') {
     const source = integration.source_label ? ` from ${integration.source_label}` : '';
     const title = String(stepTitle || '').trim();
     return {
-      title: title ? `${title}?` : 'Install this plugin?',
+      title: title || 'Install this plugin',
       description: `Ori downloads the reviewed${version} release${source}, checks its fingerprint, and installs it. Nothing runs until you enable it.`,
       confirm: 'Install'
     };
   }
   if (review.commit_action === 'enable') {
     return {
-      title: 'Enable this plugin?',
+      title: 'Enable this plugin',
       description:
         'Enabling lets Ori use the installed plugin’s blueprints, tools and guided setup. You can disable it again on the Plugins page.',
       confirm: 'Enable'
@@ -1851,6 +1990,12 @@ function renderReview() {
   );
   heading.tabIndex = -1;
   container.appendChild(heading);
+  // Said once, on the card that replaced a review that went stale.
+  if (state.reviewNotice) {
+    const notice = makeText('p', 'setup-journey__scope-note', state.reviewNotice);
+    notice.setAttribute('role', 'status');
+    container.appendChild(notice);
+  }
   if (group) {
     container.appendChild(makeText('p', '', presentation.description));
     container.appendChild(
@@ -1862,14 +2007,7 @@ function renderReview() {
     );
   } else if (accountLink) {
     container.appendChild(makeText('p', '', accountLink.description));
-    appendRows(
-      container,
-      [
-        ...accountLink.rows,
-        ['Consent expires', new Date(state.review.expires_at).toLocaleString()]
-      ],
-      'setup-journey__review-list'
-    );
+    appendRows(container, accountLink.rows, 'setup-journey__review-list');
   } else if (presentation) {
     container.appendChild(makeText('p', '', presentation.description));
     appendRows(
@@ -1913,6 +2051,12 @@ function renderReview() {
     if (integrationPresentation) {
       container.appendChild(makeText('p', '', integrationPresentation.description));
     }
+    // The card stands in for the step, so what the step had to say about the
+    // release it will install is said here too.
+    const releaseNote = integrationPresentation ? integrationReleaseCheckNote(reviewedStep) : '';
+    if (releaseNote) {
+      container.appendChild(makeText('p', 'setup-journey__scope-note', releaseNote));
+    }
     const integrationRows = integrationReviewRows(state.review);
     appendRows(
       container,
@@ -1934,17 +2078,6 @@ function renderReview() {
   }
   const controls = document.createElement('div');
   controls.className = 'setup-journey__review-controls';
-  const cancel = makeText('button', 'btn btn-outline-secondary', 'Back');
-  cancel.type = 'button';
-  cancel.addEventListener('click', () => {
-    state.review = null;
-    state.reviewInput = null;
-    render();
-    showError('');
-    const target =
-      ui()?.draft?.querySelector('input, select') || ui()?.actions?.querySelector('button');
-    target?.focus();
-  });
   const confirm = makeText(
     'button',
     'setup-journey__action setup-journey__review-confirm',
@@ -1952,7 +2085,27 @@ function renderReview() {
   );
   confirm.type = 'button';
   confirm.addEventListener('click', commitReview);
-  controls.append(cancel, confirm);
+  // A step that opens with its own review has nothing behind the card to go
+  // back to: the card is the step, and its one button commits.
+  const stepsOwn =
+    Boolean(stepReviewAction(reviewedStep)) &&
+    stepReviewAction(reviewedStep).id === state.reviewActionID;
+  if (!stepsOwn) {
+    const cancel = makeText('button', 'btn btn-outline-secondary', 'Back');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => {
+      state.review = null;
+      state.reviewInput = null;
+      state.reviewNotice = '';
+      render();
+      showError('');
+      const target =
+        ui()?.draft?.querySelector('input, select') || ui()?.actions?.querySelector('button');
+      target?.focus();
+    });
+    controls.append(cancel);
+  }
+  controls.append(confirm);
   container.appendChild(controls);
 }
 
@@ -2066,7 +2219,8 @@ export function reviewRows(review) {
       ['Live control tested', setup.live_control_tested ? 'Yes' : 'No']
     );
   }
-  rows.push(['Consent expires', new Date(review.expires_at).toLocaleString()]);
+  // No expiry clock: the review still expires on the server, and a stale one
+  // is simply reviewed again when the user confirms.
   return rows.filter(row => row[1] !== undefined && row[1] !== '');
 }
 
@@ -2090,6 +2244,9 @@ async function commitReview() {
   };
   setBusy(true, 'Applying the reviewed change…', { lockClose: true });
   showError('');
+  // A review that went stale before it was confirmed is asked for again and
+  // shown as the same card, with a line saying so. Nothing was changed.
+  let reviewAgain = null;
   try {
     const payload = await request(state.pendingCommit.url, {
       method: 'POST',
@@ -2098,6 +2255,10 @@ async function commitReview() {
     state.journey = payload?.setup_journey || state.journey;
     state.review = null;
     state.reviewInput = null;
+    state.reviewActionID = '';
+    state.reviewNotice = '';
+    // The step moved on: whatever it offers next is a new visit.
+    state.stepReview = null;
     state.pendingCommit = null;
     state.draft = null;
     state.projectDrafts = {};
@@ -2107,20 +2268,43 @@ async function commitReview() {
     ui()?.stepTitle?.focus();
   } catch (error) {
     if (error.current) state.journey = error.current;
+    if (
+      staleReviewCanRepeat(error, {
+        projectChange,
+        actionID: state.reviewActionID,
+        current: error.current
+      })
+    ) {
+      reviewAgain = { actionID: state.reviewActionID, input: state.reviewInput || {} };
+      state.pendingCommit = null;
+    }
     state.review = null;
     state.reviewInput = null;
     if (error.current && !error.current.busy) state.pendingCommit = null;
-    showError(
-      projectChange
-        ? state.pendingCommit
-          ? projectFailureGuidance('commit')
-          : 'The project change was not confirmed. Your entries are kept. Review the project again before another attempt.'
-        : error.message
-    );
+    if (!reviewAgain) {
+      showError(
+        projectChange
+          ? state.pendingCommit
+            ? projectFailureGuidance('commit')
+            : 'The project change was not confirmed. Your entries are kept. Review the project again before another attempt.'
+          : error.message
+      );
+    }
     render();
   } finally {
     setBusy(false);
   }
+  if (reviewAgain) {
+    await reviewAction(reviewAgain.actionID, reviewAgain.input, { notice: STALE_REVIEW_NOTICE });
+  }
+}
+
+// staleReviewCanRepeat decides whether a refused commit is a stale review that
+// can simply be reviewed again. A project change keeps its own recovery (its
+// entries and a possible replay), and a journey still checking a previous
+// change must be checked first.
+export function staleReviewCanRepeat(error, { projectChange, actionID, current } = {}) {
+  return error?.reason === 'review_stale' && !projectChange && Boolean(actionID) && !current?.busy;
 }
 
 async function workspaceRoute(workspaceID, suffix = '') {
@@ -2408,6 +2592,9 @@ export async function openSpecialistSetupJourney(requested = null) {
     state.journey = payload?.setup_journey;
     state.groupTemplate = null;
     state.providerRecovery = null;
+    // Opening setup is a new visit: its provider install is disclosed afresh.
+    state.providerReview = '';
+    state.providerReviewDue = null;
     if (!state.journey) return false;
     // An unresolved owner operation blocks presentation writes, not access
     // to its status. Show the authorized read without claiming another action.
@@ -2444,11 +2631,15 @@ export async function openSpecialistSetupJourney(requested = null) {
     }
     state.review = null;
     state.reviewInput = null;
+    // Opening setup is a new visit to whatever step it lands on.
+    state.reviewActionID = '';
+    state.reviewNotice = '';
+    state.stepReview = null;
     render();
     if (globalThis.bootstrap?.Modal) {
       state.modal ||= globalThis.bootstrap.Modal.getOrCreateInstance(elements.root);
       state.modal.show();
-      elements.root.addEventListener('shown.bs.modal', () => elements.stepTitle?.focus(), {
+      elements.root.addEventListener('shown.bs.modal', focusCurrentStep, {
         once: true
       });
       elements.root.addEventListener('hidden.bs.modal', () => state.returnFocus?.focus?.(), {
@@ -2458,7 +2649,7 @@ export async function openSpecialistSetupJourney(requested = null) {
       elements.root.classList.add('show');
       elements.root.style.display = 'block';
       elements.root.removeAttribute('aria-hidden');
-      elements.stepTitle?.focus();
+      focusCurrentStep();
     }
     return true;
   } catch (error) {

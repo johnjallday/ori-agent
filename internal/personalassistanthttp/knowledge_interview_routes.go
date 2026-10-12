@@ -160,7 +160,13 @@ func (h *Handler) scanForInterview(ctx context.Context, userID string, req folde
 	case req.File:
 		return h.folderDigest.ScanPickedFile(ctx, userID)
 	}
-	offer, err := h.folderDigest.ScanChip(ctx, userID, req.Chip)
+	var offer personalassistant.FolderOfferView
+	var err error
+	if req.SelectionToken != "" {
+		offer, err = h.folderDigest.ScanSelection(ctx, userID, req.SelectionToken)
+	} else {
+		offer, err = h.folderDigest.ScanChip(ctx, userID, req.Chip)
+	}
 	if err != nil {
 		return nil, err
 	}

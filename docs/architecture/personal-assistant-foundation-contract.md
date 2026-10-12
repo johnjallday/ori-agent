@@ -659,11 +659,38 @@ assistant makes one explained offer.
   mission card reach the same flow. Nothing opens by itself: at rest the
   conversation is empty. The chip is disabled while a folder is being chosen
   or explored. Before HQ, Home opens its confirm card instead.
-- **Choosing.** Chips name Downloads, Documents, and Desktop under the server's
-  home; "Pick another folder…" runs the native picker on the server
-  (`platform.ChooseFolder`, osascript). The browser never sends a filesystem
-  path: `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}` or
-  `{picker: true}` and answers 400 to any `path`/`folder` key.
+- **Choosing.** Chips name Music, Documents, Desktop, and Downloads under the
+  server's home; "Pick another folder…" runs the native picker on the server
+  (`platform.ChooseFolder`, osascript). Any other folder can be typed in the
+  "or paste a folder path" field: the text goes to
+  `POST /api/folder-picker/select-path` (`path`), the one route that accepts a
+  typed path, which checks it (`internal/folderpath`, same-origin only) and
+  answers with a selection token. The scan never receives a filesystem path:
+  `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}`,
+  `{picker: true}` or `{selection_token}` and answers 400 to any
+  `path`/`folder` key.
+- **A path written in the chat.** A panel message that contains an absolute or
+  `~/` path to an existing folder is answered with a card on the reply, never a
+  refusal (`folderPathTurn`, `internal/agenthttp/personal_assistant_folder_path.go`).
+  The host decides this from the user's own words, not the model: `folderpath.Find`
+  locates the path (it may contain spaces; the longest existing folder wins) and
+  applies the typed-path rules, the model is told the facts in the user message,
+  a reply that ignores or refuses the folder is opened by the host's own
+  sentence, and the answered turn's response carries `folder_proposal`
+  `{kind, selection_token, folder_name, path, warning?, warning_note?,
+  workspace_id?, workspace_name?}`. The folder is held as an ordinary selection
+  token (bound to the workspace for a link) and nothing in it is read. `kind` is
+  `link` inside a project workspace (confirm posts the token to
+  `POST /api/workspaces/{id}/directories`) and `explore` everywhere else (confirm
+  attaches it through `folder-context/select` in `selection` mode: names, kinds
+  and dates only). After the confirm the browser sends the next turn itself, so
+  the assistant carries on. A folder already linked to the workspace gets no
+  card; a real folder the rules refuse gets the refusal's sentence and no card.
+  The card is not stored with the reply, and the path is shown on it but never
+  sent back. The router keeps such a message with the assistant
+  (`FolderPathNamed`): a leading `/` would otherwise read as a command. The path
+  is cut out of the text the turn binds its workspace from, so a folder named
+  like a workspace does not move the turn.
 - **Presentation.** The turn reads as a conversation: the user's request
   ("Explore a folder"), then the assistant's replies in order — the chooser
   ("Which folder should I explore?", the folder buttons, "A read-only peek.

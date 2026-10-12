@@ -393,6 +393,11 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	if s.workspaceFileStore != nil {
 		handler.Files, handler.WorkspaceContext.Files = personalAssistantFileSource{roots: s.workspaceFileStore}, true
 	}
+	// A folder path in a message is checked and held by the host; the handler
+	// only ever sees the result.
+	if s.folderPaths != nil {
+		handler.FolderPaths = s.folderPaths
+	}
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
 	// A request to create a workspace is offered as a build with the
 	// assistant while it can build (FR41).

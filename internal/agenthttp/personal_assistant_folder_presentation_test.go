@@ -61,3 +61,19 @@ func TestAssistantFolderPresentation_RootFlagIsDataNotAnIndependentTotal(t *test
 		t.Fatalf("invalid root presentation: %s %v", text, err)
 	}
 }
+
+// The model is given each project's last-changed day, so it can say which was
+// worked on most recently; a project without one is simply given none.
+func TestAssistantFolderPresentation_ProjectsCarryTheirLastChangedDay(t *testing.T) {
+	text, err := folderObservationPrompt(&preparedFolderTurn{observation: &foldercontext.Observation{Projects: []foldercontext.Project{
+		{ID: "a", Name: "Night Drive", Files: 4, LastChanged: "2026-10-09"},
+		{ID: "b", Name: "Empty Idea"},
+	}}})
+	if err != nil || !strings.Contains(text, `{"name":"Night Drive","files":4,"last_changed":"2026-10-09"}`) ||
+		!strings.Contains(text, `{"name":"Empty Idea","files":0}`) {
+		t.Fatalf("project dates in the prompt: %s %v", text, err)
+	}
+	if !strings.Contains(folderConversationInstructions, "last_changed is the date of the newest file seen") {
+		t.Fatal("the model is not told what last_changed means")
+	}
+}

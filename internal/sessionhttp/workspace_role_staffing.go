@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -162,13 +163,6 @@ func roleStaffedEntryAgent(
 	return ""
 }
 
-// staffAssistantRoles commits the roles the user filled on an assistant-program
-// blueprint, through the staffing adapter's ordinary Review/Commit pair.
-//
-// It returns a WARNING rather than failing the request: the workspace exists by
-// now, and tearing it down because one role could not be staffed would be worse
-// than handing the user a workspace whose roster still shows that role empty —
-// which is exactly the state the roster is built to explain and to fix.
 type workspaceTeamCompletionRole struct {
 	RoleID string `json:"role_id"`
 	Label  string `json:"label"`
@@ -240,8 +234,20 @@ func (h *Handler) observeAssistantTeamCompletion(workspaceID, workspaceSlug stri
 	return result
 }
 
-func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, items []roleStaffingInput) string {
-	if h == nil || h.assistantRoleStaffer == nil || len(items) == 0 {
+// staffAssistantRoles commits the roles the user filled on an assistant-program
+// blueprint, through the staffing adapter's ordinary Review/Commit pair.
+//
+// It returns a WARNING rather than failing the request: the workspace exists by
+// now, and tearing it down because one role could not be staffed would be worse
+// than handing the user a workspace whose roster still shows that role empty —
+// which is exactly the state the roster is built to explain and to fix.
+//
+// With reviewed set (the strict wizard's reviewed create), the required roles
+// the user left empty are filled too: the review listed them, so the create
+// makes them. They commit after the user's own fills, so a role the host could
+// not fill never costs the user a choice they made.
+func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, items []roleStaffingInput, reviewed *projectstaffing.Grant) string {
+	if h == nil || h.assistantRoleStaffer == nil || (len(items) == 0 && reviewed == nil) {
 		return ""
 	}
 	staffing, err := normalizeRoleStaffing(items)
@@ -249,23 +255,39 @@ func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, i
 		return err.Error()
 	}
 	fills := make([]RoleStaffingFill, 0, len(staffing))
+	explicit := make(map[string]bool, len(staffing))
 	for _, item := range staffing {
+		explicit[item.RoleID] = true
 		fills = append(fills, RoleStaffingFill{
 			RoleID: item.RoleID, Mode: item.Mode, Name: item.Name,
 			Provider: item.Provider, Model: item.Model, ReasoningEffort: item.ReasoningEffort,
 			Appearance: item.Appearance,
 		})
 	}
-	// Deterministic order so a failure is reproducible and the created agents
-	// land in a stable sequence.
-	sort.Slice(fills, func(i, j int) bool { return fills[i].RoleID < fills[j].RoleID })
-
-	if err := h.assistantRoleStaffer(ctx, workspaceID, fills); err != nil {
-		logger.Warn("Assistant role staffing failed after workspace creation",
-			logger.Fields{"workspace_id": workspaceID, "error": err})
-		return "some roles could not be staffed; fill them from the workspace roster"
+	warning := ""
+	auto := h.autoRoleFills(workspaceID, explicit, reviewed)
+	for _, batch := range [][]RoleStaffingFill{fills, auto} {
+		if len(batch) == 0 {
+			continue
+		}
+		// Deterministic order so a failure is reproducible and the created
+		// agents land in a stable sequence.
+		sort.Slice(batch, func(i, j int) bool { return batch[i].RoleID < batch[j].RoleID })
+		if err := h.assistantRoleStaffer(ctx, workspaceID, batch); err != nil {
+			logger.Warn("Assistant role staffing failed after workspace creation",
+				logger.Fields{"workspace_id": workspaceID, "error": err})
+			warning = "some roles could not be staffed; fill them from the workspace roster"
+		}
 	}
-	return ""
+	if len(auto) > 0 {
+		// Records the shared agent this create made, so the Home's next project
+		// binds it instead of making another.
+		if err := h.projectStaffing.Settle(workspaceID); err != nil {
+			logger.Warn("The created workspace's shared agent was not recorded",
+				logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
+		}
+	}
+	return warning
 }
 
 // respondRoleStaffingError rolls back what this request created and reports the

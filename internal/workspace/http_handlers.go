@@ -39,6 +39,7 @@ type HTTPHandler struct {
 	openFile                func(string) error
 	revealFile              func(string) error
 	pathSelectionIssuer     trustedPathSelectionIssuer
+	typedFolderPaths        TypedFolderPathChecker
 	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
 	// Mission-related HTTP endpoints route through it so they share the same
 	// trigger configuration as cadence-driven runs. Optional — handlers
@@ -83,6 +84,14 @@ func (h *HTTPHandler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionG
 func (h *HTTPHandler) SetTrustedPathSelectionIssuer(issuer trustedPathSelectionIssuer) {
 	if h != nil {
 		h.pathSelectionIssuer = issuer
+	}
+}
+
+// SetTypedFolderPathChecker lets select-path accept a folder path the user
+// typed. Without it a typed path is refused and only the dialog selects.
+func (h *HTTPHandler) SetTypedFolderPathChecker(checker TypedFolderPathChecker) {
+	if h != nil {
+		h.typedFolderPaths = checker
 	}
 }
 

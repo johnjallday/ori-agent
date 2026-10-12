@@ -84,6 +84,155 @@ func TestFolderObservation_LocalOnlyAndBounded(t *testing.T) {
 	}
 }
 
+// "Which of these did I work on last?" is answered from the scan's own dates:
+// each project carries the day of its newest file, and nothing else about it.
+func TestFolderObservation_ProjectsSayWhenTheyWereLastChanged(t *testing.T) {
+	older := time.Date(2026, time.March, 14, 10, 30, 0, 0, time.Local)
+	newer := time.Date(2026, time.October, 9, 16, 30, 0, 0, time.Local)
+	observation := summarizeFolder(folderdigest.Result{
+		Name: "Song Projects", ScannedAt: newer.Add(time.Hour), Entries: 6,
+		Candidates: []folderdigest.Candidate{
+			{Name: "Song Projects", IsRoot: true, FileCount: 4, NewestModTime: newer},
+			{Name: "Harbor Lights", FileCount: 2, NewestModTime: older},
+			{Name: "Night Drive", FileCount: 2, NewestModTime: newer},
+			{Name: "Empty Idea"},
+		},
+	}, "observation-1")
+	if err := observation.Validate(); err != nil {
+		t.Fatalf("observation invalid: %v (%+v)", err, observation)
+	}
+	dates := map[string]string{}
+	for _, project := range observation.Projects {
+		dates[project.Name] = project.LastChanged
+	}
+	if dates["Harbor Lights"] != "2026-03-14" || dates["Night Drive"] != "2026-10-09" || dates["Song Projects"] != "2026-10-09" {
+		t.Fatalf("dates = %v", dates)
+	}
+	// A project with no file seen has no date, rather than an invented one.
+	if date, listed := dates["Empty Idea"]; !listed || date != "" {
+		t.Fatalf("empty project date = %q (listed %v)", date, listed)
+	}
+	encoded, err := json.Marshal(observation)
+	if err != nil || strings.Contains(string(encoded), "16:30") || strings.Contains(string(encoded), "T16") {
+		t.Fatalf("a time of day was written: %s %v", encoded, err)
+	}
+}
+
+// The drawer's chooser is told why the dialog is missing in Home's words. A
+// picker's reason is a code and must never be the note.
+func TestFolderObservation_ChoicesExplainAMissingDialogInWords(t *testing.T) {
+	f, service, _ := observationFixture(t)
+	ctx := context.Background()
+	codes := []string{FolderDialogUnavailableDesktopOff, FolderDialogUnavailablePlatform, "some_new_reason"}
+	for _, reason := range codes {
+		t.Run(reason, func(t *testing.T) {
+			f.service.deps.Picker = offPicker{reason: reason}
+			choices, err := service.Choices(ctx, "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			home, err := f.service.Current(ctx, "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if choices.PickerAvailable || len(choices.Chips) != 3 || choices.PickerNote == "" || choices.PickerNote != home.PickerNote {
+				t.Fatalf("choices=%+v home note=%q", choices, home.PickerNote)
+			}
+			encoded, err := json.Marshal(choices)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				PickerNote string `json:"picker_note"`
+			}
+			if err := json.Unmarshal(encoded, &payload); err != nil {
+				t.Fatal(err)
+			}
+			for _, code := range codes {
+				if strings.Contains(payload.PickerNote, code) {
+					t.Fatalf("picker_note carries the reason code %q: %q", code, payload.PickerNote)
+				}
+			}
+			if !strings.HasPrefix(payload.PickerNote, "Pick a folder from the list; ") {
+				t.Fatalf("picker_note = %q", payload.PickerNote)
+			}
+		})
+	}
+
+	// The sandboxed server's exact sentence, the one Home shows.
+	f.service.deps.Picker = offPicker{reason: FolderDialogUnavailableDesktopOff}
+	choices, err := service.Choices(ctx, "local")
+	if err != nil || choices.PickerNote != "Pick a folder from the list; the folder dialog is switched off in this session." {
+		t.Fatalf("note=%q err=%v", choices.PickerNote, err)
+	}
+
+	// A working dialog over the usual folders needs no note at all.
+	f.service.deps.Picker = fakeFolderPicker{}
+	choices, err = service.Choices(ctx, "local")
+	if err != nil || !choices.PickerAvailable || choices.PickerNote != "" {
+		t.Fatalf("choices=%+v err=%v", choices, err)
+	}
+}
+
+// A typed path reaches the chooser as a selection token the server resolves.
+// The token names the folder; nothing the page sends is ever used as a path.
+func TestFolderObservation_SelectionTokenNamesTheFolder(t *testing.T) {
+	f, service, target := observationFixture(t)
+	ctx := context.Background()
+	music := filepath.Join(f.home, "Music", "REAPER Projects")
+	if err := os.MkdirAll(filepath.Join(music, "Night Drive"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(music, "Night Drive", "Night Drive.rpp"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	f.service.deps.ResolveSelection = func(token string) (string, error) {
+		asked = append(asked, token)
+		if token != "live-token" {
+			return "", errors.New("unknown token")
+		}
+		return music, nil
+	}
+
+	observation, err := service.Observe(ctx, target, FolderObserveSelection, "live-token")
+	if err != nil || observation == nil || observation.Folder != "REAPER Projects" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	encoded, err := json.Marshal(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), f.home) || strings.Contains(string(encoded), "live-token") {
+		t.Fatalf("the observation carries the path or the token: %s", encoded)
+	}
+
+	var rootErr *FolderRootError
+	for name, choice := range map[string]string{"an expired token": "gone", "a path in place of a token": music} {
+		if _, err := service.Observe(ctx, target, FolderObserveSelection, choice); !errors.As(err, &rootErr) || rootErr.Message != folderSelectionLostMessage {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+	if len(asked) != 3 {
+		t.Fatalf("resolver asked %q", asked)
+	}
+	if _, err := service.Observe(ctx, target, FolderObserveSelection, "  "); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("blank token err=%v", err)
+	}
+	if _, err := service.Observe(ctx, target, FolderObservePicker, "live-token"); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("a token in picker mode err=%v", err)
+	}
+	if _, err := service.Observe(ctx, target, "path", music); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("an unknown mode err=%v", err)
+	}
+
+	// With no resolver wired every selection is refused.
+	f.service.deps.ResolveSelection = nil
+	if _, err := service.Observe(ctx, target, FolderObserveSelection, "live-token"); !errors.As(err, &rootErr) {
+		t.Fatalf("no resolver err=%v", err)
+	}
+}
+
 func TestFolderObservation_ScopeBindingLifetimeAndRestart(t *testing.T) {
 	f, service, target := observationFixture(t)
 	ctx := context.Background()

@@ -661,7 +661,7 @@ const sessionManager = {
       this.prefillWorkspaceNameFromImportPath(event?.target?.value || '');
     });
     importPathInput?.addEventListener('blur', event => {
-      void this.checkImportDuplicate(event?.target?.value || '');
+      void this.resolveTypedImportPath(event?.target?.value || '');
     });
 
     const importBrowseBtn = document.getElementById('folderImportBrowseBtn');
@@ -4133,6 +4133,55 @@ const sessionManager = {
     }
   },
 
+  // The line under the import path field: why the dialog did not open, why a
+  // typed path was refused, or a warning about one that was accepted.
+  setImportPathNote(text) {
+    const note = document.getElementById('folderImportPathNote');
+    if (!note) return;
+    note.textContent = String(text || '').trim();
+    note.hidden = !note.textContent;
+    // The field sits low in a scrolling modal; a note nobody sees says nothing.
+    if (!note.hidden) note.scrollIntoView?.({ block: 'nearest' });
+  },
+
+  // A typed import path goes through the folder picker's typed-path check
+  // first, like every other "paste a folder path" field: "~/" is expanded and
+  // the canonical path replaces what was typed. A refusal is shown under the
+  // field; the import's own checks still have the last word.
+  async resolveTypedImportPath(pathValue) {
+    const typed = String(pathValue || '').trim();
+    const input = document.getElementById('folderImportPathInput');
+    this.setImportPathNote('');
+    if (!typed || !this.importModeEnabled || !input) {
+      await this.checkImportDuplicate(typed);
+      return;
+    }
+    let path = typed;
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: typed })
+      });
+      const result = await response.json().catch(() => ({}));
+      // The user kept typing: this answer is about text that is gone.
+      if (input.value.trim() !== typed) return;
+      if (response.ok && result.success && result.selected && result.path) {
+        path = result.path;
+        if (path !== typed) {
+          input.value = path;
+          this.prefillWorkspaceNameFromImportPath(path);
+        }
+        this.setImportPathNote(result.warning_note);
+      } else if (result.error) {
+        this.setImportPathNote(result.error);
+      }
+    } catch (error) {
+      console.error('Failed to check typed import path:', error);
+    }
+    await this.checkImportDuplicate(path);
+  },
+
   setImportBrowseLoading(isLoading) {
     const browseBtn = document.getElementById('folderImportBrowseBtn');
     if (!browseBtn) return;
@@ -4165,6 +4214,12 @@ const sessionManager = {
       });
 
       const result = await response.json().catch(() => ({}));
+      if (result.reason === 'dialog_off') {
+        // No dialog in this session is not a failure: say so by the field,
+        // which takes a typed path.
+        this.setImportPathNote(result.note || 'The folder dialog is switched off in this session.');
+        return;
+      }
       if (!response.ok || !result.success) {
         this.showToast(result.error || 'Failed to open folder picker', 'error');
         return;
@@ -4174,6 +4229,7 @@ const sessionManager = {
         return;
       }
 
+      this.setImportPathNote('');
       importPathInput.value = result.path;
       this.importAllowDuplicate = false;
       this.clearImportDuplicateWarning();
@@ -5174,7 +5230,9 @@ const sessionManager = {
     const host = document.getElementById(hostId);
     if (!host) return;
     const view = this.teamView();
-    if (!view) {
+    // A connection-only creator has no Team step and never gates on the team,
+    // so it does not show team blockers nobody can act on from here.
+    if (!view || this.workspaceCreatorContext?.connectionOnly) {
       host.innerHTML = '';
       return;
     }
@@ -5309,6 +5367,9 @@ const sessionManager = {
       case 'fill-required-role': {
         const { issue, role, projection } = this.requiredRoleRecoveryContext();
         if (!role || role.scope !== 'home') {
+          // The blocker is also shown on Review, where the roster is hidden:
+          // open Team first, or focus lands on a row nobody can see.
+          if (this.wizardStep !== 3) this.goToWizardStep(3, { focus: false });
           this.focusWorkspaceRoleRow(issue?.roleId || role?.role_id);
           break;
         }
@@ -7757,6 +7818,23 @@ const sessionManager = {
     text.textContent = `Includes ${summary.count} agent${summary.count === 1 ? '' : 's'}: ${names.join(', ')}.`;
   },
 
+  // The required group roles the destination still lacks that Ori fills when
+  // the workspace is created, exactly as the Team roster shows them.
+  autoFilledGroupRoles(progress) {
+    const missing = Array.isArray(progress?.roles)
+      ? progress.roles.filter(role => role.state !== 'filled')
+      : [];
+    if (!missing.length) return [];
+    const rows = this.teamView()?.roleRoster?.roles || [];
+    return missing
+      .map(role =>
+        rows.find(
+          row => row.role_id === role.role_id && row.scope === 'home' && row.auto && row.agent
+        )
+      )
+      .filter(Boolean);
+  },
+
   renderWorkspaceGroupDestinationCard() {
     const card = document.getElementById('workspaceGroupDestinationCard');
     if (!card) return;
@@ -7788,10 +7866,13 @@ const sessionManager = {
     const actionsHost = document.getElementById('workspaceGroupDestinationActions');
 
     const missingRequiredHomeRoles = Number(progress?.missing);
+    // A missing group role Ori fills on create is not something to set up
+    // first: the destination is ready, and choosing someone else is optional.
+    const autoGroupRoles = this.autoFilledGroupRoles(progress);
     const groupRolesReady =
       progress?.verification === 'verified' &&
       Number.isInteger(missingRequiredHomeRoles) &&
-      missingRequiredHomeRoles === 0;
+      missingRequiredHomeRoles === autoGroupRoles.length;
     if (title) title.textContent = 'Project destination';
     if (badge) {
       badge.className = 'workspace-group-destination-badge';
@@ -7867,6 +7948,16 @@ const sessionManager = {
       if (progress?.verification === 'not_applicable') {
         progressHost.textContent = 'Group coordinator · Not applicable for standalone placement';
         progressHost.classList.add('is-ready');
+      } else if (
+        Number.isInteger(required) &&
+        Number.isInteger(filled) &&
+        autoGroupRoles.length > 0 &&
+        autoGroupRoles.length === missingRoles.length
+      ) {
+        progressHost.textContent = `Group coordinator · ${autoGroupRoles
+          .map(role => `${role.label}: ${role.agent.name}`)
+          .join(', ')} · created for you with this workspace`;
+        progressHost.classList.add('is-ready');
       } else if (Number.isInteger(required) && Number.isInteger(filled)) {
         const noun = required === 1 ? 'required group role' : 'required group roles';
         const missingCopy = missingRoles.length ? ` · Needs ${missingRoles.join(', ')}` : '';
@@ -7932,9 +8023,13 @@ const sessionManager = {
       else if (actions.includes('manage_plugins')) action = 'manage_plugins';
       else if (actions.includes('change_template')) action = 'change_template';
       const missingLabel = progress?.roles?.find?.(role => role.state !== 'filled')?.label;
+      // Setting up a role Ori fills by itself is a choice, not a step.
+      const optionalGroupRoles = action === 'open_group_roles' && groupRolesReady;
       const labels = {
         review_create_home: `Review ${destinationName} setup`,
-        open_group_roles: `Set up ${missingLabel || 'group coordinator'}`,
+        open_group_roles: optionalGroupRoles
+          ? 'Choose a different agent'
+          : `Set up ${missingLabel || 'group coordinator'}`,
         retry: 'Recheck destination',
         open_guided_setup: 'Open guided setup',
         manage_plugins: 'Manage plugin',
@@ -7944,7 +8039,7 @@ const sessionManager = {
         const button = document.createElement('button');
         button.type = 'button';
         button.className =
-          action === 'review_create_home' || action === 'open_group_roles'
+          action === 'review_create_home' || (action === 'open_group_roles' && !optionalGroupRoles)
             ? 'modern-btn modern-btn-primary'
             : 'modern-btn modern-btn-secondary';
         button.dataset.groupDestinationAction = action;
@@ -8041,6 +8136,11 @@ const sessionManager = {
       document.getElementById('workspaceReviewIssues')?.setAttribute('hidden', '');
       document.getElementById('workspaceReviewReadiness')?.replaceChildren();
       this.renderSetupPreview(null);
+      // Guided group setup reviews its group as Review is shown, so its one
+      // button creates it.
+      if (this.isFinalWizardStep() && this.workspaceCreatorContext?.mode === 'guided') {
+        void this.workspaceCreatorContext.guided?.ensureReview?.();
+      }
       return;
     }
     this.stageGuidedBlueprintRoles();
@@ -8099,6 +8199,8 @@ const sessionManager = {
     if (!groupRoster) this.renderBlueprintAgentSummary();
     this.syncWorkspaceBuildChosenTags();
     window.SetupWorkspaceCreator?.refreshReview();
+    // One card, one confirm: the placement is reviewed as Review is shown.
+    if (!groupRoster) void this.ensureGroupRequirementReview();
   },
 
   renderOrdinaryGroupReceipt(view = null) {
@@ -8368,9 +8470,15 @@ const sessionManager = {
     const requiredHomeRoles = Array.isArray(projection.required_home_roles?.roles)
       ? projection.required_home_roles.roles
       : [];
+    const autoGroupRoles = this.autoFilledGroupRoles(projection.required_home_roles);
     const coordinatorLines = requiredHomeRoles.map(role => {
       const holder = String(role.agent?.name || '').trim();
-      const state = holder ? `${holder} · already staffed on the group` : 'Missing on the group';
+      const created = autoGroupRoles.find(row => row.role_id === role.role_id);
+      const state = holder
+        ? `${holder} · already staffed on the group`
+        : created
+          ? `${created.agent.name} · created for you`
+          : 'Missing on the group';
       return `<span class="workspace-review-hierarchy-role"><b>${this.escapeHtml(role.label)}</b><small>${this.escapeHtml(state)}</small></span>`;
     });
     const groupTemplate = grouped
@@ -8464,6 +8572,30 @@ const sessionManager = {
   // decide whether this is the team the user meant. Never the roster editor.
   renderWorkspaceReceiptTeam(view) {
     if (this.workspaceCreatorContext?.connectionOnly) {
+      // The project's required roles are filled when it is created; this card
+      // is where the person sees who, before they confirm.
+      const planned = Array.isArray(this.templateAgentPlan?.auto_staffing)
+        ? this.templateAgentPlan.auto_staffing
+        : [];
+      const filledOnCreate = planned.filter(row => row?.agent_name && !row.blocked);
+      if (filledOnCreate.length > 0) {
+        const later = planned.filter(row => row?.blocked);
+        const lines = [
+          ...filledOnCreate.map(
+            row =>
+              `${row.label} · ${row.agent_name} · ${row.outcome === 'existing' ? 'already on this Home' : 'created for you'}`
+          ),
+          ...later.map(row => `${row.label} · set up in the next step`)
+        ];
+        return `
+        <div class="workspace-review-card" data-connection-only-team>
+          <div class="workspace-review-card-main">
+            <span class="workspace-review-card-label">Team</span>
+            ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+            <span class="workspace-review-card-note">Ori adds these agents when the project is created. You can change them from the workspace afterwards.</span>
+          </div>
+        </div>`;
+      }
       // Say exactly what this step does and does not do, so a person is never
       // left believing a team was chosen here.
       return `
@@ -8569,7 +8701,11 @@ const sessionManager = {
         row.state === 'filled'
           ? row.source === 'assigned'
             ? `${row.tag.label} · saved agent will be attached`
-            : `${row.tag.label} · new agent will be created`
+            : row.source === 'auto'
+              ? `${row.tag.label} · created for you`
+              : row.source === 'shared'
+                ? `${row.tag.label} · already on this Home`
+                : `${row.tag.label} · new agent will be created`
           : row.tag.label;
       return [row.label, row.designation, state].join(' · ');
     });
@@ -8661,6 +8797,19 @@ const sessionManager = {
       if (projectAssigned) {
         consequences.push(
           `${projectAssigned} saved project agent${projectAssigned === 1 ? '' : 's'} will be attached`
+        );
+      }
+      // Roles nobody was chosen for, which the create fills by itself.
+      const autoCreated = roles.filter(role => role.auto && role.source === 'auto').length;
+      const autoShared = roles.filter(role => role.auto && role.source === 'shared').length;
+      if (autoCreated) {
+        consequences.push(
+          `${autoCreated} agent${autoCreated === 1 ? '' : 's'} will be created for you`
+        );
+      }
+      if (autoShared) {
+        consequences.push(
+          `${autoShared} agent${autoShared === 1 ? '' : 's'} already on this Home will be used`
         );
       }
       if (optionalHomeOpen) {
@@ -9608,7 +9757,9 @@ const sessionManager = {
     if (this.workspaceCreatorContext?.mode === 'guided' && guided) {
       if (guided.error && guided.review?.pending) return 'Retry Confirmed Change';
       if (guided.review?.existing) return `Use existing group “${guided.review.name || 'Group'}”`;
-      if (guided.review) return `Create group “${guided.review.name || 'Group'}” only`;
+      if (guided.review) return `Create group “${guided.review.name || 'Group'}”`;
+      // Only while the review that Review itself asks for is missing: it is
+      // still on its way, or it failed and this button asks again.
       return 'Review group';
     }
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
@@ -9618,9 +9769,6 @@ const sessionManager = {
       !window.SetupWorkspaceCreator?.isActive?.()
     ) {
       return name ? `Place “${name}” on map →` : 'Place on map →';
-    }
-    if (this.groupRequirementDraft?.review?.review_token) {
-      return name ? `Confirm create “${name}”` : 'Confirm reviewed creation';
     }
     if (this.usesManagedGroupTemplate()) return window.GroupTemplateCreator.ctaLabel(this);
     if (this.isGroupCreator()) return name ? `Create group “${name}”` : 'Create Group';
@@ -9957,15 +10105,26 @@ const sessionManager = {
     }
   },
 
-  async prepareGroupRequirementCommit(endpoint, payload) {
+  // The placement review for a blueprint with a group requirement.
+  //
+  // It runs twice at most: quietly when Review is shown, so the card states the
+  // reviewed destination before anything is pressed, and on Create only if no
+  // review for this exact request is at hand. Either way the one Create button
+  // commits: a review prepared by the click is used by the same click. A quiet
+  // review reports nothing; whatever is not ready is left for Create to say.
+  // Returns true when the request carries a reviewed placement and may be sent.
+  async prepareGroupRequirementCommit(endpoint, payload, { quiet = false } = {}) {
     const draft = this.groupRequirementDraft;
     if (!draft || window.SetupWorkspaceCreator?.isActive()) return true;
     payload.group_composition = draft.composition;
     const payloadKey = JSON.stringify(payload);
-    if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
+    const carryReview = () => {
       payload.group_review_token = draft.review.review_token;
       payload.idempotency_key = draft.review.idempotencyKey;
       return true;
+    };
+    if (draft.review?.payloadKey === payloadKey && draft.review.review_token) {
+      return quiet ? false : carryReview();
     }
 
     const requestReview = async () => {
@@ -9986,6 +10145,7 @@ const sessionManager = {
 
     const review = await requestReview();
     if (review.state === 'home_creation_review_required') {
+      if (quiet) return false;
       this.showWorkspaceCreateError(
         'Prepare the required group from Details before reviewing project creation.'
       );
@@ -9994,31 +10154,90 @@ const sessionManager = {
       return false;
     }
     if (review.state !== 'ready_grouped' && review.state !== 'ready_standalone') {
+      if (quiet) return false;
       const actions = Array.isArray(review.actions) ? review.actions.join(', ') : '';
       this.showWorkspaceCreateError(
         `${String(review.summary || 'This placement is not ready.')}${actions ? ` Available actions: ${actions}.` : ''}`
       );
       return false;
     }
-    if (!review.review_token) throw new Error('The placement receipt is unavailable.');
+    if (!review.review_token) {
+      if (quiet) return false;
+      throw new Error('The placement receipt is unavailable.');
+    }
     draft.review = {
       ...review,
-      payloadKey: JSON.stringify(payload),
+      payloadKey,
       idempotencyKey: crypto.randomUUID()
     };
     this.refreshWorkspaceReview();
     this.refreshWizardChrome();
+    // The card states the reviewed destination from here on (see
+    // renderReviewReadiness, which keeps it through repaints).
     const readiness = document.getElementById('workspaceReviewReadiness');
     if (readiness) {
       readiness.hidden = false;
-      readiness.textContent = draft.preparedHome
-        ? `${draft.preparedHome.home_created ? 'Created' : 'Reused'} “${draft.preparedHome.home_name || review.home_name}” as the required group. No workspace was created. Reviewed destination: ${review.home_name}. Click Confirm create to create the workspace separately.`
-        : review.selected_composition === 'grouped'
-          ? `Reviewed destination: ${review.home_name}. Click Confirm create to apply.`
-          : 'Reviewed destination: standalone, with no Home membership. Click Confirm create to apply.';
-      readiness.focus?.();
+      readiness.textContent = this.reviewedDestinationLine();
+      // A review prepared while the card was only being shown must not take
+      // focus from whatever the user is doing.
+      if (!quiet) readiness.focus?.();
     }
-    return false;
+    return quiet ? false : carryReview();
+  },
+
+  // The create request as the form stands now, assembled the way Create
+  // assembles it. Null while there is no name to create anything under.
+  currentCreateRequest() {
+    const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    if (!name) return null;
+    const teamView = this.usesTeamRosterCreator() ? this.teamView() : null;
+    const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
+    const parentSelect = document.getElementById('folderParentSelect');
+    const { payload, endpoint } = this.collectCreatePayload({
+      importEnabled: false,
+      importPath: '',
+      name,
+      description: String(document.getElementById('folderDescriptionInput')?.value || '').trim(),
+      parentId: this.lockedParentId() || parentSelect?.value?.trim() || '',
+      color: colorBtn?.dataset.color || '',
+      workspaceBootstrap: this.getWorkspaceBootstrapFromModal(),
+      teamPayload: teamView?.payload || {}
+    });
+    // The same destination adjustments Create makes before it reviews.
+    if (!payload.parent_id && this.workspaceMapOrigin) {
+      const pending = window.OriWorkspaceMap?.getPendingBuild?.();
+      if (pending?.group?.id) payload.parent_id = pending.group.id;
+    }
+    const lockedParent = this.lockedParentId();
+    if (lockedParent) payload.parent_id = lockedParent;
+    return { payload, endpoint };
+  },
+
+  // Asks for the placement review as soon as Review is shown, once per exact
+  // request. A repaint asks nothing; a changed name, team or destination does.
+  async ensureGroupRequirementReview() {
+    const draft = this.groupRequirementDraft;
+    if (
+      !draft ||
+      this.isCreatingFolder ||
+      this.importModeEnabled ||
+      !this.isFinalWizardStep() ||
+      this.isOrdinaryGroupCreator() ||
+      window.SetupWorkspaceCreator?.isActive?.() ||
+      this.groupRequirementBlocked() ||
+      this.hasBlockingTeamIssue()
+    )
+      return;
+    const request = this.currentCreateRequest();
+    if (!request) return;
+    const key = JSON.stringify({ ...request.payload, group_composition: draft.composition });
+    if (draft.review?.payloadKey === key || draft.quietReviewKey === key) return;
+    draft.quietReviewKey = key;
+    try {
+      await this.prepareGroupRequirementCommit(request.endpoint, request.payload, { quiet: true });
+    } catch (_) {
+      // Create asks again and says what is wrong.
+    }
   },
 
   // Keeps the create button's label in step with the workspace name without
@@ -13703,7 +13922,16 @@ const sessionManager = {
     host.textContent = '';
     if (this.importModeEnabled) return;
     const readiness = window.ProjectTemplateCard?.getSelectedReadiness?.();
-    if (!readiness || readiness.state === 'ready') return;
+    if (!readiness || readiness.state === 'ready') {
+      // The placement this request was reviewed for stays stated on the card,
+      // through every repaint, until the request changes.
+      const reviewed = this.reviewedDestinationLine();
+      if (reviewed) {
+        host.hidden = false;
+        host.textContent = reviewed;
+      }
+      return;
+    }
     const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
     const panel = window.BlueprintReadiness?.renderPanel(readiness, {
       blueprintName: template?.name || template?.id || '',
@@ -13713,6 +13941,19 @@ const sessionManager = {
       onAction: () => this.goToWizardStep(1)
     });
     if (panel) host.appendChild(panel);
+  },
+
+  // The reviewed placement in words, or '' while this request has no review.
+  reviewedDestinationLine() {
+    const draft = this.groupRequirementDraft;
+    const review = draft?.review;
+    if (!review?.review_token) return '';
+    if (draft.preparedHome) {
+      return `${draft.preparedHome.home_created ? 'Created' : 'Reused'} “${draft.preparedHome.home_name || review.home_name}” as the required group. No workspace was created. Reviewed destination: ${review.home_name}.`;
+    }
+    return review.selected_composition === 'grouped'
+      ? `Reviewed destination: ${review.home_name}.`
+      : 'Reviewed destination: standalone, with no Home membership.';
   },
 
   // Renders the server's own failure message on Review with a route back to the

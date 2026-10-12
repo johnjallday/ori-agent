@@ -75,6 +75,27 @@ export function setupQuestURL(quest) {
   return `/?${query}`;
 }
 
+// setupQuestActionURL is the link for an assistant reply's open_setup_quest
+// action. The action names a quest by key (quest_id, source, plugin_id); it
+// never carries a URL, and one that does is not followed. Returns null for an
+// action that is not this kind or does not name a well-formed quest.
+export function setupQuestActionURL(action) {
+  if (action?.type !== 'open_setup_quest') return null;
+  const named = action.arguments || {};
+  const quest =
+    named.source === 'host'
+      ? { source: 'host', id: named.quest_id }
+      : named.source === 'plugin'
+        ? { source: 'plugin', plugin_id: named.plugin_id, id: named.quest_id }
+        : null;
+  if (!quest) return null;
+  try {
+    return setupQuestURL(quest);
+  } catch (_) {
+    return null;
+  }
+}
+
 // setupQuestOpenDetail is the ori:open-specialist-setup event detail for a
 // catalog quest. Each source carries only its own identity fields.
 export function setupQuestOpenDetail(quest) {

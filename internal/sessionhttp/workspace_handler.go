@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -919,16 +920,29 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		// An assistant-program blueprint can only be staffed once its station
 		// link exists, which is why this runs here rather than in the
-		// entry-agent stage. Exactly the roles the user filled are committed;
-		// the roles they left empty stay empty.
-		if assistantStationID != "" && len(req.RoleStaffing) > 0 {
-			if warning := h.staffAssistantRoles(r.Context(), ws.ID, req.RoleStaffing); warning != "" {
+		// entry-agent stage. The roles the user filled are committed as they
+		// chose. A reviewed wizard create also fills the required roles they
+		// left empty, as its review listed; an API caller's empty roles stay
+		// empty.
+		var reviewedStaffing *projectstaffing.Grant
+		if teamIntent != nil && teamIntent.Mode == workspaceTeamModeStaffed {
+			reviewedStaffing = &projectstaffing.Grant{Source: agentworkspace.ProjectStaffingConsentReviewedCreate}
+			if groupPlan != nil {
+				reviewedStaffing.OfferID = groupPlan.claim.Operation.ReviewDigest
+			}
+		}
+		if assistantStationID != "" && (len(req.RoleStaffing) > 0 || reviewedStaffing != nil) {
+			if warning := h.staffAssistantRoles(r.Context(), ws.ID, req.RoleStaffing, reviewedStaffing); warning != "" {
 				if prov.projectWarning == "" {
 					prov.projectWarning = warning
 				} else {
 					prov.projectWarning += "; " + warning
 				}
 			}
+			// The starter tasks above were seeded before this workspace had an
+			// entry agent; give them to the one staffing just set, so the Home
+			// does not count them as needing an assignee.
+			h.claimUnassignedTasksForEntryAgentLogged(ws.ID)
 		}
 		if teamIntent != nil {
 			teamCompletion = h.observeAssistantTeamCompletion(ws.ID, ws.FolderSlug, req.RoleStaffing)

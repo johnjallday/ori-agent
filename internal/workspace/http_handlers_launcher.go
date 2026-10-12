@@ -17,12 +17,51 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 const folderPickerControlPort = "21547"
 
+// What the picker endpoints answer when desktop launches are switched off: the
+// helper is neither started nor signalled, and the page offers a typed path.
+// The reason is for code; the note is the sentence a person reads.
+const (
+	folderPickerDialogOffReason = "dialog_off"
+	folderPickerDialogOffNote   = "The folder dialog is switched off in this session. Paste a folder path instead."
+)
+
 var errFolderPickerAppNotFound = errors.New("folder picker app not found")
+
+// The helper's two side effects, replaced in tests so a handler test can never
+// start or signal a picker.
+var (
+	showFolderPicker   = showExistingFolderPicker
+	launchFolderPicker = launchFolderPickerApp
+)
+
+type folderPickerDialogOffResponse struct {
+	Success  bool   `json:"success"`
+	Launched bool   `json:"launched"`
+	Selected bool   `json:"selected"`
+	Reason   string `json:"reason"`
+	Note     string `json:"note"`
+	// Error repeats the note for callers that only print a failure's error.
+	Error string `json:"error"`
+}
+
+// folderPickerDialogOff answers a picker request while desktop launches are
+// switched off, logging the skipped launch. It reports whether it answered.
+func folderPickerDialogOff(w http.ResponseWriter, action, workspaceID string) bool {
+	if !platform.DesktopLaunchSkipped(action, workspaceID) {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(folderPickerDialogOffResponse{
+		Reason: folderPickerDialogOffReason, Note: folderPickerDialogOffNote, Error: folderPickerDialogOffNote,
+	})
+	return true
+}
 
 var folderPickerProcess struct {
 	sync.Mutex
@@ -32,6 +71,9 @@ var folderPickerProcess struct {
 type folderPickerSelectPathRequest struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Title       string `json:"title,omitempty"`
+	// Path is a folder the user typed or pasted instead of using the dialog.
+	// Blank means "open the dialog", as before.
+	Path string `json:"path,omitempty"`
 }
 
 type folderPickerSelectPathResponse struct {
@@ -39,7 +81,31 @@ type folderPickerSelectPathResponse struct {
 	Selected       bool   `json:"selected,omitempty"`
 	Path           string `json:"path,omitempty"`
 	SelectionToken string `json:"selection_token,omitempty"`
-	Error          string `json:"error,omitempty"`
+	// Warning and WarningNote accompany a typed path that is allowed but worth
+	// a second look; the note is the sentence to show.
+	Warning     string `json:"warning,omitempty"`
+	WarningNote string `json:"warning_note,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// TypedFolderPath is a typed path the server accepted.
+type TypedFolderPath struct {
+	// Path is the canonical folder the typed text names.
+	Path string
+	// Warning is a short code and WarningNote its sentence; both empty when
+	// there is nothing to warn about.
+	Warning     string
+	WarningNote string
+}
+
+// TypedFolderPathChecker decides whether a folder path the page typed may stand
+// in for a native dialog choice. The dialog is a gesture the page cannot make;
+// a typed path is not, so nothing is issued for one without this decision.
+type TypedFolderPathChecker interface {
+	// Allow refuses a request that did not come from Ori's own page.
+	Allow(*http.Request) error
+	// Check returns the folder, or an error whose text is shown as it is.
+	Check(raw string) (TypedFolderPath, error)
 }
 
 // LaunchFolderPicker handles POST /api/launch-folder-picker
@@ -57,6 +123,9 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 	}
+	if folderPickerDialogOff(w, "launch_folder_picker", reqBody.WorkspaceID) {
+		return
+	}
 
 	// Claim persistent-child ownership before launch or acknowledgement. The
 	// claim survives the request until verified shutdown; a reset fence can
@@ -68,7 +137,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// First, try to show existing window via local control server.
-	if showExistingFolderPicker(reqBody.WorkspaceID) {
+	if showFolderPicker(reqBody.WorkspaceID) {
 		folderPickerProcess.Unlock()
 		logger.Info("Showed existing folder picker window", logger.Fields{"workspace_id": reqBody.WorkspaceID})
 		w.Header().Set("Content-Type", "application/json")
@@ -80,7 +149,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 	}
 
 	// App not running, need to launch it.
-	if err := launchFolderPickerApp(reqBody.WorkspaceID); err != nil {
+	if err := launchFolderPicker(reqBody.WorkspaceID); err != nil {
 		releaseFolderPickerLocked()
 		folderPickerProcess.Unlock()
 		logger.Error("Failed to launch folder picker", logger.Fields{"error": err})
@@ -114,6 +183,15 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
+	// A typed path needs no dialog, so it is answered before the dialog is
+	// asked for and works while desktop launches are switched off.
+	if strings.TrimSpace(req.Path) != "" {
+		h.selectTypedFolderPath(w, r, req)
+		return
+	}
+	if folderPickerDialogOff(w, "select_folder_path", req.WorkspaceID) {
+		return
+	}
 
 	folderPickerProcess.Lock()
 	if err := claimFolderPickerLocked(h.admissionGate); err != nil {
@@ -121,8 +199,8 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if !showExistingFolderPicker(req.WorkspaceID) {
-		if err := launchFolderPickerApp(req.WorkspaceID); err != nil {
+	if !showFolderPicker(req.WorkspaceID) {
+		if err := launchFolderPicker(req.WorkspaceID); err != nil {
 			releaseFolderPickerLocked()
 			folderPickerProcess.Unlock()
 			logger.Error("Failed to launch folder picker for path selection", logger.Fields{"error": err})
@@ -164,19 +242,9 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 	}
 
 	selectionToken := ""
-	if selected && h.pathSelectionIssuer != nil {
-		if scoped, ok := h.pathSelectionIssuer.(interface {
-			IssueFor(path, scope string) (string, error)
-		}); ok && strings.TrimSpace(req.WorkspaceID) != "" {
-			selectionToken, err = scoped.IssueFor(selectedPath, req.WorkspaceID)
-		} else {
-			selectionToken, err = h.pathSelectionIssuer.Issue(selectedPath)
-		}
-		if err != nil {
-			logger.Error("Failed to issue trusted folder selection", logger.Fields{"error": err})
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{Success: false, Error: "Trusted folder selection is unavailable"})
+	if selected {
+		if selectionToken, err = h.issueFolderSelection(selectedPath, req.WorkspaceID); err != nil {
+			writeFolderSelectionUnavailable(w, err)
 			return
 		}
 	}
@@ -184,6 +252,59 @@ func (h *HTTPHandler) SelectFolderPath(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{
 		Success: true, Selected: selected, Path: selectedPath, SelectionToken: selectionToken,
 	})
+}
+
+// selectTypedFolderPath answers select-path for a folder the user typed. An
+// accepted path gets the same answer, and the same selection token, as a folder
+// chosen in the dialog, so every caller keeps one flow.
+func (h *HTTPHandler) selectTypedFolderPath(w http.ResponseWriter, r *http.Request, req folderPickerSelectPathRequest) {
+	w.Header().Set("Content-Type", "application/json")
+	if h.typedFolderPaths == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{Error: "Typing a folder path is unavailable here. Use the folder dialog instead."})
+		return
+	}
+	if err := h.typedFolderPaths.Allow(r); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{Error: "That request did not come from Ori."})
+		return
+	}
+	typed, err := h.typedFolderPaths.Check(req.Path)
+	if err != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{Error: err.Error()})
+		return
+	}
+	selectionToken, err := h.issueFolderSelection(typed.Path, req.WorkspaceID)
+	if err != nil {
+		writeFolderSelectionUnavailable(w, err)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{
+		Success: true, Selected: true, Path: typed.Path, SelectionToken: selectionToken,
+		Warning: typed.Warning, WarningNote: typed.WarningNote,
+	})
+}
+
+// issueFolderSelection mints the opaque receipt for a selected folder, scoped
+// to the workspace when the request named one. "" when no issuer is wired.
+func (h *HTTPHandler) issueFolderSelection(path, workspaceID string) (string, error) {
+	if h.pathSelectionIssuer == nil {
+		return "", nil
+	}
+	if scoped, ok := h.pathSelectionIssuer.(interface {
+		IssueFor(path, scope string) (string, error)
+	}); ok && strings.TrimSpace(workspaceID) != "" {
+		return scoped.IssueFor(path, workspaceID)
+	}
+	return h.pathSelectionIssuer.Issue(path)
+}
+
+func writeFolderSelectionUnavailable(w http.ResponseWriter, err error) {
+	logger.Error("Failed to issue trusted folder selection", logger.Fields{"error": err})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(folderPickerSelectPathResponse{Success: false, Error: "Trusted folder selection is unavailable"})
 }
 
 // showExistingFolderPicker tries to show the window of an already running folder picker

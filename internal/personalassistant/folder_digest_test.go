@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1018,6 +1019,103 @@ func TestFolderDigest_ChipsHiddenWhenMissingAndUnknownRefused(t *testing.T) {
 	}
 }
 
+// A selection token scans the folder the server holds for it, as a dialog
+// choice would, and the home folder is still too broad however it was named.
+func TestFolderDigest_ScanSelectionScansTheFolderTheTokenNames(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	held := map[string]string{
+		"thesis": filepath.Join(f.home, "Documents", "Thesis"),
+		"home":   f.home,
+	}
+	f.service.deps.ResolveSelection = func(token string) (string, error) {
+		path, ok := held[token]
+		if !ok {
+			return "", errors.New("unknown token")
+		}
+		return path, nil
+	}
+
+	offer, err := f.service.ScanSelection(ctx, "local", " thesis ")
+	if err != nil || offer.Folder != "Thesis" || offer.Verdict != "project" {
+		t.Fatalf("offer=%+v err=%v", offer, err)
+	}
+	view, err := f.service.Current(ctx, "local")
+	if err != nil || view.Offer == nil || view.Offer.ID != offer.ID {
+		t.Fatalf("the typed folder's offer is not the pending one: %+v err=%v", view.Offer, err)
+	}
+
+	var rootErr *FolderRootError
+	if _, err := f.service.ScanSelection(ctx, "local", "home"); !errors.As(err, &rootErr) || !strings.Contains(rootErr.Message, "whole home folder") {
+		t.Fatalf("home folder err=%v", err)
+	}
+	for _, token := range []string{"gone", "", filepath.Join(f.home, "Documents")} {
+		if _, err := f.service.ScanSelection(ctx, "local", token); !errors.As(err, &rootErr) || rootErr.Message != folderSelectionLostMessage {
+			t.Fatalf("token %q err=%v", token, err)
+		}
+	}
+	f.service.deps.ResolveSelection = nil
+	if _, err := f.service.ScanSelection(ctx, "local", "thesis"); !errors.As(err, &rootErr) {
+		t.Fatalf("no resolver err=%v", err)
+	}
+}
+
+// Music leads the chooser when the home has one. A home without it, or with a
+// file of that name, offers the other folders and refuses the chip.
+func TestFolderDigest_MusicChipLeadsTheChooserWhenPresent(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	chipIDs := func() []string {
+		t.Helper()
+		view, err := f.service.Current(ctx, "local")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(view.Chips))
+		for _, chip := range view.Chips {
+			ids = append(ids, chip.ID)
+		}
+		return ids
+	}
+
+	if got := chipIDs(); !slices.Equal(got, []string{"documents", "desktop", "downloads"}) {
+		t.Fatalf("chips without a Music folder = %v", got)
+	}
+	if _, err := f.service.ScanChip(ctx, "local", "music"); !errors.Is(err, ErrFolderChipMissing) {
+		t.Fatalf("missing music chip err=%v", err)
+	}
+
+	music := filepath.Join(f.home, "Music")
+	if err := os.WriteFile(music, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := chipIDs(); !slices.Equal(got, []string{"documents", "desktop", "downloads"}) {
+		t.Fatalf("chips with a file called Music = %v", got)
+	}
+	if err := os.Remove(music); err != nil {
+		t.Fatal(err)
+	}
+
+	song := filepath.Join(music, "Night Drive", "Night Drive.rpp")
+	if err := os.MkdirAll(filepath.Dir(song), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(song, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := chipIDs(); !slices.Equal(got, []string{"music", "documents", "desktop", "downloads"}) {
+		t.Fatalf("chips with a Music folder = %v", got)
+	}
+	view, err := f.service.Current(ctx, "local")
+	if err != nil || view.Chips[0].Label != "Music" {
+		t.Fatalf("first chip=%+v err=%v", view.Chips, err)
+	}
+	offer, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil || offer.Folder != "Music" {
+		t.Fatalf("music offer=%+v err=%v", offer, err)
+	}
+}
+
 func TestFolderDigest_PausedScansButDoesNotPromiseToRemember(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()
@@ -1535,11 +1633,11 @@ func TestFolderChooserNote(t *testing.T) {
 		want   string
 	}{
 		{"chips and dialog", 3, true, "", ""},
-		{"dialog only", 0, true, "", "Downloads, Documents and Desktop are not under this home; pick another folder."},
+		{"dialog only", 0, true, "", "Music, Documents, Desktop and Downloads are not under this home; pick another folder."},
 		{"chips, dialog switched off", 3, false, FolderDialogUnavailableDesktopOff, "Pick a folder from the list; the folder dialog is switched off in this session."},
 		{"chips, not a Mac", 1, false, FolderDialogUnavailablePlatform, "Pick a folder from the list; the folder dialog is only available on macOS."},
 		{"chips, no picker wired", 1, false, "", "Pick a folder from the list; the folder dialog is unavailable here."},
-		{"nothing at all", 0, false, FolderDialogUnavailableDesktopOff, "Downloads, Documents and Desktop are not under this home, and the folder dialog is switched off in this session."},
+		{"nothing at all", 0, false, FolderDialogUnavailableDesktopOff, "Music, Documents, Desktop and Downloads are not under this home, and the folder dialog is switched off in this session."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1554,7 +1652,7 @@ func TestFolderDigest_CurrentExplainsAnEmptyChooser(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()
 
-	// A home with none of the three folders, and no picker wired at all.
+	// A home with none of the chooser's folders, and no picker wired at all.
 	f.home = t.TempDir()
 	view, err := f.service.Current(ctx, "local")
 	if err != nil {
@@ -1563,7 +1661,7 @@ func TestFolderDigest_CurrentExplainsAnEmptyChooser(t *testing.T) {
 	if len(view.Chips) != 0 || view.PickerAvailable {
 		t.Fatalf("chooser=%+v", view)
 	}
-	if view.PickerNote != "Downloads, Documents and Desktop are not under this home, and the folder dialog is unavailable here." {
+	if view.PickerNote != "Music, Documents, Desktop and Downloads are not under this home, and the folder dialog is unavailable here." {
 		t.Fatalf("note = %q", view.PickerNote)
 	}
 
@@ -1583,7 +1681,7 @@ func TestFolderDigest_CurrentExplainsAnEmptyChooser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !view.PickerAvailable || view.PickerNote != "Downloads, Documents and Desktop are not under this home; pick another folder." {
+	if !view.PickerAvailable || view.PickerNote != "Music, Documents, Desktop and Downloads are not under this home; pick another folder." {
 		t.Fatalf("chooser=%+v", view)
 	}
 }

@@ -38,6 +38,8 @@ type Service struct {
 	documents        publicread.Reader
 	publicSearch     *publicsearch.PublicWebSearchAdapter
 	searchConfigured func() bool
+	// reviewed backs ReviewedIntegrations; see ConfigureReviewedIntegrations.
+	reviewed ReviewedIntegrationSources
 }
 
 func NewService(manager SkillInventoryReader, servers MCPInventoryReader, registry MCPCatalogReader, catalog skills.MarketplaceCatalog) *Service {

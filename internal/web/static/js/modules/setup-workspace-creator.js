@@ -2,6 +2,7 @@
 // changes only its project-creation transport to the exact journey owner. It
 // never stores selection paths, consent, or drafts in browser storage.
 import { setupJourneyAPIRoot } from './setup-quest-links.js';
+import { createFolderPathEntry, folderDialogOffNote } from './folder-path-entry.js';
 let active = null;
 let savedDraft = null; // One run, browser memory only; never review consent.
 const el = id => document.getElementById(id);
@@ -351,9 +352,26 @@ function mountProjectChoice(state) {
   pick.className = 'modern-btn modern-btn-secondary';
   pick.hidden = state.mode !== 'existing_project';
   const folder = text('p', state.folderDisplay || '');
+  // A dialog choice and a typed path both arrive as the picker's selection.
+  const useSelection = (token, shownPath) => {
+    if (!token) throw new Error('Choose the folder again; its selection expired.');
+    state.selectionToken = token;
+    state.entryName = '';
+    state.folderDisplay = shownPath || '';
+    folder.textContent = state.folderDisplay;
+    refreshReview();
+  };
+  const typed = createFolderPathEntry({
+    title: 'Choose the project folder',
+    onSelect: selection => {
+      if (active === state) useSelection(selection.selectionToken, selection.path);
+    }
+  });
+  typed.element.hidden = state.mode !== 'existing_project';
   select.addEventListener('change', () => {
     state.mode = select.value;
     pick.hidden = state.mode !== 'existing_project';
+    typed.element.hidden = pick.hidden;
     state.entryName = '';
     refreshReview();
   });
@@ -364,14 +382,16 @@ function mountProjectChoice(state) {
         method: 'POST',
         body: JSON.stringify({ title: 'Choose the project folder' })
       });
-      if (active !== state || !selection?.selected) return;
-      if (!selection.selection_token)
-        throw new Error('Choose the folder again; its selection expired.');
-      state.selectionToken = selection.selection_token;
-      state.entryName = '';
-      state.folderDisplay = selection.path || '';
-      folder.textContent = state.folderDisplay;
-      refreshReview();
+      if (active !== state) return;
+      const dialogOff = folderDialogOffNote(selection);
+      if (dialogOff) {
+        // No dialog in this session: say so and leave the typed path.
+        typed.setNote(dialogOff);
+        typed.focus();
+        return;
+      }
+      if (!selection?.selected) return;
+      useSelection(selection.selection_token, selection.path);
     } catch (error) {
       folder.textContent = error.message;
     } finally {
@@ -379,7 +399,7 @@ function mountProjectChoice(state) {
     }
   });
   label.appendChild(select);
-  box.append(label, pick, folder);
+  box.append(label, pick, typed.element, folder);
   el('wizardNameField').after(box);
   const review = document.createElement('div');
   review.id = 'workspaceJourneyReview';

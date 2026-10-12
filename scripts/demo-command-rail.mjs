@@ -440,14 +440,23 @@ async function actionsOn(ws) {
   check((await openKey()) === 'files', 'files "+": Files is open behind the upload dialog');
   await dismissModal('#hubAddFileModal');
 
+  // Linking a folder opens a small dialog: "Choose folder…" asks for the
+  // picker, and a typed path is offered beside it.
+  const linkDialog = page.locator('dialog.folder-path-dialog');
   await page.locator(plus('folders')).click();
-  await page.waitForTimeout(400);
-  check(pickerRequests === 1, 'folders "+": asks for the folder picker');
-  check((await openKey()) === 'folders', 'folders "+": Linked Folders is open');
+  await linkDialog.waitFor({ state: 'visible' });
+  check((await openKey()) === 'folders', 'folders "+": Linked Folders is open behind its dialog');
+  check(
+    (await linkDialog.getByText('or paste a folder path').count()) === 1,
+    'folders "+": the dialog offers a typed path'
+  );
+  await linkDialog.getByRole('button', { name: 'Choose folder…' }).click();
+  await linkDialog.waitFor({ state: 'detached' });
+  check(pickerRequests === 1, 'folders "+": Choose folder… asks for the folder picker');
   check(
     (await page.locator(plus('folders')).textContent()).trim() === '+' &&
       (await page.locator(plus('folders')).isEnabled()),
-    'folders "+": the button is itself again once the picker request returns'
+    'folders "+": the button is itself again once the dialog closes'
   );
 
   await page.locator(plus('schedules')).click();
@@ -464,8 +473,10 @@ async function actionsOn(ws) {
     [
       'folders',
       async () => {
-        await page.waitForTimeout(400);
-        check(pickerRequests === 2, 'folders verb: asks for the folder picker');
+        await linkDialog.waitFor({ state: 'visible' });
+        await linkDialog.getByRole('button', { name: 'Choose folder…' }).click();
+        await linkDialog.waitFor({ state: 'detached' });
+        check(pickerRequests === 2, 'folders verb: Choose folder… asks for the folder picker');
       }
     ]
   ]) {

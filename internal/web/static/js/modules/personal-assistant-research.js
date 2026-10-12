@@ -318,20 +318,28 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
       return;
     doc.getElementById?.('personalAssistantInput')?.focus?.({ preventScroll: true });
   };
+  // The field always shows what would be sent. An edit is never approved under
+  // the earlier review: it is prepared as a review of its own first. The
+  // earlier review is kept until then, so typing the reviewed text back
+  // returns to it, and an emptied field can be neither approved nor reviewed.
+  const noun = view.document || view.registry ? 'URL' : 'query';
+  const blank = () => !String(input.value || '').trim();
+  const edited = () => !review || input.value !== view.value;
+  const reflect = () => {
+    confirm.disabled = busy || blank();
+    confirm.textContent = edited() ? 'Review edited lookup' : 'Approve exact lookup';
+  };
   input.addEventListener('input', () => {
-    if (review) {
-      const old = review;
-      review = null;
-      post('/api/home-assistant/research/cancel', { ...request(), token: old.token }).catch(
-        () => {}
-      );
-    }
-    confirm.textContent = 'Review edited lookup';
-    status.textContent =
-      'Edited. Nothing is sent until a new exact review is prepared and approved.';
+    reflect();
+    if (blank())
+      status.textContent = `Nothing to look up yet. Type the exact ${noun}, or Cancel. Nothing is sent while this is empty.`;
+    else if (edited())
+      status.textContent =
+        'Edited. Nothing is sent until a new exact review is prepared and approved.';
+    else status.textContent = 'Back to the reviewed lookup. Nothing is sent until you approve it.';
   });
   confirm.addEventListener('click', async () => {
-    if (busy) return;
+    if (busy || blank()) return;
     if (!validContext()) {
       status.textContent =
         'Conversation or context changed. Prepare a new review; nothing was sent.';
@@ -340,11 +348,20 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
     busy = true;
     confirm.disabled = cancel.disabled = true;
     try {
-      if (!review) {
+      if (edited()) {
         const lookup = {
           ...data.research_review.lookup,
           ...(view.document ? { url: input.value } : { query: input.value })
         };
+        // The edit replaces the earlier review, which is withdrawn first.
+        if (review) {
+          const old = review;
+          review = null;
+          await post('/api/home-assistant/research/cancel', {
+            ...request(),
+            token: old.token
+          }).catch(() => {});
+        }
         const prepared = await post('/api/home-assistant/research/review', {
           ...request(),
           lookup
@@ -354,7 +371,6 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
         if (!next || next.value !== input.value) throw new Error('changed');
         review = prepared.review;
         view = next;
-        confirm.textContent = 'Approve exact lookup';
         status.textContent = 'Exact edited lookup prepared. Review it, then approve.';
       } else {
         if (!researchReviewView(review)) throw new Error('expired');
@@ -373,10 +389,10 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
       status.textContent =
         'The review expired, changed, or became unavailable. Nothing was installed; prepare a new review.';
       review = null;
-      confirm.textContent = 'Review edited lookup';
     } finally {
       busy = false;
-      confirm.disabled = cancel.disabled = false;
+      cancel.disabled = false;
+      reflect();
     }
   });
   cancel.addEventListener('click', async () => {

@@ -167,6 +167,23 @@
     };
   }
 
+  // How the host fills each required role the user leaves empty when the
+  // workspace is created: a new agent made for them, or one the group already
+  // has. A blocked entry names why the host cannot, so that role needs the user.
+  const AUTO_CREATE = 'create';
+  const AUTO_EXISTING = 'existing';
+
+  function normalizeAutoStaffing(rows) {
+    return (Array.isArray(rows) ? rows : [])
+      .map(row => ({
+        roleId: text(row && row.role_id),
+        outcome: text(row && row.outcome) === AUTO_EXISTING ? AUTO_EXISTING : AUTO_CREATE,
+        agentName: text(row && row.agent_name),
+        blocked: text(row && row.blocked)
+      }))
+      .filter(row => row.roleId && (row.agentName || row.blocked));
+  }
+
   // Accepts the raw /api/workspaces/template-agent-plan response and flattens it
   // to the camelCase shape the rest of this module uses. Tolerates a missing or
   // malformed agents array rather than throwing mid-render.
@@ -187,6 +204,7 @@
       systemModel: text(data && data.system_model),
       systemModelConfigured: Boolean(data && data.system_model_configured),
       assistantProgram: normalizeAssistantProgram(data && data.assistant_program),
+      autoStaffing: normalizeAutoStaffing(data && data.auto_staffing),
       agents,
       warnings: (Array.isArray(data && data.warnings) ? data.warnings : [])
         .map(warning => text(warning))
@@ -244,6 +262,7 @@
     if (plan.data?.groupRoster) return [];
     const program = plan.data?.assistantProgram || null;
     if (program) {
+      const autoStaffing = plan.data.autoStaffing || [];
       return program.roles.map(role => ({
         roleId: role.id,
         label: role.label,
@@ -253,7 +272,9 @@
         primary: Boolean(role.primary),
         // A home role an existing station already staffs is shown with its
         // holder and cannot be changed from here (D2).
-        heldElsewhere: role.scope === 'home' ? role.agentName : ''
+        heldElsewhere: role.scope === 'home' ? role.agentName : '',
+        // What the create does for this role when the user picks nobody.
+        auto: (role.required && autoStaffing.find(row => row.roleId === role.id)) || null
       }));
     }
     const seen = new Map();
@@ -405,7 +426,12 @@
     if (draft?.staleConflict?.kind !== 'team-readiness') return;
     const ready = declaredRoles(draft)
       .filter(role => role.required)
-      .every(role => role.heldElsewhere || draft.roleFills?.has(role.roleId));
+      .every(
+        role =>
+          role.heldElsewhere ||
+          draft.roleFills?.has(role.roleId) ||
+          (role.auto && !role.auto.blocked)
+      );
     if (ready || draft.agentless) draft.staleConflict = null;
   }
 
@@ -1296,6 +1322,8 @@
           item.state = 'filled';
           item.source = SOURCE_GROUP_WIRE;
           item.agent = { name: role.heldElsewhere };
+        } else {
+          applyAutoFill(item, role.auto);
         }
         return item;
       }
@@ -1313,6 +1341,8 @@
         };
         // A filled role has nothing left to propose.
         delete item.proposed;
+      } else {
+        applyAutoFill(item, role.auto);
       }
       return item;
     });
@@ -1329,13 +1359,42 @@
       assigned_count: roles.filter(
         role => role.state === 'filled' && !role.read_only && role.source === SOURCE_ASSIGNED_WIRE
       ).length,
+      // Filled by the create itself: nothing in the request names them.
+      auto_created_count: roles.filter(role => role.auto && role.source === SOURCE_AUTO_WIRE)
+        .length,
+      auto_existing_count: roles.filter(role => role.auto && role.source === SOURCE_SHARED_WIRE)
+        .length,
       empty_count: roles.length - filled.length
     };
   }
 
+  // applyAutoFill shows a required role nobody was chosen for as filled by the
+  // create: with the agent Ori makes for the user, or the one the group already
+  // has. The row stays the user's to change; `auto` marks that no fill of theirs
+  // backs it, so nothing is sent for it. A blocked role stays empty and carries
+  // the reason.
+  function applyAutoFill(item, auto) {
+    if (!auto) return;
+    if (auto.blocked) {
+      item.blocked_reason = auto.blocked;
+      return;
+    }
+    item.state = 'filled';
+    item.auto = true;
+    item.source = auto.outcome === AUTO_EXISTING ? SOURCE_SHARED_WIRE : SOURCE_AUTO_WIRE;
+    item.agent = { name: auto.agentName };
+    if (item.read_only && item.source === SOURCE_AUTO_WIRE) {
+      item.read_only_reason = GROUP_ROLE_AUTO_NOTE;
+    }
+  }
+
+  const GROUP_ROLE_AUTO_NOTE = 'Ori adds this agent to the group when the workspace is created.';
+
   const SOURCE_CREATED_WIRE = 'created';
   const SOURCE_ASSIGNED_WIRE = 'assigned';
   const SOURCE_GROUP_WIRE = 'group';
+  const SOURCE_AUTO_WIRE = 'auto';
+  const SOURCE_SHARED_WIRE = 'shared';
   const GROUP_ROLE_READ_ONLY = 'This role belongs to the group workspace. Fill or clear it there.';
 
   // roleStaffingSummary states the request in FUTURE tense and counts every
@@ -1356,6 +1415,16 @@
     const savedCount = roster.assigned_count + (roster.unassigned?.length || 0);
     if (savedCount > 0) {
       parts.push(`${savedCount} saved agent${savedCount === 1 ? '' : 's'} will be attached`);
+    }
+    if (roster.auto_created_count > 0) {
+      parts.push(
+        `${roster.auto_created_count} agent${roster.auto_created_count === 1 ? '' : 's'} will be created for you`
+      );
+    }
+    if (roster.auto_existing_count > 0) {
+      parts.push(
+        `${roster.auto_existing_count} agent${roster.auto_existing_count === 1 ? '' : 's'} already on the group will be used`
+      );
     }
     if (roster.empty_count > 0) {
       parts.push(
@@ -1631,11 +1700,19 @@
       // project role hide the one Team action that can prepare the Home.
       .sort((left, right) => Number(right.scope === 'home') - Number(left.scope === 'home'));
     if (!agentless && missingRequired.length > 0) {
+      // A role Ori would have filled but cannot is named with its reason, so
+      // the one blocker says what to do about it.
+      const blocked = missingRequired.find(role => role.blocked_reason);
+      if (blocked) {
+        missingRequired.splice(missingRequired.indexOf(blocked), 1);
+        missingRequired.unshift(blocked);
+      }
       issues.push({
         id: 'required-roles-missing',
         severity: 'blocking',
-        message:
-          missingRequired.length === 1
+        message: blocked
+          ? `${blocked.label}: ${blocked.blocked_reason}.`
+          : missingRequired.length === 1
             ? `Fill the required ${missingRequired[0].label} role before reviewing this workspace.`
             : `Fill all ${missingRequired.length} required roles before reviewing this workspace.`,
         recovery: ['fill-required-role'],
@@ -1690,8 +1767,10 @@
         mode: agentless ? 'agentless' : 'staffed',
         plan_revision: plan.data.revision
       };
+      // A role the create fills by itself is not in the request: the server
+      // decides it again when the workspace exists.
       payload.role_staffing = (agentless ? [] : roleRoster.roles)
-        .filter(role => role.state === 'filled' && !role.read_only)
+        .filter(role => role.state === 'filled' && !role.read_only && !role.auto)
         .map(role => {
           const fill = source.roleFills.get(role.role_id);
           const item = { role_id: role.role_id, mode: fill.mode, name: fill.name };

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
@@ -56,22 +57,43 @@ func (s *FolderObservationService) Choices(ctx context.Context, userID string) (
 		return FolderDigestView{}, err
 	}
 	view := FolderDigestView{Chips: s.digest.availableChips()}
+	reason := ""
 	if picker := s.digest.deps.Picker; picker != nil {
 		view.PickerAvailable = picker.Available()
-		if !view.PickerAvailable {
-			view.PickerNote = picker.UnavailableReason()
-		}
+		reason = picker.UnavailableReason()
 	}
+	// The picker's reason is a code; the chooser is shown Home's sentence.
+	view.PickerNote = folderChooserNote(len(view.Chips), view.PickerAvailable, reason)
 	return view, nil
 }
 
+// The ways a folder is named to Observe. The choice that goes with each is a
+// chip identifier, nothing, or a folder-picker selection token.
+const (
+	FolderObserveChip      = "chip"
+	FolderObservePicker    = "picker"
+	FolderObserveSelection = "selection"
+)
+
 // Observe returns nil on native cancellation. The caller rechecks conversation
 // revision after this asynchronous operation before publishing the preview.
-func (s *FolderObservationService) Observe(ctx context.Context, target foldercontext.Target, mode, chip string) (*foldercontext.Observation, error) {
+// choice is the chip identifier in chip mode, the selection token in selection
+// mode, and empty in picker mode; it is never a path.
+func (s *FolderObservationService) Observe(ctx context.Context, target foldercontext.Target, mode, choice string) (*foldercontext.Observation, error) {
 	if s == nil || s.digest == nil || s.digest.store == nil || !target.Valid() {
 		return nil, ErrFolderSelection
 	}
-	if (mode != "chip" && mode != "picker") || (mode == "picker" && chip != "") {
+	switch mode {
+	case FolderObserveChip:
+	case FolderObservePicker:
+		if choice != "" {
+			return nil, ErrFolderSelection
+		}
+	case FolderObserveSelection:
+		if strings.TrimSpace(choice) == "" {
+			return nil, ErrFolderSelection
+		}
+	default:
 		return nil, ErrFolderSelection
 	}
 	d := s.digest
@@ -103,9 +125,12 @@ func (s *FolderObservationService) Observe(ctx context.Context, target foldercon
 	defer func() { s.mu.Lock(); delete(s.busy, target.UserID); s.mu.Unlock() }()
 
 	var raw string
-	if mode == "chip" {
-		raw, err = d.chipPath(chip)
-	} else {
+	switch mode {
+	case FolderObserveChip:
+		raw, err = d.chipPath(choice)
+	case FolderObserveSelection:
+		raw, err = d.selectionPath(choice)
+	default:
 		if d.deps.Picker == nil || !d.deps.Picker.Available() {
 			return nil, ErrFolderPickerUnavailable
 		}
@@ -307,6 +332,12 @@ func summarizeFolder(result folderdigest.Result, id string) foldercontext.Observ
 		project := foldercontext.Project{ID: fmt.Sprintf("candidate-%d", index), Name: name, Files: candidate.FileCount, Root: candidate.IsRoot}
 		if candidate.Marker != nil {
 			project.Marker = foldercontext.DisplayName(candidate.Marker.Name)
+		}
+		// When it was last worked on: the scan already knows the newest file's
+		// time, and "which of these is the most recent" is the first thing a
+		// person asks about a folder of projects.
+		if !candidate.NewestModTime.IsZero() {
+			project.LastChanged = candidate.NewestModTime.Format(foldercontext.DateLayout)
 		}
 		observation.Projects = append(observation.Projects, project)
 	}

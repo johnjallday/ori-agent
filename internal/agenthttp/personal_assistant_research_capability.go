@@ -36,6 +36,9 @@ func researchSystemPrompt(turn *assistantResearchTurn, tools bool) string {
 	} else {
 		text += "Broader web search is disabled/unconfigured. Catalogs and exact public-document review remain separate.\n"
 	}
+	if tools && configuredReviewedIntegrations(turn.handler) != nil {
+		text += reviewedIntegrationsRule
+	}
 	if tools {
 		text += "Only dedicated Ori-brokered metadata readers are available. Proposing a research lookup does NOT perform it. A real user review is offered by the host after the turn saves; each later lookup needs its own review. Suggest internal first-party readers for workspace facts, installed metadata for local capabilities, catalogs for candidates, and exact document reads for verifying descriptions. Do not claim any read, review, installation or test actually happened unless this turn's host evidence says so.\n"
 	} else {

@@ -95,6 +95,143 @@ test('a copied workspace this build cannot restore blocks the ordinary import an
   assert.equal(elements.get('folderImportContinuityNotice').hidden, true);
 });
 
+// The import field takes a typed path. What is typed goes through the folder
+// picker's typed-path check, like every other "paste a folder path" field.
+function importPathManager(respond) {
+  const note = {
+    textContent: '',
+    hidden: true,
+    revealed: 0,
+    scrollIntoView() {
+      this.revealed++;
+    }
+  };
+  const elements = new Map([
+    ['folderImportPathInput', { value: '', focus() {} }],
+    ['folderImportPathNote', note]
+  ]);
+  const requests = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      requests.push({ url, body: JSON.parse(options.body || '{}') });
+      const result = respond(JSON.parse(options.body || '{}'));
+      return { ok: result.status < 400, status: result.status, json: async () => result.body };
+    },
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.importModeEnabled = true;
+  const checked = [];
+  const named = [];
+  const toasts = [];
+  manager.checkImportDuplicate = async path => {
+    checked.push(path);
+  };
+  manager.prefillWorkspaceNameFromImportPath = path => named.push(path);
+  manager.showToast = (message, kind) => toasts.push([message, kind]);
+  return {
+    manager,
+    requests,
+    checked,
+    named,
+    toasts,
+    input: elements.get('folderImportPathInput'),
+    note: elements.get('folderImportPathNote')
+  };
+}
+
+test('a typed import path is checked, and "~/" becomes the real folder before the import looks at it', async () => {
+  const f = importPathManager(() => ({
+    status: 200,
+    body: {
+      success: true,
+      selected: true,
+      path: '/Users/riley/Music/REAPER Projects',
+      selection_token: 'tok'
+    }
+  }));
+  f.input.value = '~/Music/REAPER Projects';
+  await f.manager.resolveTypedImportPath(f.input.value);
+  assert.deepEqual(f.requests, [
+    { url: '/api/folder-picker/select-path', body: { path: '~/Music/REAPER Projects' } }
+  ]);
+  assert.equal(f.input.value, '/Users/riley/Music/REAPER Projects');
+  assert.deepEqual(f.named, ['/Users/riley/Music/REAPER Projects']);
+  assert.deepEqual(f.checked, ['/Users/riley/Music/REAPER Projects']);
+  assert.equal(f.note.hidden, true);
+});
+
+test('a typed import path outside the home folder keeps its warning under the field', async () => {
+  const f = importPathManager(() => ({
+    status: 200,
+    body: {
+      success: true,
+      selected: true,
+      path: '/Volumes/Sessions',
+      warning: 'outside_home',
+      warning_note: 'This folder is outside your home folder.'
+    }
+  }));
+  f.input.value = '/Volumes/Sessions';
+  await f.manager.resolveTypedImportPath(f.input.value);
+  // Already canonical: nothing is rewritten or renamed.
+  assert.equal(f.input.value, '/Volumes/Sessions');
+  assert.deepEqual(f.named, []);
+  assert.equal(f.note.textContent, 'This folder is outside your home folder.');
+  assert.equal(f.note.hidden, false);
+  assert.doesNotMatch(f.note.textContent, /outside_home/);
+});
+
+test('a refused typed import path says why and leaves the import its own check', async () => {
+  const f = importPathManager(() => ({
+    status: 422,
+    body: { success: false, error: 'Use the full path to the folder, starting with / or ~/.' }
+  }));
+  f.input.value = 'Music/REAPER Projects';
+  await f.manager.resolveTypedImportPath(f.input.value);
+  assert.equal(f.input.value, 'Music/REAPER Projects');
+  assert.equal(f.note.textContent, 'Use the full path to the folder, starting with / or ~/.');
+  assert.deepEqual(f.checked, ['Music/REAPER Projects']);
+  assert.deepEqual(f.toasts, []);
+});
+
+test('an answer about text the user has since changed is dropped', async () => {
+  let f;
+  f = importPathManager(() => {
+    f.input.value = '~/Music/Other';
+    return { status: 200, body: { success: true, selected: true, path: '/Users/riley/Music' } };
+  });
+  f.input.value = '~/Music';
+  await f.manager.resolveTypedImportPath('~/Music');
+  assert.equal(f.input.value, '~/Music/Other');
+  assert.deepEqual(f.checked, []);
+});
+
+test('an empty import path or a closed import asks the server nothing', async () => {
+  const f = importPathManager(() => ({ status: 200, body: {} }));
+  await f.manager.resolveTypedImportPath('   ');
+  f.manager.importModeEnabled = false;
+  await f.manager.resolveTypedImportPath('/Users/riley/Music');
+  assert.deepEqual(f.requests, []);
+  assert.deepEqual(f.checked, ['', '/Users/riley/Music']);
+});
+
+test('Browse with the folder dialog switched off shows the sentence by the field, not an error', async () => {
+  const note = 'The folder dialog is switched off in this session. Paste a folder path instead.';
+  const f = importPathManager(() => ({
+    status: 200,
+    body: { success: false, launched: false, reason: 'dialog_off', note, error: note }
+  }));
+  await f.manager.browseImportFolderPath();
+  assert.equal(f.note.textContent, note);
+  assert.equal(f.note.hidden, false);
+  // The field is low in a scrolling modal, so the note is brought into view.
+  assert.equal(f.note.revealed, 1);
+  assert.deepEqual(f.toasts, []);
+  assert.equal(f.input.value, '');
+  assert.doesNotMatch(f.note.textContent, /dialog_off/);
+});
+
 test('an importable assistant copy offers Import and continue and renders untrusted names as text', () => {
   const list = {
     hidden: true,
@@ -1657,6 +1794,225 @@ test('Team missing-role recovery builds an absent group or opens exact Home staf
   assert.deepEqual(opened, { opener, roleID: 'portfolio-coordinator' });
 });
 
+test('a missing project role’s link opens Team before it focuses the role', () => {
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { querySelector: () => null, getElementById: () => null }
+  );
+  manager.teamView = () => ({
+    blockingIssues: [{ id: 'required-roles-missing', roleId: 'song-assistant' }],
+    roleRoster: {
+      roles: [
+        {
+          role_id: 'song-assistant',
+          label: 'Song Assistant',
+          scope: 'project',
+          required: true,
+          state: 'empty'
+        }
+      ]
+    }
+  });
+  assert.equal(manager.teamRecoveryLabel('fill-required-role'), 'Go to Song Assistant');
+
+  const calls = [];
+  manager.goToWizardStep = (step, options) => {
+    calls.push(['step', step, options?.focus]);
+    manager.wizardStep = step;
+  };
+  manager.focusWorkspaceRoleRow = roleId => {
+    calls.push(['focus', roleId, manager.wizardStep]);
+    return true;
+  };
+  // The blocker is repeated on Review, where the roster is hidden: the link
+  // has to show Team, or it focuses a row nobody can see.
+  manager.wizardStep = 4;
+  manager.runTeamRecovery('fill-required-role');
+  assert.deepEqual(calls, [
+    ['step', 3, false],
+    ['focus', 'song-assistant', 3]
+  ]);
+
+  calls.length = 0;
+  manager.runTeamRecovery('fill-required-role');
+  assert.deepEqual(calls, [['focus', 'song-assistant', 3]], 'already on Team: only focus moves');
+});
+
+test('a group role Ori fills on create leaves the destination ready and its setup optional', () => {
+  const ids = [
+    'workspaceGroupDestinationCard',
+    'workspaceGroupDestinationTitle',
+    'workspaceGroupDestinationBadge',
+    'workspaceGroupDestinationRoute',
+    'workspaceGroupDestinationSummary',
+    'workspaceGroupDestinationProgress',
+    'workspaceGroupCompositionChoice',
+    'workspaceGroupHomeReview',
+    'workspaceGroupHomeReviewTitle',
+    'workspaceGroupHomeReviewCopy',
+    'workspaceGroupHomeConfirm',
+    'workspaceGroupHomeCancel',
+    'workspaceGroupDestinationActions',
+    'folderNameInput'
+  ];
+  const elements = new Map(ids.map(id => [id, new CardElement()]));
+  elements.get('folderNameInput').value = 'Night Drive';
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { getElementById: id => elements.get(id) || null, createElement: () => new CardElement() }
+  );
+  manager.groupRequirementDraft = {
+    policy: 'required',
+    composition: 'grouped',
+    status: 'ready',
+    projection: {
+      state: 'ready_grouped',
+      summary: 'Use the exact group.',
+      home: { exists: true, workspace_id: 'home-1', name: 'Music Home' },
+      required_home_roles: {
+        verification: 'verified',
+        required: 1,
+        filled: 0,
+        missing: 1,
+        roles: [{ role_id: 'portfolio', label: 'Music Portfolio Manager', state: 'empty' }]
+      },
+      actions: ['open_group_roles']
+    }
+  };
+  const homeRole = {
+    role_id: 'portfolio',
+    label: 'Music Portfolio Manager',
+    scope: 'home',
+    required: true
+  };
+  manager.teamView = () => ({
+    roleRoster: {
+      roles: [
+        {
+          ...homeRole,
+          state: 'filled',
+          auto: true,
+          source: 'auto',
+          agent: { name: 'Portfolio Manager' }
+        }
+      ]
+    }
+  });
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Ready');
+  assert.equal(
+    elements.get('workspaceGroupDestinationProgress').textContent,
+    'Group coordinator · Music Portfolio Manager: Portfolio Manager · created for you with this workspace'
+  );
+  const optional = elements.get('workspaceGroupDestinationActions').children[0];
+  assert.equal(optional.textContent, 'Choose a different agent');
+  assert.match(optional.className, /modern-btn-secondary/);
+
+  // The Review hierarchy names the same agent with the same words.
+  const receipt = manager.renderWorkspaceGroupRequirementReceipt({
+    group_requirement: { policy: 'required', default_home_name: 'Music Home' }
+  });
+  assert.match(receipt, /Music Portfolio Manager/);
+  assert.match(receipt, /Portfolio Manager · created for you/);
+  assert.doesNotMatch(receipt, /Missing on the group/);
+
+  // A role Ori cannot fill is still a step to take first.
+  manager.teamView = () => ({ roleRoster: { roles: [{ ...homeRole, state: 'empty' }] } });
+  manager.renderWorkspaceGroupDestinationCard();
+  assert.equal(elements.get('workspaceGroupDestinationBadge').textContent, 'Needs setup');
+  assert.equal(
+    elements.get('workspaceGroupDestinationProgress').textContent,
+    '0 of 1 required group role filled · Needs Music Portfolio Manager'
+  );
+  const required = elements.get('workspaceGroupDestinationActions').children[0];
+  assert.equal(required.textContent, 'Set up Music Portfolio Manager');
+  assert.match(required.className, /modern-btn-primary/);
+});
+
+test('the quest’s creator lists the team its create makes, and says so only when it will', () => {
+  const manager = loadSessionManager();
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace', connectionOnly: true };
+  manager.templateAgentPlan = {
+    auto_staffing: [
+      {
+        role_id: 'portfolio',
+        label: 'Music Portfolio Manager',
+        outcome: 'create',
+        agent_name: 'Portfolio Manager'
+      },
+      {
+        role_id: 'song',
+        label: 'Song Assistant',
+        outcome: 'existing',
+        agent_name: 'Song Assistant'
+      }
+    ]
+  };
+  const card = manager.renderWorkspaceReceiptTeam(null);
+  assert.match(card, /data-connection-only-team/);
+  assert.match(card, /Music Portfolio Manager · Portfolio Manager · created for you/);
+  assert.match(card, /Song Assistant · Song Assistant · already on this Home/);
+  assert.doesNotMatch(card, /Set up in the next step|No agent or profile is created/);
+
+  // Nothing Ori can fill (no model for a new agent): the old, exact statement.
+  manager.templateAgentPlan = {
+    auto_staffing: [
+      {
+        role_id: 'song',
+        label: 'Song Assistant',
+        outcome: 'create',
+        agent_name: 'Song Assistant',
+        blocked: 'no model'
+      }
+    ]
+  };
+  assert.match(
+    manager.renderWorkspaceReceiptTeam(null),
+    /No agent or profile is created or attached now/
+  );
+
+  // Part of it: the rest is named as the next step's.
+  manager.templateAgentPlan.auto_staffing.unshift({
+    role_id: 'portfolio',
+    label: 'Music Portfolio Manager',
+    outcome: 'existing',
+    agent_name: 'Portfolio Manager'
+  });
+  const partial = manager.renderWorkspaceReceiptTeam(null);
+  assert.match(partial, /Music Portfolio Manager · Portfolio Manager · already on this Home/);
+  assert.match(partial, /Song Assistant · set up in the next step/);
+});
+
+test('the quest’s creator shows no team blocker on its Review; an ordinary creator still does', () => {
+  const host = { innerHTML: 'stale', querySelectorAll: () => [] };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    { getElementById: id => (id === 'workspaceReviewIssues' ? host : null) }
+  );
+  manager.teamView = () => ({
+    issues: [
+      {
+        id: 'required-roles-missing',
+        severity: 'blocking',
+        message: 'Song Assistant: no model is set up for new agents.',
+        recovery: []
+      }
+    ]
+  });
+  // The quest's creator never gates on the team, so a blocker here would name
+  // a step that does not exist in it.
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace', connectionOnly: true };
+  manager.renderWorkspaceTeamIssues('workspaceReviewIssues');
+  assert.equal(host.innerHTML, '');
+
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace' };
+  manager.renderWorkspaceTeamIssues('workspaceReviewIssues');
+  assert.match(host.innerHTML, /Song Assistant: no model is set up for new agents\./);
+});
+
 test('Details destination card distinguishes loading, proposed, existing, standalone, and unavailable state', () => {
   const ids = [
     'workspaceGroupDestinationCard',
@@ -1898,20 +2254,200 @@ test('group requirement creation reviews before committing and reuses only the e
   manager.refreshWizardChrome = () => {};
   const payload = { name: 'Standalone', template_id: 'variant' };
 
-  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
+  // Shown: the review is prepared quietly and nothing is committed by it.
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+    false
+  );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.group_requirement_review, true);
   assert.equal(calls[0].body.group_composition, 'standalone');
   assert.equal(payload.group_review_token, undefined, 'review request must not become a commit');
+  // Shown again: the same request asks nothing.
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+    false
+  );
+  assert.equal(calls.length, 1, 'a repaint does not review again');
 
+  // Create: one press commits the review the card already shows.
   assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), true);
   assert.equal(calls.length, 1, 'unchanged payload reuses the visible receipt');
   assert.equal(payload.group_review_token, 'receipt-1');
   assert.equal(payload.idempotency_key, 'review-key');
 
+  // Create with a request nothing reviewed yet: the same press reviews it and
+  // carries that review. There is no second "confirm" press.
   const changed = { name: 'Changed', template_id: 'variant' };
-  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', changed), false);
-  assert.equal(calls.length, 2, 'changed request gets a fresh inert review');
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', changed), true);
+  assert.equal(calls.length, 2, 'changed request gets a fresh review');
+  assert.equal(calls[1].body.group_requirement_review, true);
+  assert.equal(calls[1].body.group_review_token, undefined, 'the review itself carries no token');
+  assert.equal(changed.group_review_token, 'receipt-1');
+  assert.equal(manager.workspaceCreateCtaLabel().startsWith('Confirm'), false);
+});
+
+test('showing Review asks for the placement review once per exact request, and nowhere else', async () => {
+  const manager = loadSessionManager();
+  const asked = [];
+  let request = {
+    endpoint: '/api/workspaces',
+    payload: { name: 'Night Drive', template_id: 'song' }
+  };
+  let finalStep = true;
+  manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+  manager.isFinalWizardStep = () => finalStep;
+  manager.isOrdinaryGroupCreator = () => false;
+  manager.groupRequirementBlocked = () => false;
+  manager.hasBlockingTeamIssue = () => false;
+  manager.currentCreateRequest = () => request && { ...request, payload: { ...request.payload } };
+  manager.prepareGroupRequirementCommit = async (endpoint, payload, options) => {
+    asked.push({ endpoint, name: payload.name, quiet: options?.quiet });
+    return false;
+  };
+
+  await manager.ensureGroupRequirementReview();
+  assert.deepEqual(asked, [{ endpoint: '/api/workspaces', name: 'Night Drive', quiet: true }]);
+  // Repaints of the same card ask nothing more.
+  await manager.ensureGroupRequirementReview();
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 1);
+
+  // A different request is a different card.
+  request = { endpoint: '/api/workspaces', payload: { name: 'Slow Tide', template_id: 'song' } };
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 2);
+  assert.equal(asked[1].name, 'Slow Tide');
+
+  // Not on Review, while creating, without a name, in import, for a group, in
+  // the guided quest's own creator, or with a blocked team: nothing is asked.
+  request = { endpoint: '/api/workspaces', payload: { name: 'Third', template_id: 'song' } };
+  const quiet = [
+    () => (finalStep = false),
+    () => (manager.isCreatingFolder = true),
+    () => (manager.importModeEnabled = true),
+    () => (manager.isOrdinaryGroupCreator = () => true),
+    () => (manager.groupRequirementBlocked = () => true),
+    () => (manager.hasBlockingTeamIssue = () => true),
+    () => (manager.currentCreateRequest = () => null)
+  ];
+  for (const block of quiet) {
+    const restore = {
+      finalStep,
+      creating: manager.isCreatingFolder,
+      importing: manager.importModeEnabled,
+      group: manager.isOrdinaryGroupCreator,
+      blocked: manager.groupRequirementBlocked,
+      team: manager.hasBlockingTeamIssue,
+      current: manager.currentCreateRequest
+    };
+    block();
+    await manager.ensureGroupRequirementReview();
+    finalStep = restore.finalStep;
+    manager.isCreatingFolder = restore.creating;
+    manager.importModeEnabled = restore.importing;
+    manager.isOrdinaryGroupCreator = restore.group;
+    manager.groupRequirementBlocked = restore.blocked;
+    manager.hasBlockingTeamIssue = restore.team;
+    manager.currentCreateRequest = restore.current;
+  }
+  assert.equal(asked.length, 2, 'a card that is not the Review step asked for a review');
+
+  // No group requirement, no review at all.
+  manager.groupRequirementDraft = null;
+  await manager.ensureGroupRequirementReview();
+  assert.equal(asked.length, 2);
+});
+
+test('the reviewed destination stays on the Review card through repaints', () => {
+  const host = { textContent: 'stale', hidden: true, appendChild() {} };
+  const manager = loadSessionManager(
+    async () => ({ ok: true, json: async () => ({}) }),
+    { ProjectTemplateCard: { getSelectedReadiness: () => ({ state: 'ready' }) } },
+    { getElementById: id => (id === 'workspaceReviewReadiness' ? host : null) }
+  );
+  manager.groupRequirementDraft = { composition: 'grouped', review: null, preparedHome: null };
+
+  // No review yet: the card says nothing about a destination.
+  assert.equal(manager.reviewedDestinationLine(), '');
+  manager.renderReviewReadiness();
+  assert.equal(host.textContent, '');
+
+  manager.groupRequirementDraft.review = {
+    review_token: 'receipt-1',
+    selected_composition: 'grouped',
+    home_name: 'Music Production Home'
+  };
+  for (let repaint = 0; repaint < 3; repaint++) {
+    manager.renderReviewReadiness();
+    assert.equal(host.textContent, 'Reviewed destination: Music Production Home.');
+    assert.equal(host.hidden, false);
+  }
+  // No second press is asked for anywhere in the line.
+  assert.doesNotMatch(host.textContent, /Confirm|Click/);
+
+  manager.groupRequirementDraft.review.selected_composition = 'standalone';
+  assert.equal(
+    manager.reviewedDestinationLine(),
+    'Reviewed destination: standalone, with no Home membership.'
+  );
+  manager.groupRequirementDraft.preparedHome = { home_created: true, home_name: 'Studio' };
+  assert.match(manager.reviewedDestinationLine(), /^Created “Studio” as the required group\./);
+
+  // Import has no placement to state.
+  manager.importModeEnabled = true;
+  manager.renderReviewReadiness();
+  assert.equal(host.textContent, '');
+});
+
+test('the guided group button creates the group once its review is shown', () => {
+  const manager = loadSessionManager();
+  const guided = { review: null, error: '' };
+  manager.workspaceCreatorContext = { mode: 'guided', guided };
+  // Before the review Review itself asks for has arrived, or after it failed.
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Review group');
+  guided.review = { name: 'Music Production Home', existing: false, pending: false };
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create group “Music Production Home”');
+  guided.review = { name: 'Music Production Home', existing: true };
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Use existing group “Music Production Home”');
+});
+
+test('a placement review asked for by showing Review reports nothing that is not ready', async () => {
+  const states = [
+    { state: 'home_creation_review_required', home_name: 'Music Production Home' },
+    { state: 'blocked', summary: 'This placement is not ready.' },
+    { state: 'ready_grouped', home_name: 'Music Production Home' }
+  ];
+  for (const review of states) {
+    const errors = [];
+    let moved = 0;
+    const manager = loadSessionManager(async () => ({
+      ok: true,
+      json: async () => ({ group_requirement_review: review })
+    }));
+    manager.groupRequirementDraft = {
+      policy: 'required',
+      composition: 'grouped',
+      review: null,
+      preparedHome: null
+    };
+    manager.refreshWorkspaceReview = () => {};
+    manager.refreshWizardChrome = () => {};
+    manager.showWorkspaceCreateError = message => errors.push(message);
+    manager.goToWizardStep = () => {
+      moved++;
+    };
+    const payload = { name: 'Song', template_id: 'song' };
+    assert.equal(
+      await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+      false,
+      review.state
+    );
+    assert.deepEqual(errors, [], review.state);
+    assert.equal(moved, 0, review.state);
+    assert.equal(manager.groupRequirementDraft.review, null, review.state);
+    assert.equal(payload.group_review_token, undefined, review.state);
+  }
 });
 
 test('final placement review never creates a missing required Home as a surprise consequence', async () => {
