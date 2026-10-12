@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -109,13 +110,15 @@ func TestAssistantFolderPaths_LinkedKnowsAFolderAPersonLinked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !paths.Linked("ws-1", songs) {
-		t.Fatal("a linked folder was not recognised")
+	if got := paths.LinkState("ws-1", songs); got != agenthttp.FolderLinked {
+		t.Fatalf("a linked folder: state %q", got)
 	}
-	if paths.Linked("ws-1", filepath.Join(home, "Music")) {
-		t.Fatal("a capability's folder was taken for a linked one")
+	// The folder that holds the linked one is the collection around it; a
+	// capability's own reference to it does not make it linked.
+	if got := paths.LinkState("ws-1", filepath.Join(home, "Music")); got != agenthttp.FolderContainsLinked {
+		t.Fatalf("the folder around a linked one: state %q", got)
 	}
-	if paths.Linked("ws-2", songs) || paths.Linked("", songs) || paths.Linked("ws-1", "") {
+	if paths.LinkState("ws-2", songs) != "" || paths.LinkState("", songs) != "" || paths.LinkState("ws-1", "") != "" {
 		t.Fatal("an unknown workspace or an empty path was reported linked")
 	}
 }

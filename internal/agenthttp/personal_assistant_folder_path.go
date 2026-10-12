@@ -31,9 +31,22 @@ type FolderPaths interface {
 	// returns the token the browser sends back in its place. A workspace ID
 	// binds the token to a link in that workspace.
 	Hold(path, workspaceID string) (string, error)
-	// Linked reports whether the folder is already linked to the workspace.
-	Linked(workspaceID, path string) bool
+	// LinkState says how the folder stands to the folders a person linked to
+	// the workspace: FolderLinked, FolderInsideLinked, FolderContainsLinked, or
+	// "" when it has nothing to do with them.
+	LinkState(workspaceID, path string) string
 }
+
+// How a folder stands to a workspace's linked folders.
+const (
+	// FolderLinked: this folder is linked to the workspace already.
+	FolderLinked = "linked"
+	// FolderInsideLinked: it sits inside a linked folder, so it is readable.
+	FolderInsideLinked = "inside"
+	// FolderContainsLinked: it holds a linked folder. It is the collection the
+	// workspace's own project lives in, not something to hand to one project.
+	FolderContainsLinked = "contains"
+)
 
 // The card a folder path gets.
 const (
@@ -94,6 +107,11 @@ func (h *HomeAssistantAskHandler) folderPathFound(prompt string, req HomeAssista
 // folderPathTurn prepares the turn for a folder found in the user's message.
 // Inside a project workspace the card links the folder there; anywhere else it
 // explores it in this conversation.
+//
+// One folder is explored even inside a project: the one that contains a folder
+// the project already has. "All my songs are in …", said from a song's page,
+// names the collection that song lives in. Linking the whole collection to one
+// song would be the wrong home for it; a read-only look answers the question.
 func (h *HomeAssistantAskHandler) folderPathTurn(found FolderPathFound, scope *assistantWorkspaceTurn) *folderPathTurn {
 	if h == nil || h.FolderPaths == nil || scope == nil || (found.Path == "" && found.Refusal == "") {
 		return nil
@@ -104,10 +122,14 @@ func (h *HomeAssistantAskHandler) folderPathTurn(found FolderPathFound, scope *a
 	}
 	turn.kind = FolderProposalExplore
 	if subject := scope.projection.Subject; subject != nil && subject.Kind == "project" && strings.TrimSpace(subject.ID) != "" {
-		turn.workspaceID, turn.workspaceName = subject.ID, strings.TrimSpace(subject.Name)
-		if h.FolderPaths.Linked(subject.ID, found.Path) {
+		switch h.FolderPaths.LinkState(subject.ID, found.Path) {
+		case FolderLinked, FolderInsideLinked:
+			turn.workspaceID, turn.workspaceName = subject.ID, strings.TrimSpace(subject.Name)
 			turn.kind, turn.linked = "", true
-		} else {
+		case FolderContainsLinked:
+			// Explored in the conversation; no workspace is named on the card.
+		default:
+			turn.workspaceID, turn.workspaceName = subject.ID, strings.TrimSpace(subject.Name)
 			turn.kind = FolderProposalLink
 		}
 	}
@@ -127,7 +149,7 @@ func (t *folderPathTurn) referencePrompt() string {
 		return header + "- The path " + t.found.Text + " is a real folder that Ori will not open. " + t.found.Refusal +
 			" Say that plainly. Do not offer another way to read it.\n"
 	case t.linked:
-		return header + "- The folder " + t.found.Name + " (" + t.found.Text + ") is already linked to the " + t.workspaceName +
+		return header + "- The folder " + t.found.Name + " (" + t.found.Text + ") is already among the folders linked to the " + t.workspaceName +
 			" workspace. Use the workspace file readers to answer; do not ask the user to link or attach it again.\n"
 	case t.kind == FolderProposalLink:
 		return header + "- The folder " + t.found.Name + " (" + t.found.Text + ") exists. Nothing in it has been read. " +

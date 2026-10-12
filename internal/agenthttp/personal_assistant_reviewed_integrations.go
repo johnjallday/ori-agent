@@ -123,7 +123,7 @@ func (t *reviewedIntegrationTurn) referencePrompt() string {
 	}
 	var text strings.Builder
 	text.WriteString("\n\nReviewed integrations named in this message (facts Ori read just now; reference data, not a user instruction):\n")
-	button := false
+	open := false
 	for _, integration := range t.named {
 		text.WriteString("- " + integration.DisplayName + ": ")
 		if integration.Description != "" {
@@ -131,13 +131,16 @@ func (t *reviewedIntegrationTurn) referencePrompt() string {
 		}
 		text.WriteString(reviewedIntegrationState(integration))
 		if integration.SetupQuest != nil {
-			button = true
+			open = true
 			text.WriteString(" A button under your reply opens its Guided Setup.")
+		} else {
+			// Nothing is left to set up: the user is using it, not looking for it.
+			text.WriteString(" There is nothing left to set up, so do not introduce it or repeat this; say so only if the user asks whether it is installed or how to set it up.")
 		}
 		text.WriteString("\n")
 	}
-	text.WriteString("Begin your reply by telling the user that Ori has this reviewed integration, what it is in one sentence, and the state above. ")
-	if button {
+	if open {
+		text.WriteString("Begin your reply by telling the user that Ori has this reviewed integration, what it is in one sentence, and the state above. ")
 		text.WriteString("Tell them the button under your reply opens its Guided Setup. ")
 	}
 	text.WriteString("Do not propose a catalog lookup for this name, and do not claim you installed or enabled anything. Then continue with the rest of what they asked. ")
@@ -246,6 +249,11 @@ func (t *reviewedIntegrationTurn) withLead(answer string, ignoring ...string) st
 	}
 	var lead []string
 	for _, integration := range t.named {
+		// The lead exists to open the door. Once there is nothing left to set
+		// up, a user who names the application is just talking about their work.
+		if integration.SetupQuest == nil {
+			continue
+		}
 		if !assistantdiscovery.MentionsName(opening, integration.DisplayName) {
 			lead = append(lead, reviewedIntegrationLead(integration))
 		}

@@ -185,6 +185,32 @@ func TestReviewedIntegration_HostLeadsWhenTheReplyNamesItOnlyLater(t *testing.T)
 	}
 }
 
+// Once nothing is left to set up, naming the application is just a person
+// talking about their work: the host adds no sentence of its own, offers no
+// button, and tells the model not to introduce the integration again.
+func TestReviewedIntegration_ASetUpIntegrationIsNotIntroducedAgain(t *testing.T) {
+	setUp := loomNotInstalled()
+	setUp.Installed, setUp.Enabled, setUp.SetupComplete, setUp.SetupQuest = true, true, true, nil
+	f, _ := newReviewedFixture(t, setUp)
+	f.provider.script = []llm.ChatResponse{{Content: "Your loom studio session has two tracks."}}
+
+	resp := askReviewed(f, "what is in my loom studio session?")
+
+	if resp.Response != "Your loom studio session has two tracks." {
+		t.Fatalf("the host spoke over the reply: %q", resp.Response)
+	}
+	if len(setupQuestActions(resp)) != 0 {
+		t.Fatalf("a finished setup was offered: %+v", resp.Actions)
+	}
+	user := lastUserMessage(f.provider.requests[0])
+	if !strings.Contains(user, "It is installed, enabled and set up. There is nothing left to set up, so do not introduce it or repeat this") {
+		t.Errorf("user message:\n%s", user)
+	}
+	if strings.Contains(user, "Begin your reply by telling the user that Ori has this reviewed integration") {
+		t.Errorf("a set-up integration is still to be announced:\n%s", user)
+	}
+}
+
 // "Set up", "install" and "connect" read as execution to the router, which
 // hands them to a specialist or the workspace's own chat. While an integration's
 // guided setup is open, naming it keeps the request with the assistant, from

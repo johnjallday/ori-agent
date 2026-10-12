@@ -52,23 +52,40 @@ func (p assistantFolderPaths) Hold(path, workspaceID string) (string, error) {
 	return p.selections.Issue(checked.Path)
 }
 
-// Linked reports whether the workspace already has the folder among the
-// folders a person linked to it (a capability's own folders are not that).
-func (p assistantFolderPaths) Linked(workspaceID, path string) bool {
+// LinkState says how the folder stands to the folders a person linked to the
+// workspace (a capability's own folders are not those): it is one of them, it
+// sits inside one, or it contains one.
+func (p assistantFolderPaths) LinkState(workspaceID, path string) string {
 	if p.workspaces == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(path) == "" {
-		return false
+		return ""
 	}
 	ws, err := p.workspaces.Get(strings.TrimSpace(workspaceID))
 	if err != nil || ws == nil {
-		return false
+		return ""
 	}
 	want := canonicalFolder(path)
+	state := ""
 	for _, ref := range ws.DirectoryReferences {
-		if ref.WorkspaceID == ws.ID && strings.TrimSpace(ref.Purpose) == "" && canonicalFolder(ref.Path) == want {
-			return true
+		if ref.WorkspaceID != ws.ID || strings.TrimSpace(ref.Purpose) != "" || strings.TrimSpace(ref.Path) == "" {
+			continue
+		}
+		linked := canonicalFolder(ref.Path)
+		switch {
+		case linked == want:
+			return agenthttp.FolderLinked
+		case folderWithin(linked, want):
+			state = agenthttp.FolderInsideLinked
+		case folderWithin(want, linked) && state == "":
+			state = agenthttp.FolderContainsLinked
 		}
 	}
-	return false
+	return state
+}
+
+// folderWithin reports whether child lies inside parent. Both are canonical.
+func folderWithin(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // canonicalFolder compares two spellings of one folder: symlinks resolved when

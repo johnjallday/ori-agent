@@ -37,8 +37,11 @@ func (f *fakeFolderPaths) Hold(path, workspaceID string) (string, error) {
 	return "held-" + path, nil
 }
 
-func (f *fakeFolderPaths) Linked(workspaceID, path string) bool {
-	return f.linked[workspaceID+"|"+path]
+func (f *fakeFolderPaths) LinkState(workspaceID, path string) string {
+	if f.linked[workspaceID+"|"+path] {
+		return FolderLinked
+	}
+	return ""
 }
 
 const (
