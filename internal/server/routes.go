@@ -336,6 +336,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
 	homeAssistantRouteHandler.ConversationRoute = homeAssistantAskHandler.ValidateRouteConversation
 	homeAssistantRouteHandler.OperationRequest = homeAssistantAskHandler.OperationRequestSupported
+	homeAssistantRouteHandler.ReviewedIntegrationSetup = homeAssistantAskHandler.ReviewedIntegrationSetupOpen
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
 	// Assistant operations ("Operate Ori"): the asking tab reads an operation
 	// and reports what it observed. None of these can create or start work.

@@ -44,6 +44,11 @@ const (
 	HomeActionBuildWorkspace = "build_workspace"
 	// Opens an editable form only; never executed through ConfirmedAction.
 	HomeActionPrepareWorkspace = "prepare_workspace"
+	// HomeActionOpenSetupQuest opens a guided setup in the browser. Its
+	// arguments name the quest by key (quest_id, source, plugin_id) and the
+	// browser builds the link; it is not a mutation and the server never
+	// executes it.
+	HomeActionOpenSetupQuest = "open_setup_quest"
 )
 
 // homeMutatingActionTypes are the only action types that change state and thus
@@ -548,6 +553,13 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		intent = homeAssistantConversationIntent.Key
 	}
 
+	// An integration Ori has reviewed is named back with its guided setup
+	// whenever the user's message names it, whatever else the turn does.
+	if reviewed := h.reviewedIntegrationTurn(ctx, prompt); reviewed != nil {
+		ctx = context.WithValue(ctx, reviewedIntegrationTurnKey{}, reviewed)
+		defer func() { reviewed.finalize(&response) }()
+	}
+
 	h.prepareContinuity(ctx, prompt, conversation)
 	promptSources := h.scopedPanelSources(ctx, personalAssistantPromptSources(h.Sources, workContext), scope)
 	var history []llm.Message
@@ -574,7 +586,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			resp.DraftContext = draftContext
 			return resp
 		}
-		answer = strings.TrimSpace(answer)
+		answer = reviewedIntegrationTurnFromContext(ctx).withLead(strings.TrimSpace(answer))
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "answered"})
 		return HomeAssistantAskResponse{
 			Response: answer, Intent: intent, Identity: identity,
@@ -599,7 +611,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		resp.Conversation = unstoredConversation(conversation)
 		return resp
 	}
-	answer = strings.TrimSpace(answer)
+	answer = reviewedIntegrationTurnFromContext(ctx).withLead(strings.TrimSpace(answer))
 
 	actions := h.buildNextStepActions(intent, prompt, snapshot)
 	meta := snapshot.Meta
@@ -788,7 +800,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if research != nil && research.result != nil {
 		researchEvidence = researchReferencePrompt(*research.result)
 	}
-	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence))
+	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence+reviewedIntegrationTurnFromContext(ctx).referencePrompt()))
 	if len(tools) == 0 && scope != nil {
 		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}

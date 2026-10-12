@@ -41,7 +41,12 @@ type HomeAssistantRouteHandler struct {
 	// this installation can carry out. Such a request stays in the hired
 	// assistant's conversation, whatever else its words resemble.
 	OperationRequest func(context.Context, string) bool
-	RuntimeResolver  interface {
+	// ReviewedIntegrationSetup reports a message that names an integration Ori
+	// has reviewed whose guided setup is still open. The hired assistant
+	// answers it, naming the integration and offering that setup; no
+	// specialist or workspace owns that answer.
+	ReviewedIntegrationSetup func(context.Context, string) bool
+	RuntimeResolver          interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
 	SystemModelReader interface {
@@ -421,6 +426,13 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		// workspace" is the assistant's to carry out, not a navigation answer,
 		// an app launch or a specialist handoff. Elsewhere those keep it.
 		if h.OperationRequest != nil && h.OperationRequest(ctx, prompt) {
+			return assistantConversationRoute(workContext), nil
+		}
+		// "Set up", "install" and "connect" read as execution below, which
+		// would hand "can you set up the <integration> integration?" to a
+		// specialist or the workspace's own chat. While its guided setup is
+		// open, a named reviewed integration is the assistant's to answer.
+		if h.ReviewedIntegrationSetup != nil && h.ReviewedIntegrationSetup(ctx, prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
 		if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {

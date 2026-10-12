@@ -165,6 +165,9 @@ func (r *assistantResearchRegistry) Definitions() []llm.Tool {
 	}
 	query := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "maxLength": 256}}, "additionalProperties": false}
 	tools = append(tools, llm.Tool{Name: "assistant_installed_capabilities", Description: "Read bounded installed Skills-folder and registered MCP metadata. No prompt/scripts, enable/trust/grants or operational verification. Does not search externally.", Parameters: query}, llm.Tool{Name: "assistant_mcp_catalog", Description: "Search compiled curated/enabled-source cached MCP metadata only. Distinguish stale, disabled, unknown and listing-only results. No refresh or MCP start.", Parameters: query}, llm.Tool{Name: "assistant_public_registry_sources", Description: "List configured enabled public registry destinations and version IDs eligible for exact user review. No network or server start.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}})
+	if configuredReviewedIntegrations(r.research.handler) != nil {
+		tools = append(tools, reviewedIntegrationsToolDefinition())
+	}
 	_, folderReader := r.research.handler.Conversations.(PersonalAssistantResearchFolderReader)
 	if !r.research.folder || folderReader {
 		tools = append(tools, llm.Tool{Name: "assistant_propose_research_lookup", Description: "Propose ONE minimal skills_catalog query, public_document URL, configured mcp_catalog_refresh (source_id/version and exact URL), or web_search query ONLY when the configured operation is listed. Nothing is sent. The host presents a five-minute editable user review only after this discussion turn saves; user approval is required for every exact lookup and follow-up. Never include Profile/HQ/files/transcript or credentials. No install, native tools, broad web-search fallback or setup authority.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"operation": map[string]any{"type": "string", "enum": operations}, "query": map[string]any{"type": "string", "maxLength": 256}, "url": map[string]any{"type": "string", "maxLength": 2000}, "source_id": map[string]any{"type": "string", "maxLength": 128}, "source_version": map[string]any{"type": "string", "maxLength": 64}}, "required": []string{"operation"}, "additionalProperties": false}})
@@ -177,6 +180,10 @@ func (r *assistantResearchRegistry) Execute(ctx context.Context, name, arguments
 	}
 	switch name {
 	case "assistant_installed_capabilities", "assistant_mcp_catalog", "assistant_public_registry_sources", "assistant_propose_research_lookup":
+	case reviewedIntegrationsTool:
+		if configuredReviewedIntegrations(r.research.handler) == nil {
+			return r.base.Execute(ctx, name, arguments)
+		}
 	default:
 		return r.base.Execute(ctx, name, arguments)
 	}
@@ -198,19 +205,33 @@ func (r *assistantResearchRegistry) Execute(ctx context.Context, name, arguments
 		if err != nil {
 			return "", err
 		}
+		// A catalog search for an integration Ori has reviewed and the user
+		// has not finished setting up is answered by its guided setup instead.
+		if reviewedIntegrationTurnFromContext(ctx).replacesCatalogLookup(lookup) {
+			return reviewedLookupNotNeeded, nil
+		}
 		r.research.proposed = &lookup
 		return `{"status":"review_required","sent":false,"note":"Only the latest proposed lookup will be offered after this turn saves. No lookup or setup has run."}`, nil
 	}
 	var args struct {
 		Query string `json:"query,omitempty"`
 	}
-	if decoder.Decode(&args) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) || (name == "assistant_public_registry_sources" && args.Query != "") {
+	takesNoQuery := name == "assistant_public_registry_sources" || name == reviewedIntegrationsTool
+	if decoder.Decode(&args) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) || (takesNoQuery && args.Query != "") {
 		return "", errors.New("invalid research arguments")
 	}
 	if args.Query != "" && assistantdiscovery.ValidatePublicQuery(args.Query) != nil {
 		return "", errors.New("invalid metadata query")
 	}
 	started := time.Now()
+	if name == reviewedIntegrationsTool {
+		encoded, status := readReviewedIntegrations(ctx, r.research.handler, r.research.turn.userID)
+		if !r.research.budget.ChargeLocal(assistantdiscovery.Result{Scope: encoded}) {
+			return "", assistantdiscovery.ErrResearchBudget
+		}
+		r.research.turn.ledger.observe(status, time.Since(started))
+		return encoded, r.research.revalidate(ctx)
+	}
 	if name == "assistant_public_registry_sources" {
 		reader, ok := r.research.handler.Discovery.(interface {
 			RegistrySources(context.Context) []mcpregistry.PublicSource

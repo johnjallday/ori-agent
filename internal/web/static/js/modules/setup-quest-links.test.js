@@ -7,6 +7,7 @@ import {
   hostSetupQuestAPIRoot,
   setupJourneyAPIRoot,
   setupQuestURL,
+  setupQuestActionURL,
   setupQuestForTemplate,
   setupQuestOpenDetail,
   loadSetupQuests
@@ -23,6 +24,66 @@ const userQuest = {
   attachment_id: 'uqatt_0123456789abcdef01234567',
   id: 'quest_0123456789abcdef01234567'
 };
+
+// The assistant's "Open Guided Setup" button. The action names a quest by key;
+// the link is always built here, never taken from the action.
+test('an open_setup_quest action opens the quest its arguments name', () => {
+  const install = {
+    id: 'open-setup-quest-demo',
+    type: 'open_setup_quest',
+    label: 'Open Guided Setup: Demo',
+    arguments: { quest_id: 'install_demo', display_name: 'Demo', source: 'host' }
+  };
+  assert.equal(setupQuestActionURL(install), '/?setup=quest&source=host&quest=install_demo');
+
+  const own = {
+    type: 'open_setup_quest',
+    label: 'Continue setup: Demo',
+    arguments: {
+      quest_id: 'demo_setup',
+      display_name: 'Demo',
+      source: 'plugin',
+      plugin_id: 'demo-plugin'
+    }
+  };
+  assert.equal(setupQuestActionURL(own), '/?setup=quest&plugin=demo-plugin&quest=demo_setup');
+});
+
+test('an open_setup_quest action that names no well-formed quest opens nothing', () => {
+  const action = named => ({ type: 'open_setup_quest', label: 'Open', ...named });
+  for (const bad of [
+    null,
+    {},
+    { type: 'navigate', href: '/?setup=quest&source=host&quest=install_demo' },
+    action({}),
+    action({ arguments: {} }),
+    action({ arguments: { quest_id: 'install_demo' } }),
+    action({ arguments: { quest_id: 'install_demo', source: 'user_template' } }),
+    action({ arguments: { quest_id: '../settings', source: 'host' } }),
+    action({ arguments: { quest_id: 'Install Demo', source: 'host' } }),
+    action({ arguments: { quest_id: 'demo_setup', source: 'plugin' } }),
+    action({ arguments: { quest_id: 'demo_setup', source: 'plugin', plugin_id: 'a/b' } }),
+    // A link in the action is never followed: only the key counts.
+    action({ href: 'https://evil.example', arguments: { source: 'host' } })
+  ]) {
+    assert.equal(setupQuestActionURL(bad), null, JSON.stringify(bad));
+  }
+  const withLink = action({
+    href: 'https://evil.example',
+    arguments: { quest_id: 'install_demo', source: 'host' }
+  });
+  assert.equal(setupQuestActionURL(withLink), '/?setup=quest&source=host&quest=install_demo');
+});
+
+// dashboard.js is a classic script with no test harness: pin the two facts the
+// button depends on there.
+test('the assistant drawer maps open_setup_quest to a button that asks this module for the link', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('./dashboard.js', import.meta.url), 'utf8');
+  assert.match(source, /if \(type === 'open_setup_quest'\) \{/);
+  assert.match(source, /links\.setupQuestActionURL\(action\)/);
+  assert.match(source, /window\.location\.assign\(url\)/);
+});
 
 test('quest routes are compiled from exact IDs, not plugin URLs or arbitrary paths', () => {
   assert.equal(

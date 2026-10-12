@@ -365,7 +365,8 @@ model may call are `home_workspaces`, `home_tasks`, `home_sessions`,
 
 **Action schema:**
 - `id`: Stable action id.
-- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `create_agent`, `remove_agent`, `ask_followup`.
+- `type`: One of `navigate`, `open_workspace`, `open_task`, `open_session`, `create_workspace`, `create_task`, `start_task`, `assign_agent`, `create_agent`, `remove_agent`, `ask_followup`, `open_setup_quest`.
+- `open_setup_quest` opens a guided setup and is attached by the host, never by the model: when a hired-assistant turn's message names an integration Ori has reviewed (whole word, case-insensitive, from the reviewed registry), or the model read the reviewed list and its reply names an entry, and that integration still has a guided setup to open. It carries no `href`; `arguments` name the quest by key: `quest_id`, `display_name`, `source` (`host` for the install quest, `plugin` for the installed plugin's own quest) and, for `plugin`, `plugin_id`. The label is "Open Guided Setup: <name>" or, once the plugin is installed, "Continue setup: <name>". The reply itself opens with a sentence naming the integration and its install state, and that sentence is part of the saved conversation; the action is not. A panel message that names such an integration is routed to the assistant conversation even when it starts with "set up", "install" or "connect".
 - `label`: Button label.
 - `href` (optional): Destination for navigation/`open_*` actions.
 - `workspace_id` / `task_id` / `session_id` (optional): Resolved target ids.

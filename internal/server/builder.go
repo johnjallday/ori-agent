@@ -797,6 +797,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.workspaceFileStore = b.workspaceFileStore
 	b.server.continuityWorker = b.continuityWorker
 	b.server.setupJourneyStore = b.setupJourneyStore
+	b.server.setupJourneys = b.setupJourneyService
 	b.server.projectTemplateCatalog = templateRuntimeCatalog{
 		capabilities: b.workspaceCapabilityRegistry,
 		runtimes:     b.runtimeCapabilityRegistry,

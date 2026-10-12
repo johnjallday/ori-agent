@@ -66,6 +66,9 @@ type Server struct {
 	continuityWorker       *continuityprep.Worker
 	projectTemplateCatalog projecttemplates.RuntimeCatalog
 	setupJourneyStore      *setupjourney.SQLiteStore
+	// setupJourneys lets the assistant's reviewed-integration reader name an
+	// installed plugin's own guided setup and say whether it is finished.
+	setupJourneys *setupjourney.Service
 	// reviewedReleases finds and verifies reviewed releases. Blueprint recovery
 	// uses it to install a reviewed Home provider; nil when plugins are off.
 	reviewedReleases *reviewedIntegrationUpdates
