@@ -257,7 +257,7 @@ func TestFolderPath_AFolderAlreadyLinkedGetsNoCard(t *testing.T) {
 		t.Fatalf("the host spoke over a reply that had nothing to confirm: %q", resp.Response)
 	}
 	user := lastUserMessage(f.provider.requests[0])
-	if !strings.Contains(user, "is already linked to the "+f.alpha.Name+" workspace. Use the workspace file readers") {
+	if !strings.Contains(user, "is already among the folders linked to the "+f.alpha.Name+" workspace. Use the workspace file readers") {
 		t.Errorf("user message:\n%s", user)
 	}
 }
