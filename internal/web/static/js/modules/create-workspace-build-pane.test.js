@@ -192,7 +192,10 @@ function loadPane() {
     'workspace-build-collapse',
     'workspace-build-expand',
     'workspace-build-start-over',
-    'workspace-build-action'
+    'workspace-build-action',
+    'workspace-build-folder-open',
+    'workspace-build-folder',
+    'workspace-build-folder-remove'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -424,4 +427,235 @@ test('destroy empties the pane and hides it', () => {
   assert.equal(root.children.length, 0);
   assert.equal(buildWith.hidden, true);
   assert.equal(pane.isMounted(), false);
+});
+
+// ----- Add folder -----
+
+// Objects born inside the pane's vm realm have another Object prototype, so
+// they are compared by value, not by deepEqual's prototype check.
+function same(actual, expected) {
+  assert.equal(JSON.stringify(actual), JSON.stringify(expected));
+}
+
+function folderControls(root) {
+  const buttons = root.querySelectorAll('button');
+  const byControl = kind => buttons.find(button => button.dataset.buildControl === kind);
+  return {
+    add: byControl('add-folder'),
+    remove: byControl('remove-folder'),
+    cancel: byControl('folder-cancel'),
+    usePath: byControl('folder-path'),
+    chooser: root
+      .querySelectorAll('section')
+      .find(node => node.id === 'workspaceBuildFolderChooser'),
+    chip: root.querySelectorAll('span').find(node => node.id === 'workspaceBuildFolder'),
+    name: root.querySelectorAll('span').find(node => node.id === 'workspaceBuildFolderName'),
+    summary: root.querySelectorAll('p').find(node => node.id === 'workspaceBuildFolderSummary'),
+    path: root.querySelectorAll('input').find(node => node.id === 'workspaceBuildFolderPath'),
+    pathStatus: root
+      .querySelectorAll('p')
+      .find(node => node.id === 'workspaceBuildFolderPathStatus'),
+    hint: root
+      .querySelectorAll('span')
+      .find(node => node.classList.contains('workspace-build-folder__hint')),
+    choices: () => root.querySelectorAll('button').filter(button => button.dataset.buildFolderMode)
+  };
+}
+
+const observation = {
+  id: 'obs-1',
+  folder: 'Elite School',
+  files: 42,
+  coverage: { partial: true }
+};
+
+test('the chooser view restates the composer’s rule: chips, the picker, and the note', () => {
+  const { pane } = loadPane();
+  const view = pane.folderChooserView({
+    chips: [
+      { id: 'documents', label: 'Documents' },
+      { id: ' ', label: 'blank' },
+      { id: 'desktop' }
+    ],
+    picker_available: true,
+    picker_note: 'desktop_off'
+  });
+  same(view.choices, [
+    { label: 'Documents', mode: 'chip', chip: 'documents' },
+    { label: 'desktop', mode: 'chip', chip: 'desktop' },
+    { label: 'Pick another folder…', mode: 'picker' }
+  ]);
+  assert.equal(view.note, '');
+  assert.equal(
+    pane.folderChooserView({ chips: [{ id: 'documents', label: 'Documents' }] }).note,
+    'Pick a folder from the list for now.'
+  );
+  assert.equal(pane.folderChooserView({}).note, 'No folder can be chosen here.');
+  assert.equal(
+    pane.folderChooserView({ picker_note: 'The dialog is off here.' }).note,
+    'The dialog is off here.'
+  );
+});
+
+test('Add folder is offered only when the server wires it, and the sheet sends one choice', () => {
+  const first = loadPane();
+  first.pane.mount({ assistant });
+  assert.equal(folderControls(first.root).add.hidden, true);
+
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const controls = folderControls(root);
+  assert.equal(controls.add.hidden, false);
+  assert.equal(controls.chooser.hidden, true);
+  controls.add.click();
+  assert.equal(events.at(-1).type, 'workspace-build-folder-open');
+
+  // While choices load, the sheet is open with Cancel holding focus.
+  assert.equal(pane.openFolderChooser(), true);
+  assert.equal(controls.chooser.hidden, false);
+  assert.equal(pane.folderChooserOpen(), true);
+  assert.match(controls.chooser.textContent, /Loading folder choices/);
+  assert.match(controls.chooser.textContent, /File contents are not read/);
+  assert.equal(controls.add.getAttribute('aria-expanded'), 'true');
+
+  pane.openFolderChooser({
+    chips: [{ id: 'documents', label: 'Documents' }],
+    picker_available: true
+  });
+  const choices = controls.choices();
+  same(
+    choices.map(button => button.textContent),
+    ['Documents', 'Pick another folder…']
+  );
+  choices[0].click();
+  same(events.at(-1), {
+    type: 'workspace-build-folder',
+    detail: { mode: 'chip', chip: 'documents' }
+  });
+  choices[1].click();
+  same(events.at(-1), { type: 'workspace-build-folder', detail: { mode: 'picker' } });
+
+  controls.cancel.click();
+  assert.equal(controls.chooser.hidden, true);
+  assert.equal(pane.folderChooserOpen(), false);
+  assert.equal(controls.add.getAttribute('aria-expanded'), 'false');
+});
+
+test('a typed path is reported as a path for the controller to check, never as a turn', () => {
+  const { pane, root, events, document } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const controls = folderControls(root);
+  pane.openFolderChooser({ chips: [], picker_available: false });
+  assert.match(controls.chooser.textContent, /No folder can be chosen here/);
+
+  controls.usePath.click();
+  assert.equal(controls.pathStatus.textContent, 'Type or paste a folder path first.');
+  assert.equal(controls.pathStatus.classList.contains('is-error'), true);
+  assert.equal(document.activeElement, controls.path);
+  assert.equal(
+    events.some(event => event.type === 'workspace-build-folder'),
+    false
+  );
+
+  const before = events.length;
+  controls.path.value = '~/Projects/app';
+  controls.path.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-folder',
+    detail: { mode: 'path', path: '~/Projects/app' }
+  });
+  assert.equal(
+    events.slice(before).some(event => event.type === 'workspace-build-turn'),
+    false
+  );
+
+  pane.folderChooserStatus('That folder could not be used.', true);
+  assert.equal(controls.pathStatus.hidden, false);
+  assert.equal(controls.pathStatus.classList.contains('is-error'), true);
+
+  // While the controller checks a path, the field is locked and a second
+  // Enter sends nothing; the sheet stays open for the answer.
+  const sent = events.length;
+  pane.setFolderPathBusy(true);
+  assert.equal(controls.path.disabled, true);
+  assert.equal(controls.usePath.disabled, true);
+  assert.equal(controls.usePath.textContent, 'Checking…');
+  controls.path.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  assert.equal(events.length, sent);
+  assert.equal(controls.chooser.hidden, false);
+  pane.setFolderPathBusy(false);
+  assert.equal(controls.usePath.disabled, false);
+  assert.equal(controls.usePath.textContent, 'Use this path');
+  pane.closeFolderChooser();
+  assert.equal(controls.chooser.hidden, true);
+  assert.equal(document.activeElement, controls.add);
+});
+
+test('the attached folder comes from the session: chip, summary, empty Send, and remove', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const controls = folderControls(root);
+  const input = root.querySelectorAll('textarea')[0];
+  assert.equal(controls.chip.hidden, true);
+  assert.equal(controls.summary.hidden, true);
+
+  // Without a folder an empty Send is nothing.
+  input.value = '';
+  input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  assert.equal(
+    events.some(event => event.type === 'workspace-build-turn'),
+    false
+  );
+
+  pane.applySession({ transcript: [], folder: { observation } });
+  assert.equal(controls.chip.hidden, false);
+  assert.equal(controls.name.textContent, 'Elite School');
+  assert.equal(controls.remove.getAttribute('aria-label'), 'Remove folder Elite School');
+  assert.equal(controls.summary.hidden, false);
+  assert.equal(
+    controls.summary.textContent,
+    '42 files observed · partial look · contents not read'
+  );
+  assert.equal(controls.hint.hidden, false);
+
+  input.value = 'a thing';
+  input.dispatchEvent(new FakeEvent('input'));
+  assert.equal(controls.hint.hidden, true);
+  input.value = '';
+  input.dispatchEvent(new FakeEvent('input'));
+  assert.equal(controls.hint.hidden, false);
+
+  input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-turn',
+    detail: { text: 'Set it up from the attached folder.' }
+  });
+
+  controls.remove.click();
+  assert.equal(events.at(-1).type, 'workspace-build-folder-remove');
+
+  // A pick in flight locks the attachments and says what is happening.
+  pane.setFolderBusy(true, 'Looking at folder metadata locally…');
+  assert.equal(controls.add.disabled, true);
+  assert.equal(controls.remove.disabled, true);
+  assert.equal(controls.summary.textContent, 'Looking at folder metadata locally…');
+  controls.remove.click();
+  assert.equal(events.at(-1).type, 'workspace-build-folder-remove'); // the earlier one; nothing new
+  const count = events.length;
+  controls.add.click();
+  assert.equal(events.length, count);
+  pane.setFolderBusy(false, 'No folder was chosen. Your draft is unchanged.');
+  assert.equal(controls.add.disabled, false);
+  assert.equal(controls.summary.textContent, 'No folder was chosen. Your draft is unchanged.');
+
+  // A new folder starts clean; no folder clears the chip.
+  pane.applySession({
+    transcript: [],
+    folder: { observation: { ...observation, id: 'obs-2', files: 1, coverage: {} } }
+  });
+  assert.equal(controls.summary.textContent, '1 file observed · bounded look · contents not read');
+  pane.applySession({ transcript: [] });
+  assert.equal(controls.chip.hidden, true);
+  assert.equal(controls.summary.hidden, true);
+  assert.equal(controls.hint.hidden, true);
 });

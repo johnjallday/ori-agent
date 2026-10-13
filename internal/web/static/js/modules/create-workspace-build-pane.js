@@ -45,8 +45,36 @@
     chosenBy: name => `Chosen by ${name}`,
     buildWith: name => `Build with ${name}`,
     replyLabel: name => `Reply to ${name}`,
-    resumeQuestion: name => `Resume building ${name || 'your workspace'}?`
+    resumeQuestion: name => `Resume building ${name || 'your workspace'}?`,
+    // Add folder: the composer's folder context, in the pane's own words.
+    addFolder: 'Add folder',
+    removeFolder: 'Remove folder',
+    folderTitle: 'Add a folder',
+    folderDisclosure:
+      'Ori records file and folder names, kinds, counts and project markers locally. File contents are not read. Send shares this metadata with your configured model. When you create the workspace, Ori links the folder to it; nothing in it is moved or changed.',
+    folderLoading: 'Loading folder choices…',
+    folderPickerLabel: 'Pick another folder…',
+    folderPathLabel: 'or paste a folder path',
+    folderPathPlaceholder: '~/Projects/my-app',
+    folderPathButton: 'Use this path',
+    folderPathChecking: 'Checking…',
+    folderPathEmpty: 'Type or paste a folder path first.',
+    folderCancel: 'Cancel',
+    folderNoChoices: 'No folder can be chosen here.',
+    folderListOnly: 'Pick a folder from the list for now.',
+    folderLooking: 'Looking at folder metadata locally… No file contents are read.',
+    folderAttached:
+      'Folder attached — I can see its file and folder names, not their contents. Tell me what this workspace should do, or just press Send.',
+    folderCancelled: 'No folder was chosen. Your draft is unchanged.',
+    folderSend: 'Set it up from the attached folder.',
+    folderSendHint: 'Empty Send: “Set it up from the attached folder”',
+    folderSummary: (files, partial) =>
+      `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`
   };
+
+  // A reason code ("desktop_off") is for code, never for the user; a note
+  // that is a single identifier is treated as no note at all.
+  const REASON_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
   // The transcript shows the most recent entries; older ones stay one click
   // away so a long build never pushes the composer off screen.
@@ -67,6 +95,24 @@
       .map(choice => ({ id: text(choice?.id), label: text(choice?.label) }))
       .filter(choice => choice.id && choice.label)
       .slice(0, 4);
+  }
+
+  // folderChooserView is the Add folder sheet's render decision for the
+  // server's choices: one button per known folder, the picker when a dialog
+  // can open, and the sentence that explains a missing one. It is the
+  // composer's own rule (personal-assistant-folder-chooser.js), restated here
+  // because the pane is not a module.
+  function folderChooserView(payload) {
+    const chips = (Array.isArray(payload?.chips) ? payload.chips : [])
+      .filter(chip => chip && typeof chip.id === 'string' && chip.id.trim())
+      .map(chip => ({ id: chip.id.trim(), label: text(chip.label || chip.id) }));
+    const pickerVisible = payload?.picker_available === true;
+    let note = text(payload?.picker_note);
+    if (REASON_CODE.test(note)) note = '';
+    if (!note && !pickerVisible) note = chips.length ? COPY.folderListOnly : COPY.folderNoChoices;
+    const choices = chips.map(chip => ({ label: chip.label, mode: 'chip', chip: chip.id }));
+    if (pickerVisible) choices.push({ label: COPY.folderPickerLabel, mode: 'picker' });
+    return { choices, note };
   }
 
   function normalizeEntry(entry) {
@@ -189,6 +235,12 @@
     expanded: false,
     busy: false,
     collapsed: false,
+    // Add folder: whether the server offers it, whether a pick or removal
+    // is in flight, the note under the chip, and whether the sheet is open.
+    folders: false,
+    folderBusy: false,
+    folderNote: '',
+    chooserOpen: false,
     listeners: [],
     els: {}
   };
@@ -292,19 +344,95 @@
     els.input.disabled = view.composerDisabled;
     els.send.disabled = view.composerDisabled;
     state.root.classList.toggle('is-busy', view.busy);
+    renderFolder(view);
     if (els.transcript && typeof els.transcript.scrollHeight === 'number') {
       els.transcript.scrollTop = els.transcript.scrollHeight;
     }
   }
 
+  function attachedFolder() {
+    const observation = state.session?.folder?.observation;
+    return observation && typeof observation === 'object' ? observation : null;
+  }
+
+  // renderFolder draws the composer's attachments from the session: the Add
+  // folder button when the server offers it, the attached folder's chip and
+  // summary, and the empty-Send hint while the reply box is empty.
+  function renderFolder(view) {
+    const { els } = state;
+    if (!els.addFolder) return;
+    const folder = attachedFolder();
+    const locked = Boolean(view?.busy) || state.folderBusy;
+    els.addFolder.hidden = !state.folders;
+    els.addFolder.disabled = locked;
+    els.folderChip.hidden = !folder;
+    const name = text(folder?.folder) || '';
+    els.folderName.textContent = name;
+    els.folderRemove.disabled = locked;
+    els.folderRemove.setAttribute(
+      'aria-label',
+      name ? `${COPY.removeFolder} ${name}` : COPY.removeFolder
+    );
+    const summary =
+      state.folderNote ||
+      (folder
+        ? COPY.folderSummary(
+            Math.max(0, Number(folder.files) || 0),
+            folder.coverage?.partial === true
+          )
+        : '');
+    // A live region is written only when its text changes, so a keystroke in
+    // the reply box never re-announces the folder.
+    if (els.folderSummary.textContent !== summary) els.folderSummary.textContent = summary;
+    els.folderSummary.hidden = !summary;
+    els.folderHint.hidden = !folder || Boolean(text(els.input?.value));
+  }
+
+  // setFolderPathBusy locks the path field while the controller has the
+  // folder-picker endpoint check a typed path; the sheet stays open so a
+  // refusal can be read where it was typed.
+  function setFolderPathBusy(busy) {
+    const { els } = state;
+    if (!els.folderPath) return;
+    const locked = Boolean(busy);
+    els.folderPath.disabled = locked;
+    els.folderPathUse.disabled = locked;
+    els.folderPathUse.textContent = locked ? COPY.folderPathChecking : COPY.folderPathButton;
+  }
+
   function submitComposer() {
-    if (state.busy) return;
+    if (state.busy || state.folderBusy) return;
     const value = String(state.els.input?.value || '')
       .slice(0, MAX_MESSAGE_LENGTH)
       .trim();
-    if (!value) return;
+    if (!value) {
+      // An empty Send with a folder attached asks for the folder itself.
+      if (!attachedFolder()) return;
+      emit('workspace-build-turn', { text: COPY.folderSend });
+      return;
+    }
     state.els.input.value = '';
     emit('workspace-build-turn', { text: value });
+  }
+
+  function submitFolderPath() {
+    if (state.busy || state.folderBusy || state.els.folderPathUse?.disabled) return;
+    const path = text(state.els.folderPath?.value);
+    if (!path) {
+      folderChooserStatus(COPY.folderPathEmpty, true);
+      state.els.folderPath?.focus?.();
+      return;
+    }
+    emit('workspace-build-folder', { mode: 'path', path });
+  }
+
+  function chooseFolderChoice(button) {
+    if (state.busy || state.folderBusy || button.disabled) return;
+    const mode = text(button.dataset.buildFolderMode);
+    if (!mode) return;
+    const detail = { mode };
+    if (mode === 'chip') detail.chip = text(button.dataset.buildFolderChip);
+    emit('workspace-build-folder', detail);
   }
 
   function chooseChip(button) {
@@ -360,6 +488,10 @@
     state.busy = false;
     state.collapsed = false;
     state.withdrawn = false;
+    state.folders = options.folders === true;
+    state.folderBusy = false;
+    state.folderNote = '';
+    state.chooserOpen = false;
 
     root.textContent = '';
     root.appendChild(renderHeader());
@@ -377,6 +509,8 @@
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     const composer = createElement('form', 'workspace-build-pane__composer');
+    const folderEls = renderAttachments(composer);
+    const row = createElement('div', 'workspace-build-pane__composer-row');
     const label = createElement(
       'label',
       'visually-hidden',
@@ -395,13 +529,14 @@
       COPY.send
     );
     send.type = 'submit';
-    composer.appendChild(label);
-    composer.appendChild(input);
-    composer.appendChild(send);
+    row.appendChild(label);
+    row.appendChild(input);
+    row.appendChild(send);
+    composer.appendChild(row);
     root.appendChild(transcript);
     root.appendChild(status);
     root.appendChild(composer);
-    state.els = { transcript, showEarlier, log, status, composer, input, send };
+    state.els = { transcript, showEarlier, log, status, composer, input, send, ...folderEls };
 
     listen(root, 'click', event => {
       const control = event.target?.closest?.('[data-build-control]');
@@ -412,7 +547,19 @@
         else if (kind === 'show-earlier') {
           state.expanded = true;
           render();
-        }
+        } else if (kind === 'add-folder') {
+          if (!state.busy && !state.folderBusy && !control.disabled)
+            emit('workspace-build-folder-open');
+        } else if (kind === 'remove-folder') {
+          if (!state.busy && !state.folderBusy && !control.disabled)
+            emit('workspace-build-folder-remove');
+        } else if (kind === 'folder-cancel') closeFolderChooser();
+        else if (kind === 'folder-path') submitFolderPath();
+        return;
+      }
+      const folderChoice = event.target?.closest?.('[data-build-folder-mode]');
+      if (folderChoice) {
+        chooseFolderChoice(folderChoice);
         return;
       }
       const chip = event.target?.closest?.('[data-build-choice]');
@@ -427,6 +574,21 @@
       event.preventDefault?.();
       submitComposer();
     });
+    listen(input, 'input', () => renderFolder({ busy: state.busy }));
+    // Enter in the path field checks the path; it must never submit the
+    // reply form around it.
+    listen(folderEls.folderPath, 'keydown', event => {
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      submitFolderPath();
+    });
+    listen(folderEls.chooser, 'keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      closeFolderChooser();
+    });
     listen(state.buildWithButton, 'click', () => emit('workspace-build-expand'));
 
     if (options.opening !== false) showLine(COPY.opening);
@@ -436,11 +598,193 @@
     return true;
   }
 
+  // renderAttachments builds the composer's attachments row, the line under
+  // it, and the Add folder sheet, into composer. Returns the elements the
+  // pane drives. Every id is build-scoped; the chooser's are the pane's own.
+  function renderAttachments(composer) {
+    const attachments = createElement('div', 'workspace-build-pane__attachments');
+    const addFolder = createElement('button', 'workspace-build-pane__chip');
+    addFolder.type = 'button';
+    addFolder.dataset.buildControl = 'add-folder';
+    addFolder.setAttribute('aria-expanded', 'false');
+    addFolder.setAttribute('aria-controls', 'workspaceBuildFolderChooser');
+    addFolder.hidden = true;
+    const icon = createElement('i', 'bi bi-folder2-open');
+    icon.setAttribute('aria-hidden', 'true');
+    addFolder.appendChild(icon);
+    addFolder.appendChild(createElement('span', '', COPY.addFolder));
+    const folderChip = createElement('span', 'workspace-build-folder');
+    folderChip.id = 'workspaceBuildFolder';
+    folderChip.hidden = true;
+    const folderName = createElement('span', 'workspace-build-folder__name');
+    folderName.id = 'workspaceBuildFolderName';
+    const folderRemove = createElement('button', 'workspace-build-folder__remove', '×');
+    folderRemove.type = 'button';
+    folderRemove.dataset.buildControl = 'remove-folder';
+    folderRemove.setAttribute('aria-label', COPY.removeFolder);
+    folderChip.appendChild(folderName);
+    folderChip.appendChild(folderRemove);
+    const folderHint = createElement('span', 'workspace-build-folder__hint', COPY.folderSendHint);
+    folderHint.hidden = true;
+    attachments.appendChild(addFolder);
+    attachments.appendChild(folderChip);
+    attachments.appendChild(folderHint);
+    const folderSummary = createElement('p', 'workspace-build-folder__summary');
+    folderSummary.id = 'workspaceBuildFolderSummary';
+    folderSummary.setAttribute('role', 'status');
+    folderSummary.setAttribute('aria-live', 'polite');
+    folderSummary.hidden = true;
+
+    const chooser = createElement('section', 'workspace-build-folder-chooser');
+    chooser.id = 'workspaceBuildFolderChooser';
+    chooser.hidden = true;
+    const chooserTitle = createElement(
+      'h3',
+      'workspace-build-folder-chooser__title',
+      COPY.folderTitle
+    );
+    chooserTitle.id = 'workspaceBuildFolderChooserTitle';
+    chooser.setAttribute('aria-labelledby', chooserTitle.id);
+    chooser.appendChild(chooserTitle);
+    chooser.appendChild(
+      createElement('p', 'workspace-build-folder-chooser__disclosure', COPY.folderDisclosure)
+    );
+    const choices = createElement('div', 'workspace-build-folder-chooser__choices');
+    chooser.appendChild(choices);
+    const chooserNote = createElement('p', 'workspace-build-folder-chooser__note');
+    chooserNote.hidden = true;
+    chooser.appendChild(chooserNote);
+    // Any other folder: a typed path, which the controller has the
+    // folder-picker endpoint check before the build ever hears of it.
+    const entry = createElement('div', 'folder-path-entry');
+    const entryLabel = createElement('label', 'folder-path-entry__label', COPY.folderPathLabel);
+    entryLabel.setAttribute('for', 'workspaceBuildFolderPath');
+    const entryRow = createElement('div', 'folder-path-entry__row');
+    const folderPath = createElement('input', 'modern-input folder-path-entry__input');
+    folderPath.id = 'workspaceBuildFolderPath';
+    folderPath.type = 'text';
+    folderPath.placeholder = COPY.folderPathPlaceholder;
+    folderPath.setAttribute('autocomplete', 'off');
+    folderPath.setAttribute('autocapitalize', 'off');
+    folderPath.setAttribute('spellcheck', 'false');
+    const folderPathUse = createElement(
+      'button',
+      'modern-btn modern-btn-secondary folder-path-entry__use',
+      COPY.folderPathButton
+    );
+    folderPathUse.type = 'button';
+    folderPathUse.dataset.buildControl = 'folder-path';
+    entryRow.appendChild(folderPath);
+    entryRow.appendChild(folderPathUse);
+    const folderPathStatus = createElement('p', 'folder-path-entry__status');
+    folderPathStatus.id = 'workspaceBuildFolderPathStatus';
+    folderPathStatus.setAttribute('role', 'status');
+    folderPathStatus.setAttribute('aria-live', 'polite');
+    folderPathStatus.hidden = true;
+    folderPath.setAttribute('aria-describedby', folderPathStatus.id);
+    entry.appendChild(entryLabel);
+    entry.appendChild(entryRow);
+    entry.appendChild(folderPathStatus);
+    chooser.appendChild(entry);
+    const actions = createElement('div', 'workspace-build-folder-chooser__actions');
+    const cancel = createElement('button', 'modern-btn modern-btn-secondary', COPY.folderCancel);
+    cancel.type = 'button';
+    cancel.dataset.buildControl = 'folder-cancel';
+    actions.appendChild(cancel);
+    chooser.appendChild(actions);
+
+    composer.appendChild(attachments);
+    composer.appendChild(folderSummary);
+    composer.appendChild(chooser);
+    return {
+      addFolder,
+      folderChip,
+      folderName,
+      folderRemove,
+      folderHint,
+      folderSummary,
+      chooser,
+      chooserChoices: choices,
+      chooserNote,
+      chooserCancel: cancel,
+      folderPath,
+      folderPathUse,
+      folderPathStatus
+    };
+  }
+
+  // openFolderChooser shows the Add folder sheet. Without a payload it shows
+  // that choices are loading, with Cancel owning focus so Escape closes only
+  // the sheet; with the server's choices it draws them and focuses the first.
+  function openFolderChooser(payload) {
+    const { els } = state;
+    if (!els.chooser || state.busy || state.folderBusy) return false;
+    state.chooserOpen = true;
+    els.chooser.hidden = false;
+    els.addFolder.setAttribute('aria-expanded', 'true');
+    els.chooserChoices.textContent = '';
+    folderChooserStatus('');
+    if (payload === undefined) {
+      els.chooserChoices.appendChild(createElement('p', '', COPY.folderLoading));
+      els.chooserNote.hidden = true;
+      els.chooserCancel.focus?.();
+      return true;
+    }
+    const view = folderChooserView(payload);
+    let first = null;
+    for (const choice of view.choices) {
+      const button = createElement('button', 'workspace-build-chip', choice.label);
+      button.type = 'button';
+      button.dataset.buildFolderMode = choice.mode;
+      if (choice.chip) button.dataset.buildFolderChip = choice.chip;
+      els.chooserChoices.appendChild(button);
+      if (!first) first = button;
+    }
+    els.chooserNote.textContent = view.note;
+    els.chooserNote.hidden = !view.note;
+    (first || els.folderPath).focus?.();
+    return true;
+  }
+
+  function closeFolderChooser({ focus = true } = {}) {
+    const { els } = state;
+    state.chooserOpen = false;
+    if (!els.chooser) return;
+    els.chooser.hidden = true;
+    els.addFolder.setAttribute('aria-expanded', 'false');
+    if (focus) els.addFolder.focus?.();
+  }
+
+  // folderChooserStatus is the path field's own line: what the server said
+  // about a typed path, or nothing.
+  function folderChooserStatus(message, failed = false) {
+    const status = state.els.folderPathStatus;
+    if (!status) return;
+    const body = text(message);
+    status.textContent = body;
+    status.hidden = !body;
+    status.classList.toggle('is-error', Boolean(failed && body));
+  }
+
+  // setFolderBusy locks the attachments while a pick or a removal is in
+  // flight, and leaves a note under the chip (the local look, a cancelled
+  // dialog) until the next change.
+  function setFolderBusy(busy, note = '') {
+    state.folderBusy = Boolean(busy);
+    state.folderNote = text(note);
+    if (state.folderBusy) closeFolderChooser({ focus: false });
+    render();
+  }
+
   // applySession replaces what the pane shows with the server's session. The
   // stored transcript is the authority; pane-only lines keep their place.
   function applySession(session) {
+    const before = attachedFolder()?.id || '';
     state.session = session && typeof session === 'object' ? session : null;
     if (state.session?.assistant) state.assistant = state.session.assistant;
+    // A note is about the folder it was written under; a new folder, or none,
+    // starts clean.
+    if ((attachedFolder()?.id || '') !== before) state.folderNote = '';
     render();
   }
 
@@ -530,6 +874,10 @@
     state.busy = false;
     state.collapsed = false;
     state.withdrawn = false;
+    state.folders = false;
+    state.folderBusy = false;
+    state.folderNote = '';
+    state.chooserOpen = false;
   }
 
   window.WorkspaceBuildPane = {
@@ -544,9 +892,16 @@
     collapse,
     expand,
     destroy,
+    openFolderChooser,
+    closeFolderChooser,
+    folderChooserOpen: () => Boolean(state.root && state.chooserOpen),
+    folderChooserStatus,
+    setFolderBusy,
+    setFolderPathBusy,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),
-    paneView
+    paneView,
+    folderChooserView
   };
 })();

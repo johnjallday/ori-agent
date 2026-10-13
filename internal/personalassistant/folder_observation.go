@@ -235,6 +235,20 @@ func (s *FolderObservationService) resolve(ctx context.Context, target foldercon
 	return selection, "", nil
 }
 
+// ResolveRoot returns the canonical root of a live, exactly scoped selection,
+// for a host that links the folder to a workspace the user is creating from
+// it (the workspace build's Create). The root is the server's own: it is never
+// serialized to a browser, and a selection that was lost, expired, or whose
+// directory changed is refused exactly as Resolve refuses it. The snapshot a
+// build keeps cannot revive a selection; only a new pick can.
+func (s *FolderObservationService) ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error) {
+	selection, _, err := s.resolve(ctx, target, id)
+	if err != nil {
+		return "", err
+	}
+	return selection.root, nil
+}
+
 // Status never rescans. A saved observation remains history when the live
 // selection was lost, expired or replaced. The input must come from storage.
 func (s *FolderObservationService) Status(ctx context.Context, target foldercontext.Target, observation foldercontext.Observation) FolderContinuationReason {

@@ -658,6 +658,35 @@ func TestWorkspaceBuild_TheFolderChipOnlyForBlueprintsThatLinkOne(t *testing.T) 
 	}
 }
 
+// A "create it" the model answers with the flag alone — nothing left to set,
+// nothing to ask — is accepted as the user's instruction, never nudged and
+// replaced by "Which of these is closest?".
+func TestWorkspaceBuild_CreateItAloneIsNotTalk(t *testing.T) {
+	createOnly := strings.Replace(
+		strings.Replace(talkOnlyReply, `"say":"Sounds lovely."`, `"say":"Creating it."`, 1),
+		`"ready":false,"create_now":false`, `"ready":true,"create_now":true`, 1,
+	)
+	f := newBuildFixture(t, true, describeReply, createOnly)
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "a newsletter from my research notes"})
+	build = sessionOf(t, body)
+	_, body = f.turn(t, build, map[string]any{"text": "create it"})
+	got := sessionOf(t, body)
+	if !got.CreateNow || !got.Ready || lastEntry(got).Text != "Creating it." || got.PendingQuestion != nil {
+		t.Fatalf("create alone %+v", got)
+	}
+	if f.provider.calls != 2 {
+		t.Fatalf("the flag alone must not be retried: %d model calls", f.provider.calls)
+	}
+	// On the first turn the flag alone is still talk: the user has not seen a form.
+	f = newBuildFixture(t, true, createOnly, createOnly)
+	build = f.start(t)
+	_, body = f.turn(t, build, map[string]any{"text": "create a newsletter workspace"})
+	if got := sessionOf(t, body); got.CreateNow || lastEntry(got).Text != buildCopySubstitute {
+		t.Fatalf("first-turn create alone %+v", got)
+	}
+}
+
 func TestWorkspaceBuild_CreateItIsOnlyAFlag(t *testing.T) {
 	createIt := strings.Replace(describeReply, `"create_now":false`, `"create_now":true`, 1)
 	f := newBuildFixture(t, true, createIt, createIt)

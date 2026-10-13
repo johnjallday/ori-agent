@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -56,7 +57,49 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 	if b.userProvider != nil {
 		deps.CurrentUserID = b.userProvider.CurrentUserID
 	}
+	// The pane's Add folder is the composer's folder observation service,
+	// which a later phase attaches to the storage facade; it is looked up on
+	// every call. Without a folder digest there is no chooser to offer.
+	if b.personalAssistantFolderDigest != nil {
+		deps.Folders = buildFolderObservations{builder: b}
+	}
 	b.sessionHandler.SetWorkspaceBuild(deps)
+}
+
+// buildFolderObservations hands build sessions the composer's folder
+// observation service, resolved at call time because it is wired after the
+// build endpoints are.
+type buildFolderObservations struct{ builder *ServerBuilder }
+
+func (o buildFolderObservations) service() *personalassistant.FolderObservationService {
+	if o.builder == nil || o.builder.server == nil {
+		return nil
+	}
+	return o.builder.server.Storage.PersonalAssistantFolderObservations
+}
+
+func (o buildFolderObservations) Choices(ctx context.Context, userID string) (personalassistant.FolderDigestView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderDigestView{}, personalassistant.ErrFolderSelection
+	}
+	return service.Choices(ctx, userID)
+}
+
+func (o buildFolderObservations) Observe(ctx context.Context, target foldercontext.Target, mode, choice string) (*foldercontext.Observation, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.Observe(ctx, target, mode, choice)
+}
+
+func (o buildFolderObservations) ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error) {
+	service := o.service()
+	if service == nil {
+		return "", personalassistant.ErrFolderSelection
+	}
+	return service.ResolveRoot(ctx, target, id)
 }
 
 // resolveWorkspaceBuildModel picks the model a build talks to (FR30): the

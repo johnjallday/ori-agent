@@ -84,6 +84,37 @@ func TestFolderObservation_LocalOnlyAndBounded(t *testing.T) {
 	}
 }
 
+// A build's Create links the folder behind an observation through the root
+// the server held for it: the exact selection, for its owner, while it lasts.
+func TestFolderObservation_ResolveRootIsTheHeldRootForTheExactSelection(t *testing.T) {
+	f, service, target := observationFixture(t)
+	ctx := context.Background()
+	observation, err := service.Observe(ctx, target, "chip", "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := service.ResolveRoot(ctx, target, observation.ID)
+	if err != nil || root != filepath.Join(f.home, "Desktop") {
+		t.Fatalf("root = %q, %v", root, err)
+	}
+	encoded, _ := json.Marshal(observation)
+	if strings.Contains(string(encoded), root) {
+		t.Fatal("the root is the server's own, never in the observation")
+	}
+	other := target
+	other.DraftID = "draft-b"
+	if _, err := service.ResolveRoot(ctx, other, observation.ID); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("another draft's selection: %v", err)
+	}
+	if _, err := service.ResolveRoot(ctx, target, "unknown"); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("unknown selection: %v", err)
+	}
+	f.now = f.now.Add(foldercontext.SelectionTTL)
+	if _, err := service.ResolveRoot(ctx, target, observation.ID); !errors.Is(err, ErrFolderSelection) {
+		t.Fatalf("an expired selection is gone: %v", err)
+	}
+}
+
 // "Which of these did I work on last?" is answered from the scan's own dates:
 // each project carries the day of its newest file, and nothing else about it.
 func TestFolderObservation_ProjectsSayWhenTheyWereLastChanged(t *testing.T) {

@@ -51,6 +51,7 @@ type Session = {
   create_now: boolean;
   furthest_step: number;
   turn_count: number;
+  folder?: { observation: Record<string, unknown> } | null;
 };
 
 type RequestBody = Record<string, any>;
@@ -61,6 +62,31 @@ type FakeBuild = {
   turns: RequestBody[];
   drafts: RequestBody[];
   abandons: RequestBody[];
+  folders: RequestBody[];
+};
+
+// The folder the fake "scans" for any choice: the composer's path-free
+// observation, as the server would return it.
+const FAKE_OBSERVATION = {
+  version: 1,
+  id: 'spec-observation-1',
+  folder: 'Elite School',
+  scanned_at: '2026-10-12T09:00:00Z',
+  entries: 44,
+  files: 42,
+  kinds: [{ name: 'py', count: 30 }],
+  projects: [
+    { id: 'candidate-0', name: 'Elite School', files: 42, marker: 'pyproject.toml', root: true }
+  ],
+  coverage: {
+    max_depth: 3,
+    max_entries: 5000,
+    budget_seconds: 3,
+    partial: false,
+    skipped_links: 0,
+    kinds_omitted: 0,
+    projects_omitted: 0
+  }
 };
 
 // The draft keys a turn can set, by the field name the session reports.
@@ -86,7 +112,14 @@ async function fakeBuildServer(
     turnFailures?: number;
   } = {}
 ): Promise<FakeBuild> {
-  const fake: FakeBuild = { session: null, creates: [], turns: [], drafts: [], abandons: [] };
+  const fake: FakeBuild = {
+    session: null,
+    creates: [],
+    turns: [],
+    drafts: [],
+    abandons: [],
+    folders: []
+  };
   let sequence = 0;
   const respond = (route: Route, status: number, body: unknown) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -132,8 +165,21 @@ async function fakeBuildServer(
       return respond(
         route,
         200,
-        options.available === false ? { available: false, reason: 'no_model' } : { available: true }
+        options.available === false
+          ? { available: false, reason: 'no_model' }
+          : { available: true, folders: true }
       );
+    }
+    if (method === 'GET' && path === '/folder-choices') {
+      return respond(route, 200, {
+        available: true,
+        chips: [
+          { id: 'documents', label: 'Documents' },
+          { id: 'desktop', label: 'Desktop' }
+        ],
+        picker_available: false,
+        picker_note: 'Pick a folder from the list for now.'
+      });
     }
     const body: RequestBody = request.postDataJSON() || {};
     if (method === 'POST' && path === '') {
@@ -162,7 +208,7 @@ async function fakeBuildServer(
       if (body.first_message) runTurn(session, String(body.first_message));
       return respond(route, 201, { session });
     }
-    const match = path.match(/^\/([^/]+)\/(turns|draft|abandon)$/);
+    const match = path.match(/^\/([^/]+)\/(turns|draft|abandon|folder|folder\/detach)$/);
     const session = fake.session;
     if (!match || !session || decodeURIComponent(match[1]) !== session.id) {
       return respond(route, 404, { error: 'Build session not found.', code: 'not_found' });
@@ -177,6 +223,27 @@ async function fakeBuildServer(
         error: 'The build changed since you last saw it.',
         code: 'version'
       });
+    }
+    // Add folder: the server's observation is kept on the session and said
+    // as the user's own act; the browser only ever named a chip.
+    if (match[2] === 'folder') {
+      fake.folders.push(body);
+      session.folder = { observation: { ...FAKE_OBSERVATION } };
+      session.transcript.push({
+        role: 'form',
+        text: 'You attached the folder “Elite School”. It will be linked to the workspace when you create it.'
+      });
+      session.applied = [];
+      session.version += 1;
+      return respond(route, 200, { session });
+    }
+    if (match[2] === 'folder/detach') {
+      if (session.folder) {
+        session.folder = null;
+        session.transcript.push({ role: 'form', text: 'You removed the attached folder.' });
+        session.version += 1;
+      }
+      return respond(route, 200, { session });
     }
     if (match[2] === 'turns') {
       await options.turnGate?.();
@@ -419,6 +486,81 @@ test('golden path: three turns and no form clicks create the workspace the build
     new RegExp(`/workspaces/${workspace.folder_slug}\\?agent=content%20lead`)
   );
   await expect(page.getByRole('region', { name: 'Next action', exact: true })).toBeVisible();
+});
+
+test('a folder attached in the pane shows on the chip, the draft line, the turn, and Review', async ({
+  page
+}) => {
+  const fake = await fakeBuildServer(page, [
+    {
+      text: 'I can see a Python project. I picked Code Project and named it Elite School.',
+      set: {
+        template_id: 'code-project',
+        name: 'Elite School',
+        description: 'The elite_school repository, linked in place.'
+      }
+    }
+  ]);
+  await openFromHome(page);
+  await expect(pane(page)).toBeVisible();
+  await expect(page.locator('#workspaceBuildFolder')).toBeHidden();
+
+  await pane(page).getByRole('button', { name: 'Add folder' }).click();
+  const chooser = page.locator('#workspaceBuildFolderChooser');
+  await expect(chooser).toBeVisible();
+  await expect(chooser).toContainText('File contents are not read');
+  await expect(chooser).toContainText('Pick a folder from the list for now.');
+  // Escape closes only the sheet: the dialog stays, and focus returns to Add folder.
+  await page.keyboard.press('Escape');
+  await expect(chooser).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(pane(page).getByRole('button', { name: 'Add folder' })).toBeFocused();
+  await pane(page).getByRole('button', { name: 'Add folder' }).click();
+  await expect(chooser).toBeVisible();
+  const attached = page.waitForResponse(response =>
+    /\/api\/workspaces\/build-sessions\/[^/]+\/folder$/.test(new URL(response.url()).pathname)
+  );
+  await chooser.getByRole('button', { name: 'Documents' }).click();
+  await attached;
+  await expect(chooser).toBeHidden();
+  await expect(page.locator('#workspaceBuildFolderName')).toHaveText('Elite School');
+  await expect(page.locator('#workspaceBuildFolderSummary')).toContainText('42 files observed');
+  await expect(page.locator('#workspaceBuildFolderSummary')).toContainText('contents not read');
+  await expect(page.locator('#workspaceBuildDraftText')).toContainText('Folder: Elite School');
+  await expect(pane(page)).toContainText('Folder attached');
+  expect(fake.folders).toHaveLength(1);
+  expect(fake.folders[0]).toMatchObject({ mode: 'chip', chip: 'documents' });
+  expect(fake.folders[0].path).toBeUndefined();
+
+  // An empty Send asks for the folder itself; the reply fills the form.
+  await expect(composer(page)).toBeEnabled();
+  const turn = page.waitForResponse(response => isTurn(response.url()));
+  await composer(page).press('Enter');
+  await settle(page, turn);
+  expect(fake.turns.at(-1)?.text).toBe('Set it up from the attached folder.');
+  await expect(page.locator('#folderNameInput')).toHaveValue('Elite School');
+
+  // Review names the folder Create will link, whichever surface is active.
+  await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(1);
+  await expect(page.locator('[data-build-folder-receipt]')).toContainText(
+    'Elite School · 42 files observed'
+  );
+  await manual(page);
+  await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(1);
+  await assisted(page);
+
+  const detached = page.waitForResponse(response =>
+    /\/folder\/detach$/.test(new URL(response.url()).pathname)
+  );
+  await page
+    .locator('#workspaceBuildFolder')
+    .getByRole('button', { name: 'Remove folder' })
+    .click();
+  await detached;
+  await expect(page.locator('#workspaceBuildFolder')).toBeHidden();
+  await expect(page.locator('#workspaceBuildDraftText')).not.toContainText('Folder:');
+  await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(0);
+  await expect(composer(page)).toBeFocused();
 });
 
 test('a blueprint switched on the form is said back and the assistant re-staffs', async ({

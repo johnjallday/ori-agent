@@ -32,6 +32,8 @@ import (
 //	PATCH /api/workspaces/build-sessions/{id}/draft      the user's own form edits
 //	POST  /api/workspaces/build-sessions/{id}/abandon    Start over / Discard
 //
+// The pane's Add folder is in workspace_build_session_folder.go.
+//
 // The session's draft is the create request. The assistant proposes; the
 // host validates every field (workspace_build_session_validate.go); the
 // wizard renders; the user confirms with the ordinary Create.
@@ -59,6 +61,9 @@ type WorkspaceBuildDeps struct {
 	// can be resolved.
 	ModelAvailable func(provider, model string) bool
 	CurrentUserID  func(ctx context.Context) (string, error)
+	// Folders observes a folder the user attaches in the pane and resolves it
+	// at Create. Nil leaves the pane without Add folder.
+	Folders WorkspaceBuildFolders
 }
 
 // SetWorkspaceBuild wires build sessions. Without it every build endpoint
@@ -129,6 +134,12 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			return
 		}
 		h.getWorkspaceBuildAvailability(w, r)
+	case "folder-choices":
+		if r.Method != http.MethodGet {
+			_ = orihttp.RespondMethodNotAllowed(w)
+			return
+		}
+		h.getWorkspaceBuildFolderChoices(w, r)
 	case "":
 		if r.Method != http.MethodPost {
 			_ = orihttp.RespondMethodNotAllowed(w)
@@ -137,6 +148,14 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		h.createWorkspaceBuildSession(w, r)
 	default:
 		parts := strings.Split(rest, "/")
+		if len(parts) == 3 && strings.TrimSpace(parts[0]) != "" && parts[1] == "folder" && parts[2] == "detach" {
+			if r.Method != http.MethodPost {
+				_ = orihttp.RespondMethodNotAllowed(w)
+				return
+			}
+			h.postWorkspaceBuildFolderDetach(w, r, parts[0])
+			return
+		}
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
 			_ = orihttp.RespondNotFound(w, "Build session not found")
 			return
@@ -149,7 +168,9 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			h.patchWorkspaceBuildDraft(w, r, id)
 		case action == "abandon" && r.Method == http.MethodPost:
 			h.abandonWorkspaceBuildSession(w, r, id)
-		case action == "turns" || action == "draft" || action == "abandon":
+		case action == "folder" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildFolder(w, r, id)
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -208,6 +229,9 @@ func (h *Handler) getWorkspaceBuildAvailability(w http.ResponseWriter, r *http.R
 	body := map[string]any{"available": readiness.available}
 	if !readiness.available {
 		body["reason"] = readiness.reason
+	} else {
+		// Whether the pane may offer Add folder (the folder seam is wired).
+		body["folders"] = h.workspaceBuild.Folders != nil
 	}
 	_ = orihttp.RespondJSON(w, http.StatusOK, body)
 }
@@ -638,7 +662,11 @@ func buildReplyDoesWork(session *personalassistant.WorkspaceBuildSession, reply 
 	scratch := cloneBuildSession(*session)
 	result := applyBuildReply(&scratch, reply.Patch, validation)
 	asked := strings.TrimSpace(reply.Ask.Question) != "" || result.askFolder
-	if !result.changed() && !asked {
+	// "Create it" is work of its own once the user has seen the form: the
+	// flag alone, with nothing left to set, is the user's instruction carried
+	// out, not talk to be retried and replaced.
+	creating := reply.CreateNow && session.TurnCount > 1
+	if !result.changed() && !asked && !creating {
 		return false, result.rejections
 	}
 	// The first answer to the user's description sets the essentials.
@@ -829,8 +857,12 @@ func buildRefusalNote(rejections []personalassistant.BuildRejection) string {
 		part := ""
 		switch {
 		case field == buildFieldAskFolder:
-			// A folder this blueprint cannot link has one fixed way forward.
-			folder = buildCopyFolderLater
+			// A folder this blueprint cannot link has one fixed way forward. A
+			// question refused because a folder is already attached needs no
+			// note: the next turn's prompt says so.
+			if rejection.Reason == buildReasonNoFolder {
+				folder = buildCopyFolderLater
+			}
 		case field == buildFieldBlueprint:
 			part = "the blueprint"
 		case field == buildFieldName:
@@ -1076,6 +1108,13 @@ func buildSummaryFor(session personalassistant.WorkspaceBuildSession, created pe
 	}
 	if team != "" {
 		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{Section: "team", Text: team})
+	}
+	// The folder line states what Create linked: the folder attached in the
+	// pane, which a create with a lost pick refuses rather than drops.
+	if folder := session.Folder; folder != nil {
+		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{
+			Section: "folder", Text: fmt.Sprintf("Linked the folder “%s” you attached.", folder.Observation.Folder),
+		})
 	}
 	return summary
 }

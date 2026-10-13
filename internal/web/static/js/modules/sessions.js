@@ -835,6 +835,7 @@ const sessionManager = {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
+      if (this.consumeWorkspaceBuildEscape()) return;
       if (this.workspaceCreatorContext?.submitting) {
         this.showToast('Finish the confirmed workspace change before closing.', 'warning');
         return;
@@ -852,6 +853,7 @@ const sessionManager = {
         if (event.key !== 'Escape' || !addFolderModal?.classList.contains('show')) return;
         event.preventDefault();
         event.stopPropagation();
+        if (this.consumeWorkspaceBuildEscape()) return;
         if (this.workspaceCreatorContext?.submitting) {
           this.showToast('Finish the confirmed workspace change before closing.', 'warning');
           return;
@@ -8387,6 +8389,7 @@ const sessionManager = {
       identity +
       details +
       this.renderBlueprintInputsReceipt() +
+      this.renderBuildFolderReceipt() +
       this.renderExistingProjectReceipt(selectedTemplate) +
       this.renderWorkspaceGroupRequirementReceipt(selectedTemplate) +
       this.renderWorkspaceReceiptTeam(view)
@@ -11579,7 +11582,10 @@ const sessionManager = {
       create: body => call('POST', base, body),
       turn: (id, body) => call('POST', sessionURL(id, 'turns'), body),
       draft: (id, body) => call('PATCH', sessionURL(id, 'draft'), body),
-      abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {})
+      abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {}),
+      folderChoices: () => call('GET', `${base}/folder-choices`),
+      folder: (id, body) => call('POST', sessionURL(id, 'folder'), body),
+      detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body)
     };
   },
 
@@ -11608,6 +11614,15 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-action', event => {
       void this.runWorkspaceBuildAction(event?.detail?.action);
+    });
+    modal.addEventListener('workspace-build-folder-open', () => {
+      void this.openWorkspaceBuildFolderChooser();
+    });
+    modal.addEventListener('workspace-build-folder', event => {
+      void this.attachWorkspaceBuildFolder(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-folder-remove', () => {
+      void this.detachWorkspaceBuildFolder();
     });
     // Bootstrap focuses the dialog once it is shown; in build mode the
     // conversation is where the user starts, so focus moves to the composer.
@@ -11707,7 +11722,12 @@ const sessionManager = {
       lastTurn: null,
       resumeLine: '',
       chosen: new Map(),
-      chosenRoles: new Set()
+      chosenRoles: new Set(),
+      // Add folder is offered only when the server wires the composer's
+      // folder chooser for builds.
+      folders: availability?.folders === true,
+      folderPending: false,
+      folderGeneration: 0
     };
     this.mountWorkspaceBuildPane();
     // A slow availability read must not replace the wizard the user is already using.
@@ -11723,7 +11743,7 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
-    pane.mount({ assistant: build.assistant });
+    pane.mount({ assistant: build.assistant, folders: build.folders });
     this.syncWorkspaceBuildPresentation();
   },
 
@@ -11896,7 +11916,13 @@ const sessionManager = {
   // form edits are sent first, so the assistant answers the form as it is.
   async sendWorkspaceBuildTurn(detail = {}) {
     const build = this.workspaceBuild;
-    if (!build?.session || build.busy || build.turnPending || !this.workspaceBuildAssisted())
+    if (
+      !build?.session ||
+      build.busy ||
+      build.turnPending ||
+      build.folderPending ||
+      !this.workspaceBuildAssisted()
+    )
       return;
     const choiceID = String(detail.choiceId || '').trim();
     const text = String(detail.text || '')
@@ -12182,7 +12208,8 @@ const sessionManager = {
       const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
-      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}`;
+      const folder = String(this.workspaceBuild?.session?.folder?.observation?.folder || '').trim();
+      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}`;
     }
   },
 
@@ -12856,6 +12883,254 @@ const sessionManager = {
         { id: 'folder_skip', label: pane.COPY.noFolder }
       ]
     });
+  },
+
+  // ----- Add folder (the pane's own) -----
+  //
+  // The folder the user attaches here is the composer's folder context, kept
+  // on the build session: the server scans names, kinds, and counts (never
+  // contents), the model reads that snapshot, and Create links the folder to
+  // the new workspace. The browser never sends a path to the build: a
+  // known-folder chip, the picker (a dialog the server opens), or a typed path
+  // the folder-picker endpoint checks first and answers with a token.
+
+  // Escape inside the pane's Add folder sheet closes only the sheet. The
+  // dialog's own Escape handlers (one on the dialog, one capturing on the
+  // window) ask here first, since the window one fires before the sheet
+  // could ever stop the key itself.
+  consumeWorkspaceBuildEscape() {
+    const pane = this.workspaceBuildPane();
+    if (!this.workspaceBuild || !pane?.folderChooserOpen?.()) return false;
+    pane.closeFolderChooser();
+    return true;
+  },
+
+  // A folder request never overlaps a turn, the draft flush before a turn, or
+  // another folder request: each would move the session's version under the
+  // other, and the loser's 409 would cost the user what they typed.
+  workspaceBuildFolderLocked(build) {
+    return Boolean(build.busy || build.turnPending || build.folderPending);
+  },
+
+  async openWorkspaceBuildFolderChooser() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    build.folderGeneration = (build.folderGeneration || 0) + 1;
+    const generation = build.folderGeneration;
+    if (!pane.openFolderChooser()) return;
+    let result;
+    try {
+      result = await this.workspaceBuildApi().folderChoices();
+    } catch (_) {
+      result = { ok: false, body: {} };
+    }
+    // Cancelled, closed, or reopened meanwhile: this answer is about a sheet
+    // that is gone.
+    if (
+      this.workspaceBuild !== build ||
+      build.folderGeneration !== generation ||
+      !pane.folderChooserOpen()
+    )
+      return;
+    if (!result?.ok || result.body?.available !== true) {
+      pane.openFolderChooser({
+        chips: [],
+        picker_available: false,
+        picker_note: 'Folders can’t be added right now. Your draft is unchanged.'
+      });
+      return;
+    }
+    pane.openFolderChooser(result.body);
+  },
+
+  // attachWorkspaceBuildFolder sends one choice to the build: a chip, the
+  // picker, or the token for a typed path the folder-picker endpoint accepted.
+  async attachWorkspaceBuildFolder(detail = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    const mode = String(detail.mode || '').trim();
+    let body;
+    if (mode === 'chip') {
+      const chip = String(detail.chip || '').trim();
+      if (!chip) return;
+      body = { mode, chip };
+    } else if (mode === 'picker') {
+      body = { mode };
+    } else if (mode !== 'path') {
+      return;
+    }
+    // One pick at a time from here: a second Use this path, or a chip while
+    // a path is still being checked, is ignored rather than sent.
+    build.folderPending = true;
+    let attaching = false;
+    let note = '';
+    try {
+      if (mode === 'path') {
+        pane.setFolderPathBusy(true);
+        let token = '';
+        try {
+          token = await this.selectWorkspaceBuildFolderPath(detail.path);
+        } finally {
+          if (this.workspaceBuild === build) pane.setFolderPathBusy(false);
+        }
+        // Refused, or the sheet was cancelled while the path was checked.
+        if (this.workspaceBuild !== build || !token || !pane.folderChooserOpen()) return;
+        body = { mode: 'selection', selection_token: token };
+      }
+      attaching = true;
+      pane.setFolderBusy(true, pane.COPY.folderLooking);
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      body.version = Number(build.session.version) || 0;
+      let result;
+      try {
+        result = await this.workspaceBuildApi().folder(build.session.id, body);
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+        if (this.workspaceBuild === build) {
+          pane.showLine('The build moved on in another tab. Try Add folder again.');
+        }
+        return;
+      }
+      if (result?.status === 409 && result.body?.code === 'unavailable') {
+        this.failWorkspaceBuild();
+        return;
+      }
+      const session = result?.body?.session || null;
+      if (!result?.ok || !session) {
+        pane.showLine(
+          String(result?.body?.error || '').trim() ||
+            'That folder could not be used. Try Add folder again; your draft is unchanged.'
+        );
+        return;
+      }
+      this.adoptWorkspaceBuildSession(session);
+      if (result.body.cancelled) {
+        note = pane.COPY.folderCancelled;
+        return;
+      }
+      pane.showLine(pane.COPY.folderAttached);
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.folderPending = false;
+        if (attaching) {
+          pane.setFolderBusy(false, note);
+          pane.focusComposer?.();
+        }
+      }
+    }
+  },
+
+  // A typed path goes to the one endpoint every surface sends a path to; the
+  // build only ever hears the token it answers with.
+  async selectWorkspaceBuildFolderPath(pathValue) {
+    const pane = this.workspaceBuildPane();
+    const typed = String(pathValue || '').trim();
+    if (!typed) {
+      pane?.folderChooserStatus(pane.COPY.folderPathEmpty, true);
+      return '';
+    }
+    const refused = 'That folder could not be used. Check the path and try again.';
+    pane?.folderChooserStatus('Checking…');
+    let response;
+    let result = {};
+    try {
+      response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ path: typed })
+      });
+      result = await response.json().catch(() => ({}));
+    } catch (_) {
+      pane?.folderChooserStatus(refused, true);
+      return '';
+    }
+    if (!response.ok || !result?.success || !result.selected || !result.selection_token) {
+      pane?.folderChooserStatus(String(result?.error || '').trim() || refused, true);
+      return '';
+    }
+    pane?.folderChooserStatus('');
+    return String(result.selection_token);
+  },
+
+  async detachWorkspaceBuildFolder() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session?.folder || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    build.folderPending = true;
+    pane.setFolderBusy(true);
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      let result;
+      try {
+        result = await this.workspaceBuildApi().detachFolder(build.session.id, {
+          version: Number(build.session.version) || 0
+        });
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+        return;
+      }
+      const session = result?.body?.session || null;
+      if (!result?.ok || !session) {
+        pane.showLine('The folder could not be removed. Try again.');
+        return;
+      }
+      this.adoptWorkspaceBuildSession(session);
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.folderPending = false;
+        pane.setFolderBusy(false);
+        pane.focusComposer?.();
+      }
+    }
+  },
+
+  // adoptWorkspaceBuildSession takes a session the folder endpoints returned.
+  // The form is untouched by a folder, so only the pane, the version, the
+  // draft line, and Review's folder card move.
+  adoptWorkspaceBuildSession(session) {
+    const build = this.workspaceBuild;
+    if (!build || !session) return;
+    if (build.session?.id === session.id && Number(build.session.version) > Number(session.version))
+      return;
+    build.session = session;
+    this.rememberWorkspaceBuildSession(session);
+    this.workspaceBuildPane()?.applySession(session);
+    this.syncWorkspaceBuildPresentation();
+    if (this.isWorkspaceCreator?.()) this.refreshWorkspaceReview();
+  },
+
+  // Review's statement of the folder attached in the conversation: Create
+  // links it in place. Shown whichever surface is active, so a manual finish
+  // still sees what the build will link.
+  renderBuildFolderReceipt() {
+    const session = this.workspaceBuild?.session;
+    const observation = session?.folder?.observation;
+    if (!observation || session.status !== 'open') return '';
+    const files = Math.max(0, Number(observation.files) || 0);
+    const name = String(observation.folder || 'Folder');
+    return `
+      <div class="workspace-review-card" data-build-folder-receipt>
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Attached folder</span>
+          <span class="workspace-review-card-meta">${this.escapeHtml(name)} · ${files} ${files === 1 ? 'file' : 'files'} observed</span>
+          <span class="workspace-review-card-note">Ori will link this folder to the workspace. Nothing in it is moved or changed; its contents have not been read.</span>
+        </div>
+      </div>`;
   },
 
   // The first gate the wizard would refuse Create on, in the wizard's own

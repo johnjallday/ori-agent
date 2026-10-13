@@ -264,9 +264,13 @@ func applyBuildReply(session *personalassistant.WorkspaceBuildSession, patch bui
 	}
 
 	if patch.sets(buildFieldAskFolder) && patch.AskFolder {
-		if hasTemplate && supportsExistingProject(template) {
+		switch {
+		case session.Folder != nil:
+			// The user already attached one in the pane; Create links it.
+			result.reject(buildFieldAskFolder, buildReasonFolderAttached)
+		case hasTemplate && supportsExistingProject(template):
 			result.askFolder = true
-		} else {
+		default:
 			result.reject(buildFieldAskFolder, buildReasonNoFolder)
 		}
 	}

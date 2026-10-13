@@ -1389,7 +1389,7 @@ Bodies are capped at 256 KiB and must be one JSON object with only the fields na
 { "available": false, "reason": "no_model" }
 ```
 
-`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the system model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
+`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the system model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. When available, `folders` says whether the pane may offer Add folder (the composer's folder chooser is wired for builds). The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
 
 ### Create or Resume
 
@@ -1458,7 +1458,7 @@ or
 { "choice_id": "c1-1", "version": 3 }
 ```
 
-Exactly one of `text` (≤ 2,000 characters) or `choice_id`. A chip is answered with its label. `"auto": true` marks the turn the client sends on its own after the user switched the blueprint on the form; it is never recorded as the user's request. Fields the user edited on the form while the model was working keep the user's value; the rest of the reply still applies. The user's turn is stored before the model runs, so a failed model call keeps it: the transcript then carries the fixed line "I couldn’t reach my model just now. Keep going on the form, or try again." with a `try_again` chip. A reply that neither changes the form nor asks a question is retried once, then replaced with "Which of these is closest?" and three blueprint chips. `folder_choose` is `400` (choosing a folder happens on the form). Returns `200` with `{ "session": … }`.
+Exactly one of `text` (≤ 2,000 characters) or `choice_id`. A chip is answered with its label. `"auto": true` marks the turn the client sends on its own after the user switched the blueprint on the form; it is never recorded as the user's request. Fields the user edited on the form while the model was working keep the user's value; the rest of the reply still applies. The user's turn is stored before the model runs, so a failed model call keeps it: the transcript then carries the fixed line "I couldn’t reach my model just now. Keep going on the form, or try again." with a `try_again` chip. A reply that neither changes the form nor asks a question is retried once, then replaced with "Which of these is closest?" and three blueprint chips — except a reply that answers "create it" with `create_now` alone after the first turn, which is the user's instruction carried out and stands as it is. `folder_choose` is `400` (choosing a folder happens on the form). Returns `200` with `{ "session": … }`.
 
 ### Report Form Edits
 
@@ -1469,6 +1469,36 @@ Exactly one of `text` (≤ 2,000 characters) or `choice_id`. A chip is answered 
 ```
 
 The client sends the form's current create payload (only the draft keys above) about half a second after the user stops editing. The server keeps a blueprint only if this user can create from it. Each change is written once to the transcript as a `form` entry ("You renamed it to Field Notes"), which the assistant reads on its next turn. `"sync": true` marks a write that only reports what applying the assistant's own turn did to the form; it is recorded but never said back. `step` (1–4) records the furthest wizard step for resume; `team_state` is at most 32 KiB. The response is `{ "session": …, "blueprint_changed": true|false }`; the client answers a changed blueprint with an automatic turn so the assistant re-staffs the team.
+
+### Folder Choices
+
+**Endpoint:** `GET /api/workspaces/build-sessions/folder-choices`
+
+```json
+{ "available": true, "chips": [{ "id": "documents", "label": "Documents" }], "picker_available": false, "picker_note": "Pick a folder from the list for now." }
+```
+
+What the pane's Add folder sheet can offer: the composer's known-folder chips, whether the native folder dialog can open here, and the sentence that explains a missing one. `available` is false when the folder chooser is not wired for builds. Read only.
+
+### Attach a Folder
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/folder`
+
+```json
+{ "mode": "chip", "chip": "documents", "version": 3 }
+```
+
+`mode` is `chip` (with `chip`), `picker` (the server opens its folder dialog), or `selection` (with `selection_token`, the receipt `POST /api/folder-picker/select-path` issued for a typed path it checked). **No path is accepted** (`400`). The server looks at the folder the way the assistant's composer does — names, kinds, counts, project markers, last-changed dates, coverage; it never reads a file — and stores the path-free observation on the session as `folder.observation`, with a `form` transcript entry ("You attached the folder “X”. It will be linked to the workspace when you create it.") the assistant hears on its next turn. The model then sees the observation and may not ask its own folder question. `version` is checked before the dialog opens; the pick itself then stands. A cancelled dialog returns `200` with `{ "session": …, "cancelled": true }` and changes nothing. A refused folder (too broad, unreadable, the dialog off, a pick still running) is `409` with `code: folder` and a sentence to show; `code: version`, `closed`, and `not_found` as elsewhere. Returns `{ "session": … }`.
+
+### Remove the Folder
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/folder/detach`
+
+```json
+{ "version": 4 }
+```
+
+Clears the attached folder and says so in the transcript. Removing twice is harmless. Returns `{ "session": … }`.
 
 ### Abandon
 
@@ -1483,6 +1513,8 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 ### Create from a Build
 
 `POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or closed `build_session_id` never blocks the create.
+
+When the named build has an attached folder, Create links that folder to the new workspace in place — as a linked directory reference, and as its primary directory unless the create already set one outside the workspace folder — and the summary gains a `folder` decision. The folder is resolved through the server's own hold on the pick (the same 30-minute window the assistant's composer has) before anything is created: a pick the server no longer holds is `409` with `conflict.type: "build_folder"` and an `error` to show, and nothing is created. Nothing is copied, moved, or read in the linked folder.
 
 ## Personal Assistant Folder Digest API
 
