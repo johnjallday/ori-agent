@@ -58,6 +58,13 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		},
 		InspectSoftware: inspectSoftwareProject,
 		SoftwareProject: setupHost.softwareProject,
+		StructureGroup: func(_ context.Context, userID string, offer personalassistant.FolderOffer, root, groupID string) (personalassistant.FolderCreateResult, error) {
+			return structureGroupReceipt(b, userID, offer, root, groupID)
+		},
+		// Looked up at call time: the session handler is wired in a later phase.
+		WorkspaceNameTaken: func(ctx context.Context, name string) bool {
+			return b.sessionHandler != nil && b.sessionHandler.WorkspaceNameTaken(ctx, name)
+		},
 		LegacyDeclined: func(ctx context.Context, userID, domain string) (bool, error) {
 			if b.personalAssistantStore == nil || domain != "music_production" {
 				return false, nil

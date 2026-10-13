@@ -3,6 +3,7 @@ package agenthttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -178,12 +179,31 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 	if view.Portfolio != nil {
 		result.Operation = "create_or_join_home_and_list_collection"
 	}
+	// A folder that holds several projects is reviewed as one group with a
+	// workspace per folder. What it cannot use is part of the proposal, not a
+	// blocker: the setup goes ahead in its plain form.
+	structure := view.Structure
+	if structure != nil && structure.Group.Type == personalassistant.FolderGroupLibrary {
+		structure = nil // the user chose the Home-plus-library setup in Adjust
+	}
+	if structure != nil {
+		result.Operation, result.Blocker = "create_group_with_workspaces", ""
+		result.DestinationStatus = structure.Group.DestinationState
+		result.DestinationName = workspaceContextText(structure.Group.Name, 120)
+		result.DestinationKind = "group"
+		if structure.Group.Type == personalassistant.FolderGroupHome {
+			result.DestinationKind = "home"
+		}
+	}
 	var lines []personalassistant.FolderPlanLine
 	if view.Plan != nil {
 		lines = view.Plan.Lines
 	}
 	if view.Setup != nil {
 		lines = view.Setup.Lines
+	}
+	if len(lines) == 0 && structure != nil && view.Status == personalassistant.FolderOfferPending {
+		lines = structureReviewLines(structure)
 	}
 	if len(lines) == 0 && view.Capability == nil && view.CreateAvailable && view.Status == personalassistant.FolderOfferPending {
 		lines = []personalassistant.FolderPlanLine{
@@ -257,7 +277,9 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 			result.Controls = []string{"Continue setup"}
 		} else if view.Status == personalassistant.FolderOfferPending {
 			result.Status = "awaiting_confirmation"
-			if view.Software != nil {
+			if structure != nil {
+				result.Controls = []string{"Set up", "Adjust…", "Keep chatting"}
+			} else if view.Software != nil {
 				softwareReviewState(view, result)
 			} else if view.Capability != nil {
 				if view.Plan != nil {
@@ -284,6 +306,29 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 		result.Controls = nil
 	}
 	return result
+}
+
+// structureReviewLines says what a proposed group's setup would do, before a
+// stamped plan exists to say it: the group, the workspaces, and what the
+// proposal goes without.
+func structureReviewLines(structure *personalassistant.FolderStructure) []personalassistant.FolderPlanLine {
+	group := "Creates group " + structure.Group.Name
+	if structure.Group.DestinationState == "existing" {
+		group = "Adds to your " + structure.Group.Name
+	}
+	count := len(structure.Included())
+	workspaces := fmt.Sprintf("Creates %d workspaces, each linked to its own folder", count)
+	if count == 1 {
+		workspaces = "Creates 1 workspace, linked to its own folder"
+	}
+	lines := []personalassistant.FolderPlanLine{
+		{Name: group},
+		{Name: workspaces, Detail: "Nothing is moved, copied or read."},
+	}
+	for _, note := range structure.Notes {
+		lines = append(lines, personalassistant.FolderPlanLine{Name: note})
+	}
+	return append(lines, personalassistant.FolderPlanLine{Name: "No task is created or started"})
 }
 
 // softwareReviewState describes a pending software project card. Such a card

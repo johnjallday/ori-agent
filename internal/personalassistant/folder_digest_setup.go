@@ -23,6 +23,11 @@ const folderSetupTimeout = 20 * time.Minute
 // recognized project with a reviewed capability row, or a whole collection of
 // projects (a portfolio) — never one whose capability was suppressed.
 func eligibleForOneCard(offer FolderOffer) bool {
+	// A proposed group is the host's own setup and needs no capability: a
+	// domain the user declined only changes what the group is made of.
+	if offer.Structure.ProposesWorkspaces() {
+		return true
+	}
 	return !offer.CapabilitySuppressed && (isProjectCapabilityOffer(offer) || isSoftwareOffer(offer))
 }
 
@@ -73,10 +78,11 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
 	if err != nil || len(plan.Lines) == 0 {
 		v.SetupUnavailableReason = "setup_unavailable"
+		v.Availability = setupAvailability(err)
 		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
 			switch reason.SetupPreviewReason() {
 			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable",
-				"project_exists", "assistant_unavailable":
+				"project_exists", "assistant_unavailable", "name_taken":
 				v.SetupUnavailableReason = reason.SetupPreviewReason()
 			}
 		}
@@ -323,6 +329,11 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
 			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent,
 		}
+		if structure := plan.Intent.Structure; structure != nil && structure.GroupType == FolderGroupPlain {
+			// The user confirmed a plain group. The folder is no longer a
+			// collection waiting for a Home, and nothing later treats it as one.
+			item.Portfolio = nil
+		}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: item.ID, Action: "setup", At: now})
 		pruneFolderDigest(d)
 		started = *item
@@ -385,6 +396,15 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 	}
 	offer := doc.Offer(offerID)
 	if offer == nil || offer.Setup == nil || offer.Setup.Status != FolderSetupDone || offer.Status != FolderOfferAwaitingOutcome {
+		return
+	}
+	if offer.Setup.Intent.Recipe == FolderRecipeStructure {
+		// A structure has no plugin quest to read back. Its proof is the group
+		// and its workspaces themselves, re-read from canonical state.
+		if err := s.resolveStructure(ctx, userID, offerID); err != nil {
+			logger.Warn("Folder structure setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
+			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+		}
 		return
 	}
 	if offer.Portfolio != nil {

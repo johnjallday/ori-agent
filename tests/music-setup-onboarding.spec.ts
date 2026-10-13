@@ -103,6 +103,14 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
     capability: { setup_source: 'portfolio' }
   });
   await page.goto('/?panel=today&folder=show');
+  // With the provider not installed yet the folder is first proposed as a plain
+  // group; listing it in the Home is the Adjust choice this journey takes.
+  const proposed = page.locator('#personalAssistantFolderOffer');
+  await expect(proposed).toContainText('Set up a group with 6 workspaces?');
+  await proposed.getByRole('button', { name: 'Adjust…', exact: true }).click();
+  const sheet = proposed.locator('[data-folder-adjust]').first();
+  await sheet.locator('input[type=radio][value=library]').check();
+  await sheet.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.locator('#personalAssistantFolderOffer')).toContainText('6 music projects');
   page.on('dialog', dialog => dialog.accept()); // Only inside the disposable HOME.
   await page
@@ -136,6 +144,10 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
   await expect(setupCard.locator('#projectSetupNextAction')).toHaveText(
     'Start library and review Documents'
   );
+  // The assistant's drawer was open on Home and stays open on the next page,
+  // where it would lie over this card's button.
+  const drawerClose = page.getByRole('button', { name: 'Close personal assistant' });
+  if (await drawerClose.isVisible().catch(() => false)) await drawerClose.click();
   await setupCard.locator('#projectSetupNextAction').click();
   const grant = page.getByRole('dialog', { name: 'Connect this discovery folder?' });
   await expect(grant).toContainText(documents);

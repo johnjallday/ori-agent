@@ -32,6 +32,10 @@ const (
 	// PortfolioMinProjects is the number of immediate same-shape projects
 	// needed to suggest the shape's Home, not separate workspaces.
 	PortfolioMinProjects = 5
+	// CollectionMinProjects is the number of immediate project subfolders that
+	// makes a root a collection: a folder that holds separate projects, each of
+	// which can have its own workspace. Two matches the mixed verdict.
+	CollectionMinProjects = 2
 )
 
 // documentExtensions are exempt from the density rule (FR16): a folder of
@@ -226,6 +230,32 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 	}
 	v.Reason = reasonFor(v, r, now)
 	return v
+}
+
+// IsProject reports whether a candidate carries a project signal (FR16): a
+// known marker, or the density rule.
+func IsProject(c Candidate, now time.Time) bool { return projectSignal(c, now) }
+
+// IsCollection reports whether the scanned root holds separate projects that
+// can be set up together: it carries no marker of its own and at least
+// CollectionMinProjects of its immediate subfolders are projects. A root that
+// is itself a project (a repository with packages, a session folder with its
+// backups) is one project, however its subfolders look. Software projects do
+// not count: each has a reviewed setup of its own, with its own assistant, and
+// a folder of repositories keeps asking which one. Like the portfolio signal,
+// this is read from the unfiltered scan: a declined subfolder is still evidence
+// of the root's shape.
+func IsCollection(r Result, now time.Time) bool {
+	if r.RootCandidate().HasMarker() {
+		return false
+	}
+	projects := 0
+	for _, candidate := range r.Subfolders() {
+		if projectSignal(candidate, now) && ShapeFor(candidate) != ShapeCode {
+			projects++
+		}
+	}
+	return projects >= CollectionMinProjects
 }
 
 func portfolioFromScan(r Result, now time.Time) *PortfolioSignal {

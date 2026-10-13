@@ -80,8 +80,21 @@ test('a local-only provider cannot resolve a portfolio offer or grant a discover
   expect(beforeHome).toHaveLength(1); // My HQ, not an implicit music Home.
   await page.goto('/?panel=today&folder=show');
   const offerCard = page.locator('#personalAssistantFolderOffer');
-  await expect(offerCard).toContainText('5 music projects');
+  // A Home whose provider cannot be verified does not block the folder: it is
+  // proposed as a plain group, and the card says why the Home is not used.
+  await expect(offerCard).toContainText('Set up a group with 5 workspaces?');
+  await expect(offerCard).toContainText(
+    'Music Production Home could not be verified right now; a plain group is proposed instead.'
+  );
   await shot(page, '12-portfolio-observed-offer');
+  // Listing the folder in the Home is still one choice away in Adjust, and is
+  // the earlier portfolio setup with every one of its refusals.
+  await offerCard.getByRole('button', { name: 'Adjust…', exact: true }).click();
+  const sheet = offerCard.locator('[data-folder-adjust]').first();
+  await sheet.locator('input[type=radio][value=library]').check();
+  await sheet.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(offerCard).toContainText('5 music projects');
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(1);
   await offerCard.locator('[data-folder-action="setup"]').click();
   // This local clean-candidate installation is not a *published reviewed
   // release*. The offer setup must fail closed without contacting GitHub or

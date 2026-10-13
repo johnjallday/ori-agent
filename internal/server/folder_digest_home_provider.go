@@ -16,10 +16,32 @@ import (
 // URL or plugin ID. Preview and install both re-verify the release.
 type folderHomeProviderSetup struct{ builder *ServerBuilder }
 
+// homeProviderPreviewError is ErrFolderOutcomeUnavailable with what the preview
+// found, for the log. Its text is fixed wording that names no path, and its
+// message to a caller is the unavailable outcome's own.
+type homeProviderPreviewError string
+
+func (e homeProviderPreviewError) Error() string {
+	return personalassistant.ErrFolderOutcomeUnavailable.Error()
+}
+func (e homeProviderPreviewError) Unwrap() error {
+	return personalassistant.ErrFolderOutcomeUnavailable
+}
+
+// homeProviderPreviewDetail is what a failed preview found, or "" when the
+// failure carries no detail.
+func homeProviderPreviewDetail(err error) string {
+	var preview homeProviderPreviewError
+	if errors.As(err, &preview) {
+		return string(preview)
+	}
+	return ""
+}
+
 func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (personalassistanthttp.FolderHomeProviderPreview, error) {
 	b := s.builder
 	if b == nil || b.server == nil || b.server.reviewedReleases == nil || b.pluginHandler == nil {
-		return personalassistanthttp.FolderHomeProviderPreview{}, personalassistant.ErrFolderOutcomeUnavailable
+		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("the reviewed release reader is not available")
 	}
 	var provider *reviewedintegration.HomeProvider
 	for _, entry := range reviewedintegration.HomeProviders() {
@@ -30,7 +52,7 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 		}
 	}
 	if provider == nil {
-		return personalassistanthttp.FolderHomeProviderPreview{}, personalassistant.ErrFolderOutcomeUnavailable
+		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("the provider is not a reviewed one")
 	}
 	result := personalassistanthttp.FolderHomeProviderPreview{
 		PluginID: provider.PluginID,
@@ -38,7 +60,7 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 	if source := os.Getenv("ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE"); source != "" {
 		installed, err := b.pluginHandler.Manager().List()
 		if err != nil {
-			return result, personalassistant.ErrFolderOutcomeUnavailable
+			return result, homeProviderPreviewError("installed plugins could not be listed")
 		}
 		for _, entry := range installed {
 			if folderHomeDevelopmentReady(entry, *provider, source) {
@@ -48,13 +70,17 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 		}
 	}
 	release, ok, err := b.server.reviewedReleases.homeProviderInstall(ctx, *provider)
-	if err != nil || !ok {
-		return personalassistanthttp.FolderHomeProviderPreview{}, personalassistant.ErrFolderOutcomeUnavailable
+	if err != nil {
+		// The resolver's own error is worded for its caller and is not repeated.
+		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("the reviewed release could not be verified")
+	}
+	if !ok {
+		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("no reviewed release this build can install")
 	}
 	result.Version, result.Source, result.Disclosure = release.version, release.source, release.report
 	installed, err := b.pluginHandler.Manager().List()
 	if err != nil {
-		return personalassistanthttp.FolderHomeProviderPreview{}, personalassistant.ErrFolderOutcomeUnavailable
+		return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("installed plugins could not be listed")
 	}
 	for _, entry := range installed {
 		if entry.Name != provider.PluginID {
@@ -70,7 +96,7 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 		default:
 			// A plugin with this name alone is not evidence of the reviewed pin.
 			// Never enable an unrelated installation on a folder-card click.
-			return personalassistanthttp.FolderHomeProviderPreview{}, personalassistant.ErrFolderOutcomeUnavailable
+			return personalassistanthttp.FolderHomeProviderPreview{}, homeProviderPreviewError("an installed plugin of that name is not the reviewed release")
 		}
 		return result, nil
 	}

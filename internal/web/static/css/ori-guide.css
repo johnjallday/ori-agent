@@ -1824,6 +1824,95 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   grid-column: 2;
   justify-self: start;
 }
+/* A proposed group's member workspaces: a plain list, never a second chooser. */
+.personal-assistant-proposal__members {
+  margin: 6px 0 4px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+.personal-assistant-proposal__member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+  font-size: 13px;
+}
+.personal-assistant-proposal__member[hidden] {
+  display: none;
+}
+.personal-assistant-proposal__member-type,
+.personal-assistant-proposal__note {
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+}
+.personal-assistant-proposal__more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.personal-assistant-proposal__more[hidden] {
+  display: none;
+}
+/* The controls under a proposed group, and the sheet that adjusts it. */
+.personal-assistant-structure__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.personal-assistant-folder-adjust {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-surface);
+}
+.personal-assistant-folder-adjust[hidden] {
+  display: none;
+}
+.personal-assistant-folder-adjust fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 4px;
+}
+.personal-assistant-folder-adjust legend,
+.personal-assistant-folder-adjust__label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pa-ink-dim);
+}
+.personal-assistant-folder-adjust__member {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 8px;
+}
+.personal-assistant-folder-adjust__member small,
+.personal-assistant-folder-adjust__hint {
+  grid-column: 2;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+}
+.personal-assistant-folder-adjust__error {
+  margin: 0;
+  color: var(--bs-danger, #b42318);
+  font-size: 13px;
+}
+.personal-assistant-folder-adjust__error:empty {
+  display: none;
+}
 @media (max-width: 390px) {
   .personal-assistant-panel .personal-assistant-proposal {
     grid-template-columns: 52px minmax(0, 1fr);

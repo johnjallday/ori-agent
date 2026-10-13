@@ -79,6 +79,12 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 		writeFolderReviewError(w, err)
 		return ctx, false
 	}
+	// A folder that holds several projects makes its own group, or joins the
+	// shape's Home. The page on screen is neither where it goes nor something
+	// it could be a supporting folder of, so there is no placement to choose.
+	if preview.Structure != nil && operation != personalassistant.FolderOperationSupport {
+		return personalassistant.WithFolderReviewPlacement(ctx, personalassistant.FolderReviewPlacement{Operation: personalassistant.FolderOperationCreate}), true
+	}
 	subject := turn.projection.Subject
 	choice := func(message string, options []folderPlacementOption, actions ...HomeAction) (context.Context, bool) {
 		writeFolderPlacementChoice(w, candidateID, preview.Subject.Name, message, options, actions)

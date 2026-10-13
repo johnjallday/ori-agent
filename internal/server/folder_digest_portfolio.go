@@ -157,6 +157,28 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
 	}
+	// What this computer already holds is read before any release is looked
+	// up: the owner's Home, or the template a new one is made from.
+	home, err := h.station(req.UserID, target.provider)
+	if err != nil {
+		return personalassistant.FolderSetupPlan{}, err
+	}
+	var newHome *personalassistant.FolderSetupDestination
+	if home == nil {
+		newHome, err = h.ReadSetupDestination(ctx, req)
+		if errors.Is(err, errHomeTemplateNotReady) {
+			// The usual reason a first collection has no one-click plan: the
+			// provider is not installed, so there is no template to make a Home
+			// from. Say that, rather than a bare "unavailable".
+			return personalassistant.FolderSetupPlan{}, folderSetupUnavailable{
+				reason: "home_provider_unavailable", availability: personalassistant.FolderAvailabilityProviderNotInstalled,
+				key: target.provider.Key, detail: "the provider's Home template is not ready",
+			}
+		}
+		if err != nil || newHome == nil {
+			return personalassistant.FolderSetupPlan{}, errSetupUnavailable
+		}
+	}
 	provider, err := h.providerFacts(ctx, target.provider)
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
@@ -175,10 +197,6 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 		}
 		facts.Integration = &integration
 	}
-	home, err := h.station(req.UserID, target.provider)
-	if err != nil {
-		return personalassistant.FolderSetupPlan{}, err
-	}
 	if home != nil {
 		destination, err := folderSetupHomeDestination(home)
 		if err != nil {
@@ -194,12 +212,8 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 			facts.AssistantName = team.Roles[0].Label
 		}
 	}
-	if home == nil {
-		destination, err := h.ReadSetupDestination(ctx, req)
-		if err != nil || destination == nil {
-			return personalassistant.FolderSetupPlan{}, errSetupUnavailable
-		}
-		facts.Destination, facts.HomeName = destination, destination.Name
+	if newHome != nil {
+		facts.Destination, facts.HomeName = newHome, newHome.Name
 	}
 	if facts.FolderName == "" {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable

@@ -119,6 +119,14 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   expect(offer).toMatchObject({ status: 'pending', capability: { setup_source: 'portfolio' } });
   await page.goto('/?panel=today&folder=show');
   page.on('dialog', dialog => dialog.accept()); // Only inside the disposable HOME.
+  // With the provider not installed yet the folder is first proposed as a plain
+  // group; listing it in the Home is the Adjust choice this suite takes.
+  const proposed = page.locator('#personalAssistantFolderOffer');
+  await proposed.getByRole('button', { name: 'Adjust…', exact: true }).click();
+  const sheet = proposed.locator('[data-folder-adjust]').first();
+  await sheet.locator('input[type=radio][value=library]').check();
+  await sheet.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(proposed).toContainText('music projects');
   await page
     .locator('#personalAssistantFolderOffer')
     .locator('[data-folder-action="setup"]')

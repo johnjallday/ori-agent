@@ -195,7 +195,11 @@ func (h *HomeAssistantAskHandler) folderExpected(ctx context.Context, target fol
 }
 
 func strictFolderBody(w http.ResponseWriter, r *http.Request, out any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	return strictFolderBodyWithin(w, r, out, 2048)
+}
+
+func strictFolderBodyWithin(w http.ResponseWriter, r *http.Request, out any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
@@ -336,7 +340,26 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 		}
 		revision = rows[0].ID
 	}
-	orihttp.WriteJSON(w, map[string]any{"observation": observation, "revision": revision, "cancelled": observation == nil})
+	response := map[string]any{"observation": observation, "revision": revision, "cancelled": observation == nil}
+	// A folder that holds several projects is proposed as a group right away,
+	// before any message is sent. It is a description from the scan just made:
+	// no model is called and nothing is offered or created.
+	if structure := h.folderStructure(r.Context(), target, observation); structure != nil {
+		response["structure"] = structure
+	}
+	orihttp.WriteJSON(w, response)
+}
+
+// folderStructure reads the proposed group for a live selection, or nil when
+// the folder is not a collection or the host has no setup service to ask.
+func (h *HomeAssistantAskHandler) folderStructure(ctx context.Context, target foldercontext.Target, observation *foldercontext.Observation) *personalassistant.FolderStructure {
+	reader, ok := h.FolderSetups.(interface {
+		Structure(context.Context, foldercontext.Target, string) *personalassistant.FolderStructure
+	})
+	if !ok || observation == nil {
+		return nil
+	}
+	return reader.Structure(ctx, target, observation.ID)
 }
 
 // DetachFolderContextHandler changes only the active binding; it does not write

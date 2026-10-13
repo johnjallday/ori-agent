@@ -28,9 +28,26 @@ func (e folderSetupPreviewError) Error() string              { return string(e) 
 func (e folderSetupPreviewError) Unwrap() error              { return errSetupUnavailable }
 func (e folderSetupPreviewError) SetupPreviewReason() string { return string(e) }
 
+// folderSetupUnavailable is a plan that could not be built because a plugin it
+// needs could not be read. reason is the card's word for it; availability is
+// what a proposal that carries on without that plugin says
+// (personalassistant.FolderAvailability*); key names the provider or
+// integration and detail says what was read, for the log. None is a path.
+type folderSetupUnavailable struct{ reason, availability, key, detail string }
+
+func (e folderSetupUnavailable) Error() string              { return e.reason }
+func (e folderSetupUnavailable) Unwrap() error              { return errSetupUnavailable }
+func (e folderSetupUnavailable) SetupPreviewReason() string { return e.reason }
+func (e folderSetupUnavailable) SetupAvailability() string  { return e.availability }
+
 // planFactsTTL keeps a card's plan stable while it is read repeatedly, and keeps
 // reading a plugin's release from becoming a request per poll.
 const planFactsTTL = 15 * time.Second
+
+// planWarnInterval is how long one user's unavailable plugin stays quiet in the
+// log after it was reported: a card is read again on every poll and every turn,
+// and the reason is worth one line, not one per read.
+const planWarnInterval = 10 * time.Minute
 
 // folderSetupHost plans and runs a recognized project's one-card setup over the
 // real setup journey. The runner re-reads the journey each pass and the digest
@@ -44,6 +61,61 @@ type folderSetupHost struct {
 	// from, and when it was made.
 	apps   []folderdigest.InstalledApp
 	appsAt time.Time
+	// warned is what was last logged per user and plugin, so an unavailable
+	// plan is reported once rather than on every read. warn replaces the logger
+	// in tests.
+	warned map[string]planWarning
+	warn   func(message string, fields logger.Fields)
+	// availabilities is the short cache behind a structure proposal's two
+	// questions (HomeAvailability, IntegrationAvailability).
+	availabilities map[string]cachedAvailability
+}
+
+type planWarning struct {
+	reason string
+	at     time.Time
+}
+
+// notePlan logs why a plan could not be built, once per user and plugin until
+// the reason changes or planWarnInterval passes. The line names a provider or
+// integration key and a reason code, never a folder.
+func (h *folderSetupHost) notePlan(userID string, err error) {
+	var unavailable folderSetupUnavailable
+	if err == nil || !errors.As(err, &unavailable) {
+		return
+	}
+	if !h.firstReport(userID, unavailable.key, unavailable.availability) {
+		return
+	}
+	warn := h.warn
+	if warn == nil {
+		warn = func(message string, fields logger.Fields) { logger.Warn(message, fields) }
+		// A plugin that is simply not installed is the ordinary state, not a fault.
+		switch unavailable.availability {
+		case personalassistant.FolderAvailabilityProviderNotInstalled, personalassistant.FolderAvailabilityIntegrationNotInstalled:
+			warn = func(message string, fields logger.Fields) { logger.Info(message, fields) }
+		}
+	}
+	warn("Folder setup plan unavailable", logger.Fields{
+		"reason": unavailable.availability, "provider_or_integration_key": unavailable.key,
+		"detail": unavailable.detail, "user_id": userID,
+	})
+}
+
+// firstReport says whether a user's plugin and reason have not been logged
+// within planWarnInterval, and records that they now have been.
+func (h *folderSetupHost) firstReport(userID, pluginKey, reason string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key := userID + "|" + pluginKey
+	if last, ok := h.warned[key]; ok && last.reason == reason && time.Since(last.at) < planWarnInterval {
+		return false
+	}
+	if h.warned == nil {
+		h.warned = map[string]planWarning{}
+	}
+	h.warned[key] = planWarning{reason: reason, at: time.Now()}
+	return true
 }
 
 type cachedPlanFacts struct {
@@ -92,15 +164,18 @@ func (h *folderSetupHost) target(offer personalassistant.FolderOffer) (setupTarg
 // journey, but never its Read API: Read creates/reconciles inert journey rows.
 // Opening a card or supplying review context must remain observational.
 func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, entry reviewedintegration.Entry) (foldersetup.Plugin, error) {
+	unavailable := func(availability, detail string) error {
+		return folderSetupUnavailable{reason: "integration_unavailable", availability: availability, key: entry.Key, detail: detail}
+	}
 	if h.builder == nil || h.builder.reviewedIntegrationReader == nil {
-		return foldersetup.Plugin{}, errSetupUnavailable
+		return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "no integration reader")
 	}
 	read, err := h.builder.reviewedIntegrationReader.Read(ctx, setupjourney.ReadScope{
 		OwnerUserID: userID, IntegrationKey: entry.Key, ExpectedBlueprintID: entry.ExpectedBlueprintID,
 		ExpectedAssistantProgramID: entry.ExpectedProgramID,
 	})
 	if err != nil || read.Integration == nil {
-		return foldersetup.Plugin{}, errSetupUnavailable
+		return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "the integration could not be read")
 	}
 	shown := read.Integration
 	plugin := foldersetup.Plugin{Name: entry.DisplayName, PluginID: entry.PluginID, Source: entry.SourceLabel}
@@ -126,8 +201,12 @@ func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, e
 		plugin.State, plugin.Version, plugin.InstalledVersion = personalassistant.FolderInstallUpdate, shown.ExpectedVersion, shown.InstalledVersion
 	default:
 		// Unsupported platform, no reviewed release, or another block: the
-		// journey explains it, the one-card path does not guess.
-		return foldersetup.Plugin{}, errSetupUnavailable
+		// journey explains it, the one-card path does not guess. A proposal that
+		// carries on without the integration says the true thing about it.
+		if shown.InstalledVersion == "" {
+			return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityIntegrationNotInstalled, "not installed and no reviewed install is offered")
+		}
+		return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "installed, with no reviewed action offered")
 	}
 	return plugin, nil
 }
@@ -137,7 +216,10 @@ func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, e
 func (h *folderSetupHost) providerFacts(ctx context.Context, provider reviewedintegration.HomeProvider) (foldersetup.Plugin, error) {
 	preview, err := (folderHomeProviderSetup{builder: h.builder}).Preview(ctx, provider.Key)
 	if err != nil {
-		return foldersetup.Plugin{}, errSetupUnavailable
+		return foldersetup.Plugin{}, folderSetupUnavailable{
+			reason: "home_provider_unavailable", availability: personalassistant.FolderAvailabilityProviderUnverified,
+			key: provider.Key, detail: homeProviderPreviewDetail(err),
+		}
 	}
 	plugin := foldersetup.Plugin{
 		Name: provider.DisplayName, PluginID: provider.PluginID, Version: preview.Version, Source: provider.SourceLabel,
@@ -167,13 +249,13 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 		facts := foldersetup.PlanFacts{AppName: target.entry.DisplayName, BlueprintLabel: target.row.Blueprint.Label}
 		integration, err := h.integrationFacts(ctx, req.UserID, target.entry)
 		if err != nil {
-			return foldersetup.PlanFacts{}, folderSetupPreviewError("integration_unavailable")
+			return foldersetup.PlanFacts{}, err
 		}
 		facts.Integration = integration
 		if target.provider != nil {
 			provider, err := h.providerFacts(ctx, *target.provider)
 			if err != nil {
-				return foldersetup.PlanFacts{}, folderSetupPreviewError("home_provider_unavailable")
+				return foldersetup.PlanFacts{}, err
 			}
 			facts.Provider = &provider
 		}
@@ -261,6 +343,17 @@ func (h *folderSetupHost) forget(userID string, entry reviewedintegration.Entry)
 // Plan lists every consequence of Set up for the offer, in the order the card
 // shows them. Every string is plain text and names no path.
 func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.FolderSetupRequest) (personalassistant.FolderSetupPlan, error) {
+	plan, err := h.plan(ctx, req)
+	h.notePlan(req.UserID, err)
+	return plan, err
+}
+
+func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.FolderSetupRequest) (personalassistant.FolderSetupPlan, error) {
+	// A proposed group is the host's own setup. It is planned before anything
+	// that looks for a plugin, so no plugin can stand in its way.
+	if req.Offer.Structure.ProposesWorkspaces() {
+		return h.structurePlan(ctx, req)
+	}
 	if req.Offer.Portfolio != nil {
 		return h.portfolioPlan(ctx, req)
 	}
@@ -287,6 +380,14 @@ func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.Folder
 func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderSetupRequest) error {
 	if h == nil || h.builder == nil {
 		return errSetupUnavailable
+	}
+	// A structure is the host's own recipe too: it runs only for an offer that
+	// still proposes one, and never as anything else.
+	if req.Plan.Intent.Recipe == personalassistant.FolderRecipeStructure {
+		if !req.Offer.Structure.ProposesWorkspaces() {
+			return errSetupUnavailable
+		}
+		return h.structureRun(ctx, req)
 	}
 	// A built-in recipe needs no setup journey; it is dispatched before the
 	// journey service is required, and an intent naming any other recipe is
