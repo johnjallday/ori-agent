@@ -51,6 +51,9 @@ type Server struct {
 	// writers, child ownership and pre-start apply still block a Lifecycle.
 	resetWork  *resetstate.WorkGate
 	resetLease *resetstate.Lease
+	// shutdownWorkWait bounds how long Shutdown lets admitted work finish;
+	// zero means shutdownAdmittedWorkWait. Tests shorten it.
+	shutdownWorkWait time.Duration
 
 	// workspacePlanAuto drives approved automatic Plans. Its loops are not
 	// owned by any request, so shutdown has to stop them explicitly or a
@@ -190,6 +193,13 @@ func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
 	return false
 }
 
+// shutdownAdmittedWorkWait bounds how long Shutdown waits for work the reset
+// gate admitted. The writers that matter finish in milliseconds; the bound is
+// for a stuck provider call, which must not hold Quit.
+const shutdownAdmittedWorkWait = 10 * time.Second
+
+var errAdmittedWorkStillRunning = errors.New("admitted work was still running when shutdown stopped waiting")
+
 // Shutdown gracefully shuts down background services. It deliberately leaves
 // the shared stores open for the menubar's same-process Stop/Start behavior.
 func (s *Server) Shutdown() {
@@ -238,6 +248,13 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 			s.Storage.LocationManager.Stop()
 		}
 
+		// The loops are stopped, but the writers they or a request admitted
+		// through the gate may still be finishing: a task's tail after its
+		// status flipped, every event subscriber persisting what that
+		// completion meant. Nothing above stops or joins them, so let them
+		// finish before anything they write to is closed behind this call.
+		s.shutdownErr = errors.Join(s.shutdownErr, s.waitForAdmittedWork(ctx))
+
 		// The helper can only call back through fenced ordinary HTTP, but ask it
 		// to exit before destructive application anyway.
 		s.shutdownErr = errors.Join(s.shutdownErr, workspace.ShutdownFolderPicker(ctx))
@@ -247,6 +264,27 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 		}
 	})
 	return s.shutdownErr
+}
+
+// waitForAdmittedWork joins finite work the reset gate admitted, bounded by
+// shutdownWorkWait. It waits without fencing: the gate is shared with the
+// process lease and with the next hosted instance, and there is no unfence. On
+// the reset path the fence already proved the gate idle, so this returns at
+// once; an unwired gate is untracked and returns at once too.
+func (s *Server) waitForAdmittedWork(ctx context.Context) error {
+	if s.resetWork == nil {
+		return nil
+	}
+	wait := s.shutdownWorkWait
+	if wait <= 0 {
+		wait = shutdownAdmittedWorkWait
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	if err := s.resetWork.WaitIdle(ctx); err != nil {
+		return errors.Join(errAdmittedWorkStillRunning, err)
+	}
+	return nil
 }
 
 // HTTPServer returns a fully configured http.Server.
