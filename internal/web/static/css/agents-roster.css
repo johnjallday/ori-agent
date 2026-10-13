@@ -226,6 +226,104 @@ body.agents-roster-page {
   color: var(--text-primary, #111827);
 }
 
+/* Subscription pills use the same quiet surface as the health summary. */
+.roster-limits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.roster-limits[hidden] {
+  display: none;
+}
+
+.roster-limit {
+  min-height: 40px;
+  max-width: 100%;
+  padding: 8px 14px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.roster-limit:hover {
+  border-color: var(--primary-color);
+}
+
+.roster-limit:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.roster-limit--warn {
+  border-color: var(--warning-color);
+  background: color-mix(in srgb, var(--warning-color) 10%, var(--card-soft));
+}
+
+.roster-limit--exhausted {
+  border-color: var(--danger-color);
+  background: color-mix(in srgb, var(--danger-color) 10%, var(--card-soft));
+  font-weight: 600;
+}
+
+.stage__limits {
+  width: 100%;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.stage__limits h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stage__limits-plan,
+.stage__limits-detail {
+  margin: 0 0 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.stage__limits-row + .stage__limits-row {
+  margin-top: 12px;
+}
+
+.stage__limits-label {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.stage__limits-reset,
+.stage__limits-footer {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--card-muted);
+}
+
+.stage__limits-footer {
+  margin-top: 14px;
+}
+
+.stage__limits .stage__limits-fill--warn {
+  background: var(--warning-color);
+}
+
+.stage__limits .stage__limits-fill--exhausted {
+  background: var(--danger-color);
+}
+
 /* ---- Collection shell ----------------------------------------------------- */
 
 /* The Inspector is a sibling column that can collapse to zero, so closing it

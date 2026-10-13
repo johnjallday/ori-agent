@@ -72,6 +72,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
+	"github.com/johnjallday/ori-agent/internal/usagelimits"
 	"github.com/johnjallday/ori-agent/internal/userhttp"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/vault"
@@ -90,6 +91,7 @@ import (
 func (b *ServerBuilder) initializeHandlers() {
 	b.locationHandler = locationhttp.NewHandler(b.locationManager)
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
+	b.usageHandler.SetLimitsService(usagelimits.NewService())
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
 	b.mcpHandler.SetAdmissionGate(b.resetWork)
 	b.macWakeService = macwake.NewService(b.configManager)

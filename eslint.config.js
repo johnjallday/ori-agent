@@ -228,6 +228,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-task-result-actions.js',
       'internal/web/static/js/modules/workspace-task-skill-draft.js',
       'internal/web/static/js/modules/relative-time.js',
+      'internal/web/static/js/modules/provider-limits.js',
       'internal/web/static/js/modules/workspace-run.js',
       'internal/web/static/js/modules/task-result-artifacts.js',
       'internal/web/static/js/modules/tag-input.js',
