@@ -51,10 +51,23 @@ func (r *codexReader) readWithRefresh(ctx context.Context, refresh bool) *Provid
 		p.State, p.Detail = StateNoLimits, "Codex is using an API key, not a subscription"
 	default:
 		reading, passiveErr := r.passive(ctx, home)
+		latest, hasLatest := r.live.latestResult()
+		if hasLatest && latest.State != StateOK {
+			// Retry a prior auth/no-limits result, but never revive old log
+			// percentages when the retry fails or is inside the refresh floor.
+			if live, err := r.live.read(ctx); err == nil {
+				return &live
+			}
+			return &latest
+		}
+		if hasLatest && (passiveErr != nil || latest.FetchedAt.After(reading.FetchedAt)) {
+			reading, passiveErr = latest, nil
+		}
 		if refresh || passiveErr != nil || r.now().Sub(reading.FetchedAt) > time.Hour {
 			if live, err := r.live.read(ctx); err == nil {
 				return &live
 			}
+			reading.Detail = "Live Codex usage unavailable; showing the last reading"
 		}
 		if passiveErr == nil {
 			return &reading

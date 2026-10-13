@@ -43,6 +43,65 @@ func TestLiveReaderSingleFlightAndRefreshFloor(t *testing.T) {
 	}
 }
 
+func TestCodexDoesNotRegressToOlderLogAfterLiveRefresh(t *testing.T) {
+	for _, state := range []State{StateOK, StateNotSignedIn, StateNoLimits} {
+		t.Run(string(state), func(t *testing.T) {
+			now := time.Now()
+			logTime := now.Add(-33 * time.Minute)
+			liveTime := now
+			fail := false
+			calls := 0
+			r := newCodexReader()
+			r.now = func() time.Time { return now }
+			r.lookPath = func(string) (string, error) { return "/fake/codex", nil }
+			r.home = func() string { return "/fake" }
+			r.login = func(context.Context, string) (authdiscovery.CodexLoginStatus, error) {
+				return authdiscovery.CodexLoginStatus{SignedIn: true}, nil
+			}
+			r.passive = func(context.Context, string) (Provider, error) {
+				return Provider{State: StateOK, Source: SourceCodexSessionLog, FetchedAt: logTime}, nil
+			}
+			r.live = &liveReader{now: r.now, fetch: func(context.Context) (Provider, error) {
+				calls++
+				if fail {
+					return Provider{}, errCodexLiveUnavailable
+				}
+				return Provider{State: state, Source: SourceCodexAppServer, FetchedAt: liveTime}, nil
+			}}
+			r.readWithRefresh(context.Background(), true)
+			now = now.Add(snapshotTTL + time.Second)
+			got := r.readWithRefresh(context.Background(), false)
+			if got.Source != SourceCodexAppServer || got.State != state || !got.FetchedAt.Equal(liveTime) {
+				t.Fatalf("normal cache refill regressed: %+v", got)
+			}
+			if state == StateOK && calls != 1 {
+				t.Fatal("normal refill should preserve the newer live reading without spawning again")
+			}
+			fail = true
+			now = now.Add(liveRefreshFloor)
+			got = r.readWithRefresh(context.Background(), true)
+			if got.Source != SourceCodexAppServer || got.State != state || !got.FetchedAt.Equal(liveTime) {
+				t.Fatalf("failed live refresh regressed: %+v", got)
+			}
+			if state == StateOK && got.Detail == "" {
+				t.Fatal("fallback must explain the failed live refresh")
+			}
+			now = now.Add(snapshotTTL + time.Second)
+			got = r.readWithRefresh(context.Background(), false)
+			if got.State != state || got.Source != SourceCodexAppServer {
+				t.Fatalf("failure erased the last provider result: %+v", got)
+			}
+			if state == StateOK {
+				logTime = now
+				got = r.readWithRefresh(context.Background(), false)
+				if got.Source != SourceCodexSessionLog || !got.FetchedAt.Equal(logTime) {
+					t.Fatalf("genuinely newer session log should win: %+v", got)
+				}
+			}
+		})
+	}
+}
+
 func TestCodexLivePolicyAndFallback(t *testing.T) {
 	for _, tt := range []struct {
 		name                   string

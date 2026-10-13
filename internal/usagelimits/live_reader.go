@@ -18,6 +18,16 @@ type liveReader struct {
 	last   Provider
 	err    error
 	flight chan struct{}
+	// Preserve the latest completed provider result across transport failures.
+	// Authentication results count too, so stale usage cannot mask sign-out.
+	result    Provider
+	hasResult bool
+}
+
+func (r *liveReader) latestResult() (Provider, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.result, r.hasResult
 }
 
 func (r *liveReader) read(ctx context.Context) (Provider, error) {
@@ -49,6 +59,9 @@ func (r *liveReader) run(ctx context.Context, done chan struct{}) {
 	p, err := r.fetch(ctx)
 	r.mu.Lock()
 	r.last, r.err, r.lastAt = p, err, r.now()
+	if err == nil {
+		r.result, r.hasResult = p, true
+	}
 	r.flight = nil
 	close(done)
 	r.mu.Unlock()
