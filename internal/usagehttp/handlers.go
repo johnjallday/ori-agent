@@ -16,6 +16,7 @@ type Handler struct {
 	costTracker      *llm.CostTracker
 	utilityTelemetry *utilitytelemetry.Tracker
 	limits           limitsService
+	mirror           mirrorInstaller
 }
 
 type limitsService interface {
@@ -38,7 +39,16 @@ func (h *Handler) GetLimits(w http.ResponseWriter, r *http.Request) {
 		orihttp.WriteJSON(w, usagelimits.Snapshot{GeneratedAt: time.Now().UTC(), Providers: []usagelimits.Provider{}})
 		return
 	}
-	orihttp.WriteJSON(w, h.limits.Snapshot(r.Context(), r.URL.Query().Get("refresh") == "1"))
+	snapshot := h.limits.Snapshot(r.Context(), r.URL.Query().Get("refresh") == "1")
+	if h.mirror != nil {
+		status := h.mirror.Status()
+		for i := range snapshot.Providers {
+			if snapshot.Providers[i].Provider == "claude_code" {
+				snapshot.Providers[i].Mirror = &status
+			}
+		}
+	}
+	orihttp.WriteJSON(w, snapshot)
 }
 
 // NewHandler creates a new usage HTTP handler

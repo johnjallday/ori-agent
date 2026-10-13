@@ -55,12 +55,20 @@ export function pillLabel(provider) {
   const parts = [esc(provider.display_name)];
   for (const window of windows(provider)) {
     const label = { five_hour: '5h', weekly: 'Wk' }[window.id] || window.label;
-    const value = level(provider.level) === 'exhausted' ? 'limit reached' : `${percent(window)}%`;
+    const value =
+      level(window.level) === 'exhausted' ? 'limit reached' : `${percent(window)}% used`;
     parts.push(
-      `${esc(label)} ${level(window.level) === 'warn' ? `<strong>${esc(value)}</strong>` : esc(value)}`
+      `${esc(label)} ${level(provider.level) === 'warn' || level(window.level) === 'warn' ? `<strong>${esc(value)}</strong>` : esc(value)}`
     );
   }
-  if (!windows(provider).length && provider.level === 'exhausted') parts.push('limit reached');
+  // A reached flag or a hidden model window can exhaust the provider without
+  // exhausting every visible window. Do not relabel healthy windows as full.
+  if (
+    provider.level === 'exhausted' &&
+    !windows(provider).some(window => window.level === 'exhausted')
+  ) {
+    parts.push('limit reached');
+  }
   return parts.join(' · ');
 }
 
@@ -70,7 +78,11 @@ export function pillDescription(provider, now = new Date()) {
     ...windows(provider).map(
       window => `${window.label} ${percent(window)}% used, ${resetTime(window.resets_at, now)}`
     ),
-    provider.level === 'exhausted' ? 'limit reached' : '',
+    provider.level === 'exhausted'
+      ? 'limit reached'
+      : provider.level === 'warn'
+        ? 'nearing limit'
+        : '',
     readingTime(provider, now)
   ]
     .filter(Boolean)
@@ -97,7 +109,7 @@ export function renderSection(
               ? ' · nearing limit'
               : '';
         return `<div class="stage__limits-row">
-        <div class="stage__limits-label"><span>${esc(window.label)}</span><strong>${value}%${status}</strong></div>
+        <div class="stage__limits-label"><span>${esc(window.label)}</span><strong>${value}% used${status}</strong></div>
         <div class="stage__progression-xpbar" role="meter" aria-label="${esc(window.label)} usage"
           aria-valuenow="${Math.min(100, value)}" aria-valuemin="0" aria-valuemax="100" aria-valuetext="${value}% used${status}">
           <div class="stage__progression-xpfill stage__limits-fill--${severity}" style="width: ${Math.min(100, value)}%"></div>
@@ -114,17 +126,108 @@ export function renderSection(
   return `<section class="stage__limits" aria-label="Usage limits"><h3>Usage limits</h3>${body}</section>`;
 }
 
+export const refreshInterval = 3 * 60 * 1000;
+
+// On-demand browser polling only: hidden tabs and pages in the back/forward
+// cache have no timer. The returned disposer also supports detail-card remounts.
+export function startRefreshCadence(
+  load,
+  {
+    doc = document,
+    win = window,
+    now = Date.now,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout
+  } = {}
+) {
+  let timer = null;
+  let hiddenAt = null;
+  let started = false;
+  let suspended = false;
+  let disposed = false;
+  function pause() {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+    if (hiddenAt === null) hiddenAt = now();
+  }
+  function schedule() {
+    if (timer !== null) clearTimer(timer);
+    timer = setTimer(() => {
+      timer = null;
+      if (disposed || suspended || doc.visibilityState !== 'visible') return;
+      load(true);
+      schedule();
+    }, refreshInterval);
+  }
+  function resume() {
+    if (disposed || suspended) return;
+    if (doc.visibilityState !== 'visible') {
+      pause();
+      return;
+    }
+    if (!started || (hiddenAt !== null && now() - hiddenAt > refreshInterval)) load(true);
+    started = true;
+    hiddenAt = null;
+    schedule();
+  }
+  function pageHide() {
+    suspended = true;
+    pause();
+  }
+  function pageShow() {
+    suspended = false;
+    resume();
+  }
+  doc.addEventListener('visibilitychange', resume);
+  win.addEventListener('pagehide', pageHide);
+  win.addEventListener('pageshow', pageShow);
+  resume();
+  return () => {
+    disposed = true;
+    pause();
+    doc.removeEventListener('visibilitychange', resume);
+    win.removeEventListener('pagehide', pageHide);
+    win.removeEventListener('pageshow', pageShow);
+  };
+}
+
+export function renderMirrorControl(mirror, pending = false, error = '') {
+  if (!mirror) return '';
+  const action = mirror.installed ? 'remove' : 'install';
+  return `<section class="stage__limits-mirror" aria-label="Status-line fallback">
+    <h4>Status-line fallback</h4>
+    <p>Updates <code>~/.claude/settings.json</code> to copy the status line to Ori while keeping your existing command. Remove restores the previous setting.</p>
+    <p>Updates only during interactive Claude Code sessions on Pro or Max, after the first API response. Headless Ori turns do not update it.</p>
+    ${mirror.installed ? '<p>Installed</p>' : ''}
+    <button type="button" class="modern-btn modern-btn-secondary" data-limits-mirror="${action}" ${pending ? 'disabled' : ''}>${pending ? 'Updating…' : mirror.installed ? 'Remove' : 'Mirror the status line to Ori'}</button>
+    ${error ? `<p role="alert">${esc(error)}</p>` : ''}
+  </section>`;
+}
+
+const detailMounts = new WeakMap();
+
 // Each detail card owns its reading without replacing the synced settings.
 export function mountDetail(root, providerID) {
+  detailMounts.get(root)?.();
   const host = root.querySelector('[data-provider-limits]');
   if (!host) return async () => {};
   let provider = null;
   let pending = false;
   let pendingRequest = null;
+  let warningLogged = false;
+  let disposed = false;
+  let mirrorPending = false;
+  let mirrorError = '';
   function render() {
-    if (!provider) return;
+    if (disposed || !provider) return;
     host.hidden = false;
     host.innerHTML = renderSection(provider, { modelSpecific: true, refresh: true, pending });
+    if (providerID === 'claude_code') {
+      host.insertAdjacentHTML(
+        'beforeend',
+        renderMirrorControl(provider.mirror, mirrorPending, mirrorError)
+      );
+    }
     if (provider.credits) {
       const credits = provider.credits;
       const value = credits.unlimited
@@ -140,10 +243,11 @@ export function mountDetail(root, providerID) {
         );
     }
   }
-  function load(refresh = false) {
-    // An explicit refresh arriving during the initial cached read must still
+  function load(refresh = true, notify = false) {
+    if (disposed) return Promise.resolve();
+    // An explicit refresh arriving during the initial live read must still
     // issue refresh=1 afterwards, rather than silently dropping the click.
-    if (pending) return refresh ? pendingRequest.then(() => load(true)) : pendingRequest;
+    if (pending) return refresh ? pendingRequest.then(() => load(true, notify)) : pendingRequest;
     const refocus = host.contains(document.activeElement);
     pending = true;
     render();
@@ -152,10 +256,17 @@ export function mountDetail(root, providerID) {
         const response = await fetch('/api/usage/limits' + (refresh ? '?refresh=1' : ''));
         if (!response.ok) throw new Error('Usage limits unavailable');
         const snapshot = await response.json();
+        if (!snapshot || !Array.isArray(snapshot.providers))
+          throw new Error('Invalid limits snapshot');
+        if (disposed) return;
         provider = snapshot.providers.find(value => value.provider === providerID) || null;
         host.hidden = !provider;
+        warningLogged = false;
       } catch {
-        if (refresh && window.Toast) window.Toast.error('Could not refresh usage limits');
+        if (!disposed && !warningLogged) console.warn('[provider limits] usage limits unavailable');
+        warningLogged = true;
+        if (!disposed && notify && window.Toast)
+          window.Toast.error('Could not refresh usage limits');
       } finally {
         pending = false;
         render();
@@ -166,13 +277,58 @@ export function mountDetail(root, providerID) {
     })();
     return pendingRequest;
   }
-  host.addEventListener('click', event => {
-    if (event.target.closest('[data-limits-refresh]')) void load(true);
+  async function changeMirror(action) {
+    if (mirrorPending || disposed) return;
+    mirrorPending = true;
+    mirrorError = '';
+    render();
+    try {
+      const response = await fetch('/api/usage/limits/claude-mirror', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(
+          typeof result.error === 'string' ? result.error : 'Could not update status-line mirror'
+        );
+      if (disposed || !provider) return;
+      provider.mirror = result;
+      await load(true);
+    } catch (error) {
+      mirrorError = error?.message || 'Could not update status-line mirror';
+      if (!disposed && window.Toast) window.Toast.error(esc(mirrorError));
+    } finally {
+      mirrorPending = false;
+      render();
+      if (!disposed && host.isConnected && document.activeElement === document.body) {
+        host.querySelector('[data-limits-mirror]')?.focus();
+      }
+    }
+  }
+  function onClick(event) {
+    if (event.target.closest('[data-limits-refresh]')) void load(true, true);
+    const mirror = event.target.closest('[data-limits-mirror]');
+    if (mirror) void changeMirror(mirror.dataset.limitsMirror);
+  }
+  host.addEventListener('click', onClick);
+  const stop = startRefreshCadence(load);
+  detailMounts.set(root, () => {
+    disposed = true;
+    stop();
+    host.removeEventListener('click', onClick);
   });
-  void load();
-  return load;
+  return (refresh = true) => load(refresh, true);
 }
 
 if (typeof window !== 'undefined') {
-  window.ProviderLimitsUI = { level, pillLabel, pillDescription, renderSection, mountDetail };
+  window.ProviderLimitsUI = {
+    level,
+    pillLabel,
+    pillDescription,
+    renderSection,
+    mountDetail,
+    startRefreshCadence
+  };
 }

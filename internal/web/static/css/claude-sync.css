@@ -168,3 +168,26 @@
 .provider-limits-card[hidden] {
   display: none;
 }
+
+.stage__limits-mirror {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--card-line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.stage__limits-mirror h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.stage__limits-mirror button {
+  white-space: normal;
+  max-width: 100%;
+}
+
+.stage__limits-mirror code {
+  color: inherit;
+  font-size: inherit;
+}

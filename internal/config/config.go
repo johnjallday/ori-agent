@@ -90,6 +90,11 @@ type Settings struct {
 	ExternalAgentsCodexEnabled   bool `json:"external_agents_codex_enabled"`             // Force-enable reading from Codex CLI ~/.codex (opt-in)
 	ExternalAgentsCodexDisabled  bool `json:"external_agents_codex_disabled,omitempty"`  // Explicit opt-out: suppresses auto-enable even when the Codex CLI is detected
 
+	// Opt-in status-line mirror. Preserve only the previous statusLine value,
+	// never the rest of Claude's settings or any login credentials.
+	ClaudeStatuslineMirrorInstalled bool            `json:"claude_statusline_mirror_installed,omitempty"`
+	ClaudeStatuslineMirrorPrevious  json.RawMessage `json:"claude_statusline_mirror_previous,omitempty"`
+
 	// Speech settings
 	SpeechProvider string `json:"speech_provider,omitempty"` // auto, browser, openai, off
 	SpeechModel    string `json:"speech_model,omitempty"`    // Provider-specific model override
@@ -119,6 +124,7 @@ type Settings struct {
 
 // Manager handles configuration loading and saving
 type Manager struct {
+	saveMu      sync.Mutex   // Serializes disk writers so an older snapshot cannot overwrite a saved restoration record.
 	mu          sync.RWMutex // Protects settings from concurrent access
 	filePath    string
 	settings    Settings
@@ -523,6 +529,8 @@ func TemplatesRootSource(configured string) string {
 
 // Save writes current configuration to file
 func (m *Manager) Save() error {
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	// validate() normalizes (mutates) m.settings, so a write lock is required
 	// here even though Save reads more than it writes.
 	m.mu.Lock()
@@ -556,6 +564,7 @@ func (m *Manager) Save() error {
 func (m *Manager) Get() Settings {
 	m.mu.RLock()
 	settings := m.settings
+	settings.ClaudeStatuslineMirrorPrevious = append(json.RawMessage(nil), m.settings.ClaudeStatuslineMirrorPrevious...)
 	secretStore := m.secretStore
 	m.mu.RUnlock()
 
@@ -570,6 +579,10 @@ func (m *Manager) Update(settings Settings) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Restoration metadata belongs to the dedicated installer. A stale whole-
+	// settings update must not erase it or inject a different prior command.
+	settings.ClaudeStatuslineMirrorInstalled = m.settings.ClaudeStatuslineMirrorInstalled
+	settings.ClaudeStatuslineMirrorPrevious = append(json.RawMessage(nil), m.settings.ClaudeStatuslineMirrorPrevious...)
 	m.settings = settings
 	return m.validate()
 }

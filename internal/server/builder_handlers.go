@@ -92,6 +92,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.locationHandler = locationhttp.NewHandler(b.locationManager)
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
 	b.usageHandler.SetLimitsService(usagelimits.NewService())
+	b.usageHandler.SetMirrorInstaller(usagelimits.NewMirrorInstaller(b.configManager))
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
 	b.mcpHandler.SetAdmissionGate(b.resetWork)
 	b.macWakeService = macwake.NewService(b.configManager)

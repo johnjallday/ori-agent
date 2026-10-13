@@ -451,7 +451,11 @@
         if (event.target.closest('[data-limits-refresh]')) loadProviderLimits(true);
       });
     loadProviders();
-    loadProviderLimits();
+    if (window.ProviderLimitsUI) {
+      window.ProviderLimitsUI.startRefreshCadence(loadProviderLimits);
+    } else {
+      loadProviderLimits(true);
+    }
     // Wait for the role catalog (emblem/accent-color lookup) so the first
     // paint of roster cards renders correct role chips instead of a
     // flash-of-Unspecialized while the catalog fetch is still in flight.
@@ -510,19 +514,33 @@
     var host = els.providerLimits;
     var ui = window.ProviderLimitsUI;
     if (!host || !ui) return;
-    host.replaceChildren();
+    var previous = new Map();
+    Array.from(host.children).forEach(function (pill) {
+      previous.set(pill.dataset.provider, pill);
+    });
+    var index = 0;
     state.providerLimits.forEach(function (provider) {
       if (provider.state !== 'ok') return;
-      var pill = document.createElement('button');
-      pill.type = 'button';
+      var pill = previous.get(provider.provider);
+      if (!pill) {
+        pill = document.createElement('button');
+        pill.type = 'button';
+        pill.dataset.provider = provider.provider;
+        pill.addEventListener('click', function () {
+          selectAgent(pill.dataset.displayName, { openInspector: true, opener: pill });
+        });
+      }
+      previous.delete(provider.provider);
+      pill.dataset.displayName = provider.display_name;
       pill.className = 'roster-limit roster-limit--' + ui.level(provider.level);
       pill.innerHTML = ui.pillLabel(provider);
       pill.title = ui.pillDescription(provider);
       pill.setAttribute('aria-label', pill.title);
-      pill.addEventListener('click', function () {
-        selectAgent(provider.display_name, { openInspector: true, opener: pill });
-      });
-      host.appendChild(pill);
+      if (host.children[index] !== pill) host.insertBefore(pill, host.children[index] || null);
+      index++;
+    });
+    previous.forEach(function (pill) {
+      pill.remove();
     });
     host.hidden = !host.childElementCount;
   }
