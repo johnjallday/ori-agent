@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
 // fakeGuard is the host as a test sees it. Each field can be changed between
@@ -89,11 +89,14 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "ops.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	// These tests exercise operations, not database initialization. Each gets
+	// an isolated copy of the current schema, with no shared mutable state.
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	f := &fixture{t: t, db: db, store: NewSQLiteStore(db), clock: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}
 	f.owner = Owner{UserID: "local", AssistantID: "asst-1", StateVersion: 4, HQWorkspaceID: "hq", ProfileName: "Atlas", ConversationID: "conv-1", TurnMessageID: "msg-1"}
 	f.conversation("conv-1")

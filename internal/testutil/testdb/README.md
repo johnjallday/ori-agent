@@ -73,6 +73,28 @@ FTS insert/update/delete/search, pool/pragmas, concurrency, mutation/close
 isolation, first-caller lifetime and failure cleanup. The package is included
 by the existing full unit-package selector, not a manual-only gate.
 
+## Ordinary fixture adoption
+
+`assistantops.newFixture` and `setupjourney.openTestStore` now also use private
+clones. Their service/CRUD assertions and test identities are unchanged;
+explicit lifecycle/reopen/connection/storage-mode fixtures still use real fresh
+initialization. These consumers do not share a connection or mutable state.
+
+A local Darwin arm64 Go 1.26.0 comparison used fresh `-short -race -count=1
+-covermode=atomic` runs before and after this adoption:
+
+| Package | Before | After |
+| --- | ---: | ---: |
+| `internal/assistantops` | 351.101 s | 14.415 s |
+| `internal/setupjourney` | 391.744 s | 62.629 s |
+
+All 343 test/subtest completion identities and outcomes matched. Statement
+inventories were unchanged, with no previously covered blocks lost in this
+sample (assistantops 754 → 756 of 880 statements; setupjourney 3431 → 3432 of
+4314). These are single-run local package timings, not Ubuntu CI or whole-job
+speedup evidence. Compilation is excluded and package executions overlap.
+Hosted cold/warm measurements and repeated samples remain necessary.
+
 ## Measurement
 
 `BenchmarkOpenFresh` retains the real production initialization path for memory

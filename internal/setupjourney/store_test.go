@@ -9,17 +9,22 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
 var testStepIDs = []string{"integration", "project", "workspace", "staffing", "summary"}
 
 func openTestStore(t *testing.T) (*database.DB, *SQLiteStore) {
 	t.Helper()
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	// Ordinary store/service fixtures use private pre-migrated copies. Tests
+	// of real reopen, connection and storage-mode behavior still open their
+	// own databases explicitly below and in the lifecycle test files.
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return db, NewSQLiteStore(db)
 }
 

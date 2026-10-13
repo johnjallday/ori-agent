@@ -4,7 +4,8 @@ script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 root="$(mktemp -d "${TMPDIR:-/tmp}/ori-unit-wrapper-test.XXXXXX")"
 trap 'rm -rf -- "$root"' EXIT
 mkdir -p "$root/repo/scripts" "$root/bin" "$root/artifacts" "$root/tmp"
-cp "$script_dir/run-unit-tests.sh" "$script_dir/run-test-command.sh" "$script_dir/prune-test-cache.sh" "$script_dir/list-unit-packages.sh" "$root/repo/scripts/"
+cp "$script_dir/run-unit-tests.sh" "$script_dir/run-test-command.sh" "$script_dir/prune-test-cache.sh" "$script_dir/list-unit-packages.sh" "$script_dir/unit-shards.py" "$script_dir/unit-shard-weights.json" "$root/repo/scripts/"
+unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT # Do not inherit the enclosing CI shard.
 cat > "$root/reporter" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
@@ -101,6 +102,32 @@ for directory in "$root/artifacts"/ori-unit.*; do
   count=$((count+1))
 done
 [[ "$count" -eq 11 ]]
+
+# Each shard executes only its assigned packages, with exactly the original flags.
+ORI_UNIT_SHARD=1 ORI_UNIT_SHARD_COUNT=2 check_case shard-one 0 0 0
+grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"
+if grep -qx 'github.com/johnjallday/ori-agent/internal/two' "$TEST_ARGUMENTS"; then exit 1; fi
+ORI_UNIT_SHARD=2 ORI_UNIT_SHARD_COUNT=2 check_case shard-two 0 0 0
+grep -qx 'github.com/johnjallday/ori-agent/internal/two' "$TEST_ARGUMENTS"
+if grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"; then exit 1; fi
+for flag in -json -short -race -timeout 30m -count=1 -covermode=atomic; do
+  grep -qx -- "$flag" "$TEST_ARGUMENTS"
+done
+ORI_UNIT_SHARD=1 ORI_UNIT_SHARD_COUNT=2 check_case shard-failure 17 1 17
+for settings in 'ORI_UNIT_SHARD=0 ORI_UNIT_SHARD_COUNT=2' \
+  'ORI_UNIT_SHARD=3 ORI_UNIT_SHARD_COUNT=2' \
+  'ORI_UNIT_SHARD=1' 'ORI_UNIT_SHARD_COUNT=2' \
+  'ORI_UNIT_SHARD=1 ORI_UNIT_SHARD_COUNT=3' \
+  'RUNNER_OS=macOS ORI_UNIT_SHARD=1 ORI_UNIT_SHARD_COUNT=2'; do
+  # Settings are fixed literals above, not a shell program or caller input.
+  read -r -a settings_args <<< "$settings"
+  rm -f "$TEST_ARGUMENTS"
+  if env "${settings_args[@]}" "$runner" > "$root/invalid-shard.log" 2>&1; then
+    printf 'Invalid shard accepted: %s\n' "$settings" >&2
+    exit 1
+  fi
+  [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid shard ran tests\n' >&2; exit 1; }
+done
 
 WAIT_FOR_SIGNAL=1 "$runner" > "$root/cancel.log" 2>&1 &
 parent=$!

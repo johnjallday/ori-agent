@@ -233,20 +233,31 @@ jobs:
             bash scripts/readme-refresh.sh cleanup --run-id "$README_CAPTURE_CI_RUN_ID"
           fi
 
-  test-unit:
-    name: Unit Tests
+  test-unit-run:
+    name: Unit execution (${{ matrix.os }}, ${{ matrix.shard }})
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     permissions:
       contents: read
     env:
       # Actions owns these ephemeral runner caches; do not prune them before save.
       ORI_SKIP_CACHE_PRUNE: '1'
+      ORI_UNIT_SHARD: ${{ matrix.os == 'ubuntu-latest' && matrix.shard || '' }}
+      ORI_UNIT_SHARD_COUNT: ${{ matrix.os == 'ubuntu-latest' && '4' || '' }}
     strategy:
+      # Run every shard to completion; a failing sibling must not hide evidence.
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        # Keep this value as a stable required-check label. setup-go reads the
-        # real toolchain from go.mod so dependency updates cannot desync CI.
-        go-version: ['1.25.12']
+        include:
+          - os: ubuntu-latest
+            shard: '1'
+          - os: ubuntu-latest
+            shard: '2'
+          - os: ubuntu-latest
+            shard: '3'
+          - os: ubuntu-latest
+            shard: '4'
+          - os: macos-latest
+            shard: platform
 
     steps:
       - name: Checkout code
@@ -286,32 +297,39 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ steps.unit_cache_identity.outputs.build }}
-          key: ori-unit-build-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # Each shard refreshes only its own compilation, not whichever sibling
+          # saved last. v2 starts cold; compare compatible-warm runs separately.
+          key: ori-unit-build-v2-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ori-unit-build-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-
+            ori-unit-build-v2-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ matrix.shard }}-
         continue-on-error: true
 
       - name: Download dependencies
         run: go mod download
 
-      # The macOS leg exists to cover darwin-specific code, not to re-run what
-      # the ubuntu leg just ran. Measured over 34 runs (2026-08-05..07) it spent
-      # ~8.5 min on the identical 150 packages at 10x the per-minute rate: 88%
-      # of every macOS minute this repo burns, for zero extra signal. Scoping it
-      # to the packages whose behaviour can differ by GOOS takes that to ~22s of
-      # test time while still compiling every darwin-tagged file - which nothing
-      # else in CI does, since `make build` only builds ./cmd/server.
-      #
-      # The scope is chosen inside the step on purpose. Adding a matrix key
-      # would rename the job, and `Unit Tests (macos-latest, 1.25.12)` is a
-      # required check on dev: a renamed job leaves the old context pending
-      # forever and wedges every PR.
+      # Ubuntu partitions the full canonical list; macOS keeps --platform.
+      # Neither test flags nor assertions change. Required names live on the
+      # fail-closed aggregation jobs below, outside this execution matrix.
       - name: Run unit tests
         id: unit
         shell: bash
-        # Keeps full Ubuntu / --platform Darwin selection and the 30m per-package
-        # timeout. Fresh execution prevents cached results masquerading as speed.
         run: ./scripts/run-unit-tests.sh
+
+      # Unlike optional diagnostic artifacts, these are part of the gate:
+      # missing results cannot produce a green full-suite check or coverage.
+      - name: Publish successful unit shard
+        if: success() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-results-${{ matrix.shard }}
+          path: |
+            ${{ steps.unit.outputs.artifact-dir }}/packages.txt
+            ${{ steps.unit.outputs.artifact-dir }}/all-packages.txt
+            ${{ steps.unit.outputs.artifact-dir }}/metadata.txt
+            ${{ steps.unit.outputs.artifact-dir }}/coverage.txt
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
 
       # GitHub's native ref scoping keeps PR caches at their merge ref. There is
       # no privileged workflow_run promotion or cross-workflow restore prefix.
@@ -336,7 +354,7 @@ jobs:
         if: always() && steps.unit.outputs.artifact-dir != ''
         uses: actions/upload-artifact@v4
         with:
-          name: unit-timings-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: unit-timings-${{ runner.os }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ steps.unit.outputs.artifact-dir }}/*.json
             ${{ steps.unit.outputs.artifact-dir }}/*.txt
@@ -346,13 +364,68 @@ jobs:
           if-no-files-found: error
         continue-on-error: true
 
-      # Linux only: Darwin covers only the platform subset, and uploading it
-      # under the same flag would look like a spurious coverage drop.
+  # Keep both existing required check names and downstream needs: test-unit.
+  # Both gates require all five executions. Linux also proves exact partition
+  # completeness and merges coverage; an absent/skipped/failed shard is red.
+  test-unit:
+    name: Unit Tests
+    needs: test-unit-run
+    if: ${{ always() }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # Stable required-check label only; the actual toolchain is in go.mod.
+        go-version: ['1.25.12']
+    steps:
+      - name: Require every unit execution
+        shell: bash
+        env:
+          UNIT_RESULT: ${{ needs.test-unit-run.result }}
+        run: |
+          if [[ "$UNIT_RESULT" != success ]]; then
+            echo '::error::A unit execution failed, was cancelled or was skipped.'
+            exit 1
+          fi
+
+      - name: Checkout code
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        if: runner.os == 'Linux'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Receive successful unit shards
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unit-results-*
+          path: ${{ runner.temp }}/unit-results
+
+      - name: Verify complete partition and merge coverage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/list-unit-packages.sh > "$RUNNER_TEMP/unit-packages.txt"
+          python3 scripts/unit-shards.py merge --count 4 \
+            --packages "$RUNNER_TEMP/unit-packages.txt" \
+            --directory "$RUNNER_TEMP/unit-results" \
+            --revision "$(git rev-parse HEAD)" > "$RUNNER_TEMP/unit-coverage.txt"
+
+      # Upload once, only after verifying all Linux coverage. Darwin is partial.
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux'
         uses: codecov/codecov-action@v4
         with:
-          file: ${{ steps.unit.outputs.artifact-dir }}/coverage.txt
+          file: ${{ runner.temp }}/unit-coverage.txt
           flags: unittests
           name: codecov-${{ matrix.os }}
         continue-on-error: true
