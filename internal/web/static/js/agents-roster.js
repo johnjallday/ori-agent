@@ -56,6 +56,9 @@
     rendered: [],
     focusIndex: -1,
     providers: null,
+    providerLimits: [],
+    limitsWarningLogged: false,
+    limitsPending: false,
     // Whether the Inspector is showing. Closing it is a presentation change:
     // the focused agent, its history, and the checked set all survive
     // (PRD FR49/FR51).
@@ -99,6 +102,7 @@
       list: document.getElementById('rosterList'),
       count: document.getElementById('rosterCount'),
       stats: document.getElementById('rosterStats'),
+      providerLimits: document.getElementById('providerLimits'),
       search: document.getElementById('rosterSearch'),
       sort: document.getElementById('rosterSort'),
       group: document.getElementById('rosterGroup'),
@@ -442,7 +446,16 @@
     state.inspectorOpen = !isSheetMode();
     reflectInspectorPresentation();
 
+    if (els.progression)
+      els.progression.addEventListener('click', function (event) {
+        if (event.target.closest('[data-limits-refresh]')) loadProviderLimits(true);
+      });
     loadProviders();
+    if (window.ProviderLimitsUI) {
+      window.ProviderLimitsUI.startRefreshCadence(loadProviderLimits);
+    } else {
+      loadProviderLimits(true);
+    }
     // Wait for the role catalog (emblem/accent-color lookup) so the first
     // paint of roster cards renders correct role chips instead of a
     // flash-of-Unspecialized while the catalog fetch is still in flight.
@@ -455,9 +468,84 @@
 
   /* ---- data ---------------------------------------------------------------- */
 
-  // Load the available LLM providers + their models so the overview Model field
-  // can offer a picker instead of free text. Fire-and-forget: if it fails or is
-  // slow, renderOverview falls back to a text input.
+  // Subscription readings are independent of the provider/model catalog.
+  function loadProviderLimits(refresh) {
+    if (state.limitsPending) return Promise.resolve();
+    var selected = state.selected;
+    var refocus = document.activeElement && document.activeElement.matches('[data-limits-refresh]');
+    state.limitsPending = true;
+    renderSelectedLimits();
+    return fetch('/api/usage/limits' + (refresh ? '?refresh=1' : ''))
+      .then(function (response) {
+        if (!response.ok) throw new Error('usage limits ' + response.status);
+        return response.json();
+      })
+      .then(function (snapshot) {
+        if (!snapshot || !Array.isArray(snapshot.providers))
+          throw new Error('Invalid limits snapshot');
+        state.providerLimits = snapshot.providers;
+        state.limitsWarningLogged = false;
+        renderProviderPills();
+        renderSelectedLimits();
+      })
+      .catch(function () {
+        // Keep the last reading on transient failures, without console noise on
+        // every retry or leaking the provider's response into diagnostics.
+        if (!state.limitsWarningLogged) console.warn('[roster] usage limits unavailable');
+        state.limitsWarningLogged = true;
+      })
+      .finally(function () {
+        state.limitsPending = false;
+        renderSelectedLimits();
+        if (refocus && selected === state.selected && document.activeElement === document.body) {
+          var button = els.progression.querySelector('[data-limits-refresh]');
+          if (button) button.focus();
+        }
+      });
+  }
+
+  function renderSelectedLimits() {
+    if (state.selected && isPermanent(state.byName[state.selected])) {
+      renderProgression(state.selected, state.byName[state.selected]);
+    }
+  }
+
+  function renderProviderPills() {
+    var host = els.providerLimits;
+    var ui = window.ProviderLimitsUI;
+    if (!host || !ui) return;
+    var previous = new Map();
+    Array.from(host.children).forEach(function (pill) {
+      previous.set(pill.dataset.provider, pill);
+    });
+    var index = 0;
+    state.providerLimits.forEach(function (provider) {
+      if (provider.state !== 'ok') return;
+      var pill = previous.get(provider.provider);
+      if (!pill) {
+        pill = document.createElement('button');
+        pill.type = 'button';
+        pill.dataset.provider = provider.provider;
+        pill.addEventListener('click', function () {
+          selectAgent(pill.dataset.displayName, { openInspector: true, opener: pill });
+        });
+      }
+      previous.delete(provider.provider);
+      pill.dataset.displayName = provider.display_name;
+      pill.className = 'roster-limit roster-limit--' + ui.level(provider.level);
+      pill.innerHTML = ui.pillLabel(provider);
+      pill.title = ui.pillDescription(provider);
+      pill.setAttribute('aria-label', pill.title);
+      if (host.children[index] !== pill) host.insertBefore(pill, host.children[index] || null);
+      index++;
+    });
+    previous.forEach(function (pill) {
+      pill.remove();
+    });
+    host.hidden = !host.childElementCount;
+  }
+
+  // Load the available LLM providers and model metadata independently.
   function loadProviders() {
     fetch('/api/providers')
       .then(function (r) {
@@ -2254,7 +2342,15 @@
   function renderProgression(name, listItem) {
     if (!els.progression) return;
     if (isPermanent(listItem)) {
-      els.progression.innerHTML = '';
+      var limits = state.providerLimits.find(function (provider) {
+        return provider.display_name === name;
+      });
+      els.progression.innerHTML = window.ProviderLimitsUI
+        ? window.ProviderLimitsUI.renderSection(limits, {
+            refresh: true,
+            pending: state.limitsPending
+          })
+        : '';
       return;
     }
 

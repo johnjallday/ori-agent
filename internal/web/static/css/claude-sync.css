@@ -79,3 +79,115 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
 }
+
+/* Shared subscription rows: also used by the Agents inspector. */
+.stage__limits {
+  width: 100%;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.stage__limits h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stage__limits-plan,
+.stage__limits-detail {
+  margin: 0 0 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.stage__limits-row + .stage__limits-row {
+  margin-top: 12px;
+}
+
+.stage__limits-label {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.stage__limits-reset,
+.stage__limits-footer {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--card-muted, var(--text-primary));
+}
+
+.stage__limits-footer {
+  margin-top: 14px;
+}
+
+.stage__limits .stage__progression-xpbar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.stage__limits .stage__progression-xpfill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary-color);
+}
+
+.stage__limits .stage__limits-fill--warn {
+  background: var(--warning-color);
+}
+
+.stage__limits .stage__limits-fill--exhausted {
+  background: var(--danger-color);
+}
+
+.stage__limits-refresh {
+  margin: 10px 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.stage__limits-refresh:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 3px;
+}
+
+.stage__limits-refresh:disabled {
+  cursor: wait;
+}
+
+.provider-limits-card[hidden] {
+  display: none;
+}
+
+.stage__limits-mirror {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--card-line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.stage__limits-mirror h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.stage__limits-mirror button {
+  white-space: normal;
+  max-width: 100%;
+}
+
+.stage__limits-mirror code {
+  color: inherit;
+  font-size: inherit;
+}

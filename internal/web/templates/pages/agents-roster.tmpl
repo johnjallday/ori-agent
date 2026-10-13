@@ -39,6 +39,7 @@
             </p>
           </div>
           <div class="collection-head__actions">
+            <div id="providerLimits" class="roster-limits" role="group" aria-label="Provider usage limits" hidden></div>
             <div class="roster-stats" id="rosterStats" role="group" aria-label="Agent status summary" hidden>
               <!-- real summary tiles injected here -->
             </div>
@@ -459,6 +460,7 @@
        character-picker.js all load from head.tmpl, which every page shares;
        deferred order still puts them before this controller. Re-declaring one
        here would execute it twice. -->
+  <script type="module" src="/js/modules/provider-limits.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 

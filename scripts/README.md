@@ -75,6 +75,15 @@ workflows and Ori's worktree provisioning adapter.
 - `demo-server.sh`: standalone isolated HOME/data server, browser opt-in.
   `wt demo` uses Ori's separate adapter preserving Codex pass-through/opt-out,
   default port 8931 and automatic sandbox cleanup; they are not interchangeable.
+  For Claude credentials hidden by the demo HOME, explicitly opt in with
+  `ORI_CLAUDE_CREDENTIALS_DIR="$HOME/.claude" wt demo 8943`. Ori reads only
+  `.credentials.json` from that directory. On macOS, the read-only `security`
+  child also uses the login user's native HOME to find the active Keychain;
+  Ori, Claude settings/sessions and the mirror installer remain sandboxed.
+  No credentials are copied, refreshed or written. Keychain discovery runs
+  first: an expired fallback file does not mean the CLI is signed out.
+  `ORI_USAGE_LIMITS_DEBUG=1` logs sanitized discovery outcomes and usage-response
+  status/schema keys/types, never credentials or response values.
 - `software-folder-seed.sh <sandbox> [--ori]`: put disposable software-project
   folders under a demo sandbox's Documents, Desktop and Downloads, where its
   folder chips reach them (a sandboxed server has no native folder dialog). It

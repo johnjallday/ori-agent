@@ -554,6 +554,8 @@ func registerUsageRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/usage/summary", s.Handlers.Usage.GetSummary)
 	mux.HandleFunc("/api/usage/utility", s.Handlers.Usage.GetUtilityMetrics)
 	mux.HandleFunc("/api/usage/pricing", s.Handlers.Usage.GetPricingModels)
+	mux.HandleFunc("/api/usage/limits", s.Handlers.Usage.GetLimits)
+	mux.HandleFunc("/api/usage/limits/claude-mirror", s.Handlers.Usage.ClaudeMirror)
 }
 
 // registerModelCategoryRoutes registers model category and auto-categorize endpoints.
