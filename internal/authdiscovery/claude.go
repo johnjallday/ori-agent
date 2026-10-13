@@ -1,13 +1,18 @@
 package authdiscovery
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 const (
@@ -16,71 +21,140 @@ const (
 	ClaudeCliRelativePath    = ".claude/.credentials.json"
 )
 
+var ErrNoClaudeLogin = errors.New("no Claude Code login found")
+
+var errClaudeLoginUnreadable = errors.New("claude code login is unreadable")
+
 type ClaudeOauth struct {
 	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken"`
-	ExpiresAt    int64  `json:"expiresAt"`
+	ExpiresAt    int64  `json:"expiresAt"` // Unix milliseconds, as written by Claude Code.
 }
 
 type ClaudeCredentialsFile struct {
 	ClaudeAiOauth ClaudeOauth `json:"claudeAiOauth"`
 }
 
-// DiscoverClaudeToken attempts to find an Anthropic API token from Claude CLI
+// DiscoverClaudeToken preserves the token-only API for existing callers.
 func DiscoverClaudeToken() (string, error) {
-	// 1. Try macOS keychain if on Darwin
-	if runtime.GOOS == "darwin" {
-		token, err := readClaudeFromKeychain()
-		if err == nil && token != "" {
-			return token, nil
-		}
-	}
-
-	// 2. Try fallback file
-	return readClaudeFromFile()
+	oauth, err := DiscoverClaudeOauth()
+	return oauth.AccessToken, err
 }
 
-func readClaudeFromKeychain() (string, error) {
-	cmd := exec.Command("security", "find-generic-password", "-s", ClaudeCliKeychainService, "-w")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-
-	var file ClaudeCredentialsFile
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &file); err != nil {
-		// Try unmarshaling as just the Oauth object in case it's different
-		var oauth ClaudeOauth
-		if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &oauth); err == nil {
-			return strings.TrimSpace(oauth.AccessToken), nil
-		}
-		return "", err
-	}
-
-	return strings.TrimSpace(file.ClaudeAiOauth.AccessToken), nil
+// DiscoverClaudeOauth reads the existing login without refreshing or writing it.
+// Only the access token and expiry are returned; refresh tokens are not retained.
+func DiscoverClaudeOauth() (ClaudeOauth, error) {
+	return DiscoverClaudeOauthContext(context.Background())
 }
 
-func readClaudeFromFile() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
+func DiscoverClaudeOauthContext(ctx context.Context) (ClaudeOauth, error) {
+	return discoverClaudeOauth(func() ([]byte, error) {
+		if runtime.GOOS != "darwin" {
+			return nil, os.ErrNotExist
+		}
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", ClaudeCliKeychainService, "-w")
+		// The explicit read-only bridge also restores the login user's Keychain
+		// search context. Only this read-only security child gets the native HOME;
+		// Ori, Claude settings, sessions and the mirror installer stay sandboxed.
+		if strings.TrimSpace(os.Getenv("ORI_CLAUDE_CREDENTIALS_DIR")) != "" {
+			if loginUser, err := user.Current(); err == nil && loginUser.HomeDir != "" {
+				cmd.Env = append(os.Environ(), "HOME="+loginUser.HomeDir)
+			}
+		}
+		cmd.WaitDelay = 100 * time.Millisecond
+		data, err := cmd.Output()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
+			return nil, os.ErrNotExist
+		}
+		return data, err
+	}, func() ([]byte, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return readClaudeCredentialsFile()
+	})
+}
 
-	path := filepath.Join(home, ClaudeCliRelativePath)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
+// ORI_CLAUDE_CREDENTIALS_DIR is an explicit read-only credential source for an
+// isolated demo. Unlike CLAUDE_CONFIG_DIR, it does not redirect CLI settings,
+// sessions, or the opt-in status-line installer into the user's real directory.
+func readClaudeCredentialsFile() ([]byte, error) {
+	dir := strings.TrimSpace(os.Getenv("ORI_CLAUDE_CREDENTIALS_DIR"))
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = filepath.Join(home, ".claude")
 	}
+	// #nosec G304 G703 -- fixed credential filename under HOME or an explicit trusted local configuration directory; read-only, never an HTTP-supplied path.
+	return os.ReadFile(filepath.Join(dir, ".credentials.json"))
+}
 
-	var file ClaudeCredentialsFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		return "", err
+func discoverClaudeOauth(keychain, file func() ([]byte, error)) (ClaudeOauth, error) {
+	data, keychainErr := keychain()
+	if keychainErr == nil {
+		if oauth, err := parseClaudeOauth(data); err == nil {
+			logClaudeDiscovery("keychain", nil)
+			return oauth, nil
+		} else {
+			keychainErr = err
+		}
 	}
-
-	token := strings.TrimSpace(file.ClaudeAiOauth.AccessToken)
-	if token == "" {
-		return "", fmt.Errorf("no access token found in %s", path)
+	logClaudeDiscovery("keychain", keychainErr)
+	data, fileErr := file()
+	if fileErr == nil {
+		oauth, err := parseClaudeOauth(data)
+		logClaudeDiscovery("file", err)
+		return oauth, err
 	}
+	logClaudeDiscovery("file", fileErr)
+	if (errors.Is(keychainErr, os.ErrNotExist) || errors.Is(keychainErr, ErrNoClaudeLogin)) && errors.Is(fileErr, os.ErrNotExist) {
+		return ClaudeOauth{}, ErrNoClaudeLogin
+	}
+	// Do not propagate command output, credential JSON or file paths into logs.
+	return ClaudeOauth{}, errClaudeLoginUnreadable
+}
 
-	return token, nil
+// Diagnostics deliberately exclude paths, command output and credential fields.
+func logClaudeDiscovery(source string, err error) {
+	if os.Getenv("ORI_USAGE_LIMITS_DEBUG") != "1" {
+		return
+	}
+	result := "found"
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		result = "missing"
+	case errors.Is(err, ErrNoClaudeLogin):
+		result = "no_oauth"
+	case err != nil:
+		result = "unreadable"
+	}
+	log := logger.New("usage-limits")
+	log.SetLevel(logger.DebugLevel)
+	log.Debug("Claude login discovery", logger.Fields{"source": source, "result": result})
+}
+
+func parseClaudeOauth(data []byte) (ClaudeOauth, error) {
+	var envelope ClaudeCredentialsFile
+	if json.Unmarshal(data, &envelope) != nil {
+		return ClaudeOauth{}, errClaudeLoginUnreadable
+	}
+	oauth := envelope.ClaudeAiOauth
+	if oauth.AccessToken == "" {
+		// A bare OAuth object is valid JSON too, so envelope decoding alone does
+		// not report an error for it.
+		if json.Unmarshal(data, &oauth) != nil {
+			return ClaudeOauth{}, errClaudeLoginUnreadable
+		}
+	}
+	oauth.AccessToken = strings.TrimSpace(oauth.AccessToken)
+	oauth.RefreshToken = ""
+	if oauth.AccessToken == "" {
+		return ClaudeOauth{}, ErrNoClaudeLogin
+	}
+	return oauth, nil
 }

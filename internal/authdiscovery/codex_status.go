@@ -24,6 +24,7 @@ func ReadCodexLoginStatus(ctx context.Context, home string) (CodexLoginStatus, e
 			return nil, os.ErrNotExist
 		}
 		account := computeCodexKeychainAccount(home)
+		// #nosec G204 -- fixed macOS security subcommand; account is a hash of the trusted local Codex home, passed as an argument without a shell.
 		cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", CodexCliKeychainService, "-a", account, "-w")
 		data, err := cmd.Output()
 		if ctx.Err() != nil {
@@ -44,14 +45,14 @@ func readCodexLoginStatus(home string, keychain func() ([]byte, error)) (CodexLo
 		return parseCodexLoginStatus(data)
 	}
 	if !errors.Is(fileErr, os.ErrNotExist) {
-		return CodexLoginStatus{}, errors.New("Codex login file is unreadable")
+		return CodexLoginStatus{}, errors.New("codex login file is unreadable")
 	}
 	data, err := keychain()
 	if errors.Is(err, os.ErrNotExist) {
 		return CodexLoginStatus{}, nil
 	}
 	if err != nil {
-		return CodexLoginStatus{}, errors.New("Codex login status is unavailable")
+		return CodexLoginStatus{}, errors.New("codex login status is unavailable")
 	}
 	return parseCodexLoginStatus(data)
 }
@@ -65,7 +66,7 @@ func parseCodexLoginStatus(data []byte) (CodexLoginStatus, error) {
 		} `json:"tokens"`
 	}
 	if json.Unmarshal(data, &auth) != nil {
-		return CodexLoginStatus{}, errors.New("Codex login data is unreadable")
+		return CodexLoginStatus{}, errors.New("codex login data is unreadable")
 	}
 	apiKey := auth.Mode == "apikey" || auth.APIKey != ""
 	return CodexLoginStatus{SignedIn: apiKey || auth.Tokens.AccessToken != "", APIKey: apiKey}, nil

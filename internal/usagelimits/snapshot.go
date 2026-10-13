@@ -38,16 +38,23 @@ type Snapshot struct {
 
 // Provider deliberately contains no credential or account identity fields.
 type Provider struct {
-	Provider    string    `json:"provider"`
-	DisplayName string    `json:"display_name"`
-	State       State     `json:"state"`
-	Level       Level     `json:"level"`
-	Plan        string    `json:"plan,omitempty"`
-	Windows     []Window  `json:"windows"`
-	Credits     *Credits  `json:"credits,omitempty"`
-	FetchedAt   time.Time `json:"fetched_at,omitzero"`
-	Source      Source    `json:"source,omitempty"`
-	Detail      string    `json:"detail"`
+	Provider    string        `json:"provider"`
+	DisplayName string        `json:"display_name"`
+	State       State         `json:"state"`
+	Level       Level         `json:"level"`
+	Plan        string        `json:"plan,omitempty"`
+	Windows     []Window      `json:"windows"`
+	Credits     *Credits      `json:"credits,omitempty"`
+	FetchedAt   time.Time     `json:"fetched_at,omitzero"`
+	Source      Source        `json:"source,omitempty"`
+	Detail      string        `json:"detail"`
+	Mirror      *MirrorStatus `json:"mirror,omitempty"`
+}
+
+// MirrorStatus deliberately excludes the prior command and local file paths.
+type MirrorStatus struct {
+	Installed              bool `json:"installed"`
+	PreviousCommandPresent bool `json:"previous_command_present"`
 }
 
 type Window struct {

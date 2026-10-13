@@ -14,7 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/version"
 )
 
-var errCodexLiveUnavailable = errors.New("Codex app server usage limits are unavailable")
+var errCodexLiveUnavailable = errors.New("codex app server usage limits are unavailable")
 
 type codexLiveWindow struct {
 	UsedPercent   float64 `json:"usedPercent"`

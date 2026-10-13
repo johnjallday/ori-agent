@@ -20,10 +20,11 @@ type Service struct {
 	inFlightRefresh bool
 	now             func() time.Time
 	codex           func(context.Context, bool) *Provider
+	claude          func(context.Context, bool) *Provider
 }
 
 func NewService() *Service {
-	return &Service{now: time.Now, codex: newCodexReader().readWithRefresh}
+	return &Service{now: time.Now, codex: newCodexReader().readWithRefresh, claude: newClaudeReader().read}
 }
 
 // Snapshot shares a cache refill across callers. A canceled request stops waiting
@@ -67,8 +68,21 @@ func (s *Service) refill(ctx context.Context, done chan struct{}, refresh bool) 
 	ctx, cancel := context.WithTimeout(ctx, readerTimeout)
 	defer cancel()
 	result := Snapshot{Providers: []Provider{}}
-	if p := s.codex(ctx, refresh); p != nil {
-		result.Providers = append(result.Providers, *p)
+	// Run providers concurrently: two four-second live reads must not add up
+	// to an eight-second endpoint. Buffered channels also tolerate canceled waits.
+	codex, claude := make(chan *Provider, 1), make(chan *Provider, 1)
+	go func() { codex <- s.codex(ctx, refresh) }()
+	go func() {
+		if s.claude == nil {
+			claude <- nil
+			return
+		}
+		claude <- s.claude(ctx, refresh)
+	}()
+	for _, ch := range []chan *Provider{codex, claude} {
+		if p := <-ch; p != nil {
+			result.Providers = append(result.Providers, *p)
+		}
 	}
 	result.GeneratedAt = s.now().UTC()
 	s.mu.Lock()
@@ -87,6 +101,10 @@ func cloneSnapshot(snapshot Snapshot) Snapshot {
 		if p.Credits != nil {
 			credits := *p.Credits
 			result.Providers[i].Credits = &credits
+		}
+		if p.Mirror != nil {
+			mirror := *p.Mirror
+			result.Providers[i].Mirror = &mirror
 		}
 	}
 	return result

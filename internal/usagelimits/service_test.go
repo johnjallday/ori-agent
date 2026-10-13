@@ -8,10 +8,42 @@ import (
 	"time"
 )
 
+func TestServiceReadsProvidersConcurrently(t *testing.T) {
+	s := NewService()
+	codexStarted, claudeStarted := make(chan struct{}), make(chan struct{})
+	s.codex = func(ctx context.Context, _ bool) *Provider {
+		close(codexStarted)
+		select {
+		case <-claudeStarted:
+		case <-ctx.Done():
+			t.Error("providers ran sequentially")
+		}
+		p := codexProvider()
+		p.State = StateOK
+		return &p
+	}
+	s.claude = func(ctx context.Context, _ bool) *Provider {
+		close(claudeStarted)
+		select {
+		case <-codexStarted:
+		case <-ctx.Done():
+			t.Error("providers ran sequentially")
+		}
+		p := claudeProvider()
+		p.State = StateOK
+		return &p
+	}
+	got := s.Snapshot(context.Background(), true)
+	if len(got.Providers) != 2 || got.Providers[0].Provider != "codex" || got.Providers[1].Provider != "claude_code" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestServiceCacheAndRefresh(t *testing.T) {
 	now := time.Date(2026, 10, 13, 1, 0, 0, 0, time.UTC)
 	calls := 0
 	s := NewService()
+	s.claude = nil
 	s.now = func() time.Time { return now }
 	s.codex = func(context.Context, bool) *Provider {
 		calls++
@@ -39,6 +71,7 @@ func TestServiceConcurrentRequestsShareRead(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	s := NewService()
+	s.claude = nil
 	s.codex = func(context.Context, bool) *Provider {
 		calls.Add(1)
 		close(started)
@@ -65,6 +98,7 @@ func TestServiceConcurrentRequestsShareRead(t *testing.T) {
 func TestServiceRefreshDuringPassiveReadStillRequestsLive(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	s := NewService()
+	s.claude = nil
 	s.codex = func(_ context.Context, refresh bool) *Provider {
 		if !refresh {
 			close(started)
@@ -89,6 +123,7 @@ func TestServiceCanceledWaitDoesNotCancelSharedRead(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	s := NewService()
+	s.claude = nil
 	s.codex = func(ctx context.Context, _ bool) *Provider {
 		close(started)
 		<-release

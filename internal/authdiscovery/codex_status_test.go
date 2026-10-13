@@ -47,7 +47,7 @@ func TestReadCodexLoginStatus(t *testing.T) {
 
 func TestCodexLoginStatusErrorsAreSanitized(t *testing.T) {
 	_, err := readCodexLoginStatus(t.TempDir(), func() ([]byte, error) { return nil, errors.New("private diagnostic") })
-	if err == nil || err.Error() != "Codex login status is unavailable" {
+	if err == nil || err.Error() != "codex login status is unavailable" {
 		t.Fatalf("got %v", err)
 	}
 }
