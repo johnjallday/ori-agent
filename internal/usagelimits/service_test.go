@@ -13,7 +13,7 @@ func TestServiceCacheAndRefresh(t *testing.T) {
 	calls := 0
 	s := NewService()
 	s.now = func() time.Time { return now }
-	s.codex = func(context.Context) *Provider {
+	s.codex = func(context.Context, bool) *Provider {
 		calls++
 		return &Provider{Provider: "codex", State: StateOK, Windows: []Window{{UsedPercent: 16}}}
 	}
@@ -39,7 +39,7 @@ func TestServiceConcurrentRequestsShareRead(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	s := NewService()
-	s.codex = func(context.Context) *Provider {
+	s.codex = func(context.Context, bool) *Provider {
 		calls.Add(1)
 		close(started)
 		<-release
@@ -62,11 +62,34 @@ func TestServiceConcurrentRequestsShareRead(t *testing.T) {
 	}
 }
 
+func TestServiceRefreshDuringPassiveReadStillRequestsLive(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	s := NewService()
+	s.codex = func(_ context.Context, refresh bool) *Provider {
+		if !refresh {
+			close(started)
+			<-release
+			return &Provider{Source: SourceCodexSessionLog}
+		}
+		return &Provider{Source: SourceCodexAppServer}
+	}
+	first := make(chan Snapshot, 1)
+	go func() { first <- s.Snapshot(context.Background(), false) }()
+	<-started
+	live := make(chan Snapshot, 1)
+	go func() { live <- s.Snapshot(context.Background(), true) }()
+	close(release)
+	<-first
+	if result := <-live; result.Providers[0].Source != SourceCodexAppServer {
+		t.Fatalf("refresh shared passive-only result: %+v", result)
+	}
+}
+
 func TestServiceCanceledWaitDoesNotCancelSharedRead(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	s := NewService()
-	s.codex = func(ctx context.Context) *Provider {
+	s.codex = func(ctx context.Context, _ bool) *Provider {
 		close(started)
 		<-release
 		if ctx.Err() != nil {

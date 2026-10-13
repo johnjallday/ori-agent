@@ -77,7 +77,10 @@ export function pillDescription(provider, now = new Date()) {
     .join(' · ');
 }
 
-export function renderSection(provider, { modelSpecific = false, now = new Date() } = {}) {
+export function renderSection(
+  provider,
+  { modelSpecific = false, refresh = false, pending = false, now = new Date() } = {}
+) {
   if (!provider) return '';
   let body = '';
   if (provider.state === 'ok') {
@@ -106,9 +109,70 @@ export function renderSection(provider, { modelSpecific = false, now = new Date(
   if (provider.detail) body += `<p class="stage__limits-detail">${esc(provider.detail)}</p>`;
   if (provider.fetched_at)
     body += `<p class="stage__limits-footer">${esc(readingTime(provider, now))}</p>`;
+  if (refresh)
+    body += `<button type="button" class="stage__limits-refresh" data-limits-refresh ${pending ? 'disabled' : ''}>${pending ? 'Refreshing…' : 'Refresh'}</button>`;
   return `<section class="stage__limits" aria-label="Usage limits"><h3>Usage limits</h3>${body}</section>`;
 }
 
+// Each detail card owns its reading without replacing the synced settings.
+export function mountDetail(root, providerID) {
+  const host = root.querySelector('[data-provider-limits]');
+  if (!host) return async () => {};
+  let provider = null;
+  let pending = false;
+  let pendingRequest = null;
+  function render() {
+    if (!provider) return;
+    host.hidden = false;
+    host.innerHTML = renderSection(provider, { modelSpecific: true, refresh: true, pending });
+    if (provider.credits) {
+      const credits = provider.credits;
+      const value = credits.unlimited
+        ? 'unlimited'
+        : !credits.has_credits
+          ? 'none'
+          : credits.balance;
+      host
+        .querySelector('.stage__limits')
+        .insertAdjacentHTML(
+          'beforeend',
+          `<p class="stage__limits-detail">Credits: ${esc(value)}</p>`
+        );
+    }
+  }
+  function load(refresh = false) {
+    // An explicit refresh arriving during the initial cached read must still
+    // issue refresh=1 afterwards, rather than silently dropping the click.
+    if (pending) return refresh ? pendingRequest.then(() => load(true)) : pendingRequest;
+    const refocus = host.contains(document.activeElement);
+    pending = true;
+    render();
+    pendingRequest = (async () => {
+      try {
+        const response = await fetch('/api/usage/limits' + (refresh ? '?refresh=1' : ''));
+        if (!response.ok) throw new Error('Usage limits unavailable');
+        const snapshot = await response.json();
+        provider = snapshot.providers.find(value => value.provider === providerID) || null;
+        host.hidden = !provider;
+      } catch {
+        if (refresh && window.Toast) window.Toast.error('Could not refresh usage limits');
+      } finally {
+        pending = false;
+        render();
+        if (refocus && host.isConnected && document.activeElement === document.body) {
+          host.querySelector('[data-limits-refresh]')?.focus();
+        }
+      }
+    })();
+    return pendingRequest;
+  }
+  host.addEventListener('click', event => {
+    if (event.target.closest('[data-limits-refresh]')) void load(true);
+  });
+  void load();
+  return load;
+}
+
 if (typeof window !== 'undefined') {
-  window.ProviderLimitsUI = { level, pillLabel, pillDescription, renderSection };
+  window.ProviderLimitsUI = { level, pillLabel, pillDescription, renderSection, mountDetail };
 }

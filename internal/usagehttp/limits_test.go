@@ -75,6 +75,51 @@ func TestGetLimitsShapeCacheAndPrivacy(t *testing.T) {
 	}
 }
 
+func TestGetLimitsLiveRefreshFloor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	t.Setenv("PATH", home)
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"tokens":{"access_token":"invented"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/bin/sh
+printf x >> "$CODEX_HOME/calls"
+read -r init
+printf '%s\n' '{"id":1,"result":{}}'
+read -r initialized
+read -r request
+printf '%s\n' '{"id":2,"result":{"rateLimits":{"planType":"prolite","primary":{"usedPercent":16,"windowDurationMins":10080,"resetsAt":1792295868}}}}'
+read -r hold
+`
+	if err := os.WriteFile(filepath.Join(home, "codex"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(nil)
+	h.SetLimitsService(usagelimits.NewService())
+	var first time.Time
+	for range 2 {
+		rr := httptest.NewRecorder()
+		h.GetLimits(rr, httptest.NewRequest(http.MethodGet, "/api/usage/limits?refresh=1", nil))
+		var snapshot usagelimits.Snapshot
+		if err := json.Unmarshal(rr.Body.Bytes(), &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Providers) != 1 || snapshot.Providers[0].Source != usagelimits.SourceCodexAppServer {
+			t.Fatalf("got %+v", snapshot)
+		}
+		fetched := snapshot.Providers[0].FetchedAt
+		if first.IsZero() {
+			first = fetched
+		} else if !fetched.Equal(first) {
+			t.Fatal("refresh inside floor fetched again")
+		}
+	}
+	calls, err := os.ReadFile(filepath.Join(home, "calls"))
+	if err != nil || string(calls) != "x" {
+		t.Fatalf("calls=%q, err=%v", calls, err)
+	}
+}
+
 type limitsSpy struct{ refresh bool }
 
 func (s *limitsSpy) Snapshot(_ context.Context, refresh bool) usagelimits.Snapshot {

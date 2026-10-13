@@ -58,6 +58,7 @@
     providers: null,
     providerLimits: [],
     limitsWarningLogged: false,
+    limitsPending: false,
     // Whether the Inspector is showing. Closing it is a presentation change:
     // the focused agent, its history, and the checked set all survive
     // (PRD FR49/FR51).
@@ -445,6 +446,10 @@
     state.inspectorOpen = !isSheetMode();
     reflectInspectorPresentation();
 
+    if (els.progression)
+      els.progression.addEventListener('click', function (event) {
+        if (event.target.closest('[data-limits-refresh]')) loadProviderLimits(true);
+      });
     loadProviders();
     loadProviderLimits();
     // Wait for the role catalog (emblem/accent-color lookup) so the first
@@ -460,8 +465,13 @@
   /* ---- data ---------------------------------------------------------------- */
 
   // Subscription readings are independent of the provider/model catalog.
-  function loadProviderLimits() {
-    return fetch('/api/usage/limits')
+  function loadProviderLimits(refresh) {
+    if (state.limitsPending) return Promise.resolve();
+    var selected = state.selected;
+    var refocus = document.activeElement && document.activeElement.matches('[data-limits-refresh]');
+    state.limitsPending = true;
+    renderSelectedLimits();
+    return fetch('/api/usage/limits' + (refresh ? '?refresh=1' : ''))
       .then(function (response) {
         if (!response.ok) throw new Error('usage limits ' + response.status);
         return response.json();
@@ -472,16 +482,28 @@
         state.providerLimits = snapshot.providers;
         state.limitsWarningLogged = false;
         renderProviderPills();
-        if (state.selected && isPermanent(state.byName[state.selected])) {
-          renderProgression(state.selected, state.byName[state.selected]);
-        }
+        renderSelectedLimits();
       })
       .catch(function () {
         // Keep the last reading on transient failures, without console noise on
         // every retry or leaking the provider's response into diagnostics.
         if (!state.limitsWarningLogged) console.warn('[roster] usage limits unavailable');
         state.limitsWarningLogged = true;
+      })
+      .finally(function () {
+        state.limitsPending = false;
+        renderSelectedLimits();
+        if (refocus && selected === state.selected && document.activeElement === document.body) {
+          var button = els.progression.querySelector('[data-limits-refresh]');
+          if (button) button.focus();
+        }
       });
+  }
+
+  function renderSelectedLimits() {
+    if (state.selected && isPermanent(state.byName[state.selected])) {
+      renderProgression(state.selected, state.byName[state.selected]);
+    }
   }
 
   function renderProviderPills() {
@@ -2306,7 +2328,10 @@
         return provider.display_name === name;
       });
       els.progression.innerHTML = window.ProviderLimitsUI
-        ? window.ProviderLimitsUI.renderSection(limits)
+        ? window.ProviderLimitsUI.renderSection(limits, {
+            refresh: true,
+            pending: state.limitsPending
+          })
         : '';
       return;
     }

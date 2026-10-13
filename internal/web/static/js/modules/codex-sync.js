@@ -64,6 +64,7 @@
       return `
         <div class="codex-sync">
           ${actions}
+          <div class="codex-sync-card provider-limits-card" data-provider-limits hidden></div>
           <div class="codex-sync-card">
             <span class="codex-sync-label">Codex sync</span>
             <div class="codex-sync-value codex-sync-empty">Not available. Enable Codex agents in Settings, or install the Codex CLI - synced details from ~/.codex will appear here.</div>
@@ -83,6 +84,7 @@
     return `
       <div class="codex-sync">
         ${actions}
+        <div class="codex-sync-card provider-limits-card" data-provider-limits hidden></div>
         <div class="codex-sync-card">
           <span class="codex-sync-label">Model &amp; Settings</span>
           <div class="codex-sync-value">
@@ -121,6 +123,9 @@
     if (!root) {
       return;
     }
+    const refreshLimits = window.ProviderLimitsUI
+      ? window.ProviderLimitsUI.mountDetail(root, 'codex')
+      : async () => {};
     const btn = root.querySelector('.codex-sync-refresh');
     if (!btn) {
       return;
@@ -132,6 +137,7 @@
       btn.textContent = 'Refreshing...';
 
       try {
+        await refreshLimits(true);
         const resp = await fetch('/api/external-agents/refresh', { method: 'POST' });
         if (!resp.ok) {
           throw new Error(`Refresh failed (${resp.status})`);

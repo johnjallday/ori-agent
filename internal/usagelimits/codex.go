@@ -13,6 +13,8 @@ type codexReader struct {
 	home     func() string
 	login    func(context.Context, string) (authdiscovery.CodexLoginStatus, error)
 	passive  func(context.Context, string) (Provider, error)
+	live     *liveReader
+	now      func() time.Time
 }
 
 func newCodexReader() *codexReader {
@@ -21,11 +23,17 @@ func newCodexReader() *codexReader {
 		home:     CodexHome,
 		login:    authdiscovery.ReadCodexLoginStatus,
 		passive:  ReadCodexSessionLog,
+		live:     &liveReader{fetch: ReadCodexAppServer, now: time.Now},
+		now:      time.Now,
 	}
 }
 
 // read returns nil when the CLI is not installed, matching CLI card detection.
 func (r *codexReader) read(ctx context.Context) *Provider {
+	return r.readWithRefresh(ctx, false)
+}
+
+func (r *codexReader) readWithRefresh(ctx context.Context, refresh bool) *Provider {
 	if _, err := r.lookPath("codex"); err != nil {
 		return nil
 	}
@@ -42,8 +50,13 @@ func (r *codexReader) read(ctx context.Context) *Provider {
 	case login.APIKey:
 		p.State, p.Detail = StateNoLimits, "Codex is using an API key, not a subscription"
 	default:
-		reading, err := r.passive(ctx, home)
-		if err == nil {
+		reading, passiveErr := r.passive(ctx, home)
+		if refresh || passiveErr != nil || r.now().Sub(reading.FetchedAt) > time.Hour {
+			if live, err := r.live.read(ctx); err == nil {
+				return &live
+			}
+		}
+		if passiveErr == nil {
 			return &reading
 		}
 		p.State, p.Detail = StateUnavailable, "No Codex session has reported limits yet"

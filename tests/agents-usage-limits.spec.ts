@@ -41,7 +41,15 @@ test.beforeEach(async ({ page }) => {
     })
   );
   await page.route('**/api/agents/*/detail', route =>
-    route.fulfill({ json: { name: 'Codex', provider: 'codex', model: 'codex' } })
+    route.fulfill({
+      json: {
+        name: 'Codex',
+        provider: 'codex',
+        role: 'cli_agent',
+        model: 'codex',
+        codex_sync: { config: { model: 'codex' } }
+      }
+    })
   );
 });
 
@@ -86,6 +94,90 @@ for (const theme of ['light', 'dark']) {
     expect(violations).toEqual([]);
   });
 }
+
+test('inspector Refresh requests live data and updates pills without replacing cards', async ({
+  page
+}) => {
+  await page.route('**/api/usage/limits*', async route => {
+    const live = route.request().url().includes('refresh=1');
+    await route.fulfill({
+      json: {
+        providers: [
+          {
+            ...provider(live ? 'warn' : 'ok'),
+            source: live ? 'codex_app_server' : 'codex_session_log'
+          }
+        ]
+      }
+    });
+  });
+  await page.goto('/agents?agent=Codex');
+  await expect(page.getByRole('meter')).toHaveAttribute('aria-valuenow', '16');
+  await page.locator('#rosterList').evaluate(element => element.setAttribute('data-kept', 'yes'));
+  await page.locator('#stageProgression [data-limits-refresh]').click();
+  await expect(page.getByRole('meter')).toHaveAttribute('aria-valuenow', '85');
+  await expect(page.locator('.roster-limit--warn')).toContainText('85%');
+  await expect(page.locator('#stageProgression')).toContainText('Codex app server');
+  await expect(page.locator('#rosterList')).toHaveAttribute('data-kept', 'yes');
+  await expect(page.locator('#stageProgression [data-limits-refresh]')).toBeFocused();
+});
+
+test('Codex detail card shows credits and both refresh controls fetch live limits', async ({
+  page
+}) => {
+  let refreshes = 0;
+  await page.route('**/api/usage/limits*', route => {
+    if (route.request().url().includes('refresh=1')) refreshes++;
+    return route.fulfill({
+      json: {
+        providers: [
+          { ...provider(), credits: { has_credits: false, unlimited: false, balance: '0' } }
+        ]
+      }
+    });
+  });
+  await page.route('**/api/external-agents/refresh', route =>
+    route.fulfill({ json: { success: true } })
+  );
+  await page.goto('/agents/codex');
+  const card = page.locator('[data-provider-limits]');
+  await expect(card).toContainText('Usage limits');
+  await expect(card).toContainText('Credits: none');
+  await expect(card.getByRole('meter')).toBeVisible();
+  await card.locator('[data-limits-refresh]').click();
+  await expect.poll(() => refreshes).toBe(1);
+  await expect(card.locator('[data-limits-refresh]')).toBeEnabled();
+  await page.getByRole('button', { name: 'Refresh from ~/.codex' }).click();
+  await expect.poll(() => refreshes).toBe(2);
+});
+
+test('detail refresh during initial load is queued rather than dropped', async ({ page }) => {
+  let release: () => void;
+  let initialStarted: () => void;
+  const waiting = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const started = new Promise<void>(resolve => {
+    initialStarted = resolve;
+  });
+  let refreshes = 0;
+  await page.route('**/api/usage/limits*', async route => {
+    if (route.request().url().includes('refresh=1')) refreshes++;
+    else {
+      initialStarted();
+      await waiting;
+    }
+    await route.fulfill({ json: { providers: [provider()] } });
+  });
+  await page.route('**/api/external-agents/refresh', route =>
+    route.fulfill({ json: { success: true } })
+  );
+  await page.goto('/agents/codex');
+  await started;
+  await page.getByRole('button', { name: 'Refresh from ~/.codex' }).click();
+  release!();
+  await expect.poll(() => refreshes).toBe(1);
+});
 
 test('no providers hides the entire group', async ({ page }) => {
   await page.route('**/api/usage/limits', route => route.fulfill({ json: { providers: [] } }));

@@ -22,6 +22,7 @@ func TestCodexInclusionAndState(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r := newCodexReader()
+			r.live = &liveReader{now: r.now, fetch: func(context.Context) (Provider, error) { return Provider{}, errCodexLiveUnavailable }}
 			r.lookPath = func(string) (string, error) {
 				if !tt.installed {
 					return "", errors.New("absent")
