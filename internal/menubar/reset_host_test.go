@@ -133,6 +133,20 @@ func TestResetHostMenubarProcessHelper(t *testing.T) {
 			}
 		}
 	})
+	// StartServer allows ten seconds, meant for a listener to come up, and the
+	// factory above opens sessions.db inside it. On the Linux runner, under the
+	// race detector, every migration from zero took nine of those seconds and
+	// the start timed out before the lifecycle under test began (dev runs
+	// 38118750934, 38187395617; PR run 38342420705). Build the schema once
+	// here, the state every real start but the very first finds, so the timed
+	// start is the lifecycle and not a schema build.
+	warm, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(root, "sessions.db"), WALMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := warm.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.StartServer(t.Context()); err != nil {
 		t.Fatal(err)
 	}

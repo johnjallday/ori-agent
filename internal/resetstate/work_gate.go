@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 var (
@@ -159,6 +160,34 @@ func (g *WorkGate) TryFence(ctx context.Context) error {
 		cancel()
 	}
 	return nil
+}
+
+// WaitIdle returns once no finite operation holds a permit, or with ctx's error
+// when ctx ends first. It never fences and keeps admitting work throughout: a
+// host that is only shutting down shares this gate with the process lease and
+// with the next hosted instance, so the one thing it may do is let admitted
+// writers finish before closing what they write to. Lifetime owners and streams
+// are not waited for; owners stop in Lifecycle.Drain and streams end with their
+// connections. A nil gate is untracked and returns at once.
+func (g *WorkGate) WaitIdle(ctx context.Context) error {
+	if g == nil {
+		return nil
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		g.mu.Lock()
+		active := g.active
+		g.mu.Unlock()
+		if active == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // blockNewWork is the lease's uncertainty path, not normal reset admission.

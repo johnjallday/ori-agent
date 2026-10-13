@@ -3,8 +3,14 @@
 # this wrapper owns a separate, newly allocated evidence directory.
 set -euo pipefail
 if [[ $# -ne 0 ]]; then
-  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope)\n' >&2
+  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux)\n' >&2
   exit 2
+fi
+if [[ -n "${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]; then
+  if [[ "${RUNNER_OS:-}" == macOS || ! "${ORI_UNIT_SHARD:-}" =~ ^[1-9][0-9]*$ || ! "${ORI_UNIT_SHARD_COUNT:-}" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'Sharding requires both positive shard settings and full (non-macOS) scope\n' >&2
+    exit 2
+  fi
 fi
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 cd "$script_dir/.."
@@ -93,16 +99,28 @@ fi
 scope=full
 selection=""
 if [[ "${RUNNER_OS:-}" == macOS ]]; then scope=platform; selection=--platform; fi
-if "$script_dir/list-unit-packages.sh" ${selection:+"$selection"} > "$artifacts/packages.txt" 2> "$artifacts/stderr.txt"; then
-  packages=()
-  while IFS= read -r package; do
-    [[ -n "$package" ]] && packages+=("$package")
-  done < "$artifacts/packages.txt"
+if "$script_dir/list-unit-packages.sh" ${selection:+"$selection"} > "$artifacts/all-packages.txt" 2> "$artifacts/stderr.txt"; then
+  if [[ -n "${ORI_UNIT_SHARD:-}" ]]; then
+    scope="shard-${ORI_UNIT_SHARD}-of-${ORI_UNIT_SHARD_COUNT}"
+    if python3 "$script_dir/unit-shards.py" select --shard "$ORI_UNIT_SHARD" --count "$ORI_UNIT_SHARD_COUNT" < "$artifacts/all-packages.txt" > "$artifacts/packages.txt" 2>> "$artifacts/stderr.txt"; then
+      :
+    else
+      status=$?
+      finish "$status"
+      exit "$status"
+    fi
+  else
+    cp "$artifacts/all-packages.txt" "$artifacts/packages.txt"
+  fi
 else
   status=$?
   finish "$status"
   exit "$status"
 fi
+packages=()
+while IFS= read -r package; do
+  [[ -n "$package" ]] && packages+=("$package")
+done < "$artifacts/packages.txt"
 package_count=${#packages[@]}
 if [[ "$package_count" -eq 0 ]]; then
   printf 'Unit package selection was empty\n' >> "$artifacts/stderr.txt"
