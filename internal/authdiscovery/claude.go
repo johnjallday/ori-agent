@@ -54,17 +54,7 @@ func DiscoverClaudeOauthContext(ctx context.Context) (ClaudeOauth, error) {
 		}
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", ClaudeCliKeychainService, "-w")
-		// The explicit read-only bridge also restores the login user's Keychain
-		// search context. Only this read-only security child gets the native HOME;
-		// Ori, Claude settings, sessions and the mirror installer stay sandboxed.
-		if strings.TrimSpace(os.Getenv("ORI_CLAUDE_CREDENTIALS_DIR")) != "" {
-			if loginUser, err := user.Current(); err == nil && loginUser.HomeDir != "" {
-				cmd.Env = append(os.Environ(), "HOME="+loginUser.HomeDir)
-			}
-		}
-		cmd.WaitDelay = 100 * time.Millisecond
-		data, err := cmd.Output()
+		data, err := claudeKeychainCommand(ctx).Output()
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
 			return nil, os.ErrNotExist
@@ -76,6 +66,20 @@ func DiscoverClaudeOauthContext(ctx context.Context) (ClaudeOauth, error) {
 		}
 		return readClaudeCredentialsFile()
 	})
+}
+
+func claudeKeychainCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", ClaudeCliKeychainService, "-w")
+	// The explicit read-only bridge also restores the login user's Keychain
+	// search context. Only this read-only security child gets the native HOME;
+	// Ori, Claude settings, sessions and the mirror installer stay sandboxed.
+	if strings.TrimSpace(os.Getenv("ORI_CLAUDE_CREDENTIALS_DIR")) != "" {
+		if loginUser, err := user.Current(); err == nil && loginUser.HomeDir != "" {
+			cmd.Env = append(os.Environ(), "HOME="+loginUser.HomeDir)
+		}
+	}
+	cmd.WaitDelay = 100 * time.Millisecond
+	return cmd
 }
 
 // ORI_CLAUDE_CREDENTIALS_DIR is an explicit read-only credential source for an

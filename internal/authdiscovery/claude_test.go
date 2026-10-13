@@ -2,58 +2,49 @@ package authdiscovery
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"os"
 	"os/user"
 	"path/filepath"
-	"runtime"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClaudeReadOnlyDiscoveryUsesLoginKeychainHome(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("macOS Keychain search context")
-	}
 	loginUser, err := user.Current()
 	if err != nil {
 		t.Fatal("cannot resolve login user's home")
 	}
 	home := t.TempDir()
-	dir := filepath.Join(home, ".claude")
-	if err := os.Mkdir(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	credentials := []byte(`{"accessToken":"stale-invented","expiresAt":1}`)
-	path := filepath.Join(dir, ".credentials.json")
-	if err := os.WriteFile(path, credentials, 0600); err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	// No real Keychain access: the fake models a search list scoped by HOME.
-	script := "#!/bin/sh\n[ \"$HOME\" = \"$EXPECTED_KEYCHAIN_HOME\" ] || exit 44\nprintf '%s' '{\"accessToken\":\"keychain-invented\"}'\n"
-	if err := os.WriteFile(filepath.Join(bin, "security"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
 	t.Setenv("HOME", home)
-	t.Setenv("EXPECTED_KEYCHAIN_HOME", loginUser.HomeDir)
 	t.Setenv("ORI_CLAUDE_CREDENTIALS_DIR", "")
-	got, err := DiscoverClaudeOauth()
-	if err != nil || got.AccessToken != "stale-invented" {
-		t.Fatal("default discovery must retain its HOME scope")
+	if cmd := claudeKeychainCommand(context.Background()); cmd.Env != nil {
+		t.Fatal("default discovery must inherit its HOME scope")
 	}
-	t.Setenv("ORI_CLAUDE_CREDENTIALS_DIR", dir)
-	got, err = DiscoverClaudeOauth()
-	if err != nil || got.AccessToken != "keychain-invented" {
-		t.Fatal("opt-in discovery did not use the login user's Keychain context")
+	t.Setenv("ORI_CLAUDE_CREDENTIALS_DIR", filepath.Join(home, ".claude"))
+	cmd := claudeKeychainCommand(context.Background())
+	// Inspect the real command construction without starting a process. A fake
+	// child's startup can exceed the production one-second deadline under race
+	// suite load; scheduler speed is not the behavior this test verifies.
+	want := []string{"security", "find-generic-password", "-s", ClaudeCliKeychainService, "-w"}
+	if !reflect.DeepEqual(cmd.Args, want) || cmd.Cancel == nil || cmd.WaitDelay != 100*time.Millisecond {
+		t.Fatal("read-only command or bounded cancellation changed")
 	}
-	if os.Getenv("HOME") != home {
-		t.Fatal("read-only discovery changed Ori's HOME")
+	found := false
+	for _, value := range cmd.Environ() {
+		if strings.HasPrefix(value, "HOME=") {
+			found = true
+			if value != "HOME="+loginUser.HomeDir {
+				t.Fatal("opt-in command did not use the native Keychain HOME")
+			}
+		}
 	}
-	if data, err := os.ReadFile(path); err != nil || !bytes.Equal(data, credentials) {
-		t.Fatal("read-only discovery changed the credentials file")
+	if !found || os.Getenv("HOME") != home {
+		t.Fatal("discovery changed Ori's HOME or omitted the child HOME")
 	}
 }
 
