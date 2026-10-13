@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // A folder that holds several projects is proposed as one group with a
@@ -136,6 +137,9 @@ func (s *FolderStructure) applyMembers(adjustment *FolderStructureAdjustment) er
 		member := s.Member(change.CandidateID)
 		if member == nil {
 			return structureAdjustmentError("a folder is not part of this proposal")
+		}
+		if change.Included && member.ExistingWorkspace != "" {
+			return structureAdjustmentError(member.Folder + " is already the workspace " + member.ExistingWorkspace)
 		}
 		member.Included = change.Included
 		if change.Name != "" {
@@ -273,7 +277,9 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 				reason = FolderAvailabilityPlanUnavailable
 			}
 		}
-		structure.Group.HomeAvailable = reason == ""
+		// The Home can be chosen in Adjust whenever the owner can be offered it;
+		// reason says whether it is in place now, which decides the default.
+		structure.Group.HomeAvailable = offer.Portfolio != nil
 		useHome := false
 		switch {
 		case chosen == FolderGroupPlain:
@@ -287,7 +293,10 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 			// then. No setup creates them all at once yet, so it is not offered.
 			return nil, structureAdjustmentError("a workspace for each folder inside " + structure.Group.HomeName + " is not available yet")
 		case wantsHome:
-			if reason != "" {
+			// Listing the collection in its Home is the earlier setup, with its own
+			// review and, when the provider is not installed yet, its own guided
+			// steps. It can be chosen whenever the owner can be offered that Home.
+			if offer.Portfolio == nil {
 				return nil, structureAdjustmentError(structure.Group.HomeName + " cannot be used right now")
 			}
 			// Choosing the Home is how Adjust brings an earlier no back.
@@ -311,22 +320,24 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 	} else if wantsHome {
 		return nil, structureAdjustmentError("this folder has no Home to use")
 	}
-	if adjustment != nil && adjustment.GroupName != "" && structure.Group.Type == FolderGroupPlain {
-		structure.Group.Name = adjustment.GroupName
-	}
 	integrations := map[string]string{}
 	for i := range structure.Members {
 		member := &structure.Members[i]
 		if identity, err := portfolioDirectoryIdentity(filepath.Join(result.Root, member.RelPath)); err == nil {
 			member.Identity = identity
 		}
+		// A folder that is already a workspace is listed, never set up twice.
+		if s.deps.ExistingProjects != nil {
+			path := filepath.Join(result.Root, member.RelPath)
+			if existing, err := s.deps.ExistingProjects(ctx, userID, path, member.Identity); err == nil && len(existing) > 0 {
+				member.ExistingWorkspace = foldercontext.DisplayName(existing[0].Name)
+				member.Included = false
+			}
+		}
 		row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(member.Shape), member.MarkerName, member.DominantExtension)
 		if !ok {
-			// No integration is involved: the shape's installed blueprint, or blank.
-			subject := FolderCandidateRecord{Shape: member.Shape, MarkerName: member.MarkerName, DominantExtension: member.DominantExtension}
-			if id, label, _ := s.blueprintForSubject(subject); id != "" {
-				member.BlueprintID, member.BlueprintLabel = id, label
-			}
+			// No integration is involved. The workspace starts blank: a blueprint
+			// brings agents of its own, and a group setup adds none it did not list.
 			continue
 		}
 		member.Integration = row.Offer.IntegrationName
@@ -352,10 +363,172 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 			member.BlueprintID, member.BlueprintLabel = row.Blueprint.BlueprintID, row.Blueprint.Label
 		}
 	}
+	// Default names first, then what the user chose in Adjust over them.
+	s.freeStructureNames(ctx, structure)
+	if adjustment != nil && adjustment.GroupName != "" && structure.Group.Type == FolderGroupPlain {
+		structure.Group.Name = adjustment.GroupName
+	}
 	if err := structure.applyMembers(adjustment); err != nil {
 		return nil, err
 	}
+	if err := s.checkStructureNames(ctx, structure); err != nil {
+		if adjustment != nil {
+			return nil, err
+		}
+		// A proposal whose own default names cannot all be made free is not
+		// one to offer; the folders stay available one by one.
+		return nil, nil
+	}
+	if len(structure.Included()) == 0 && structure.Group.Type != FolderGroupLibrary {
+		// Every folder is already a workspace: there is no group left to propose.
+		return nil, nil
+	}
 	return structure, nil
+}
+
+// structureNameTaken reports whether a workspace or group of this name already
+// exists. Workspace names share one namespace, whatever group they are in.
+func (s *FolderDigestService) structureNameTaken(ctx context.Context, name string) bool {
+	return s.deps.WorkspaceNameTaken != nil && s.deps.WorkspaceNameTaken(ctx, name)
+}
+
+// freeStructureNames gives a proposal default names that can actually be
+// created: a group or workspace whose folder name is already taken, by an
+// existing workspace or by another member, is proposed under a name that says
+// where it comes from ("Album-1 (Albums)"), and then a number. The user can
+// change any of them in Adjust.
+func (s *FolderDigestService) freeStructureNames(ctx context.Context, structure *FolderStructure) {
+	used := map[string]bool{}
+	free := func(candidates ...string) string {
+		for attempt := 0; attempt < 8; attempt++ {
+			for _, candidate := range candidates {
+				name := candidate
+				if attempt > 0 {
+					name = fmt.Sprintf("%s %d", candidate, attempt+1)
+				}
+				slug := workspace.Slugify(name)
+				if validStructureWorkspaceName(name) && slug != "" && !used[slug] && !s.structureNameTaken(ctx, name) {
+					used[slug] = true
+					return name
+				}
+			}
+		}
+		return candidates[0]
+	}
+	if structure.Group.Type == FolderGroupPlain {
+		structure.Group.Name = free(structure.Folder, structure.Folder+" group")
+	}
+	for i := range structure.Members {
+		member := &structure.Members[i]
+		if member.ExistingWorkspace == "" {
+			member.Name = free(member.Folder, member.Folder+" ("+structure.Folder+")")
+		}
+	}
+}
+
+// checkStructureNames refuses a proposal that could not be created as it
+// stands: its group, or a workspace it includes, would have a name that is
+// already taken, here or by another of its own workspaces.
+func (s *FolderDigestService) checkStructureNames(ctx context.Context, structure *FolderStructure) error {
+	if structure.Group.Type == FolderGroupLibrary {
+		return nil
+	}
+	seen := map[string]bool{}
+	names := make([]string, 0, len(structure.Members)+1)
+	if structure.Group.Type == FolderGroupPlain {
+		names = append(names, structure.Group.Name)
+	}
+	for _, member := range structure.Included() {
+		names = append(names, member.Name)
+	}
+	for _, name := range names {
+		slug := workspace.Slugify(name)
+		if slug == "" || seen[slug] {
+			return structureAdjustmentError("two workspaces would have the name " + name)
+		}
+		if s.structureNameTaken(ctx, name) {
+			return structureAdjustmentError("a workspace named " + name + " already exists")
+		}
+		seen[slug] = true
+	}
+	return nil
+}
+
+// adjusted applies Adjust choices to a stored proposal, for an offer made on
+// Home, where no scan is held to describe the folder afresh. Members and what
+// each can be stay as the scan found them; the group's type and name, and which
+// members get a workspace under which name, are what change. existingHome says
+// the owner already has the Home the collection would be listed in.
+func (s *FolderStructure) adjusted(adjustment *FolderStructureAdjustment, existingHome bool) (*FolderStructure, error) {
+	next := s.stored()
+	switch adjustment.GroupType {
+	case "":
+	case FolderGroupPlain:
+		if next.Group.Type != FolderGroupPlain {
+			next.Group.Type, next.Group.Name, next.Group.DestinationState = FolderGroupPlain, s.Folder, "new"
+		}
+	case FolderGroupLibrary:
+		if !s.Group.HomeAvailable || s.Group.HomeName == "" {
+			return nil, structureAdjustmentError("this folder has no Home to use")
+		}
+		next.Group.Type, next.Group.Name, next.Group.DestinationState = FolderGroupLibrary, s.Group.HomeName, "new"
+		if existingHome {
+			next.Group.DestinationState = "existing"
+		}
+	default:
+		return nil, structureAdjustmentError("a workspace for each folder inside " + s.Group.HomeName + " is not available yet")
+	}
+	if adjustment.GroupName != "" && next.Group.Type == FolderGroupPlain {
+		next.Group.Name = adjustment.GroupName
+	}
+	if err := next.applyMembers(adjustment); err != nil {
+		return nil, err
+	}
+	if next.Validate() != nil {
+		return nil, structureAdjustmentError("the proposal would no longer be valid")
+	}
+	return next, nil
+}
+
+// AdjustStructure applies what the user changed in Adjust to a pending Home
+// offer's proposed group. It creates nothing and scans nothing: the plan the
+// card shows next is stamped from the adjusted proposal. A review made in a
+// conversation is adjusted through that conversation's own Review instead.
+func (s *FolderDigestService) AdjustStructure(ctx context.Context, userID, offerID string, adjustment FolderStructureAdjustment) (FolderOfferView, error) {
+	if s == nil || s.store == nil {
+		return FolderOfferView{}, ErrFolderOutcomeUnavailable
+	}
+	if err := adjustment.Validate(); err != nil {
+		return FolderOfferView{}, err
+	}
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	var adjusted FolderOffer
+	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		item := d.Offer(offerID)
+		if item == nil {
+			return ErrFolderOfferNotFound
+		}
+		if item.Status != FolderOfferPending || item.ConversationReview != nil || item.Structure == nil {
+			return ErrFolderOfferDecided
+		}
+		next, adjustErr := item.Structure.adjusted(&adjustment, item.Portfolio != nil && item.Portfolio.ExistingHome)
+		if adjustErr != nil {
+			return adjustErr
+		}
+		if nameErr := s.checkStructureNames(ctx, next); nameErr != nil {
+			return nameErr
+		}
+		item.Structure = next
+		adjusted = *item
+		return nil
+	})
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	return s.viewFor(ctx, userID, adjusted, binding.Paused), nil
 }
 
 // StructureMemberRoot returns one member's own directory under the root the
@@ -419,7 +592,7 @@ func (s *FolderDigestService) resolveStructure(ctx context.Context, userID, offe
 		}
 		item.Status, item.ResolvedAt = FolderOfferResolved, &now
 		item.Outcome = &FolderOutcome{
-			Kind: FolderChoiceHome, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
+			Kind: FolderChoiceGroup, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
 			Receipt: append([]FolderReceiptRow(nil), verified.Receipt...),
 		}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: "setup-" + offerID + "-structure", OfferID: offerID, Action: "structure", At: now})

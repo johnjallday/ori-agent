@@ -160,7 +160,11 @@ func TestBuildFolderStructure_OnlyAFolderOfSeveralProjectsIsACollection(t *testi
 		"a repository with packages":        {files: []string{"go.mod", "api/go.mod", "web/package.json"}},
 		"plain folders only":                {files: []string{"A/a.txt", "B/b.txt", "C/c.txt"}},
 		"two projects":                      {files: []string{"One/One.rpp", "Two/Two.rpp"}, collection: true},
-		"projects of different kinds":       {files: []string{"Song/Song.rpp", "Site/package.json", "Notes/ideas.txt"}, collection: true},
+		"projects of different kinds":       {files: []string{"Song/Song.rpp", "Thesis/main.tex", "Notes/ideas.txt"}, collection: true},
+		// Software projects are set up one at a time, each with its own review.
+		"a folder of repositories":      {files: []string{"api/go.mod", "web/package.json", "cli/Cargo.toml"}},
+		"one project and a repository":  {files: []string{"Song/Song.rpp", "Site/package.json"}},
+		"two projects and a repository": {files: []string{"One/One.rpp", "Two/Two.rpp", "Site/package.json"}, collection: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

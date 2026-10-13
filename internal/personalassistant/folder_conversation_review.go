@@ -372,8 +372,8 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 			// A structure never waits on a plugin, only on a host that can set
 			// one up at all.
 			option.WorkspaceType = offer.Structure.summary()
-			if s.digest.deps.Setup == nil {
-				unavailable(FolderAvailabilityPlanUnavailable)
+			if view.Plan == nil {
+				unavailable(view.Availability)
 			} else {
 				option.Structure = offer.Structure.view()
 			}

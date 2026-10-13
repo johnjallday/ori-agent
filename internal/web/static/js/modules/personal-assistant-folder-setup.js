@@ -150,6 +150,7 @@ function parkChoices() {
 }
 
 const STOPPED_BECAUSE = {
+  member_failed: 'one workspace could not be created',
   needs_pick: 'it needs the folder again',
   needs_choice: 'it needs you to choose the project file',
   needs_model: 'it needs a model',
@@ -168,10 +169,14 @@ export function reviewStatusView(context, elsewhere = null) {
   const subject = String(context.subject || '').trim() || 'this folder';
   const name = String(context.destination_name || '').trim();
   const known = ['existing', 'new'].includes(context.destination_status) && name;
+  // A folder set up as a group is not placed "in" anything: the group is what
+  // is made of it, and often carries the folder's own name.
   const place = known
     ? context.operation === 'link_supporting_folder'
       ? ` as a supporting folder in ${name}`
-      : ` in ${context.destination_status === 'new' ? 'a new ' : ''}${name}`
+      : context.operation === 'create_group_with_workspaces'
+        ? ` as the group ${name}`
+        : ` in ${context.destination_status === 'new' ? 'a new ' : ''}${name}`
     : '';
   const past = context.historical ? ' This is an earlier review; it cannot be confirmed here.' : '';
   let text;
@@ -912,7 +917,7 @@ function renderReferences() {
     }
     if (receipt.visible) {
       const kind =
-        offer.outcome?.kind === 'home'
+        offer.outcome?.kind === 'home' || offer.outcome?.kind === 'group'
           ? 'group'
           : offer.outcome?.kind === 'project'
             ? 'workspace'

@@ -236,19 +236,22 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 // known marker, or the density rule.
 func IsProject(c Candidate, now time.Time) bool { return projectSignal(c, now) }
 
-// IsCollection reports whether the scanned root holds separate projects: it
-// carries no marker of its own and at least CollectionMinProjects of its
-// immediate subfolders are projects. A root that is itself a project (a
-// repository with packages, a session folder with its backups) is one project,
-// however its subfolders look. Like the portfolio signal, this is read from the
-// unfiltered scan: a declined subfolder is still evidence of the root's shape.
+// IsCollection reports whether the scanned root holds separate projects that
+// can be set up together: it carries no marker of its own and at least
+// CollectionMinProjects of its immediate subfolders are projects. A root that
+// is itself a project (a repository with packages, a session folder with its
+// backups) is one project, however its subfolders look. Software projects do
+// not count: each has a reviewed setup of its own, with its own assistant, and
+// a folder of repositories keeps asking which one. Like the portfolio signal,
+// this is read from the unfiltered scan: a declined subfolder is still evidence
+// of the root's shape.
 func IsCollection(r Result, now time.Time) bool {
 	if r.RootCandidate().HasMarker() {
 		return false
 	}
 	projects := 0
 	for _, candidate := range r.Subfolders() {
-		if projectSignal(candidate, now) {
+		if projectSignal(candidate, now) && ShapeFor(candidate) != ShapeCode {
 			projects++
 		}
 	}

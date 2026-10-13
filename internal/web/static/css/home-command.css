@@ -284,6 +284,11 @@ body.home-command-page .home-command-bridge * {
   grid-column: 1 / -1;
 }
 
+/* A group's receipt lists the workspaces it made, one to a row. */
+.pa-folder__receipt[data-layout="list"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .pa-folder__receipt-icon {
   flex: none;
   color: var(--hc-signal);

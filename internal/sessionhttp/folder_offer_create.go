@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -29,6 +30,45 @@ type FolderOfferWorkspaceRequest struct {
 	// showed. The endpoint then creates the whole reviewed roster or nothing:
 	// a roster that changed since the review is ErrFolderOfferRosterChanged.
 	Roster *FolderOfferRosterReview
+	// Group, when set, makes the workspace a group, created with the Group
+	// Manager a review showed. A group has no blueprint, so TemplateID must be
+	// empty; a roster that changed since the review is
+	// ErrFolderOfferRosterChanged.
+	Group *FolderOfferGroupRoster
+}
+
+// FolderOfferGroupRoster is the Group Manager a new group is created with, in
+// the terms the creation endpoint checks: the revision of the group's roster
+// plan, the manager's name, and whether it is a new saved agent ("create") or
+// the user's own saved agent of that name ("reuse").
+type FolderOfferGroupRoster struct {
+	PlanRevision string
+	Manager      string
+	Action       string
+}
+
+// WorkspaceNameTaken reports whether creating a workspace or group of this name
+// would be refused because its folder name is already in use. It applies the
+// occupancy the create path's own conflict uses, and changes nothing.
+func (h *Handler) WorkspaceNameTaken(ctx context.Context, name string) bool {
+	slug := workspaceSlugFor(strings.TrimSpace(name))
+	return h != nil && slug != "" && h.workspaceSlugOccupied(ctx, slug, "")
+}
+
+// FolderOfferGroup reads the roster a new group of this name would get, the
+// same way the Create Workspace Team step reads it. Reading it creates no agent
+// and no workspace.
+func (h *Handler) FolderOfferGroup(name string) (FolderOfferGroupRoster, error) {
+	name = strings.TrimSpace(name)
+	if h == nil || h.agentStore == nil || name == "" {
+		return FolderOfferGroupRoster{}, ErrFolderOfferRoster
+	}
+	plan := h.buildTemplateAgentPlan(groupRosterTemplate(name))
+	if len(plan.Agents) != 1 || strings.TrimSpace(plan.Agents[0].Name) == "" || strings.TrimSpace(plan.Revision) == "" {
+		return FolderOfferGroupRoster{}, ErrFolderOfferRoster
+	}
+	manager := plan.Agents[0]
+	return FolderOfferGroupRoster{PlanRevision: plan.Revision, Manager: strings.TrimSpace(manager.Name), Action: manager.Action}, nil
 }
 
 // CreateFolderOfferWorkspace creates the workspace through the ordinary
@@ -56,6 +96,19 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 		}
 		create.TemplateAgentOverrides, create.TemplateAgentReview = overrides, review
 	}
+	if req.Group != nil {
+		// The group's own reviewed roster contract: exactly its Group Manager,
+		// as the review saw it, or nothing is created.
+		if create.TemplateID != "" || req.Roster != nil || strings.TrimSpace(req.Group.Manager) == "" {
+			return "", errors.New("a folder offer group has a Group Manager and no blueprint")
+		}
+		enabled := true
+		create.Kind, create.GroupRoster, create.CreateTemplateAgents = string(session.WorkspaceKindGroup), true, &enabled
+		create.TemplateAgentReview = &templateAgentReview{
+			Version: templateAgentReviewVersion, PlanRevision: strings.TrimSpace(req.Group.PlanRevision),
+			Expectations: []templateAgentReviewExpectation{{Index: 0, Name: strings.TrimSpace(req.Group.Manager), Action: strings.TrimSpace(req.Group.Action)}},
+		}
+	}
 	body, err := json.Marshal(create)
 	if err != nil {
 		return "", err
@@ -68,7 +121,7 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 	recorder := httptest.NewRecorder()
 	h.HandleWorkspaces(recorder, httpRequest)
 	if recorder.Code != http.StatusCreated {
-		if req.Roster != nil && recorder.Code == http.StatusConflict && createConflictType(recorder.Body.Bytes()) == "template_agent_plan" {
+		if (req.Roster != nil || req.Group != nil) && recorder.Code == http.StatusConflict && createConflictType(recorder.Body.Bytes()) == "template_agent_plan" {
 			return "", ErrFolderOfferRosterChanged
 		}
 		return "", fmt.Errorf("folder offer workspace creation failed (%d): %s", recorder.Code, createFailureMessage(recorder.Body.Bytes()))

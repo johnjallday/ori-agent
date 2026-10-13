@@ -28,6 +28,15 @@ type structureSetup struct {
 	homeReads, integrationReads int
 }
 
+// Plan plans a proposed group itself, as the real host does: a group needs no
+// plugin, so whatever the fake says about plugins does not stand in its way.
+func (s *structureSetup) Plan(ctx context.Context, req FolderSetupRequest) (FolderSetupPlan, error) {
+	if req.Offer.Structure.ProposesWorkspaces() {
+		return NewFolderSetupPlan([]FolderPlanLine{{Kind: FolderPlanGroup, Name: "Creates group " + req.Offer.Structure.Group.Name}}).Stamped(), nil
+	}
+	return s.fakeFolderSetup.Plan(ctx, req)
+}
+
 func (s *structureSetup) HomeAvailability(context.Context, string, string) string {
 	s.homeReads++
 	return s.home
@@ -343,8 +352,12 @@ func TestFolderReviewOptions_ReadOnlyAvailabilityAndScope(t *testing.T) {
 	if got, reason := state(withSetup, "Album"); len(withSetup) != len(options) || got != "proposed" || reason != "" {
 		t.Fatalf("available specialized setup not offered: %s/%s", got, reason)
 	}
-	f.service.deps.Setup = &fakeFolderSetup{planErr: reasonedPlanError(FolderAvailabilityIntegrationNotInstalled)}
+	// A host whose integration plans fail still plans the group itself.
+	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{planErr: reasonedPlanError(FolderAvailabilityIntegrationNotInstalled)}}
 	unplanned := service.ReviewOptions(ctx, target, observation.ID)
+	if got, reason := state(unplanned, "Documents"); got != "proposed" || reason != "" {
+		t.Fatalf("the group waited on a plugin: %s/%s", got, reason)
+	}
 	if got, reason := state(unplanned, "Album"); len(unplanned) != len(options) || got != "unavailable" || reason != FolderAvailabilityIntegrationNotInstalled {
 		t.Fatalf("unavailable plan: %s/%s", got, reason)
 	}

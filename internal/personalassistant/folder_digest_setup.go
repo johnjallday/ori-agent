@@ -82,7 +82,7 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
 			switch reason.SetupPreviewReason() {
 			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable",
-				"project_exists", "assistant_unavailable":
+				"project_exists", "assistant_unavailable", "name_taken":
 				v.SetupUnavailableReason = reason.SetupPreviewReason()
 			}
 		}

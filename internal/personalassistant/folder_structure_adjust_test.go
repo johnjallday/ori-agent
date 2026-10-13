@@ -86,7 +86,13 @@ func TestFolderStructureAdjustment_RefusesWhatTheProposalCannotTake(t *testing.T
 			{CandidateID: a, Included: true, Name: "Same"}, {CandidateID: b, Included: true, Name: "same"},
 		}}, "two workspaces would have the name"},
 		"a workspace per folder in a Home": {FolderStructureAdjustment{GroupType: FolderGroupHome}, "is not available yet"},
-		"a library in an unavailable Home": {FolderStructureAdjustment{GroupType: FolderGroupLibrary}, "cannot be used right now"},
+	}
+	// Listing the collection in its Home is the earlier setup, with its own
+	// guided steps when the Home is not installed yet: it can always be chosen
+	// for a folder that has a Home to offer.
+	if library, err := rootStructure(t, service, observation.ID, &FolderStructureAdjustment{GroupType: FolderGroupLibrary}); err != nil ||
+		library.Group.Type != FolderGroupLibrary || library.ProposesWorkspaces() {
+		t.Fatalf("listing in a Home that is not installed: %+v, %v", library, err)
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

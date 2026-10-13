@@ -62,6 +62,9 @@ const (
 	FolderChoiceProject = "project"
 	FolderChoiceTidy    = "tidy"
 	FolderChoiceHome    = "home" // resolved portfolio, not a project folder
+	// FolderChoiceGroup is a resolved structure: a group and the workspaces a
+	// folder of several projects was set up as. It is an outcome only.
+	FolderChoiceGroup = "group"
 )
 
 // FolderCandidateRecord is one thing the assistant could offer about a

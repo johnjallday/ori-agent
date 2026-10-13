@@ -1785,3 +1785,97 @@ test('an open first look is pinned in Needs you, so a reload keeps it', () => {
     false
   );
 });
+
+test('Home proposes a folder of several projects as one group, with its own four controls', () => {
+  const offer = {
+    id: 'offer-1',
+    status: 'pending',
+    verdict: 'project',
+    folder: 'Albums',
+    reason: '5 audio project folders',
+    subject: { name: 'Albums', kind: 'project', is_root: true },
+    // The collection evidence stays on the offer; the card is the group's.
+    portfolio: { shape: 'audio', projects: 5 },
+    capability: { question: 'Set up one Home for these projects?', accept_label: 'Yes' },
+    plan: {
+      digest: 'd1',
+      lines: [
+        { kind: 'group', name: 'Creates group Albums' },
+        { kind: 'workspaces', name: 'Creates 3 workspaces, each linked to its own folder' }
+      ]
+    },
+    structure: {
+      version: 1,
+      folder: 'Albums',
+      group: { name: 'Albums', type: 'group', destination_state: 'new', home_name: 'Music Home' },
+      members: [
+        {
+          candidate_id: 'candidate-1',
+          name: 'Album-1',
+          type_label: 'Session',
+          project: true,
+          included: true
+        },
+        {
+          candidate_id: 'candidate-2',
+          name: 'Album-2',
+          type_label: 'Session',
+          project: true,
+          included: true
+        },
+        {
+          candidate_id: 'candidate-3',
+          name: 'Sketch',
+          type_label: 'Plain workspace',
+          included: true
+        }
+      ],
+      notes: ['Music Home is not installed; a plain group is proposed instead.']
+    }
+  };
+  const view = folderOfferView(offer);
+  assert.deepEqual(
+    view.headline.map(part => part.text),
+    ['Albums', ' has 2 Session folders and 1 other folder.']
+  );
+  assert.equal(
+    view.question,
+    'Set up a group with 3 workspaces? Here is everything Set up will do:'
+  );
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Set up', 'Adjust…', 'No thanks', 'Later']
+  );
+  assert.equal(view.actions[0].oneCard, true);
+  assert.equal(view.actions[1].adjustStructure, true);
+  assert.deepEqual(
+    view.actions.slice(2).map(action => action.decision),
+    ['no', 'later']
+  );
+  // Nothing on the card opens the Home's step-by-step setup or creates a
+  // single workspace for the whole folder.
+  assert.equal(
+    view.actions.some(action => action.journey || action.modal || action.create),
+    false
+  );
+  // The plan says it all, so the proposal card is not drawn beside it; with
+  // no plan yet the card carries the members and what is unavailable.
+  assert.equal(view.structure, null);
+  assert.equal(view.plan.lines.length, 2);
+  const unplanned = folderOfferView({ ...offer, plan: null });
+  assert.equal(unplanned.structure.members.length, 3);
+  assert.deepEqual(
+    unplanned.actions.map(action => action.label),
+    ['Adjust…', 'No thanks', 'Later']
+  );
+  assert.equal(view.reason, '5 audio project folders');
+  // Listing the collection in its Home instead (chosen in Adjust) is the
+  // earlier collection card, unchanged.
+  const listed = folderOfferView({
+    ...offer,
+    plan: null,
+    structure: { ...offer.structure, group: { ...offer.structure.group, type: 'library' } }
+  });
+  assert.equal(listed.structure, undefined);
+  assert.equal(listed.question, 'Set up one Home for these projects?');
+});

@@ -349,6 +349,11 @@ func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.Folder
 }
 
 func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.FolderSetupRequest) (personalassistant.FolderSetupPlan, error) {
+	// A proposed group is the host's own setup. It is planned before anything
+	// that looks for a plugin, so no plugin can stand in its way.
+	if req.Offer.Structure.ProposesWorkspaces() {
+		return h.structurePlan(ctx, req)
+	}
 	if req.Offer.Portfolio != nil {
 		return h.portfolioPlan(ctx, req)
 	}
@@ -375,6 +380,14 @@ func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.Folder
 func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderSetupRequest) error {
 	if h == nil || h.builder == nil {
 		return errSetupUnavailable
+	}
+	// A structure is the host's own recipe too: it runs only for an offer that
+	// still proposes one, and never as anything else.
+	if req.Plan.Intent.Recipe == personalassistant.FolderRecipeStructure {
+		if !req.Offer.Structure.ProposesWorkspaces() {
+			return errSetupUnavailable
+		}
+		return h.structureRun(ctx, req)
 	}
 	// A built-in recipe needs no setup journey; it is dispatched before the
 	// journey service is required, and an intent naming any other recipe is

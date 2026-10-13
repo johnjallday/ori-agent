@@ -16,6 +16,7 @@ import {
 } from './personal-assistant-folder-setup.js';
 import {
   conversationFolderOfferView,
+  folderReceiptView,
   folderReviewResponseCurrent,
   offerStructure,
   structureCounts
@@ -230,6 +231,18 @@ test('the status sentence names the reviewed destination and why a control is bl
     }).text,
     /as a supporting folder in Music Home/
   );
+  // A folder made into a group is not "in a new" anything, even under one name.
+  assert.equal(
+    reviewStatusView({
+      version: 1,
+      subject: 'Downloads',
+      destination_name: 'Downloads',
+      destination_status: 'new',
+      status: 'completed',
+      operation: 'create_group_with_workspaces'
+    }).text,
+    'Downloads is set up as the group Downloads.'
+  );
   // An undisclosed destination is never filled in from a name alone.
   assert.doesNotMatch(
     reviewStatusView({
@@ -431,11 +444,10 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
     ...offer,
     subject: { name: 'Albums', kind: 'project', is_root: true },
     create_available: true,
-    // The Home-plus-library plan the same offer carries has no plan; that is
-    // not this card's business.
+    // The collection evidence the same offer carries is not this card's
+    // business: the group is the proposal.
     portfolio: { shape: 'audio', projects: 5 },
     capability: { question: 'Set up one Home for these projects?', accept_label: 'Yes' },
-    setup_unavailable_reason: 'home_provider_unavailable',
     structure: albumsStructure()
   };
   const view = conversationFolderOfferView(pending);
@@ -459,6 +471,82 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
     view.actions.some(action => action.create || action.modal || action.decision || action.journey),
     false
   );
+  // A proposal the server could not plan says the one thing that stops it,
+  // and still offers Adjust.
+  const taken = conversationFolderOfferView({ ...pending, setup_unavailable_reason: 'name_taken' });
+  assert.equal(
+    taken.capabilityDetail,
+    'The name Albums is not one a group can have. Choose another in Adjust.'
+  );
+  assert.deepEqual(
+    taken.actions.map(action => action.label),
+    ['Adjust…', 'Keep chatting']
+  );
+  assert.match(
+    conversationFolderOfferView({ ...pending, setup_unavailable_reason: 'setup_unavailable' })
+      .capabilityDetail,
+    /^Set up is not available for this proposal right now/
+  );
+  // A run that stopped at one workspace is carried on from the card.
+  const stopped = conversationFolderOfferView({
+    ...pending,
+    status: 'awaiting_outcome',
+    setup: {
+      plan_digest: 'd1',
+      status: 'stopped',
+      stop_reason: 'member_failed',
+      lines: [
+        { kind: 'group', name: 'Creates group Albums', state: 'done' },
+        { kind: 'member', name: 'Album-1', state: 'failed' }
+      ]
+    }
+  });
+  assert.match(stopped.question, /^1 of 2 steps finished\. One workspace could not be created/);
+  assert.deepEqual(
+    stopped.actions.map(action => [action.label, action.oneCard, action.retry]),
+    [['Continue', true, true]]
+  );
+  // A finished setup shows its receipt: the group, then every workspace, each
+  // with its own page. A row whose route is not a workspace page is not linked.
+  const done = {
+    ...pending,
+    status: 'resolved',
+    outcome: {
+      kind: 'group',
+      workspace_id: 'group-1',
+      route: '/workspaces/albums',
+      receipt: [
+        { kind: 'workspace', name: 'Albums', detail: 'group', route: '/workspaces/albums' },
+        {
+          kind: 'workspace',
+          name: 'Album-1',
+          detail: 'linked to Album-1',
+          route: '/workspaces/album-1'
+        },
+        { kind: 'workspace', name: 'Album-2', route: 'https://example.com/elsewhere' }
+      ]
+    }
+  };
+  const receipt = folderReceiptView(done);
+  assert.equal(receipt.visible, true);
+  assert.equal(receipt.route, '/workspaces/albums');
+  assert.equal(receipt.openLabel, 'Open Albums');
+  assert.deepEqual(
+    receipt.rows.map(row => [row.name, row.route]),
+    [
+      ['Albums', '/workspaces/albums'],
+      ['Album-1', '/workspaces/album-1'],
+      ['Album-2', '']
+    ]
+  );
+  const finished = conversationFolderOfferView(done);
+  assert.equal(finished.question, "Here's what I set up:");
+  assert.equal(finished.structure, null);
+  // A group outcome with no workspace to show is not a receipt.
+  assert.equal(
+    folderReceiptView({ ...done, outcome: { ...done.outcome, receipt: [] } }).visible,
+    false
+  );
   // With a plan from the server, Set up comes first and the plan says the rest.
   const planned = conversationFolderOfferView({
     ...pending,
@@ -469,9 +557,10 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
     ['Set up', 'Adjust…', 'Keep chatting']
   );
   assert.equal(planned.actions[0].oneCard, true);
-  // The plan's own lines say what is unavailable, so the card's notes step aside.
-  assert.deepEqual(planned.structure.notes, []);
-  assert.equal(planned.structure.members.length, 6);
+  // The plan names the group, every workspace and what is unavailable, so the
+  // proposal card steps aside: nothing is said twice.
+  assert.equal(planned.structure, null);
+  assert.equal(planned.structured, true);
   assert.match(planned.question, /Here is everything Set up will do:$/);
   // The shape's Home, new and existing; a single remaining member.
   assert.equal(

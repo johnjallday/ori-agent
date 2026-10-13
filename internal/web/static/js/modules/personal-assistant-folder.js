@@ -23,6 +23,7 @@ import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import { proposalView, renderProposal, structureOption } from './personal-assistant-proposal.js';
+import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
 // can use it without mounting this card; it is re-exported for existing callers.
@@ -267,6 +268,33 @@ const SOFTWARE_STOP_COPY = {
     'A step did not finish. What finished is kept and nothing in the project folder was changed; Try again carries on from there.'
 };
 
+// A group setup is the host's own too. It creates workspaces one at a time, so
+// a stop always leaves what finished in place and is carried on from the card.
+const STRUCTURE_STOP_COPY = {
+  member_failed:
+    'One workspace could not be created, so I stopped there. What finished is kept and nothing in your folder was changed; Continue carries on from that workspace.',
+  plan_changed:
+    'What is saved no longer matches what you reviewed, so I stopped before going further. Anything that finished is kept.',
+  needs_pick: subject =>
+    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  interrupted:
+    'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
+  failed:
+    'A step did not finish. What finished is kept and nothing in your folder was changed; Try again carries on from there.'
+};
+
+function structureStoppedActions(reason) {
+  const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
+  switch (reason) {
+    case 'needs_pick':
+      return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
+    case 'member_failed':
+      return [{ ...retry, label: 'Continue' }];
+    default:
+      return [retry];
+  }
+}
+
 const CONTINUE_SETUP = {
   id: 'resume',
   label: 'Continue setup',
@@ -332,7 +360,11 @@ function stoppedActions(reason, setup) {
 // setup: the plan lines with a state each, one status line, and — only when
 // stopped — one plain sentence saying what finished and what is needed. A raw
 // stop reason code is never shown.
-export function setupRunView(setup, subject, { portfolio = false, software = false } = {}) {
+export function setupRunView(
+  setup,
+  subject,
+  { portfolio = false, software = false, structure = false } = {}
+) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
   if (status !== 'stopped') {
@@ -351,13 +383,18 @@ export function setupRunView(setup, subject, { portfolio = false, software = fal
   let sentence =
     (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
+  if (structure) sentence = STRUCTURE_STOP_COPY[reason] || STRUCTURE_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   return {
     status,
     lines,
     statusLine: '',
     question: `${progress}${sentence}`,
-    actions: software ? softwareStoppedActions(reason) : stoppedActions(reason, setup || {})
+    actions: structure
+      ? structureStoppedActions(reason)
+      : software
+        ? softwareStoppedActions(reason)
+        : stoppedActions(reason, setup || {})
   };
 }
 
@@ -599,7 +636,7 @@ function structureOfferView(offer, base, subject) {
   const count = proposal.members.length;
   const workspaces = `${count} workspace${count === 1 ? '' : 's'}`;
   const group = String(structure.group.name || '').trim();
-  const run = offer.setup ? setupRunView(offer.setup, subject) : null;
+  const run = offer.setup ? setupRunView(offer.setup, subject, { structure: true }) : null;
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   let question =
@@ -615,6 +652,12 @@ function structureOfferView(offer, base, subject) {
   else if (!base.decided) {
     if (hasPlan) actions.push({ id: 'setup', label: 'Set up', style: 'primary', oneCard: true });
     actions.push({ id: 'adjust', label: 'Adjust…', style: 'outline', adjustStructure: true });
+    // On Home the proposal can be declined or put off; in a conversation its
+    // review is closed with Keep chatting instead.
+    actions.push(
+      { id: 'no', label: 'No thanks', style: 'outline', decision: 'no' },
+      { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+    );
   }
   return {
     ...base,
@@ -624,16 +667,25 @@ function structureOfferView(offer, base, subject) {
     ]),
     question,
     // What the proposal goes without is said once: by the proposal card's own
-    // notes, and by the plan's lines once there is a plan.
-    capabilityDetail: '',
+    // notes, and by the plan's lines once there is a plan. A proposal with no
+    // plan says the one thing that stops it.
+    capabilityDetail:
+      hasPlan || run || base.decided
+        ? ''
+        : offer.setup_unavailable_reason === 'name_taken'
+          ? `The name ${group} is not one a group can have. Choose another in Adjust.`
+          : offer.setup_unavailable_reason
+            ? 'Set up is not available for this proposal right now. You can adjust it or keep chatting.'
+            : '',
     reason: run ? '' : base.reason,
     actions,
     resume: base.status === 'awaiting_outcome',
     plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
     setup: run,
-    // With a plan the card shows the plan's own unavailable lines, so the
-    // proposal keeps its members and drops its notes.
-    structure: base.decided && !run ? null : hasPlan || run ? { ...proposal, notes: [] } : proposal
+    structured: true,
+    // The plan names the group, every workspace and what is unavailable, so
+    // with a plan (or a run of it) the proposal card would only repeat it.
+    structure: hasPlan || run || base.decided ? null : proposal
   };
 }
 
@@ -688,7 +740,7 @@ export function folderOfferView(offer, options = {}) {
   }
   if (
     status === 'resolved' &&
-    (offer?.outcome?.kind === 'project' || offer?.outcome?.kind === 'home') &&
+    ['project', 'home', 'group'].includes(offer?.outcome?.kind) &&
     folderReceiptView(offer).visible
   ) {
     view.question = "Here's what I set up:";
@@ -1339,9 +1391,40 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
 // and route are never reconstructed from the folder name or blueprint plan.
 // options.busy and options.message are a first-look click of ours in flight and
 // what it was told; they only change the first look's part of the view.
+// A workspace's own page, as a receipt row may link it.
+const WORKSPACE_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/?$/;
+
+// groupReceiptView is the receipt of a folder set up as a group: the group
+// first, then every workspace it made, each with the page to open.
+function groupReceiptView(offer) {
+  const rows = (Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : []).filter(
+    row => row?.kind === 'workspace' && String(row.name || '').trim()
+  );
+  const route = resolvedRouteFor(offer);
+  if (rows.length < 2 || !WORKSPACE_ROUTE.test(route)) return { visible: false };
+  return {
+    visible: true,
+    group: true,
+    rows: rows.map(row => {
+      const link = String(row.route || '').trim();
+      return {
+        kind: 'workspace',
+        name: String(row.name),
+        detail: String(row.detail || ''),
+        route: WORKSPACE_ROUTE.test(link) ? link : ''
+      };
+    }),
+    route,
+    homeRoute: '',
+    openLabel: `Open ${String(rows[0].name).trim()}`
+  };
+}
+
 export function folderReceiptView(offer, options = {}) {
   if (offer?.status === 'resolved' && offer?.outcome?.kind === 'home')
     return homeReceiptView(offer);
+  if (offer?.status === 'resolved' && offer?.outcome?.kind === 'group')
+    return groupReceiptView(offer);
   if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
   const workspace = rows.find(row => row.kind === 'workspace');
@@ -1745,6 +1828,8 @@ export function folderOutcomeNote(offer) {
     case 'declined':
       return `I will not ask about ${subject} again.`;
     case 'resolved':
+      if (offer?.outcome?.kind === 'group')
+        return 'Your group and its workspaces are ready. Nothing in the folder was moved or changed.';
       if (offer?.outcome?.kind === 'home') {
         return offer.outcome.existing
           ? 'Your Music Production Home has this collection waiting in its library. Nothing was moved, linked, or scanned.'
@@ -1918,10 +2003,24 @@ function renderReceiptRows(list, rows, doc = document) {
     icon.className = 'pa-folder__receipt-icon';
     icon.setAttribute('aria-hidden', 'true');
     icon.textContent = glyph;
-    li.append(
-      icon,
-      doc.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
-    );
+    if (row.route) {
+      // A group's receipt names every workspace it made, each one to open. The
+      // text is one item beside the icon, so it wraps as a sentence.
+      const link = doc.createElement('a');
+      link.href = row.route;
+      link.textContent = row.name;
+      const text = doc.createElement('span');
+      text.append(
+        doc.createTextNode(`${label} · `),
+        link,
+        doc.createTextNode(row.detail ? ` (${row.detail})` : '')
+      );
+      li.append(icon, text);
+    } else
+      li.append(
+        icon,
+        doc.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
+      );
     list.append(li);
   });
 }
@@ -2409,7 +2508,7 @@ export function conversationFolderOfferView(offer, options = {}) {
   if (!offer?.conversation_id || offer.status !== 'pending') return view;
   // A proposed group keeps its own controls. In a conversation the review is
   // closed with Keep chatting, never declined or postponed.
-  if (view.structure)
+  if (view.structured)
     return {
       ...view,
       actions: [
@@ -2459,6 +2558,12 @@ function renderOffer(place) {
       ? document.activeElement.dataset.folderAction
       : '';
   if (state.reviewSlot) window.PersonalAssistantTranscript?.beforeChange?.();
+  // An Adjust sheet belongs to the offer it was opened on, while it is pending.
+  if (
+    structureAdjust &&
+    (structureAdjust.offerId !== state.offer?.id || state.offer?.status !== 'pending')
+  )
+    closeStructureAdjust(false);
   const view = conversationFolderOfferView(state.offer, {
     confirm: state.confirm,
     softwareAdjusting:
@@ -2533,6 +2638,8 @@ function renderOffer(place) {
   if (els.why) els.why.hidden = !view.reason;
   if (els.receipt) {
     els.receipt.hidden = !receipt.visible;
+    // A group's receipt is a list of workspaces to open: one to a row.
+    els.receipt.dataset.layout = receipt.visible && receipt.group ? 'list' : 'grid';
     renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
   // What the agent found, once its first look has finished, and for an
@@ -2716,6 +2823,7 @@ function runAction(action) {
     const trigger = elements()?.actions?.querySelector('[data-folder-action="adjust"]');
     if (state.offer?.conversation_id)
       window.PersonalAssistantFolderSetup?.adjustStructure?.(trigger, state.offer.structure);
+    else openStructureAdjust();
     return;
   }
   if (action.repick && state.offer?.conversation_id) {
@@ -3514,6 +3622,61 @@ async function reviewSoftware() {
 // saveSoftwareNames sends the names typed on the card. The server redraws the
 // plan for them; nothing is created. A refused name keeps what was typed, so
 // it can be corrected rather than typed again.
+// The Adjust sheet of a proposed group on Home's own card. It is the sheet the
+// composer uses; here Done saves the choices on the offer, and the card is drawn
+// again with the plan the server stamped for them. Nothing is created.
+let structureAdjust = null;
+
+function closeStructureAdjust(returnFocus = true) {
+  if (!structureAdjust) return;
+  structureAdjust.sheet.element.remove();
+  structureAdjust = null;
+  if (returnFocus) focusFolderAction('adjust');
+}
+
+function openStructureAdjust() {
+  const offer = state.offer;
+  const els = elements();
+  if (!offer?.structure || state.busy || !els?.actions) return;
+  closeStructureAdjust(false);
+  const sheet = createAdjustSheet({
+    structure: offer.structure,
+    onCancel: () => closeStructureAdjust(),
+    onDone: adjustment => void saveStructureAdjust(offer.id, adjustment)
+  });
+  els.actions.before(sheet.element);
+  structureAdjust = { sheet, offerId: offer.id };
+  sheet.focus();
+}
+
+async function saveStructureAdjust(offerId, adjustment) {
+  const open = structureAdjust;
+  if (!open || open.offerId !== offerId || state.offer?.id !== offerId || state.busy) return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  let saved = false;
+  try {
+    const { ok, payload } = await postOffer(offerId, 'structure', { structure: adjustment });
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) {
+      open.sheet.setError(
+        String(payload?.error || 'Those changes could not be applied. Nothing was saved.')
+      );
+      return;
+    }
+    saved = true;
+  } catch (_) {
+    open.sheet.setError('The changes could not be saved. Try again.');
+  } finally {
+    state.busy = false;
+    if (saved) closeStructureAdjust(false);
+    render();
+    if (saved) focusFolderAction('adjust');
+  }
+}
+
 async function saveSoftwareNames() {
   const offer = state.offer;
   if (!offer?.id || state.busy) return;
@@ -3676,7 +3839,7 @@ async function revealSetupWalkthrough(offer) {
 export function resolvedRouteFor(offer) {
   if (String(offer?.status || '') !== 'resolved') return '';
   const kind = offer?.outcome?.kind;
-  if (kind !== 'tidy' && kind !== 'project' && kind !== 'home') return '';
+  if (kind !== 'tidy' && kind !== 'project' && kind !== 'home' && kind !== 'group') return '';
   const route = String(offer?.outcome?.route || '').trim();
   return route.startsWith('/') && !route.startsWith('//') ? route : '';
 }

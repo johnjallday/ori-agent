@@ -335,6 +335,10 @@ type FolderDigestDeps struct {
 	// returns is the one shown. Nil leaves a finished run unverified, and an
 	// unverified run never resolves an offer.
 	StructureGroup func(ctx context.Context, userID string, offer FolderOffer, root, groupID string) (FolderCreateResult, error)
+	// WorkspaceNameTaken reports whether a workspace or group of this name
+	// already exists, by the same rule creating one applies. A proposed group
+	// names its workspaces around what is taken. Nil means nothing is.
+	WorkspaceNameTaken func(ctx context.Context, name string) bool
 	// LegacyDeclined reads the pre-folder app-card answer once per domain.
 	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
@@ -1053,7 +1057,10 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	// A whole collection is one Home question, not the first of seven
 	// per-project questions. An unreadable Home suppresses it. An existing Home
 	// turns it into "add this collection to your Home", never a second Home.
-	if pickedFile == "" && verdict.Portfolio != nil {
+	// A root the user said no to as a group is not asked about again as a
+	// collection either: what is left are its projects, one by one.
+	declinedGroup := s.deps.Setup != nil && doc.Tombstoned(FolderKey(root)) && folderdigest.IsCollection(result, now)
+	if pickedFile == "" && verdict.Portfolio != nil && !declinedGroup {
 		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
 		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" && s.deps.HomeExists != nil {
 			exists, homeErr := s.deps.HomeExists(ctx, userID, row.Offer.HomeProviderKey)
@@ -1107,21 +1114,49 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 			return FolderOfferView{}, err // do not offer on an unreadable prior no
 		}
 	}
-	if offer.Portfolio != nil {
-		// The collection is also described as a group with a workspace per
-		// project. A first no about a single project is revived once by a whole
+	// A folder that holds several projects is proposed as one group with a
+	// workspace per folder, on Home as in the composer. Two folders keep the
+	// question they had: a landing zone full of loose files (a project, or a
+	// tidy), and a root the user already said no to (its projects, one by one).
+	// A host with no setup runner cannot make a group at all, and offers none.
+	if pickedFile == "" && s.deps.Setup != nil && !verdict.RootDump && !doc.Tombstoned(FolderKey(root)) && folderdigest.IsCollection(result, now) {
+		collection := offer
+		if collection.Portfolio == nil {
+			collection = buildCollectionOffer(offer, verdict, result, now)
+		}
+		// A first no about a single project is revived once by a whole
 		// collection, exactly as the capability offer below is.
 		declined := s.declinedDomains(ctx, userID, doc)
-		offer.Structure, err = s.structureFor(ctx, userID, result, verdict, offer, func(candidate string) bool {
+		structure, structureErr := s.structureFor(ctx, userID, result, verdict, collection, func(candidate string) bool {
 			if !declined(candidate) {
 				return false
 			}
 			decline := doc.DeclineFor(candidate)
-			revived := candidate == domain && (decline == nil || (decline.Count == 1 && decline.FirstEvidence == "single_project"))
+			revived := candidate == domain && collection.Portfolio != nil &&
+				(decline == nil || (decline.Count == 1 && decline.FirstEvidence == "single_project"))
 			return !revived
 		}, nil)
-		if err != nil {
-			return FolderOfferView{}, err
+		if structureErr != nil {
+			return FolderOfferView{}, structureErr
+		}
+		switch {
+		case structure.ProposesWorkspaces():
+			// The group is the offer: the root is its subject, and no queue of
+			// per-project questions follows it.
+			offer = collection
+			offer.Structure = structure
+			offer.Enclosing, offer.SubjectIdentity, offer.SoftwareReview = nil, "", nil
+			afterIdentity, identityErr := portfolioDirectoryIdentity(root)
+			if (identityErr != nil && !errors.Is(identityErr, projectlibrary.ErrUnavailable)) ||
+				(beforeIdentity != "" && beforeIdentity != afterIdentity) {
+				return FolderOfferView{}, ErrFolderPathLost
+			}
+			offer.RootIdentity = afterIdentity
+			// A group is not a capability: it has no domain to decline or revive.
+			domain, evidence, legacyDeclined = "", "", false
+		case structure != nil && offer.Portfolio != nil:
+			// The collection's Home is in place: it is listed there, as before.
+			offer.Structure = structure
 		}
 	}
 
@@ -1247,7 +1282,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if input.Decision == FolderDecisionYes {
 		// A proposed group is set up through its own reviewed plan (Set up). A
 		// bare yes on its review would make one workspace out of the whole folder.
-		if offer.ConversationReview != nil && offer.Status == FolderOfferPending && offer.Structure.ProposesWorkspaces() {
+		if offer.Status == FolderOfferPending && offer.Structure.ProposesWorkspaces() {
 			return FolderOfferView{}, ErrFolderReviewRequired
 		}
 		if input.Create && isProjectCapabilityOffer(*offer) {
@@ -1903,6 +1938,11 @@ func (s *FolderDigestService) PortfolioProvider(ctx context.Context, userID, off
 // folderOfferDomainClass identifies only an actually eligible capability.
 // A blank Ableton/Logic workspace has no music-domain decline to record.
 func folderOfferDomainClass(offer FolderOffer) (domain, evidence string) {
+	// A proposed group is the host's own setup, not a capability: a no to it is
+	// a no to that folder, never to a kind of work.
+	if offer.Structure.ProposesWorkspaces() {
+		return "", ""
+	}
 	if offer.Portfolio != nil {
 		row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape))
 		if ok && row.Offer != nil && row.Offer.HomeProviderKey == offer.Portfolio.ProviderKey {
@@ -2455,6 +2495,25 @@ func buildPortfolioOffer(offer FolderOffer, verdict folderdigest.Verdict, provid
 	offer.ProjectsCount = signal.Projects
 	offer.Portfolio = &FolderPortfolioEvidence{Shape: string(signal.Shape), Projects: signal.Projects, ProviderKey: providerKey}
 	offer.Queue = nil
+	return offer
+}
+
+// buildCollectionOffer makes the root the subject of an offer about a folder
+// that holds several projects, whichever project the scan would have asked
+// about first. The root itself is no project of any shape, so nothing about it
+// looks for a capability, and no queue of per-project offers follows.
+func buildCollectionOffer(offer FolderOffer, verdict folderdigest.Verdict, result folderdigest.Result, now time.Time) FolderOffer {
+	projects := 0
+	for _, candidate := range result.Subfolders() {
+		if folderdigest.IsProject(candidate, now) {
+			projects++
+		}
+	}
+	offer.Subject = folderCandidateRecord(verdict.Root, FolderChoiceProject, fmt.Sprintf("%d project folders", projects))
+	offer.Subject.Shape, offer.Subject.MarkerName, offer.Subject.Marker, offer.Subject.DominantExtension = "", "", "", ""
+	offer.Subject.IsRoot = true
+	offer.Status, offer.Verdict, offer.Reason = FolderOfferPending, string(folderdigest.KindProject), offer.Subject.Reason
+	offer.ProjectsCount, offer.Queue, offer.NeedsCandidate = projects, nil, false
 	return offer
 }
 
