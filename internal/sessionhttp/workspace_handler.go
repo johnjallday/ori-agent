@@ -632,6 +632,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		respondCreateWorkspaceAttachError(w, attachErr)
 		return
 	}
+	// So is a folder attached in the build conversation: a pick the server no
+	// longer holds refuses the create here, with nothing to roll back.
+	buildFolderPlan, buildFolderErr := h.planCreateWorkspaceBuildFolder(r.Context(), req, kind)
+	if buildFolderErr != nil {
+		respondCreateWorkspaceAttachError(w, buildFolderErr)
+		return
+	}
 
 	// The client's values are never trusted: they are re-validated against the
 	// blueprint's own declaration here, before anything is created, so a
@@ -816,6 +823,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolved:     templateResolved,
 		resolveErr:   templateResolveErr,
 		attach:       attachPlan,
+		buildFolder:  buildFolderPlan,
 		inputs:       blueprintInputs,
 	}, seed)
 	if responded {
@@ -1326,6 +1334,9 @@ type createTemplateContext struct {
 	// attach, when set, references an existing project folder instead of
 	// scaffolding one.
 	attach *createWorkspaceAttachPlan
+	// buildFolder, when set, links the folder attached in the build
+	// conversation to the workspace once its folder exists.
+	buildFolder *createWorkspaceBuildFolderPlan
 	// inputs, when set, are the validated values for the blueprint's declared
 	// inputs: written into the scaffold and recorded on the workspace.
 	inputs *createWorkspaceInputs
@@ -1359,6 +1370,8 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	if tc.attach != nil {
 		// Every path below that does not record the attach leaves this set.
 		out.attachErr = errAttachWorkspaceFolderUnavailable
+	} else if tc.buildFolder != nil {
+		out.attachErr = errBuildFolderWorkspaceUnavailable
 	}
 	if h.workspaceStore == nil {
 		return out, false
@@ -1452,8 +1465,14 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	h.provisionWorkspaceScaffolding(ctx, ws, folderWS, folderPath, []string{folderPath})
 	logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 
-	if tc.wantsProject {
-		out.projectWarning, out.attachErr = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
+	out.attachErr = nil
+	switch {
+	case tc.wantsProject:
+		out.projectWarning, out.attachErr = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, folderPath, tc)
+	case tc.buildFolder != nil:
+		// Blank: no scaffold and no tool step, so the folder attached in the
+		// build conversation is linked here.
+		out.attachErr = h.recordCreateWorkspaceBuildFolder(ctx, ws, folderWS, folderPath, tc.buildFolder)
 	}
 	return out, false
 }
@@ -1490,7 +1509,7 @@ func (h *Handler) installTemplateDashboard(workspaceID, folderPath string, tc cr
 // replaced by setup starter tasks). Scaffolding is never fatal — a failure is
 // reported via the returned warning. An attached existing project replaces
 // scaffolding and is the exception: its failure is returned as attachErr.
-func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string, attachErr error) {
+func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, folderPath string, tc createTemplateContext) (projectWarning string, attachErr error) {
 	switch {
 	case tc.attach != nil:
 		// The user's folder is referenced in place; nothing is copied into it.
@@ -1515,6 +1534,17 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 		} else if result.ProjectWarning != "" {
 			projectWarning = result.ProjectWarning
 			logger.Warn("Project entry was not persisted", logger.Fields{"id": ws.ID, "warning": result.ProjectWarning})
+		}
+	}
+
+	// The folder attached in the build conversation is linked after the
+	// scaffold or attached project, so it can tell a scaffold inside the
+	// workspace folder from a project folder the user chose, and before the
+	// tool step, which reads and saves the workspace itself: a link saved from
+	// this in-memory record after it would erase the bindings it wrote.
+	if tc.buildFolder != nil {
+		if err := h.recordCreateWorkspaceBuildFolder(ctx, ws, folderWS, folderPath, tc.buildFolder); err != nil {
+			return projectWarning, err
 		}
 	}
 

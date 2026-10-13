@@ -2542,10 +2542,135 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 }
 .workspace-create-modal .workspace-build-pane__composer {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: flex-end;
   padding: 10px 14px 12px;
   border-top: 1px solid var(--wc-line);
+}
+.workspace-create-modal .workspace-build-pane__composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+/* The composer's own attachments: Add folder, the attached folder's chip and
+   its one-line summary, and the sheet that opens above the reply box. The
+   path field reuses the shared folder-path-entry styles (components.css). */
+.workspace-create-modal .workspace-build-pane__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-build-pane__attachments[hidden],
+.workspace-create-modal .workspace-build-pane__chip[hidden],
+.workspace-create-modal .workspace-build-folder[hidden],
+.workspace-create-modal .workspace-build-folder__hint[hidden],
+.workspace-create-modal .workspace-build-folder__summary[hidden],
+.workspace-create-modal .workspace-build-folder-chooser[hidden],
+.workspace-create-modal .workspace-build-folder-chooser__note[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-build-pane__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px dashed var(--wc-line-bright);
+  background: transparent;
+  color: var(--wc-ink);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-pane__chip:hover:not(:disabled),
+.workspace-create-modal .workspace-build-pane__chip:focus-visible,
+.workspace-create-modal .workspace-build-pane__chip[aria-expanded="true"] {
+  border-color: var(--wc-faction);
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-build-pane__chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.workspace-create-modal .workspace-build-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--wc-faction-deep);
+  background: var(--wc-panel);
+  color: var(--wc-ink-heading);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-folder__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-create-modal .workspace-build-folder__remove {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--wc-ink-dim);
+  font-size: 16px;
+  line-height: 1;
+}
+.workspace-create-modal .workspace-build-folder__remove:hover:not(:disabled),
+.workspace-create-modal .workspace-build-folder__remove:focus-visible {
+  color: var(--wc-ink-heading);
+}
+.workspace-create-modal .workspace-build-folder__remove:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.workspace-create-modal .workspace-build-folder__hint,
+.workspace-create-modal .workspace-build-folder__summary {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-build-folder-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+}
+.workspace-create-modal .workspace-build-folder-chooser__title {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-font-display);
+  font-size: 13px;
+  font-weight: 700;
+}
+.workspace-create-modal .workspace-build-folder-chooser__disclosure,
+.workspace-create-modal .workspace-build-folder-chooser__note {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-build-folder-chooser__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.workspace-create-modal .workspace-build-folder-chooser__choices p {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-folder-chooser .folder-path-entry__status.is-error {
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-build-folder-chooser__actions {
+  display: flex;
+  justify-content: flex-end;
 }
 .workspace-create-modal .workspace-build-pane__input {
   flex: 1 1 auto;

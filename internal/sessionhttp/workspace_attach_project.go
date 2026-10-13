@@ -45,6 +45,10 @@ type createWorkspaceAttachError struct {
 	message string
 	// duplicate names the workspace that already owns the folder.
 	duplicate *projectconnection.FolderOwner
+	// kind is the conflict type the response names; "" is project_connection.
+	// A build's attached folder (workspace_build_session_folder.go) names its
+	// own, so the wizard does not route the refusal to the project control.
+	kind string
 }
 
 func (e *createWorkspaceAttachError) Error() string { return e.message }
@@ -344,9 +348,13 @@ func respondCreateWorkspaceAttachError(w http.ResponseWriter, err error) {
 	if !errors.As(err, &attachErr) {
 		attachErr = errAttachWorkspaceFolderUnavailable
 	}
+	kind := attachErr.kind
+	if kind == "" {
+		kind = "project_connection"
+	}
 	body := map[string]any{
 		"error":    attachErr.message,
-		"conflict": map[string]any{"type": "project_connection"},
+		"conflict": map[string]any{"type": kind},
 	}
 	if attachErr.duplicate != nil {
 		body["duplicate"] = attachErr.duplicate

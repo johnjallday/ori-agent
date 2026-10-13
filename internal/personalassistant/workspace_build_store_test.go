@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 )
 
 func newWorkspaceBuildStoreFixture(t *testing.T) (*WorkspaceBuildStore, *knowledgeFixture, *time.Time) {
@@ -169,6 +171,43 @@ func TestWorkspaceBuildStore_KeepsTheTranscriptBounded(t *testing.T) {
 	}
 	if transcriptBytes(session.Transcript) > WorkspaceBuildMaxTranscriptBytes {
 		t.Fatalf("byte cap exceeded: %d", transcriptBytes(session.Transcript))
+	}
+}
+
+// An attached folder is stored as the composer's path-free observation and
+// held to its bounds; a settled build drops it with the rest.
+func TestWorkspaceBuildStore_KeepsAnAttachedFolderWithinItsBounds(t *testing.T) {
+	ctx := context.Background()
+	store, _, now := newWorkspaceBuildStoreFixture(t)
+	session := openBuild("build-1", *now)
+	session.Folder = &BuildFolder{Observation: foldercontext.Observation{
+		Version: foldercontext.Version, ID: "obs-1", Folder: "Elite School", ScannedAt: *now, Entries: 3, Files: 2,
+		Kinds:    []foldercontext.Kind{{Name: "md", Count: 2}},
+		Projects: []foldercontext.Project{{ID: "candidate-0", Name: "Elite School", Files: 2, Root: true}},
+		Coverage: foldercontext.Coverage{MaxDepth: 3, MaxEntries: 5000, BudgetSeconds: 3},
+	}}
+	if _, err := store.Mutate(ctx, "local", func(doc *WorkspaceBuildDocument) error {
+		doc.Add(session)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := doc.Open()
+	if open == nil || open.Folder == nil || open.Folder.Observation.Folder != "Elite School" || open.Folder.Observation.Projects[0].Name != "Elite School" {
+		t.Fatalf("read back %+v", open)
+	}
+	bad := session
+	bad.Folder = &BuildFolder{Observation: foldercontext.Observation{Version: 2}}
+	if err := validateBuildSession(bad); !errors.Is(err, ErrWorkspaceBuildInvalid) {
+		t.Fatalf("an invalid observation is refused: %v", err)
+	}
+	open.Settle()
+	if open.Folder != nil {
+		t.Fatal("a settled build keeps no folder")
 	}
 }
 

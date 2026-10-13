@@ -41,6 +41,7 @@ user: "create it" / clicks Create ─► POST /api/workspaces { …draft, build_
 | Model request/response, prompt, retries        | `internal/sessionhttp/workspace_build_session_model.go`                            |
 | Field validation (FR15)                        | `internal/sessionhttp/workspace_build_session_validate.go`                         |
 | Form edits, abandon, slug occupancy            | `internal/sessionhttp/workspace_build_session_draft.go`                            |
+| Add folder: choices, attach, detach, the link  | `internal/sessionhttp/workspace_build_session_folder.go`                           |
 | Session types and bounds                       | `internal/personalassistant/workspace_build_types.go`                              |
 | Sidecar store (+ Windows variant)              | `internal/personalassistant/workspace_build_store*.go`, `workspace_build_codec.go` |
 | Wiring, model resolution                       | `internal/server/workspace_build.go`                                               |
@@ -109,6 +110,33 @@ The model's words are not trusted to describe the form:
 - **Edits during a turn**: fields the user changed on the form while the model was
   working keep the user's value; the rest of the reply applies.
 
+### Attached folder (the pane's Add folder)
+
+The pane's composer has the assistant composer's **Add folder**: a known-folder chip, the
+native picker (a dialog the server opens), or a typed path that `/api/folder-picker/select-path`
+checks first and answers with a token. The build endpoints never accept a path.
+`POST …/{id}/folder` hands the choice to the composer's `FolderObservationService`
+(`WorkspaceBuildDeps.Folders`, wired lazily in `internal/server/workspace_build.go`) with the
+build itself as the selection's draft target (`build:<session id>`, a draft id no composer
+request can name, since the composer's must parse as a UUID), and stores the resulting path-free
+`foldercontext.Observation` on the session as `folder`. The attach is said in the transcript
+as the user's own act ("You attached the folder “X”. It will be linked to the workspace when
+you create it."), which the model hears as a form edit. The system prompt then carries the
+observation inside `<folder_observation>…</folder_observation>` — names, kinds, counts,
+markers, last-changed dates, coverage; never ids, never contents — and tells the model that
+Create links the folder and that `ask_folder` is never to be set (validation refuses it with
+`a folder is already attached; it is linked at Create`). `POST …/{id}/folder/detach` clears it.
+
+Create (`POST /api/workspaces` with `build_session_id`) resolves the folder's root through
+the service's own hold on the selection (`ResolveRoot`, the same 30-minute window the
+composer has) before anything is created; a lost pick is a `409` with
+`conflict.type: build_folder`, and nothing is left behind. Once the workspace folder exists,
+the attached folder is linked in place as a directory reference (`AttachLinkedDirectory`) and
+becomes the primary directory unless the create already set one outside the workspace folder
+(an attached project keeps it; a scaffold inside the workspace folder is superseded). The link
+runs after the scaffold or attached project and before the template's tool step, which reads
+and saves the workspace itself. The `BuildSummary` records it as a `folder` decision.
+
 ### Storage
 
 One sidecar file per HQ: `<HQ folder>/.ori/workspace-build-v1.json`, written through the
@@ -122,6 +150,9 @@ Personal Assistant knowledge store (locked, atomic replace, a Windows variant). 
   the file stays far below its 512 KiB limit;
 - every host-written line is cut to the store's 2,000-character bound, and the lists a
   model can grow (refusals, saved teammates) are capped;
+- an attached folder is kept only as its path-free observation (at most 8 KiB, validated
+  on every write) and dropped when the build settles; the server's hold on the folder
+  itself lasts 30 minutes and is never written anywhere;
 - every mutation is versioned; a stale `version` is a `409` the client reloads from.
 
 On create, `build_session_id` marks the session `created` and stores a `BuildSummary` in
@@ -173,18 +204,22 @@ the workspace's template provenance. An unknown or closed id never blocks the cr
 
 ## Privacy (FR33)
 
-The model receives only what the user typed in the pane, the draft, and the catalog,
-saved-agent, and group metadata above — never folder contents, notes, or other
-workspaces' data. Logs and events carry ids, counts, and field or section names, never
-message text or draft values.
+The model receives only what the user typed in the pane, the draft, the catalog,
+saved-agent, and group metadata above, and — when the user attached a folder — that
+folder's observation: names, kinds, counts, markers, and dates, never file contents, paths,
+or ids. It never receives notes or other workspaces' data. Logs and events carry ids,
+counts, and field or section names, never message text, draft values, or folder names.
 
 ## Tests
 
 - Go: `internal/sessionhttp/workspace_build_session_test.go` (fake provider on both the
   structured and plain paths, the validation table, retry/substitute, stale versions, form
-  edits, create → provenance), `internal/personalassistant/workspace_build_store_test.go`
-  (persistence, bounds, expiry), `internal/agenthttp/home_assistant_ask_test.go`
-  (`build_workspace` replaces `create_workspace` without writing the store).
+  edits, create → provenance), `workspace_build_session_folder_test.go` (the chooser,
+  attach/detach, the prompt, the refused folder question, the create-time plan and link),
+  `internal/personalassistant/workspace_build_store_test.go` (persistence, bounds, expiry,
+  the attached folder), `folder_observation_test.go` (`ResolveRoot`),
+  `internal/agenthttp/home_assistant_ask_test.go` (`build_workspace` replaces
+  `create_workspace` without writing the store).
 - JS: `create-workspace-build-pane.test.js`, `sessions.test.js`,
   `workspace-creator-state.test.js`, `create-workspace-team-draft.test.js`,
   `personal-assistant-home.test.js`, `workspace-command.test.js`.

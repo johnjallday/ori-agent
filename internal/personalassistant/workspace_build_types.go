@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -143,6 +144,16 @@ type BuildRetry struct {
 	ChoiceID string `json:"choice_id,omitempty"`
 }
 
+// BuildFolder is the folder the user attached to the build from the pane's
+// own Add folder: the same path-free observation the assistant's composer
+// records (names, kinds, counts, markers; never contents, never a path). The
+// pane shows it, the model reads it, and Create links the folder the
+// observation names — through the server's own held selection, which this
+// record cannot revive once it expires.
+type BuildFolder struct {
+	Observation foldercontext.Observation `json:"observation"`
+}
+
 // BuildAssistant is the face the pane shows: the hired assistant's.
 type BuildAssistant struct {
 	DisplayName string                 `json:"display_name"`
@@ -205,6 +216,8 @@ type WorkspaceBuildSession struct {
 	// AskFolder offers the folder chip; the browser never sends a path.
 	AskFolder bool        `json:"ask_folder,omitempty"`
 	Retry     *BuildRetry `json:"retry,omitempty"`
+	// Folder is the folder the user attached in the pane, if any.
+	Folder *BuildFolder `json:"folder,omitempty"`
 	// TurnCount counts the user's own turns; FirstRequest is their first
 	// description, both kept for the workspace's provenance.
 	TurnCount          int    `json:"turn_count"`
@@ -261,6 +274,7 @@ func (s *WorkspaceBuildSession) Settle() {
 	s.Rejections = nil
 	s.Applied = nil
 	s.Retry = nil
+	s.Folder = nil
 	s.Draft = BuildDraft{Name: s.Draft.Name}
 }
 
@@ -413,6 +427,11 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 	}
 	if team := session.TeamPatch; team != nil && (len(team.Roles) > workspaceBuildMaxList || len(team.SavedAgents) > workspaceBuildMaxList) {
 		return fmt.Errorf("%w: team", ErrWorkspaceBuildInvalid)
+	}
+	// An attached folder is held to the observation's own bounds: path-free,
+	// at most 8 KiB, names of at most 96 runes.
+	if folder := session.Folder; folder != nil && folder.Observation.Validate() != nil {
+		return fmt.Errorf("%w: folder", ErrWorkspaceBuildInvalid)
 	}
 	return nil
 }
