@@ -12,6 +12,7 @@ import {
   folderPresentation,
   renderFolderSummary
 } from './personal-assistant-folder-presentation.js';
+import { proposalView, renderProposal, structureOption } from './personal-assistant-proposal.js';
 export { observationSummary, coverageSummary } from './personal-assistant-folder-presentation.js';
 
 const ENDPOINT = '/api/home-assistant/folder-context';
@@ -32,6 +33,10 @@ export function createFolderContextController({
     draftId: uuid(),
     revision: '',
     observation: null,
+    // The group Ori proposes for a folder that holds several projects, as the
+    // attach response described it. A local preview only: after Send the
+    // reply's own suggestion carries the proposal.
+    structure: null,
     focusIDs: [],
     accepted: null,
     offerId: '',
@@ -60,6 +65,7 @@ export function createFolderContextController({
       draftId: uuid(),
       revision: saved.revision || '',
       observation: saved.observation || null,
+      structure: null,
       focusIDs: [],
       accepted: saved.observation || null,
       offerId: saved.offer_id || '',
@@ -98,6 +104,7 @@ export function createFolderContextController({
         return false;
       }
       state.observation = result.observation;
+      state.structure = result.structure?.version === 1 ? result.structure : null;
       state.focusIDs = [];
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
@@ -143,6 +150,7 @@ export function createFolderContextController({
         state.revision = result.revision;
       }
       state.observation = null;
+      state.structure = null;
       state.focusIDs = [];
       state.accepted = null;
       state.offerId = '';
@@ -257,7 +265,9 @@ export function createFolderContextController({
                 : {}),
               ...(placement.operation
                 ? { operation: placement.operation, destination_id: placement.destination_id || '' }
-                : {})
+                : {}),
+              // What the user changed in Adjust on a proposed group.
+              ...(placement.structure ? { structure: placement.structure } : {})
             })
       });
       if (generation !== state.generation || currentId() !== owner) return null;
@@ -357,6 +367,81 @@ function discussionDraft(value, projectId = '') {
   return accepted;
 }
 
+// discussionChips are the controls under a folder reply. A folder Ori proposed
+// a group for gets the proposal's own controls, and choosing one folder moves
+// into Adjust; any other folder keeps the two discussion shortcuts.
+export function discussionChips({
+  structure = false,
+  historical = false,
+  children = 0,
+  markers = false
+}) {
+  if (structure && !historical)
+    return [
+      { id: 'setup', label: 'Set up this structure' },
+      { id: 'adjust', label: 'Adjust…' },
+      { id: 'discuss', label: 'Just discuss' }
+    ];
+  const chips = [
+    {
+      id: 'whole',
+      label: historical
+        ? 'Discuss saved observations'
+        : children > 1
+          ? 'Discuss the collection'
+          : 'Discuss this folder'
+    }
+  ];
+  if (children)
+    chips.push({ id: 'choose', label: markers ? 'Choose a project…' : 'Choose a folder…' });
+  return chips;
+}
+
+// The proposal card shown as soon as a collection is attached, before Send.
+// It is drawn from the attach response alone; pressing a control is what
+// starts a request, and "Just discuss" starts none.
+function renderStructure(state) {
+  const host = elements?.structure;
+  if (!host) return;
+  const structure = state.preview && !state.authority ? state.structure : null;
+  const key = structure ? String(state.observation?.id || '') : '';
+  if (host.dataset.structureKey === key) {
+    for (const button of host.querySelectorAll('[data-structure-action]'))
+      button.disabled = state.pending;
+    return;
+  }
+  host.dataset.structureKey = key;
+  host.replaceChildren();
+  host.hidden = !structure;
+  if (!structure) return;
+  host.append(
+    renderProposal(
+      proposalView(structureOption(structure)),
+      document,
+      window.OriWorkspaceBuildingArt
+    )
+  );
+  const actions = node('div', '', 'personal-assistant-structure__actions');
+  const control = (id, label, className, run) => {
+    const button = node('button', label, className);
+    button.type = 'button';
+    button.dataset.structureAction = id;
+    button.disabled = state.pending;
+    button.addEventListener('click', () => run(button));
+    actions.append(button);
+  };
+  control('review', 'Review group setup', 'btn btn-sm btn-primary', button =>
+    window.PersonalAssistantFolderSetup?.reviewStructure?.(button)
+  );
+  control('adjust', 'Adjust…', 'btn btn-sm btn-outline-secondary', button =>
+    window.PersonalAssistantFolderSetup?.adjustStructure?.(button, controller.state.structure)
+  );
+  control('discuss', 'Just discuss', 'btn btn-sm btn-link', () =>
+    document.getElementById('personalAssistantInput')?.focus()
+  );
+  host.append(actions);
+}
+
 function renderDiscussion() {
   const existing = document.querySelector('[data-folder-discussion]');
   // A cancelled selection may restore the same canonical snapshot. Recapture
@@ -377,9 +462,12 @@ function renderDiscussion() {
     closeDiscussionChooser({ restoreFocus: false });
     return;
   }
+  // The reply's own suggestion says whether Ori proposed a group for this folder.
+  const proposed = Boolean(window.PersonalAssistantFolderSetup?.structure?.());
   if (
     existing?.parentElement === row.firstElementChild &&
-    existing.dataset.folderGeneration === String(discussionBinding.generation)
+    existing.dataset.folderGeneration === String(discussionBinding.generation) &&
+    existing.dataset.folderStructure === String(proposed)
   )
     return;
   existing?.remove();
@@ -387,10 +475,37 @@ function renderDiscussion() {
   const strip = node('div', '', 'personal-assistant-folder-discussion');
   strip.dataset.folderDiscussion = value.messageId;
   strip.dataset.folderGeneration = String(value.generation);
+  strip.dataset.folderStructure = String(proposed);
   strip.setAttribute('role', 'group');
   strip.setAttribute('aria-label', 'Folder conversation choices');
   const children = folderDiscussionOptions(controller.state.observation);
   const historical = Boolean(controller.state.authority) || value.restored === true;
+  if (proposed && !historical) {
+    // A proposed group: its own controls. Each one checks again, when pressed,
+    // that this reply's proposal is still the current one.
+    const runs = {
+      setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
+      adjust: button => window.PersonalAssistantFolderSetup?.adjustStructure?.(button),
+      discuss: () => document.getElementById('personalAssistantInput')?.focus()
+    };
+    for (const chip of discussionChips({ structure: true })) {
+      const button = node('button', chip.label, 'personal-assistant-conversation__button');
+      button.type = 'button';
+      button.dataset.structureChip = chip.id;
+      button.addEventListener('click', () => {
+        if (discussionRow(value)) runs[chip.id](button);
+      });
+      strip.append(button);
+    }
+    const bubble = row.firstElementChild;
+    bubble?.insertBefore(
+      strip,
+      bubble.querySelector(
+        '.personal-assistant-message__setup, .personal-assistant-message__actions'
+      )
+    );
+    return;
+  }
   const whole = node(
     'button',
     historical
@@ -489,6 +604,7 @@ function render(state) {
       ).status;
   }
   elements.status.textContent = state.notice;
+  renderStructure(state);
   updateSendHint();
   window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
   window.PersonalAssistantConversation?.refresh?.();
@@ -526,7 +642,9 @@ async function open() {
       closeChooser();
       const selectedGeneration = chooserGeneration;
       const selected = await controller.select(mode, chip, selectionToken);
-      if (selected && folderTreeView(controller.state.observation))
+      // A folder Ori proposed a group for stays on the chat side, where that
+      // proposal is shown; its tree is one press away (Tree + Chat).
+      if (selected && !controller.state.structure && folderTreeView(controller.state.observation))
         explorer?.explore({ automatic: true });
       // Disabling Add during selection can move focus to body. Restore it
       // only if the user has not moved elsewhere or left this conversation.
@@ -625,6 +743,7 @@ function init() {
     remove: document.getElementById('personalAssistantRemoveFolder'),
     preview: document.getElementById('personalAssistantFolderPreview'),
     summary: document.getElementById('personalAssistantFolderSummary'),
+    structure: document.getElementById('personalAssistantFolderStructure'),
     history: document.getElementById('personalAssistantFolderHistorical'),
     status: document.getElementById('personalAssistantContextStatus'),
     hint: document.getElementById('personalAssistantFolderSendHint'),

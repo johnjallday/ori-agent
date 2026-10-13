@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   proposalView,
   placementProposalView,
-  renderProposal
+  renderProposal,
+  structureOption
 } from './personal-assistant-proposal.js';
 
 const option = (kind, effect, extra = {}) => ({
@@ -119,4 +120,148 @@ test('renderer inserts bounded hostile names as literal text and only curated in
   assert.equal(nodes.filter(node => node.innerHTML).length, 1);
   assert.equal(nodes.find(node => node.innerHTML).attrs['aria-hidden'], 'true');
   assert.equal(view.destination.includes('unknown'), false);
+});
+
+const albums = (extra = {}, group = {}) => ({
+  version: 1,
+  folder: 'Albums',
+  group: { name: 'Albums', type: 'group', destination_state: 'new', ...group },
+  members: [
+    ...[1, 2, 3, 4, 5].map(number => ({
+      candidate_id: `candidate-${number}`,
+      name: `Album-${number}`,
+      type_label: 'Session folder',
+      included: true,
+      availability: 'integration_not_installed'
+    })),
+    {
+      candidate_id: 'candidate-6',
+      name: 'Logic Sketch',
+      type_label: 'Plain workspace',
+      included: true
+    }
+  ],
+  notes: ['The integration is not installed; it can be added later.'],
+  ...extra
+});
+
+test('a folder of several projects is one proposed group with its member workspaces', () => {
+  const view = proposalView(structureOption(albums()), { name: 'ignored', root: true });
+  assert.equal(view.kind, 'structure');
+  assert.equal(view.label, 'Proposed workspace group');
+  assert.equal(view.subject, 'Albums');
+  assert.equal(view.scope, '6 workspaces');
+  assert.equal(view.art, 'district');
+  assert.equal(view.destination, 'Creates this group');
+  assert.equal(view.action, 'Review group setup');
+  assert.match(view.description, /Nothing is moved, copied or read/);
+  assert.deepEqual(view.members[0], {
+    name: 'Album-1',
+    type: 'Session folder',
+    note: 'plain for now'
+  });
+  assert.deepEqual(view.members[5], { name: 'Logic Sketch', type: 'Plain workspace', note: '' });
+  assert.deepEqual(view.notes, ['The integration is not installed; it can be added later.']);
+
+  // The shape's Home, new or the owner's own; unchecked members are not listed.
+  const home = albums({}, { name: 'Music Home', type: 'home' });
+  assert.equal(proposalView(structureOption(home)).destination, 'Creates this Home');
+  const existing = albums({}, { name: 'Music Home', type: 'home', destination_state: 'existing' });
+  assert.equal(
+    proposalView(structureOption(existing)).destination,
+    'Adds to your existing Music Home'
+  );
+  const adjusted = albums();
+  adjusted.members[5].included = false;
+  const fewer = proposalView(structureOption(adjusted));
+  assert.equal(fewer.scope, '5 workspaces');
+  assert.equal(fewer.members.length, 5);
+  adjusted.members.forEach((member, index) => (member.included = index === 0));
+  assert.equal(proposalView(structureOption(adjusted)).scope, '1 workspace');
+
+  // Only the closed host fields make a structure: a type string, a foreign
+  // version, an unavailable state or the library choice never does.
+  for (const broken of [
+    { structure: albums() },
+    { structure: albums(), presentation: { version: 1, state: 'unavailable', kind: 'structure' } },
+    structureOption(albums({ version: 2 })),
+    structureOption(albums({}, { type: 'library' })),
+    structureOption({ version: 1, group: { type: 'group' } }),
+    { workspace_type: 'Group with 6 workspaces' }
+  ])
+    assert.notEqual(proposalView(broken).kind, 'structure');
+});
+
+test('the member list is literal text, collapsed after six rows, with each note once', () => {
+  const nodes = [];
+  const doc = {
+    createElement(tag) {
+      const node = {
+        tag,
+        children: [],
+        dataset: {},
+        attrs: {},
+        listeners: {},
+        textContent: '',
+        hidden: false,
+        append(...children) {
+          this.children.push(...children);
+        },
+        setAttribute(key, value) {
+          this.attrs[key] = value;
+        },
+        addEventListener(type, listener) {
+          this.listeners[type] = listener;
+        }
+      };
+      nodes.push(node);
+      return node;
+    }
+  };
+  const structure = albums({ omitted: 3 });
+  structure.members.push(
+    {
+      candidate_id: 'candidate-7',
+      name: '<img src=x onerror=confirm()>',
+      type_label: 'Plain workspace',
+      included: true
+    },
+    { candidate_id: 'candidate-8', name: 'Eighth', type_label: 'Plain workspace', included: true }
+  );
+  renderProposal(proposalView(structureOption(structure)), doc, null);
+  const rows = nodes.filter(node => node.className === 'personal-assistant-proposal__member');
+  assert.equal(rows.length, 8);
+  assert.deepEqual(
+    rows.map(row => row.hidden),
+    [false, false, false, false, false, false, true, true]
+  );
+  assert.equal(rows[0].children[1].textContent, 'Session folder · plain for now');
+  assert.equal(rows[6].children[0].textContent, '<img src=x onerror=confirm()>');
+  const more = nodes.find(node => node.className === 'personal-assistant-proposal__more');
+  assert.equal(more.textContent, 'Show all 8');
+  more.listeners.click();
+  assert.equal(
+    rows.some(row => row.hidden),
+    false
+  );
+  assert.equal(more.hidden, true);
+  const notes = nodes
+    .filter(node => node.className === 'personal-assistant-proposal__note')
+    .map(node => node.textContent);
+  assert.deepEqual(notes, [
+    '3 more folders are not listed and get no workspace here.',
+    'The integration is not installed; it can be added later.'
+  ]);
+  assert.equal(
+    nodes.some(node => ['img', 'a', 'input'].includes(node.tag) || node.innerHTML),
+    false
+  );
+
+  // Six or fewer rows need no "Show all".
+  nodes.length = 0;
+  renderProposal(proposalView(structureOption(albums())), doc, null);
+  assert.equal(
+    nodes.some(node => node.className === 'personal-assistant-proposal__more'),
+    false
+  );
 });

@@ -195,7 +195,11 @@ func (h *HomeAssistantAskHandler) folderExpected(ctx context.Context, target fol
 }
 
 func strictFolderBody(w http.ResponseWriter, r *http.Request, out any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	return strictFolderBodyWithin(w, r, out, 2048)
+}
+
+func strictFolderBodyWithin(w http.ResponseWriter, r *http.Request, out any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {

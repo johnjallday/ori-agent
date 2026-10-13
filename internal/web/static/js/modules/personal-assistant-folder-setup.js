@@ -7,6 +7,38 @@ import {
   renderProposal
 } from './personal-assistant-proposal.js';
 import { setupQuestActionURL } from './setup-quest-links.js';
+import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
+
+// proposedStructure is the option of a suggestion that proposes a group for a
+// folder of several projects, or null. Only the host's closed fields make one.
+export function proposedStructure(options) {
+  return (
+    (options || []).find(
+      option =>
+        option?.presentation?.version === 1 &&
+        option.presentation.kind === 'structure' &&
+        option.presentation.state === 'proposed' &&
+        option.structure?.version === 1
+    ) || null
+  );
+}
+
+// suggestionChoices sorts a reply's options into what its proposal shows. A
+// proposed group is the proposal, and the single folders are reached through
+// Adjust. Otherwise the options that can be set up are shown; when none can,
+// the unavailable ones are shown as unavailable rather than dropped.
+export function suggestionChoices(options) {
+  const all = options || [];
+  const proposable = all.filter(option => option?.presentation?.state !== 'unavailable');
+  const structure = proposedStructure(all);
+  if (structure)
+    return {
+      structure,
+      shown: [structure],
+      single: proposable.filter(option => option !== structure)
+    };
+  return { structure: null, shown: proposable.length ? proposable : all, single: proposable };
+}
 
 // placementChoiceView is a placement answer as the drawer shows it: the
 // server's sentence, the operations it offers, and the guided setups it
@@ -259,7 +291,8 @@ export function suggestionNote(value) {
     return 'Focuses the existing canonical review only. Setup still requires its reviewed confirmation.';
   if (value?.subject?.name)
     return `Workspace you named: ${String(value.subject.name)}. Placement and operation are rechecked in Review; setup still requires confirmation.`;
-  return (value?.options || []).length > 1
+  // A proposed group is one proposal, however many folders it holds.
+  return (value?.options || []).length > 1 && !proposedStructure(value.options)
     ? 'Choose scope and review effects before confirming. Nothing is set up here.'
     : 'Review its effects before confirming. Nothing is set up here.';
 }
@@ -319,14 +352,15 @@ function renderSuggestion() {
   const bubble = row.firstElementChild;
   if (!bubble) return;
   if (existing?.parentElement === bubble) {
-    existing.querySelector('button').disabled = Boolean(current.pending);
+    const action = existing.querySelector('[data-setup-action]');
+    if (action) action.disabled = Boolean(current.pending);
     return;
   }
   retireSuggestion(existing);
   const handoff = document.createElement('div');
   handoff.dataset.folderSetupSuggestion = suggestion.message_id;
   handoff.className = 'personal-assistant-message__setup';
-  const options = suggestion.options || [];
+  const { structure, shown: options } = suggestionChoices(suggestion.options);
   const project = current.observation?.projects?.find(
     project => project.id === options[0]?.candidate_id
   );
@@ -334,6 +368,19 @@ function renderSuggestion() {
     options.length === 1 ? options[0] : {},
     options.length === 1 ? project : { name: current.observation?.folder, root: true }
   );
+  if (structure && !suggestion.offer_id) {
+    // A proposed group stays under the reply as a card. Its controls are the
+    // chips above it (Set up this structure, Adjust…, Just discuss), so the card
+    // carries no button of its own.
+    handoff.append(renderProposal(view, document, window.OriWorkspaceBuildingArt));
+    const note = document.createElement('p');
+    note.className = 'personal-assistant-folder-context__note';
+    note.textContent = suggestionNote(suggestion);
+    handoff.append(note);
+    bubble.append(handoff);
+    window.PersonalAssistantFolderContext?.refreshDiscussion?.();
+    return;
+  }
   if (suggestion.offer_id)
     view = {
       ...view,
@@ -357,6 +404,7 @@ function renderSuggestion() {
   handoff.append(renderProposal(view, document, window.OriWorkspaceBuildingArt));
   const button = document.createElement('button');
   button.type = 'button';
+  button.dataset.setupAction = 'true';
   button.className = suggestion.offer_id
     ? 'personal-assistant-message__action'
     : 'personal-assistant-message__action personal-assistant-message__setup-secondary';
@@ -382,7 +430,7 @@ function renderSuggestion() {
       }
       return;
     }
-    openChoices(value.options, button, value.subject?.workspace_id || '');
+    openChoices(options, button, value.subject?.workspace_id || '');
   });
   const note = document.createElement('p');
   note.className = 'personal-assistant-folder-context__note';
@@ -700,6 +748,119 @@ function openChoices(options, trigger = elements.open, subjectId = '') {
   } else elements.candidate.focus();
 }
 
+// The group Ori proposes for the attached folder, when it proposes one: from
+// the current reply's suggestion once there is a reply, else from the attach
+// preview. Null for a single folder, a saved (historical) snapshot, and a
+// suggestion that only points at an existing review.
+function currentStructure() {
+  if (!current?.observation || current.authority) return null;
+  if (suggestion && !suggestion.offer_id && currentSuggestion(current, suggestion))
+    return proposedStructure(suggestion.options)?.structure || null;
+  return current.preview && current.structure?.version === 1 ? current.structure : null;
+}
+
+// The root is the candidate a group is reviewed as.
+function rootCandidate() {
+  return (
+    proposedStructure(suggestion?.options)?.candidate_id ||
+    current?.observation?.projects?.find(project => project.root)?.id ||
+    ''
+  );
+}
+
+// Where a flow started from a control continues: the proposal under the same
+// reply when there is one, else the composer's own end of the pane.
+function flowOrigin(trigger) {
+  return (
+    trigger?.closest?.('[data-folder-setup-suggestion]') ||
+    trigger?.closest?.('[data-message-id]')?.querySelector('[data-folder-setup-suggestion]') ||
+    fallbackOrigin()
+  );
+}
+
+let adjusting = null;
+
+function closeAdjust(returnFocus = true) {
+  if (!adjusting) return;
+  const { sheet, trigger } = adjusting;
+  adjusting = null;
+  window.PersonalAssistantTranscript?.beforeChange?.();
+  sheet.element.remove();
+  window.PersonalAssistantTranscript?.changed?.();
+  if (returnFocus) focusLocal(trigger?.isConnected ? trigger : elements?.open);
+}
+
+// One explicit review of one candidate, started from a control rather than the
+// scope chooser. placement may carry what the user changed in Adjust.
+function reviewFrom(trigger, candidateId, placement = {}) {
+  if (!candidateId || !current?.observation || current.pending || current.authority) return;
+  closeChoices(false);
+  closeAdjust(false);
+  choiceTrigger = trigger;
+  choiceOrigin = {
+    parent: flowOrigin(trigger),
+    trigger,
+    binding: {
+      conversationId: current.conversationId,
+      observationId: current.observation.id,
+      revision: current.revision
+    }
+  };
+  void review(candidateId, false, undefined, placement);
+}
+
+function reviewStructure(trigger) {
+  if (currentStructure()) reviewFrom(trigger, rootCandidate());
+}
+
+// Adjust is one sheet: the group's name and type, the member checklist with
+// editable names, and the way to set up a single folder instead. Done opens the
+// review with those choices; nothing is created by the sheet.
+function adjustStructure(trigger, structure) {
+  const record = structure?.version === 1 ? structure : currentStructure();
+  const candidateId = rootCandidate();
+  if (!record || !candidateId || current.pending) return;
+  closeChoices(false);
+  closeAdjust(false);
+  const binding = {
+    conversationId: current.conversationId,
+    observationId: current.observation.id,
+    revision: current.revision
+  };
+  // The folders that can be set up on their own: the reply's own options, or
+  // before any reply every observed folder but the root.
+  const single = suggestion?.options
+    ? suggestionChoices(suggestion.options).single
+    : (current.observation.projects || [])
+        .filter(project => !project.root)
+        .map(project => ({ candidate_id: project.id }));
+  const sheet = createAdjustSheet({
+    structure: record,
+    onDone: adjustment => {
+      if (!choiceIsCurrent(binding, current)) return closeAdjust(false);
+      closeAdjust(false);
+      reviewFrom(trigger, candidateId, { structure: adjustment });
+    },
+    onCancel: () => closeAdjust(),
+    onSingle: single.length
+      ? () => {
+          closeAdjust(false);
+          openChoices(single, trigger);
+        }
+      : undefined
+  });
+  // The sheet opens beside what it adjusts: the attach preview, the review
+  // card, or the proposal under a reply.
+  const home =
+    trigger?.closest?.('#personalAssistantFolderStructure, #personalAssistantFolderOffer') ||
+    flowOrigin(trigger);
+  window.PersonalAssistantTranscript?.beforeChange?.();
+  home.append(sheet.element);
+  window.PersonalAssistantTranscript?.changed?.();
+  adjusting = { sheet, trigger, binding };
+  sheet.focus();
+}
+
 function park(node) {
   if (
     !node ||
@@ -803,6 +964,7 @@ function contextChanged(state) {
   if (current?.offerId !== state.offerId || !state.offerId)
     window.PersonalAssistantFolder?.parkConversation?.();
   current = { ...state };
+  if (adjusting && !choiceIsCurrent(adjusting.binding, current)) closeAdjust(false);
   if (choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current)) {
     if (flowHasFocus()) retireSuggestion(choiceOrigin.parent);
     else closeChoices(false);
@@ -853,7 +1015,11 @@ function init() {
   }
   choicesMarker = document.createComment('single setup chooser parking slot');
   elements.choices.after(choicesMarker);
-  open.addEventListener('click', () => openChoices());
+  // A folder Ori proposed a group for is reviewed as that group; choosing one
+  // of its folders instead is in Adjust.
+  open.addEventListener('click', () =>
+    currentStructure() ? reviewStructure(open) : openChoices()
+  );
   elements.candidate.addEventListener('change', renderChoicePreview);
   elements.choices.addEventListener('focusout', () =>
     queueMicrotask(() => {
@@ -900,6 +1066,9 @@ if (typeof window !== 'undefined')
     applyReviewContext,
     hydrate,
     park,
+    structure: currentStructure,
+    reviewStructure,
+    adjustStructure,
     closeReview: async offer => {
       if (
         offer?.conversation_id &&

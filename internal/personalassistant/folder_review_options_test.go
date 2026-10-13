@@ -134,24 +134,30 @@ func TestFolderReviewOptions_ACollectionRootIsAStructureListedFirst(t *testing.T
 		t.Fatal("describing a collection wrote an offer or allocated an id")
 	}
 
-	// With the provider and the integration in place, the group is the shape's
-	// Home and each album starts from the integration's blueprint.
+	// With the provider and the integration in place the collection is listed
+	// in the shape's Home, as it was before: that Home makes each project's
+	// workspace when it is opened. The root is then the earlier collection
+	// option, not a group of blank workspaces, and it is still listed.
 	ready := &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
 	f.service.deps.Setup = ready
 	options = service.ReviewOptions(ctx, target, observation.ID)
-	p = options[0].Presentation
-	if options[0].WorkspaceType != "Music Production Home with 6 workspaces" || p.Kind != "structure" || p.GroupType != FolderGroupHome ||
-		p.DestinationName != "Music Production Home" || p.Availability != "" || len(p.Notes) != 0 {
-		t.Fatalf("home structure: %+v / %+v", options[0], p)
+	if len(options) != 7 || options[0].CandidateID != "candidate-0" || options[0].Structure != nil ||
+		options[0].Presentation.Kind == "structure" || options[0].WorkspaceType != "Music Production Home" {
+		t.Fatalf("collection with its Home in place: %+v / %+v", options[0], options[0].Presentation)
+	}
+	if service.Structure(ctx, target, observation.ID) != nil {
+		t.Fatal("a collection whose Home is in place was proposed as a plain group on attach")
 	}
 	offer, err := service.prepareReviewOffer(ctx, service.selections[observation.ID], target, "candidate-0")
-	if err != nil || offer.Structure == nil || offer.Structure.Validate() != nil {
+	if err != nil || offer.Structure == nil || offer.Structure.Validate() != nil || offer.Structure.Group.Type != FolderGroupLibrary ||
+		offer.Structure.Group.Name != "Music Production Home" || !offer.Structure.Group.HomeAvailable || offer.Portfolio == nil {
 		t.Fatalf("root offer: %+v, %v", offer.Structure, err)
 	}
+	// The members a group would get are known all the same: each folder is
+	// witnessed, and none starts from a blueprint that lives in the Home.
 	for _, member := range offer.Structure.Members {
-		session := member.TypeLabel == "REAPER session"
-		if session != (member.BlueprintID == "reaper-song") || member.Availability != "" || member.Identity == "" {
-			t.Fatalf("member blueprint: %+v", member)
+		if member.Identity == "" || member.BlueprintID != "" {
+			t.Fatalf("member: %+v", member)
 		}
 	}
 }

@@ -31,7 +31,19 @@ const (
 	// one of their templates folders is listed. Present only when the Home's
 	// installed package declares a profile.
 	FolderPlanProfile = "profile"
+	// A structure's plan: the group, the workspaces it creates with one line per
+	// member, and one line for each thing the proposal goes without.
+	FolderPlanGroup       = "group"
+	FolderPlanMembers     = "workspaces"
+	FolderPlanMember      = "member"
+	FolderPlanUnavailable = "unavailable"
 )
+
+// FolderRecipeStructure names the host's own setup of a folder that holds
+// several projects: one group and a linked workspace per member. Like the
+// software recipe it installs nothing, and its whole intent is part of what the
+// plan digest covers.
+const FolderRecipeStructure = "folder_structure"
 
 // States of one plan line while a run is in progress.
 const (
@@ -63,6 +75,9 @@ const (
 	// FolderStopAssistantMissing: the shared assistant the Home's consent created
 	// was deleted or renamed.
 	FolderStopAssistantMissing = "assistant_missing"
+	// FolderStopMemberFailed: a structure's run could not create or link one
+	// member's workspace. What finished is kept; Continue carries on from there.
+	FolderStopMemberFailed = "member_failed"
 )
 
 // FolderPlanLine is one consequence the user consents to. Name and Detail are
@@ -127,6 +142,80 @@ type FolderSetupIntent struct {
 	Recipe        string                `json:"recipe,omitempty"`
 	RecipeVersion int                   `json:"recipe_version,omitempty"`
 	Software      *FolderSoftwareIntent `json:"software,omitempty"`
+	// Structure is the FolderRecipeStructure recipe's promise.
+	Structure *FolderStructureIntent `json:"structure,omitempty"`
+}
+
+// FolderStructureIntent is everything a reviewed structure setup promised, in a
+// form the run checks before each effect: which group, with which Group
+// Manager, and which member folders become which workspaces. Two reviews whose
+// lines read the same but whose folders or names differ are different reviews.
+// It never leaves the server and holds no filesystem path.
+type FolderStructureIntent struct {
+	GroupName string `json:"group_name"`
+	GroupType string `json:"group_type"` // FolderGroupPlain or FolderGroupHome
+	// GroupExists says the group is the owner's existing Home, which the
+	// members join; nothing is created for it.
+	GroupExists bool `json:"group_exists,omitempty"`
+	// Manager is the Group Manager a new plain group is created with, and
+	// ManagerAction whether it is a new saved agent ("create") or the owner's
+	// saved agent of that name ("reuse"). RosterRevision witnesses the roster
+	// plan the review showed.
+	Manager        string `json:"manager,omitempty"`
+	ManagerAction  string `json:"manager_action,omitempty"`
+	RosterRevision string `json:"roster_revision,omitempty"`
+	// RootKey and RootIdentity witness the folder the review was about.
+	RootKey      string                        `json:"root_key"`
+	RootIdentity string                        `json:"root_identity,omitempty"`
+	Members      []FolderStructureMemberIntent `json:"members"`
+}
+
+// FolderStructureMemberIntent is one member the plan promised a workspace for.
+type FolderStructureMemberIntent struct {
+	CandidateID string `json:"candidate_id"`
+	Name        string `json:"name"`
+	// Blueprint is the blueprint the workspace starts from; empty is blank.
+	Blueprint string `json:"blueprint,omitempty"`
+	// Identity witnesses the member's own directory at review time.
+	Identity string `json:"identity,omitempty"`
+}
+
+// Validate checks a structure intent's shape: known types, bounded text, at
+// least one member, no path.
+func (i FolderStructureIntent) Validate() error {
+	if !validStructureWorkspaceName(i.GroupName) || (i.GroupType != FolderGroupPlain && i.GroupType != FolderGroupHome) ||
+		validateFolderKey(i.RootKey) != nil || len(i.Members) == 0 || len(i.Members) > FolderStructureMaxMembers {
+		return fmt.Errorf("%w: structure intent", errFolderDigestInvalid)
+	}
+	switch i.ManagerAction {
+	case "":
+		if i.Manager != "" || i.RosterRevision != "" {
+			return fmt.Errorf("%w: structure manager", errFolderDigestInvalid)
+		}
+	case FolderSoftwareCreate, FolderSoftwareReuse:
+		if strings.TrimSpace(i.Manager) == "" || i.GroupExists {
+			return fmt.Errorf("%w: structure manager", errFolderDigestInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: structure manager action", errFolderDigestInvalid)
+	}
+	seen := map[string]bool{}
+	for _, member := range i.Members {
+		if !validStructureName(member.CandidateID) || seen[member.CandidateID] || !validStructureWorkspaceName(member.Name) {
+			return fmt.Errorf("%w: structure member", errFolderDigestInvalid)
+		}
+		seen[member.CandidateID] = true
+	}
+	texts := []string{i.Manager, i.RosterRevision, i.RootIdentity}
+	for _, member := range i.Members {
+		texts = append(texts, member.Blueprint, member.Identity)
+	}
+	for _, text := range texts {
+		if len(text) > 200 || strings.ContainsAny(text, "\\\x00\r\n") || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "~") {
+			return fmt.Errorf("%w: structure intent text", errFolderDigestInvalid)
+		}
+	}
+	return nil
 }
 
 // Outcomes a software setup can promise for the workspace, and what it does
@@ -413,7 +502,9 @@ type FolderSetupView struct {
 }
 
 const (
-	folderSetupMaxLines   = 16
+	// A structure's plan has a line per member workspace besides its fixed
+	// lines, and its receipt a row per workspace it made.
+	folderSetupMaxLines   = 16 + FolderStructureMaxMembers
 	folderSetupMaxText    = 512
 	folderSetupMaxEntries = 64
 )
@@ -446,14 +537,21 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	// formed; anything else is refused rather than run on a guess.
 	switch intent.Recipe {
 	case "":
-		if intent.RecipeVersion != 0 || intent.Software != nil {
+		if intent.RecipeVersion != 0 || intent.Software != nil || intent.Structure != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 	case folderdigest.BuiltinSoftwareProject:
-		if intent.RecipeVersion < 1 || intent.Software == nil {
+		if intent.RecipeVersion < 1 || intent.Software == nil || intent.Structure != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 		if err := intent.Software.Validate(); err != nil {
+			return err
+		}
+	case FolderRecipeStructure:
+		if intent.RecipeVersion < 1 || intent.Structure == nil || intent.Software != nil {
+			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
+		}
+		if err := intent.Structure.Validate(); err != nil {
 			return err
 		}
 	default:

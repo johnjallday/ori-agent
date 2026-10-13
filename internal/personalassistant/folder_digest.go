@@ -328,6 +328,13 @@ type FolderDigestDeps struct {
 	// how a run's "done" is checked before the offer says so. Nil leaves a
 	// finished run unverified, and an unverified run never resolves an offer.
 	SoftwareProject func(ctx context.Context, userID string, offer FolderOffer, folderPath, identity string) (FolderCreateResult, error)
+	// StructureGroup re-reads, from canonical state, the group a finished
+	// structure setup made (or joined) and the workspaces it created for the
+	// offer's members, each still linked to its own folder under root. It is how
+	// a run's "done" is checked before the offer says so, and the receipt it
+	// returns is the one shown. Nil leaves a finished run unverified, and an
+	// unverified run never resolves an offer.
+	StructureGroup func(ctx context.Context, userID string, offer FolderOffer, root, groupID string) (FolderCreateResult, error)
 	// LegacyDeclined reads the pre-folder app-card answer once per domain.
 	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
@@ -1105,14 +1112,17 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		// project. A first no about a single project is revived once by a whole
 		// collection, exactly as the capability offer below is.
 		declined := s.declinedDomains(ctx, userID, doc)
-		offer.Structure = s.structureFor(ctx, userID, result, verdict, offer, func(candidate string) bool {
+		offer.Structure, err = s.structureFor(ctx, userID, result, verdict, offer, func(candidate string) bool {
 			if !declined(candidate) {
 				return false
 			}
 			decline := doc.DeclineFor(candidate)
 			revived := candidate == domain && (decline == nil || (decline.Count == 1 && decline.FirstEvidence == "single_project"))
 			return !revived
-		})
+		}, nil)
+		if err != nil {
+			return FolderOfferView{}, err
+		}
 	}
 
 	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -1235,6 +1245,11 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 		}
 	}
 	if input.Decision == FolderDecisionYes {
+		// A proposed group is set up through its own reviewed plan (Set up). A
+		// bare yes on its review would make one workspace out of the whole folder.
+		if offer.ConversationReview != nil && offer.Status == FolderOfferPending && offer.Structure.ProposesWorkspaces() {
+			return FolderOfferView{}, ErrFolderReviewRequired
+		}
 		if input.Create && isProjectCapabilityOffer(*offer) {
 			return FolderOfferView{}, ErrFolderOutcomeUnavailable
 		}

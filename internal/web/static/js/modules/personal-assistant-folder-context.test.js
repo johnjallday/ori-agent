@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   createFolderContextController,
+  discussionChips,
   folderContextChoices,
   FOLDER_DISCLOSURE,
   observationSummary,
@@ -337,6 +338,68 @@ test('review carries a named workspace as a reference while the page stays the l
   assert.equal(f.calls[2].body.destination_id, 'ws-home');
   await f.controller.review('root');
   assert.equal('subject_workspace_id' in f.calls[3].body.context, false);
+});
+
+test('an attached collection keeps its proposed group as a local preview until Send', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  let reply = { observation: observation('a'), revision: '', structure };
+  const f = fixture(async url => (url.endsWith('/select') ? reply : { conversation: {} }));
+  assert.equal(await f.controller.select('chip', 'downloads'), true);
+  assert.equal(f.controller.state.structure, structure);
+  assert.equal(f.controller.state.preview, true);
+  // Only the select call was made: showing the proposal costs no request.
+  assert.equal(f.calls.length, 1);
+  // What the user changed in Adjust rides the ordinary review request.
+  const adjustment = {
+    group_type: 'group',
+    group_name: 'Albums 2026',
+    members: [{ candidate_id: 'candidate-1', included: true, name: 'First' }]
+  };
+  await f.controller.review('root', false, undefined, { structure: adjustment });
+  assert.deepEqual(f.calls[1].body.structure, adjustment);
+  await f.controller.review('root');
+  assert.equal('structure' in f.calls[2].body, false);
+  // A single folder, an unknown record version, and a saved turn carry none.
+  reply = { observation: observation('b'), revision: '' };
+  await f.controller.select('chip', 'desktop');
+  assert.equal(f.controller.state.structure, null);
+  reply = { observation: observation('c'), revision: '', structure: { ...structure, version: 2 } };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(f.controller.state.structure, null);
+  reply = { observation: observation('d'), revision: '', structure };
+  await f.controller.select('chip', 'downloads');
+  f.controller.accepted('chat', { observation: observation('d'), revision: 'r1' });
+  assert.equal(f.controller.state.structure, null);
+});
+
+test('a proposed group replaces the discussion shortcuts with its own three controls', () => {
+  assert.deepEqual(
+    discussionChips({ structure: true, children: 6, markers: true }).map(chip => chip.label),
+    ['Set up this structure', 'Adjust…', 'Just discuss']
+  );
+  // Without a proposal the two shortcuts are what they were.
+  assert.deepEqual(
+    discussionChips({ children: 6, markers: true }).map(chip => chip.label),
+    ['Discuss the collection', 'Choose a project…']
+  );
+  assert.deepEqual(
+    discussionChips({ children: 1 }).map(chip => chip.label),
+    ['Discuss this folder', 'Choose a folder…']
+  );
+  assert.deepEqual(
+    discussionChips({}).map(chip => chip.label),
+    ['Discuss this folder']
+  );
+  // A saved snapshot has no live proposal to set up.
+  assert.deepEqual(
+    discussionChips({ structure: true, historical: true, children: 2 }).map(chip => chip.label),
+    ['Discuss saved observations', 'Choose a folder…']
+  );
 });
 
 test('late review cannot bind a new conversation and historical context cannot request setup', async () => {

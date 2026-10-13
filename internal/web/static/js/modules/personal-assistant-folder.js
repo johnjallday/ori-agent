@@ -22,6 +22,7 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
+import { proposalView, renderProposal, structureOption } from './personal-assistant-proposal.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
 // can use it without mounting this card; it is re-exported for existing callers.
@@ -557,6 +558,85 @@ function capabilityConfirmView(offer, base, subject) {
   };
 }
 
+// offerStructure is the group an offer proposes for a folder of several
+// projects, or null: for a single folder, and for a collection the user turned
+// into the Home-plus-library listing in Adjust, which is the earlier card.
+export function offerStructure(offer) {
+  const structure = offer?.structure;
+  return structure?.version === 1 &&
+    ['home', 'group'].includes(structure.group?.type) &&
+    Array.isArray(structure.members)
+    ? structure
+    : null;
+}
+
+// structureCounts words what the folder holds from the host's own labels: the
+// projects by their shared type label when they have one, then the rest.
+export function structureCounts(structure) {
+  const members = structure.members || [];
+  const projects = members.filter(member => member.project);
+  const others = members.length - projects.length;
+  const labels = new Set(projects.map(member => String(member.type_label || '').trim()));
+  const label = labels.size === 1 ? [...labels][0] : '';
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const parts = [];
+  if (projects.length)
+    parts.push(
+      label
+        ? count(projects.length, `${label} folder`, `${label} folders`)
+        : count(projects.length, 'project folder', 'project folders')
+    );
+  if (others) parts.push(count(others, 'other folder', 'other folders'));
+  return parts.join(' and ');
+}
+
+// A proposed group rides the same result card as every other offer: one
+// question, the member workspaces, and the plan once the server has one. What
+// the proposal goes without is said, and never removes Set up.
+function structureOfferView(offer, base, subject) {
+  const structure = offerStructure(offer);
+  const proposal = proposalView(structureOption(structure));
+  const count = proposal.members.length;
+  const workspaces = `${count} workspace${count === 1 ? '' : 's'}`;
+  const group = String(structure.group.name || '').trim();
+  const run = offer.setup ? setupRunView(offer.setup, subject) : null;
+  const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
+  const hasPlan = planLines.length > 0;
+  let question =
+    structure.group.destination_state === 'existing'
+      ? `Add ${workspaces} to your ${group}?`
+      : structure.group.type === 'home'
+        ? `Set up ${group} with ${workspaces}?`
+        : `Set up a group with ${workspaces}?`;
+  if (hasPlan) question += ' Here is everything Set up will do:';
+  if (run) question = run.question;
+  let actions = [];
+  if (run) actions = run.actions;
+  else if (!base.decided) {
+    if (hasPlan) actions.push({ id: 'setup', label: 'Set up', style: 'primary', oneCard: true });
+    actions.push({ id: 'adjust', label: 'Adjust…', style: 'outline', adjustStructure: true });
+  }
+  return {
+    ...base,
+    headline: segments([
+      { text: String(structure.folder || subject) },
+      ` has ${structureCounts(structure)}.`
+    ]),
+    question,
+    // What the proposal goes without is said once: by the proposal card's own
+    // notes, and by the plan's lines once there is a plan.
+    capabilityDetail: '',
+    reason: run ? '' : base.reason,
+    actions,
+    resume: base.status === 'awaiting_outcome',
+    plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    setup: run,
+    // With a plan the card shows the plan's own unavailable lines, so the
+    // proposal keeps its members and drops its notes.
+    structure: base.decided && !run ? null : hasPlan || run ? { ...proposal, notes: [] } : proposal
+  };
+}
+
 // folderOfferView is the whole render decision for one offer (FR22). Every
 // string comes from the verdict and the server's counts and names; the
 // reason line is always present. options.confirm ('project' or 'tidy') shows
@@ -585,8 +665,12 @@ export function folderOfferView(offer, options = {}) {
     confirming: false,
     needsPick: offer.needs_pick === true
   };
-  const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
+  const structured = Boolean(offerStructure(offer)) && verdict === 'project';
+  const view = structured
+    ? structureOfferView(offer, base, subject)
+    : verdictView(offer, base, { verdict, folder, subject, remember, confirm });
   if (
+    !structured &&
     status === 'awaiting_outcome' &&
     offer?.capability &&
     (!offer.portfolio || view.plan) &&
@@ -657,7 +741,7 @@ export function folderOfferView(offer, options = {}) {
     enclosingView(offer, view);
     if (view.enclosing && !view.capabilityDetail) view.capabilityDetail = view.enclosing;
   }
-  if (view.visible && !view.setup && !view.plan && offer.setup_unavailable_reason) {
+  if (view.visible && !structured && !view.setup && !view.plan && offer.setup_unavailable_reason) {
     const reasons = {
       integration_unavailable: 'integration readiness could not be verified',
       home_provider_unavailable: 'Home-provider readiness could not be verified',
@@ -1864,6 +1948,7 @@ function elements() {
     offer: document.getElementById('personalAssistantFolderOffer'),
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
+    structure: document.getElementById('personalAssistantFolderOfferStructure'),
     nameLabel: document.getElementById('personalAssistantFolderWorkspaceNameLabel'),
     workspaceName: document.getElementById('personalAssistantFolderWorkspaceName'),
     assistantLabel: document.getElementById('personalAssistantFolderAssistantNameLabel'),
@@ -2322,6 +2407,18 @@ export function conversationFolderOfferView(offer, options = {}) {
       actions: []
     };
   if (!offer?.conversation_id || offer.status !== 'pending') return view;
+  // A proposed group keeps its own controls. In a conversation the review is
+  // closed with Keep chatting, never declined or postponed.
+  if (view.structure)
+    return {
+      ...view,
+      actions: [
+        ...(view.actions || []).filter(
+          action => action.decision !== 'no' && action.decision !== 'later'
+        ),
+        { id: 'keep-chatting', label: 'Keep chatting', style: 'link', closeReview: true }
+      ]
+    };
   const actions = (view.actions || []).filter(
     action =>
       action.decision !== 'no' &&
@@ -2400,6 +2497,16 @@ function renderOffer(place) {
     });
   }
   setText(els.question, view.question, false);
+  if (els.structure) {
+    // The proposed group and its member workspaces, drawn by the same renderer
+    // as the proposal under a reply.
+    els.structure.replaceChildren();
+    els.structure.hidden = !view.structure;
+    if (view.structure)
+      els.structure.append(
+        renderProposal(view.structure, document, window.OriWorkspaceBuildingArt)
+      );
+  }
   if (els.nameLabel)
     els.nameLabel.hidden = !(
       view.adjusting === true ||
@@ -2601,6 +2708,14 @@ function runAction(action) {
     state.editingName = true;
     render();
     elements()?.workspaceName?.focus();
+    return;
+  }
+  if (action.adjustStructure) {
+    // The sheet is the composer's own: Done sends the choices to the review
+    // this card belongs to, and the card is drawn again from what was saved.
+    const trigger = elements()?.actions?.querySelector('[data-folder-action="adjust"]');
+    if (state.offer?.conversation_id)
+      window.PersonalAssistantFolderSetup?.adjustStructure?.(trigger, state.offer.structure);
     return;
   }
   if (action.repick && state.offer?.conversation_id) {

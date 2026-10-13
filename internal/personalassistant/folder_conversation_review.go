@@ -29,6 +29,9 @@ type FolderConversationReview struct {
 	DestinationBlocker *FolderDestinationBlocker `json:"destination_blocker,omitempty"`
 	Operation          string                    `json:"operation,omitempty"`
 	DestinationID      string                    `json:"destination_id,omitempty"`
+	// Structure is what the user changed in Adjust on a collection's proposal,
+	// kept so a refreshed review proposes the same group, names and members.
+	Structure *FolderStructureAdjustment `json:"structure,omitempty"`
 }
 
 // ConfigureConversationReviews is wired once at host construction. The guard
@@ -117,11 +120,29 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 	}
 	target := source
 	target.ConversationID, target.DraftID = conversationID, ""
+	d := s.digest
+	// A review opened again without new Adjust choices keeps the ones its
+	// pending review already has. If they no longer fit (the Home they chose is
+	// gone), the proposal is made afresh rather than refused.
+	carried := false
+	if folderStructureAdjustment(ctx) == nil {
+		if doc, readErr := d.store.Read(ctx, source.UserID); readErr == nil {
+			for _, prior := range doc.Offers {
+				review := prior.ConversationReview
+				if prior.Status == FolderOfferPending && review != nil && review.Target == target &&
+					review.ObservationID == observationID && review.CandidateID == candidateID && review.Structure != nil {
+					ctx, carried = WithFolderStructureAdjustment(ctx, review.Structure), true
+				}
+			}
+		}
+	}
 	offer, err := s.prepareReviewOffer(ctx, held, target, candidateID)
+	if carried && errors.Is(err, ErrFolderStructureAdjustment) {
+		offer, err = s.prepareReviewOffer(context.WithValue(ctx, folderStructureAdjustmentKey{}, (*FolderStructureAdjustment)(nil)), held, target, candidateID)
+	}
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	d := s.digest
 	offer.ID = d.deps.NewID()
 	var result FolderOffer
 	_, err = d.store.Mutate(ctx, source.UserID, func(doc *FolderDigestDocument) error {
@@ -143,6 +164,11 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 					offer.ConversationReview.Destination = prior.ConversationReview.Destination
 					offer.ConversationReview.DestinationUnavailable = prior.ConversationReview.DestinationUnavailable
 					offer.ConversationReview.DestinationBlocker = prior.ConversationReview.DestinationBlocker.clone()
+					offer.ConversationReview.Structure = prior.ConversationReview.Structure.clone()
+				} else {
+					// A pending review's proposal follows the review: what is
+					// available now, and what the user chose in Adjust.
+					prior.Structure = offer.Structure.stored()
 				}
 				prior.ConversationReview = offer.ConversationReview
 				result = *prior
@@ -251,10 +277,20 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 			}
 		}
 	}
-	if collection {
-		offer.Structure = d.structureFor(ctx, target.UserID, held.result, verdict, offer, d.declinedDomains(ctx, target.UserID, doc))
+	// What the user changed in Adjust applies only to a collection's own
+	// proposal. It is kept on the review so a refresh proposes the same thing.
+	adjustment := folderStructureAdjustment(ctx)
+	if adjustment != nil && !collection {
+		return FolderOffer{}, structureAdjustmentError("this folder is not proposed as a group")
 	}
-	if offer.Structure != nil && offer.Structure.Group.Type != FolderGroupHome {
+	if collection {
+		offer.Structure, err = d.structureFor(ctx, target.UserID, held.result, verdict, offer, d.declinedDomains(ctx, target.UserID, doc), adjustment)
+		if err != nil {
+			return FolderOffer{}, err
+		}
+		offer.ConversationReview.Structure = adjustment.clone()
+	}
+	if offer.Structure != nil && offer.Structure.Group.Type == FolderGroupPlain {
 		// A plain group is created by the setup itself: there is no Home to
 		// witness, and a Home that could not be read does not hold it up.
 		review := offer.ConversationReview
@@ -290,6 +326,10 @@ type FolderReviewOption struct {
 	CandidateID   string                    `json:"candidate_id"`
 	WorkspaceType string                    `json:"workspace_type"`
 	Presentation  *FolderReviewPresentation `json:"presentation,omitempty"`
+	// Structure is the proposed group on the root option of a collection: the
+	// same record the attach response and the offer carry, so every surface
+	// shows and adjusts one thing.
+	Structure *FolderStructure `json:"structure,omitempty"`
 }
 
 // ReviewOptions reads the same candidate and setup availability as Review. It
@@ -328,12 +368,14 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 		row, software := softwareCapability(offer.Subject)
 		capability, recognized := folderOfferCapabilityWorkspace(offer)
 		switch {
-		case offer.Structure != nil:
+		case offer.Structure.ProposesWorkspaces():
 			// A structure never waits on a plugin, only on a host that can set
 			// one up at all.
 			option.WorkspaceType = offer.Structure.summary()
 			if s.digest.deps.Setup == nil {
 				unavailable(FolderAvailabilityPlanUnavailable)
+			} else {
+				option.Structure = offer.Structure.view()
 			}
 		case software:
 			// A software project's setup is reviewed on its own card; the option
@@ -379,7 +421,8 @@ func (s *FolderObservationService) Structure(ctx context.Context, target folderc
 		return nil
 	}
 	offer, err := s.prepareReviewOffer(ctx, held, target, folderRootCandidateID)
-	if err != nil {
+	if err != nil || !offer.Structure.ProposesWorkspaces() {
+		// A collection whose Home is in place is listed there, as before.
 		return nil
 	}
 	return offer.Structure.view()
@@ -536,6 +579,9 @@ func validateConversationReview(review *FolderConversationReview) error {
 		return nil
 	}
 	if review.Destination != nil && review.Destination.Validate() != nil {
+		return errFolderDigestInvalid
+	}
+	if review.Structure != nil && review.Structure.Validate() != nil {
 		return errFolderDigestInvalid
 	}
 	if !review.Target.Valid() || review.Target.ConversationID == "" || review.Target.DraftID != "" {

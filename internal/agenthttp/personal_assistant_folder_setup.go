@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -78,7 +79,26 @@ func writeFolderReviewError(w http.ResponseWriter, err error) {
 		writeConversationError(w, http.StatusConflict, "folder_review_pending", err.Error())
 		return
 	}
+	if errors.Is(err, personalassistant.ErrFolderStructureAdjustment) {
+		// The sentence names the part that cannot be applied; nothing was saved.
+		writeConversationError(w, http.StatusBadRequest, "folder_structure_adjustment", folderAdjustmentMessage(err))
+		return
+	}
 	writeFolderError(w, err)
+}
+
+// folderReviewBodyBytes bounds a review request. It is larger than the other
+// folder requests because an adjusted group names every member workspace.
+const folderReviewBodyBytes = 16 * 1024
+
+// folderAdjustmentMessage is the sentence a refused Adjust shows: the part the
+// service named, as a sentence, with nothing saved.
+func folderAdjustmentMessage(err error) string {
+	detail := strings.TrimPrefix(err.Error(), personalassistant.ErrFolderStructureAdjustment.Error()+": ")
+	if detail == "" || detail == err.Error() {
+		return "That change cannot be applied to this proposal. Nothing was saved."
+	}
+	return strings.ToUpper(detail[:1]) + detail[1:] + ". Nothing was saved."
 }
 
 // ReviewFolderSetupHandler is an explicit local review, not a chat approval or
@@ -101,9 +121,19 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		Context        *HomeAssistantRouteContext `json:"context,omitempty"`
 		Operation      string                     `json:"operation,omitempty"`
 		DestinationID  string                     `json:"destination_id,omitempty"`
+		// Structure is what the user changed in Adjust on a proposed group: its
+		// name and type, and which folders get a workspace under which name. It
+		// names folders only by the ids the proposal gave.
+		Structure *personalassistant.FolderStructureAdjustment `json:"structure,omitempty"`
 	}
-	if !strictFolderBody(w, r, &req) {
+	if !strictFolderBodyWithin(w, r, &req, folderReviewBodyBytes) {
 		return
+	}
+	if req.Structure != nil {
+		if err := req.Structure.Validate(); err != nil {
+			writeFolderReviewError(w, err)
+			return
+		}
 	}
 	target, err := h.folderTarget(scope, req.ConversationID, req.DraftID)
 	if err != nil {
@@ -125,6 +155,7 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 	if !placementReady {
 		return
 	}
+	placementContext = personalassistant.WithFolderStructureAdjustment(placementContext, req.Structure)
 	observation, err := h.resolveFolderObservation(r.Context(), target, req.SelectionID)
 	if err != nil {
 		writeFolderError(w, err)
