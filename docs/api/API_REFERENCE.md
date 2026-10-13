@@ -1708,6 +1708,55 @@ An offer the user sent to the step-by-step journey (**Adjust…**, so `awaiting_
 
 The same action sets up a **collection** offer (`portfolio`) when its reviewed Home provider resolves: the plan lists the provider, the integration (only when some folders are projects it opens), the Home, its agents, the library listing and the shared assistant, and the run builds the Home, staffs its required roles, starts its library, connects the folder, scans it once and records the Home's standing staffing consent. It lists the projects and makes **no** project workspace. The finished offer's `outcome.receipt` rows (`home`, `library`, `assistant`) name what was made; the `library` row says "Listed N … so far" after a partial scan. A single-song run records the same consent on its Home, so its project role is filled by the Home's one shared assistant: created by the first song (receipt detail `added`), bound by later ones (`joined`).
 
+### A Folder of Projects: the proposed group
+
+A folder with no project marker of its own and two or more immediate subfolders that are each a project (software repositories aside, which keep the candidate choice above) is a **collection**. Ori answers it with one proposal: a workspace group and one linked workspace per subfolder. The proposal is the `structure` record, built from directory entries only, and it is the same record wherever the folder is shown:
+
+- `POST /api/home-assistant/folder-context/select` (the assistant's **Add folder**) returns it as `structure` beside `folder_context`, and the turn's review option carries it too.
+- `POST /api/personal-assistant/folder-digest/scan` and the digest read (Home's **Explore a folder**) return it as `offer.structure`. The offer's subject is then the folder itself and no subfolder is queued one by one.
+
+```json
+{
+  "version": 1,
+  "folder": "Albums",
+  "group": { "name": "Albums", "type": "group", "destination_state": "new", "home_name": "Music Production Home", "home_available": true, "availability": "provider_not_installed" },
+  "members": [
+    { "candidate_id": "…", "name": "Album-1", "folder": "Album-1", "type_label": "REAPER session", "project": true, "files": 2, "last_changed": "2026-09-29", "included": true, "integration": "REAPER", "availability": "integration_not_installed" }
+  ],
+  "min_members": 2,
+  "projects": 5,
+  "omitted": 0,
+  "notes": ["Music Production Home is not installed; a plain group is proposed instead."]
+}
+```
+
+`group.type` is `group` (a new plain group, the default whenever the shape's Home is not in place) or `library` (the collection is listed in the shape's Home, which is the collection setup above and makes no project workspace). An offer whose structure is `library` is that collection setup in every respect (`portfolio`, `capability`, its own plan and journey); the attach response carries no `structure` for it, and the plain group is reached by sending `group_type: "group"` to the adjust action below. `members` lists at most 24 subfolders (`omitted` counts the rest); a member carries no path, only its folder's name and an opaque `candidate_id` that is valid for this proposal alone. A member whose folder is already a workspace's primary folder carries `existing_workspace` and is not included. Default names are made free before they are shown: a member whose name is taken reads "Album-1 (Albums)", and a group whose name is taken reads "Albums group".
+
+Nothing about a plugin blocks the proposal. A Home or an integration that cannot be used is reported, never dropped: `availability` on the group or the member is one of `integration_not_installed`, `provider_not_installed`, `provider_unverified`, `declined_earlier` or `plan_unavailable`, and `notes` says each reason once as a plain sentence. Availability is read from what is installed on this computer; showing a folder makes no network request. The same codes appear on a review option that cannot be chosen now (`availability` on the option), so an option the server cannot plan is listed with its reason and not left out.
+
+A bare `yes` on the decide action is refused for a proposed group (`409`, "Review this project's setup first"), as for a software project: the group is confirmed on its plan.
+
+**Adjust the proposal (assistant):** `POST /api/home-assistant/folder-context/review` accepts `structure` in its body.
+
+**Adjust the proposal (Home):** `POST /api/personal-assistant/folder-digest/offers/{offerID}/structure`
+
+```json
+{
+  "request_id": "…",
+  "structure": {
+    "group_name": "Studio",
+    "group_type": "group",
+    "members": [{ "candidate_id": "…", "included": false }, { "candidate_id": "…", "included": true, "name": "First album" }]
+  }
+}
+```
+
+Every field of `structure` is optional. `group_type` is `group` or `library` (`library` only while `group.home_available` is true). A member that is left out keeps its current state. The server applies the change to the proposal it holds; it scans nothing, reads no file and creates nothing. The response is `{ "offer": … }` with the adjusted `structure` and a fresh `plan`, whose digest is what **Set up** then confirms. The body is at most 16 KiB and has no path field. `400` (with the part that cannot be applied named in `message`, ending "Nothing was saved") for an id the proposal did not list, no folder left included, a folder that is already a workspace, a name that is longer than 96 characters or contains a slash or a line break, two workspaces of one name, a name a workspace already has (workspace names are one namespace, whatever group they are in), or a Home that cannot be used; `404` for an unknown offer; `409` when the offer is no longer pending, has no proposed group, or was made from a conversation review (that review is adjusted through the assistant's review action instead).
+
+**Set up** is the one-card action above with the plan's digest. The plan's lines are the group (`group`), the count of workspaces (`workspaces`) with one `member` line each, "Nothing is moved, copied or read", one `unavailable` line per capability that is not in place, and "No task is created or started". The run is the server's own and calls no model: it creates the group with its reviewed Group Manager, then one blank workspace per included member inside it, links each member's folder where it is as that workspace's primary directory, and records what the folder was recognized as (`folder_shape`, `folder_marker` in the workspace's shared data) so the workspace can take its integration later. It moves, copies and opens nothing in the folder, installs nothing and seeds no task.
+
+The group is recorded under the offer and each workspace under the offer and its member, so a repeated click, a retry after a restart, or a second pass after a stop continues on what exists and makes nothing twice. A workspace that cannot be created stops the run with `stop_reason: "member_failed"` and keeps the group and every workspace already made; sending the same digest again carries on from that member. The other stop reasons are `plan_changed`, `needs_pick`, `interrupted` and `failed`. A finished run makes the offer `resolved` with `outcome.kind: "group"`, `outcome.workspace_id` and `outcome.route` for the group, and `outcome.receipt`: one `workspace` row for the group (`detail: "group"`) and one per workspace (`detail: "linked to <folder>"`), each with its `route`.
+
 ### Read-only tools over linked directories
 
 Chat and task runs in a workspace with a linked directory get two tools:

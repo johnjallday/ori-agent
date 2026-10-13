@@ -81,6 +81,13 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   const offerID = scanned.offer.id;
   await page.goto('/?panel=today&folder=show');
   const offerCard = page.locator('#personalAssistantFolderOffer');
+  // With the provider not installed yet the folder is first proposed as a plain
+  // group; listing it in the Home is the Adjust choice this suite takes.
+  await expect(offerCard).toContainText('Set up a group with 5 workspaces?');
+  await offerCard.getByRole('button', { name: 'Adjust…', exact: true }).click();
+  const sheet = offerCard.locator('[data-folder-adjust]').first();
+  await sheet.locator('input[type=radio][value=library]').check();
+  await sheet.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(offerCard).toContainText('5 music projects');
   await shot(page, '16-reviewed-release-offer');
   const disclosures: string[] = [];

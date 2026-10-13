@@ -348,6 +348,41 @@ by bounded preview facts, not an automatic setup offer. New Workspace remains
 a separate flow. Real-host/no-model browser tests and the updated folder-first
 demo exercise canonical review, cancellation, creation, replay and receipts.
 
+## A folder of projects: the proposed group
+
+A folder with no marker of its own and two or more immediate project subfolders
+is a collection (`folderdigest.IsCollection`; software repositories keep their
+candidate choice). It is answered with one path-free `FolderStructure`: a
+workspace group and one linked workspace per subfolder. The record is built once
+(`BuildFolderStructure`, then `structureFor` for availability and free names)
+and is the same on every entry that shows a folder:
+
+- **Add folder** in the assistant's composer: the attach response and the
+  turn's review option carry it, the card is shown before any model reply, and
+  the model is told to lead with it and end with Set up or Adjust.
+- **Explore a folder** on Home: the offer's subject is the folder itself, with
+  the structure, instead of one question per subfolder.
+- **Create Workspace**'s assisted chat still attaches a folder to one workspace
+  draft; proposing the group there is not implemented.
+
+A Home or integration that cannot be used never blocks or hides the proposal.
+The group falls back to a plain group and a member to a blank workspace, each
+with a reason code and one plain sentence. Availability is read from what is
+installed locally; attaching a folder makes no network request.
+
+One review confirms it and one run creates it (`foldersetup.StructureRunner`):
+the group with its reviewed Group Manager, then a blank workspace per included
+member, each linked to its own folder where it is. The run calls no model,
+seeds no task, installs nothing and opens no file. It is idempotent per offer
+and per member, so a stop (`member_failed`) continues from the workspace that
+failed. A workspace per folder *inside* a plugin Home is not created here: that
+Home's own library makes each one when a project is opened, so the Home stays
+available as the "list them in the Home" choice in Adjust. Choosing it hands
+the offer back to the earlier collection setup, with that setup's own review,
+provider install and refusals; on Home that card carries "Make a group instead"
+to return to the proposal. When the Home is already installed and usable, the
+collection setup is the default and the plain group is that one choice away.
+
 ## Dependencies and evidence limits
 
 Host-only: no plugin manifest, blueprint, release or pin changes are required.
