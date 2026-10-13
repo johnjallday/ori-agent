@@ -88,16 +88,16 @@ func TestCIMatrixRunnerPinsPreserveCheckNames(t *testing.T) {
 	for _, test := range []struct {
 		id     string
 		name   string
-		matrix map[string][]string
+		matrix unitMatrix
 	}{
-		{"devtools-contract", "Ori workflow adapter contract (${{ matrix.os }})", map[string][]string{
-			"os": {"ubuntu-latest", "macos-latest"},
+		{"devtools-contract", "Ori workflow adapter contract (${{ matrix.os }})", unitMatrix{
+			OS: []string{"ubuntu-latest", "macos-latest"},
 		}},
-		{"test-unit", "Unit Tests", map[string][]string{
-			"os": {"ubuntu-latest", "macos-latest"}, "go-version": {"1.25.12"},
+		{"test-unit", "Unit Tests", unitMatrix{
+			OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"1.25.12"},
 		}},
-		{"build", "Build", map[string][]string{
-			"os": {"ubuntu-latest", "macos-latest", "windows-latest"}, "go-version": {"1.25.12"},
+		{"build", "Build", unitMatrix{
+			OS: []string{"ubuntu-latest", "macos-latest", "windows-latest"}, GoVersion: []string{"1.25.12"},
 		}},
 	} {
 		t.Run(test.id, func(t *testing.T) {
