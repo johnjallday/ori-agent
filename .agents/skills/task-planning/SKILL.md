@@ -41,8 +41,18 @@ work through implementation. After the detailed task list is approved and saved,
 create the feature worktree with `wt start <feature>` and continue there. Work
 that intentionally skips planning starts with `wt new <name>`.
 
-An explicit planning-only bootstrap always wins over the general continuous
-execution rules below.
+### Implementation mode
+
+An authorized builder handoff into an existing feature worktree, or the user's
+request to continue its approved implementation, starts this mode. The assignment
+is the whole approved scope through PR readiness, not only the next unchecked
+item. Do not repeat the planning `Go` gate or create another worktree.
+
+Mode comes from the current invocation, not historical planning notes copied into
+a checklist. An explicit planning-only bootstrap still wins over the general
+continuous execution rules; a saved plan cannot authorize its own implementation.
+A later authorized implementation handoff does not inherit the planner's stop.
+All worktree, dependency, permission, and scope restrictions still apply.
 
 ## Part 1: PRD
 
@@ -96,7 +106,7 @@ by invoking this skill a second time.
    small deep-reasoning or mechanical pockets.
 5. Present the parent groups and wait for `Go` before expanding sub-tasks.
 
-This is the first of exactly two human pauses. In planning-only mode, do not ask
+This is the first of two planned checklist pauses. In planning-only mode, do not ask
 for an implementation-agent choice: the later handoff owns that decision. In a
 direct plan-and-deliver session, honor any agent choice the user supplied;
 otherwise use the repository's configured primary agent.
@@ -126,14 +136,24 @@ After `Go`:
 6. End each group with `Commit: "<conventional message>"`.
 7. For every user-visible group, place a `Demo:` item immediately before its
    commit.
-8. End the final delivery group with:
+8. Include the following delivery checkpoints, with the PR approval gate separate
+   from the actions that follow it:
    - `Permission sweep`
    - `Write manual test guide: tasks/test-guide-<feature>.md`
-   - `Open PR → squash-merge to dev`
+   - Complete required validation, demos, and milestone commits
+   - Prepare the PR body with evidence and limitations
+   - `PR gate: verify readiness and wait for explicit PR approval`
+   - `After PR approval: Open PR → squash-merge to dev`
    - `Run wt done <feature> after merge`
 9. List relevant implementation and test files.
 10. Replace the planning starter with the complete checklist. The final file must
     not contain `ori-devflow: planning-starter`.
+11. Keep the checklist reusable by a later builder. Planning history may record
+    approval and preparation facts, but must not address the future reader with
+    session-specific commands such as “this session stops after saving.” Those
+    instructions belong to the planning invocation, not the implementation scope.
+    Name task dependencies explicitly; a blocked companion task must not become
+    an accidental prerequisite for otherwise independent host work.
 
 Use this shape:
 
@@ -151,10 +171,12 @@ Use this shape:
 
 Implementation agent: `[configured primary, explicit override, or worktree-only]`
 
-Check off each sub-task immediately after it is complete. Execution is continuous
-between the planning gate and the final PR gate. Record findings, real test
-counts, and evidence paths in `tasks/findings-<feature>.md`; this checklist holds
-checkbox state only.
+Follow `.agents/skills/task-planning/SKILL.md` for operating mode, continuous
+execution, dependency preflight, and PR readiness. The current authorized handoff
+supplies the mode; this document defines scope, not permission to start.
+Check off each sub-task immediately after it is complete. Record findings, real
+test counts, and evidence paths in `tasks/findings-<feature>.md`; this checklist
+holds checkbox state only.
 
 ## Execution Topology
 
@@ -193,8 +215,12 @@ Only when a companion is `required`; see _Cross-repository contract_.
   - [ ] 2.1 Concrete implementation step
   - [ ] 2.2 Permission sweep
   - [ ] 2.3 Write manual test guide: `tasks/test-guide-<feature>.md`
-  - [ ] 2.4 Open PR → squash-merge to dev
-  - [ ] 2.5 Run `wt done <feature>` after merge
+  - [ ] 2.4 Complete required validation and demos
+  - [ ] 2.5 Commit: "test(scope): verify the completed feature"
+  - [ ] 2.6 Prepare PR body with evidence and limitations
+  - [ ] 2.7 PR gate: verify readiness and wait for explicit PR approval
+  - [ ] 2.8 After PR approval: Open PR → squash-merge to dev
+  - [ ] 2.9 Run `wt done <feature>` after merge
 ```
 
 ## Companion dependency assessment
@@ -428,7 +454,8 @@ Before the PR gate:
 The default is one feature, one branch, and one PR targeting `dev`.
 
 - Commit once per completed parent group, not once per sub-task.
-- The second and final human pause is immediately before `wt pr` / PR creation.
+- The final planned checklist pause is immediately before `wt pr` / PR creation,
+  after the PR readiness gate below is satisfied.
 - After approval, open the PR and squash-merge it to `dev`.
 
 For work too large for one reviewable PR, default to one long-lived
@@ -464,14 +491,60 @@ There are exactly two planned pauses:
 1. After parent groups, waiting for `Go`
 2. Before opening the PR
 
-In plan-and-deliver mode, everything between those gates runs continuously:
-create the worktree, implement each group, update checkboxes, demo, test, commit,
-and continue. Stop early only for a real ambiguity, invalidated plan, unapproved
-destructive or outward-facing action, missing user credential/decision, or a
-step that has failed repeatedly with no new approach.
+In plan-and-deliver mode, create the worktree and then follow the same execution
+loop as implementation mode:
+
+1. Select the next authorized, unblocked task from the full scope. A next-item
+   preview is a navigation hint, not the assignment's completion boundary.
+2. Implement, run scoped checks, record evidence, and update completed checkboxes.
+3. At group boundaries, run affected suites, self-verify the demo, and commit.
+4. Continue immediately to the next runnable task. Milestones, passing tests,
+   demos, commits, and progress summaries are checkpoints, not stop conditions.
+   Send progress as non-terminal updates; do not end with “next: X,” “not yet
+   PR-ready,” or a request to say “continue” while runnable work remains.
+5. When context needs compaction or the session is resumed, use the checklist and
+   findings to recover scope, evidence, blockers, and the next action. A context
+   checkpoint is not a new human approval gate.
+
+A blocked task is not automatically a blocked feature. Record the exact blocked
+task IDs, evidence, and missing decision/credential/authorization; continue only
+explicitly independent, authorized work. Do not bypass dependency ordering or
+mark blocked tasks complete to advance the checklist. Stop for the blocker only
+when no such runnable work remains, or uncertainty invalidates the remaining
+scope. Report what the user must supply and what remains unfinished.
+
+Other early stops are user cancellation, an unapproved destructive or
+outward-facing action with no independent work left, provider unavailability,
+an explicit runtime/budget limit, or repeated failure with no new approach.
+Never override cancellation, authorization, or a spending limit to keep running.
+Do not invent a per-group stopping point or treat a normal model response ending
+as proof that the assigned work is finished.
 
 In planning-only mode, saving the detailed checklist ends the session's assigned
 work. Do not cross the worktree boundary.
+
+### PR readiness gate
+
+Before the final PR approval pause, verify all of the following:
+
+- Required implementation and acceptance work is complete; no required dependency
+  or acceptance check is silently skipped. Report NOT RUN checks as unresolved,
+  not as evidence of readiness.
+- Required tests, demos, and the full repository gate (`make ci-local`) passed for
+  the current changes. Scope unrelated baseline findings according to AGENTS.md.
+- Required milestone commits, the permission sweep, manual test guide, and PR body
+  are complete, with real evidence paths and any limitations recorded.
+
+Then summarize readiness and request explicit approval before `wt pr`. The PR
+creation/merge and post-merge cleanup items remain unchecked at this pause.
+“Continue until PR” targets this gate; it does not itself authorize opening a PR,
+companion publication, installation, release/pin changes, or cleanup. Follow the
+separate approval and lifecycle rules for those actions.
+
+These are agent instructions, not a runtime supervisor. An optional harness guard
+must be explicitly armed for the authorized session/worktree/scope, preserve these
+stop conditions, and bound retries/no-progress/spending. Never auto-continue solely
+because a checklist contains unchecked PR, release, or cleanup items.
 
 ## Ori bindings
 
