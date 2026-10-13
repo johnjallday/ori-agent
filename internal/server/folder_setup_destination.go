@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
@@ -63,7 +64,12 @@ func (h *folderSetupHost) ReadSetupDestination(ctx context.Context, req personal
 		}
 	}
 	var provider *reviewedintegration.HomeProvider
+	// integrationKey is the reviewed integration whose guided setup installs
+	// the provider and builds its Home, named by key when that is what is
+	// missing. The handler speaks from the registry; nothing here names it.
+	integrationKey := ""
 	if req.Offer.Portfolio != nil {
+		integrationKey = req.Offer.Portfolio.IntegrationKey
 		for _, candidate := range reviewedintegration.HomeProviders() {
 			if candidate.Key == req.Offer.Portfolio.ProviderKey {
 				value := candidate
@@ -95,6 +101,7 @@ func (h *folderSetupHost) ReadSetupDestination(ctx context.Context, req personal
 		if provider == nil {
 			return &personalassistant.FolderSetupDestination{Status: "standalone"}, nil
 		}
+		integrationKey = target.entry.Key
 	}
 	home, err := h.station(req.UserID, *provider)
 	if err != nil {
@@ -104,7 +111,16 @@ func (h *folderSetupHost) ReadSetupDestination(ctx context.Context, req personal
 		if requestedID != "" {
 			return nil, errSetupUnavailable
 		}
-		return h.newHomeDestination(ctx, req.UserID, *provider)
+		destination, err := h.newHomeDestination(ctx, req.UserID, *provider)
+		if errors.Is(err, errHomeTemplateNotReady) {
+			// The user can clear this one: the integration's guided setup
+			// installs the provider and builds the Home the project belongs in.
+			return nil, &personalassistant.FolderSetupBlockedError{
+				Blocker: personalassistant.FolderDestinationBlocker{IntegrationKey: integrationKey, HomeProviderKey: provider.Key},
+				Err:     err,
+			}
+		}
+		return destination, err
 	}
 	if requestedID != "" && home.ID != requestedID {
 		return nil, errSetupUnavailable

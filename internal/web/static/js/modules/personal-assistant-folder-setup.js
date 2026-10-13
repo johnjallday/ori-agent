@@ -6,6 +6,28 @@ import {
   placementProposalView,
   renderProposal
 } from './personal-assistant-proposal.js';
+import { setupQuestActionURL } from './setup-quest-links.js';
+
+// placementChoiceView is a placement answer as the drawer shows it: the
+// server's sentence, the operations it offers, and the guided setups it
+// attached. A setup action names a quest by key only; its link is built here,
+// and an action without a well-formed key is dropped, never followed.
+export function placementChoiceView(choice) {
+  const options = (choice?.options || []).filter(option =>
+    ['create_project_workspace', 'link_supporting_folder'].includes(option?.operation)
+  );
+  const setups = [];
+  for (const action of choice?.actions || []) {
+    const href = setupQuestActionURL(action);
+    if (!href) continue;
+    setups.push({ label: String(action.label || 'Open Guided Setup'), href });
+  }
+  return {
+    message: String(choice?.message || 'Choose the operation to review.'),
+    options,
+    setups
+  };
+}
 
 export function setupCandidates(observation) {
   const projects = observation?.projects || [];
@@ -553,15 +575,14 @@ async function review(candidateId, close = false, offerId, placement) {
   }
   if (result?.folder_placement_choice) {
     const choice = result.folder_placement_choice;
+    const view = placementChoiceView(choice);
     placementNode = document.createElement('section');
     placementNode.className = 'personal-assistant-message__setup';
     placementNode.setAttribute('aria-label', 'Choose folder placement');
     const message = document.createElement('p');
-    message.textContent = String(choice.message || 'Choose the operation to review.');
+    message.textContent = view.message;
     placementNode.append(message);
-    for (const option of choice.options || []) {
-      if (!['create_project_workspace', 'link_supporting_folder'].includes(option.operation))
-        continue;
+    for (const option of view.options) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'btn btn-sm btn-outline-secondary';
@@ -584,6 +605,15 @@ async function review(candidateId, close = false, offerId, placement) {
       preview.append(button);
       placementNode.append(preview);
     }
+    // A guided setup the server attached opens in this tab, like the
+    // assistant's own setup button; it replaces a review that cannot proceed.
+    for (const setup of view.setups) {
+      const open = document.createElement('a');
+      open.className = 'btn btn-sm btn-primary';
+      open.href = setup.href;
+      open.textContent = setup.label;
+      placementNode.append(open);
+    }
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.className = 'btn btn-sm btn-link';
@@ -592,7 +622,7 @@ async function review(candidateId, close = false, offerId, placement) {
       closeChoices();
     });
     placementNode.append(cancel);
-    showPlacement(placementNode.querySelector('button'), shouldFocus);
+    showPlacement(placementNode.querySelector('button, a'), shouldFocus);
     return;
   }
   if (result?.review_closed) {

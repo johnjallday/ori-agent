@@ -24,8 +24,11 @@ type FolderConversationReview struct {
 	CandidateIdentity      string                  `json:"candidate_identity"`
 	Destination            *FolderSetupDestination `json:"destination,omitempty"`
 	DestinationUnavailable bool                    `json:"destination_unavailable,omitempty"`
-	Operation              string                  `json:"operation,omitempty"`
-	DestinationID          string                  `json:"destination_id,omitempty"`
+	// DestinationBlocker says why the destination is unavailable when the user
+	// can clear it, by key. Absent for an unavailability the host cannot name.
+	DestinationBlocker *FolderDestinationBlocker `json:"destination_blocker,omitempty"`
+	Operation          string                    `json:"operation,omitempty"`
+	DestinationID      string                    `json:"destination_id,omitempty"`
 }
 
 // ConfigureConversationReviews is wired once at host construction. The guard
@@ -139,6 +142,7 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 				if prior.Status != FolderOfferPending {
 					offer.ConversationReview.Destination = prior.ConversationReview.Destination
 					offer.ConversationReview.DestinationUnavailable = prior.ConversationReview.DestinationUnavailable
+					offer.ConversationReview.DestinationBlocker = prior.ConversationReview.DestinationBlocker.clone()
 				}
 				prior.ConversationReview = offer.ConversationReview
 				result = *prior
@@ -231,6 +235,7 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		destination, err := reader.ReadSetupDestination(ctx, d.setupRequest(ctx, target.UserID, offer))
 		if err != nil {
 			offer.ConversationReview.DestinationUnavailable = true
+			offer.ConversationReview.DestinationBlocker = folderDestinationBlocker(err)
 		} else if destination != nil {
 			if destination.Validate() != nil {
 				offer.ConversationReview.DestinationUnavailable = true
@@ -420,6 +425,16 @@ func validateConversationReview(review *FolderConversationReview) error {
 	}
 	if len(review.DestinationID) > 200 || strings.ContainsAny(review.DestinationID, "/\\\x00\r\n") {
 		return errFolderDigestInvalid
+	}
+	if blocker := review.DestinationBlocker; blocker != nil {
+		if *blocker == (FolderDestinationBlocker{}) {
+			return errFolderDigestInvalid
+		}
+		for _, value := range []string{blocker.IntegrationKey, blocker.HomeProviderKey} {
+			if len(value) > 200 || strings.ContainsAny(value, "/\\\x00\r\n") {
+				return errFolderDigestInvalid
+			}
+		}
 	}
 	for _, value := range []string{review.Target.UserID, review.Target.WorkspaceID, review.Target.AgentName, review.Target.ConversationID, review.ObservationID, review.CandidateID, review.CandidateIdentity} {
 		if strings.TrimSpace(value) == "" || len(value) > 200 || strings.ContainsAny(value, "/\\\x00\r\n") {

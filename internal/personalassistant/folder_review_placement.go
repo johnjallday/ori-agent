@@ -182,6 +182,7 @@ func (s *FolderObservationService) PreviewReview(ctx context.Context, target fol
 	}
 	if offer.ConversationReview.DestinationUnavailable {
 		view.DestinationStatus = "unavailable"
+		view.DestinationBlocker = offer.ConversationReview.DestinationBlocker.clone()
 	}
 	return view, nil
 }

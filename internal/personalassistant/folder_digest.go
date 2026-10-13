@@ -634,9 +634,12 @@ type FolderOfferView struct {
 	Setup                  *FolderSetupView        `json:"setup,omitempty"`
 	Destination            *FolderSetupDestination `json:"destination,omitempty"`
 	DestinationStatus      string                  `json:"destination_status,omitempty"`
-	Operation              string                  `json:"operation,omitempty"`
-	CandidateID            string                  `json:"candidate_id,omitempty"`
-	RequestedDestinationID string                  `json:"-"`
+	// DestinationBlocker names, by key, what the user can set up to make an
+	// unavailable destination available. It is absent for every other status.
+	DestinationBlocker     *FolderDestinationBlocker `json:"destination_blocker,omitempty"`
+	Operation              string                    `json:"operation,omitempty"`
+	CandidateID            string                    `json:"candidate_id,omitempty"`
+	RequestedDestinationID string                    `json:"-"`
 	// FirstTask is where the folder's first look stands, on a resolved project
 	// offer whose workspace has one. It is read live, never stored on the offer.
 	FirstTask *FolderFirstTaskView `json:"first_task,omitempty"`
@@ -2299,6 +2302,7 @@ func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer 
 			v.DestinationStatus = "changed"
 			if errors.Is(err, ErrFolderOutcomeUnavailable) {
 				v.DestinationStatus = "unavailable"
+				v.DestinationBlocker = review.DestinationBlocker.clone()
 			}
 			return v
 		}
