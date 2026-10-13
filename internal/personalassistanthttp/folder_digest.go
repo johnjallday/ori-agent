@@ -396,6 +396,68 @@ func (h *Handler) AdjustFolderSoftware(w http.ResponseWriter, r *http.Request) {
 	h.changeFolderSoftwareReview(w, r, true)
 }
 
+// folderStructureAdjuster is the part of the digest service behind Adjust on a
+// proposed group. It is asked for by assertion so a host without it simply has
+// no such control.
+type folderStructureAdjuster interface {
+	AdjustStructure(ctx context.Context, userID, offerID string, adjustment personalassistant.FolderStructureAdjustment) (personalassistant.FolderOfferView, error)
+}
+
+// maxFolderStructureBodyBytes bounds an Adjust request, which names every
+// member workspace of a proposed group.
+const maxFolderStructureBodyBytes = 16 * 1024
+
+// AdjustFolderStructure applies the Adjust sheet's choices to a pending offer's
+// proposed group: its name and type, and which folders get a workspace under
+// which name. The body names folders only by the ids the proposal gave; it
+// accepts no path. Nothing is created: the answer is the offer with its plan
+// stamped again. POST .../offers/{offerID}/structure
+func (h *Handler) AdjustFolderStructure(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	adjuster, ok := any(h.folderDigestService()).(folderStructureAdjuster)
+	if !ok {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req struct {
+		Structure *personalassistant.FolderStructureAdjustment `json:"structure"`
+		// RequestID is what every card request carries. An adjustment replaces
+		// the one before it, so nothing is keyed on it.
+		RequestID string `json:"request_id,omitempty"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFolderStructureBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || req.Structure == nil {
+		orihttp.BadRequest(w, "Send the proposal's changes as one JSON object")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	offer, err := adjuster.AdjustStructure(r.Context(), userID, offerID, *req.Structure)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
+}
+
+// folderDigestService returns the digest service, or nil when none is wired.
+func (h *Handler) folderDigestService() any {
+	if h == nil || h.folderDigest == nil {
+		return nil
+	}
+	return h.folderDigest
+}
+
 func (h *Handler) changeFolderSoftwareReview(w http.ResponseWriter, r *http.Request, adjust bool) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
@@ -761,6 +823,13 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.BadRequest(w, "That folder is not on this computer")
 	case errors.Is(err, personalassistant.ErrFolderCandidateRequired):
 		orihttp.BadRequest(w, "Choose which project this is about first")
+	case errors.Is(err, personalassistant.ErrFolderStructureAdjustment):
+		// The sentence names the part that cannot be applied; nothing was saved.
+		detail := strings.TrimPrefix(err.Error(), personalassistant.ErrFolderStructureAdjustment.Error()+": ")
+		if detail == "" || detail == err.Error() {
+			detail = "that change cannot be applied to this proposal"
+		}
+		orihttp.BadRequest(w, strings.ToUpper(detail[:1])+detail[1:]+". Nothing was saved")
 	case errors.Is(err, personalassistant.ErrFolderReviewUnavailable):
 		orihttp.ServiceUnavailable(w, "The project could not be read just now. Nothing was changed. Try again in a moment")
 	case errors.Is(err, personalassistant.ErrFolderOfferChoice):
