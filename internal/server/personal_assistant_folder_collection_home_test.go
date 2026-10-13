@@ -5,6 +5,46 @@ import (
 	"testing"
 )
 
+// Choosing the Home in Adjust hands the offer back to the earlier collection
+// setup, with that setup's own steps and refusals. It is no longer a proposed
+// group, so its yes is the journey's, and nothing is created by choosing it.
+func TestHomeFolderCollection_ChoosingTheHomeIsTheEarlierCollectionSetup(t *testing.T) {
+	f := newDraftServerFixture(t)
+	seedAlbumsCollection(t)
+	files := f.builder.workspaceFileStore
+	before := len(files.CachedWorkspaces())
+
+	status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/scan", map[string]any{"chip": "music"})
+	if status != http.StatusOK {
+		t.Fatalf("scan: %d %v", status, body)
+	}
+	id := body["offer"].(map[string]any)["id"].(string)
+	offers := "/api/personal-assistant/folder-digest/offers/" + id
+
+	status, body = f.call(t, http.MethodPost, offers+"/structure",
+		map[string]any{"structure": map[string]any{"group_type": "library"}})
+	if status != http.StatusOK {
+		t.Fatalf("choosing the Home: %d %v", status, body)
+	}
+	listed := body["offer"].(map[string]any)
+	group := listed["structure"].(map[string]any)["group"].(map[string]any)
+	if group["type"] != "library" || group["name"] != "Music Production Home" || listed["portfolio"] == nil || listed["capability"] == nil {
+		t.Fatalf("the offer is not the collection setup: group %v, portfolio %v, capability %v", group, listed["portfolio"], listed["capability"])
+	}
+
+	// The collection card's Set up begins with the journey's yes, which a
+	// proposed group refuses and this offer takes. The provider step that
+	// follows asks the release registry, so it is left to the browser suite.
+	status, body = f.call(t, http.MethodPost, offers+"/decide",
+		map[string]any{"decision": "yes", "choice": "project", "request_id": "collection-yes"})
+	if status != http.StatusOK || body["offer"].(map[string]any)["status"] != "awaiting_outcome" {
+		t.Fatalf("the collection's yes: %d %v", status, body)
+	}
+	if len(files.CachedWorkspaces()) != before {
+		t.Fatal("choosing the Home created a workspace")
+	}
+}
+
 func TestHomeFolderCollection_AdjustThenSetUpCreatesTheRenamedGroup(t *testing.T) {
 	f := newDraftServerFixture(t)
 	provider := &capturingChatProvider{}

@@ -44,7 +44,7 @@ func TestBuildStructurePlan_APlainGroupListsEveryConsequenceInOrder(t *testing.T
 		"member: Album-1", "member: Album-2", "member: Album-3", "member: Album-4", "member: Album-5", "member: Logic Sketch",
 		"folder: Nothing is moved, copied or read",
 		"unavailable: Music Production Home is not installed; a plain group is proposed instead.",
-		"task: No task runs until you open a workspace",
+		"task: No task is created or started",
 	}
 	if got := lineNames(plan.Lines); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("plan lines:\n%s", strings.Join(got, "\n"))

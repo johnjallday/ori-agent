@@ -110,7 +110,8 @@ func folderTreeHash(t *testing.T, root string) string {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
-		fmt.Fprintf(sum, "%s|%d|%d|%v\n", rel, info.Size(), info.ModTime().UnixNano(), info.Mode())
+		// A hash never fails a write.
+		_, _ = fmt.Fprintf(sum, "%s|%d|%d|%v\n", rel, info.Size(), info.ModTime().UnixNano(), info.Mode())
 		if entry.Type().IsRegular() {
 			data, err := os.ReadFile(path) // #nosec G304 -- a fixture file under the test's sandboxed home
 			if err != nil {
@@ -244,7 +245,7 @@ func TestAssistantFolderCollection_OneReviewOneRunCreatesTheGroupAndItsWorkspace
 		"folder: Nothing is moved, copied or read",
 		"unavailable: Music Production Home is not installed; a plain group is proposed instead.",
 		"unavailable: REAPER integration is not installed; it can be added later.",
-		"task: No task runs until you open a workspace",
+		"task: No task is created or started",
 	}
 	if got := planLineNames(view); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("plan:\n%s", strings.Join(got, "\n"))
@@ -289,6 +290,10 @@ func TestAssistantFolderCollection_OneReviewOneRunCreatesTheGroupAndItsWorkspace
 		marker, _ := ws.SharedData[folderMarkerKey].(string)
 		if session := strings.HasPrefix(name, "Album-"); (session && (shape != "audio" || marker != "*.rpp")) || (!session && (shape != "" || marker != "")) {
 			t.Fatalf("%s recorded shape %q, marker %q", name, shape, marker)
+		}
+		// The plan said no task is created, so none is waiting in any of them.
+		if len(ws.Tasks) != 0 {
+			t.Fatalf("%s was given %d tasks by the setup", name, len(ws.Tasks))
 		}
 	}
 	// The folder is exactly as it was, and no model was asked anything.

@@ -328,7 +328,7 @@ func structureReviewLines(structure *personalassistant.FolderStructure) []person
 	for _, note := range structure.Notes {
 		lines = append(lines, personalassistant.FolderPlanLine{Name: note})
 	}
-	return append(lines, personalassistant.FolderPlanLine{Name: "No task runs until you open a workspace"})
+	return append(lines, personalassistant.FolderPlanLine{Name: "No task is created or started"})
 }
 
 // softwareReviewState describes a pending software project card. Such a card

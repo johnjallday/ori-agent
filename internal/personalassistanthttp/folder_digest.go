@@ -701,6 +701,12 @@ func (h *Handler) SetupFolderHomeProvider(w http.ResponseWriter, r *http.Request
 		).WithDetails(map[string]string{"home_name": homeUpgrade.HomeName, "home_path": homeUpgrade.HomePath}))
 		return
 	}
+	if errors.Is(err, personalassistant.ErrFolderOutcomeUnavailable) {
+		// The usual sentence for this error is about linking a folder; here it is
+		// the Home's provider that cannot be used.
+		orihttp.ServiceUnavailable(w, "The Home provider is unavailable right now")
+		return
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return

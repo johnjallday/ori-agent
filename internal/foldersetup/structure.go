@@ -99,7 +99,7 @@ func BuildStructurePlan(facts StructureFacts) personalassistant.FolderSetupPlan 
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanUnavailable, Name: sentence})
 		}
 	}
-	lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: "No task runs until you open a workspace"})
+	lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: "No task is created or started"})
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	plan.Intent = personalassistant.FolderSetupIntent{
 		Recipe: personalassistant.FolderRecipeStructure, RecipeVersion: 1, Structure: &intent, Placement: "grouped",

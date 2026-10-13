@@ -167,9 +167,11 @@ func (s structureSetupHost) EnsureWorkspace(ctx context.Context, group folderset
 		created = true
 	}
 	shape, marker := member.Shape, member.MarkerName
+	// A group setup makes no task: a blank workspace has no agent to give one
+	// to, and a first task per workspace would only ask for attention.
 	link, err := s.creator.linker.link(ctx, personalassistant.FolderLinkRequest{
 		UserID: s.userID, WorkspaceID: id, OfferID: memberOffer, Name: member.Folder, Path: path, Shape: folderdigest.Shape(shape),
-	}, folderLinkOptions{record: func(shared map[string]any, _ string) (map[string]any, error) {
+	}, folderLinkOptions{noFirstTask: true, record: func(shared map[string]any, _ string) (map[string]any, error) {
 		if shared == nil {
 			shared = map[string]any{}
 		}

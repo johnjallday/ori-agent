@@ -92,7 +92,7 @@ func TestReviewContext_AProposedGroupIsDescribedAsOneSetupThatGoesAhead(t *testi
 	}
 	want := []string{
 		"Creates group Albums 2026", "Creates 2 workspaces, each linked to its own folder",
-		"Music Production Home is not installed; a plain group is proposed instead.", "No task runs until you open a workspace",
+		"Music Production Home is not installed; a plain group is proposed instead.", "No task is created or started",
 	}
 	if len(got.Effects) != len(want) {
 		t.Fatalf("effects: %+v", got.Effects)

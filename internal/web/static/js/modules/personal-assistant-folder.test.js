@@ -105,6 +105,33 @@ test('a finished run shows the receipt and the Open link in the pop-up', () => {
   assert.equal(view.receiptRows.length, 1);
 });
 
+test('a finished group run says what it did and promises no first task', () => {
+  const view = setupModalView({
+    status: 'resolved',
+    folder: 'Albums',
+    setup: { status: 'done', lines: runLines(['done', 'done']) },
+    outcome: {
+      kind: 'group',
+      route: '/workspaces/albums',
+      receipt: [
+        { kind: 'workspace', name: 'Albums', detail: 'group', route: '/workspaces/albums' },
+        {
+          kind: 'workspace',
+          name: 'Album-1',
+          detail: 'linked to Album-1',
+          route: '/workspaces/album-1'
+        }
+      ]
+    }
+  });
+  assert.equal(view.phase, 'done');
+  assert.equal(view.openLabel, 'Open Albums');
+  assert.equal(view.receiptRows.length, 2);
+  assert.match(view.status, /Each workspace is linked to its own folder/);
+  assert.match(view.status, /no task was created/);
+  assert.doesNotMatch(view.status, /first task/);
+});
+
 test('a settled offer has dropped its run but the pop-up still ends on the receipt', () => {
   const view = setupModalView({
     status: 'resolved',
@@ -854,6 +881,50 @@ test('a collection offered to an existing Home asks to add it, not to set up ano
   assert.doesNotMatch(view.question, /Set up one/);
   assert.equal(view.actions[0].journey, true);
   assert.equal(view.actions[0].label, 'Yes, add to my Home');
+});
+
+test('a collection listed in its Home can still be made a plain group', () => {
+  const offer = {
+    id: 'collection',
+    status: 'pending',
+    verdict: 'project',
+    folder: 'Albums',
+    subject: { name: 'Albums', shape: 'audio', is_root: true },
+    portfolio: { shape: 'audio', projects: 5, provider_key: 'music_project_management' },
+    reason: '5 audio project folders',
+    capability: {
+      recognized: '5 music projects',
+      workspace: 'Music Production Home',
+      question: 'Set up one Music Production Home for these projects?',
+      accept_label: 'Set up',
+      decline_label: 'No thanks'
+    },
+    structure: {
+      version: 1,
+      folder: 'Albums',
+      group: { name: 'Music Production Home', type: 'library', home_available: true },
+      members: [{ candidate_id: 'a', name: 'Album-1', folder: 'Album-1', included: true }]
+    }
+  };
+  // The Home's own card, not the group proposal, with the way back to it last.
+  const view = folderOfferView(offer);
+  assert.notEqual(view.structured, true);
+  assert.match(view.question, /Set up one Music Production Home/);
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['setup', 'no', 'later', 'group']
+  );
+  assert.equal(view.actions.at(-1).label, 'Make a group instead');
+  assert.equal(view.actions.at(-1).structureGroup, true);
+  // In a conversation the same choice opens that review's Adjust sheet.
+  const reviewed = folderOfferView({ ...offer, conversation_id: 'conversation' });
+  assert.equal(reviewed.actions.at(-1).label, 'Make a group instead…');
+  assert.equal(reviewed.actions.at(-1).structureGroup, true);
+  // A collection with no proposal behind it and an offer that was already
+  // answered have no such choice.
+  const ids = changed => folderOfferView({ ...offer, ...changed }).actions.map(action => action.id);
+  assert.ok(!ids({ structure: undefined }).includes('group'));
+  assert.ok(!ids({ status: 'awaiting_outcome' }).includes('group'));
 });
 
 test('a resolved existing-Home outcome says nothing was created, moved, linked, or scanned', () => {

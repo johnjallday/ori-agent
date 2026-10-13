@@ -440,7 +440,9 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
         ? 'Here is what I set up. Open a project from the library when you want to work on it.'
         : software
           ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
-          : 'Here is what I set up. The first task starts when you open the workspace.',
+          : receipt.group
+            ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
+            : 'Here is what I set up. The first task starts when you open the workspace.',
       count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
       percent: 100,
       lines: settled,
@@ -580,6 +582,24 @@ function capabilityConfirmView(offer, base, subject) {
     question = `You said no before, but this is a whole collection now. ${question}`;
   const destination = folderSetupDestinationLabel(offer);
   if (destination) question += ` ${destination}`;
+  // A collection listed in its Home can still be made a plain group with a
+  // workspace per folder: the other choice of the same proposal. On Home it is
+  // one click; in a conversation it opens that review's own Adjust sheet.
+  if (
+    !run &&
+    base.status === 'pending' &&
+    offer.structure?.version === 1 &&
+    offer.structure.group?.type === 'library'
+  )
+    actions = [
+      ...actions,
+      {
+        id: 'group',
+        label: offer.conversation_id ? 'Make a group instead…' : 'Make a group instead',
+        style: 'link',
+        structureGroup: true
+      }
+    ];
   return {
     ...base,
     headline,
@@ -2817,6 +2837,19 @@ function runAction(action) {
     elements()?.workspaceName?.focus();
     return;
   }
+  if (action.structureGroup) {
+    // A conversation's review is changed through that conversation: its Adjust
+    // sheet opens on the group, with the Home still one of its two choices.
+    if (state.offer?.conversation_id) {
+      const trigger = elements()?.actions?.querySelector('[data-folder-action="group"]');
+      const structure = state.offer.structure;
+      window.PersonalAssistantFolderSetup?.adjustStructure?.(trigger, {
+        ...structure,
+        group: { ...structure.group, type: 'group', name: structure.folder }
+      });
+    } else void proposeGroupInstead();
+    return;
+  }
   if (action.adjustStructure) {
     // The sheet is the composer's own: Done sends the choices to the review
     // this card belongs to, and the card is drawn again from what was saved.
@@ -3661,8 +3694,14 @@ async function saveStructureAdjust(offerId, adjustment) {
     const { ok, payload } = await postOffer(offerId, 'structure', { structure: adjustment });
     if (generation !== state.reviewGeneration) return;
     if (!ok) {
+      // The server's sentence names the part it refused (a name that is taken,
+      // a folder that is already a workspace).
       open.sheet.setError(
-        String(payload?.error || 'Those changes could not be applied. Nothing was saved.')
+        String(
+          payload?.message ||
+            payload?.error ||
+            'Those changes could not be applied. Nothing was saved.'
+        )
       );
       return;
     }
@@ -3674,6 +3713,31 @@ async function saveStructureAdjust(offerId, adjustment) {
     if (saved) closeStructureAdjust(false);
     render();
     if (saved) focusFolderAction('adjust');
+  }
+}
+
+// proposeGroupInstead turns a collection listed in its Home back into the
+// plain group with a workspace per folder. It creates nothing: the card is
+// drawn again from the proposal the server returns.
+async function proposeGroupInstead() {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    const { ok, payload } = await postOffer(offer.id, 'structure', {
+      structure: { group_type: 'group' }
+    });
+    if (generation !== state.reviewGeneration) return;
+    if (!ok) showError(String(payload?.message || 'That could not be changed. Try again.'));
+  } catch (_) {
+    showError('That could not be changed. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+    focusFolderAction('setup', 'adjust');
   }
 }
 
