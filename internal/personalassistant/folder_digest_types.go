@@ -164,6 +164,10 @@ type FolderOffer struct {
 	Queue         []FolderCandidateRecord  `json:"queue,omitempty"`
 	ProjectsCount int                      `json:"projects_count,omitempty"`
 	Portfolio     *FolderPortfolioEvidence `json:"portfolio,omitempty"`
+	// Structure is the proposal for a folder that holds several projects: one
+	// group and a workspace per subfolder. It is set only on an offer whose
+	// subject is the root, and holds no path.
+	Structure *FolderStructure `json:"structure,omitempty"`
 	// NeedsCandidate says the folder holds several software projects and the
 	// user has not said which one this offer is about. Nothing can be set up
 	// until they choose; the subject is only the first of them.
@@ -427,6 +431,14 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 				(offer.Portfolio.IntegrationProjects > 0) != (offer.Portfolio.IntegrationKey != "") ||
 				(offer.Portfolio.IntegrationKey != "" && offer.Portfolio.IntegrationKey != row.Offer.IntegrationKey) {
 				return fmt.Errorf("%w: portfolio", errFolderDigestInvalid)
+			}
+		}
+		if offer.Structure != nil {
+			if !offer.Subject.IsRoot || len(offer.Structure.Notes) != 0 {
+				return fmt.Errorf("%w: structure subject", errFolderDigestInvalid)
+			}
+			if err := offer.Structure.Validate(); err != nil {
+				return err
 			}
 		}
 		if len(offer.Queue) > folderDigestMaxQueue {

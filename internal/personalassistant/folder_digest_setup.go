@@ -73,6 +73,7 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
 	if err != nil || len(plan.Lines) == 0 {
 		v.SetupUnavailableReason = "setup_unavailable"
+		v.Availability = setupAvailability(err)
 		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
 			switch reason.SetupPreviewReason() {
 			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable",

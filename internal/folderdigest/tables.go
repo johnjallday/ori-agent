@@ -36,6 +36,9 @@ type CapabilityOffer struct {
 	ProjectExtensions []string
 	HomeProviderKey   string
 	HomeProviderName  string
+	// HomeName is what the shape's Home is called before the provider is
+	// installed to name it.
+	HomeName string
 }
 
 type OfferCopy struct {
@@ -121,7 +124,7 @@ var capabilityRows = []CapabilityRow{
 				{Index: 1, Title: "Owed and waiting", Legend: "What do you owe a collaborator—or what are you waiting on?"},
 				{Index: 2, Title: "Release and session dates", Legend: "Dates to keep visible"},
 			},
-			SuggestedTemplateID: "reaper-song", IntegrationKey: "ori_reaper", IntegrationName: "REAPER", ProjectExtensions: []string{".rpp"}, HomeProviderKey: "music_project_management", HomeProviderName: "Music Project Management",
+			SuggestedTemplateID: "reaper-song", IntegrationKey: "ori_reaper", IntegrationName: "REAPER", ProjectExtensions: []string{".rpp"}, HomeProviderKey: "music_project_management", HomeProviderName: "Music Project Management", HomeName: "Music Production Home",
 			Suggestion: Suggestion{
 				Title:       "Set up your music projects",
 				Body:        "Install the Ori REAPER plugin, create your music production group, then create a workspace for a new or existing project. There is no project monitoring or studio team until workspace setup is confirmed. Live access is approved and verified separately for each workspace.",

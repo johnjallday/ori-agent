@@ -595,8 +595,11 @@ type FolderOfferView struct {
 	Subject        FolderSubjectView        `json:"subject"`
 	ProjectsCount  int                      `json:"projects_count,omitempty"`
 	Portfolio      *FolderPortfolioEvidence `json:"portfolio,omitempty"`
-	LooseFiles     int                      `json:"loose_files,omitempty"`
-	LooseKinds     int                      `json:"loose_kinds,omitempty"`
+	// Structure is the proposed group and its member workspaces, on an offer
+	// about a folder that holds several projects.
+	Structure  *FolderStructure `json:"structure,omitempty"`
+	LooseFiles int              `json:"loose_files,omitempty"`
+	LooseKinds int              `json:"loose_kinds,omitempty"`
 	// Remember says whether the card may promise "I will also remember"
 	// (FR22, FR39, FR52).
 	Remember bool `json:"remember"`
@@ -629,11 +632,15 @@ type FolderOfferView struct {
 	Enclosing *FolderEnclosingHint `json:"enclosing,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
-	Plan                   *FolderSetupPlan        `json:"plan,omitempty"`
-	SetupUnavailableReason string                  `json:"setup_unavailable_reason,omitempty"`
-	Setup                  *FolderSetupView        `json:"setup,omitempty"`
-	Destination            *FolderSetupDestination `json:"destination,omitempty"`
-	DestinationStatus      string                  `json:"destination_status,omitempty"`
+	Plan                   *FolderSetupPlan `json:"plan,omitempty"`
+	SetupUnavailableReason string           `json:"setup_unavailable_reason,omitempty"`
+	// Availability says, in the words a proposal uses (FolderAvailability*), why
+	// the offer has no plan: what the option is listed with instead of being
+	// dropped. Empty when a plan exists or none was looked for.
+	Availability      string                  `json:"availability,omitempty"`
+	Setup             *FolderSetupView        `json:"setup,omitempty"`
+	Destination       *FolderSetupDestination `json:"destination,omitempty"`
+	DestinationStatus string                  `json:"destination_status,omitempty"`
 	// DestinationBlocker names, by key, what the user can set up to make an
 	// unavailable destination available. It is absent for every other status.
 	DestinationBlocker     *FolderDestinationBlocker `json:"destination_blocker,omitempty"`
@@ -1092,6 +1099,20 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		if err != nil {
 			return FolderOfferView{}, err // do not offer on an unreadable prior no
 		}
+	}
+	if offer.Portfolio != nil {
+		// The collection is also described as a group with a workspace per
+		// project. A first no about a single project is revived once by a whole
+		// collection, exactly as the capability offer below is.
+		declined := s.declinedDomains(ctx, userID, doc)
+		offer.Structure = s.structureFor(ctx, userID, result, verdict, offer, func(candidate string) bool {
+			if !declined(candidate) {
+				return false
+			}
+			decline := doc.DeclineFor(candidate)
+			revived := candidate == domain && (decline == nil || (decline.Count == 1 && decline.FirstEvidence == "single_project"))
+			return !revived
+		})
 	}
 
 	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -2203,7 +2224,7 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 			Marker: offer.Subject.Marker, IsRoot: offer.Subject.IsRoot,
 		},
 		ProjectsCount: offer.ProjectsCount, Portfolio: offer.Portfolio, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
-		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome,
+		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome, Structure: offer.Structure.view(),
 	}
 	if offer.ConversationReview != nil {
 		v.ConversationID = offer.ConversationReview.Target.ConversationID
