@@ -60,7 +60,7 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	if gate.Name != "Unit Tests" || gate.RunsOn != pinnedUbuntuMatrixRunner {
 		t.Fatal("required-check identity changed")
 	}
-	wantMatrix := unitMatrix{OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"1.25.12"}}
+	wantMatrix := unitMatrix{OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"go.mod"}}
 	if !reflect.DeepEqual(gate.Strategy.Matrix, wantMatrix) {
 		t.Fatalf("matrix renamed required contexts: %#v", gate.Strategy.Matrix)
 	}
