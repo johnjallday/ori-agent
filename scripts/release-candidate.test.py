@@ -147,6 +147,53 @@ class LifecycleTests(GitFixture):
         self.assertEqual(self.outputs()["sha"], self.source)
         self.assertEqual(before, self.refs())
 
+    def wait_for_ci(self, runs_after_each_sleep, candidate=""):
+        """Run await_ci; each fake sleep swaps in the next CI state. Returns the sleeps taken."""
+        sleeps, states, now = [], list(runs_after_each_sleep), [0]
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+            if states:
+                self.runs["ci.yml", self.source] = states.pop(0)
+
+        rc.await_ci(rc.Repository(), candidate, sleep=sleep, clock=lambda: now[0])
+        return sleeps
+
+    def test_await_ci_waits_for_a_running_ci_then_lets_evaluate_pass(self):
+        running = [self.workflow_run(self.source, "dev", conclusion=None, status="in_progress")]
+        green = [self.workflow_run(self.source, "dev")]
+        self.runs["ci.yml", self.source] = running
+        self.assertEqual(self.wait_for_ci([running, green]), [30, 30])
+        rc.evaluate(rc.Repository())
+        self.assertEqual(self.outputs()["ready"], "true")
+
+    def test_await_ci_gives_up_after_the_timeout_and_evaluate_still_holds(self):
+        running = [self.workflow_run(self.source, "dev", conclusion=None, status="queued")]
+        self.runs["ci.yml", self.source] = running
+        with patch.dict(os.environ, {"RELEASE_CI_WAIT_SECONDS": "90"}):
+            self.assertEqual(self.wait_for_ci([]), [30, 30, 30])
+        with self.assertRaises(rc.NotReady):
+            rc.evaluate(rc.Repository())
+        self.assertEqual(self.outputs()["ready"], "false")
+
+    def test_await_ci_does_not_wait_on_a_finished_red_run_or_a_hold(self):
+        self.runs["ci.yml", self.source] = [self.workflow_run(self.source, "dev", conclusion="failure")]
+        self.assertEqual(self.wait_for_ci([]), [])
+        running = [self.workflow_run(self.source, "dev", conclusion=None, status="in_progress")]
+        self.runs["ci.yml", self.source] = running
+        with patch.dict(os.environ, {"AUTO_RELEASE_HOLD": "true"}):
+            self.assertEqual(self.wait_for_ci([]), [])
+
+    def test_await_ci_waits_a_bounded_time_for_a_run_that_does_not_exist_yet(self):
+        self.runs["ci.yml", self.source] = []
+        self.assertEqual(len(self.wait_for_ci([])), 10)
+
+    def test_await_ci_skips_when_a_release_branch_is_already_active(self):
+        self.prepare()
+        self.runs["ci.yml", self.source] = [self.workflow_run(self.source, "dev", conclusion=None, status="in_progress")]
+        self.assertEqual(self.wait_for_ci([]), [])
+
     def test_below_threshold_and_force_only_bypasses_cadence(self):
         with patch.dict(os.environ, {"RELEASE_MIN_PRS": "11"}):
             rc.evaluate(rc.Repository())
@@ -668,6 +715,11 @@ class EntryPointTests(unittest.TestCase):
         # The lifecycle lock is per job: a skipped react job must not cancel a queued evaluation.
         self.assertNotIn("\nconcurrency:\n  group: release-lifecycle", auto)
         self.assertEqual(auto.count("group: release-lifecycle"), 3)
+        # The CI wait must not hold that lock, or it queues react and promotion behind it.
+        wait_job = auto.split("  await-ci:", 1)[1].split("\n  evaluate:", 1)[0]
+        self.assertNotIn("concurrency:", wait_job)
+        self.assertIn("await-ci --candidate", wait_job)
+        self.assertIn("needs: await-ci", auto)
         self.assertIn("needs: [verify, smoke]", release)
         self.assertIn("draft: true", (ROOT / ".goreleaser.yaml").read_text())
         self.assertNotIn("softprops/action-gh-release", release)
