@@ -94,10 +94,10 @@ func TestCIMatrixRunnerPinsPreserveCheckNames(t *testing.T) {
 			OS: []string{"ubuntu-latest", "macos-latest"},
 		}},
 		{"test-unit", "Unit Tests", unitMatrix{
-			OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"1.25.12"},
+			OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"go.mod"},
 		}},
 		{"build", "Build", unitMatrix{
-			OS: []string{"ubuntu-latest", "macos-latest", "windows-latest"}, GoVersion: []string{"1.25.12"},
+			OS: []string{"ubuntu-latest", "macos-latest", "windows-latest"}, GoVersion: []string{"go.mod"},
 		}},
 	} {
 		t.Run(test.id, func(t *testing.T) {

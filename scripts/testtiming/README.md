@@ -12,7 +12,7 @@ exclusion or retry is added.
 
 CI runs four Ubuntu partitions and the existing Darwin subset concurrently in
 `test-unit-run`. The `test-unit` aggregation matrix retains both original
-`Unit Tests (OS, 1.25.12)` required names and downstream dependencies. Both gates
+`Unit Tests (OS, go.mod)` required names and downstream dependencies. Both gates
 require all executions to succeed; failure, cancellation or skipping is not a
 pass. The Linux gate additionally re-enumerates the canonical package list and
 verifies each shard's exact assignment, full list, revision, flags, success

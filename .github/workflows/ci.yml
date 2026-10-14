@@ -379,7 +379,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         # Stable required-check label only; the actual toolchain is in go.mod.
-        go-version: ['1.25.12']
+        go-version: ['go.mod']
     steps:
       - name: Require every unit execution
         shell: bash
@@ -499,7 +499,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         # Keep this value as a stable required-check label. setup-go reads the
         # real toolchain from go.mod so dependency updates cannot desync CI.
-        go-version: ['1.25.12']
+        go-version: ['go.mod']
 
     steps:
       - name: Checkout code
