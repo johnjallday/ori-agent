@@ -1,9 +1,14 @@
 # Workspace arrangement v1
 
-Status: **contract and characterization, not a shipped arrangement workflow**.
-The initial change defines inert intent and tests existing boundaries. Subsequent
-adapters, persistence, review, execution and UI must satisfy this contract before
-an arrangement can be applied. No new plugin protocol or filesystem permission.
+Status: **bounded core and characterization, not a shipped arrangement workflow**.
+Inert intent, held/saved evidence adapters, batch-validated tools and the bounded
+API-provider planning loop, atomic PA draft storage, opt-in PA/Home endpoints,
+read-only pinned Manager guidance and shared inert history cards are implemented.
+The PA attachment disclosure/Send path now reaches a canonical saved proposal.
+Home Organize library also reaches canonical proposals and clarifications through
+explicit sharing/upgrade consent. Correction/review and execution remain required;
+no Apply UI is enabled.
+No new plugin protocol or filesystem permission.
 
 ## Evidence behind the contract
 
@@ -75,6 +80,60 @@ not to scan, read contents or apply. If the disclosure cannot be shown, keep the
 old discussion/manual path. Home Organize similarly discloses saved Home catalog
 metadata and the exact Manager/model. No automatic provider switch.
 
+The PA backend accepts an explicit `arrangement.share_held_metadata: true` on
+its existing Ask request, with a current conversation/draft and live held folder
+reference. It bypasses ordinary path resolution, research and general-purpose
+tools. Mixed approvals, focused/historical references and unsupported transports
+are refused. The PA drawer's **Suggest arrangement** entry wires this mode into
+Ask directly, without ordinary routing, draft/research approvals or operation
+controls. Its disclosure names the system provider/model; paired
+`expected_provider` / `expected_model` pins reject configuration drift before
+sharing. Metadata inspection and reopening history call no planning model.
+Home Organize library reads a separate owner-only planning-context disclosure,
+including the actual Manager/model and library version. Its `context_pin` binds
+Send to that runtime/catalog snapshot; the host reauthorizes independently and
+rejects stale pins before sharing metadata. Readiness reads never initialize,
+upgrade, learn or trust skills. The shared `workspace-arrangement-consent.js`
+component defaults disabled; the integrated PA and Home entries explicitly opt in. It discloses the exact displayed agent/provider/model,
+expanded held versus catalog metadata, per-turn evidence bounds and repeated
+requests, and a separate v1-to-v2 storage-upgrade choice. In-memory choices are
+bound to the current goal/context/revision/runtime display and consumed before
+handoff; they never grant host authority. An uncertain request/save blocks another
+Send until the owning adapter successfully reopens canonical history. No planning
+request, provider fallback or retry originates from mounting or checking it. Saved summaries can be reopened through a
+shared read-only card in PA conversations and the Home library's Saved arrangements
+section. Cards distinguish clarification, proposal, stale/redacted history and
+partial coverage; every intention remains inert. Only canonical references/GETs
+are used, never assistant prose. Late reads cannot attach to a switched context.
+Successful drafts accompany an atomically saved
+attributed turn; replies contain bounded inert summaries and conversation reads
+hydrate canonical record/message references with `review_available: false`.
+Provider registration/model and owner/context/attachment pins are rechecked
+across awaits. Reload never substitutes a deterministic setup suggestion for a
+typed arrangement's answer. Explicit existing setup controls remain separate.
+The sharing object rejects unknown/duplicate/case-aliased fields and non-boolean
+choices. Explicit null/duplicate/aliased mode fields cannot fall through to the
+ordinary tool loop. Safe `arrangement_error` codes distinguish missing consent,
+invalid input, unavailable sources/models/transports, stale state, cancellation,
+time/budget/storage limits and failed saves; raw errors are never returned.
+Both draft and clarification writers must be wired before sharing metadata.
+Failed-first-turn cleanup uses an owner/revision-checked transaction and refuses
+any conversation with messages or concurrent changes. Cleanup has a separate
+bounded cancellation-independent context, skips a busy store rather than waiting,
+and never deletes a committed draft after an uncertain save result.
+
+Saved PA and Home records have owner-checked, read-only summary endpoints (see
+[API reference](../api/API_REFERENCE.md)). Their shared projection is capped at
+64 KiB, independently of model tool budgets, and includes origin, saved dates,
+goal, rationale, coverage, unknowns and proposed-operation/review-question counts.
+It never returns full membership, selectors or authority fingerprints. Explicit
+unchanged counts exclude the implicitly unchanged remainder; needs-review counts
+deduplicate items with several questions. Context/catalog-current flags are only
+historical revision comparisons, not live readiness. Reads do not initialize or
+upgrade a library, probe a source or impersonate a Home Manager. Planning and
+compiled review remain separate. The server owns one shared Planner for route
+adapters so constructing another handler does not create fresh concurrency limits.
+
 Add folder and Home Explore use this same distinction and review semantics.
 Assisted Create Workspace stays a separate single-workspace draft. Historical
 or expired evidence is discussable but cannot acquire new executable authority.
@@ -88,6 +147,10 @@ Only these tools are advertised in arrangement mode:
 - `arrangement_overview`: aggregate counts by known format/connection/observed
   availability/root, coverage, capabilities and at most five explicitly labeled
   samples. Samples are not representative, exhaustive or an ordering decision.
+  Optional literal `collection_text` and `collection_cursor` arguments page
+  existing collection summaries five at a time; total/matching counts and a
+  separate signed cursor keep collections beyond the initial sample reachable.
+  Collection cursors cannot be used as item-search cursors.
 - `arrangement_search`: typed AND filters (literal name text, format, connection,
   observed availability, root handle, collection handle), sort by name/ID, opaque
   cursor. No glob, regex, SQL, path, expression or future-match rule.
@@ -205,12 +268,19 @@ witness and operation journal. Pure wire Draft and stored record are distinct:
 model handles are replaced by exact references/revisions at successful save.
 Provider/model/skill fingerprints and coverage are provenance, not permission.
 
-- **PA:** a dedicated SQLite arrangement table owned by the session store, keyed
-  by arrangement UUID and canonical session ID. Save the first record with the
-  atomic canonical answered folder turn, after all ownership/revision checks.
-  Messages carry a reference/summary, not a second editable draft. Session delete
-  cascades; imported messages cannot populate the table. Revision updates use CAS
-  and the current owning conversation/attachment revision. Cap 32 records/4 MiB
+- **PA:** SQLite migration 81 adds `assistant_arrangements`, owned by the session
+  store and keyed by arrangement UUID and canonical session ID. The
+  `AppendArrangementTurn` writer saves it with the attributed turn in one
+  transaction. Bounded reference listing supports history hydration without
+  returning every draft's membership. `ContextCurrent` compares canonical
+  context pins only; it never revives held source or provider authority.
+  Ordinary/imported messages cannot populate the table. Reset clears it and
+  deleting its session or originating message cascades. Save the first record
+  with the atomic canonical answered folder turn, after ownership/revision checks.
+  A separate host-only reference projection links each draft to its originating
+  answer message; portable messages do not embed the record or its references.
+  Later revision updates must use CAS and the current owning conversation and
+  attachment revision; the initial insert API never overwrites a record. Cap 32 records/4 MiB
   per conversation; 1 MiB per resolved record. Byte limits may reject a record
   before its reference-count limit. Never evict retryable journals.
 - **Home:** `ProjectLibrary.arrangements` and `ProjectLibrary.collections` in
@@ -219,9 +289,50 @@ Provider/model/skill fingerprints and coverage are provenance, not permission.
   page them through current entries. Keep per-entry rationale with its entry
   reference so forgetting can redact it; clear free-text generated summary/goal
   and obsolete compiled projections when they might recover a forgotten name.
+  The implemented `SaveArrangement` requires authenticated exact Manager access,
+  live evidence and explicit schema-upgrade consent under the canonical Home CAS.
+  A saved wrapper pins the **post-save** catalog revision and Manager binding:
+  its own write does not invalidate it. Replays return canonical history, including
+  redacted tombstones, never the replayed original text. No public arbitrary
+  collection writer or review/apply path is wired yet.
+  `SaveArrangementClarification` also completes into this same envelope, never
+  a second transcript. Its explicit `kind: clarification` preserves the user's
+  goal/source/provenance in an empty `needs_more_evidence` envelope and stores
+  bounded untrusted discussion text separately from intent. It cannot carry
+  operations, selections, references or a proposal rationale. Empty stored kind
+  remains a proposal for earlier v2 records; history explicitly projects either
+  `proposal` or `clarification`. Both outcomes share the 32-record limit, upgrade
+  consent, owner/Manager checks, CAS and retry identity. Forget clears clarification
+  text while preserving the kind of the stale tombstone; retry never restores it.
+  The entire Home detail projection, including discussion and JSON escaping, is
+  bounded to 64 KiB and checked before save. This is canonical storage support,
+  now used by the opt-in Home planning backend and Organize library entry.
+  The host-only `Store.PlanArrangement` now joins the shared Planner to these
+  two completion paths. It resolves the exact currently bound primary Manager,
+  checks owner/catalog/upgrade/sharing prerequisites before runtime resolution,
+  and requires a read-only pinned runtime resolver with revalidation. It never
+  allocates a private Planner, subscribes to scans or enables general tools.
+  Changed goals, runtime/catalog drift and failed saves return no outcome;
+  stale lost-response retries cannot call the model again. The goal must be the
+  complete current goal; conversational revision/history wiring remains pending.
+  `POST .../library/arrangements/plan` now supplies the application-owned Planner
+  and `ServerBuilder.resolveArrangementRuntime`. This read-only resolver requires
+  the local Manager (no global fallback), installed enabled pinned Home package,
+  canonical primary-role prompt and plugin-only skill resolution without source
+  collisions. Each declared skill must have one enabled/trusted binding admitted
+  by the instance's pinned Toolbox (when assigned) or legacy access; broken pins,
+  learned-source substitutions and configured prompt variants refuse rather than
+  widen access. Role/skill trees, package generation/installation identity, local
+  settings, registration pointer and access/assignment snapshots are revalidated.
+  The general runtime resolver is not called: it can materialize MCP bindings.
+  The route uses authenticated owner scope, exact request fields and explicit
+  sharing/upgrade consent, returns canonical history only and sanitizes failures.
+  Runtime tests stage synthetic package fixtures in disposable data, not the
+  missing Music candidate; shared browser and candidate-guidance acceptance remain
+  unfinished.
 - **Library schema 1 → 2:** new reader accepts exact v1 and v2; no read-time write
   or authority switch. V1 cannot contain new fields even if empty. The first
-  explicit arrangement draft save or reviewed collection write atomically moves
+  explicit arrangement outcome save (including clarification) or reviewed collection write atomically moves
   that already-initialized document to v2 under its old revision CAS. Disclose the
   local storage upgrade before Home Organize; it cannot be opened by older Ori.
   Preserve all existing roots, grants, links, scans, entries, sessions, history
@@ -271,7 +382,7 @@ REAPER/SDK/devtools changes are not required by the effects above.
 
 ## Implementation seams and validation gates
 
-Freeze names: `workspacearrangement/{contract,evidence,planner,record,review}.go`;
+Freeze names: `workspacearrangement/{contract,evidence,tools,planner,record,review}.go`;
 `personalassistant/folder_arrangement.go` for held-only projection;
 `projectlibrary/{arrangements,collections}.go` for canonical Home operations;
 `session/assistant_arrangement.go` for atomic PA persistence;

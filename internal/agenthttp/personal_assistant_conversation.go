@@ -605,6 +605,24 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	body := map[string]any{
 		"conversation": conversationSummary(record), "messages": views, "truncated": truncated, "folder_context": folderState,
 	}
+	allowLegacySuggestion := true
+	if reader, ok := h.Conversations.(personalAssistantArrangementReader); ok {
+		allowLegacySuggestion = false // Unknown typed history must not become a rule-based proposal.
+		owner, err := h.canonicalConversationOwner(r.Context())
+		if err != nil || owner.WorkspaceID != scope.workspaceID || !strings.EqualFold(owner.AgentName, scope.agentName) {
+			body["arrangements_unavailable"] = true
+		} else if refs, err := reader.ListArrangementRefs(r.Context(), record.ID, owner); err != nil {
+			body["arrangements_unavailable"] = true
+		} else {
+			body["arrangements"] = refs
+			allowLegacySuggestion = true
+			for _, ref := range refs {
+				if ref.MessageID == folderSuggestionMessage(messages, folderState.Revision) {
+					allowLegacySuggestion = false
+				}
+			}
+		}
+	}
 	if target, targetErr := h.folderTarget(scope, record.ID, ""); targetErr == nil {
 		body["folder_reviews"] = h.folderReviewViews(r.Context(), target, messages)
 		review := h.prepareReviewContext(r.Context(), reviewConversation, nil).forDrawer()
@@ -612,9 +630,11 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 		if elsewhere := review.elsewhereRef(); elsewhere != nil {
 			body["folder_review_elsewhere"] = elsewhere
 		}
-		suggestion := h.folderSetupSuggestion(r.Context(), target, &folderState, folderSuggestionMessage(messages, folderState.Revision), folderSuggestionPrompt(messages, folderState.Revision))
-		if suggestion = h.bindSuggestionSubject(r.Context(), suggestion, folderSuggestionAttribution(messages, folderState.Revision)); suggestion != nil {
-			body["folder_setup_suggestion"] = suggestion
+		if allowLegacySuggestion {
+			suggestion := h.folderSetupSuggestion(r.Context(), target, &folderState, folderSuggestionMessage(messages, folderState.Revision), folderSuggestionPrompt(messages, folderState.Revision))
+			if suggestion = h.bindSuggestionSubject(r.Context(), suggestion, folderSuggestionAttribution(messages, folderState.Revision)); suggestion != nil {
+				body["folder_setup_suggestion"] = suggestion
+			}
 		}
 	}
 	// Drafts saved from this conversation, read from the HQ's Tickets. A read

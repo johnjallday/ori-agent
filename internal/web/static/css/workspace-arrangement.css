@@ -1,0 +1,16 @@
+/* Saved cards belong below their canonical reply, not beside a squeezed bubble. */
+.personal-assistant-arrangement-row {
+  flex-wrap: wrap;
+}
+.personal-assistant-arrangement-row > .workspace-arrangement-history {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+
+/* A consumed/awaiting-consent Send remains keyboard-focusable so an async
+   response does not discard focus. Bootstrap's .disabled suppresses its ring. */
+.workspace-arrangement-consent .btn.disabled:focus-visible {
+  opacity: 1;
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}

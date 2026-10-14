@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 )
 
 // personalAssistantConversationStore is the part of the canonical session
@@ -112,6 +113,69 @@ func (a personalAssistantConversationAdapter) AppendAttributedTurn(ctx context.C
 		return nil, agenthttp.ErrPersonalAssistantConversationNotFound
 	}
 	return folderConversationMessages(messages), err
+}
+
+// SupportsArrangementStorage reports writer wiring, not database health. Both
+// proposal and clarification completion must exist before metadata is shared.
+func (a personalAssistantConversationAdapter) SupportsArrangementStorage() bool {
+	_, drafts := a.store.(session.AssistantArrangementStore)
+	_, discussion := a.store.(session.AssistantTurnStore)
+	return drafts && discussion
+}
+
+func (a personalAssistantConversationAdapter) AppendArrangementTurn(ctx context.Context, id string, owner assistantcontext.SaveOwner, event *foldercontext.Event, revision, user, answer string, attribution *assistantcontext.Attribution, record workspacearrangement.Record) ([]agenthttp.PersonalAssistantConversationMessage, error) {
+	store, ok := a.store.(session.AssistantArrangementStore)
+	if !ok {
+		return nil, errors.New("canonical arrangement writer unavailable")
+	}
+	messages, err := store.AppendArrangementTurn(ctx, id, owner, event, revision, user, answer, attribution, record)
+	if errors.Is(err, session.ErrFolderContextConflict) {
+		return nil, agenthttp.ErrPersonalAssistantFolderConflict
+	}
+	if errors.Is(err, session.ErrSessionNotFound) {
+		return nil, agenthttp.ErrPersonalAssistantConversationNotFound
+	}
+	return folderConversationMessages(messages), err
+}
+
+func (a personalAssistantConversationAdapter) ListArrangementRefs(ctx context.Context, id string, owner assistantcontext.SaveOwner) ([]agenthttp.PersonalAssistantArrangementRef, error) {
+	store, ok := a.store.(session.AssistantArrangementStore)
+	if !ok {
+		return nil, errors.New("canonical arrangement reader unavailable")
+	}
+	refs, err := store.ListAssistantArrangementRefs(ctx, id, owner)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agenthttp.PersonalAssistantArrangementRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, agenthttp.PersonalAssistantArrangementRef{ID: ref.ID, MessageID: ref.MessageID, Revision: ref.Revision, State: ref.State, ContextCurrent: ref.ContextCurrent})
+	}
+	return out, nil
+}
+
+func (a personalAssistantConversationAdapter) ReadArrangementSummary(ctx context.Context, id string, owner assistantcontext.SaveOwner, recordID string) (*agenthttp.PersonalAssistantArrangementHistory, error) {
+	store, ok := a.store.(session.AssistantArrangementStore)
+	if !ok {
+		return nil, errors.New("canonical arrangement reader unavailable")
+	}
+	saved, err := store.ReadAssistantArrangement(ctx, id, owner, recordID)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := saved.Record.Summarize()
+	if err != nil {
+		return nil, err
+	}
+	return &agenthttp.PersonalAssistantArrangementHistory{Arrangement: summary, ConversationID: saved.ConversationID, MessageID: saved.MessageID, ContextCurrent: saved.ContextCurrent}, nil
+}
+
+func (a personalAssistantConversationAdapter) DiscardUnansweredArrangementConversation(ctx context.Context, id string, owner assistantcontext.SaveOwner) error {
+	store, ok := a.store.(session.AssistantArrangementCleanup)
+	if !ok {
+		return errors.New("guarded arrangement cleanup unavailable")
+	}
+	return store.DiscardUnansweredArrangementConversation(ctx, id, owner)
 }
 
 // Discard deletes a session that Create just made and whose first turn could

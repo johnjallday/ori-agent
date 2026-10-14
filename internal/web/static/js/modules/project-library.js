@@ -13,6 +13,8 @@ import {
   songLineText
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
+import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
+import { mountHomeArrangementPlanner } from './home-arrangement.js';
 
 // The open helpers moved to library-open.js so the setup pop-up can share them
 // without loading this module on every page; existing importers keep working.
@@ -590,6 +592,7 @@ export class ProjectLibraryPanel {
     this.cursor = '';
     this.rows = [];
     this.searchGeneration = 0;
+    this.arrangementHistoryGeneration = 0;
     this.searchInFlight = false;
     this.busy = false;
     this.selectedProjects = new Set();
@@ -988,6 +991,8 @@ export class ProjectLibraryPanel {
   }
 
   async refresh() {
+    this.arrangementPlanning?.invalidate();
+    this.arrangementHistoryGeneration++;
     try {
       this.state = await this.request('/roots');
       const initialized = this.state.initialized === true;
@@ -1008,6 +1013,7 @@ export class ProjectLibraryPanel {
         this.focusArrival();
         return;
       }
+      this.renderArrangementPlanning();
       this.renderFormats();
       this.renderRoots();
       this.renderSharing();
@@ -1019,6 +1025,7 @@ export class ProjectLibraryPanel {
       await this.renderResume();
       await this.renderPendingLinks();
       await this.renderProposals();
+      await this.renderArrangementHistory();
       await this.search(false);
       if (!this.readOnly && this.state.picker_available === false && !this.offerID)
         this.status(
@@ -1152,6 +1159,89 @@ export class ProjectLibraryPanel {
           `${pending.total - pending.rows.length} more linked projects remain; review these first and refresh.`
         )
       );
+  }
+
+  renderArrangementPlanning() {
+    const container = document.getElementById('projectLibraryArrangementPlanning');
+    if (
+      !container ||
+      (this.arrangementPlanning && this.arrangementPlanningHomeID === this.workspaceId)
+    )
+      return;
+    container.replaceChildren();
+    const homeID = this.workspaceId;
+    const epoch = (this.arrangementPlanningEpoch || 0) + 1;
+    this.arrangementPlanningEpoch = epoch;
+    this.arrangementPlanningHomeID = homeID;
+    const isCurrent = () => this.workspaceId === homeID && this.arrangementPlanningEpoch === epoch;
+    this.arrangementPlanning = mountHomeArrangementPlanner(container, {
+      homeID,
+      isCurrent,
+      request: (path, options) => {
+        if (!isCurrent()) throw new Error('Home changed');
+        return this.request(path, options);
+      },
+      onSaved: () => this.renderArrangementHistory()
+    });
+  }
+
+  async renderArrangementHistory() {
+    const section = document.getElementById('projectLibraryArrangements');
+    const container = document.getElementById('projectLibraryArrangementRows');
+    if (!section || !container) return;
+    const generation = ++this.arrangementHistoryGeneration;
+    const home = this.workspaceId;
+    const current = () =>
+      generation === this.arrangementHistoryGeneration && home === this.workspaceId;
+    container.replaceChildren();
+    section.hidden = true;
+    try {
+      const result = await this.request('/arrangements', { cache: 'no-store' });
+      if (!current()) return;
+      const refs = result.arrangements;
+      if (
+        !Array.isArray(refs) ||
+        refs.length > 32 ||
+        !refs.every(
+          ref =>
+            ref &&
+            arrangementID(ref.id) &&
+            ref.review_available === false &&
+            ['proposal', 'clarification'].includes(ref.kind) &&
+            Number.isSafeInteger(ref.revision) &&
+            ref.revision > 0
+        )
+      )
+        throw new Error('Invalid saved references');
+      for (const ref of refs) {
+        const row = node('div', 'border rounded p-2');
+        row.append(
+          node(
+            'p',
+            'small text-body-secondary',
+            `${ref.kind === 'clarification' ? 'Saved clarification' : 'Saved proposal'} · Revision ${ref.revision}${ref.catalog_current === false ? ' · Historical catalog' : ''}`
+          )
+        );
+        container.append(row);
+        mountArrangementHistory(row, {
+          id: ref.id,
+          isCurrent: current,
+          load: () =>
+            this.request(`/arrangements/${encodeURIComponent(ref.id)}`, { cache: 'no-store' })
+        });
+      }
+      section.hidden = refs.length === 0;
+    } catch (_) {
+      if (!current()) return;
+      section.hidden = false;
+      container.replaceChildren(
+        node(
+          'p',
+          'small text-body-secondary',
+          'Saved arrangement history could not be loaded. Reopen this Home to try again; nothing was applied.'
+        )
+      );
+    }
   }
 
   async renderProposals() {
@@ -3112,6 +3202,14 @@ export class ProjectLibraryPanel {
           [
             `${review.source_count} historical discovery source(s) will be removed from this Home record.`,
             `${review.session_count} saved studio session(s) and this project's Home notes will be erased.`,
+            ...(review.collection_count > 0
+              ? [`Membership in ${review.collection_count} logical collection(s) will be removed.`]
+              : []),
+            ...(review.arrangement_count > 0
+              ? [
+                  `${review.arrangement_count} saved arrangement draft(s) will be invalidated. Their generated text and selections will be erased to prevent forgotten history from being recovered.`
+                ]
+              : []),
             ...(review.queued_at
               ? [
                   `This is song ${review.queued_at} in the saved review queue. The queue stays in order, but setup for this record becomes unavailable; you must separately skip it or discard the queue.`

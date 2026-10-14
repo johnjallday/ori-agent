@@ -772,10 +772,28 @@ export function folderOfferView(offer, options = {}) {
   // before offering anything a yes would need.
   if (view.visible && ['changed', 'unavailable'].includes(offer.destination_status)) {
     const destination = folderSetupDestinationLabel(offer);
+    // A blocked Home must not strand the user's manual fallback. This action
+    // requests a fresh, conversation-bound plain-group review; it cannot set up
+    // the unavailable destination or execute the previous plan.
+    const plainReview =
+      offer.conversation_id &&
+      status === 'pending' &&
+      !view.needsPick &&
+      offer.structure?.version === 1 &&
+      offer.structure.group?.type === 'library';
     return {
       ...view,
       plan: null,
-      actions: [],
+      actions: plainReview
+        ? [
+            {
+              id: 'group',
+              label: 'Review plain group instead…',
+              style: 'link',
+              structureGroup: true
+            }
+          ]
+        : [],
       question: `${destination ? `${destination} ` : ''}${
         offer.destination_status === 'changed'
           ? 'The reviewed destination has changed.'
@@ -3434,12 +3452,14 @@ function openHQCard() {
 // Start, or an offer's own "Show another folder". Every one of them starts
 // the same turn in the conversation.
 //
-// It is the one-card flow, with the chips and the picker, then a read-only scan,
-// then the verdict card with Set up. The composer's "Add folder" chip is the chat
-// flow and calls PersonalAssistantFolderContext itself. Every folder starts at
-// the HQ, so until one is built this opens its card instead of a chooser that
-// the server would refuse (FR24, FR25).
+// New selections use the same held attachment and explicit planning consent as
+// Add folder. Existing reviewed offers retain their legacy execution controls.
+// Older hosts without the attachment adapter retain the manual chooser.
 function openChooser() {
+  if (window.PersonalAssistantFolderContext?.open) {
+    window.PersonalAssistantFolderContext.open();
+    return;
+  }
   if (!state.available) {
     openHQCard();
     return;

@@ -103,7 +103,7 @@ func TestArrangementCharacterization_SavedMultiRootCatalogIsInertAndPaged(t *tes
 	t.Logf("saved-only catalog: roots=4 entries=%d pages=%d largest_page_bytes=%d document_bytes=%d; source roots absent; no writes", len(seen), pages, maxBytes, len(after.GetAssistantProgramState().ProjectLibrary))
 }
 
-func TestArrangementCharacterization_LegacyReaderRefusesFutureLibrary(t *testing.T) {
+func TestArrangementCharacterization_ReaderRejectsUnknownVersionsAndV1Extensions(t *testing.T) {
 	file, scope := libraryHome(t)
 	store := NewStore(file)
 	initializeLibrary(t, store, scope)
@@ -116,12 +116,12 @@ func TestArrangementCharacterization_LegacyReaderRefusesFutureLibrary(t *testing
 		t.Fatal(err)
 	}
 	for name, future := range map[string]string{
-		"schema":             strings.Replace(string(raw), `"schema_version":1`, `"schema_version":2`, 1),
+		"schema":             strings.Replace(string(raw), `"schema_version":1`, `"schema_version":3`, 1),
 		"unknown collection": strings.TrimSuffix(string(raw), "}") + `,"collections":[]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeDocument([]byte(future), scope); !errors.Is(err, ErrCorrupt) {
-				t.Fatalf("old reader accepted future state: %v", err)
+				t.Fatalf("reader accepted unsupported state: %v", err)
 			}
 		})
 	}

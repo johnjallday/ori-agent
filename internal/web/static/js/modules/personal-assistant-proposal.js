@@ -56,10 +56,10 @@ function structureView(option) {
     kind: 'structure',
     state: 'proposed',
     art: 'district',
-    label: 'Proposed workspace group',
+    label: 'Rule-based setup option',
     subject: bounded(s.group.name) || 'Selected folder',
     scope: `${members.length} workspace${members.length === 1 ? '' : 's'}`,
-    description: effects.structure,
+    description: `Not an agent assessment. ${effects.structure}`,
     destination: existing
       ? `Adds to your existing ${bounded(s.group.name)}`
       : s.group.type === 'home'

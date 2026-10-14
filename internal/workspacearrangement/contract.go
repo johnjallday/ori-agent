@@ -1,5 +1,6 @@
-// Package workspacearrangement defines inert, source-neutral arrangement
-// intent. It has no filesystem, provider, creator, HTTP or approval authority.
+// Package workspacearrangement defines inert, source-neutral arrangement intent
+// and a bounded metadata-only planning loop. It has no filesystem, creator,
+// HTTP or approval authority; providers and canonical completion are host-bound.
 package workspacearrangement
 
 import (
@@ -133,7 +134,7 @@ func (v ValidationView) members(s Selection) ([]string, error) {
 func (d Draft) Validate(v ValidationView) error {
 	if d.Version != Version || !label(v.Revision, 160) || d.SourceRevision != v.Revision ||
 		(v.Kind != Attachment && v.Kind != HomeLibrary) || len(v.Items) > MaxSourceItems ||
-		!text(d.Goal, 2000) || d.Goal == "" || !text(d.Rationale, 2000) ||
+		!ValidGoal(d.Goal) || !text(d.Rationale, 2000) ||
 		len(d.Unknowns) > 16 || len(d.NeedsReview) > 32 || len(d.Operations) > MaxOperations {
 		return ErrInvalid
 	}
@@ -219,6 +220,10 @@ func (d Draft) Validate(v ValidationView) error {
 	return nil
 }
 
+// ValidGoal applies the same bounded, single-line goal contract at entry and
+// proposal validation, before callers send any metadata to a model.
+func ValidGoal(goal string) bool { return goal != "" && text(goal, 2000) }
+
 func text(s string, max int) bool {
 	if len(s) > max || !utf8.ValidString(s) || strings.TrimSpace(s) != s {
 		return false
@@ -256,6 +261,12 @@ func DecodeDraft(raw string, v ValidationView) (Draft, error) {
 }
 
 func uniqueJSON(decoder *json.Decoder, depth int) error {
+	return uniqueJSONKeys(decoder, depth, false, false)
+}
+
+// Stored records additionally contain maps whose keys are case-sensitive opaque
+// IDs rather than schema fields. Wire intent does not enable that exception.
+func uniqueJSONKeys(decoder *json.Decoder, depth int, storedRecord, mapKeys bool) error {
 	if depth > 16 {
 		return ErrInvalid
 	}
@@ -269,18 +280,20 @@ func uniqueJSON(decoder *json.Decoder, depth int) error {
 	}
 	seen := map[string]bool{}
 	for decoder.More() {
+		childMap := false
 		if delim == '{' {
 			key, err := decoder.Token()
 			if err != nil {
 				return err
 			}
 			name, ok := key.(string)
-			if !ok || name != strings.ToLower(name) || seen[name] {
+			if !ok || (!mapKeys && name != strings.ToLower(name)) || seen[name] {
 				return ErrInvalid
 			}
 			seen[name] = true
+			childMap = storedRecord && (name == "item_revisions" || name == "collection_revisions")
 		}
-		if err := uniqueJSON(decoder, depth+1); err != nil {
+		if err := uniqueJSONKeys(decoder, depth+1, storedRecord, childMap); err != nil {
 			return err
 		}
 	}

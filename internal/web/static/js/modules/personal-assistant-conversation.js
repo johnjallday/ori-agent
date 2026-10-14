@@ -9,6 +9,11 @@ import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-wor
 import { renderResearchSources } from './personal-assistant-research.js';
 import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
+import {
+  arrangementID,
+  mountArrangementHistory,
+  renderArrangementHistory
+} from './workspace-arrangement.js';
 // Installs window.PersonalAssistantFolderProposal, the reply card the work
 // controller draws for a folder path the user wrote.
 import './personal-assistant-folder-proposal.js';
@@ -202,6 +207,41 @@ function attachMessage(row, conversationId, messageId) {
   window.PersonalAssistantMemory?.decorate?.(row);
 }
 
+function attachArrangementHistory(row, conversationId, reference) {
+  if (
+    !row ||
+    !arrangementID(reference?.id) ||
+    !reference.message_id ||
+    reference.review_available !== false
+  )
+    return;
+  const container = row.ownerDocument.createElement('div');
+  container.className = 'workspace-arrangement-history';
+  row.classList.add('personal-assistant-arrangement-row');
+  const generation = state.generation;
+  row.append(container);
+  mountArrangementHistory(container, {
+    id: reference.id,
+    isCurrent: () =>
+      state.available &&
+      state.generation === generation &&
+      state.id === conversationId &&
+      row.dataset.messageId === reference.message_id,
+    load: async () => {
+      const result = await readJSON(
+        `${LIST_ENDPOINT}/${encodeURIComponent(conversationId)}/arrangements/${encodeURIComponent(reference.id)}`
+      );
+      if (
+        !result.ok ||
+        result.body?.conversation_id !== conversationId ||
+        result.body?.message_id !== reference.message_id
+      )
+        throw new Error('Unavailable history');
+      return result.body;
+    }
+  });
+}
+
 /** A review belongs to the conversation it was opened in; leaving it closes it. */
 function closeReviews() {
   window.PersonalAssistantDrafts?.close?.();
@@ -297,6 +337,16 @@ async function resume(id, options = {}) {
         renderResearchSources(row, message.workspace_context, { historical: true });
       }
       attachMessage(row, conversation.id, message.id);
+      if (
+        message.role === 'assistant' &&
+        Array.isArray(result.body.arrangements) &&
+        result.body.arrangements.length <= 32
+      ) {
+        for (const reference of result.body.arrangements) {
+          if (reference.message_id === message.id)
+            attachArrangementHistory(row, conversation.id, reference);
+        }
+      }
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
     // its latest part even when the server returned all of it.
@@ -406,6 +456,7 @@ async function toggleList() {
     items.push(item);
   }
   els.list.replaceChildren(...items);
+  return true;
 }
 
 function listItem(text) {
@@ -459,6 +510,13 @@ function applyReply(data, rows = {}) {
     renderFolderFocus(rows.userRow, reply.folder_focus);
     attachMessage(rows.assistantRow, nextId, reply.assistant_message_id);
     if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
+    if (data.arrangement && rows.assistantRow && reply.assistant_message_id) {
+      const container = rows.assistantRow.ownerDocument.createElement('div');
+      container.className = 'workspace-arrangement-history';
+      rows.assistantRow.classList.add('personal-assistant-arrangement-row');
+      rows.assistantRow.append(container);
+      renderArrangementHistory(container, { arrangement: data.arrangement, context_current: true });
+    }
   }
   setCurrent(nextId, reply.title);
   if (reply.stored && data.folder_context) {
@@ -544,6 +602,12 @@ const api = {
   applyReply,
   startNew,
   resume,
+  reopenHistory: async () => {
+    if (state.loading) return false;
+    if (state.id) return resume(state.id);
+    closeList();
+    return (await toggleList()) === true;
+  },
   // Lets a message action report a refusal in the conversation bar.
   notify: setNote,
   currentId: () => state.id,

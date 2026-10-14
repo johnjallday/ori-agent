@@ -610,6 +610,7 @@ function render(state) {
   window.PersonalAssistantConversation?.refresh?.();
   window.PersonalAssistantFolder?.contextProgress?.(state);
   window.PersonalAssistantFolderSetup?.contextChanged?.(state);
+  window.PersonalAssistantArrangement?.contextChanged?.();
   renderDiscussion();
   explorer?.refresh();
 }

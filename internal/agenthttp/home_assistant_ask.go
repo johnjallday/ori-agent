@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 )
 
 const homeMaxToolRounds = 4
@@ -97,8 +98,9 @@ type HomeAssistantAskRequest struct {
 	ConfirmedAction *HomeAction                `json:"confirmed_action,omitempty"`
 	// Conversation asks for the turn to be part of a hired-assistant
 	// conversation. Its ID is opaque; the server derives the owner.
-	Conversation  *HomeAssistantConversationRef `json:"conversation,omitempty"`
-	FolderContext *HomeAssistantFolderRef       `json:"folder_context,omitempty"`
+	Conversation  *HomeAssistantConversationRef    `json:"conversation,omitempty"`
+	FolderContext *HomeAssistantFolderRef          `json:"folder_context,omitempty"`
+	Arrangement   *HomeAssistantArrangementRequest `json:"arrangement,omitempty"`
 	// Draft names the saved draft the conversation is working on, so the turn
 	// sees its current text. It is read, never written, by a turn.
 	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
@@ -128,6 +130,8 @@ type HomeAssistantAskResponse struct {
 	// Conversation is set only for a hired-assistant conversation turn.
 	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
 	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
+	Arrangement           *HomeAssistantArrangementSummary        `json:"arrangement,omitempty"`
+	ArrangementError      *ArrangementFailure                     `json:"arrangement_error,omitempty"`
 	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
 	// FolderReviewContext is the canonical review summary given to the model for
 	// this turn: description only, with no offer ID, digest or control.
@@ -237,6 +241,7 @@ type HomeAssistantAskHandler struct {
 	// conversations; nil keeps every turn stateless.
 	Conversations      PersonalAssistantConversationStore
 	FolderObservations PersonalAssistantFolderObservations
+	ArrangementPlanner *workspacearrangement.Planner
 	FolderSetups       PersonalAssistantFolderSetups
 	folderRequests     folderRequestGate
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
@@ -261,6 +266,7 @@ func NewHomeAssistantAskHandler(sources HomeSnapshotSources, factory *llm.Factor
 	}
 	handler := &HomeAssistantAskHandler{Sources: sources, LLMFactory: factory, SystemModel: systemModel, now: now}
 	handler.ResearchReviews = handler.NewResearchReviewGate()
+	handler.ArrangementPlanner = &workspacearrangement.Planner{}
 	return handler
 }
 
@@ -416,6 +422,12 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 				conversation.owner = scope.saveOwner()
 			}
 		}
+	}
+
+	// This branch advertises only arrangement tools. It precedes path-resolving
+	// folder preparation, research, memory actions and the general tool loop.
+	if req.Arrangement != nil {
+		return h.answerArrangementTurn(ctx, req, prompt, identity, workContext, conversation)
 	}
 
 	var research *assistantResearchTurn

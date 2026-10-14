@@ -445,7 +445,7 @@ request fields:
 and these response fields:
 
 - `conversation`: `id`, `title`, `started`, `stored`, `user_message_id`, `assistant_message_id`, `history_truncated`, or `error` (`conversation_not_found`, `conversation_out_of_scope`, `conversation_unavailable`). Only an answered turn is stored. When `stored` is false nothing was saved and the client returns the text to the composer.
-- `model_unavailable`: `true` when no model could answer.
+- `model_unavailable`: `true` when a model answer cannot be delivered. Arrangement mode also uses this input-preservation flag for a rejected result or failed save; inspect `arrangement_error` for the reason.
 - `draft_review`: present when the prompt asked to save the draft ("save this draft and put it in my todo list"). It is the same object `POST …/drafts/review` returns. Nothing has been written.
 - `memory_review`: present when the prompt asked to remember something. `{ "text", "destination", "max_bytes" }` — editable starting text (empty when no fact was stated). Nothing has been written, no model was called, and the request is not stored as a turn.
 - `draft_context`: `{ "ticket_id", "available", "display_number", "version" }` — whether the saved draft named in `draft` could be read for this turn.
@@ -455,10 +455,88 @@ and these response fields:
 | Endpoint | Returns |
 |---|---|
 | `GET /api/home-assistant/conversations` | `conversations` (`id`, `title`, `message_count`, `updated_at`) that belong to the current assistant in the current Personal HQ, and `manage_href`. |
-| `GET /api/home-assistant/conversations/{id}` | `conversation`, `messages` (`id`, `role`, `content`, `created_at`, `imported`), `truncated`, and `saved` — the drafts saved from it (or `saved_unavailable`). |
+| `GET /api/home-assistant/conversations/{id}` | `conversation`, `messages` (`id`, `role`, `content`, `created_at`, `imported`), `truncated`, and `saved` — the Ticket drafts saved from it (or `saved_unavailable`). Canonical arrangement history is separate: `arrangements` (bounded record/message references) or `arrangements_unavailable`. |
+| `GET /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}` | One saved `arrangement` summary, `conversation_id`, `message_id`, and `context_current`; no query arguments. |
 
 Conversations are canonical Sessions; they are renamed and deleted through the
 Sessions API. Deleting one never deletes a saved Ticket or a remembered fact.
+
+**PA arrangement planning:** Add folder → Suggest arrangement → enter a goal →
+explicitly choose bounded metadata sharing → Send organizing goal. Ordinary Send
+remains discussion. Ask may explicitly request
+`arrangement: { "share_held_metadata": true }` with a current conversation/draft
+and live `folder_context`. This acknowledges additional bounded held-metadata
+sharing, not discovery or execution. Picking a folder alone calls no model.
+Only supported API transports run; CLI, historical/focused references and mixed
+approvals are refused. A successful typed proposal is saved with its canonical
+answered turn before the response includes an `arrangement` summary. No Apply
+capability is exposed. The sharing object accepts only an exact boolean
+`share_held_metadata` field and optional paired nonempty `expected_provider` /
+`expected_model` strings (at most 160 bytes each). The PA browser sends both
+runtime pins from its disclosure; a changed configured provider/model returns
+`stale_context` before metadata sharing. Duplicate/aliased keys, an incomplete
+pin pair and unrelated approvals are rejected. An explicit null, duplicated or case-aliased top-level `arrangement`
+field returns HTTP 400 instead of falling through to ordinary chat/tools. An
+absent field preserves ordinary Ask behavior. Goals follow the single-line,
+2,000-UTF-8-byte intent bound.
+
+Once arrangement mode is entered, refusals return `arrangement_error: { "code", "message" }` with safe host-authored
+recovery guidance, never raw provider/database errors. Codes distinguish
+`sharing_required`, `invalid_request`, `invalid_goal`, `source_required`,
+`historical_source`, `focused_source`, `source_unavailable`,
+`provider_unavailable`, `unsupported_transport`, `storage_unavailable`, `busy`,
+`stale_context`, `cancelled`, `timed_out`, `limit_reached`, `storage_limit`,
+`invalid_reply`, `save_failed`, and `planning_failed`. No refusal switches
+providers, scans a source, applies effects or automatically retries. After an
+uncertain save, reopen canonical history before retrying. Cleanup may remove only
+the unchanged, unanswered conversation created by that failed first turn—not a
+committed draft or another tab's work. See [the arrangement contract](../architecture/workspace-arrangement.md).
+
+Owner-only Home history uses
+`GET /api/workspaces/{workspaceID}/assistant-program/library/arrangements` and
+`GET /api/workspaces/{workspaceID}/assistant-program/library/arrangements/{arrangementID}`.
+**Home Organize library:** the initialized library shelf has an explicit planning
+entry. `GET /api/workspaces/{workspaceID}/assistant-program/library/arrangements/context`
+returns `home_id`, `revision`, `schema_version`, `agent_name`, `provider`, `model`
+and `context_pin` for the owner's exact bound Manager. It checks pinned installed
+guidance but calls no model, reads no catalog source files and performs no setup
+or migration. Missing prerequisites refuse; role staffing alone does not silently
+trust a workspace skill binding. The response is `no-store` and accepts no query arguments.
+
+`POST /api/workspaces/{workspaceID}/assistant-program/library/arrangements/plan`
+accepts only `goal`, `expected_revision`, `share_catalog_metadata` (must be `true`),
+`allow_upgrade` (required `true` for a v1 library), and optional `expected_context`
+(64 hexadecimal characters). The browser always sends the disclosed context pin;
+a different current runtime/catalog refuses before metadata reaches the model.
+This pin is a comparison value, not approval or a replacement for owner authorization. Duplicate/aliased fields,
+null choices, caller-supplied identities and query arguments are rejected.
+The authenticated owner invokes the actual bound local Manager's supported API
+model with pinned installed role/skill guidance and the shared bounded Planner.
+No general/native tools, global-agent fallback, scan, initialization or effects
+are enabled. A successful response is the same canonical history projection as
+GET; clarification is saved as discussion, not a proposal. Failed preparation,
+drift or save returns a safe `arrangement_error`, never raw provider errors or an
+unsaved result. A lost-response retry with the old revision conflicts without a
+second model call; reopen history. The browser keeps the goal, separately requests
+upgrade consent, and renders only canonical saved outcomes. Apply remains unavailable.
+
+The list returns at most 32 record references; detail returns `arrangement` and
+`catalog_current`. Home list/detail also includes `kind` (`proposal` or
+`clarification`); a clarification detail includes bounded `clarification` text
+unless Forget has redacted it. Clarifications contain no selected members or
+proposed effects, and do not imply a saved actionable draft. The complete Home
+detail projection is capped at 64 KiB. PA and Home arrangement history responses
+use `Cache-Control: no-store`. These reads accept no query arguments, never initialize or
+upgrade a library, and do not run or impersonate its Manager. An uninitialized
+library returns 409.
+
+The shared summary contains origin, saved timestamps, ID/revision/state, goal, rationale,
+unknowns, coverage, proposed-operation names/counts and review questions. Explicit
+unchanged/needs-review counts are not a partition of the full inventory. The
+projection is capped at 64 KiB and omits member IDs, live handles and authority
+fingerprints. `context_current`/`catalog_current` compare saved context only;
+**`review_available` remains false**, even for a current record. Historical or
+redacted records never restore source permission. This is not a compiled review.
 
 **Assistant operations ("Operate Ori"):** an explicit request such as "open the
 Album workspace and select Mixer" lets the assistant ask Ori to carry out a

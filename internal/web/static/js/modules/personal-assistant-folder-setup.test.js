@@ -456,7 +456,7 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
     ['Albums', ' has 5 Session folders and 1 other folder.']
   );
   assert.equal(view.question, 'Set up a group with 6 workspaces?');
-  assert.equal(view.structure.label, 'Proposed workspace group');
+  assert.equal(view.structure.label, 'Rule-based setup option');
   assert.equal(view.structure.members.length, 6);
   // What the proposal goes without is said once, by the proposal card.
   assert.equal(view.capabilityDetail, '');

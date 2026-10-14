@@ -348,7 +348,7 @@ by bounded preview facts, not an automatic setup offer. New Workspace remains
 a separate flow. Real-host/no-model browser tests and the updated folder-first
 demo exercise canonical review, cancellation, creation, replay and receipts.
 
-## A folder of projects: the proposed group
+## A folder of projects: rule-based manual setup
 
 A folder with no marker of its own and two or more immediate project subfolders
 is a collection (`folderdigest.IsCollection`; software repositories keep their
@@ -358,10 +358,15 @@ workspace group and one linked workspace per subfolder. The record is built once
 and is the same on every entry that shows a folder:
 
 - **Add folder** in the assistant's composer: the attach response and the
-  turn's review option carry it, the card is shown before any model reply, and
-  the model is told to lead with it and end with Set up or Adjust.
-- **Explore a folder** on Home: the offer's subject is the folder itself, with
-  the structure, instead of one question per subfolder.
+  turn's review option carry it, and the card is labeled **Rule-based setup option**
+  before any model reply. Ordinary discussion starts from the user's goal and
+  bounded evidence, may ask a consequential question, and need not endorse the
+  fallback or end with a setup pitch. Dates are observed file activity, not progress.
+- **Explore a folder** on Home (including the deep link and workspace toolbar)
+  enters the same attachment picker. **Suggest arrangement** is a separate,
+  explicitly consented planning turn; neither attachment nor preview calls a model.
+  Saved arrangements are inert and do not enable Apply. See
+  [workspace arrangement](workspace-arrangement.md).
 - **Create Workspace**'s assisted chat still attaches a folder to one workspace
   draft; proposing the group there is not implemented.
 
@@ -379,8 +384,9 @@ failed. A workspace per folder *inside* a plugin Home is not created here: that
 Home's own library makes each one when a project is opened, so the Home stays
 available as the "list them in the Home" choice in Adjust. Choosing it hands
 the offer back to the earlier collection setup, with that setup's own review,
-provider install and refusals; on Home that card carries "Make a group instead"
-to return to the proposal. When the Home is already installed and usable, the
+provider install and refusals. A conversation-bound unavailable Home never enables
+its old Set up action: **Review plain group instead…** opens Adjust, whose Done
+requests a fresh authorized plain-group review. It performs no setup itself. When the Home is already installed and usable, the
 collection setup is the default and the plain group is that one choice away.
 
 ## Dependencies and evidence limits

@@ -96,7 +96,7 @@ type Listed = {
 
 async function workspaces(request: APIRequestContext) {
   const listed = await ok(await request.get('/api/workspaces'));
-  return (Array.isArray(listed) ? listed : listed.workspaces || []) as Listed[];
+  return (Array.isArray(listed) ? listed : listed.folders || listed.workspaces || []) as Listed[];
 }
 
 // watch records what would make a run fail its promises: a page error, or any
@@ -185,7 +185,7 @@ test.describe('a folder of projects attached in the assistant', () => {
     expect(selected.structure?.members?.length).toBe(6);
     const proposal = page.locator('#personalAssistantFolderStructure');
     await expect(proposal).toBeVisible({ timeout: 30_000 });
-    await expect(proposal).toContainText('Proposed workspace group');
+    await expect(proposal).toContainText('Rule-based setup option');
     for (const name of members) await expect(proposal).toContainText(name);
     // Neither capability is installed here, and both say so instead of vanishing.
     await expect(proposal).toContainText('is not installed');
@@ -238,22 +238,37 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
   test.skip(phase !== 'home', 'runs in the home phase');
   const root = join(sandbox, 'Music');
 
-  test('is one group offer, adjusted and created from its card', async ({ page, request }) => {
+  test('offers explicit planning and a rule-based manual review without a model', async ({
+    page,
+    request
+  }, info) => {
     await hireAssistant(request);
     const before = { hash: hashFolder(root), workspaces: (await workspaces(request)).length };
     const seen = watch(page);
 
     await page.goto('/?panel=today&folder=show');
-    const chooser = page.locator('#personalAssistantFolderChooser');
+    const chooser = page.locator('#personalAssistantFolderChoices');
     await expect(chooser).toBeVisible({ timeout: 30_000 });
     const scanned = page.waitForResponse(
       response =>
-        response.request().method() === 'POST' && /\/folder-digest\/scan$/.test(response.url()),
+        response.request().method() === 'POST' && /\/folder-context\/select$/.test(response.url()),
       { timeout: 60_000 }
     );
     await chooser.getByRole('button', { name: 'Music', exact: true }).click();
-    const offer = (await (await scanned).json()).offer;
-    expect(offer.structure?.members?.length).toBe(6);
+    const selected = await (await scanned).json();
+    expect(selected.structure?.members?.length).toBe(6);
+    await expect(page.locator('#personalAssistantFolderStructure')).toContainText(
+      'Rule-based setup option'
+    );
+    await page.getByRole('button', { name: 'Suggest arrangement', exact: true }).click();
+    const planning = page.locator('#personalAssistantArrangement');
+    await expect(
+      planning.getByText('Configure a tool-capable API model', { exact: false })
+    ).toBeVisible();
+    await expect(planning.getByRole('button', { name: 'Send organizing goal' })).toBeDisabled();
+    await page.screenshot({ path: info.outputPath('explore-no-model-manual.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Suggest arrangement', exact: true }).click();
+    await page.getByRole('button', { name: 'Review group setup' }).first().click();
 
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
     await card(page).scrollIntoViewIfNeeded();
@@ -268,7 +283,7 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
         .locator('#personalAssistantFolderOfferActions')
         .locator('button, a')
         .allInnerTexts()
-    ).toEqual(['Set up', 'Adjust…', 'No thanks', 'Later']);
+    ).toEqual(['Set up', 'Adjust…', 'Keep chatting']);
     expect(await planLines(page)).toContain('Creates group Music');
 
     // Listing the folder in its Home is one choice in Adjust: the earlier
@@ -280,7 +295,17 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
     await expect(page.locator('#personalAssistantFolderOfferHeadline')).toContainText(
       'Music has 5 music projects.'
     );
-    await card(page).getByRole('button', { name: 'Make a group instead', exact: true }).click();
+    // Conversation-bound reviews must not bypass unavailable Home provenance.
+    // The explicit fallback requests a fresh plain-group review, never setup.
+    await expect(card(page)).toContainText('The reviewed destination is unavailable');
+    await card(page)
+      .getByRole('button', { name: 'Review plain group instead…', exact: true })
+      .click();
+    await card(page)
+      .locator('[data-folder-adjust]')
+      .first()
+      .getByRole('button', { name: 'Done', exact: true })
+      .click();
     await expect(page.locator('#personalAssistantFolderOfferQuestion')).toContainText(
       'Set up a group with 6 workspaces?'
     );
@@ -296,9 +321,13 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
     // A name a workspace already has is refused in the sheet, with the reason.
     await groupName.fill('My HQ');
     await sheet.getByRole('button', { name: 'Done', exact: true }).click();
-    await expect(sheet.getByRole('alert')).toContainText(
-      'A workspace named My HQ already exists. Nothing was saved'
-    );
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: 'A workspace named My HQ already exists. Nothing was saved' })
+    ).toBeVisible();
+    await expect(card(page)).toContainText('Creates group Music');
+    await card(page).getByRole('button', { name: 'Adjust…', exact: true }).click();
     await groupName.fill('Studio');
     await sheet.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(card(page)).toContainText('Creates group Studio', { timeout: 30_000 });

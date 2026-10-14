@@ -38,6 +38,8 @@ type Handler struct {
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not
 	// the raw folder store, or task changes won't be visible to task reads.
+	arrangementPlanning           func(context.Context, projectlibrary.ArrangementPlanningRequest) (projectlibrary.ArrangementPlanningResult, error)
+	arrangementContext            func(context.Context, string, string) (projectlibrary.ArrangementPlanningContext, error)
 	workspaceTaskStore            workspace.Store
 	assistantLibraryRoots         *projectlibrary.Roots // host native chooser; never accepts a browser path
 	assistantLibraryOfferResolver projectlibrary.PortfolioRootResolver
