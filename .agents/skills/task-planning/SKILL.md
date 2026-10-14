@@ -133,9 +133,13 @@ After `Go`:
    individual sub-task when expensive reasoning or mechanical work is localized;
    do not assign a deep model to routine implementation after the contract is
    settled.
-6. End each group with `Commit: "<conventional message>"`.
+6. End each group with `Commit: "<conventional message>"`. Plan one `Validate:`
+   checkpoint per implementation group, naming the affected checks. Put it before
+   the `Demo:` item, or directly before the commit when no demo applies. Keep test
+   authoring alongside the behavior it covers; do not add suite runs to every
+   sub-task. Follow _Validation cadence_ for early risk checks and delivery gates.
 7. For every user-visible group, place a `Demo:` item immediately before its
-   commit.
+   commit. Scope it to the group's changed path, not a full feature tour.
 8. Include the following delivery checkpoints, with the PR approval gate separate
    from the actions that follow it:
    - `Permission sweep`
@@ -185,7 +189,7 @@ holds checkbox state only.
 - Delegation: `[demo verification for every Demo: item; scribe for checkbox ticks, findings log, test guide, and PR body; exploration sweeps at group starts; other bounded findings-only review; or none with a reason]`
 - Deep-model hotspots: `[specific unresolved decisions, or none]`
 - Parallel-safe work: `[file-disjoint, independently verifiable work, or none]`
-- Validation cadence: `[scoped checks per slice; affected suites per group; full repository gate once at delivery]`
+- Validation cadence: `[smallest useful checks after coherent changes; one affected-test checkpoint and changed-path demo per group; broad regression and full repository gate at delivery; name any early risk checks]`
 
 ## Companion Dependencies
 
@@ -208,9 +212,10 @@ Only when a companion is `required`; see _Cross-repository contract_.
 ## Tasks
 
 - [ ] 1.0 First vertical outcome `Model: Sonnet 5`
-  - [ ] 1.1 Concrete implementation step
-  - [ ] 1.2 Demo: drive the user-visible result with `wt demo`
-  - [ ] 1.3 Commit: "feat(scope): deliver first outcome"
+  - [ ] 1.1 Concrete implementation step with focused behavior tests
+  - [ ] 1.2 Validate: run the named affected package/module checks
+  - [ ] 1.3 Demo: drive the changed user-visible path with `wt demo`
+  - [ ] 1.4 Commit: "feat(scope): deliver first outcome"
 - [ ] 2.0 Final delivery outcome `Model: Sonnet 5`
   - [ ] 2.1 Concrete implementation step
   - [ ] 2.2 Permission sweep
@@ -401,30 +406,57 @@ and still keeps findings out of the checklist.
 A green test suite does not prove that a user-visible surface is reachable or
 usable.
 
-For every user-visible group:
+For every user-visible group, verify its new or changed path and directly
+impacted behavior, not the entire feature again. Keep the complete user journeys
+and browser/layout/theme matrix for delivery unless an earlier risk requires them.
 
-1. Build the branch.
-2. Launch the isolated demo server with `wt demo` (default port 8931).
-3. Hand the drive to the demo-verification lane: the expected states, their
+1. Use a current build of the branch; rebuild when relevant inputs change.
+2. Launch the isolated demo server with `wt demo` (default port 8931), or reuse
+   that server only while its build, configuration, and sandbox state remain
+   appropriate for the check.
+3. Hand the drive to the demo-verification lane: the changed states, their
    click paths, the port, and the evidence directory. Without a lane, drive the
-   new surface yourself in the mode users actually use.
-4. Capture a screenshot per expected state under `tasks/evidence-<feature>/`.
+   changed surface yourself in the mode users actually use.
+4. Capture a screenshot per expected changed state under `tasks/evidence-<feature>/`.
 5. Record the verdict in the findings log and fix failures before committing.
+
+Prefer deterministic fixtures for repeated UI checks. Exercise a real integration
+early when its behavior is uncertain, and retain required live acceptance checks
+at delivery; fixture evidence does not prove live behavior. Do not repeat paid
+model calls or unrelated screenshots merely because a new group began.
 
 Demos are self-checks, not extra approval pauses. Include the screenshot paths
 in the final report.
 
 ## Validation cadence
 
-- After a sub-task or narrow slice, run the smallest affected package, module, or
-  focused test that can disprove the change quickly.
-- At a parent-group boundary, run the affected package and frontend suites before
-  committing.
-- Run the repository's complete required test, ratcheted lint, scoped security,
-  and relevant frontend gates in the final delivery group.
-- Do not replace the final gate with scoped checks, and do not repeatedly run the
-  full repository suite after every mechanical sub-task unless coupling makes it
-  necessary.
+Optimize for useful feedback, not checkbox count. This cadence is shared by
+Claude, Codex, and Pi; harness-specific entrypoints must not define another one.
+
+- Write focused tests alongside behavior changes. Deferring broad suite execution
+  is not deferring test authoring or reducing required acceptance coverage.
+- During implementation, run the smallest useful check after a coherent change,
+  not mechanically after every sub-task. Batch related mechanical edits before
+  checking; use a focused test or module rather than multiple whole packages
+  when that gives honest feedback.
+- Check risky foundations before dependent work: permissions, data writes,
+  concurrency, API contracts, and uncertain external integrations. Name those
+  early checks in the plan rather than discovering a broken assumption at delivery.
+- At each implementation group boundary, use one `Validate:` checkpoint for the
+  affected package/module tests, plus the changed-path demo when applicable.
+  Reuse a passing result only while its relevant code, dependencies, fixtures,
+  and environment are unchanged; otherwise rerun the affected checks. Do not run
+  the same suite twice merely to tick both a sub-task and its parent checkpoint.
+- At delivery, run broad regression, complete user journeys, the relevant
+  browser/layout/theme matrix, and the full required `make ci-local` gate
+  (including ratcheted lint, scoped security, and frontend checks). Keep these
+  out of routine group checkpoints unless coupling or an identified risk makes
+  earlier coverage necessary; record that reason.
+- The full repository gate belongs at delivery, not after each group. Rerun it
+  when subsequent changes invalidate its result. This does not bypass `wt pr`'s
+  mandatory pre-push checks or authorize `--skip-checks`.
+- Scoped checks never replace the final gate. A failed check must be resolved or
+  reported as an explicit blocker, not deferred silently to claim a group passed.
 
 ## Manual test guide
 
@@ -496,8 +528,10 @@ loop as implementation mode:
 
 1. Select the next authorized, unblocked task from the full scope. A next-item
    preview is a navigation hint, not the assignment's completion boundary.
-2. Implement, run scoped checks, record evidence, and update completed checkboxes.
-3. At group boundaries, run affected suites, self-verify the demo, and commit.
+2. Implement with focused tests, run checks at the _Validation cadence_ above,
+   record evidence, and update completed checkboxes.
+3. At group boundaries, complete the group's validation checkpoint, self-verify
+   the changed-path demo when applicable, and commit.
 4. Continue immediately to the next runnable task. Milestones, passing tests,
    demos, commits, and progress summaries are checkpoints, not stop conditions.
    Send progress as non-terminal updates; do not end with “next: X,” “not yet

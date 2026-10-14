@@ -62,6 +62,49 @@ func TestTaskPlanningKeepsCheckpointsNonTerminalWithoutBypassingStops(t *testing
 	}
 }
 
+func TestTaskPlanningScopesValidationWithoutDeferringRiskChecks(t *testing.T) {
+	protocol := taskPlanningProtocol(t)
+	for _, tc := range []struct {
+		heading  string
+		required []string
+	}{
+		{
+			heading: "Validation cadence",
+			required: []string{
+				"Write focused tests alongside behavior changes",
+				"not mechanically after every sub-task",
+				"Check risky foundations before dependent work",
+				"one `Validate:` checkpoint",
+				"full required `make ci-local` gate",
+				"`wt pr`'s mandatory pre-push checks",
+				"Scoped checks never replace the final gate",
+			},
+		},
+		{
+			heading: "Demo checkpoints",
+			required: []string{
+				"not the entire feature again",
+				"complete user journeys and browser/layout/theme matrix for delivery",
+				"fixture evidence does not prove live behavior",
+			},
+		},
+	} {
+		t.Run(tc.heading, func(t *testing.T) {
+			_, section, ok := strings.Cut(protocol, "## "+tc.heading+"\n")
+			if !ok {
+				t.Fatalf("missing protocol section: %s", tc.heading)
+			}
+			section, _, _ = strings.Cut(section, "\n## ")
+			section = strings.Join(strings.Fields(section), " ")
+			for _, required := range tc.required {
+				if !strings.Contains(section, required) {
+					t.Errorf("missing validation boundary: %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestTaskPlanningTemplateSeparatesPRReadinessFromApprovedActions(t *testing.T) {
 	protocol := taskPlanningProtocol(t)
 	_, template, ok := strings.Cut(protocol, "```markdown\n")
@@ -82,6 +125,10 @@ func TestTaskPlanningTemplateSeparatesPRReadinessFromApprovedActions(t *testing.
 	}
 	previous := -1
 	for _, checkpoint := range []string{
+		"1.1 Concrete implementation step with focused behavior tests",
+		"1.2 Validate:",
+		"1.3 Demo: drive the changed user-visible path",
+		"1.4 Commit:",
 		"Complete required validation and demos",
 		"Prepare PR body with evidence and limitations",
 		"PR gate: verify readiness and wait for explicit PR approval",

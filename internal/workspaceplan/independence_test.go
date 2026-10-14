@@ -137,10 +137,19 @@ func TestCrossHarnessTaskPlanningSkillHasOneWorkflowSource(t *testing.T) {
 		t.Fatalf("read Claude task-planning entry point: %v", err)
 	}
 	text := string(entrypoint)
-	if !strings.Contains(text, ".agents/skills/task-planning/SKILL.md") {
-		t.Fatalf("Claude entry point does not delegate to the canonical skill: %s", text)
+	_, reference, ok := strings.Cut(text, "```\n")
+	if !ok {
+		t.Fatal("Claude entry point is missing its canonical skill reference")
 	}
-	for _, duplicated := range []string{"## Operating modes", "## Demo checkpoints", "## Permission sweep"} {
+	reference, _, ok = strings.Cut(reference, "\n```")
+	if !ok {
+		t.Fatal("Claude entry point has an unterminated canonical skill reference")
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(claudePath), strings.TrimSpace(reference)))
+	if resolved != canonicalPath {
+		t.Fatalf("Claude entry point resolves to %s, want %s", resolved, canonicalPath)
+	}
+	for _, duplicated := range []string{"## Operating modes", "## Demo checkpoints", "## Validation cadence", "## Permission sweep"} {
 		if strings.Contains(text, duplicated) {
 			t.Errorf("Claude entry point duplicated canonical workflow section %q", duplicated)
 		}
