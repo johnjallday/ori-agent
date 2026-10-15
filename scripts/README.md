@@ -104,6 +104,14 @@ workflows and Ori's worktree provisioning adapter.
 - `list-unit-packages.sh`: application package/platform selection shared by CI
   and local tests. External tool packages are not part of this module.
 - `check-cross-platform.sh`, `check-go-version.sh`: app build/toolchain checks.
+- `feature-explore-snapshot.sh`: read-only evidence snapshot for the
+  feature-explore skill (`.agents/skills/feature-explore/SKILL.md`): the previous
+  discovery report, every worktree with its commits, checklist progress and
+  branch PR state, PRs to dev, open Issues, and the commits since the last
+  report, in one command. Reports and archived plans are read from the
+  planning checkout on `dev` from any worktree. It never fetches or writes;
+  exit 1 means GitHub could not answer and the run is incomplete.
+  `make test-devtools` covers it.
 
 ## Lint & maintenance
 

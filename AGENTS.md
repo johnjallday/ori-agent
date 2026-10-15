@@ -128,6 +128,11 @@ or existing checklist. It is the canonical cross-harness protocol; Claude's
 entrypoint delegates to it. PRDs and task lists are opt-in. Do not duplicate the
 protocol in guidance, starter checklists or bootstrap prompts.
 
+Before choosing new work, `.agents/skills/feature-explore/SKILL.md` runs the
+read-only discovery pass from `docs/feature-discovery/PLAYBOOK.md` and writes a
+dated shortlist under `docs/feature-discovery/reports/`. It never creates
+Issues, branches, worktrees or planning artifacts; choosing stays with a person.
+
 Planning artifacts belong in `ori-agent-dev/tasks/` (not absolute `/tasks/`).
 Finish planning there before `wt start`; it copies artifacts to the feature.
 `wt done` archives them back with `(done #N)` or `(done)` names; tooling skips
