@@ -231,7 +231,7 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	if in.CycleOrdinal <= 1 {
 		b.WriteString("This is the first goal run for this workspace (the BASELINE run). Look at what the workspace holds, then suggest the few pieces of work that would move the goal forward most, and note anything the user should know.\n\n")
 	} else {
-		b.WriteString(fmt.Sprintf("This is goal run #%d. Compare the workspace with the goal and with the work and findings listed below; suggest only work that is genuinely new, and keep a recurring finding's title so it merges.\n\n", in.CycleOrdinal))
+		fmt.Fprintf(&b, "This is goal run #%d. Compare the workspace with the goal and with the work and findings listed below; suggest only work that is genuinely new, and keep a recurring finding's title so it merges.\n\n", in.CycleOrdinal)
 	}
 
 	switch in.AutonomyPolicy {

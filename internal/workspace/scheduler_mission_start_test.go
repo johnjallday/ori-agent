@@ -47,7 +47,7 @@ func (s *blockingStarter) startCount() int {
 	return len(s.starts)
 }
 
-func goalStartFixture(t *testing.T) (*TaskScheduler, *InMemoryStore, *blockingStarter, *HTTPHandler, *http.ServeMux, *Workspace) {
+func goalStartFixture(t *testing.T) (*TaskScheduler, *InMemoryStore, *blockingStarter, *http.ServeMux, *Workspace) {
 	t.Helper()
 	store := NewInMemoryStore()
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand", Agents: []string{"Writer"}})
@@ -77,7 +77,7 @@ func goalStartFixture(t *testing.T) (*TaskScheduler, *InMemoryStore, *blockingSt
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", handler.TriggerMission)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", handler.RunBaselineNow)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/first-open", handler.GoalFirstOpen)
-	return ts, store, starter, handler, mux, ws
+	return ts, store, starter, mux, ws
 }
 
 func serveJSON(t *testing.T, mux *http.ServeMux, method, path, body string) (int, map[string]any) {
@@ -97,7 +97,7 @@ func serveJSON(t *testing.T, mux *http.ServeMux, method, path, body string) (int
 // background, GET mission shows it in flight, a second trigger is 409, and
 // the slot frees when the run ends.
 func TestRunNowIsAsynchronousAndSingleFlight(t *testing.T) {
-	ts, _, starter, _, mux, ws := goalStartFixture(t)
+	ts, _, starter, mux, ws := goalStartFixture(t)
 	base := "/api/workspaces/" + ws.ID + "/mission"
 
 	code, body := serveJSON(t, mux, http.MethodPost, base+"/trigger", "")
@@ -140,7 +140,7 @@ func TestRunNowIsAsynchronousAndSingleFlight(t *testing.T) {
 // The cadence shares the slot: a manual run is refused while a cadence run
 // holds it.
 func TestStartMissionRunSharesTheCadenceSlot(t *testing.T) {
-	ts, _, _, _, _, ws := goalStartFixture(t)
+	ts, _, _, _, ws := goalStartFixture(t)
 	if !ts.claimMission(ws.ID) {
 		t.Fatal("claim")
 	}
@@ -156,7 +156,7 @@ func TestStartMissionRunSharesTheCadenceSlot(t *testing.T) {
 // FR24: with no model the run does not start; the reason is stored on the goal
 // and shown by GET mission, and a later start that succeeds clears it.
 func TestStartMissionRunRecordsWhyItCannotStart(t *testing.T) {
-	ts, store, starter, _, mux, ws := goalStartFixture(t)
+	ts, store, starter, mux, ws := goalStartFixture(t)
 	modelReady := false
 	ts.SetMissionModelCheck(func(*Workspace) (bool, string) { return modelReady, "" })
 
@@ -195,7 +195,7 @@ func TestStartMissionRunRecordsWhyItCannotStart(t *testing.T) {
 // FR24: saving a goal where there was none starts exactly one run, ignoring
 // MissionEnabled and leaving the cadence alone; editing an existing goal does not.
 func TestFirstGoalSaveStartsOneRun(t *testing.T) {
-	_, store, starter, _, mux, ws := goalStartFixture(t)
+	_, store, starter, mux, ws := goalStartFixture(t)
 	if err := store.Update(ws.ID, func(w *Workspace) error {
 		w.Mission = ""
 		return nil
@@ -226,7 +226,7 @@ func TestFirstGoalSaveStartsOneRun(t *testing.T) {
 // FR25: a workspace created with a goal runs once, on first open; the marker
 // is consumed so reloads start nothing; a workspace without it starts nothing.
 func TestGoalFirstOpenStartsTheDeferredRunOnce(t *testing.T) {
-	_, store, starter, _, mux, ws := goalStartFixture(t)
+	_, store, starter, mux, ws := goalStartFixture(t)
 	path := "/api/workspaces/" + ws.ID + "/mission/first-open"
 
 	code, body := serveJSON(t, mux, http.MethodPost, path, "")
