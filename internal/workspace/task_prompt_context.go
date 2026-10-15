@@ -989,6 +989,10 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task,
 	tail.WriteString("respond directly without calling tools. ")
 	if ActiveTaskOutputSpec(&task) != nil || NormalizeTaskOutputSchema(task.OutputSchema) != nil || NormalizeTaskOutputContract(task.OutputContract) != nil {
 		tail.WriteString("When you are done, your final answer must be the JSON object described above and nothing else.")
+	} else if IsMissionTask(task.Context) {
+		// A goal run is read by code: its answer is the {"items": [...]}
+		// object its task description defines, not a prose summary (FR14).
+		tail.WriteString("When you are done, your final answer must be the JSON object described in the task description and nothing else.")
 	} else {
 		tail.WriteString("Provide a clear, concise response with your findings or results.")
 	}

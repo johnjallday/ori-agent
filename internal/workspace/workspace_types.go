@@ -245,8 +245,12 @@ type Workspace struct {
 	// counters) but leave NextMissionRunAt untouched, so the cadence acts as a
 	// hard heartbeat regardless of event activity. Default false = an
 	// event-fired run pushes the next cadence run back, like any other run.
-	MissionCadenceHeartbeat bool          `json:"mission_cadence_heartbeat,omitempty"`
-	Opportunities           []Opportunity `json:"opportunities,omitempty"`
+	MissionCadenceHeartbeat bool `json:"mission_cadence_heartbeat,omitempty"`
+	// MissionRuns is the recent goal-run history, newest first and capped at
+	// MissionRunHistoryLimit: what each run created, skipped and dropped, and
+	// for an unreadable answer the raw tail (FR21). Persisted with the Goal.
+	MissionRuns   []MissionRunRecord `json:"mission_runs,omitempty"`
+	Opportunities []Opportunity      `json:"opportunities,omitempty"`
 	// GoalBrief is the structured, user-accepted statement of what this
 	// workspace's Goal needs — output, sources, semantic operations, autonomy
 	// ceiling, mandatory capabilities (see toolbox_goal_brief.go). Nil until a

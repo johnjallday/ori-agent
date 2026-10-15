@@ -28,7 +28,36 @@ const (
 	// OpportunitySourceAssistantSuggestion identifies generic assistant-program
 	// recommendations without coupling Action Center to a plugin domain.
 	OpportunitySourceAssistantSuggestion = "assistant_suggestion"
+
+	// OpportunitySourceGoalSuggestions marks the one Action Center row a goal
+	// run adds when it suggests tasks: "N suggested tasks in <workspace>",
+	// linking to that workspace's Backlog (FR22). The row is a pointer, not
+	// the work — triaging it never touches the suggested tickets.
+	OpportunitySourceGoalSuggestions = "goal_suggestions"
 )
+
+// AppendOpportunity adds opp to ws as a new record without dedup merging, for
+// rows that are one-per-event by design (a goal run's summary row). Fills the
+// ID, status and timestamps. Mutates ws; call it inside Store.Update.
+func AppendOpportunity(ws *Workspace, opp Opportunity) Opportunity {
+	if ws == nil {
+		return opp
+	}
+	now := time.Now()
+	if opp.ID == "" {
+		opp.ID = newOpportunityID()
+	}
+	if opp.Status == "" {
+		opp.Status = OpportunityNew
+	}
+	if opp.CreatedAt.IsZero() {
+		opp.CreatedAt = now
+	}
+	opp.UpdatedAt = now
+	opp.WorkspaceID = ws.ID
+	ws.Opportunities = append(ws.Opportunities, opp)
+	return opp
+}
 
 // DismissalReason captures why the user dismissed an opportunity. Used to power
 // the duplicate-dismissal-rate success metric — high "duplicate" counts mean

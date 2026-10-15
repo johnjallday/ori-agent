@@ -2,11 +2,14 @@ package workspace
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestGetMission_OpenFindingsCount(t *testing.T) {
@@ -86,11 +89,65 @@ func TestBuildMissionSystemPrompt_BaselineFraming(t *testing.T) {
 	if !strings.Contains(got, "BASELINE run") {
 		t.Error("first cycle must be framed as baseline")
 	}
-	if strings.Contains(got, "recurring mission run") {
+	if strings.Contains(got, "goal run #") {
 		t.Error("baseline must not use the recurring framing")
 	}
-	if !strings.Contains(got, "findings") {
+	if !strings.Contains(got, `{"items": [ ... ]}`) || !strings.Contains(got, `"kind": "task"`) || !strings.Contains(got, `"kind": "finding"`) {
 		t.Error("structured-output contract missing")
+	}
+}
+
+// FR14: the contract names both kinds, each in one sentence, with the caps,
+// and no longer asks for findings-only output.
+func TestBuildMissionSystemPrompt_ItemsContract(t *testing.T) {
+	got := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "Keep brand voice consistent.", CycleOrdinal: 1})
+	for _, want := range []string{
+		"Goal: Keep brand voice consistent.",
+		"Answer with ONE JSON object and nothing else",
+		`- "task": work that moves the goal forward and that an agent in this workspace could do.`,
+		`- "finding": something the user should know that is not itself a task`,
+		`"effort": "small"|"medium"|"large"`,
+		`"suggested_agent": string`,
+		`"first_step": string`,
+		`"recommended_action": string`,
+		"Suggest at most 5 tasks and 5 findings.",
+		`If nothing is worth suggesting, answer {"items": []}.`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(got, `{"findings": [`) {
+		t.Error("the findings-only contract must be gone")
+	}
+}
+
+// FR18/FR19: existing and dismissed work is listed so it is not suggested
+// again, agents are named for suggested_agent, and what the run may do while
+// it looks follows the autonomy level.
+func TestBuildMissionSystemPrompt_ListsExistingWorkAndAutonomy(t *testing.T) {
+	watch := BuildMissionSystemPrompt(MissionPromptInputs{
+		Mission: "x", CycleOrdinal: 2, AutonomyPolicy: AutonomyWatch,
+		AgentNames:         []string{"Writer", "Editor"},
+		ExistingWorkTitles: []string{"Draft the style guide"},
+		DismissedTitles:    []string{"Audit every old post"},
+	})
+	for _, want := range []string{
+		"Agents in this workspace (use one of these names for suggested_agent, or leave it empty): Writer, Editor",
+		"Work that already exists in this workspace (do not suggest it again):\n  - Draft the style guide",
+		"Suggestions the user dismissed as not useful (never suggest them again):\n  - Audit every old post",
+		"but do not change anything",
+	} {
+		if !strings.Contains(watch, want) {
+			t.Errorf("watch prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(watch, "Do NOT take action") {
+		t.Error("the old report-only line must be gone")
+	}
+	propose := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "x", CycleOrdinal: 2, AutonomyPolicy: AutonomyPropose})
+	if !strings.Contains(propose, "write notes or drafts inside it") || strings.Contains(propose, "but do not change anything") {
+		t.Errorf("propose prompt must allow workspace writes: %q", propose)
 	}
 }
 
@@ -100,7 +157,7 @@ func TestBuildMissionSystemPrompt_RecurringFraming(t *testing.T) {
 		Mission:                "Keep brand voice consistent.",
 		CycleOrdinal:           5,
 	})
-	if !strings.Contains(got, "recurring mission run #5") {
+	if !strings.Contains(got, "goal run #5") {
 		t.Error("expected recurring framing with cycle number")
 	}
 	if strings.Contains(got, "BASELINE") {
@@ -158,82 +215,174 @@ func TestAutonomyPolicyRunHints(t *testing.T) {
 	}
 }
 
-func TestParseMissionOutput_ObjectForm(t *testing.T) {
-	raw := `{
-		"findings": [
-			{"title": "Brand voice drift", "summary": "3 posts diverge", "priority": "high", "confidence": "medium"},
-			{"title": "Missing alt text", "evidence": "hero.png", "priority": "medium"}
-		]
-	}`
-	got, err := ParseMissionOutput("ws-1", "run-42", raw)
+const missionFixtureAnswer = `{"items": [
+	{"kind": "task", "title": "Draft a brand voice guide", "why": "Three posts drift in tone", "evidence": "notes/posts.md", "priority": "high", "confidence": "medium", "effort": "small", "suggested_agent": "Writer", "first_step": "Collect five on-brand posts"},
+	{"kind": "finding", "title": "Brand voice drift", "why": "3 posts diverge", "evidence": "posts/*.md", "priority": "HIGH ", "confidence": " Medium", "recommended_action": "Review the last three posts"}
+]}`
+
+func TestParseMissionRunOutput_ItemsContract(t *testing.T) {
+	got, err := ParseMissionRunOutput("ws-1", "run-42", missionFixtureAnswer)
 	if err != nil {
-		t.Fatalf("ParseMissionOutput: %v", err)
+		t.Fatalf("ParseMissionRunOutput: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 opportunities; got %d", len(got))
+	if got.Rejected != 0 || got.ParseStatus() != MissionParseOK || len(got.Tasks) != 1 || len(got.Findings) != 1 {
+		t.Fatalf("output = %+v", got)
 	}
-	if got[0].Title != "Brand voice drift" {
-		t.Errorf("title[0] = %q", got[0].Title)
+	task := got.Tasks[0]
+	if task.Title != "Draft a brand voice guide" || task.Why != "Three posts drift in tone" || task.Effort != "small" ||
+		task.SuggestedAgent != "Writer" || task.FirstStep != "Collect five on-brand posts" || task.Priority != "high" {
+		t.Errorf("task = %+v", task)
 	}
-	if got[0].WorkspaceID != "ws-1" || got[0].SourceRunID != "run-42" {
-		t.Errorf("workspace/run not threaded through: %+v", got[0])
+	finding := got.Findings[0]
+	if finding.WorkspaceID != "ws-1" || finding.SourceRunID != "run-42" || finding.Status != OpportunityNew {
+		t.Errorf("workspace/run/status not threaded through: %+v", finding)
 	}
-	if got[0].Status != OpportunityNew {
-		t.Errorf("status default = %q; want %q", got[0].Status, OpportunityNew)
+	if finding.Summary != "3 posts diverge" || finding.RecommendedAction != "Review the last three posts" {
+		t.Errorf("finding why/recommended action lost: %+v", finding)
+	}
+	if finding.Priority != "high" || finding.Confidence != "medium" {
+		t.Errorf("priority/confidence not normalized: %q / %q", finding.Priority, finding.Confidence)
 	}
 }
 
-func TestParseMissionOutput_ArrayForm(t *testing.T) {
-	raw := `[{"title": "X"}, {"title": "Y"}]`
-	got, err := ParseMissionOutput("ws-1", "run-1", raw)
+func TestParseMissionRunOutput_AcceptsOneFencedBlock(t *testing.T) {
+	for name, raw := range map[string]string{
+		"fence only":         "```json\n" + missionFixtureAnswer + "\n```",
+		"prose around fence": "Here is what I found.\n\n```json\n" + missionFixtureAnswer + "\n```\nLet me know.",
+	} {
+		got, err := ParseMissionRunOutput("ws-1", "run-1", raw)
+		if err != nil || len(got.Tasks) != 1 || len(got.Findings) != 1 {
+			t.Errorf("%s: got %+v, err %v", name, got, err)
+		}
+	}
+	twoFences := "```json\n{\"items\": []}\n```\nand\n```json\n{\"items\": []}\n```"
+	if _, err := ParseMissionRunOutput("ws-1", "run-1", twoFences); err == nil {
+		t.Error("two fenced blocks must not be guessed between")
+	}
+}
+
+// The previous findings-only shapes still read, as findings.
+func TestParseMissionRunOutput_LegacyShapesAreFindings(t *testing.T) {
+	for _, raw := range []string{
+		`{"findings": [{"title": "X", "summary": "why"}, {"title": "Y"}]}`,
+		`[{"title": "X", "summary": "why"}, {"title": "Y"}]`,
+	} {
+		got, err := ParseMissionRunOutput("ws-1", "run-1", raw)
+		if err != nil || len(got.Findings) != 2 || len(got.Tasks) != 0 || got.Findings[0].Summary != "why" {
+			t.Errorf("legacy %s: got %+v, err %v", raw, got, err)
+		}
+	}
+}
+
+// Unknown kinds, titleless items and invalid enum values are rejected and
+// counted; the rest of the answer still counts.
+func TestParseMissionRunOutput_RejectsInvalidItems(t *testing.T) {
+	raw := `{"items": [
+		{"kind": "task", "title": "Keep me"},
+		{"kind": "chore", "title": "Unknown kind"},
+		{"title": "No kind"},
+		{"kind": "task", "title": ""},
+		{"kind": "task", "title": "Bad effort", "effort": "huge"},
+		{"kind": "finding", "title": "Bad priority", "priority": "urgent"}
+	]}`
+	got, err := ParseMissionRunOutput("ws-1", "run-1", raw)
 	if err != nil {
-		t.Fatalf("ParseMissionOutput: %v", err)
+		t.Fatalf("ParseMissionRunOutput: %v", err)
 	}
-	if len(got) != 2 || got[0].Title != "X" || got[1].Title != "Y" {
-		t.Errorf("array form not parsed correctly: %+v", got)
+	if len(got.Tasks) != 1 || got.Tasks[0].Title != "Keep me" || len(got.Findings) != 0 || got.Rejected != 5 {
+		t.Fatalf("output = %+v", got)
 	}
-}
-
-func TestParseMissionOutput_StripsCodeFence(t *testing.T) {
-	raw := "```json\n{\"findings\": [{\"title\": \"X\"}]}\n```"
-	got, err := ParseMissionOutput("ws-1", "run-1", raw)
-	if err != nil {
-		t.Fatalf("ParseMissionOutput: %v", err)
-	}
-	if len(got) != 1 || got[0].Title != "X" {
-		t.Errorf("fenced JSON not parsed: %+v", got)
+	if got.ParseStatus() != MissionParsePartial {
+		t.Errorf("parse status = %q, want partial", got.ParseStatus())
 	}
 }
 
-func TestParseMissionOutput_EmptyInput(t *testing.T) {
-	got, err := ParseMissionOutput("ws-1", "run-1", "")
-	if err != nil {
-		t.Fatalf("empty input must not error: %v", err)
+// SM7 at the parser: an unreadable answer is an error, never an empty success.
+func TestParseMissionRunOutput_UnreadableAnswersError(t *testing.T) {
+	for name, raw := range map[string]string{
+		"empty":       "   ",
+		"prose":       "I looked at the workspace and everything seems fine.",
+		"invalid":     "{not json",
+		"no items":    `{"suggestions": []}`,
+		"items wrong": `{"items": "none"}`,
+	} {
+		if _, err := ParseMissionRunOutput("ws-1", "run-1", raw); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
 	}
-	if got != nil {
-		t.Errorf("expected nil for empty input; got %v", got)
+	if _, err := ParseMissionRunOutput("ws-1", "run-1", ""); !errors.Is(err, ErrMissionOutputEmpty) {
+		t.Errorf("empty answer err = %v, want ErrMissionOutputEmpty", err)
 	}
-}
-
-func TestParseMissionOutput_NormalizesPriorityAndConfidence(t *testing.T) {
-	raw := `{"findings": [{"title": "X", "priority": "HIGH ", "confidence": " Medium"}]}`
-	got, _ := ParseMissionOutput("ws-1", "run-1", raw)
-	if got[0].Priority != "high" || got[0].Confidence != "medium" {
-		t.Errorf("priority/confidence not normalized: %q / %q", got[0].Priority, got[0].Confidence)
-	}
-}
-
-func TestParseMissionOutput_SkipsTitlelessFindings(t *testing.T) {
-	raw := `{"findings": [{"title": ""}, {"title": "Valid"}, {"summary": "no title"}]}`
-	got, _ := ParseMissionOutput("ws-1", "run-1", raw)
-	if len(got) != 1 || got[0].Title != "Valid" {
-		t.Errorf("titleless findings must be skipped; got %+v", got)
+	if got, err := ParseMissionRunOutput("ws-1", "run-1", `{"items": []}`); err != nil || got.ParseStatus() != MissionParseOK {
+		t.Errorf("an empty items list is a valid answer: %+v, %v", got, err)
 	}
 }
 
-func TestParseMissionOutput_ErrorsOnInvalidJSON(t *testing.T) {
-	if _, err := ParseMissionOutput("ws-1", "run-1", "{not json"); err == nil {
-		t.Error("expected error on invalid JSON")
+func TestNormalizeSuggestionTitle(t *testing.T) {
+	for _, title := range []string{"Draft a brand voice guide", "  draft A  brand voice GUIDE.", "Draft a brand voice guide!!"} {
+		if got := NormalizeSuggestionTitle(title); got != "draft a brand voice guide" {
+			t.Errorf("NormalizeSuggestionTitle(%q) = %q", title, got)
+		}
+	}
+}
+
+// SM5 core: duplicates (against known work and within the answer) are skipped
+// and counted before the cap; whatever is left over the cap is dropped and
+// counted.
+func TestSelectMissionSuggestions(t *testing.T) {
+	known := map[string]struct{}{"draft a brand voice guide": {}}
+	suggestions := []MissionTaskSuggestion{
+		{Title: "Draft a brand voice guide."}, // known
+		{Title: "Plan next week's posts"},
+		{Title: "plan next week's posts"}, // repeated in the answer
+		{Title: "A"}, {Title: "B"}, {Title: "C"}, {Title: "D"}, {Title: "E"},
+	}
+	kept, duplicates, dropped := SelectMissionSuggestions(suggestions, known, 5)
+	if len(kept) != 5 || duplicates != 2 || dropped != 1 {
+		t.Fatalf("kept=%d duplicates=%d dropped=%d", len(kept), duplicates, dropped)
+	}
+	if kept[0].Title != "Plan next week's posts" || kept[4].Title != "D" {
+		t.Errorf("kept = %+v", kept)
+	}
+	if len(known) != 1 {
+		t.Error("known titles must not be modified")
+	}
+}
+
+func TestOpenWorkTitlesSkipsFinishedWork(t *testing.T) {
+	ws := &Workspace{Tasks: []Task{
+		{ID: "a", Description: "Open backlog item", TicketState: TicketStateBacklog},
+		{ID: "b", Description: "In flight", TicketState: TicketStateReady},
+		{ID: "c", Description: "Done already", TicketState: TicketStateDone},
+		{ID: "d", Description: "Cancelled", TicketState: TicketStateCancelled},
+	}}
+	got := OpenWorkTitles(ws)
+	if _, ok := got["open backlog item"]; !ok || len(got) != 2 {
+		t.Fatalf("OpenWorkTitles = %v", got)
+	}
+}
+
+func TestRecordMissionRunKeepsTheNewestRuns(t *testing.T) {
+	ws := &Workspace{}
+	for i := 0; i < MissionRunHistoryLimit+3; i++ {
+		RecordMissionRun(ws, MissionRunRecord{RunID: fmt.Sprintf("run-%d", i)})
+	}
+	if len(ws.MissionRuns) != MissionRunHistoryLimit || ws.MissionRuns[0].RunID != fmt.Sprintf("run-%d", MissionRunHistoryLimit+2) {
+		t.Fatalf("runs = %+v", ws.MissionRuns)
+	}
+}
+
+func TestMissionOutputTailKeepsTheEnd(t *testing.T) {
+	long := strings.Repeat("é", MissionOutputTailLimit) + "THE END"
+	tail := MissionOutputTail(long)
+	if !strings.HasSuffix(tail, "THE END") || !strings.HasPrefix(tail, "…") || len(tail) > MissionOutputTailLimit+len("…") {
+		t.Fatalf("tail len=%d", len(tail))
+	}
+	if !utf8.ValidString(tail) {
+		t.Fatal("tail must not split a rune")
+	}
+	if MissionOutputTail("short") != "short" {
+		t.Fatal("a short answer is kept whole")
 	}
 }
 

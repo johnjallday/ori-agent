@@ -248,5 +248,8 @@ func (ts *TaskScheduler) TriggerMissionManually(ctx context.Context, workspaceID
 		return "", ErrMissionBindingsUnclassified
 	}
 	cycleOrdinal := ws.MissionExecutionCount + 1
+	if withOptions, ok := ts.missionTrigger.(MissionOptionsTrigger); ok {
+		return withOptions.TriggerMissionRunOpts(ctx, workspaceID, cycleOrdinal, MissionRunOptions{Origin: MissionOriginManual})
+	}
 	return ts.missionTrigger.TriggerMissionRun(ctx, workspaceID, cycleOrdinal)
 }

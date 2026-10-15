@@ -621,6 +621,68 @@
     setCommandActionStatus(message || 'Could not load workspace goal.', 'error');
   }
 
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  const RUN_ORIGIN_LABELS = {
+    cadence: 'Scheduled',
+    manual: 'Run now',
+    first_goal: 'First goal',
+    event: 'Event trigger'
+  };
+
+  function plural(count, one, many) {
+    return `${count} ${count === 1 ? one : many}`;
+  }
+
+  // One line per recent goal run: what it created, skipped and dropped (FR21).
+  // A run whose answer could not be read keeps the end of that answer behind
+  // "Show output", so the user can see what the model actually said.
+  function runHistoryHTML(runs) {
+    const list = Array.isArray(runs) ? runs : [];
+    if (!list.length) return '<p class="workspace-mission-runs-empty">No goal runs yet.</p>';
+    const items = list
+      .map(run => {
+        const when = run.finished_at || run.started_at;
+        const origin = RUN_ORIGIN_LABELS[run.origin] || 'Run';
+        const outcome = run.succeeded ? 'Completed' : 'Failed';
+        const counts = [
+          plural(run.tasks_created || 0, 'task suggested', 'tasks suggested'),
+          plural(run.findings_created || 0, 'finding', 'findings')
+        ];
+        if (run.duplicates_skipped)
+          counts.push(plural(run.duplicates_skipped, 'duplicate skipped', 'duplicates skipped'));
+        if (run.dropped_by_cap) counts.push(`${run.dropped_by_cap} over the limit`);
+        if (run.items_rejected)
+          counts.push(plural(run.items_rejected, 'item unreadable', 'items unreadable'));
+        const error =
+          !run.succeeded && run.error
+            ? `<div class="workspace-mission-run-error">${escapeHtml(run.error)}</div>`
+            : '';
+        const output = run.output_tail
+          ? `<details class="workspace-mission-run-output"><summary>Show output</summary><pre>${escapeHtml(run.output_tail)}</pre></details>`
+          : '';
+        return `
+          <li class="workspace-mission-run ${run.succeeded ? 'is-succeeded' : 'is-failed'}">
+            <div class="workspace-mission-run-head">
+              <strong>${outcome}</strong>
+              <span>${escapeHtml(origin)}</span>
+              <span title="${escapeHtml(when ? fmtTime(when) : '')}">${escapeHtml(when ? fmtRelative(when) : '')}</span>
+            </div>
+            <div class="workspace-mission-run-counts">${escapeHtml(counts.join(' · '))}</div>
+            ${error}${output}
+          </li>`;
+      })
+      .join('');
+    return `<ul class="workspace-mission-runs">${items}</ul>`;
+  }
+
   function renderStatus(state) {
     const body = $(SELECTORS.statusBody);
     if (!body) return;
@@ -635,6 +697,10 @@
         <div><strong>Next run:</strong> ${nextRun}</div>
         <div><strong>Last run:</strong> ${lastRun}</div>
         <div><strong>Runs:</strong> ${runs} <span style="color: var(--muted-color);">(${failures} failed)</span></div>
+      </div>
+      <div class="workspace-mission-history">
+        <div class="workspace-mission-history-title">Run history</div>
+        ${runHistoryHTML(state.mission_runs)}
       </div>
     `;
   }
@@ -1118,8 +1184,9 @@
     window.workspaceMission = Object.assign(window.workspaceMission || {}, {
       getState: () => latestState,
       getSummary: () => (latestState ? commandSummary(latestState) : {}),
-      // Pure summary of a given state, for module tests.
+      // Pure renderers of a given state, for module tests.
       summarize: state => commandSummary(state || {}),
+      runHistoryHTML,
       renderCommandSurfaces: () => {
         if (latestState) renderCommandPanel(latestState);
       },

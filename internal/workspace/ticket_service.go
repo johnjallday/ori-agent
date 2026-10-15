@@ -93,6 +93,8 @@ type TicketCreateInput struct {
 	Source        string
 	SourceID      string
 	LinkedNoteIDs []string
+	// Context seeds Task.Context, e.g. a goal suggestion's structured reason.
+	Context map[string]any
 	// Actor records who captured the work for the initial history entry.
 	Actor   string
 	ActorID string
@@ -563,6 +565,19 @@ func (s *TicketService) createRecord(input TicketCreateInput) (Task, error) {
 	return created, nil
 }
 
+// cloneTicketContext copies a create request's context so the caller's map is
+// never shared with the stored record. Empty stays nil.
+func cloneTicketContext(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 // buildTicketRecord validates a create request and constructs the record to
 // persist. Everything that can be rejected is rejected here, before the store
 // transaction opens, so an invalid request never takes a workspace lock.
@@ -610,6 +625,7 @@ func buildTicketRecord(workspaceID string, state TicketState, input TicketCreate
 		SourceType:    source,
 		SourceID:      strings.TrimSpace(input.SourceID),
 		LinkedNoteIDs: NormalizeLinkedNoteIDs(input.LinkedNoteIDs),
+		Context:       cloneTicketContext(input.Context),
 		TicketState:   state,
 		Status:        legacyStatusForTicketState(state, ""),
 		TicketVersion: 1,

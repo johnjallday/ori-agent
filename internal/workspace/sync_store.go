@@ -507,6 +507,7 @@ func restoreMissionFromDisk(ws, disk *Workspace) {
 	ws.MissionExecutionCount = disk.MissionExecutionCount
 	ws.MissionFailureCount = disk.MissionFailureCount
 	ws.MissionCadenceHeartbeat = disk.MissionCadenceHeartbeat
+	ws.MissionRuns = append([]MissionRunRecord(nil), disk.MissionRuns...)
 }
 
 func cloneToolboxDefinitions(definitions []ToolboxDefinition) []ToolboxDefinition {

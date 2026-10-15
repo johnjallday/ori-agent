@@ -47,6 +47,7 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"next_mission_run_at":       ws.NextMissionRunAt,
 		"mission_execution_count":   ws.MissionExecutionCount,
 		"mission_failure_count":     ws.MissionFailureCount,
+		"mission_runs":              missionRunsOrEmpty(ws.MissionRuns),
 		"open_findings_count":       openFindings,
 		"unclassified_mcp_ids":      mcpUnclassified,
 		"unclassified_skill_ids":    skillUnclassified,
@@ -56,6 +57,14 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Error("encode mission response", logger.Fields{"error": err})
 	}
+}
+
+// missionRunsOrEmpty keeps the run history a JSON array even before any run.
+func missionRunsOrEmpty(runs []MissionRunRecord) []MissionRunRecord {
+	if runs == nil {
+		return []MissionRunRecord{}
+	}
+	return runs
 }
 
 // UpdateMissionRequest is the body for PUT /api/workspaces/{workspaceID}/mission.

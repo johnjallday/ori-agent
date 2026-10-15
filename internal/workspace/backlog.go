@@ -37,6 +37,8 @@ type BacklogCreateInput struct {
 	ReferenceURL string
 	SourceType   string
 	SourceID     string
+	// Context seeds the ticket's Task.Context (a goal suggestion's reason).
+	Context map[string]any
 }
 
 // BacklogUpdateInput describes a supported-field edit to an existing Backlog
@@ -215,6 +217,7 @@ func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
 		ReferenceURL: input.ReferenceURL,
 		Source:       input.SourceType,
 		SourceID:     input.SourceID,
+		Context:      input.Context,
 		Actor:        TicketActorUser,
 	})
 	if err != nil {

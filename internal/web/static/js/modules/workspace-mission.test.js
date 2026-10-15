@@ -29,6 +29,41 @@ test('a goal card leads with the goal text and drops the empty-state line (FR8)'
   assert.equal(summary.canRun, true);
 });
 
+// FR21: run history shows each run's counts; a failed run shows its error and
+// keeps the raw answer behind "Show output", escaped.
+test('run history lists counts and a failed run raw output', () => {
+  const mission = loadWorkspaceMission();
+  const html = mission.runHistoryHTML([
+    {
+      origin: 'manual',
+      succeeded: false,
+      parse_status: 'failed',
+      error: 'the answer is not JSON',
+      output_tail: 'I think <b>everything</b> is fine',
+      finished_at: new Date().toISOString()
+    },
+    {
+      origin: 'cadence',
+      succeeded: true,
+      tasks_created: 3,
+      findings_created: 2,
+      duplicates_skipped: 1,
+      dropped_by_cap: 2,
+      finished_at: new Date().toISOString()
+    }
+  ]);
+  assert.match(html, /<strong>Failed<\/strong>\s*<span>Run now<\/span>/);
+  assert.match(html, /the answer is not JSON/);
+  assert.match(
+    html,
+    /<summary>Show output<\/summary><pre>I think &lt;b&gt;everything&lt;\/b&gt; is fine<\/pre>/
+  );
+  assert.match(html, /<strong>Completed<\/strong>\s*<span>Scheduled<\/span>/);
+  assert.match(html, /3 tasks suggested · 2 findings · 1 duplicate skipped · 2 over the limit/);
+  assert.equal((html.match(/Show output/g) || []).length, 1, 'only the failed run keeps output');
+  assert.match(mission.runHistoryHTML([]), /No goal runs yet\./);
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });
