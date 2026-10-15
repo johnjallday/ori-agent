@@ -13,7 +13,10 @@ import (
 // on both the Run now and the baseline endpoints, and never calls the runner.
 func TestManualGoalRunRequiresAGoal(t *testing.T) {
 	ts, store, trig := newSchedulerWithStub(t)
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "No Goal"})
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "No Goal", Agents: []string{"Writer"}})
+	if err := ws.SetEntryAgentName("Writer"); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Save(ws); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +47,7 @@ func TestManualGoalRunRequiresAGoal(t *testing.T) {
 		t.Fatalf("a run started without a goal: %d calls", trig.callCount())
 	}
 
-	// With a goal the same request runs.
+	// With a goal the same request starts a run in the background (202).
 	if err := store.Update(ws.ID, func(w *Workspace) error {
 		w.Mission = "Keep the brand voice consistent"
 		return nil
@@ -53,7 +56,8 @@ func TestManualGoalRunRequiresAGoal(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/mission/trigger", nil))
-	if rec.Code != http.StatusOK || trig.callCount() != 1 {
+	ts.wg.Wait()
+	if rec.Code != http.StatusAccepted || trig.callCount() != 1 {
 		t.Fatalf("with a goal: status %d, calls %d: %s", rec.Code, trig.callCount(), rec.Body.String())
 	}
 }

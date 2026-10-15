@@ -126,6 +126,21 @@ test('Not useful asks for an optional reason, then removes the suggestion once',
   assert.equal(view.backlogNotUsefulId, '');
 });
 
+test('the drawer says a goal run is looking for work while one is in flight (FR27)', () => {
+  const view = makeView([suggested]);
+  globalThis.window = { workspaceMission: { isRunning: () => true } };
+  try {
+    assert.match(
+      view.backlogDrawerHTML(),
+      /<div class="ws-cmd-drawer-goal-run" role="status">Looking for things to work on…<\/div>/
+    );
+    globalThis.window.workspaceMission.isRunning = () => false;
+    assert.ok(!view.backlogDrawerHTML().includes('ws-cmd-drawer-goal-run'));
+  } finally {
+    delete globalThis.window;
+  }
+});
+
 test('a failed Not useful keeps the form open with the reason', async () => {
   const view = makeView([suggested], { dismissBacklogSuggestion: () => Promise.resolve(false) });
   view.openBacklogNotUseful('s1');

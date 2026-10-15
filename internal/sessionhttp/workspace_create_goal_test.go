@@ -151,4 +151,15 @@ func TestCreateWorkspaceGoalNeverEnablesOrRunsTheMission(t *testing.T) {
 		t.Fatalf("create must only store the goal: enabled=%v cadence=%v runs=%d last=%v",
 			ws.MissionEnabled, ws.Cadence, ws.MissionExecutionCount, ws.LastMissionRunAt)
 	}
+	// FR25: the first goal run waits for the first open.
+	if !ws.GoalFirstRunPending {
+		t.Fatal("a workspace created with a goal must mark its first run pending")
+	}
+
+	// No goal, no pending run.
+	_, resp = postCreateWorkspace(t, handler, `{"name":"Goal-less Desk","mission":""}`)
+	folder, _ = resp["folder"].(map[string]any)
+	if plain, err := handler.workspaceStore.Get(folder["id"].(string)); err != nil || plain.GoalFirstRunPending {
+		t.Fatalf("a workspace created without a goal has nothing pending: %v %v", plain.GoalFirstRunPending, err)
+	}
 }

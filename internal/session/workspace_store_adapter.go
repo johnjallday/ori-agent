@@ -457,6 +457,7 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		MissionCadenceHeartbeat: ws.MissionCadenceHeartbeat,
 		MissionRuns:             ws.MissionRuns,
 		DismissedSuggestions:    ws.DismissedSuggestions,
+		GoalFirstRunPending:     ws.GoalFirstRunPending,
 	}); err != nil {
 		logger.Warn("Failed to marshal workspace goal", logger.Fields{"workspace_id": ws.ID, "error": err})
 	} else {
@@ -498,6 +499,7 @@ type workspaceMissionState struct {
 	MissionCadenceHeartbeat bool                            `json:"mission_cadence_heartbeat,omitempty"`
 	MissionRuns             []workspace.MissionRunRecord    `json:"mission_runs,omitempty"`
 	DismissedSuggestions    []workspace.DismissedSuggestion `json:"dismissed_suggestions,omitempty"`
+	GoalFirstRunPending     bool                            `json:"goal_first_run_pending,omitempty"`
 }
 
 // workspaceToolboxState is the envelope carried in ToolboxStateJSON.
@@ -727,6 +729,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			agentWS.MissionCadenceHeartbeat = mission.MissionCadenceHeartbeat
 			agentWS.MissionRuns = mission.MissionRuns
 			agentWS.DismissedSuggestions = mission.DismissedSuggestions
+			agentWS.GoalFirstRunPending = mission.GoalFirstRunPending
 		}
 	}
 

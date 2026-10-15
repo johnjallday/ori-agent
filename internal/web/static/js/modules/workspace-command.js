@@ -6443,6 +6443,9 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-drawer-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
       escapeHtml(this._backlogDrawerAnnounce || '') +
       '</div>' +
+      (this.goalRunInFlight()
+        ? '<div class="ws-cmd-drawer-goal-run" role="status">Looking for things to work on…</div>'
+        : '') +
       (this.backlogQuickCaptureOpen ? this.backlogQuickCaptureHTML() : '') +
       '<label class="ws-cmd-backlog-descendants">' +
       '<input type="checkbox" data-cmd-backlog-descendants-toggle' +
@@ -6456,6 +6459,13 @@ export class WorkspaceCommandView {
       '</div>' +
       this.backlogSyncPanelHTML()
     );
+  }
+
+  // A goal run is looking for work; its suggestions land in this drawer when
+  // it ends (workspace-goal-suggestions FR27).
+  goalRunInFlight() {
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    return !!(mission && typeof mission.isRunning === 'function' && mission.isRunning());
   }
 
   backlogQuickCaptureHTML() {

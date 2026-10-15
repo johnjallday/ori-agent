@@ -246,6 +246,10 @@ type Workspace struct {
 	// hard heartbeat regardless of event activity. Default false = an
 	// event-fired run pushes the next cadence run back, like any other run.
 	MissionCadenceHeartbeat bool `json:"mission_cadence_heartbeat,omitempty"`
+	// GoalFirstRunPending marks a workspace created with a goal whose first
+	// goal run waits for the first time it is opened (FR25). Consumed once by
+	// POST .../mission/first-open; the startup backfill never sets it.
+	GoalFirstRunPending bool `json:"goal_first_run_pending,omitempty"`
 	// MissionRuns is the recent goal-run history, newest first and capped at
 	// MissionRunHistoryLimit: what each run created, skipped and dropped, and
 	// for an unreadable answer the raw tail (FR21). Persisted with the Goal.

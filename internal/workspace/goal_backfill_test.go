@@ -47,8 +47,8 @@ func TestBackfillGoalsFromBootstrap(t *testing.T) {
 		if ws.Mission != want {
 			t.Fatalf("%s Mission = %q, want %q", ws.Name, ws.Mission, want)
 		}
-		if ws.MissionEnabled || ws.Cadence != nil || ws.MissionExecutionCount != 0 {
-			t.Fatalf("%s: backfill must not enable or run the goal: %+v", ws.Name, ws)
+		if ws.MissionEnabled || ws.Cadence != nil || ws.MissionExecutionCount != 0 || ws.GoalFirstRunPending {
+			t.Fatalf("%s: backfill must not enable, run or queue the goal: %+v", ws.Name, ws)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, GoalBackfillMarker)); err != nil {

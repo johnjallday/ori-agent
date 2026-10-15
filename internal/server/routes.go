@@ -1646,6 +1646,7 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", s.Handlers.Workspace.TriggerMission)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", s.Handlers.Workspace.RunBaselineNow)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/first-open", s.Handlers.Workspace.GoalFirstOpen)
 
 	// Native-MCP CLI tooling opt-in (workspace + per-agent). Gates whether a
 	// CLI-provider agent may run workspace MCP/built-in tools natively. See

@@ -72,6 +72,87 @@ test('an unset autonomy level reads as Watch, the level a goal run applies', () 
   assert.equal(mission.effectiveAutonomy('propose'), 'propose');
 });
 
+// FR27: while a goal run executes — started anywhere — the card says so and
+// Run now is disabled; a run that could not start shows why (FR24).
+test('the card shows a run in flight and why a run could not start', () => {
+  const mission = loadWorkspaceMission();
+  const running = mission.summarize({ mission: 'Ship the launch', run_in_flight: true });
+  assert.equal(running.label, 'Running');
+  assert.equal(running.actionStatus, 'Looking for things to work on…');
+  assert.equal(running.canRun, false);
+  assert.equal(running.runTitle, 'A goal run is already in progress');
+
+  const blocked = mission.summarize({
+    mission: 'Ship the launch',
+    needs_attention: 'Set up a model to get suggestions'
+  });
+  assert.equal(blocked.actionStatus, 'Set up a model to get suggestions');
+  assert.equal(blocked.actionStatusKind, 'error');
+  assert.equal(blocked.canRun, true);
+
+  const idle = mission.summarize({ mission: 'Ship the launch' });
+  assert.equal(idle.actionStatus, '');
+});
+
+test('a finished run reports its counts; a failed one its error', () => {
+  const mission = loadWorkspaceMission();
+  const done = mission.settleRun({
+    done: true,
+    failed: false,
+    record: { succeeded: true, tasks_created: 3, findings_created: 2, duplicates_skipped: 1 }
+  });
+  assert.equal(
+    done.message,
+    'Run complete — 3 tasks suggested · 2 findings · 1 duplicate skipped.'
+  );
+  assert.equal(done.kind, null);
+
+  const failed = mission.settleRun({
+    done: true,
+    failed: true,
+    record: { succeeded: false, error: 'the answer is not JSON' }
+  });
+  assert.equal(
+    failed.message,
+    'Run failed: the answer is not JSON. See Goal Settings for details.'
+  );
+  const punctuated = mission.settleRun({
+    done: true,
+    failed: true,
+    record: { succeeded: false, error: 'the model timed out.' }
+  });
+  assert.equal(
+    punctuated.message,
+    'Run failed: the model timed out. See Goal Settings for details.'
+  );
+  assert.equal(failed.kind, 'error');
+
+  const slow = mission.settleRun({ done: false });
+  assert.match(slow.message, /Still running/);
+  assert.equal(
+    mission.runCountsText({ tasks_created: 1, findings_created: 0 }),
+    '1 task suggested · 0 findings'
+  );
+});
+
+// The result line outlives a re-render of the card (the Backlog refresh at the
+// end of a run re-renders it) and gives way to the next run.
+test('a finished run keeps its result under the goal until the next run', () => {
+  const mission = loadWorkspaceMission();
+  const { message } = mission.settleRun({
+    done: true,
+    failed: false,
+    record: { succeeded: true, tasks_created: 3, findings_created: 2 }
+  });
+  const after = mission.summarize({ mission: 'Ship the launch' });
+  assert.equal(after.actionStatus, message);
+  assert.equal(after.actionStatusKind, null);
+  assert.equal(after.label, 'Completed');
+  const next = mission.summarize({ mission: 'Ship the launch', run_in_flight: true });
+  assert.equal(next.actionStatus, 'Looking for things to work on…');
+  assert.equal(mission.summarize({ mission: '' }).actionStatus, '', 'no goal, no result line');
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });

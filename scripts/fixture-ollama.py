@@ -10,13 +10,15 @@ Replies:
   * A goal (mission) run - any message containing "--- MISSION CONTEXT ---" -
     gets the contents of --mission-response, re-read on every request so a
     demo can swap the fixture between runs. Default: {"items": []}.
+    --mission-delay holds that answer for N seconds so a demo can see a run
+    in flight.
   * Anything else gets --chat-response (re-read likewise), or a short reply.
 
 The fixture never calls tools. Stdlib only; stop it by PID.
 
 Usage:
   scripts/fixture-ollama.py --port 11500 --log "$SANDBOX/fixture-requests.jsonl" \
-      [--mission-response path] [--chat-response path]
+      [--mission-response path] [--mission-delay seconds] [--chat-response path]
 """
 
 import argparse
@@ -98,6 +100,9 @@ class Fixture(BaseHTTPRequestHandler):
                                          "model": request.get("model"), "stream": bool(request.get("stream")),
                                          "messages": messages}) + "\n")
 
+        if mission and self.server.mission_delay > 0:
+            time.sleep(self.server.mission_delay)
+
         done = {"model": request.get("model") or MODEL, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "done": True, "done_reason": "stop", "prompt_eval_count": 1, "eval_count": 1}
         if request.get("stream"):
@@ -117,12 +122,14 @@ def main():
     parser.add_argument("--port", type=int, default=11500)
     parser.add_argument("--log", required=True, help="JSONL file that records every /api/chat request")
     parser.add_argument("--mission-response", default="", help="file whose contents answer goal (mission) runs")
+    parser.add_argument("--mission-delay", type=float, default=0, help="seconds to hold each goal-run answer")
     parser.add_argument("--chat-response", default="", help="file whose contents answer everything else")
     args = parser.parse_args()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Fixture)
     server.log_path = args.log
     server.mission_response = args.mission_response
+    server.mission_delay = args.mission_delay
     server.chat_response = args.chat_response
     print(f"FIXTURE_OLLAMA=http://127.0.0.1:{args.port} model={MODEL} log={args.log}", flush=True)
     try:

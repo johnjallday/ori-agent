@@ -118,16 +118,31 @@ func (b *MissionBridge) TriggerMissionRun(ctx context.Context, workspaceID strin
 // cadence-heartbeat hold. The zero-value opts reproduce TriggerMissionRun
 // exactly; the cadence scheduler keeps calling the plain method.
 func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID string, cycleOrdinal int, opts workspace.MissionRunOptions) (string, error) {
+	runID, execute, err := b.StartMissionRun(ctx, workspaceID, cycleOrdinal, opts)
+	if err != nil {
+		return runID, err
+	}
+	return runID, execute()
+}
+
+// StartMissionRun prepares a goal run and creates its run record, returning
+// the run ID at once and a function that executes the run to completion
+// (model call, reading the answer, storing suggestions, recording the run).
+// The scheduler calls execute on its own goroutine, which is what lets Run now
+// answer 202 with a run ID instead of holding the request open for minutes
+// (workspace-goal-suggestions FR26). ctx bounds the run; execute applies the
+// bridge's execution timeout on top of it.
+func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string, cycleOrdinal int, opts workspace.MissionRunOptions) (string, func() error, error) {
 	if b == nil {
-		return "", fmt.Errorf("mission bridge not configured")
+		return "", nil, fmt.Errorf("mission bridge not configured")
 	}
 	ws, err := b.workspaceStore.Get(workspaceID)
 	if err != nil {
-		return "", fmt.Errorf("load workspace: %w", err)
+		return "", nil, fmt.Errorf("load workspace: %w", err)
 	}
 	agentName := strings.TrimSpace(ws.EntryAgentName())
 	if agentName == "" {
-		return "", fmt.Errorf("workspace %q has no entry agent; mission cannot run", workspaceID)
+		return "", nil, fmt.Errorf("workspace %q has no entry agent; mission cannot run", workspaceID)
 	}
 
 	// Compose the system prompt: existing manager prompt + mission framing.
@@ -193,21 +208,18 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
-		return "", fmt.Errorf("marshal mission task payload: %w", err)
+		return "", nil, fmt.Errorf("marshal mission task payload: %w", err)
 	}
 	rawPayload := RawConfig(payload)
 	cfgPayload, err := json.Marshal(OriAgentExecutorConfig{TaskPayload: &rawPayload})
 	if err != nil {
-		return "", fmt.Errorf("marshal ori_agent executor config: %w", err)
+		return "", nil, fmt.Errorf("marshal ori_agent executor config: %w", err)
 	}
 	rawConfig := RawConfig(cfgPayload)
 
 	policy := buildMissionRunPolicy(workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy))
 
-	runCtx, cancel := context.WithTimeout(ctx, b.executionTimeout)
-	defer cancel()
-
-	run, err := b.service.CreateRun(runCtx, workspaceID, CreateRunRequest{
+	run, err := b.service.CreateRun(ctx, workspaceID, CreateRunRequest{
 		ProfileID: ProfileGeneral,
 		Executor: Executor{
 			Kind:   ExecutorKindOriAgent,
@@ -236,35 +248,46 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 			})
 			return nil
 		})
-		return "", fmt.Errorf("create mission run: %w", err)
+		return "", nil, fmt.Errorf("create mission run: %w", err)
 	}
 
+	execute := func() error {
+		return b.executeMissionRun(ctx, workspaceID, run.ID, opts)
+	}
+	return run.ID, execute, nil
+}
+
+// executeMissionRun runs a created goal run to completion and records it.
+func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runID string, opts workspace.MissionRunOptions) error {
+	runCtx, cancel := context.WithTimeout(ctx, b.executionTimeout)
+	defer cancel()
+
 	started := time.Now()
-	execErr := b.service.ExecuteRun(runCtx, workspaceID, run.ID)
+	execErr := b.service.ExecuteRun(runCtx, workspaceID, runID)
 
 	// Read the resulting artifact regardless of execErr — partial output
 	// can still be parsed and is more useful than nothing.
-	artifacts, listErr := b.store.ListArtifacts(ctx, workspaceID, run.ID)
+	artifacts, listErr := b.store.ListArtifacts(ctx, workspaceID, runID)
 	if listErr != nil {
 		logger.Warn("mission bridge: list artifacts after run", logger.Fields{
-			"workspace_id": workspaceID, "run_id": run.ID, "error": listErr,
+			"workspace_id": workspaceID, "run_id": runID, "error": listErr,
 		})
 	}
 	result, _ := taskResultFromArtifacts(artifacts)
 
-	record := workspace.MissionRunRecord{RunID: run.ID, Origin: missionRunOrigin(opts), StartedAt: started}
+	record := workspace.MissionRunRecord{RunID: runID, Origin: missionRunOrigin(opts), StartedAt: started}
 	// A run that failed before it answered has nothing to read; one that
 	// answered is read even when execution reported an error, because
 	// partial output is more useful than nothing.
 	var parseErr error
 	if execErr == nil || strings.TrimSpace(result) != "" {
-		parseErr = b.storeMissionOutput(workspaceID, run.ID, result, &record)
+		parseErr = b.storeMissionOutput(workspaceID, runID, result, &record)
 	}
 	if parseErr != nil {
 		logger.Warn("mission bridge: goal run answer could not be read", logger.Fields{
-			"workspace_id": workspaceID, "run_id": run.ID, "error": parseErr,
+			"workspace_id": workspaceID, "run_id": runID, "error": parseErr,
 		})
-		b.fileUnreadableAnswerFinding(workspaceID, run.ID, parseErr, record.OutputTail)
+		b.fileUnreadableAnswerFinding(workspaceID, runID, parseErr, record.OutputTail)
 	}
 
 	// A run counts as successful only when it executed AND its answer could
@@ -292,12 +315,12 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 	})
 
 	if execErr != nil {
-		return run.ID, fmt.Errorf("execute mission run: %w", execErr)
+		return fmt.Errorf("execute mission run: %w", execErr)
 	}
 	if parseErr != nil {
-		return run.ID, fmt.Errorf("read goal run answer: %w", parseErr)
+		return fmt.Errorf("read goal run answer: %w", parseErr)
 	}
-	return run.ID, nil
+	return nil
 }
 
 // storeMissionOutput reads a run's answer and stores what it suggests: task

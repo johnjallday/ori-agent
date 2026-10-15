@@ -1004,6 +1004,7 @@ func (b *ServerBuilder) initializeMissionBridge() {
 		return
 	}
 	b.taskScheduler.SetMissionTrigger(bridge)
+	b.taskScheduler.SetMissionModelCheck(b.goalRunModelCheck)
 	b.missionBridge = bridge
 	if b.workspaceHandler != nil {
 		b.workspaceHandler.SetScheduler(b.taskScheduler)
