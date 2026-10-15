@@ -2805,6 +2805,14 @@ button.ws-cmd-rpg-class-card:focus-visible {
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
+/* The goal sentence itself is the heading: sentence case, readable length. */
+.ws-cmd-mission-title.is-goal {
+  max-width: 88ch;
+  font-size: 15px;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .ws-cmd-mission-text {
   max-width: 88ch;
   margin: 0;

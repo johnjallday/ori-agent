@@ -89,7 +89,7 @@ func writeStaleEmailOpsManifest(t *testing.T, manifest string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale := strings.Replace(string(data), `"builtin_version": 5,`, `"builtin_version": 4,`, 1)
+	stale := strings.Replace(string(data), `"builtin_version": 6,`, `"builtin_version": 4,`, 1)
 	stale = strings.Replace(stale, "\n  \"setup_quest\": \"email_ops_setup\",", "", 1)
 	if stale == string(data) || strings.Contains(stale, "setup_quest") {
 		t.Fatal("could not build the stale email-ops manifest fixture")

@@ -314,6 +314,14 @@
                 </div>
 
                 <textarea id="folderDescriptionInput" class="modern-input w-100" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
+
+                <!-- Goal mirrors the blueprint's goal or the description until
+                     the user types in it (sessions.js syncWorkspaceGoalMirror). -->
+                <div id="workspaceGoalField" class="mt-2">
+                  <label id="folderGoalLabel" for="folderGoalInput" class="workspace-setup-title">Goal <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
+                  <p id="folderGoalHelp" class="workspace-setup-help mb-1">Your agents use this to suggest work. You can change it later.</p>
+                  <textarea id="folderGoalInput" class="modern-input w-100" placeholder="What should this workspace achieve?" rows="2" style="resize: vertical;" aria-describedby="folderGoalHelp"></textarea>
+                </div>
               </div>
 
               <section id="workspaceCreatorDestinationCard" class="workspace-setup-card mb-2">

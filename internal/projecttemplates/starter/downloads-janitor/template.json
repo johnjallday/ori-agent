@@ -6,7 +6,8 @@
   "behavior_profile": "general",
   "builtin": true,
   "retired": true,
-  "builtin_version": 4,
+  "builtin_version": 5,
+  "goal": "Keep my Downloads folder tidy by filing finished downloads with my approval.",
   "tags": [
     "files",
     "local-first",

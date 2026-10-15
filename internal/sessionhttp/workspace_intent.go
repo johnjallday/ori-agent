@@ -33,31 +33,22 @@ func workspaceBootstrapStringValue(sharedData map[string]any, key string) string
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func mergeWorkspaceBootstrapForUpdate(sharedData map[string]any, description string, descriptionTouched bool, input *workspaceBootstrapRequest) map[string]any {
-	if input != nil {
-		goal := strings.TrimSpace(input.Goal)
-		if descriptionTouched {
-			goal = strings.TrimSpace(description)
-		}
-		if goal == "" {
-			goal = strings.TrimSpace(description)
-		}
-		return normalizeWorkspaceBootstrap(&workspaceBootstrapRequest{
-			Goal:         goal,
-			Systems:      strings.TrimSpace(input.Systems),
-			Capabilities: strings.TrimSpace(input.Capabilities),
-			Context:      strings.TrimSpace(input.Context),
-		})
-	}
-
-	if !descriptionTouched {
+// mergeWorkspaceBootstrapForUpdate applies a workspace update to the legacy
+// workspace_bootstrap map. The description is no longer the goal: the goal
+// lives in Workspace.Mission, so a description edit leaves the stored
+// bootstrap goal alone, and an update that omits a goal keeps the stored one.
+func mergeWorkspaceBootstrapForUpdate(sharedData map[string]any, input *workspaceBootstrapRequest) map[string]any {
+	if input == nil {
 		return workspaceBootstrapMap(sharedData)
 	}
-
+	goal := strings.TrimSpace(input.Goal)
+	if goal == "" {
+		goal = workspaceBootstrapStringValue(sharedData, "goal")
+	}
 	return normalizeWorkspaceBootstrap(&workspaceBootstrapRequest{
-		Goal:         strings.TrimSpace(description),
-		Systems:      workspaceBootstrapStringValue(sharedData, "systems"),
-		Capabilities: workspaceBootstrapStringValue(sharedData, "capabilities"),
-		Context:      workspaceBootstrapStringValue(sharedData, "context"),
+		Goal:         goal,
+		Systems:      strings.TrimSpace(input.Systems),
+		Capabilities: strings.TrimSpace(input.Capabilities),
+		Context:      strings.TrimSpace(input.Context),
 	})
 }

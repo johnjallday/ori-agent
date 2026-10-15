@@ -187,6 +187,26 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// writeMissionTriggerError writes the response for a refused or failed manual
+// goal run and reports whether it wrote one. nil writes nothing.
+func writeMissionTriggerError(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, ErrMissionTriggerNotConfigured):
+		orihttp.ServiceUnavailable(w, err.Error())
+	case errors.Is(err, ErrMissionGoalRequired):
+		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
+			orihttp.NewAPIError("goal_required", err.Error()))
+	case errors.Is(err, ErrMissionBindingsUnclassified):
+		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
+			orihttp.NewAPIError("mission_bindings_unclassified", err.Error()))
+	default:
+		orihttp.InternalError(w, fmt.Sprintf("Failed to trigger mission: %v", err))
+	}
+	return true
+}
+
 // TriggerMission handles POST /api/workspaces/{workspaceID}/mission/trigger.
 // Fires a mission run on demand, regardless of cadence. The cycle ordinal is
 // the next one in sequence so manual + scheduled runs share a monotonic counter.
@@ -201,17 +221,7 @@ func (h *HTTPHandler) TriggerMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID, err := h.scheduler.TriggerMissionManually(r.Context(), workspaceID)
-	if errors.Is(err, ErrMissionTriggerNotConfigured) {
-		orihttp.ServiceUnavailable(w, err.Error())
-		return
-	}
-	if errors.Is(err, ErrMissionBindingsUnclassified) {
-		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
-			orihttp.NewAPIError("mission_bindings_unclassified", err.Error()))
-		return
-	}
-	if err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to trigger mission: %v", err))
+	if writeMissionTriggerError(w, err) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -247,17 +257,7 @@ func (h *HTTPHandler) RunBaselineNow(w http.ResponseWriter, r *http.Request) {
 	}
 	wasBaseline := ws.MissionExecutionCount == 0
 	runID, err := h.scheduler.TriggerMissionManually(r.Context(), workspaceID)
-	if errors.Is(err, ErrMissionTriggerNotConfigured) {
-		orihttp.ServiceUnavailable(w, err.Error())
-		return
-	}
-	if errors.Is(err, ErrMissionBindingsUnclassified) {
-		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
-			orihttp.NewAPIError("mission_bindings_unclassified", err.Error()))
-		return
-	}
-	if err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to trigger mission: %v", err))
+	if writeMissionTriggerError(w, err) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

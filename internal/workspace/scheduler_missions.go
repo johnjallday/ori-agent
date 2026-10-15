@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -239,6 +240,9 @@ func (ts *TaskScheduler) TriggerMissionManually(ctx context.Context, workspaceID
 	ws, err := ts.workspaceStore.Get(workspaceID)
 	if err != nil {
 		return "", err
+	}
+	if strings.TrimSpace(ws.Mission) == "" {
+		return "", ErrMissionGoalRequired
 	}
 	if !MissionBindingsReady(ws) {
 		return "", ErrMissionBindingsUnclassified

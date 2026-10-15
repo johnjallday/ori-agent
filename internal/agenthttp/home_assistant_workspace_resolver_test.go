@@ -13,6 +13,7 @@ func newHomeWorkspaceResolverTestWorkspace(id, name, description string, agents 
 		ID:             id,
 		Name:           name,
 		Description:    description,
+		Mission:        description,
 		AgentInstances: workspace.AgentInstancesFromNames(agents...),
 		Status:         workspace.StatusActive,
 		SharedData: map[string]any{
@@ -64,6 +65,30 @@ func (s *homeWorkspaceResolverFeedbackReaderStub) PreferredWorkspaceForPrompt(_ 
 
 func (s *homeWorkspaceResolverFeedbackReaderStub) RecentWorkspaceCorrections(_ context.Context, _ int) ([]HomeAssistantWorkspaceCorrection, error) {
 	return append([]HomeAssistantWorkspaceCorrection(nil), s.recentCorrections...), nil
+}
+
+// The goal signal reads Workspace.Mission, the one canonical goal; the legacy
+// setup-time bootstrap goal no longer scores (workspace-goal-suggestions FR3).
+func TestScoreHomeAssistantWorkspace_GoalComesFromMission(t *testing.T) {
+	hasGoalReason := func(score homeAssistantWorkspaceScore) bool {
+		for _, reason := range score.Reasons {
+			if reason == "matched workspace goal" {
+				return true
+			}
+		}
+		return false
+	}
+	ws := &workspace.Workspace{ID: "ws-brand", Name: "Desk", Mission: "Keep the brand voice consistent across newsletters"}
+	if score := scoreHomeAssistantWorkspace("draft the newsletters in our brand voice", ws); !hasGoalReason(score) {
+		t.Fatalf("a prompt matching the goal must score it: %+v", score)
+	}
+
+	legacy := &workspace.Workspace{ID: "ws-legacy", Name: "Desk", SharedData: map[string]any{
+		"workspace_bootstrap": map[string]any{"goal": "Keep the brand voice consistent across newsletters"},
+	}}
+	if score := scoreHomeAssistantWorkspace("draft the newsletters in our brand voice", legacy); hasGoalReason(score) {
+		t.Fatalf("a bootstrap-only goal must no longer score: %+v", score)
+	}
 }
 
 func TestHomeAssistantWorkspaceResolver_ConfidentMatch(t *testing.T) {

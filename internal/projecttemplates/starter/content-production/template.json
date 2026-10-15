@@ -4,7 +4,8 @@
   "icon": "\u270f",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
+  "goal": "Publish consistent, on-brand content on a steady schedule.",
   "tags": [
     "content"
   ],

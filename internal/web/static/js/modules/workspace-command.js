@@ -1310,7 +1310,7 @@ export class WorkspaceCommandView {
   commandSubtitle(mode) {
     const workflow = mode ? 'Workflow · ' + mode : '';
     const mission = this.missionSummary();
-    const missionLabel = mission && mission.label ? 'Mission · ' + mission.label : '';
+    const missionLabel = mission && mission.label ? 'Goal · ' + mission.label : '';
     return [workflow, missionLabel].filter(Boolean).join(' · ');
   }
 
@@ -1842,11 +1842,15 @@ export class WorkspaceCommandView {
     );
   }
 
+  // The goal text leads the card (workspace-goal-suggestions FR8): it is the
+  // heading itself, and the paragraph below is reserved for the empty-state
+  // prompt (or the loading line before the goal state arrives).
   renderMissionPanel() {
     const summary = this.missionSummary();
     const missionText = String(summary.mission || '').trim();
-    const title = summary.title || (missionText ? 'Current goal' : 'Workspace goal');
-    const text = summary.text || missionText || 'Loading workspace goal...';
+    const loaded = typeof summary.mission === 'string';
+    const title = summary.title || missionText || 'Workspace goal';
+    const text = loaded ? String(summary.text || '') : 'Loading workspace goal...';
     const statusLabel = summary.label || 'Loading';
     const statusClass = summary.className || 'is-loading';
     const cadence = summary.cadenceLabel || 'Cadence: loading';
@@ -1871,19 +1875,23 @@ export class WorkspaceCommandView {
       '" id="workspace-command-mission-card" aria-labelledby="workspace-command-mission-title">' +
       '<div class="ws-cmd-mission-main">' +
       '<div class="ws-cmd-mission-head">' +
-      '<span class="ws-cmd-mission-kicker">Mission</span>' +
+      '<span class="ws-cmd-mission-kicker">Goal</span>' +
       '<span class="ws-cmd-mission-status ' +
       escapeHtml(statusClass) +
       '" id="workspace-command-mission-status">' +
       escapeHtml(statusLabel) +
       '</span>' +
       '</div>' +
-      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title">' +
+      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title' +
+      (missionText ? ' is-goal' : '') +
+      '">' +
       escapeHtml(title) +
       '</h3>' +
       '<p id="workspace-command-mission-text" class="ws-cmd-mission-text' +
       (missionText ? '' : ' is-empty') +
-      '">' +
+      '"' +
+      (text ? '' : ' hidden') +
+      '>' +
       escapeHtml(text) +
       '</p>' +
       '<div class="ws-cmd-mission-meta" aria-label="Mission automation timing">' +
@@ -5208,7 +5216,7 @@ export class WorkspaceCommandView {
     // "Backlog" in its own accessible name/title (not just "Quest Board") so
     // the tool-belt button never obscures the real Backlog lifecycle (FR50).
     return [
-      { key: 'objective', label: 'Workspace Mission', icon: 'bi-bullseye' },
+      { key: 'objective', label: 'Workspace Goal', icon: 'bi-bullseye' },
       { key: 'objectives', label: 'Tasks', icon: 'bi-list-check' },
       { key: 'backlog', label: 'Backlog · Quest Board', icon: 'bi-journal-bookmark' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
@@ -5249,7 +5257,7 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-window-section is-objective">' +
       '<div class="ws-cmd-map-quest-frame">' +
-      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Mission</strong></div>' +
+      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Goal</strong></div>' +
       this.renderMissionPanel() +
       '</div></div>'
     );

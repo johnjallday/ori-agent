@@ -387,8 +387,13 @@ const sessionManager = {
         // The context fields live inside Advanced, so its collapsed summary
         // says when either holds something.
         if (fieldID !== 'folderDescriptionInput') this.updateBehaviorHint();
+        else this.syncWorkspaceGoalMirror();
       });
     }
+    // Typing in the Goal field ends mirroring for this open of the modal.
+    document.getElementById('folderGoalInput')?.addEventListener('input', event => {
+      if (event?.target?.dataset) event.target.dataset.goalEdited = '1';
+    });
     workspaceNameInput?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
@@ -3680,10 +3685,55 @@ const sessionManager = {
     }
   },
 
+  // The Goal field shows the selected blueprint's goal, else the description,
+  // until the user types in it; from then on it keeps what they typed, even
+  // when that is empty (workspace-goal-suggestions FR2).
+  mirroredWorkspaceGoal({
+    edited = false,
+    current = '',
+    description = '',
+    templateGoal = ''
+  } = {}) {
+    if (edited) return String(current || '');
+    return String(templateGoal || '').trim() || String(description || '').trim();
+  },
+
+  selectedTemplateGoal() {
+    const template = window.ProjectTemplateCard?.getSelectedTemplate?.() || null;
+    if (!template || template.blank) return '';
+    return String(template.goal || '').trim();
+  },
+
+  syncWorkspaceGoalMirror() {
+    const input = document.getElementById('folderGoalInput');
+    if (!input) return;
+    input.value = this.mirroredWorkspaceGoal({
+      edited: input.dataset?.goalEdited === '1',
+      current: input.value,
+      description: document.getElementById('folderDescriptionInput')?.value || '',
+      templateGoal: this.selectedTemplateGoal()
+    });
+  },
+
+  // The goal Create sends as `mission`. Without the field (older markup) the
+  // mirror rule alone decides it.
+  currentWorkspaceGoal() {
+    const input = document.getElementById('folderGoalInput');
+    if (input) {
+      this.syncWorkspaceGoalMirror();
+      return String(input.value || '').trim();
+    }
+    return this.mirroredWorkspaceGoal({
+      description: document.getElementById('folderDescriptionInput')?.value || '',
+      templateGoal: this.selectedTemplateGoal()
+    });
+  },
+
   getWorkspaceBootstrapFromModal() {
     const description = String(
       document.getElementById('folderDescriptionInput')?.value || ''
     ).trim();
+    const goal = this.currentWorkspaceGoal();
     const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
     const context = String(document.getElementById('folderContextInput')?.value || '').trim();
     const systemsList = systems
@@ -3694,9 +3744,9 @@ const sessionManager = {
       : [];
 
     return {
-      hasAny: Boolean(description || systems || context),
+      hasAny: Boolean(goal || systems || context),
       description,
-      goal: description,
+      goal,
       capabilities: '',
       systems,
       systemsList,
@@ -4357,6 +4407,11 @@ const sessionManager = {
       if (descriptionInput) descriptionInput.value = '';
       if (descriptionInput) descriptionInput.dataset.autofillDescription = '';
       if (primaryGoalInput) primaryGoalInput.value = '';
+      const goalInput = document.getElementById('folderGoalInput');
+      if (goalInput) {
+        goalInput.value = '';
+        if (goalInput.dataset) delete goalInput.dataset.goalEdited;
+      }
       if (systemsInput) systemsInput.value = '';
       if (contextInput) contextInput.value = '';
     }
@@ -9537,6 +9592,9 @@ const sessionManager = {
         : 'What this workspace is for and what Ori should help with';
     }
     if (bootstrapFields) bootstrapFields.hidden = ordinaryGroup;
+    // Groups have no goal of their own; their member workspaces do.
+    const goalField = document.getElementById('workspaceGoalField');
+    if (goalField) goalField.hidden = ordinaryGroup;
     // Color used to sit inside the destination card, so it vanished whenever a
     // blueprint fixed the placement. It stands on its own now and is hidden only
     // where no color is sent: import, guided group setup, and a managed Group
@@ -10389,6 +10447,7 @@ const sessionManager = {
       profile.blank ? '' : String(template?.description || ''),
       'autofillDescription'
     );
+    this.syncWorkspaceGoalMirror();
     this.syncWorkspaceDescriptionHelp();
     this.updateWorkspaceNameHint();
     this.applyTemplateBehavior(template);
@@ -13244,11 +13303,14 @@ const sessionManager = {
         };
     if (!ordinaryGroup && workspaceBootstrap.hasAny) {
       payload.workspace_bootstrap = {
-        goal: workspaceBootstrap.description || workspaceBootstrap.goal,
+        goal: workspaceBootstrap.goal,
         systems: workspaceBootstrap.systems,
         context: workspaceBootstrap.context
       };
     }
+    // The goal travels as its own field: the server stores it as the
+    // workspace's Mission, the one goal every workspace prompt reads.
+    if (!ordinaryGroup) payload.mission = String(workspaceBootstrap.goal || '').trim();
     // Agent behavior profile (mapped from the Starting point or manually
     // overridden). Sent for both create and import; the backend maps it via
     // workspacesettings.ProfileDefaults.

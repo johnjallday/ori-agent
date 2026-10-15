@@ -98,6 +98,16 @@
     propose: { label: 'Propose', desc: 'may draft inside the workspace, no external changes' }
   };
 
+  // The goal leads every goal card: the heading is the goal text itself, and
+  // the line under it appears only when there is no goal yet (FR8).
+  const EMPTY_GOAL_TITLE = 'No goal yet';
+  const EMPTY_GOAL_PROMPT = 'Set a goal so your agents can suggest work';
+
+  function goalCardCopy(mission) {
+    const goal = String(mission || '').trim();
+    return goal ? { title: goal, text: '' } : { title: EMPTY_GOAL_TITLE, text: EMPTY_GOAL_PROMPT };
+  }
+
   let latestState = null;
 
   // Guards against overlapping runs and keeps the goal card's Run button
@@ -405,12 +415,13 @@
       mission && mcp.length + skills.length > 0
         ? 'Classify MCP or skill bindings before scheduled runs.'
         : '';
+    const copy = goalCardCopy(mission);
     return {
       mission,
       label: status.label,
       className: status.className,
-      title: mission ? 'Current goal' : 'No goal set',
-      text: mission || 'No workspace goal yet.',
+      title: copy.title,
+      text: copy.text,
       cadenceLabel: `Cadence: ${cadenceLabel(current.cadence)}`,
       nextLabel: `Next: ${fmtNextRun(current.next_mission_run_at)}`,
       lastLabel: `Last: ${fmtLastRun(current.last_mission_run_at)}`,
@@ -434,7 +445,7 @@
     if (!el) return;
     const workflow = String(el.getAttribute('data-workflow-label') || '').trim();
     const summary = commandSummary(state);
-    const missionPart = summary.label ? `Mission · ${summary.label}` : '';
+    const missionPart = summary.label ? `Goal · ${summary.label}` : '';
     const text = [workflow, missionPart].filter(Boolean).join(' · ');
     el.textContent = text;
     el.hidden = !text;
@@ -460,9 +471,13 @@
       statusEl.textContent = summary.label;
       statusEl.className = `ws-cmd-mission-status ${summary.className}`;
     }
-    if (titleEl) titleEl.textContent = summary.title;
+    if (titleEl) {
+      titleEl.textContent = summary.title;
+      titleEl.classList.toggle('is-goal', !!summary.mission);
+    }
     if (textEl) {
       textEl.textContent = summary.text;
+      textEl.hidden = !summary.text;
       textEl.classList.toggle('is-empty', !summary.mission);
     }
     if (cadenceEl) cadenceEl.textContent = summary.cadenceLabel;
@@ -506,9 +521,11 @@
       statusEl.textContent = status.label;
       statusEl.className = `workspace-detail-goal-status ${status.className}`;
     }
-    if (titleEl) titleEl.textContent = mission ? 'Current goal' : 'No goal set';
+    const copy = goalCardCopy(mission);
+    if (titleEl) titleEl.textContent = copy.title;
     if (textEl) {
-      textEl.textContent = mission || 'No workspace goal yet.';
+      textEl.textContent = copy.text;
+      textEl.hidden = !copy.text;
       textEl.classList.toggle('is-empty', !mission);
     }
     if (cadenceEl) cadenceEl.textContent = `Cadence: ${cadenceLabel(state.cadence)}`;
@@ -936,7 +953,10 @@
       }
     } catch (e) {
       kind = 'error';
-      if (e.status === 412) {
+      if (e.status === 412 && e.code === 'goal_required') {
+        message = 'Set a goal before running.';
+        lastRunOutcome = { label: 'Blocked', className: 'is-blocked' };
+      } else if (e.status === 412) {
         message = 'Classify workspace bindings before running.';
         lastRunOutcome = { label: 'Blocked', className: 'is-blocked' };
       } else if (e.status === 503) {
@@ -1098,6 +1118,8 @@
     window.workspaceMission = Object.assign(window.workspaceMission || {}, {
       getState: () => latestState,
       getSummary: () => (latestState ? commandSummary(latestState) : {}),
+      // Pure summary of a given state, for module tests.
+      summarize: state => commandSummary(state || {}),
       renderCommandSurfaces: () => {
         if (latestState) renderCommandPanel(latestState);
       },

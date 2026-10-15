@@ -5,7 +5,8 @@
   "tagline": "Your calendar command center.",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
+  "goal": "Keep my calendar free of conflicts and make sure I walk into every meeting prepared.",
   "tags": [
     "calendar",
     "personal"

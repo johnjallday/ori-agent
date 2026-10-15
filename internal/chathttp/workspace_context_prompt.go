@@ -389,6 +389,11 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 		fmt.Sprintf("- Name: %q", sanitizeWorkspaceSnapshotText(ws.Name, workspaceSnapshotTextLimit)),
 	}
 
+	// The goal is what the user wants this workspace to achieve; suggestions
+	// and "what should I work on?" answers start from it.
+	if goal := sanitizeWorkspaceSnapshotText(ws.Mission, workspace.WorkspaceGoalPromptLimit); goal != "" {
+		lines = append(lines, fmt.Sprintf("- Goal: %q", goal))
+	}
 	if description := sanitizeWorkspaceSnapshotText(ws.Description, workspaceSnapshotPreviewLimit); description != "" {
 		lines = append(lines, fmt.Sprintf("- Description: %q", description))
 	}

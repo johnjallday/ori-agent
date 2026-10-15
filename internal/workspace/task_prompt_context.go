@@ -54,6 +54,10 @@ const (
 	taskPromptTextLimit      = 120
 	taskPromptPreviewLimit   = 160
 	taskPromptPathLimit      = 180
+	// WorkspaceGoalPromptLimit bounds the workspace goal wherever a prompt
+	// carries it. A goal is a sentence or two; this keeps a pasted essay from
+	// crowding out the task.
+	WorkspaceGoalPromptLimit = 500
 )
 
 // compactTaskSystemPrompt is a small-model-sized variant of the task system
@@ -287,6 +291,19 @@ func (h *LLMTaskHandler) taskOwnerUserID(task Task) string {
 		return userprofile.LocalUserID
 	}
 	return strings.TrimSpace(ws.OwnerUserID)
+}
+
+// taskWorkspaceGoal returns the task's workspace goal as its "Goal: <text>"
+// prompt line, or "".
+func (h *LLMTaskHandler) taskWorkspaceGoal(task Task) string {
+	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(task.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return GoalPromptLine(ws.Mission)
 }
 
 func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Task) string {
@@ -875,6 +892,14 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task,
 	fmt.Fprintf(&header, "**Task ID**: %s\n", task.ID)
 	fmt.Fprintf(&header, "**From**: %s\n", task.From)
 	fmt.Fprintf(&header, "**Priority**: %d/5\n\n", task.Priority)
+
+	// The workspace goal sits in the protected header of the user turn: every
+	// executor path and delegated subtask renders it, the context budget never
+	// trims it, and every provider keeps it (the Claude API provider drops
+	// system-role messages).
+	if goal := h.taskWorkspaceGoal(task); goal != "" {
+		fmt.Fprintf(&header, "## Workspace Goal\n\n%s\n\nWork toward this goal when the task leaves room for judgment.\n\n", goal)
+	}
 
 	processedDescription := h.substitutePlaceholders(task)
 	fmt.Fprintf(&header, "## Task Description\n\n%s\n\n", processedDescription)

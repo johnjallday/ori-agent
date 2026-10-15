@@ -42,7 +42,15 @@ type Handler struct {
 	reconciler *Reconciler
 	// resolvePolicy supplies the enforced policy snapshotted onto a version.
 	resolvePolicy PolicyResolver
+	// resolveContext supplies the free-form workspace context (its goal) the
+	// draft and revision prompts carry. Optional: without it plans draft
+	// without workspace context, as before.
+	resolveContext ContextResolver
 }
+
+// ContextResolver returns free-form workspace context for the planner's
+// prompts, such as the workspace goal. Empty means none.
+type ContextResolver func(ctx context.Context, workspaceID string) string
 
 // GuidanceResolver returns the model-guidance half of a workspace's planning
 // settings (FR-125).
@@ -105,6 +113,10 @@ func (h *Handler) SetReconciler(reconciler *Reconciler) { h.reconciler = reconci
 // SetPolicyResolver attaches the enforced-policy lookup snapshotted onto each
 // review version.
 func (h *Handler) SetPolicyResolver(resolve PolicyResolver) { h.resolvePolicy = resolve }
+
+// SetContextResolver attaches the workspace-context lookup (the goal) that
+// draft and revision prompts carry.
+func (h *Handler) SetContextResolver(resolve ContextResolver) { h.resolveContext = resolve }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
 // than by serializing the domain type directly, so adding an internal field
@@ -509,6 +521,7 @@ func (h *Handler) GenerateDraft(w http.ResponseWriter, r *http.Request) {
 		Guidance:           h.guidance(r.Context(), workspaceID),
 		Validation:         h.availability(r.Context(), workspaceID),
 		Artifacts:          h.artifacts(r.Context(), workspaceID),
+		WorkspaceContext:   h.workspaceContext(r.Context(), workspaceID),
 	})
 	if err != nil {
 		writeGenerationError(w, err)
@@ -912,6 +925,7 @@ func (h *Handler) RevisePlan(w http.ResponseWriter, r *http.Request) {
 		ExpectedRevision: req.Revision,
 		Guidance:         h.guidance(r.Context(), workspaceID),
 		Validation:       h.availability(r.Context(), workspaceID),
+		WorkspaceContext: h.workspaceContext(r.Context(), workspaceID),
 	})
 	if err != nil {
 		// A revision awaiting confirmation is not a failure; it is the
@@ -1060,6 +1074,13 @@ func (h *Handler) artifacts(ctx context.Context, workspaceID string) ArtifactPol
 		return ArtifactPolicy{}
 	}
 	return h.resolveArtifacts(ctx, workspaceID)
+}
+
+func (h *Handler) workspaceContext(ctx context.Context, workspaceID string) string {
+	if h.resolveContext == nil {
+		return ""
+	}
+	return h.resolveContext(ctx, workspaceID)
 }
 
 // --- Execution (FR-100 through FR-121) -------------------------------------

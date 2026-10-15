@@ -400,23 +400,27 @@ func loadTravelPlanningDetectionContext(
 	}
 }
 
+// workspaceBootstrapPlanningText is the workspace's stated intent: its goal
+// (Workspace.Mission, the canonical goal) plus the setup-time context and
+// capabilities from workspace_bootstrap.
 func workspaceBootstrapPlanningText(ws *workspace.Workspace) string {
-	if ws == nil || len(ws.SharedData) == 0 {
+	if ws == nil {
 		return ""
 	}
+	goal := strings.TrimSpace(ws.Mission)
 
 	raw, ok := ws.SharedData["workspace_bootstrap"]
 	if !ok || raw == nil {
-		return ""
+		return goal
 	}
 
 	bootstrap, ok := raw.(map[string]any)
 	if !ok {
-		return strings.TrimSpace(fmt.Sprint(raw))
+		return strings.TrimSpace(strings.Join(uniquePlanningContextParts([]string{goal, strings.TrimSpace(fmt.Sprint(raw))}), "\n"))
 	}
 
 	parts := []string{
-		workspaceBootstrapFieldText(bootstrap, "goal"),
+		goal,
 		workspaceBootstrapFieldText(bootstrap, "context"),
 		workspaceBootstrapFieldText(bootstrap, "capabilities"),
 	}

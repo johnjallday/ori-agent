@@ -5,7 +5,8 @@
   "tagline": "Review and file one intake folder safely.",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
+  "goal": "Keep this intake folder tidy by filing what arrives, with my approval before anything moves.",
   "tags": [
     "files",
     "local-first",

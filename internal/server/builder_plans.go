@@ -438,6 +438,7 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 	b.workspacePlanHandler.SetGuidanceResolver(b.resolvePlanGuidance)
 	b.workspacePlanHandler.SetArtifactPolicyResolver(b.resolvePlanArtifacts)
 	b.workspacePlanHandler.SetPolicyResolver(b.resolvePlanPolicy)
+	b.workspacePlanHandler.SetContextResolver(b.resolvePlanWorkspaceContext)
 
 	// Automatic execution runs in the background, so it outlives the request
 	// that started it and must be stopped explicitly at shutdown.
@@ -468,6 +469,20 @@ func (b *ServerBuilder) resolvePlanningProvider(context.Context) (llm.Provider, 
 		return nil, "", fmt.Errorf("no planning model is configured")
 	}
 	return result.Provider, result.Model, nil
+}
+
+// resolvePlanWorkspaceContext gives the planner the workspace goal, so a drafted
+// Plan serves what the user wants this workspace to achieve. Empty when the
+// workspace has no goal or cannot be read.
+func (b *ServerBuilder) resolvePlanWorkspaceContext(_ context.Context, workspaceID string) string {
+	if b.workspaceStore == nil {
+		return ""
+	}
+	ws, err := b.workspaceStore.Get(workspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return workspace.GoalPromptLine(ws.Mission)
 }
 
 // resolvePlanAvailability reports the agents a workspace can assign work to.

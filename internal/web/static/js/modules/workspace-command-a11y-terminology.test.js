@@ -46,7 +46,7 @@ test('terminology: Map window labels are presentation-only Mission/Tasks, keys u
   const options = view.mapWindowOptions();
   const objective = options.find(o => o.key === 'objective');
   const objectives = options.find(o => o.key === 'objectives');
-  assert.equal(objective.label, 'Workspace Mission');
+  assert.equal(objective.label, 'Workspace Goal');
   assert.equal(objectives.label, 'Tasks');
   // Panel keys are untouched — activeMapWindow state and every reference to
   // them elsewhere keeps working without a rename.

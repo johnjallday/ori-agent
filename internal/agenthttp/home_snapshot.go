@@ -23,6 +23,7 @@ const (
 	homeSnapshotMaxAgents        = 30
 	homeSnapshotPreviewLimit     = 180
 	homeSnapshotTextLimit        = 120
+	homeSnapshotGoalLimit        = 200
 )
 
 // HomeDateWindow is the activity window a snapshot is scoped to.
@@ -99,6 +100,9 @@ type HomeWorkspaceSummary struct {
 	AgentCount int
 	OpenTasks  int
 	UpdatedAt  time.Time
+	// Goal is the workspace's goal (Workspace.Mission), so the Home assistant
+	// can route a request to the workspace whose goal it serves.
+	Goal string
 }
 
 // HomeTaskSummary is a single task active within the snapshot window.
@@ -320,6 +324,7 @@ func BuildHomeSnapshot(ctx context.Context, sources HomeSnapshotSources, window 
 						AgentCount: workspaceAgentCount(ws),
 						OpenTasks:  stats["pending"] + stats["assigned"] + stats["in_progress"] + stats["waiting_for_choice"],
 						UpdatedAt:  ws.UpdatedAt,
+						Goal:       strings.TrimSpace(ws.Mission),
 					})
 				}
 				for _, t := range ws.Tasks {
@@ -549,9 +554,9 @@ func (s HomeSnapshot) PromptText() string {
 		b.WriteString("- none\n")
 	}
 	for _, ws := range s.Workspaces {
-		fmt.Fprintf(&b, "- %q [%s] agents=%d open_tasks=%d updated=%s (id=%s)\n",
+		fmt.Fprintf(&b, "- %q [%s] agents=%d open_tasks=%d updated=%s (id=%s)%s\n",
 			homeSnapshotClip(ws.Name, homeSnapshotTextLimit), ws.Status, ws.AgentCount, ws.OpenTasks,
-			homeSnapshotDate(ws.UpdatedAt), ws.ID)
+			homeSnapshotDate(ws.UpdatedAt), ws.ID, homeWorkspaceGoalText(ws.Goal))
 	}
 
 	fmt.Fprintf(&b, "\n### Agents (%d)\n\n", s.Meta.AgentCount)
@@ -629,6 +634,15 @@ func homeAgentWorkspacesText(workspaces []string) string {
 		clipped = append(clipped, homeSnapshotClip(name, homeSnapshotTextLimit))
 	}
 	return " [" + strings.Join(clipped, ", ") + suffix + "]"
+}
+
+// homeWorkspaceGoalText renders a workspace's goal for its snapshot line.
+func homeWorkspaceGoalText(goal string) string {
+	clipped := homeSnapshotClip(goal, homeSnapshotGoalLimit)
+	if clipped == "" {
+		return ""
+	}
+	return fmt.Sprintf(" Goal: %q", clipped)
 }
 
 func homeAgentDescriptionText(description string) string {

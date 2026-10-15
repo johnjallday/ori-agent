@@ -240,6 +240,7 @@ func TestTriggerMissionManually_NoTriggerConfigured(t *testing.T) {
 func TestTriggerMissionManually_RejectsUnclassifiedBindings(t *testing.T) {
 	ts, store, _ := newSchedulerWithStub(t)
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	ws.Mission = "Keep the brand voice consistent"
 	ws.MCPBindings = []MCPBinding{
 		{ID: "b-unclassified", Enabled: true}, // no DefaultSideEffect
 	}
@@ -254,6 +255,7 @@ func TestTriggerMissionManually_RejectsUnclassifiedBindings(t *testing.T) {
 func TestTriggerMissionManually_FiresWithCorrectOrdinal(t *testing.T) {
 	ts, store, trig := newSchedulerWithStub(t)
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	ws.Mission = "Keep the brand voice consistent"
 	ws.MissionExecutionCount = 2
 	ws.MCPBindings = []MCPBinding{
 		{ID: "b-1", Enabled: true, DefaultSideEffect: SideEffectRead},

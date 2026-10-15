@@ -73,8 +73,10 @@ func TestUpdateWorkspacePersistsDescriptionAndBootstrap(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected workspace_bootstrap map, got %T", bootstrapRaw)
 	}
+	// The description is no longer copied into the bootstrap goal: the goal
+	// lives in Workspace.Mission (workspace-goal-suggestions FR3).
 	for key, want := range map[string]string{
-		"goal":         "Ship launch assets",
+		"goal":         "",
 		"systems":      "Keynote, Google Drive",
 		"capabilities": "Slide production",
 		"context":      "Brand guide lives in /Launch/Brand",
@@ -102,6 +104,27 @@ func TestUpdateWorkspacePersistsDescriptionAndBootstrap(t *testing.T) {
 	}
 	if !strings.Contains(updatedNote.Content, "Old launch brief") {
 		t.Fatalf("user note content changed unexpectedly: %q", updatedNote.Content)
+	}
+}
+
+func TestMergeWorkspaceBootstrapForUpdateKeepsTheStoredGoal(t *testing.T) {
+	shared := map[string]any{"workspace_bootstrap": map[string]any{"goal": "Keep the brand voice consistent", "systems": "Figma"}}
+
+	// A description-only update sends no bootstrap and leaves it untouched.
+	if got := mergeWorkspaceBootstrapForUpdate(shared, nil); got["goal"] != "Keep the brand voice consistent" {
+		t.Fatalf("description-only update goal = %#v", got["goal"])
+	}
+
+	// A bootstrap update without a goal keeps the stored goal and replaces the rest.
+	got := mergeWorkspaceBootstrapForUpdate(shared, &workspaceBootstrapRequest{Systems: "Keynote"})
+	if got["goal"] != "Keep the brand voice consistent" || got["systems"] != "Keynote" {
+		t.Fatalf("bootstrap update = %#v", got)
+	}
+
+	// An explicit goal replaces it.
+	got = mergeWorkspaceBootstrapForUpdate(shared, &workspaceBootstrapRequest{Goal: "Grow the newsletter"})
+	if got["goal"] != "Grow the newsletter" {
+		t.Fatalf("explicit goal update = %#v", got["goal"])
 	}
 }
 

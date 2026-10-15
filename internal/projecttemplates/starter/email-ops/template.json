@@ -4,7 +4,8 @@
   "icon": "📬",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 5,
+  "builtin_version": 6,
+  "goal": "Keep my inbox under control so nothing that needs a reply slips and every follow-up is tracked.",
   "setup_quest": "email_ops_setup",
   "tags": [
     "email",

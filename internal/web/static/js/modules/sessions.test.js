@@ -3887,6 +3887,82 @@ test('an empty description is never sent as a goal (FR 16)', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Goal field (workspace-goal-suggestions FR2).
+// ---------------------------------------------------------------------------
+
+test('the Goal field mirrors the blueprint goal, else the description, until edited', () => {
+  const manager = loadSessionManager();
+  const mirror = args => manager.mirroredWorkspaceGoal(args);
+  assert.equal(
+    mirror({ description: '  Keep the brand voice consistent ' }),
+    'Keep the brand voice consistent'
+  );
+  assert.equal(
+    mirror({ description: 'Brand assets', templateGoal: 'Publish on-brand content weekly.' }),
+    'Publish on-brand content weekly.'
+  );
+  assert.equal(
+    mirror({ edited: true, current: 'My own goal', description: 'Brand assets' }),
+    'My own goal'
+  );
+  assert.equal(mirror({ edited: true, current: '', description: 'Brand assets' }), '');
+});
+
+test('typing a description updates an untouched Goal field and stops once the goal is typed', () => {
+  const listeners = new Map();
+  const element = (id, value = '') => ({
+    id,
+    value,
+    dataset: {},
+    addEventListener(type, handler) {
+      listeners.set(`${id}:${type}`, handler);
+    }
+  });
+  const elements = new Map(
+    ['folderNameInput', 'folderDescriptionInput', 'folderGoalInput'].map(id => [id, element(id)])
+  );
+  const manager = loadSessionManager(
+    undefined,
+    { ProjectTemplateCard: { getSelectedTemplate: () => null } },
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.invalidateGroupRequirementReview = () => {};
+  manager.syncWorkspaceGoalMirror();
+  const description = elements.get('folderDescriptionInput');
+  const goal = elements.get('folderGoalInput');
+
+  description.value = 'Keep the brand voice consistent';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goal.value, 'Keep the brand voice consistent');
+
+  goal.value = 'Grow the newsletter';
+  goal.dataset.goalEdited = '1';
+  description.value = 'Brand assets and newsletter';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goal.value, 'Grow the newsletter');
+  assert.equal(manager.currentWorkspaceGoal(), 'Grow the newsletter');
+});
+
+test('Create sends the goal as mission and as the bootstrap goal (SM2)', async () => {
+  const mirrored = await runDetailsCreate({ description: 'Keep the brand voice consistent' });
+  assert.equal(mirrored.mission, 'Keep the brand voice consistent');
+  assert.equal(mirrored.workspace_bootstrap.goal, 'Keep the brand voice consistent');
+
+  const typed = await runDetailsCreate({
+    description: 'Brand assets',
+    configure: manager => {
+      manager.currentWorkspaceGoal = () => 'Grow the newsletter';
+    }
+  });
+  assert.equal(typed.mission, 'Grow the newsletter');
+  assert.equal(typed.workspace_bootstrap.goal, 'Grow the newsletter');
+  assert.equal(typed.description, 'Brand assets');
+
+  const empty = await runDetailsCreate({ description: '' });
+  assert.equal(empty.mission, '');
+});
+
+// ---------------------------------------------------------------------------
 // Attach an existing project (Create Workspace Slice B, FR 20–21).
 // ---------------------------------------------------------------------------
 
@@ -5151,6 +5227,7 @@ function loadPayloadFixtureManager(requests) {
   manager.getWorkspaceBootstrapFromModal = () => ({
     hasAny: true,
     description: 'Drafts the Monday newsletter',
+    goal: 'Drafts the Monday newsletter',
     systems: 'Mail',
     context: 'research notes'
   });
@@ -5188,6 +5265,7 @@ const expectedFixturePayload = {
     systems: 'Mail',
     context: 'research notes'
   },
+  mission: 'Drafts the Monday newsletter',
   workspace_preset: 'research',
   entry_point: 'folder_digest',
   folder_offer_id: 'offer-9',

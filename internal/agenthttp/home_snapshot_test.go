@@ -143,6 +143,31 @@ func TestBuildHomeSnapshot_WithData(t *testing.T) {
 	}
 }
 
+// SM1: each workspace's Home snapshot line carries its goal, so the Home
+// assistant can route a request to the workspace whose goal it serves.
+func TestBuildHomeSnapshot_WorkspaceLineCarriesTheGoal(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspace(t, store, "ws-1", "Brand Desk", nil)
+	makeTestWorkspace(t, store, "ws-2", "Travel", nil)
+	if err := store.Update("ws-1", func(ws *workspace.Workspace) error {
+		ws.Mission = "Keep the brand voice consistent"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := BuildHomeSnapshot(context.Background(), HomeSnapshotSources{Workspaces: store, Now: fixedNow}, HomeWindowThisWeek)
+	txt := snap.PromptText()
+	if !strings.Contains(txt, `"Brand Desk"`) || !strings.Contains(txt, `Goal: "Keep the brand voice consistent"`) {
+		t.Fatalf("the Brand Desk line lacks its goal: %q", txt)
+	}
+	for _, line := range strings.Split(txt, "\n") {
+		if strings.Contains(line, `"Travel"`) && strings.Contains(line, "Goal:") {
+			t.Fatalf("a workspace without a goal must not render one: %q", line)
+		}
+	}
+}
+
 func TestBuildHomeSnapshot_DegradedUsage(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	snap := BuildHomeSnapshot(context.Background(), HomeSnapshotSources{

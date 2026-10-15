@@ -480,6 +480,13 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// renumber anything.
 	runTicketMigration(ws)
 
+	// Copy setup-time goals into the canonical Workspace.Mission, once. Waits
+	// for a confirmed workspace root like the other startup maintenance, and
+	// writes through the composed store so workspace.json and SQLite agree.
+	if startupMaintenanceApproved {
+		runGoalBackfill(ws)
+	}
+
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 

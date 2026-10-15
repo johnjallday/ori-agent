@@ -2133,16 +2133,6 @@ export class WorkspaceDetailPage {
         };
       } else if (this.workspace) {
         this.workspace[key] = newValue;
-        if (key === 'description') {
-          this.workspace.shared_data =
-            this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
-              ? this.workspace.shared_data
-              : {};
-          this.workspace.shared_data.workspace_bootstrap = {
-            ...(this.workspace.shared_data.workspace_bootstrap || {}),
-            goal: newValue
-          };
-        }
       }
 
       await this.renderWorkspaceInfo();
@@ -3234,12 +3224,13 @@ export class WorkspaceDetailPage {
     }
   }
 
+  // The description is not the goal: the goal lives in Workspace.Mission and
+  // the server keeps the stored bootstrap goal when this omits one.
   buildWorkspaceIntentPayload() {
     const intent = this.getWorkspaceIntentFromForm();
     return {
       description: intent.description,
       workspace_bootstrap: {
-        goal: intent.description,
         systems: intent.systems,
         capabilities: intent.capabilities,
         context: intent.context
@@ -3287,7 +3278,10 @@ export class WorkspaceDetailPage {
           this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
             ? this.workspace.shared_data
             : {};
-        this.workspace.shared_data.workspace_bootstrap = payload.workspace_bootstrap;
+        this.workspace.shared_data.workspace_bootstrap = {
+          ...(this.workspace.shared_data.workspace_bootstrap || {}),
+          ...payload.workspace_bootstrap
+        };
       }
 
       await this.renderWorkspaceInfo();

@@ -129,6 +129,11 @@ func normalizeTitle(s string) string {
 // ErrOpportunityNotFound is returned when an opportunity lookup misses.
 var ErrOpportunityNotFound = errors.New("opportunity not found")
 
+// ErrMissionGoalRequired is returned when a goal run is requested for a
+// workspace with no goal. The HTTP layer surfaces it as a 412 with the error
+// code goal_required: a run with no goal has nothing to work toward.
+var ErrMissionGoalRequired = errors.New("set a goal before running it")
+
 // ErrMissionTriggerNotConfigured is returned by TriggerMissionManually when
 // the scheduler has no MissionTrigger wired in. Surfaces as a 503 from the
 // manual-trigger HTTP endpoint so the user understands the missions feature

@@ -282,7 +282,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		},
 	}
 	workspace.SharedData = workspacesettings.Store(workspace.SharedData, workspacesettings.ProfileDefaults(req.WorkspacePreset))
-	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
+	if bootstrapData := normalizeWorkspaceBootstrap(bootstrapWithGoal(req.WorkspaceBootstrap, req.importGoal())); bootstrapData != nil {
 		workspace.SharedData["workspace_bootstrap"] = bootstrapData
 	}
 
@@ -419,6 +419,8 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+
+	h.applyCreateWorkspaceGoal(workspace.ID, req.importGoal())
 
 	// A supplied entry agent owns any tasks the imported folder carried that were
 	// created before a coordinator existed. No-op when none was supplied/resolved.
