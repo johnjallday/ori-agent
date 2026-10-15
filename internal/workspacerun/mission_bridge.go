@@ -153,6 +153,7 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 		openOpps = nil
 	}
 	openOpps = filterOpenOpportunities(openOpps, b.maxOpenInContext)
+	openWork, recentlyCompleted := workspace.MissionWorkSnapshot(ws)
 
 	systemPrompt := workspace.BuildMissionSystemPrompt(workspace.MissionPromptInputs{
 		WorkspaceManagerPrompt: basePrompt,
@@ -160,9 +161,10 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 		CycleOrdinal:           cycleOrdinal,
 		OpenOpportunities:      openOpps,
 		TriggeringEvent:        opts.Event,
-		AutonomyPolicy:         ws.AutonomyPolicy,
+		AutonomyPolicy:         workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy),
 		AgentNames:             missionAgentNames(ws),
-		ExistingWorkTitles:     missionExistingWorkTitles(ws),
+		OpenWork:               openWork,
+		RecentlyCompleted:      recentlyCompleted,
 	})
 
 	// Build a synthetic task to feed into the OriAgentExecutor. The task is
@@ -184,7 +186,7 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 		// a normal task).
 		Context: map[string]any{
 			workspace.MissionTaskContextOriginKey:  workspace.MissionTaskContextOriginValue,
-			workspace.MissionTaskContextPolicyKey:  string(ws.AutonomyPolicy),
+			workspace.MissionTaskContextPolicyKey:  string(workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy)),
 			workspace.MissionTaskContextOrdinalKey: cycleOrdinal,
 		},
 	}
@@ -199,7 +201,7 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 	}
 	rawConfig := RawConfig(cfgPayload)
 
-	policy := buildMissionRunPolicy(ws.AutonomyPolicy)
+	policy := buildMissionRunPolicy(workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy))
 
 	runCtx, cancel := context.WithTimeout(ctx, b.executionTimeout)
 	defer cancel()
@@ -469,22 +471,6 @@ func missionAgentNames(ws *workspace.Workspace) []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// missionExistingWorkTitles lists unfinished tickets' titles for the prompt.
-func missionExistingWorkTitles(ws *workspace.Workspace) []string {
-	var titles []string
-	for _, task := range ws.Tasks {
-		switch task.CanonicalState() {
-		case workspace.TicketStateDone, workspace.TicketStateCancelled:
-			continue
-		}
-		if task.ParentTaskID != "" {
-			continue
-		}
-		titles = append(titles, task.Description)
-	}
-	return titles
 }
 
 // buildMissionRunPolicy turns the workspace's autonomy policy into the

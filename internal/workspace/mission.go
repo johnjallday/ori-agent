@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -78,11 +79,75 @@ type MissionPromptInputs struct {
 	// AgentNames are the workspace's agents, the candidates for a
 	// suggestion's suggested_agent.
 	AgentNames []string
-	// ExistingWorkTitles are the titles of unfinished tickets (Backlog, Ready
-	// and active), listed so the model does not suggest them again (FR18).
-	ExistingWorkTitles []string
+	// OpenWork are the workspace's unfinished tickets (Backlog, Ready and
+	// active), listed with their state so the model does not suggest them
+	// again and can see what is already planned (FR12, FR18).
+	OpenWork []MissionWorkItem
+	// RecentlyCompleted are the last few finished tasks with a one-line
+	// result, so suggestions build on what was done (FR12).
+	RecentlyCompleted []MissionWorkItem
 	// DismissedTitles are suggestions the user marked Not useful (FR20).
 	DismissedTitles []string
+}
+
+// MissionWorkItem is one ticket as a goal run sees it.
+type MissionWorkItem struct {
+	Title     string
+	State     string
+	Suggested bool
+	Result    string
+}
+
+// missionRecentlyCompletedLimit is how many finished tasks a goal run sees.
+const missionRecentlyCompletedLimit = 5
+
+// missionResultLineLimit bounds a finished task's one-line result.
+const missionResultLineLimit = 160
+
+// MissionWorkSnapshot lists a workspace's unfinished top-level tickets and its
+// most recently finished tasks for the goal-run prompt.
+func MissionWorkSnapshot(ws *Workspace) (open, completed []MissionWorkItem) {
+	if ws == nil {
+		return nil, nil
+	}
+	ws.mu.RLock()
+	defer ws.mu.RUnlock()
+	var done []Task
+	for _, task := range ws.Tasks {
+		if task.ParentTaskID != "" {
+			continue
+		}
+		state := task.CanonicalState()
+		switch state {
+		case TicketStateCancelled:
+			continue
+		case TicketStateDone:
+			done = append(done, task)
+			continue
+		}
+		open = append(open, MissionWorkItem{
+			Title: task.Description, State: string(state),
+			Suggested: task.SourceType == TicketSourceGoalSuggestion,
+		})
+	}
+	sort.SliceStable(done, func(i, j int) bool { return missionFinishedAt(done[i]).After(missionFinishedAt(done[j])) })
+	if len(done) > missionRecentlyCompletedLimit {
+		done = done[:missionRecentlyCompletedLimit]
+	}
+	for _, task := range done {
+		completed = append(completed, MissionWorkItem{
+			Title: task.Description, State: string(TicketStateDone),
+			Result: sanitizeTaskPromptText(task.Result, missionResultLineLimit),
+		})
+	}
+	return open, completed
+}
+
+func missionFinishedAt(task Task) time.Time {
+	if task.CompletedAt != nil {
+		return *task.CompletedAt
+	}
+	return task.UpdatedAt
 }
 
 // missionPromptListLimit bounds each title list in the mission prompt.
@@ -181,10 +246,28 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 		b.WriteString(strings.Join(names, ", "))
 		b.WriteString("\n\n")
 	}
-	if titles := missionPromptList(in.ExistingWorkTitles); len(titles) > 0 {
+	if len(in.OpenWork) > 0 {
 		b.WriteString("Work that already exists in this workspace (do not suggest it again):\n")
-		for _, title := range titles {
-			b.WriteString("  - " + title + "\n")
+		for i, item := range in.OpenWork {
+			if i >= missionPromptListLimit {
+				break
+			}
+			marker := ""
+			if item.Suggested {
+				marker = ", suggested"
+			}
+			fmt.Fprintf(&b, "  - [%s%s] %s\n", item.State, marker, missionPromptLine(item.Title))
+		}
+		b.WriteString("\n")
+	}
+	if len(in.RecentlyCompleted) > 0 {
+		b.WriteString("Recently finished work (build on it; do not repeat it):\n")
+		for _, item := range in.RecentlyCompleted {
+			line := "  - " + missionPromptLine(item.Title)
+			if item.Result != "" {
+				line += " — " + item.Result
+			}
+			b.WriteString(line + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -239,6 +322,11 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	b.WriteString("If nothing is worth suggesting, answer {\"items\": []}.\n")
 
 	return b.String()
+}
+
+// missionPromptLine flattens a title to one line.
+func missionPromptLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 // missionPromptList trims, drops empties and bounds a title list.
@@ -358,6 +446,9 @@ func EvaluateMissionToolCall(policy AutonomyPolicy, defaultSE SideEffect, overri
 		return GateDecision{Allowed: true, Classification: SideEffectWrite, Policy: policy, ToolName: toolName}
 	}
 	resolved := ResolveSideEffect(defaultSE, overrides, toolName)
+	if native, ok := NativeToolSideEffect(toolName); ok {
+		resolved = native
+	}
 	dec := GateDecision{
 		Classification: resolved,
 		Policy:         policy,

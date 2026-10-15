@@ -64,6 +64,14 @@ test('run history lists counts and a failed run raw output', () => {
   assert.match(mission.runHistoryHTML([]), /No goal runs yet\./);
 });
 
+test('an unset autonomy level reads as Watch, the level a goal run applies', () => {
+  const mission = loadWorkspaceMission();
+  assert.equal(mission.effectiveAutonomy(''), 'watch');
+  assert.equal(mission.effectiveAutonomy(undefined), 'watch');
+  assert.equal(mission.effectiveAutonomy('watch'), 'watch');
+  assert.equal(mission.effectiveAutonomy('propose'), 'propose');
+});
+
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {
   const mission = loadWorkspaceMission();
   const summary = mission.summarize({ mission: '' });

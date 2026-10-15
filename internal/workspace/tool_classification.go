@@ -80,7 +80,7 @@ func UnclassifiedBindings(ws *Workspace) (mcpIDs, skillIDs []string) {
 		if !b.Enabled {
 			continue
 		}
-		if !isValidSideEffect(b.DefaultSideEffect) {
+		if defaultSE, _ := EffectiveMCPBindingClassification(b); !isValidSideEffect(defaultSE) {
 			mcpIDs = append(mcpIDs, b.ID)
 		}
 	}
@@ -109,6 +109,125 @@ const (
 	MemoryWriteToolName  = "memory_write"
 	MemoryForgetToolName = "memory_forget"
 )
+
+// nativeToolSideEffects classifies the tools Ori itself offers in a workspace:
+// chathttp's workspace tools, the utility tools and the Home library tools.
+// They belong to no MCP or skill binding, so a binding's default must never
+// classify them (it used to: a read-default Calendar binding made
+// workspace_save_note and delegate_task "reads"). The autonomy gate consults
+// this table before any binding (workspace-goal-suggestions FR10).
+//
+//   - read: observes what the workspace owns; allowed under Watch.
+//   - write: changes something inside this workspace; allowed under Propose.
+//   - external: reaches beyond the workspace or starts work (delegation,
+//     project scaffolding, the user profile, mail, the web); never allowed
+//     in a goal run.
+//
+// chathttp's TestNativeWorkspaceToolsAreClassified fails when a tool it
+// defines is missing here.
+var nativeToolSideEffects = map[string]SideEffect{
+	"workspace_notes":                     SideEffectRead,
+	"workspace_tasks":                     SideEffectRead,
+	"workspace_sessions":                  SideEffectRead,
+	"workspace_session_detail":            SideEffectRead,
+	"workspace_files":                     SideEffectRead,
+	"workspace_directories":               SideEffectRead,
+	"workspace_directory_list":            SideEffectRead,
+	"workspace_directory_read":            SideEffectRead,
+	"workspace_project_templates":         SideEffectRead,
+	"current_task":                        SideEffectRead,
+	"task_runs":                           SideEffectRead,
+	"hq_overview":                         SideEffectRead,
+	"home_library_search":                 SideEffectRead,
+	"home_library_detail":                 SideEffectRead,
+	"home_library_sessions":               SideEffectRead,
+	"home_library_handoff_receipts":       SideEffectRead,
+	"home_profile_read":                   SideEffectRead,
+	"time":                                SideEffectRead,
+	"workspace_save_note":                 SideEffectWrite,
+	"github_propose_change":               SideEffectWrite,
+	MemoryWriteToolName:                   SideEffectWrite,
+	MemoryForgetToolName:                  SideEffectWrite,
+	"delegate_task":                       SideEffectExternal,
+	"workspace_create_project":            SideEffectExternal,
+	"workspace_manage_agents":             SideEffectExternal,
+	"workspace_manage_mcp":                SideEffectExternal,
+	"workspace_manage_skills":             SideEffectExternal,
+	"profile_set":                         SideEffectExternal,
+	"mail_search_threads":                 SideEffectExternal,
+	"mail_get_thread":                     SideEffectExternal,
+	"mail_draft_reply":                    SideEffectExternal,
+	"home_library_save_brief":             SideEffectExternal,
+	"home_library_propose_next_action":    SideEffectExternal,
+	"home_library_propose_session_recap":  SideEffectExternal,
+	"home_library_propose_root_review":    SideEffectExternal,
+	"home_library_propose_session_goal":   SideEffectExternal,
+	"home_library_propose_project_review": SideEffectExternal,
+	"weather":                             SideEffectExternal,
+	"air_quality":                         SideEffectExternal,
+	"web_search":                          SideEffectExternal,
+	"web_fetch":                           SideEffectExternal,
+	"browser":                             SideEffectExternal,
+}
+
+// NativeToolSideEffect returns the fixed classification of one of Ori's own
+// workspace tools, and false for any other tool.
+func NativeToolSideEffect(toolName string) (SideEffect, bool) {
+	se, ok := nativeToolSideEffects[toolName]
+	return se, ok
+}
+
+// WorkspaceFilesBindingAlias is the alias of the filesystem MCP binding Ori
+// creates over every workspace's own folder.
+const WorkspaceFilesBindingAlias = "workspace-files"
+
+// workspaceFilesReadTools are the filesystem MCP server's read-only tools.
+var workspaceFilesReadTools = []string{
+	"read_file", "read_text_file", "read_media_file", "read_multiple_files",
+	"list_directory", "list_directory_with_sizes", "directory_tree",
+	"search_files", "get_file_info", "list_allowed_directories",
+}
+
+// isBuiltinWorkspaceFilesBinding reports whether b is the filesystem binding
+// Ori created over the workspace's own folder.
+func isBuiltinWorkspaceFilesBinding(b MCPBinding) bool {
+	return b.Alias == WorkspaceFilesBindingAlias && b.ServerName == "filesystem"
+}
+
+// EffectiveMCPBindingClassification returns the classification the autonomy
+// gate applies to b. The user's own default and per-tool overrides always win.
+// Ori's workspace-files binding, which reaches only the workspace's own
+// folder, carries a built-in classification when the user set none: its read
+// tools are reads, everything else writes inside the workspace. Without it
+// every new workspace would refuse goal runs until someone classified a
+// binding they never created.
+func EffectiveMCPBindingClassification(b MCPBinding) (SideEffect, map[string]SideEffect) {
+	if !isBuiltinWorkspaceFilesBinding(b) {
+		return b.DefaultSideEffect, b.ToolOverrides
+	}
+	defaultSE := b.DefaultSideEffect
+	if !isValidSideEffect(defaultSE) {
+		defaultSE = SideEffectWrite
+	}
+	overrides := make(map[string]SideEffect, len(workspaceFilesReadTools)+len(b.ToolOverrides))
+	for _, name := range workspaceFilesReadTools {
+		overrides[name] = SideEffectRead
+	}
+	for name, se := range b.ToolOverrides {
+		overrides[name] = se
+	}
+	return defaultSE, overrides
+}
+
+// EffectiveAutonomyPolicy is the policy a goal run applies: Propose only when
+// the user chose it, Watch otherwise — including a workspace that never set
+// one, which is how an automatic first run starts.
+func EffectiveAutonomyPolicy(p AutonomyPolicy) AutonomyPolicy {
+	if p == AutonomyPropose {
+		return AutonomyPropose
+	}
+	return AutonomyWatch
+}
 
 // IsWorkspaceMemoryTool reports whether toolName is a native workspace-memory
 // tool. Memory tools are workspace-internal writes permitted under every

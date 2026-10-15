@@ -91,6 +91,12 @@
     commandFindingsBtn: '#workspace-command-mission-findings'
   };
 
+  // A goal run applies Propose only when the user chose it and Watch otherwise,
+  // including a workspace that never set a level (workspace.EffectiveAutonomyPolicy).
+  function effectiveAutonomy(policy) {
+    return policy === 'propose' ? 'propose' : 'watch';
+  }
+
   // Plain-language summary of each autonomy policy. The quick-edit modal only
   // displays the current value (read-only) — it's changed in Advanced settings.
   const AUTONOMY_LABELS = {
@@ -344,8 +350,8 @@
   function renderGoalModalAutonomy(state) {
     const el = $(SELECTORS.goalModalAutonomy);
     if (!el) return;
-    const policy = (state && state.autonomy_policy) || 'propose';
-    const info = AUTONOMY_LABELS[policy] || AUTONOMY_LABELS.propose;
+    const policy = effectiveAutonomy(state && state.autonomy_policy);
+    const info = AUTONOMY_LABELS[policy];
     el.innerHTML = `Autonomy: <strong>${info.label}</strong> — ${info.desc}. Adjust in Advanced settings.`;
   }
 
@@ -757,7 +763,7 @@
 
     // Autonomy
     const radios = document.querySelectorAll(SELECTORS.autonomyRadios);
-    const policy = state.autonomy_policy || 'propose';
+    const policy = effectiveAutonomy(state.autonomy_policy);
     radios.forEach(r => {
       r.checked = r.value === policy;
     });
@@ -812,7 +818,7 @@
     const heartbeatEl = $(SELECTORS.heartbeat);
     return {
       mission: $(SELECTORS.text).value,
-      autonomy_policy: policy ? policy.value : 'propose',
+      autonomy_policy: effectiveAutonomy(policy ? policy.value : ''),
       cadence,
       notification_policy,
       mission_enabled: $(SELECTORS.enabled).checked,
@@ -1187,6 +1193,7 @@
       // Pure renderers of a given state, for module tests.
       summarize: state => commandSummary(state || {}),
       runHistoryHTML,
+      effectiveAutonomy,
       renderCommandSurfaces: () => {
         if (latestState) renderCommandPanel(latestState);
       },

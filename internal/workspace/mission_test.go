@@ -128,13 +128,18 @@ func TestBuildMissionSystemPrompt_ItemsContract(t *testing.T) {
 func TestBuildMissionSystemPrompt_ListsExistingWorkAndAutonomy(t *testing.T) {
 	watch := BuildMissionSystemPrompt(MissionPromptInputs{
 		Mission: "x", CycleOrdinal: 2, AutonomyPolicy: AutonomyWatch,
-		AgentNames:         []string{"Writer", "Editor"},
-		ExistingWorkTitles: []string{"Draft the style guide"},
-		DismissedTitles:    []string{"Audit every old post"},
+		AgentNames: []string{"Writer", "Editor"},
+		OpenWork: []MissionWorkItem{
+			{Title: "Draft the style guide", State: "backlog", Suggested: true},
+			{Title: "Publish the launch post", State: "ready"},
+		},
+		RecentlyCompleted: []MissionWorkItem{{Title: "Collect on-brand posts", Result: "Saved five posts to notes/voice.md"}},
+		DismissedTitles:   []string{"Audit every old post"},
 	})
 	for _, want := range []string{
 		"Agents in this workspace (use one of these names for suggested_agent, or leave it empty): Writer, Editor",
-		"Work that already exists in this workspace (do not suggest it again):\n  - Draft the style guide",
+		"Work that already exists in this workspace (do not suggest it again):\n  - [backlog, suggested] Draft the style guide\n  - [ready] Publish the launch post",
+		"Recently finished work (build on it; do not repeat it):\n  - Collect on-brand posts — Saved five posts to notes/voice.md",
 		"Suggestions the user dismissed as not useful (never suggest them again):\n  - Audit every old post",
 		"but do not change anything",
 	} {
@@ -148,6 +153,36 @@ func TestBuildMissionSystemPrompt_ListsExistingWorkAndAutonomy(t *testing.T) {
 	propose := BuildMissionSystemPrompt(MissionPromptInputs{Mission: "x", CycleOrdinal: 2, AutonomyPolicy: AutonomyPropose})
 	if !strings.Contains(propose, "write notes or drafts inside it") || strings.Contains(propose, "but do not change anything") {
 		t.Errorf("propose prompt must allow workspace writes: %q", propose)
+	}
+}
+
+// FR12: the goal run sees unfinished tickets (Backlog included) with their
+// state and whether they were suggested, plus the last five finished tasks
+// with a one-line result; cancelled work and subtasks are left out.
+func TestMissionWorkSnapshot(t *testing.T) {
+	base := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	ws := &Workspace{Tasks: []Task{
+		{ID: "b", Description: "Draft the style guide", TicketState: TicketStateBacklog, SourceType: TicketSourceGoalSuggestion},
+		{ID: "r", Description: "Publish the launch post", TicketState: TicketStateReady},
+		{ID: "x", Description: "Cancelled idea", TicketState: TicketStateCancelled},
+		{ID: "s", Description: "A subtask", TicketState: TicketStateReady, ParentTaskID: "r"},
+	}}
+	for i := 0; i < 7; i++ {
+		done := base.Add(time.Duration(i) * time.Hour)
+		ws.Tasks = append(ws.Tasks, Task{
+			ID: fmt.Sprintf("d%d", i), Description: fmt.Sprintf("Done %d", i), TicketState: TicketStateDone,
+			CompletedAt: &done, Result: fmt.Sprintf("Result %d\nwith a second line", i),
+		})
+	}
+	open, completed := MissionWorkSnapshot(ws)
+	if len(open) != 2 || open[0].Title != "Draft the style guide" || !open[0].Suggested || open[0].State != "backlog" || open[1].Suggested {
+		t.Fatalf("open = %+v", open)
+	}
+	if len(completed) != 5 || completed[0].Title != "Done 6" || completed[4].Title != "Done 2" {
+		t.Fatalf("completed = %+v", completed)
+	}
+	if completed[0].Result != "Result 6 with a second line" {
+		t.Fatalf("result line = %q", completed[0].Result)
 	}
 }
 
