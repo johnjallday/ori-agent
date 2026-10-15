@@ -456,6 +456,7 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		MissionFailureCount:     ws.MissionFailureCount,
 		MissionCadenceHeartbeat: ws.MissionCadenceHeartbeat,
 		MissionRuns:             ws.MissionRuns,
+		DismissedSuggestions:    ws.DismissedSuggestions,
 	}); err != nil {
 		logger.Warn("Failed to marshal workspace goal", logger.Fields{"workspace_id": ws.ID, "error": err})
 	} else {
@@ -485,17 +486,18 @@ type workspaceAssistantProgramEnvelope struct {
 }
 
 type workspaceMissionState struct {
-	Mission                 string                        `json:"mission,omitempty"`
-	MissionEnabled          bool                          `json:"mission_enabled,omitempty"`
-	AutonomyPolicy          workspace.AutonomyPolicy      `json:"autonomy_policy,omitempty"`
-	Cadence                 *workspace.ScheduleConfig     `json:"cadence,omitempty"`
-	NotificationPolicy      *workspace.NotificationPolicy `json:"notification_policy,omitempty"`
-	LastMissionRunAt        *time.Time                    `json:"last_mission_run_at,omitempty"`
-	NextMissionRunAt        *time.Time                    `json:"next_mission_run_at,omitempty"`
-	MissionExecutionCount   int                           `json:"mission_execution_count,omitempty"`
-	MissionFailureCount     int                           `json:"mission_failure_count,omitempty"`
-	MissionCadenceHeartbeat bool                          `json:"mission_cadence_heartbeat,omitempty"`
-	MissionRuns             []workspace.MissionRunRecord  `json:"mission_runs,omitempty"`
+	Mission                 string                          `json:"mission,omitempty"`
+	MissionEnabled          bool                            `json:"mission_enabled,omitempty"`
+	AutonomyPolicy          workspace.AutonomyPolicy        `json:"autonomy_policy,omitempty"`
+	Cadence                 *workspace.ScheduleConfig       `json:"cadence,omitempty"`
+	NotificationPolicy      *workspace.NotificationPolicy   `json:"notification_policy,omitempty"`
+	LastMissionRunAt        *time.Time                      `json:"last_mission_run_at,omitempty"`
+	NextMissionRunAt        *time.Time                      `json:"next_mission_run_at,omitempty"`
+	MissionExecutionCount   int                             `json:"mission_execution_count,omitempty"`
+	MissionFailureCount     int                             `json:"mission_failure_count,omitempty"`
+	MissionCadenceHeartbeat bool                            `json:"mission_cadence_heartbeat,omitempty"`
+	MissionRuns             []workspace.MissionRunRecord    `json:"mission_runs,omitempty"`
+	DismissedSuggestions    []workspace.DismissedSuggestion `json:"dismissed_suggestions,omitempty"`
 }
 
 // workspaceToolboxState is the envelope carried in ToolboxStateJSON.
@@ -724,6 +726,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			agentWS.MissionFailureCount = mission.MissionFailureCount
 			agentWS.MissionCadenceHeartbeat = mission.MissionCadenceHeartbeat
 			agentWS.MissionRuns = mission.MissionRuns
+			agentWS.DismissedSuggestions = mission.DismissedSuggestions
 		}
 	}
 

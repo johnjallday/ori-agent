@@ -194,6 +194,53 @@ func TestMissionBridge_UnreadableAnswerFailsTheRun(t *testing.T) {
 	}
 }
 
+// SM8: a suggestion marked Not useful is never created again, the run counts
+// it as a duplicate, and the next prompt names it as dismissed.
+func TestMissionBridge_NeverResuggestsADismissedTask(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := makeMissionWorkspace(t, wsStore)
+	if _, err := bridgeAnswering(t, wsStore, threeTasksTwoFindings).TriggerMissionRun(context.Background(), ws.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := wsStore.Get(ws.ID)
+	var guideID string
+	for _, ticket := range suggestedTickets(fresh) {
+		if ticket.Description == "Draft a brand voice guide" {
+			guideID = ticket.ID
+		}
+	}
+	if err := workspace.NewBacklogService(wsStore).DismissSuggestion(ws.ID, guideID, "We already have one"); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &stubOriAgentTaskRunner{result: threeTasksTwoFindings}
+	runStore := NewMemoryStore()
+	executors := NewExecutorRegistry()
+	executors.Register(ExecutorKindOriAgent, NewOriAgentExecutor(runner))
+	service := NewService(runStore, NewProfileRegistry(), executors, NewLocalEnvironmentManager(t.TempDir()), NewValidator(), nil)
+	bridge := NewMissionBridge(MissionBridgeConfig{RunStore: runStore, Service: service, WorkspaceStore: wsStore, OpportunityStore: workspace.NewOpportunityStore(wsStore)})
+	if _, err := bridge.TriggerMissionRun(context.Background(), ws.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh, _ = wsStore.Get(ws.ID)
+	for _, ticket := range suggestedTickets(fresh) {
+		if ticket.Description == "Draft a brand voice guide" {
+			t.Fatal("a dismissed suggestion was created again")
+		}
+	}
+	if record := fresh.MissionRuns[0]; record.TasksCreated != 0 || record.DuplicatesSkipped != 3 {
+		t.Fatalf("second run record = %+v (the dismissed one and the two still open are duplicates)", record)
+	}
+	prompt := runner.lastTask.Description
+	if !strings.Contains(prompt, "Suggestions the user dismissed as not useful (never suggest them again):\n  - Draft a brand voice guide") {
+		t.Fatalf("the prompt does not name the dismissed suggestion:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "[backlog, suggested] Plan next week's posts") {
+		t.Fatalf("the prompt does not list open suggested work:\n%s", prompt)
+	}
+}
+
 // Manual runs started through the scheduler are labeled manual.
 func TestMissionBridge_ManualRunsAreLabeled(t *testing.T) {
 	wsStore := workspace.NewInMemoryStore()

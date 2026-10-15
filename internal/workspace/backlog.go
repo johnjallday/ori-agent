@@ -527,6 +527,29 @@ func (s *BacklogService) Delete(workspaceID, taskID string) error {
 	return nil
 }
 
+// DismissSuggestion removes a suggested Backlog item as not useful and records
+// it, with the optional reason, in the dismissed-suggestion ledger so goal runs
+// never suggest it again (workspace-goal-suggestions FR20).
+func (s *BacklogService) DismissSuggestion(workspaceID, taskID, reason string) error {
+	err := s.store.Update(workspaceID, func(ws *Workspace) error {
+		t, err := ws.GetTask(taskID)
+		if err != nil {
+			return err
+		}
+		if t.CanonicalState() != TicketStateBacklog {
+			return fmt.Errorf("item %s is not in Backlog", taskID)
+		}
+		return ws.DismissSuggestion(taskID, reason)
+	})
+	if err != nil {
+		return err
+	}
+
+	s.publish(EventTaskDeleted, workspaceID, taskID, nil)
+	s.renderAfterMutation(workspaceID)
+	return nil
+}
+
 // Promote atomically and idempotently promotes a Backlog item to Ready
 // (FR9-12, 31): it preserves identity/metadata, clears the Backlog-only
 // rank, and leaves AwaitingExecutionIntent set so background coordinator/

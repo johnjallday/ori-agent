@@ -3604,6 +3604,35 @@ export class WorkspaceDetailPage {
   }
 
   /**
+   * Not useful on a goal-run suggestion (workspace-goal-suggestions FR20):
+   * removes it and remembers it, with the optional one-line reason, so goal
+   * runs never suggest it again. Returns true when the suggestion is gone.
+   */
+  async dismissBacklogSuggestion(itemId, ownerWorkspaceId, reason = '') {
+    const id = String(itemId || '').trim();
+    if (!id) return false;
+    const ownerId = String(ownerWorkspaceId || this.workspaceId);
+    try {
+      const response = await fetch(
+        `/api/orchestration/backlog/${encodeURIComponent(id)}/not-useful?workspace_id=${encodeURIComponent(ownerId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: String(reason || '').trim() })
+        }
+      );
+      if (!response.ok) throw new Error('Failed to remove the suggestion');
+      if (window.Toast) window.Toast.success('Suggestion removed — it won’t be suggested again');
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to remove the suggestion:', error);
+      if (window.Toast) window.Toast.error('Failed to remove the suggestion');
+      return false;
+    }
+  }
+
+  /**
    * Atomic, idempotent Promote to Ready (FR9-12): makes the item an
    * executable Ready task without assigning or running it. Refreshes both
    * Backlog and Tasks state so the item disappears from one and appears in

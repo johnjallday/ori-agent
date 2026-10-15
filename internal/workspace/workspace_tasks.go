@@ -210,14 +210,22 @@ func (w *Workspace) MutateTask(id string, fn func(*Task) error) error {
 }
 
 // DeleteTask removes a task from the workspace by ID and cleans up layout metadata.
+// Deleting a goal-run suggestion also records it in the dismissed-suggestion
+// ledger, so it is never suggested again (see suggestion_ledger.go).
 func (w *Workspace) DeleteTask(id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	return w.deleteTaskLocked(id, "")
+}
 
+// deleteTaskLocked removes a task; callers hold w.mu. reason is the optional
+// Not useful reason recorded when the task is a goal-run suggestion.
+func (w *Workspace) deleteTaskLocked(id, reason string) error {
 	idx := w.findTaskIdxLocked(id)
 	if idx == -1 {
 		return fmt.Errorf("task %q not found in workspace", id)
 	}
+	w.recordDismissedSuggestionLocked(w.Tasks[idx], reason, time.Now())
 
 	// Remove task from slice
 	w.Tasks = append(w.Tasks[:idx], w.Tasks[idx+1:]...)

@@ -165,6 +165,7 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 		AgentNames:             missionAgentNames(ws),
 		OpenWork:               openWork,
 		RecentlyCompleted:      recentlyCompleted,
+		DismissedTitles:        ws.DismissedSuggestionTitles(),
 	})
 
 	// Build a synthetic task to feed into the OriAgentExecutor. The task is
@@ -335,6 +336,10 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 	known := map[string]struct{}{}
 	if ws, err := b.workspaceStore.Get(workspaceID); err == nil {
 		known = workspace.OpenWorkTitles(ws)
+		// A suggestion the user dismissed is never suggested again (FR18).
+		for key := range ws.DismissedSuggestionKeys() {
+			known[key] = struct{}{}
+		}
 	}
 	suggestions, duplicates, dropped := workspace.SelectMissionSuggestions(output.Tasks, known, workspace.MissionMaxTaskSuggestions)
 	record.DuplicatesSkipped += duplicates
