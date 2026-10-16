@@ -3,24 +3,12 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 )
 
 func TestServerBuilder_EvolutionFeatureFlagDisabled(t *testing.T) {
 	t.Setenv("ORI_EVOLUTION_ENABLED", "false")
-
-	originalWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	tmpDir := t.TempDir()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to chdir to temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(originalWD)
-	})
+	isolateServerBuildEnv(t)
 
 	builder, err := NewServerBuilder()
 	if err != nil {
@@ -31,6 +19,7 @@ func TestServerBuilder_EvolutionFeatureFlagDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
+	closeInjectionTestServer(t, srv)
 	if srv.Handlers.Evolution != nil {
 		t.Fatal("expected evolution handler to be disabled")
 	}

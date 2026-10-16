@@ -55,6 +55,21 @@ func newServerFixtureRoot(t *testing.T) string {
 	return root
 }
 
+// isolateServerBuildEnv points everything a full NewServerBuilder().Build()
+// resolves at private temp folders, with a fixture sessions.db in the data
+// dir. Without it the build writes app_state.json, sessions.db and templates/
+// into the package directory (a stale sessions.db left there later breaks
+// migrations), and on macOS opens and migrates the developer's real
+// ~/Library/Application Support/OriAgent. The working directory is kept apart
+// from the data dir so tests can still tell the two locations apart.
+func isolateServerBuildEnv(t *testing.T) {
+	t.Helper()
+	dataDir := newServerFixtureRoot(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ORI_DATA_DIR", dataDir)
+}
+
 // newFixtureDatabase is only for ordinary fixtures whose services do not own
 // database shutdown. Reset/startup/reopen fixtures retain real database.Open.
 func newFixtureDatabase(t *testing.T) *database.DB {
