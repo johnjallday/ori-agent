@@ -1044,46 +1044,19 @@
                         <div class="row g-2">
                           <div class="col-md-6">
                             <label class="workspace-detail-settings-summary-card" style="cursor: pointer; display: block; margin: 0; padding: 0.75rem;">
-                              <input type="radio" name="workspace-detail-mission-autonomy" value="watch" style="margin-right: 0.5rem;">
+                              <input type="radio" name="workspace-detail-mission-autonomy" value="watch" checked style="margin-right: 0.5rem;">
                               <strong>Watch</strong>
-                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Analyze and report findings. Makes no changes — except recording what it learns to workspace memory.</div>
+                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Reads this workspace and suggests work. Makes no changes — except recording what it learns to workspace memory.</div>
                             </label>
                           </div>
                           <div class="col-md-6">
                             <label class="workspace-detail-settings-summary-card" style="cursor: pointer; display: block; margin: 0; padding: 0.75rem;">
-                              <input type="radio" name="workspace-detail-mission-autonomy" value="propose" checked style="margin-right: 0.5rem;">
+                              <input type="radio" name="workspace-detail-mission-autonomy" value="propose" style="margin-right: 0.5rem;">
                               <strong>Propose</strong>
-                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Analyze and may draft artifacts inside the workspace. No external changes.</div>
+                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Reads this workspace and suggests work. During a run the agent may also write notes and drafts inside this workspace. No external changes.</div>
                             </label>
                           </div>
                         </div>
-                      </div>
-
-                      <div class="col-12">
-                        <details class="workspace-detail-settings-advanced">
-                          <summary class="workspace-detail-settings-advanced-title">Advanced: notification policy</summary>
-                          <div class="row g-3 mt-2">
-                            <div class="col-md-6">
-                              <label for="workspace-detail-mission-notif-priority" class="form-label">Minimum priority for Action Center</label>
-                              <select id="workspace-detail-mission-notif-priority" class="form-select">
-                                <option value="">Default (medium+)</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
-                              </select>
-                            </div>
-                            <div class="col-md-6">
-                              <label for="workspace-detail-mission-notif-onfindings" class="form-label">When to notify</label>
-                              <select id="workspace-detail-mission-notif-onfindings" class="form-select">
-                                <option value="">Default (if findings)</option>
-                                <option value="always">Always (even on no-findings runs)</option>
-                                <option value="if_any">Only when findings exist</option>
-                                <option value="never">Never</option>
-                              </select>
-                            </div>
-                          </div>
-                        </details>
                       </div>
 
                       <div class="col-12">
@@ -3125,6 +3098,76 @@
 
     .workspace-detail-goal-text.is-empty {
       color: var(--text-secondary);
+    }
+
+    /* Goal Settings run history (workspace-mission.js runHistoryHTML). */
+    .workspace-mission-history {
+      margin-top: 0.75rem;
+    }
+
+    .workspace-mission-history-title {
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-mission-runs {
+      display: grid;
+      gap: 0.45rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .workspace-mission-run {
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      font-size: 0.8rem;
+    }
+
+    .workspace-mission-run.is-failed {
+      border-color: var(--danger-color, #c0392b);
+    }
+
+    .workspace-mission-run-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: baseline;
+    }
+
+    .workspace-mission-run-head span,
+    .workspace-mission-run-counts,
+    .workspace-mission-runs-empty {
+      color: var(--text-secondary);
+    }
+
+    .workspace-mission-run-error {
+      margin-top: 0.2rem;
+      color: var(--danger-color, #c0392b);
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-mission-run-output summary {
+      cursor: pointer;
+      width: fit-content;
+      margin-top: 0.25rem;
+    }
+
+    .workspace-mission-run-output pre {
+      max-height: 16rem;
+      margin: 0.3rem 0 0;
+      padding: 0.5rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      /* Neutral tint + inherited text color: readable on the dark Command
+         view panel and on the light settings pane alike. */
+      color: inherit;
+      background: rgba(127, 127, 127, 0.14);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 0.75rem;
     }
 
     .workspace-detail-goal-meta {

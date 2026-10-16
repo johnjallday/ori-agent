@@ -328,6 +328,10 @@ type Template struct {
 	BehaviorProfile string `json:"behavior_profile,omitempty"`
 	// StarterTasks are example tasks seeded into a new workspace.
 	StarterTasks []StarterTask `json:"starter_tasks,omitempty"`
+	// Goal is the optional default workspace goal. Creating a workspace from
+	// this template sets Workspace.Mission to it unless the caller supplied
+	// its own goal.
+	Goal string `json:"goal,omitempty"`
 	// ProjectEntry is the optional scaffolded file Ori can offer to open after
 	// an explicit Create Workspace action. It is validated data only.
 	ProjectEntry *ProjectEntry `json:"project_entry,omitempty"`
@@ -614,6 +618,7 @@ type manifest struct {
 	Addons            []string        `json:"addons,omitempty"`
 	BehaviorProfile   string          `json:"behavior_profile,omitempty"`
 	StarterTasks      []StarterTask   `json:"starter_tasks,omitempty"`
+	Goal              string          `json:"goal,omitempty"`
 	ProjectEntry      json.RawMessage `json:"project_entry,omitempty"`
 	ProjectConnection json.RawMessage `json:"project_connection,omitempty"`
 	// Inputs is held raw for the same fail-closed isolation as the wizard: one
@@ -695,6 +700,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	t.Addons = normalizeAddons(m.Addons)
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
+	t.Goal = strings.TrimSpace(m.Goal)
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
 	t.Retired = m.Retired
 	t.BuiltinVersion = m.BuiltinVersion

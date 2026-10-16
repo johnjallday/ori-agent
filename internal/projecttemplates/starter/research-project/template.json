@@ -4,7 +4,8 @@
   "icon": "\ud83d\udcda",
   "behavior_profile": "research",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
+  "goal": "Build and maintain an up-to-date synthesis of the sources on my research topic.",
   "tags": [
     "research"
   ],

@@ -2133,16 +2133,6 @@ export class WorkspaceDetailPage {
         };
       } else if (this.workspace) {
         this.workspace[key] = newValue;
-        if (key === 'description') {
-          this.workspace.shared_data =
-            this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
-              ? this.workspace.shared_data
-              : {};
-          this.workspace.shared_data.workspace_bootstrap = {
-            ...(this.workspace.shared_data.workspace_bootstrap || {}),
-            goal: newValue
-          };
-        }
       }
 
       await this.renderWorkspaceInfo();
@@ -3234,12 +3224,13 @@ export class WorkspaceDetailPage {
     }
   }
 
+  // The description is not the goal: the goal lives in Workspace.Mission and
+  // the server keeps the stored bootstrap goal when this omits one.
   buildWorkspaceIntentPayload() {
     const intent = this.getWorkspaceIntentFromForm();
     return {
       description: intent.description,
       workspace_bootstrap: {
-        goal: intent.description,
         systems: intent.systems,
         capabilities: intent.capabilities,
         context: intent.context
@@ -3287,7 +3278,10 @@ export class WorkspaceDetailPage {
           this.workspace.shared_data && typeof this.workspace.shared_data === 'object'
             ? this.workspace.shared_data
             : {};
-        this.workspace.shared_data.workspace_bootstrap = payload.workspace_bootstrap;
+        this.workspace.shared_data.workspace_bootstrap = {
+          ...(this.workspace.shared_data.workspace_bootstrap || {}),
+          ...payload.workspace_bootstrap
+        };
       }
 
       await this.renderWorkspaceInfo();
@@ -3605,6 +3599,35 @@ export class WorkspaceDetailPage {
     } catch (error) {
       console.error('Failed to delete backlog item:', error);
       if (window.Toast) window.Toast.error('Failed to delete backlog item');
+      return false;
+    }
+  }
+
+  /**
+   * Not useful on a goal-run suggestion (workspace-goal-suggestions FR20):
+   * removes it and remembers it, with the optional one-line reason, so goal
+   * runs never suggest it again. Returns true when the suggestion is gone.
+   */
+  async dismissBacklogSuggestion(itemId, ownerWorkspaceId, reason = '') {
+    const id = String(itemId || '').trim();
+    if (!id) return false;
+    const ownerId = String(ownerWorkspaceId || this.workspaceId);
+    try {
+      const response = await fetch(
+        `/api/orchestration/backlog/${encodeURIComponent(id)}/not-useful?workspace_id=${encodeURIComponent(ownerId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: String(reason || '').trim() })
+        }
+      );
+      if (!response.ok) throw new Error('Failed to remove the suggestion');
+      if (window.Toast) window.Toast.success('Suggestion removed — it won’t be suggested again');
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to remove the suggestion:', error);
+      if (window.Toast) window.Toast.error('Failed to remove the suggestion');
       return false;
     }
   }

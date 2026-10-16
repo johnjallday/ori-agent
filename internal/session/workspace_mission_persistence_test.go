@@ -76,6 +76,34 @@ func TestWorkspaceStoreAdapter_MissionRoundTrips(t *testing.T) {
 	}
 }
 
+// The goal-run history (workspace-goal-suggestions FR21) travels in the same
+// envelope; without it Goal Settings would forget every run on restart.
+func TestWorkspaceStoreAdapter_MissionRunHistoryRoundTrips(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+	input := missionWorkspace(now)
+	input.MissionRuns = []workspace.MissionRunRecord{
+		{RunID: "run-2", Origin: workspace.MissionOriginManual, StartedAt: now, FinishedAt: now, ParseStatus: workspace.MissionParseFailed, Error: "not JSON", OutputTail: "prose"},
+		{RunID: "run-1", Origin: workspace.MissionOriginCadence, StartedAt: now, FinishedAt: now, Succeeded: true, ParseStatus: workspace.MissionParseOK, TasksCreated: 3, FindingsCreated: 2, DuplicatesSkipped: 1, DroppedByCap: 1},
+	}
+
+	input.GoalFirstRunPending = true
+	input.DismissedSuggestions = []workspace.DismissedSuggestion{{NormalizedTitle: "audit old posts", Title: "Audit old posts", Reason: "no", DismissedAt: now}}
+
+	got := adapter.toAgentWorkspace(adapter.toSessionWorkspace(input))
+
+	if len(got.MissionRuns) != 2 || got.MissionRuns[0].OutputTail != "prose" || got.MissionRuns[1].TasksCreated != 3 ||
+		got.MissionRuns[1].DuplicatesSkipped != 1 || !got.MissionRuns[1].Succeeded {
+		t.Fatalf("run history = %+v", got.MissionRuns)
+	}
+	if !got.GoalFirstRunPending {
+		t.Fatal("the pending first run must survive the SQLite envelope")
+	}
+	if len(got.DismissedSuggestions) != 1 || got.DismissedSuggestions[0].Reason != "no" {
+		t.Fatalf("dismissed suggestions = %+v", got.DismissedSuggestions)
+	}
+}
+
 // The counters and timestamps are what stop a cadence from re-firing every
 // tick, so losing them is not cosmetic: a workspace that forgot NextMissionRunAt
 // would look permanently due.

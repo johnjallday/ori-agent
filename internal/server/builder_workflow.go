@@ -480,6 +480,13 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// renumber anything.
 	runTicketMigration(ws)
 
+	// Copy setup-time goals into the canonical Workspace.Mission, once. Waits
+	// for a confirmed workspace root like the other startup maintenance, and
+	// writes through the composed store so workspace.json and SQLite agree.
+	if startupMaintenanceApproved {
+		runGoalBackfill(ws)
+	}
+
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 
@@ -977,18 +984,27 @@ func (b *ServerBuilder) initializeMissionBridge() {
 		return
 	}
 	opportunityStore := workspace.NewOpportunityStore(b.workspaceStore)
+	// One BacklogService for goal-run suggestions and Action Center's Add to
+	// Backlog: both share the store, event bus and BACKLOG.md synchronizer
+	// every other capture surface uses (BacklogService is a stateless holder
+	// of those refs, mirroring orchestrationhttp.Handler's construction).
+	backlogService := workspace.NewBacklogService(b.workspaceStore)
+	backlogService.SetEventBus(b.eventBus)
+	backlogService.SetSynchronizer(workspace.NewFileBacklogSynchronizer(b.workspaceStore))
 	bridge := workspacerun.NewMissionBridge(workspacerun.MissionBridgeConfig{
 		RunStore:         b.workspaceRunStore,
 		Service:          b.workspaceRunService,
 		WorkspaceStore:   b.workspaceStore,
 		Agents:           b.st,
 		OpportunityStore: opportunityStore,
+		Backlog:          backlogService,
 	})
 	if bridge == nil {
 		logger.Warn("Mission bridge construction returned nil; mission triggers will not fire", logger.Fields{})
 		return
 	}
 	b.taskScheduler.SetMissionTrigger(bridge)
+	b.taskScheduler.SetMissionModelCheck(b.goalRunModelCheck)
 	b.missionBridge = bridge
 	if b.workspaceHandler != nil {
 		b.workspaceHandler.SetScheduler(b.taskScheduler)
@@ -996,14 +1012,9 @@ func (b *ServerBuilder) initializeMissionBridge() {
 
 	// Wire the Action Center handler with the same OpportunityStore so list,
 	// dismiss, snooze, and resolve operations stay in lockstep with mission
-	// runs that produce findings. Its own BacklogService instance (Add to
-	// Backlog) shares the same store/event bus/file synchronizer as every
-	// other capture surface (mirrors orchestrationhttp.Handler's own
-	// construction — BacklogService is a stateless holder of those refs).
-	actionCenterBacklogService := workspace.NewBacklogService(b.workspaceStore)
-	actionCenterBacklogService.SetEventBus(b.eventBus)
-	actionCenterBacklogService.SetSynchronizer(workspace.NewFileBacklogSynchronizer(b.workspaceStore))
-	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore, actionCenterBacklogService)
+	// runs that produce findings, and the same BacklogService for Add to
+	// Backlog.
+	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore, backlogService)
 	// Project-library cards are derived per request from each owned Home's
 	// persisted digest and ready suggestions; nothing is stored for them.
 	if b.sessionHandler != nil {

@@ -99,6 +99,36 @@
   min-width: 0;
 }
 
+/* Evidence and recommended action for findings; suggested-task titles and
+   the Backlog link for a goal run's summary row. */
+.action-center-details {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.action-center-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.action-center-details-label {
+  margin-top: 0.35rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.action-center-details-body {
+  margin-top: 0.15rem;
+  white-space: pre-line;
+}
+
+.action-center-goal-backlog-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+}
+
 .action-center-unavailable {
   max-width: 10rem;
   font-size: 0.8rem;

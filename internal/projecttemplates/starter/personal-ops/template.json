@@ -4,7 +4,8 @@
   "icon": "🗓",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 6,
+  "builtin_version": 7,
+  "goal": "Keep my days organized: brief me each morning, track my follow-ups, and help me reflect.",
   "tags": [
     "personal"
   ],

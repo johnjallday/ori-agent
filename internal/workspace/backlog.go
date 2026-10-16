@@ -37,6 +37,8 @@ type BacklogCreateInput struct {
 	ReferenceURL string
 	SourceType   string
 	SourceID     string
+	// Context seeds the ticket's Task.Context (a goal suggestion's reason).
+	Context map[string]any
 }
 
 // BacklogUpdateInput describes a supported-field edit to an existing Backlog
@@ -215,6 +217,7 @@ func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
 		ReferenceURL: input.ReferenceURL,
 		Source:       input.SourceType,
 		SourceID:     input.SourceID,
+		Context:      input.Context,
 		Actor:        TicketActorUser,
 	})
 	if err != nil {
@@ -514,6 +517,29 @@ func (s *BacklogService) Delete(workspaceID, taskID string) error {
 			return fmt.Errorf("item %s is not in Backlog", taskID)
 		}
 		return ws.DeleteTask(taskID)
+	})
+	if err != nil {
+		return err
+	}
+
+	s.publish(EventTaskDeleted, workspaceID, taskID, nil)
+	s.renderAfterMutation(workspaceID)
+	return nil
+}
+
+// DismissSuggestion removes a suggested Backlog item as not useful and records
+// it, with the optional reason, in the dismissed-suggestion ledger so goal runs
+// never suggest it again (workspace-goal-suggestions FR20).
+func (s *BacklogService) DismissSuggestion(workspaceID, taskID, reason string) error {
+	err := s.store.Update(workspaceID, func(ws *Workspace) error {
+		t, err := ws.GetTask(taskID)
+		if err != nil {
+			return err
+		}
+		if t.CanonicalState() != TicketStateBacklog {
+			return fmt.Errorf("item %s is not in Backlog", taskID)
+		}
+		return ws.DismissSuggestion(taskID, reason)
 	})
 	if err != nil {
 		return err

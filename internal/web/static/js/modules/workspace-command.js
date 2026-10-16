@@ -96,6 +96,23 @@ function renderCapabilityMarkdown(value) {
   return '<pre>' + escapeHtml(markdown) + '</pre>';
 }
 
+// A Backlog ticket a goal run suggested carries source_type goal_suggestion
+// and its reason in context.goal_suggestion (workspace-goal-suggestions FR15).
+// Returns that reason, or null for any other ticket.
+export function goalSuggestionOf(task) {
+  if (!task || task.source_type !== 'goal_suggestion') return null;
+  const reason = (task.context && task.context.goal_suggestion) || {};
+  const text = key => String(reason[key] || '').trim();
+  return {
+    why: text('why'),
+    evidence: text('evidence'),
+    firstStep: text('first_step'),
+    suggestedAgent: text('suggested_agent'),
+    effort: text('effort'),
+    confidence: text('confidence')
+  };
+}
+
 // Clamp an HQ station's fractional map coordinate into [0,1]. Non-finite input
 // (a corrupt saved value) collapses to 0 so a station can never render or
 // persist off-field (FR11/FR13).
@@ -1310,7 +1327,7 @@ export class WorkspaceCommandView {
   commandSubtitle(mode) {
     const workflow = mode ? 'Workflow · ' + mode : '';
     const mission = this.missionSummary();
-    const missionLabel = mission && mission.label ? 'Mission · ' + mission.label : '';
+    const missionLabel = mission && mission.label ? 'Goal · ' + mission.label : '';
     return [workflow, missionLabel].filter(Boolean).join(' · ');
   }
 
@@ -1842,11 +1859,15 @@ export class WorkspaceCommandView {
     );
   }
 
+  // The goal text leads the card (workspace-goal-suggestions FR8): it is the
+  // heading itself, and the paragraph below is reserved for the empty-state
+  // prompt (or the loading line before the goal state arrives).
   renderMissionPanel() {
     const summary = this.missionSummary();
     const missionText = String(summary.mission || '').trim();
-    const title = summary.title || (missionText ? 'Current goal' : 'Workspace goal');
-    const text = summary.text || missionText || 'Loading workspace goal...';
+    const loaded = typeof summary.mission === 'string';
+    const title = summary.title || missionText || 'Workspace goal';
+    const text = loaded ? String(summary.text || '') : 'Loading workspace goal...';
     const statusLabel = summary.label || 'Loading';
     const statusClass = summary.className || 'is-loading';
     const cadence = summary.cadenceLabel || 'Cadence: loading';
@@ -1871,19 +1892,23 @@ export class WorkspaceCommandView {
       '" id="workspace-command-mission-card" aria-labelledby="workspace-command-mission-title">' +
       '<div class="ws-cmd-mission-main">' +
       '<div class="ws-cmd-mission-head">' +
-      '<span class="ws-cmd-mission-kicker">Mission</span>' +
+      '<span class="ws-cmd-mission-kicker">Goal</span>' +
       '<span class="ws-cmd-mission-status ' +
       escapeHtml(statusClass) +
       '" id="workspace-command-mission-status">' +
       escapeHtml(statusLabel) +
       '</span>' +
       '</div>' +
-      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title">' +
+      '<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title' +
+      (missionText ? ' is-goal' : '') +
+      '">' +
       escapeHtml(title) +
       '</h3>' +
       '<p id="workspace-command-mission-text" class="ws-cmd-mission-text' +
       (missionText ? '' : ' is-empty') +
-      '">' +
+      '"' +
+      (text ? '' : ' hidden') +
+      '>' +
       escapeHtml(text) +
       '</p>' +
       '<div class="ws-cmd-mission-meta" aria-label="Mission automation timing">' +
@@ -5208,7 +5233,7 @@ export class WorkspaceCommandView {
     // "Backlog" in its own accessible name/title (not just "Quest Board") so
     // the tool-belt button never obscures the real Backlog lifecycle (FR50).
     return [
-      { key: 'objective', label: 'Workspace Mission', icon: 'bi-bullseye' },
+      { key: 'objective', label: 'Workspace Goal', icon: 'bi-bullseye' },
       { key: 'objectives', label: 'Tasks', icon: 'bi-list-check' },
       { key: 'backlog', label: 'Backlog · Quest Board', icon: 'bi-journal-bookmark' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
@@ -5249,7 +5274,7 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-window-section is-objective">' +
       '<div class="ws-cmd-map-quest-frame">' +
-      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Mission</strong></div>' +
+      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Goal</strong></div>' +
       this.renderMissionPanel() +
       '</div></div>'
     );
@@ -6317,6 +6342,15 @@ export class WorkspaceCommandView {
         this.runBacklogDelete(deleteBtn.getAttribute('data-cmd-backlog-item'));
         return;
       }
+      const notUsefulBtn = event.target.closest('[data-cmd-backlog-not-useful]');
+      if (notUsefulBtn) {
+        this.openBacklogNotUseful(notUsefulBtn.getAttribute('data-cmd-backlog-item'));
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-not-useful-cancel]')) {
+        this.closeBacklogNotUseful();
+        return;
+      }
       const editBtn = event.target.closest('[data-cmd-backlog-edit]');
       if (editBtn) {
         this.openBacklogEdit(editBtn.getAttribute('data-cmd-backlog-item'));
@@ -6338,6 +6372,11 @@ export class WorkspaceCommandView {
       if (event.target.closest('[data-cmd-backlog-edit-form]')) {
         event.preventDefault();
         this.submitBacklogEdit();
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-not-useful-form]')) {
+        event.preventDefault();
+        this.runBacklogNotUseful();
       }
     });
     const captureFieldInput = event => {
@@ -6349,6 +6388,11 @@ export class WorkspaceCommandView {
       const quickDetails = event.target.closest('[data-cmd-backlog-quick-details]');
       if (quickDetails) {
         this.backlogQuickCaptureDetailsDraft = quickDetails.value;
+        return;
+      }
+      const notUsefulReason = event.target.closest('[data-cmd-backlog-not-useful-reason]');
+      if (notUsefulReason) {
+        this.backlogNotUsefulReason = notUsefulReason.value;
         return;
       }
       const editField = event.target.closest('[data-cmd-backlog-edit-field]');
@@ -6399,6 +6443,9 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-drawer-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
       escapeHtml(this._backlogDrawerAnnounce || '') +
       '</div>' +
+      (this.goalRunInFlight()
+        ? '<div class="ws-cmd-drawer-goal-run" role="status">Looking for things to work on…</div>'
+        : '') +
       (this.backlogQuickCaptureOpen ? this.backlogQuickCaptureHTML() : '') +
       '<label class="ws-cmd-backlog-descendants">' +
       '<input type="checkbox" data-cmd-backlog-descendants-toggle' +
@@ -6412,6 +6459,13 @@ export class WorkspaceCommandView {
       '</div>' +
       this.backlogSyncPanelHTML()
     );
+  }
+
+  // A goal run is looking for work; its suggestions land in this drawer when
+  // it ends (workspace-goal-suggestions FR27).
+  goalRunInFlight() {
+    const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
+    return !!(mission && typeof mission.isRunning === 'function' && mission.isRunning());
   }
 
   backlogQuickCaptureHTML() {
@@ -6457,9 +6511,19 @@ export class WorkspaceCommandView {
           owner && this.backlogIncludeDescendants()
             ? '<span class="ws-cmd-drawer-row-owner">' + escapeHtml(owner) + '</span>'
             : '';
+        // A goal-run suggestion says so, with its why as the second line (FR20).
+        const suggestion = goalSuggestionOf(task);
+        const suggestedBadge = suggestion
+          ? '<span class="ws-cmd-drawer-row-suggested">Suggested</span>'
+          : '';
+        const whyLine =
+          suggestion && suggestion.why
+            ? '<span class="ws-cmd-drawer-row-why">' + escapeHtml(suggestion.why) + '</span>'
+            : '';
         return (
           '<button type="button" role="listitem" class="ws-cmd-drawer-row' +
           (selected ? ' is-selected' : '') +
+          (suggestion ? ' is-suggested' : '') +
           '" data-cmd-backlog-select="' +
           escapeHtml(id) +
           '" aria-current="' +
@@ -6470,6 +6534,8 @@ export class WorkspaceCommandView {
           '<span class="ws-cmd-drawer-row-title">' +
           escapeHtml(title) +
           '</span>' +
+          suggestedBadge +
+          whyLine +
           '</span></button>'
         );
       })
@@ -6522,19 +6588,35 @@ export class WorkspaceCommandView {
         escapeHtml(id) +
         '" aria-label="Move down">▼</button>'
       : '';
+    const suggestion = goalSuggestionOf(task);
+    // A suggestion shows its why and, behind one expander, its evidence and
+    // first step; any other ticket keeps its details preview (FR20).
+    const body = suggestion
+      ? this.backlogSuggestionPreviewHTML(suggestion)
+      : details
+        ? '<p class="ws-cmd-drawer-preview-brief">' + escapeHtml(details.slice(0, 400)) + '</p>'
+        : '';
+    const notUsefulControl = suggestion
+      ? this.backlogNotUsefulId === id
+        ? this.backlogNotUsefulFormHTML(id)
+        : '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-not-useful data-cmd-backlog-item="' +
+          escapeHtml(id) +
+          '">Not useful</button>'
+      : '';
     return (
       '<div class="ws-cmd-drawer-preview-head">' +
-      '<span class="ws-cmd-drawer-preview-state tone-neutral">Backlog</span>' +
+      '<span class="ws-cmd-drawer-preview-state tone-neutral">' +
+      (suggestion ? 'Backlog · Suggested' : 'Backlog') +
+      '</span>' +
       '<h3 class="ws-cmd-drawer-preview-title">' +
       escapeHtml(title) +
       '</h3>' +
       ownerLink +
       '</div>' +
-      (details
-        ? '<p class="ws-cmd-drawer-preview-brief">' + escapeHtml(details.slice(0, 400)) + '</p>'
-        : '') +
+      body +
       '<div class="ws-cmd-drawer-preview-actions">' +
       promoteControl +
+      notUsefulControl +
       moveControls +
       '<button type="button" class="ws-cmd-backlog-move" data-cmd-backlog-edit data-cmd-backlog-item="' +
       escapeHtml(id) +
@@ -6544,6 +6626,92 @@ export class WorkspaceCommandView {
       '">Delete</button>' +
       '</div>'
     );
+  }
+
+  backlogSuggestionPreviewHTML(suggestion) {
+    const facts = [];
+    if (suggestion.suggestedAgent) facts.push('Suggested agent: ' + suggestion.suggestedAgent);
+    if (suggestion.effort) facts.push('Effort: ' + suggestion.effort);
+    if (suggestion.confidence) facts.push('Confidence: ' + suggestion.confidence);
+    const evidenceParts = [];
+    if (suggestion.evidence)
+      evidenceParts.push(
+        '<p class="ws-cmd-suggestion-evidence">' + escapeHtml(suggestion.evidence) + '</p>'
+      );
+    if (suggestion.firstStep)
+      evidenceParts.push(
+        '<p class="ws-cmd-suggestion-step"><strong>First step:</strong> ' +
+          escapeHtml(suggestion.firstStep) +
+          '</p>'
+      );
+    if (facts.length)
+      evidenceParts.push(
+        '<p class="ws-cmd-suggestion-facts">' + escapeHtml(facts.join(' · ')) + '</p>'
+      );
+    return (
+      (suggestion.why
+        ? '<p class="ws-cmd-drawer-preview-brief ws-cmd-suggestion-why">' +
+          escapeHtml(suggestion.why) +
+          '</p>'
+        : '') +
+      (evidenceParts.length
+        ? '<details class="ws-cmd-suggestion-details"><summary>Evidence</summary>' +
+          evidenceParts.join('') +
+          '</details>'
+        : '')
+    );
+  }
+
+  // Not useful asks for an optional one-line reason, then removes the
+  // suggestion and remembers it so goal runs never suggest it again (FR20).
+  backlogNotUsefulFormHTML(id) {
+    return (
+      '<form class="ws-cmd-backlog-not-useful" data-cmd-backlog-not-useful-form data-cmd-backlog-item="' +
+      escapeHtml(id) +
+      '">' +
+      '<label class="ws-cmd-backlog-not-useful-label" for="ws-cmd-backlog-not-useful-reason">Why isn’t it useful? (optional)</label>' +
+      '<input id="ws-cmd-backlog-not-useful-reason" type="text" maxlength="200" class="ws-cmd-backlog-quick-input" data-cmd-backlog-not-useful-reason value="' +
+      escapeHtml(this.backlogNotUsefulReason || '') +
+      '" />' +
+      '<button type="submit" class="ws-cmd-drawer-action"' +
+      (this.backlogNotUsefulBusy ? ' disabled' : '') +
+      '>Remove suggestion</button>' +
+      '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-not-useful-cancel>Cancel</button>' +
+      '</form>'
+    );
+  }
+
+  openBacklogNotUseful(itemId) {
+    this.backlogNotUsefulId = String(itemId || '');
+    this.backlogNotUsefulReason = '';
+    this.backlogNotUsefulBusy = false;
+    this.renderBacklogDrawerBody();
+  }
+
+  closeBacklogNotUseful() {
+    this.backlogNotUsefulId = '';
+    this.backlogNotUsefulReason = '';
+    this.backlogNotUsefulBusy = false;
+    this.renderBacklogDrawerBody();
+  }
+
+  async runBacklogNotUseful() {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(this.backlogNotUsefulId || '').trim();
+    if (!page || !id || typeof page.dismissBacklogSuggestion !== 'function') return;
+    if (this.backlogNotUsefulBusy) return;
+    this.backlogNotUsefulBusy = true;
+    const removed = await page.dismissBacklogSuggestion(
+      id,
+      this.backlogItemOwner(id),
+      String(this.backlogNotUsefulReason || '').trim()
+    );
+    this.backlogNotUsefulBusy = false;
+    if (removed) {
+      this.backlogNotUsefulId = '';
+      this.backlogNotUsefulReason = '';
+    }
+    this.renderBacklogDrawerBody();
   }
 
   // Post-creation supported-field editor (FR6, 20): title, details, tags,

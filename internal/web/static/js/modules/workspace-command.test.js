@@ -310,7 +310,7 @@ test('command subtitle includes mission automation state when mission state is l
       commandView.computeStats()
     );
 
-    assert.match(html, /Workflow · Guided · Mission · Enabled/);
+    assert.match(html, /Workflow · Guided · Goal · Enabled/);
     assert.match(html, /id="workspace-command-subtitle"/);
   } finally {
     globalThis.window = originalWindow;
@@ -378,8 +378,8 @@ test('mission panel renders loaded goal state and findings link', () => {
         mission: 'Keep launch readiness current.',
         label: 'Enabled',
         className: 'is-enabled',
-        title: 'Current goal',
-        text: 'Keep launch readiness current.',
+        title: 'Keep launch readiness current.',
+        text: '',
         cadenceLabel: 'Cadence: Daily at 09:00',
         nextLabel: 'Next: in 2h',
         lastLabel: 'Last: 1h ago',
@@ -399,7 +399,13 @@ test('mission panel renders loaded goal state and findings link', () => {
   try {
     const html = commandView.renderMissionPanel();
 
-    assert.match(html, /Keep launch readiness current\./);
+    // The goal text is the card's heading, ahead of status and cadence (FR8).
+    assert.match(
+      html,
+      /<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title is-goal">Keep launch readiness current\.<\/h3>/
+    );
+    assert.match(html, /<span class="ws-cmd-mission-kicker">Goal<\/span>/);
+    assert.match(html, /id="workspace-command-mission-text" class="ws-cmd-mission-text" hidden>/);
     assert.match(html, /ws-cmd-mission-status is-enabled/);
     assert.match(html, /Cadence: Daily at 09:00/);
     assert.match(html, /href="\/action-center\?workspace=workspace-1"/);
@@ -419,8 +425,8 @@ test('mission panel disables Run Now when no saved goal is runnable', () => {
         mission: '',
         label: 'Not set',
         className: 'is-empty',
-        title: 'No goal set',
-        text: 'No workspace goal yet.',
+        title: 'No goal yet',
+        text: 'Set a goal so your agents can suggest work',
         cadenceLabel: 'Cadence: Manual only',
         nextLabel: 'Next: not scheduled',
         lastLabel: 'Last: never',
@@ -437,7 +443,7 @@ test('mission panel disables Run Now when no saved goal is runnable', () => {
   try {
     const html = commandView.renderMissionPanel();
 
-    assert.match(html, /No workspace goal yet\./);
+    assert.match(html, /Set a goal so your agents can suggest work/);
     assert.match(html, />Set Goal<\/button>/);
     assert.match(html, /id="workspace-command-mission-run"[^>]* disabled/);
     assert.match(html, /title="Set a goal before running"/);

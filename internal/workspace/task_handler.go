@@ -171,7 +171,19 @@ type resolvedTaskAgent struct {
 const (
 	maxTaskToolRounds          = 6
 	maxTaskToolResultFollowups = 1
+	// maxMissionToolRounds is a goal run's own cap: enough to read a few
+	// notes and files and still answer. Ordinary tasks keep the task cap
+	// (workspace-goal-suggestions FR13).
+	maxMissionToolRounds = 10
 )
+
+// taskToolRoundLimit is the tool-round cap for task.
+func taskToolRoundLimit(task Task) int {
+	if IsMissionTask(task.Context) {
+		return maxMissionToolRounds
+	}
+	return maxTaskToolRounds
+}
 
 // taskUtilityToolNames lists the utility tool names this handler exposes
 // to agents during task execution. Browser-intent detection lives in
@@ -535,7 +547,8 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		taskResponseSchema = deriveTaskResponseSchema(task)
 	}
 
-	for round := 0; round < maxTaskToolRounds; round++ {
+	toolRoundLimit := taskToolRoundLimit(task)
+	for round := 0; round < toolRoundLimit; round++ {
 		requestTools := tools
 		if forceFinalAnswer || toolsRejected {
 			requestTools = nil
@@ -637,7 +650,10 @@ func (h *LLMTaskHandler) executeTaskConversation(
 
 		// Preserve the existing broad native-MCP path for unrelated opted-in
 		// tasks. It is never consulted once a capability-scoped grant applies.
-		if !runtimeScopeActive && providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
+		// A goal run never takes it: native MCP runs tools inside the CLI where
+		// the autonomy gate cannot see them, and every goal-run tool call must
+		// pass the gate (workspace-goal-suggestions FR10).
+		if !runtimeScopeActive && !IsMissionTask(task.Context) && providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
 			chatReq.WorkspaceID = task.WorkspaceID
 			if h.workspaceStore != nil {
 				chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
@@ -864,7 +880,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		return "", buildToolOnlyBlockedError(lastToolSummary)
 	}
 
-	return "", fmt.Errorf("task exceeded %d tool rounds without a final answer", maxTaskToolRounds)
+	return "", fmt.Errorf("task exceeded %d tool rounds without a final answer", toolRoundLimit)
 }
 
 func repeatedSuccessfulToolCalls(toolCalls []llm.ToolCall, successfulToolCalls map[string]bool) bool {

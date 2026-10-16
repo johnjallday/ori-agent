@@ -25,7 +25,8 @@
       const bootstrap = (ws && ws.shared_data && ws.shared_data.workspace_bootstrap) || {};
       return {
         description: ws?.description || bootstrap.goal || '',
-        goal: bootstrap.goal || ws?.description || '',
+        // Workspace.Mission is the canonical goal; the bootstrap copy is legacy.
+        goal: ws?.mission || bootstrap.goal || ws?.description || '',
         systems: bootstrap.systems || '',
         context: bootstrap.context || ''
       };
