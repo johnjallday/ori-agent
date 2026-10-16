@@ -386,6 +386,121 @@ test('Action Center shows the suggestion summary and each finding with its evide
   await expect(drift).toContainText('Review the last three posts against one agreed tone.');
 });
 
+test('stock authoring: preview, duplicate, edit and create preserve custom and empty goal intent', async ({
+  page,
+  request
+}, testInfo) => {
+  const stockGoal =
+    'Understand this project, identify evidence-backed risks, and propose prioritized improvements before changing code.';
+  const customGoal = 'Review 日本語 evidence <b>literally</b> before proposing changes.';
+  const before = goalRunPrompts().length;
+  await page.goto('/workspaces');
+  await page.evaluate(() => {
+    // @ts-expect-error bootstrap is a page global
+    window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
+  });
+  await cardByLabel(page, 'Code Project').click();
+  await expect(page.locator('#templateBriefingGoalValue')).toHaveText(stockGoal);
+  await page.locator('#templateBriefingGoalValue').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('stock-goal-preview.png'), fullPage: true });
+  expect(goalRunPrompts()).toHaveLength(before);
+
+  await page.goto('/templates');
+  await page.locator('#tplList [role="listitem"]').filter({ hasText: 'Code Project' }).click();
+  const goal = page.locator('#tplEditGoal');
+  await expect(goal).toHaveValue(stockGoal);
+  await expect(goal).toHaveAttribute('readonly', '');
+  await goal.focus();
+  await expect(goal).toBeFocused();
+  await captureGoalState(page, testInfo.outputPath('stock-readonly-overview.png'));
+  await page.locator('#tplDuplicateBtn').click();
+  await page.locator('#tplNameModalInput').fill('Goal Review Copy');
+  await page.locator('#tplNameModalInput').press('Enter');
+  await expect(page.locator('#tplEditName')).toHaveValue('Goal Review Copy');
+  await expect(goal).toBeEditable();
+  await expect(goal).toHaveValue(stockGoal);
+  await goal.fill(customGoal);
+  await page.locator('#tplSaveBtn').click();
+  await expect(page.getByText('Template saved.', { exact: true })).toBeVisible();
+  await page.reload();
+  await page.locator('#tplList [role="listitem"]').filter({ hasText: 'Goal Review Copy' }).click();
+  await expect(goal).toHaveValue(customGoal);
+  await goal.fill('Unsaved changes');
+  await page.locator('#tplResetBtn').click();
+  await expect(goal).toHaveValue(customGoal);
+  await goal.focus();
+  await captureGoalState(page, testInfo.outputPath('copy-saved-goal.png'));
+  const catalog = await ok(await request.get('/api/project-templates'));
+  expect(catalog.templates.find((t: { id: string }) => t.id === 'code-project').goal).toBe(
+    stockGoal
+  );
+  const copy = catalog.templates.find((t: { id: string }) => t.id === 'goal-review-copy');
+  expect(copy.builtin).toBeFalsy();
+  expect(copy.behavior_profile).toBe('software_project');
+  expect(copy.goal).toBe(customGoal);
+
+  for (const [index, override] of ['My reviewed project outcome', ''].entries()) {
+    await page.goto('/workspaces');
+    await page.evaluate(() => {
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
+    });
+    await page.locator('[data-template-id="goal-review-copy"]').click();
+    await expect(page.locator('#templateBriefingGoalValue')).toHaveText(customGoal);
+    await expect(page.locator('#templateBriefingGoalValue b')).toHaveCount(0);
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(`Copy Goal Intent ${index}`);
+    await expect(page.locator('#folderGoalInput')).toHaveValue(customGoal);
+    await page.locator('#folderGoalInput').fill(override);
+    // Re-selecting after Back and a real catalog reload must not erase edits.
+    await page.locator('#wizardBackBtn').click();
+    await page.evaluate(async () => {
+      // @ts-expect-error picker is a page global
+      await window.ProjectTemplateCard.populate();
+    });
+    await page.locator('[data-template-id="goal-review-copy"]').click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#folderGoalInput')).toHaveValue(override);
+    await page.locator('#wizardNextBtn').click();
+    await page
+      .getByRole('button', { name: 'Assign an agent to Development Assistant', exact: true })
+      .click();
+    await page.locator('[data-existing-agent-add="Ask Ori"]').click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    let resolveCreated!: (body: { folder: { id: string; folder_slug: string } }) => void;
+    const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
+      resolveCreated = resolve;
+    });
+    // Read before fulfilling: navigation otherwise discards Chromium's body.
+    await page.route('**/api/workspaces', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const response = await route.fetch();
+      resolveCreated(await ok(response));
+      await route.fulfill({ response });
+    });
+    await page.locator('#createFolderBtn').click();
+    await page
+      .getByRole('button', { name: 'Create workspace here' })
+      .click({ timeout: 5_000 })
+      .catch(() => {});
+    const body = await created;
+    await page.unroute('**/api/workspaces');
+    const state = await missionState(request, body.folder.id);
+    expect(state.mission).toBe(override);
+    expect(state.mission_runs).toHaveLength(0);
+    await page.goto(`/workspaces/${body.folder.folder_slug}`);
+    await expect(page.locator('#workspace-command-mission-title')).toHaveText(
+      override || 'No goal yet'
+    );
+    await captureGoalState(
+      page,
+      testInfo.outputPath(override ? 'copy-workspace-override.png' : 'copy-workspace-empty.png')
+    );
+    expect(goalRunPrompts()).toHaveLength(before);
+  }
+});
+
 test('stock defaults: Writing and Code prefill from the real library and retain distinct first-open behavior', async ({
   page,
   request

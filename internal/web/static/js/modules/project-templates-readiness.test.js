@@ -134,6 +134,8 @@ const ELEMENT_IDS = [
   'templateBriefing',
   'templateBriefingDefault',
   'templateBriefingDeploys',
+  'templateBriefingGoalRow',
+  'templateBriefingGoalValue',
   'templateBriefingAgentsRow',
   'templateBriefingAgentsValue',
   'templateBriefingGroupRow',
@@ -304,6 +306,35 @@ async function setup(templates) {
   await Picker.populate();
   return Picker;
 }
+
+test('briefing shows the default goal as literal text and clears it for every non-template path', async () => {
+  const goal = 'Écrire 日本語 <img src=x onerror=alert(1)> & review';
+  await setup([template('with-goal', { goal }), template('no-goal')]);
+  optionById('with-goal').click();
+  const value = elements.get('templateBriefingGoalValue');
+  const row = elements.get('templateBriefingGoalRow');
+  assert.equal(value.textContent, goal);
+  assert.equal(value.children.length, 0, 'goal is not HTML');
+  assert.equal(row.hidden, false);
+  optionById('no-goal').click();
+  assert.equal(value.textContent, '');
+  assert.equal(row.hidden, true);
+  optionById('with-goal').click();
+  optionById('').click();
+  assert.equal(value.textContent, '');
+  assert.equal(row.hidden, true);
+  optionById('with-goal').click();
+  elements.get('projectTemplatePathInput').value = '/isolated/template-folder';
+  elements.get('projectTemplatePathInput').fire('input');
+  assert.equal(value.textContent, '');
+  assert.equal(row.hidden, true);
+  elements.get('projectTemplatePathInput').value = '';
+  optionById('with-goal').click();
+  elements.get('folderImportToggle').checked = true;
+  elements.get('folderImportToggle').fire('change');
+  assert.equal(value.textContent, '');
+  assert.equal(row.hidden, true);
+});
 
 // --- card states -----------------------------------------------------------
 

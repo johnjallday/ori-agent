@@ -3943,6 +3943,43 @@ test('typing a description updates an untouched Goal field and stops once the go
   assert.equal(manager.currentWorkspaceGoal(), 'Grow the newsletter');
 });
 
+test('template switches and asynchronous refreshes preserve custom and deliberately empty workspace goals', async () => {
+  for (const typed of ['My outcome 日本語 <b>literal</b>', '']) {
+    const { manager, elements } = nameAndDescriptionManager();
+    elements.folderGoalInput = { value: '', dataset: {} };
+    let selected = { ...catalogTemplate, goal: 'First default' };
+    manager.selectedTemplateGoal = () => selected?.goal || '';
+    manager.handleWorkspaceTemplateSelected(selected);
+    assert.equal(elements.folderGoalInput.value, 'First default');
+    elements.folderGoalInput.value = typed;
+    elements.folderGoalInput.dataset.goalEdited = '1';
+    for (const template of [
+      { id: 'second', goal: 'Second default' },
+      null,
+      { ...catalogTemplate, goal: 'Refreshed default' }
+    ]) {
+      selected = template;
+      await Promise.resolve();
+      manager.handleWorkspaceTemplateSelected(selected);
+      assert.equal(manager.currentWorkspaceGoal(), typed);
+    }
+  }
+});
+
+test('removing a template default retains description fallback until the workspace goal is explicitly cleared', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  elements.folderGoalInput = { value: '', dataset: {} };
+  let selected = { ...catalogTemplate, goal: 'Default' };
+  manager.selectedTemplateGoal = () => selected.goal;
+  manager.handleWorkspaceTemplateSelected(selected);
+  selected = { ...catalogTemplate, goal: '' };
+  manager.handleWorkspaceTemplateSelected(selected);
+  assert.equal(elements.folderGoalInput.value, catalogTemplate.description);
+  elements.folderGoalInput.value = '';
+  elements.folderGoalInput.dataset.goalEdited = '1';
+  assert.equal(manager.currentWorkspaceGoal(), '');
+});
+
 test('Create sends the goal as mission and as the bootstrap goal (SM2)', async () => {
   const mirrored = await runDetailsCreate({ description: 'Keep the brand voice consistent' });
   assert.equal(mirrored.mission, 'Keep the brand voice consistent');
@@ -3960,6 +3997,14 @@ test('Create sends the goal as mission and as the bootstrap goal (SM2)', async (
 
   const empty = await runDetailsCreate({ description: '' });
   assert.equal(empty.mission, '');
+  const cleared = await runDetailsCreate({
+    description: 'A nonempty description',
+    configure: manager => {
+      manager.currentWorkspaceGoal = () => '';
+    }
+  });
+  assert.equal(cleared.mission, '');
+  assert.equal(cleared.workspace_bootstrap?.goal || '', '');
 });
 
 // ---------------------------------------------------------------------------

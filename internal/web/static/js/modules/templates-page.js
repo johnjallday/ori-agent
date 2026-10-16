@@ -519,6 +519,8 @@ function tplResetOverviewFields() {
   if (nameInput)
     nameInput.value = template.name && template.name !== template.id ? template.name : '';
   if (descInput) descInput.value = template.description || '';
+  const goalInput = tplEl('tplEditGoal');
+  if (goalInput) goalInput.value = template.goal || '';
   const iconInput = tplEl('tplEditIcon');
   if (iconInput) iconInput.value = template.icon || '';
   const behaviorSelect = tplEl('tplEditBehavior');
@@ -791,6 +793,8 @@ async function tplSaveOverview() {
     body.if_revision = template.variant_revision;
     body.group_requirement = tplGroupRequirementFromControls();
   } else {
+    const goalInput = tplEl('tplEditGoal');
+    if (goalInput) body.goal = goalInput.value.trim();
     Object.assign(body, {
       tags,
       behavior_profile: behaviorSelect ? behaviorSelect.value : 'general',
@@ -850,7 +854,7 @@ function tplApplyReadOnly() {
         ? 'This template and its declarations are managed by the installed plugin and are read-only here.'
         : variant
           ? 'Name, description, icon, and placement policy are user-owned. Behavior, files, tools, agents, and setup stay pinned to the trusted source.'
-          : 'This is a built-in template and is read-only.';
+          : 'This built-in is read-only. Duplicate to customize its default goal and other settings.';
   });
   const duplicate = tplEl('tplDuplicateBtn');
   const pluginSourceUnavailable = Boolean(
@@ -858,9 +862,13 @@ function tplApplyReadOnly() {
   );
   if (duplicate) {
     duplicate.disabled = Boolean(
-      template?.builtin || (pluginOwned && !template?.group_requirement) || pluginSourceUnavailable
+      (pluginOwned && !template?.group_requirement) || pluginSourceUnavailable
     );
-    duplicate.textContent = pluginOwned ? 'Customize' : 'Duplicate';
+    duplicate.textContent = pluginOwned
+      ? 'Customize'
+      : template?.builtin
+        ? 'Duplicate to customize'
+        : 'Duplicate';
     duplicate.title = pluginOwned
       ? pluginSourceUnavailable
         ? 'Resolve the plugin source status before creating a customization.'
@@ -874,8 +882,11 @@ function tplApplyReadOnly() {
     customize.hidden = !pluginOwned || !template?.group_requirement;
     customize.disabled = pluginSourceUnavailable;
   }
+  const goalInput = tplEl('tplEditGoal');
+  // Read-only text remains focusable/selectable, unlike disabled edit controls.
+  if (goalInput) goalInput.readOnly = sourceSectionsReadOnly;
   const agentsDuplicate = tplEl('tplAgentsDuplicateBtn');
-  if (agentsDuplicate) agentsDuplicate.hidden = sourceSectionsReadOnly;
+  if (agentsDuplicate) agentsDuplicate.hidden = pluginOwned || variant;
   ['tplAgentsAddBtn', 'tplAgentsSaveBtn'].forEach(id => {
     const el = tplEl(id);
     if (el) el.hidden = readOnly;

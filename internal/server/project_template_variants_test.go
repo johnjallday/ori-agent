@@ -180,6 +180,21 @@ func TestProjectTemplateVariantSurfacesAreAllowlistedAndManifestOnly(t *testing.
 		t.Fatal("unsupported variant edit changed manifest bytes")
 	}
 
+	// Even an empty/null goal is outside the source-variant allowlist.
+	for _, goal := range []string{`"Override"`, `""`, `null`} {
+		r := httptest.NewRequest(http.MethodPut, "/template", bytes.NewBufferString(`{"name":"Variant","goal":`+goal+`}`))
+		r.SetPathValue("templateID", created.Template.ID)
+		w := httptest.NewRecorder()
+		server.handleProjectTemplateUpdate(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("variant goal %s: %d %s", goal, w.Code, w.Body.String())
+		}
+		unchanged, err := os.ReadFile(manifestPath)
+		if err != nil || !bytes.Equal(before, unchanged) {
+			t.Fatal("goal edit changed source variant")
+		}
+	}
+
 	files := httptest.NewRequest(http.MethodGet, "/files", nil)
 	files.SetPathValue("templateID", created.Template.ID)
 	filesRecorder := httptest.NewRecorder()

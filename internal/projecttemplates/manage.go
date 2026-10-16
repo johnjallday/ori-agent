@@ -366,6 +366,8 @@ func EnsureMutable(libDir, id string) error {
 // current value, a set pointer replaces it (empty icon clears the key; empty
 // starter_tasks clears the key; behavior_profile is normalized).
 type ManifestEdit struct {
+	// Goal: nil preserves, a string replaces after trimming, empty removes.
+	Goal                   *string
 	Icon                   *string
 	BehaviorProfile        *string
 	StarterTasks           *[]StarterTask
@@ -454,6 +456,9 @@ func updateManifestUnlocked(libDir, id, name, description string, tags *[]string
 	}
 
 	if edit != nil {
+		if edit.Goal != nil {
+			setOrDelete("goal", *edit.Goal)
+		}
 		if edit.Icon != nil {
 			setOrDelete("icon", *edit.Icon)
 		}

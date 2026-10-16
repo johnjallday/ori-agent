@@ -128,6 +128,10 @@
                 <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
                 <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
                   <div class="workspace-template-briefing-deploys-kicker">Includes</div>
+                  <div id="templateBriefingGoalRow" class="workspace-template-briefing-row" hidden>
+                    <span class="workspace-template-briefing-row-label">Default goal</span>
+                    <span id="templateBriefingGoalValue" class="workspace-template-briefing-row-value"></span>
+                  </div>
                   <div id="templateBriefingAgentsRow" class="workspace-template-briefing-row workspace-template-briefing-row-addons" hidden>
                     <span class="workspace-template-briefing-row-label">Agents</span>
                     <div id="templateBriefingAgentsValue" class="workspace-template-briefing-chips workspace-template-briefing-agents"></div>
@@ -319,7 +323,7 @@
                      the user types in it (sessions.js syncWorkspaceGoalMirror). -->
                 <div id="workspaceGoalField" class="mt-2">
                   <label id="folderGoalLabel" for="folderGoalInput" class="workspace-setup-title">Goal <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
-                  <p id="folderGoalHelp" class="workspace-setup-help mb-1">Your agents use this to suggest work. You can change it later.</p>
+                  <p id="folderGoalHelp" class="workspace-setup-help mb-1">Suggests work on first open when ready. Some projects require Run now; Start first look is a separate action. You can change this goal later; no schedule is enabled.</p>
                   <textarea id="folderGoalInput" class="modern-input w-100" placeholder="What should this workspace achieve?" rows="2" style="resize: vertical;" aria-describedby="folderGoalHelp"></textarea>
                 </div>
               </div>
