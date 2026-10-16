@@ -4,6 +4,12 @@ Weekly routine that produces a ranked shortlist of 3–5 feature candidates for 
 Output feeds the existing PRD → task generation → build workflow. This doc is the single
 source of truth for the routine — tune the routine by editing this file, not the schedule.
 
+**Running it locally.** `.agents/skills/feature-explore/SKILL.md` runs this routine on a
+checkout with git and the `gh` CLI (Claude: the `feature-explore` agent or `/feature-explore`;
+Codex: `$feature-explore`). `./scripts/feature-explore-snapshot.sh` gathers the previous
+report, worktrees, PRs, open Issues and recent commits in one read-only command. The cloud
+routine follows this document directly.
+
 **Rules for the executing agent:**
 - Read-only pass over everything. The report file is the only thing a run writes. In
   particular source E — the user's open GitHub Issues — is read and never edited, labelled,
@@ -21,11 +27,15 @@ This repo has ~zero TODO/FIXME comments (verified 2026-07) — do not grep for t
 - Stubs and placeholders: `grep -rn "not implemented\|panic(\|placeholder\|coming soon" --include="*.go" internal/ cmd/`
 - Handlers registered but thin: compare `internal/server/server.go` route registrations against handler implementations in `internal/*http/`.
 - UI surfaces without backend (or vice versa): scan `internal/web/` templates/JS for buttons or tabs that call missing endpoints.
-- Docs promising features: `docs/premium_features.md`, `docs/plugins.md`, `docs/api/API_REFERENCE.md` vs. actual code.
+- Docs promising features: `docs/plugins.md`, `docs/api/API_REFERENCE.md` vs. actual code.
+  (`docs/premium_features.md` is a pricing proposal that still describes the removed plugin
+  system; it is not a feature plan.)
 
-### B. Momentum (git usually unavailable — use mtime fallback)
-This folder is a git worktree; `.git` points outside the sandbox mount, so `git log` normally
-fails here. Try it once; if it fails, use file mtimes:
+### B. Momentum (git when available, mtime fallback otherwise)
+Locally, `git log origin/dev --since=<last report date>` works, and the snapshot script prints
+the commits, the most-changed paths and the longest-untouched packages. In the cloud sandbox
+this folder is a git worktree whose `.git` points outside the mount, so `git log` normally
+fails there. Try it once; if it fails, use file mtimes:
 
 - Hot areas (last 2 weeks): `find internal cmd -name "*.go" -mtime -14`
 - Stale areas (untouched 90+ days): `find internal -name "*.go" -mtime +90 | sed 's|/[^/]*$||' | sort | uniq -c | sort -rn | head`
@@ -43,9 +53,10 @@ Ask: what are competitors shipping that Ori Agent's architecture (MCP + skills, 
 workspaces, Go single-binary) is well positioned to match or beat?
 
 ### D. Vision docs vs. reality
-Read `docs/features/*.md` (13+ plan docs incl. `AI_FEATURES_ROADMAP.md`, `create-modal-backlog.md`,
-`multi-agent-support.md`, `personal-hq-assistant.md`) and `docs/design/*.md`. For each plan doc:
-classify as shipped / partially shipped / not started by spot-checking the code it describes.
+Read `docs/features/*.md`, `docs/architecture/*.md` (the contracts) and `docs/design/*.md`. The
+13 older plan docs were removed in `bb5285af8`, so list the folders rather than trusting a
+remembered name. For each plan doc or contract: classify as shipped / partially shipped / not
+started by spot-checking the code it describes.
 Partially-shipped plans with recent momentum are prime candidates.
 
 ### E. User backlog (all open GitHub Issues)
@@ -107,19 +118,24 @@ Rank by Impact and Strategic fit first; prefer S/M effort. At most one L-effort 
 
 ## Report format
 
-Write to `docs/feature-discovery/reports/YYYY-MM-DD.md`:
+Write to `docs/feature-discovery/reports/YYYY-MM-DD.md` (a local run scoped to one Kind or
+topic appends `-<kind>` or `-<topic-slug>` to the name):
 
 ```markdown
 # Feature Discovery — YYYY-MM-DD
 
 ## Shortlist
 ### 1. <Candidate name>  [Impact: H | Effort: M | Fit: H]
+- Kind: Feature | Finish | Quick win | Reliability
 - Issue: #<number> — <url>   (omit only for candidates that came from sources A–D)
+- Ready: yes | no — the label state, plus the `size:*` label if any (Issue-derived entries only)
 - What: one paragraph
 - Why now: evidence from sources A–E with file paths / URLs
-- First PRD questions: 2–3 questions the PRD must answer
+- Open questions: 2–3 questions the PRD must answer (for a Finish candidate, the ones the
+  person must settle to close it out)
+- First step: the one concrete action for the person; a suggestion the run prints, never performs
 
-(3–5 candidates total)
+(3–5 candidates total; a full run mixes Kinds and never pads a Kind to reach a count)
 
 ## Watchlist
 Candidates considered but not ranked, one line each, with reason. Keep `#<number>` on any
@@ -127,6 +143,14 @@ line that came from an Issue.
 
 ## Changes since last report
 Shipped / promoted / dropped candidates from the previous report.
+
+## In flight (not candidates)
+Work seen and deliberately not pitched: worktrees ahead of dev, open PRs, half-ticked checklists.
+A run without local worktrees lists open PRs only and says so.
+
+## Housekeeping (not candidates)
+Local runs only: owed cleanup verified against `git worktree list`, such as `wt done` still
+owed, stranded branches, stale docs. Omit the section when worktrees are not visible.
 
 ## Source log
 Which searches ran, which docs were read, git/mtime status, and for source E: the repository,

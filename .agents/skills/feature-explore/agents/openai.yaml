@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature Explore"
+  short_description: "Find improvements and features worth building next"
+  default_prompt: "Use $feature-explore to run a read-only feature-discovery pass and write the dated shortlist report."
