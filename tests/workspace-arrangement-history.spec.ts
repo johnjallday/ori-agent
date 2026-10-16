@@ -74,6 +74,55 @@ async function mount(page: Page) {
   });
 }
 
+test('a redacted Home receipt stays a receipt without offering another apply', async ({
+  page
+}, info) => {
+  await openHarness(page);
+  const history = summary();
+  history.arrangement.state = 'stale';
+  history.arrangement.goal = 'Catalog history was forgotten. Request a new arrangement.';
+  history.arrangement.rationale = '';
+  history.arrangement.operations = 0;
+  history.arrangement.proposed_operations = [];
+  history.arrangement.unknowns = [];
+  history.arrangement.review_questions = [];
+  history.arrangement.explicit_unchanged = 0;
+  history.arrangement.explicit_needs_review = 0;
+  const saved = {
+    ...history,
+    collection_receipt: {
+      digest: 'a'.repeat(64),
+      catalog_revision: 3,
+      applied_at: '2026-02-02T12:00:00Z',
+      effects: [
+        {
+          kind: 'create_collection',
+          collection_id: 'collection-id',
+          before_revision: 0,
+          after_revision: 1
+        }
+      ]
+    }
+  };
+  await page.route(`${origin}/history`, route => route.fulfill({ json: saved }));
+  await mount(page);
+  await page.getByRole('button', { name: 'Open saved arrangement', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Saved collection metadata receipt' })
+  ).toBeVisible();
+  await expect(page.locator('#history')).toContainText(
+    'Canonical receipt: 1 logical-collection metadata change(s)'
+  );
+  await expect(page.locator('#history')).not.toContainText('not applied');
+  await expect(
+    page.locator('#history').getByRole('button', { name: /apply|confirm/i })
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: info.outputPath('redacted-collection-receipt.png'),
+    fullPage: true
+  });
+});
+
 test('keyboard opens inert history and every intention, without an HTML injection or mutation', async ({
   page
 }, info) => {

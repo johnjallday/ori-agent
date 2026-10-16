@@ -14,8 +14,9 @@ func TestMigration081_UpgradesLegacyDatabaseWithoutManufacturingDrafts(t *testin
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE assistant_arrangement_effects`,
 		`DROP TABLE assistant_arrangements`,
-		`DELETE FROM schema_migrations WHERE version=81`,
+		`DELETE FROM schema_migrations WHERE version>=81`,
 		`INSERT INTO sessions(id,title,agent_name,created_at,updated_at) VALUES('legacy','Existing conversation','Atlas',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
 		`INSERT INTO messages(id,session_id,role,content,created_at) VALUES('legacy-message','legacy','user','Keep my history',CURRENT_TIMESTAMP)`,
 	} {
@@ -40,7 +41,7 @@ func TestMigration081_UpgradesLegacyDatabaseWithoutManufacturingDrafts(t *testin
 	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM assistant_arrangements`).Scan(&count); err != nil || count != 0 {
 		t.Fatal("upgrade manufactured drafts", err)
 	}
-	if err := db.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 81 {
+	if err := db.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatal("upgrade version", version, err)
 	}
 }

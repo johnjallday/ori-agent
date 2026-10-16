@@ -161,6 +161,62 @@ test('mount and checkbox changes never send; a POST carries only consent plus th
   assert.equal(calls.length, 6, 'fresh choices allow exactly one new request');
 });
 
+test('revision binds the exact canonical proposal and requires fresh sharing before Send', async () => {
+  const calls = [];
+  const saved = {
+    kind: 'proposal',
+    catalog_current: true,
+    arrangement: {
+      id: 'saved-a',
+      revision: 3,
+      state: 'draft',
+      origin: 'model',
+      goal: 'Prior goal',
+      rationale: '',
+      unknowns: [],
+      operations: 0,
+      proposed_operations: [],
+      explicit_unchanged: 0,
+      explicit_needs_review: 0,
+      review_questions: [],
+      coverage: { note: 'Saved catalog' },
+      review_available: false
+    }
+  };
+  const ui = mount(async (path, options) => {
+    calls.push({ path, options });
+    if (path === '/arrangements/saved-a') return saved;
+    if (path === '/arrangements')
+      return {
+        arrangements: [
+          { id: 'saved-a', revision: 4, state: 'draft', kind: 'proposal', review_available: false }
+        ]
+      };
+    if (path === '/arrangements/context') return { ...context(), schema_version: 2, revision: 9 };
+    throw new Error('uncertain revision');
+  });
+  await ui.api.revise({ id: 'saved-a', revision: 3 });
+  assert.equal(calls.length, 2);
+  assert.equal(ui.goal.value, 'Prior goal');
+  assert.equal(ui.send.attributes['aria-disabled'], 'true');
+  ui.goal.value = 'Revised owner goal';
+  ui.goal.events.input();
+  choose(ui.checks[0]);
+  await ui.send.events.click();
+  assert.equal(calls.length, 3);
+  const request = JSON.parse(calls[2].options.body);
+  assert.equal(request.revise_arrangement_id, 'saved-a');
+  assert.equal(request.expected_record_revision, 3);
+  assert.equal(request.expected_revision, 9);
+  assert.equal(request.share_catalog_metadata, true);
+  assert.equal(ui.goal.value, 'Revised owner goal');
+  await ui.history.events.click();
+  assert.equal(calls.length, 4, 'changed target recovery reads history only');
+  assert.equal(ui.goal.value, 'Revised owner goal');
+  assert.equal(ui.send.attributes['aria-disabled'], 'true');
+  assert.ok(nodes(ui.root).some(node => node.textContent.includes('The revision target changed')));
+});
+
 test('late context reads cannot enable a different Home or an invalidated view', async () => {
   let finish;
   let active = true;

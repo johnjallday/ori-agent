@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { arrangementAttachmentContext } from './personal-assistant-arrangement.js';
+import {
+  arrangementAttachmentContext,
+  libraryHomeLinks
+} from './personal-assistant-arrangement.js';
 import { ArrangementConsent } from './workspace-arrangement-consent.js';
 const source = () => ({
   assistant: {
@@ -72,4 +75,27 @@ test('unfocused live attachment is eligible, but missing/historical/focused cont
       false
     );
   }
+});
+
+test('the Home handoff links only to validated Home routes, by name', () => {
+  assert.deepEqual(
+    libraryHomeLinks({
+      homes: [
+        { id: 'h1', name: ' Music Production Home ', route: '/workspaces/music-home' },
+        { id: 'h2', name: '<img src=x>', route: '/workspaces/studio' },
+        { id: 'h3', name: 'Offsite', route: 'https://example.com/workspaces/x' },
+        { id: 'h4', name: 'Nested', route: '/workspaces/a/b' },
+        { id: 'h5', name: 'Query', route: '/workspaces/a?panel=x' },
+        { id: 'h6', name: '', route: '/workspaces/blank' },
+        { id: 'h7', name: 'No route' },
+        null
+      ]
+    }),
+    [
+      { name: 'Music Production Home', href: '/workspaces/music-home' },
+      { name: '<img src=x>', href: '/workspaces/studio' }
+    ]
+  );
+  assert.deepEqual(libraryHomeLinks(null), []);
+  assert.deepEqual(libraryHomeLinks({ homes: 'many' }), []);
 });

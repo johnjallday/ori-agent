@@ -19,8 +19,10 @@ const (
 	MaxContextRecordBytes = 4 << 20
 )
 
-// Record is canonical inert intent, not executable review state. Context
-// ownership and originating message are stored by the canonical owning store.
+// Record carries canonical intent and historical lifecycle state, never approval.
+// Home review/completion states additionally require owning-store witnesses and
+// receipts; this shape alone cannot establish them. Context ownership and the
+// originating message are stored by the canonical owning store.
 // It deliberately retains no selector handles, source paths or copied labels.
 // Live authority must be reacquired; decoding history cannot restore it.
 type Record struct {
@@ -173,10 +175,13 @@ func recordSelections(draft Draft) []Selection {
 func (r Record) Validate() error {
 	if r.Version != Version || !label(r.ID, 160) || r.Revision < 1 || !label(r.SourceID, 160) ||
 		(r.Origin != "model" && r.Origin != "manual" && r.Origin != "rule_based") ||
-		(r.State != "draft" && r.State != "needs_more_evidence" && r.State != "stale" && r.State != "cancelled") ||
+		(r.State != "draft" && r.State != "needs_more_evidence" && r.State != "stale" && r.State != "cancelled" && r.State != "awaiting_user_review" && r.State != "completed") ||
 		r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) || len(r.ItemRevisions) > MaxSourceItems || len(r.CollectionRevisions) > 100 ||
 		!label(r.Coverage.Origin, 80) || !text(r.Coverage.Note, 2000) || r.Coverage.MaxDepth < 0 || r.Coverage.MaxEntries < 0 || r.Coverage.TreeOmitted < 0 || r.Coverage.SkippedLinks < 0 ||
 		!text(r.Provider, 160) || !text(r.Model, 512) {
+		return ErrInvalid
+	}
+	if (r.State == "awaiting_user_review" || r.State == "completed") && r.SourceKind != HomeLibrary {
 		return ErrInvalid
 	}
 	if r.Origin == "model" && (r.Provider == "" || r.Model == "" || r.ProviderFingerprint == "") {

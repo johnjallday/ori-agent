@@ -26,6 +26,19 @@ func TestLibraryArrangementRequest_RejectsAmbiguousSharingAndIdentity(t *testing
 	}
 }
 
+func TestLibraryArrangementRequest_RevisionRequiresExactPairedPins(t *testing.T) {
+	for _, raw := range []string{`{"revise_arrangement_id":"saved"}`, `{"expected_record_revision":1}`, `{"revise_arrangement_id":null,"expected_record_revision":1}`, `{"revise_arrangement_id":"saved","expected_record_revision":null}`, `{"revise_arrangement_id":"saved","expected_record_revision":1.5}`, `{"revise_arrangement_id":"saved","expected_record_revision":0}`, `{"revise_arrangement_id":"saved","expected_record_revision":1,"expected_record_revision":2}`} {
+		var request libraryArrangementRequest
+		if json.Unmarshal([]byte(raw), &request) == nil {
+			t.Fatal("ambiguous revision accepted", raw)
+		}
+	}
+	var request libraryArrangementRequest
+	if err := json.Unmarshal([]byte(`{"revise_arrangement_id":"saved","expected_record_revision":2}`), &request); err != nil || request.ReviseArrangementID != "saved" || request.ExpectedRecordRevision != 2 {
+		t.Fatal(request, err)
+	}
+}
+
 func TestLibraryArrangementHTTP_RequiresOwnerAndPreservesSafeFailure(t *testing.T) {
 	h, _, home, _ := assistantPortfolioHTTPFixture(t)
 	h.currentUserID = func(context.Context) (string, error) { return home.OwnerUserID, nil }

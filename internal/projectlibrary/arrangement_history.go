@@ -3,6 +3,7 @@ package projectlibrary
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 )
@@ -10,19 +11,25 @@ import (
 // ArrangementRef is owner-visible history, not Manager or source authority.
 // CatalogCurrent describes only the library revision, not provider readiness.
 type ArrangementRef struct {
-	Kind            string `json:"kind"`
-	ID              string `json:"id"`
-	Revision        int64  `json:"revision"`
-	State           string `json:"state"`
-	CatalogCurrent  bool   `json:"catalog_current"`
-	ReviewAvailable bool   `json:"review_available"`
+	RevisionDiscussionPending bool   `json:"revision_discussion_pending,omitempty"`
+	Kind                      string `json:"kind"`
+	ID                        string `json:"id"`
+	Revision                  int64  `json:"revision"`
+	State                     string `json:"state"`
+	CatalogCurrent            bool   `json:"catalog_current"`
+	CatalogRevision           int64  `json:"catalog_revision"`
+	ReviewAvailable           bool   `json:"review_available"`
 }
 
 type ArrangementHistory struct {
-	Kind           string                       `json:"kind"`
-	Clarification  string                       `json:"clarification,omitempty"`
-	Arrangement    workspacearrangement.Summary `json:"arrangement"`
-	CatalogCurrent bool                         `json:"catalog_current"`
+	RevisionDiff         *ArrangementRevisionDiff     `json:"revision_diff,omitempty"`
+	RevisionDiscussion   *RevisionDiscussion          `json:"revision_discussion,omitempty"`
+	CollectionCorrection *CollectionCorrection        `json:"collection_correction,omitempty"`
+	CollectionReceipt    *CollectionCommitReceipt     `json:"collection_receipt,omitempty"`
+	Kind                 string                       `json:"kind"`
+	Clarification        string                       `json:"clarification,omitempty"`
+	Arrangement          workspacearrangement.Summary `json:"arrangement"`
+	CatalogCurrent       bool                         `json:"catalog_current"`
 }
 
 func arrangementHistory(saved Arrangement, current int64) (*ArrangementHistory, error) {
@@ -33,7 +40,25 @@ func arrangementHistory(saved Arrangement, current int64) (*ArrangementHistory, 
 	if err != nil {
 		return nil, err
 	}
-	out := &ArrangementHistory{Kind: saved.outcomeKind(), Clarification: saved.Clarification, Arrangement: summary, CatalogCurrent: saved.CatalogRevision == current}
+	var receipt *CollectionCommitReceipt
+	if saved.CollectionReceipt != nil {
+		copy := *saved.CollectionReceipt
+		copy.Effects = slices.Clone(copy.Effects)
+		receipt = &copy
+	}
+	out := &ArrangementHistory{Kind: saved.outcomeKind(), Clarification: saved.Clarification, CollectionReceipt: receipt, Arrangement: summary, CatalogCurrent: saved.CatalogRevision == current}
+	if saved.RevisionDiff != nil {
+		diff := *saved.RevisionDiff
+		out.RevisionDiff = &diff
+	}
+	if saved.RevisionDiscussion != nil {
+		discussion := *saved.RevisionDiscussion
+		out.RevisionDiscussion = &discussion
+	}
+	if saved.CollectionCorrection != nil {
+		correction := *saved.CollectionCorrection
+		out.CollectionCorrection = &correction
+	}
 	raw, err := json.Marshal(out)
 	if err != nil || len(raw) > workspacearrangement.MaxSummaryBytes {
 		return nil, ErrLimit
@@ -53,7 +78,7 @@ func (s *Store) ArrangementRefs(ctx context.Context, scope Scope) ([]Arrangement
 	}
 	out := make([]ArrangementRef, 0, len(doc.Arrangements))
 	for _, saved := range doc.Arrangements {
-		out = append(out, ArrangementRef{Kind: saved.outcomeKind(), ID: saved.Record.ID, Revision: saved.Record.Revision, State: saved.Record.State, CatalogCurrent: saved.CatalogRevision == doc.Revision})
+		out = append(out, ArrangementRef{Kind: saved.outcomeKind(), ID: saved.Record.ID, RevisionDiscussionPending: saved.RevisionDiscussion != nil && saved.Record.State != "cancelled", Revision: saved.Record.Revision, State: saved.Record.State, CatalogRevision: saved.CatalogRevision, CatalogCurrent: saved.CatalogRevision == doc.Revision})
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

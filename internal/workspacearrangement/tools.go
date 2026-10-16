@@ -54,7 +54,7 @@ func schemaArray(item any, maximum int) map[string]any {
 // character limits and source-specific operation support.
 func ToolDefinitions() []toolapi.ToolDefinition {
 	filter := schemaObject(map[string]any{"text": schemaString(120), "format": schemaString(80), "connection": schemaString(80),
-		"availability": schemaString(80), "root_id": schemaString(160), "collection_id": schemaString(160)})
+		"availability": schemaString(80), "root_id": schemaString(160), "collection_id": schemaString(160), "selection_handle": schemaString(160)})
 	selection := schemaObject(map[string]any{"ids": schemaArray(schemaString(160), MaxExplicitItems), "handle": schemaString(160)})
 	operation := schemaObject(map[string]any{
 		"kind": map[string]any{"type": "string", "enum": []string{CreateCollection, RenameCollection, SetMembers, RemoveCollection, CreateGroup, SelectActivation}},
@@ -68,7 +68,7 @@ func ToolDefinitions() []toolapi.ToolDefinition {
 	}, "version", "source_revision", "goal", "rationale", "unknowns", "unchanged", "needs_review", "operations")
 	return []toolapi.ToolDefinition{
 		{Name: "arrangement_overview", Description: "Read held/saved metadata counts and at most five nonrepresentative examples. Optional literal collection-name filter and collection cursor page existing collections, five at a time. No scan, content read or action.", Parameters: schemaObject(map[string]any{"collection_text": schemaString(120), "collection_cursor": schemaString(8192)})},
-		{Name: "arrangement_search", Description: "Page already-held metadata with literal AND filters; no expressions, globs or new discovery. At most 20 rows. Preserve the returned cursor and filter together.", Parameters: schemaObject(map[string]any{"filter": filter, "cursor": schemaString(8192), "page_size": map[string]any{"type": "integer", "minimum": 0, "maximum": ModelPageSize}})},
+		{Name: "arrangement_search", Description: "Page already-held metadata with literal AND filters; no expressions, globs or new discovery. Optional selection_handle restricts results to a previously issued frozen set from this turn. At most 20 rows. Preserve the returned cursor and filter together.", Parameters: schemaObject(map[string]any{"filter": filter, "cursor": schemaString(8192), "page_size": map[string]any{"type": "integer", "minimum": 0, "maximum": ModelPageSize}})},
 		{Name: "arrangement_detail", Description: "Read bounded metadata for one previously issued item ID. Tree nodes are observations, not creator targets.", Parameters: schemaObject(map[string]any{"id": schemaString(160)}, "id")},
 		{Name: "arrangement_select", Description: "Freeze the exact current set matching literal filters; returns a handle/count/digest, not approval or a future-match rule. Empty matches issue no handle.", Parameters: schemaObject(map[string]any{"filter": filter})},
 		{Name: "arrangement_propose", Description: "Submit inert intent as the sole call in its batch. This does not save, approve or execute anything. Unmentioned items stay unchanged; use needs_review for unsupported effects. Attachment supports plain create_group; Home supports logical collections and selected activation for later independent review.", Parameters: proposal},

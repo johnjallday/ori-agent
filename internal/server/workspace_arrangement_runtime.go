@@ -23,6 +23,8 @@ func (b *ServerBuilder) wireLibraryArrangementPlanning() {
 	if b.sessionHandler == nil {
 		return
 	}
+	library := projectlibrary.NewStore(b.workspaceStore).WithProviderEvidence(b.sessionHandler.AssistantLibraryProviderEvidence)
+	b.sessionHandler.SetCollectionReviewService(projectlibrary.NewCollectionReviewService(library, b.resolveArrangementRuntime))
 	b.sessionHandler.SetArrangementContext(func(ctx context.Context, owner, homeID string) (projectlibrary.ArrangementPlanningContext, error) {
 		library := projectlibrary.NewStore(b.workspaceStore).WithProviderEvidence(b.sessionHandler.AssistantLibraryProviderEvidence)
 		return library.ReadArrangementPlanningContext(ctx, owner, homeID, b.resolveArrangementRuntime)

@@ -15,6 +15,8 @@ import {
 import { setupQuestURL } from './setup-quest-links.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
 import { mountHomeArrangementPlanner } from './home-arrangement.js';
+import { mountCollectionReview } from './home-collection-review.js';
+import { mountHomeCollections } from './home-collections.js';
 
 // The open helpers moved to library-open.js so the setup pop-up can share them
 // without loading this module on every page; existing importers keep working.
@@ -512,7 +514,7 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
       !saved ||
       saved.home_id !== homeID ||
       !Array.isArray(saved.ids) ||
-      saved.ids.length < 2 ||
+      saved.ids.length < 1 ||
       saved.ids.length > QUEUE_LIMIT ||
       !Number.isInteger(saved.index) ||
       saved.index < 0 ||
@@ -991,6 +993,7 @@ export class ProjectLibraryPanel {
   }
 
   async refresh() {
+    this.collectionBrowser?.invalidate();
     this.arrangementPlanning?.invalidate();
     this.arrangementHistoryGeneration++;
     try {
@@ -1026,6 +1029,7 @@ export class ProjectLibraryPanel {
       await this.renderPendingLinks();
       await this.renderProposals();
       await this.renderArrangementHistory();
+      await this.renderCollections();
       await this.search(false);
       if (!this.readOnly && this.state.picker_available === false && !this.offerID)
         this.status(
@@ -1185,6 +1189,24 @@ export class ProjectLibraryPanel {
     });
   }
 
+  async renderCollections() {
+    const container = document.getElementById('projectLibraryCollectionBrowser');
+    if (!container) return;
+    this.collectionBrowser?.invalidate();
+    const home = this.workspaceId;
+    const generation = (this.collectionGeneration || 0) + 1;
+    this.collectionGeneration = generation;
+    const current = () => home === this.workspaceId && generation === this.collectionGeneration;
+    this.collectionBrowser = mountHomeCollections(container, {
+      isCurrent: current,
+      request: (path, options) => {
+        if (!current()) throw new Error('Home changed');
+        return this.request(path, options);
+      }
+    });
+    await this.collectionBrowser.refresh();
+  }
+
   async renderArrangementHistory() {
     const section = document.getElementById('projectLibraryArrangements');
     const container = document.getElementById('projectLibraryArrangementRows');
@@ -1223,6 +1245,55 @@ export class ProjectLibraryPanel {
           )
         );
         container.append(row);
+        if (
+          ref.kind === 'proposal' &&
+          !this.state?.provider_read_only &&
+          ['draft', 'needs_more_evidence', 'awaiting_user_review'].includes(ref.state)
+        ) {
+          const revise = node(
+            'button',
+            'btn btn-sm btn-outline-secondary',
+            'Revise with assistant'
+          );
+          revise.type = 'button';
+          revise.addEventListener('click', () => {
+            if (current()) void this.arrangementPlanning?.revise(ref, revise);
+          });
+          row.append(revise);
+        }
+        if (
+          ref.kind === 'proposal' &&
+          ref.catalog_current === true &&
+          !this.state?.provider_read_only &&
+          ['draft', 'needs_more_evidence', 'awaiting_user_review'].includes(ref.state) &&
+          Number.isSafeInteger(ref.catalog_revision)
+        ) {
+          mountCollectionReview(row, {
+            ref,
+            reviewAllowed: !ref.revision_discussion_pending,
+            isCurrent: current,
+            request: (path, options) => {
+              if (!current()) throw new Error('Home changed');
+              return this.request(path, options);
+            },
+            reload: () => this.renderArrangementHistory(),
+            onRevised: () => this.arrangementPlanning?.invalidate({ clearResult: true }),
+            onApplied: () => {
+              this.arrangementPlanning?.invalidate({ clearResult: true });
+              void this.renderCollections();
+              void this.restoreQueue()
+                .then(() => {
+                  if (current()) this.renderQueueControls();
+                })
+                .catch(() => {
+                  if (current())
+                    this.status(
+                      'Saved queue could not be reloaded. Reopen the library before reviewing projects.'
+                    );
+                });
+            }
+          });
+        }
         mountArrangementHistory(row, {
           id: ref.id,
           isCurrent: current,

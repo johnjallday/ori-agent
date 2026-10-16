@@ -456,10 +456,48 @@ and these response fields:
 |---|---|
 | `GET /api/home-assistant/conversations` | `conversations` (`id`, `title`, `message_count`, `updated_at`) that belong to the current assistant in the current Personal HQ, and `manage_href`. |
 | `GET /api/home-assistant/conversations/{id}` | `conversation`, `messages` (`id`, `role`, `content`, `created_at`, `imported`), `truncated`, and `saved` — the Ticket drafts saved from it (or `saved_unavailable`). Canonical arrangement history is separate: `arrangements` (bounded record/message references) or `arrangements_unavailable`. |
-| `GET /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}` | One saved `arrangement` summary, `conversation_id`, `message_id`, and `context_current`; no query arguments. |
+| `GET /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}` | One saved `arrangement` summary, `conversation_id`, `message_id`, and `context_current`; no query arguments. A PA proposal also returns `execution`: `{ state, reviewable, declinable, groups[] }`, each group `{ operation, name, members, state, offer_id?, route?, workspaces? }`. |
 
 Conversations are canonical Sessions; they are renamed and deleted through the
 Sessions API. Deleting one never deletes a saved Ticket or a remembered fact.
+
+**Organize inside a Home (handoff):** `GET /api/assistant-program/library-homes`
+(owner-only, `no-store`, no arguments) returns `homes: [{ id, name, route }]` for
+the owner's active program Homes whose library is initialized. The PA's Suggest
+arrangement panel links to each Home's **Organize library**; nothing is shared,
+planned, initialized or read from a catalog.
+
+**PA arranged groups (owner-only, `Cache-Control: no-store`):**
+
+| Endpoint | Request | Effect |
+|---|---|---|
+| `POST /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}/group-review` | `{ "revision": "<current folder revision>", "expected_record_revision": 1, "operation": 0 }` | Opens the existing conversation-bound folder setup review for one `create_group` intention and returns `conversation`, `folder_context` (new revision and `offer_id`) and `arrangement_review`. Creates nothing and calls no model. |
+| `POST /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}/decline` | `{ "expected_record_revision": 1 }` | Marks a current, unapplied proposal `cancelled` (revision + 1), closes its open group review, and returns the cancelled history. Nothing is undone. |
+
+Unknown fields are refused. A group review requires: the proposal is open
+(`draft`/`needs_more_evidence`) at that record revision, it is local and not
+imported, the assistant state version is current, the conversation's current
+folder event is the proposal's own observation, no other setup review is open
+(`folder_review_pending`), the model-authored record's provider/model/registered
+instance is unchanged (`arrangement_runtime_changed`), and the held scan still
+holds every selected item (`arrangement_source_unavailable`). The review is a
+version-2 `structure` with an `arrangement` binding (`record_id`,
+`record_revision`, `operation`): exactly the selected immediate subfolders, all
+plain workspaces, no threshold, no omitted tail and no Adjust. A member that is
+already a workspace, moved, or became a link, a taken group name, the root, or
+more than 24 folders returns `arrangement_group_unavailable` with that reason.
+**Set up** on that review is the only confirmation: the existing
+`POST /api/personal-assistant/folder-digest/offers/{offerID}/setup` digest check
+covers the arrangement binding, and its guard rechecks the canonical record,
+revision, binding and runtime before the run. A confirmed group is never
+re-reviewed (`arrangement_group_confirmed`); declining after any group was
+confirmed returns `arrangement_effects_applied`, and declining while a group's
+review cannot be read back returns `arrangement_effects_unverified`. Only a
+still-open review blocks the next group; a finished one does not. History's
+`execution.declinable` says whether a decline may be requested. Group `state` is read from that
+group's own review: `not_reviewed`, `awaiting_user_review`, `applying`,
+`partially_applied` (use Continue on its card), `completed` (with the read-back
+group `route` and `workspaces` count), or `closed` (nothing created).
 
 **PA arrangement planning:** Add folder → Suggest arrangement → enter a goal →
 explicitly choose bounded metadata sharing → Send organizing goal. Ordinary Send
@@ -506,7 +544,9 @@ trust a workspace skill binding. The response is `no-store` and accepts no query
 `POST /api/workspaces/{workspaceID}/assistant-program/library/arrangements/plan`
 accepts only `goal`, `expected_revision`, `share_catalog_metadata` (must be `true`),
 `allow_upgrade` (required `true` for a v1 library), and optional `expected_context`
-(64 hexadecimal characters). The browser always sends the disclosed context pin;
+(64 hexadecimal characters). To revise an existing Home proposal, also supply the
+paired `revise_arrangement_id` and positive `expected_record_revision` fields.
+These identify canonical intent, never a caller-supplied draft. The browser always sends the disclosed context pin;
 a different current runtime/catalog refuses before metadata reaches the model.
 This pin is a comparison value, not approval or a replacement for owner authorization. Duplicate/aliased fields,
 null choices, caller-supplied identities and query arguments are rejected.
@@ -518,7 +558,26 @@ GET; clarification is saved as discussion, not a proposal. Failed preparation,
 drift or save returns a safe `arrangement_error`, never raw provider errors or an
 unsaved result. A lost-response retry with the old revision conflicts without a
 second model call; reopen history. The browser keeps the goal, separately requests
-upgrade consent, and renders only canonical saved outcomes. Apply remains unavailable.
+upgrade consent, and renders only canonical saved outcomes. Planning never applies
+anything; the separate metadata and activation-selection review/confirmation path is documented below.
+
+A revision rebinds the authorized prior proposal's exact membership to fresh
+bounded selection handles and shares that proposal plus any pending question
+with the disclosed model. Both catalog and proposal revisions are CAS-fenced;
+a late response cannot overwrite a newer correction/commit or invalidate an
+unrelated current review. A new proposal retains its canonical ID and increments
+its revision, invalidating old approval. `revision_diff` contains only compact
+operation-slot/member-reference change counts, exclusion/question flags and
+base/new revisions—not old labels or member IDs, and not executed effects.
+A clarification instead preserves the complete typed proposal and saves a
+`revision_discussion` (requested goal, answer, provider/model, revision and time)
+in the same envelope. The original `arrangement.goal` still describes the retained
+intent; `revision_discussion.goal` describes the current request. Such references
+carry `revision_discussion_pending: true` and cannot enter collection review
+until a subsequent proposal resolves the question. Forget clears discussion;
+removing a referenced collection stales its proposal and clears the pending
+question. No model calls or automatic retries occur when choosing a revision
+or reopening its history; fresh explicit sharing is required.
 
 The list returns at most 32 record references; detail returns `arrangement` and
 `catalog_current`. Home list/detail also includes `kind` (`proposal` or
@@ -537,6 +596,114 @@ projection is capped at 64 KiB and omits member IDs, live handles and authority
 fingerprints. `context_current`/`catalog_current` compare saved context only;
 **`review_available` remains false**, even for a current record. Historical or
 redacted records never restore source permission. This is not a compiled review.
+Home references additionally carry `catalog_revision`. Completed metadata/selection
+history may include `collection_receipt`: opaque per-effect consequences tied to
+canonical operation/review witnesses, without copied entry labels or membership.
+A `select_activation` consequence has `queue_id`, `selected_count` (1–100), an
+empty `collection_id` and zero before/after collection revisions. It records queue
+preparation, not project activation. History replay never resumes a discarded queue.
+
+**Browse saved logical collections:** owner-only, no-store GETs under
+`/api/workspaces/{workspaceID}/assistant-program/library/collections`.
+The list returns at most 20 `collections` (ID, name, revision, member count and
+optional originating arrangement ID), `revision`, `context_pin`, `offset`,
+`total` and optional `next_offset`. Further list pages require
+`?context_pin=…&offset=20` (offset multiples of 20).
+`GET /collections/{collectionID}?context_pin=…&offset=0` returns at most 50
+exact members, the collection card, and the same paging fields; member offsets
+are multiples of 50. Rows contain ID, saved catalog name, format,
+`last_observed_availability` and optional observation timestamp—not paths,
+workspace-private state, song facts, grants or activation controls. Responses
+are capped at 64 KiB and stale pins fail rather than mixing snapshots.
+Refresh the list to obtain a current comparison pin; it grants no authority.
+Unknown/duplicate query fields are rejected. These reads do not initialize,
+migrate, scan or resolve a Manager/model; provider loss does not hide saved
+metadata. Legacy v1 libraries return an empty collection list without upgrading.
+
+**Home collection metadata and activation-selection review/confirmation:** these owner-only, no-store
+routes do not call a model, scan sources, create workspaces/links or activate
+projects. The actual Manager and current provider/runtime are independently
+reauthorized; callers cannot supply them. Collection changes and one
+`select_activation` intention may be saved atomically. Unsupported creator intent,
+multiple activation selections, an existing active queue or selected linked
+entries are rejected whole. Queue preparation grants no per-project approval. Base: `/api/workspaces/{workspaceID}/assistant-program/library/arrangements/{arrangementID}`.
+
+- `POST /decline`: exact JSON `{ "expected_revision": N,
+  "expected_record_revision": N }`. Closes a current unapplied proposal as
+  `cancelled`, retaining its typed intent and any saved revision question. It
+  never resolves a model, changes collections/queues, or undoes confirmed effects.
+  Owner/Manager binding and both current catalog/proposal pins are checked; stale,
+  foreign, completed and already-declined requests fail. An older proposal cannot
+  invalidate another live review. Late model replies and old approval tokens
+  cannot revive the declined proposal. Returns canonical history; uncertain
+  responses require reopening history, not an automatic retry. Plugin/Manager
+  authorization is still required, even though no model is needed.
+- `POST /collection-review`: exact JSON `{ "expected_revision": N,
+  "expected_record_revision": N }`. Persists a ten-minute review witness and
+  returns its first membership page; does not change collections.
+- `GET /collection-review/{reviewToken}?operation=0&offset=0`: read an exact
+  effect's before/after membership, at most 50 entries. Offset must be a multiple
+  of 50; `next_offset` identifies the next page. Unknown/duplicate query fields
+  are rejected. All pages include exact effect names/counts, goal/rationale,
+  coverage, unknowns, unchanged counts and outstanding review reasons. Member
+  rows contain only ID, name, last-observed availability and before/after flags.
+  A `select_activation` effect has `queue_id`, an empty `collection_id`, zero before
+  members and the exact selected count as after members. Its pages show the future
+  queue in stable ID order. Each project still needs independent exact-file,
+  provider/grant/staffing review and explicit creation confirmation.
+- `GET /collection-review/{reviewToken}/candidates?operation=0&offset=0&query=…`:
+  owner-only saved-member picker, 20 entries per page with literal name search
+  (at most 160 UTF-8 bytes). Offsets are multiples of 20. Returns review/catalog
+  pins, operation, echoed query, total, ID/name/availability rows and `next_offset`.
+  Supports create/set-members collection intentions and activation selections.
+  Excludes existing proposed members, global unchanged selections and unresolved
+  selections. Activation candidates additionally exclude already-linked entries.
+  The token freezes the catalog and proposal; reads never discover,
+  scan, grant access, call a model or mutate state. Unknown/duplicate fields fail.
+- `POST /collection-correction`: exact JSON `{ "review_token": "…",
+  "operation": 0, "name": "Optional new name", "exclude_ids": ["…"],
+  "add_ids": ["…"] }`.
+  Saves a **new proposal revision**, not collection effects. Name edits apply
+  only to create/rename intentions; exclusions apply to create/set-members or
+  activation-selection intentions and must be at most 50 distinct currently proposed IDs.
+  Additions apply to those same membership intentions and accept at most 50
+  distinct current Home catalog IDs not already selected. Activation corrections
+  must retain 1–100 catalog-only entries; linked additions and an empty final
+  selection are rejected atomically. They neither prepare a queue nor approve
+  project creation, and leave other collection intentions unchanged. Global unchanged and
+  unresolved selections cannot be overridden by this local editor. Local exclusions
+  can be re-added in a later revision. Add/exclude overlap is refused. Any edit
+  field may be omitted, but no-op, foreign-member and unsupported edits fail whole. A current, unconsumed review is required. The old token becomes
+  unusable after correction; obtain and explicitly confirm a fresh review.
+  There is no implicit expansion, model call, filesystem access or activation.
+  Instead of member edits, exactly one structural intent change may be sent:
+  `"convert": "catalog_only"` removes the activation-selection intention named
+  by `operation` (those projects stay catalog-only; collections are unchanged);
+  `"convert": "select_activation"` adds one activation selection of the named
+  create/set-members intention's current catalog-only members (1–100, linked
+  entries excluded; refused if any activation or group intention exists);
+  `"resolve_question": N, "resolution": "unchanged" | "dismiss"` settles
+  unresolved question N, moving its items to explicit unchanged or leaving them
+  unmentioned; `"release_unchanged": true` releases every explicit global
+  unchanged item so a later correction may add it. Each saves a new revision
+  with a count/flag-only `collection_correction` (`converted`, `resolved`,
+  `released`) and requires a fresh review; none prepares a queue or applies.
+  The response is canonical history with `collection_correction` (latest revision,
+  operation index, rename flag, exclusion/addition counts and timestamp), retaining original
+  authorship with distinct owner-correction attribution and no copied old names
+  or excluded IDs. A failed/lost response requires canonical history recovery.
+- `POST /collection-commit`: exact JSON `{ "review_token": "…",
+  "idempotency_key": "…", "confirm": true }`. Atomically consumes the review,
+  writes compiled collection metadata and an optional activation-review queue atomically,
+  then returns canonical arrangement
+  history with a receipt. Same-key retries return the stored outcome; a different
+  key cannot reuse approval. No partial application of unsupported effects.
+
+POSTs reject query arguments, duplicate/unknown/case-aliased fields, nulls,
+coercions and trailing JSON. Review pages are bounded to 64 KiB; stale/expired
+reviews refuse. A failed/lost commit response is not evidence that nothing was
+saved: reopen canonical history before a fresh review. History remains readable
+after provider loss; historical receipts never authorize another apply.
 
 **Assistant operations ("Operate Ori"):** an explicit request such as "open the
 Album workspace and select Mixer" lets the assistant ask Ori to carry out a

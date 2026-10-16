@@ -73,7 +73,7 @@ func TestRecord_ResolvedThousandMemberDraftRoundTripsWithoutLiveHandles(t *testi
 		t.Fatal("summary aliases saved intent")
 	}
 	invalid := restored
-	invalid.State = "completed"
+	invalid.State = "applying"
 	if _, err := invalid.Summarize(); err == nil {
 		t.Fatal("summary accepted an invalid executable record")
 	}
@@ -115,9 +115,9 @@ func TestRecord_RejectsAuthorityFieldsAliasesAndExecutableStates(t *testing.T) {
 	if unpinned.Validate() == nil {
 		t.Fatal("model provenance omitted provider fingerprint")
 	}
-	r.State = "completed"
+	r.State = "applying"
 	if r.Validate() == nil {
-		t.Fatal("inert draft claimed completion")
+		t.Fatal("unsupported execution state accepted")
 	}
 	r.State = "draft"
 	r.Draft.Unchanged.Handle = "ephemeral"

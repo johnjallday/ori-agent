@@ -65,7 +65,7 @@ export function mountHomeArrangementPlanner(
   details.append(
     node(
       'p',
-      'Plan using saved catalog metadata. No scan or model call runs when this panel opens; saving a plan does not apply it.',
+      'Plan using saved catalog metadata. Revisions also share the current saved proposal and pending question with the disclosed model. No scan or model call runs when this panel opens; saving a plan does not apply it.',
       'small'
     )
   );
@@ -82,8 +82,21 @@ export function mountHomeArrangementPlanner(
   status.setAttribute('role', 'status');
   const consentBody = node('div');
   const resultBody = node('div');
-  details.append(label, refresh, history, status, consentBody, resultBody);
+  const targetLabel = node('p', 'New proposal', 'small');
+  const newProposal = node('button', 'Start a new proposal', 'btn btn-sm btn-link');
+  newProposal.type = 'button';
+  details.append(
+    label,
+    targetLabel,
+    newProposal,
+    refresh,
+    history,
+    status,
+    consentBody,
+    resultBody
+  );
   container.append(details);
+  let target = null;
   let context = null;
   let generation = 0;
   let pending = false;
@@ -116,11 +129,16 @@ export function mountHomeArrangementPlanner(
   const consent = mountArrangementConsent(consentBody, {
     kind: 'home_library',
     enabled: true,
-    getContext: () => homeArrangementContext(homeID, context, goal.value.trim(), current()),
+    getContext: () => {
+      const view = homeArrangementContext(homeID, context, goal.value.trim(), current());
+      if (target) view.contextKey += `:${target.id}:${target.revision}`;
+      return view;
+    },
     onSend: async body => {
       if (!current() || pending || !context) throw new Error('Not ready');
       const run = generation;
       const pin = context.context_pin;
+      const revising = target ? { ...target } : null;
       pending = true;
       refresh.disabled = true;
       history.disabled = true;
@@ -128,11 +146,26 @@ export function mountHomeArrangementPlanner(
       try {
         const result = await request('/arrangements/plan', {
           method: 'POST',
-          body: JSON.stringify({ ...body, expected_context: pin })
+          body: JSON.stringify({
+            ...body,
+            expected_context: pin,
+            ...(revising
+              ? { revise_arrangement_id: revising.id, expected_record_revision: revising.revision }
+              : {})
+          })
         });
         if (run !== generation || !current()) throw new Error('Context changed');
         const view = arrangementPresentation(result);
-        if (!view || view.goal !== body.goal) throw new Error('Invalid canonical outcome');
+        if (
+          !view ||
+          (result.revision_discussion?.goal || view.goal) !== body.goal ||
+          (revising && (view.id !== revising.id || view.revision !== revising.revision + 1))
+        )
+          throw new Error('Invalid canonical outcome');
+        if (revising) {
+          target = { id: view.id, revision: view.revision };
+          targetLabel.textContent = `Revising proposal ${target.id} · Revision ${target.revision}`;
+        }
         renderArrangementHistory(resultBody, result);
         status.textContent =
           'Saved to canonical Home history. Nothing was applied. Refresh the context before requesting another plan.';
@@ -149,6 +182,15 @@ export function mountHomeArrangementPlanner(
         history.disabled = false;
       }
     }
+  });
+  newProposal.addEventListener('click', () => {
+    if (pending || !current()) return;
+    generation++;
+    context = null;
+    target = null;
+    targetLabel.textContent = 'New proposal';
+    consent.refresh();
+    status.textContent = 'New proposal selected. Refresh planning context before Send.';
   });
   goal.addEventListener('input', () => consent.refresh());
   refresh.addEventListener('click', () => void readContext());
@@ -171,6 +213,20 @@ export function mountHomeArrangementPlanner(
       await onSaved();
       if (!current() || run !== generation) return;
       consent.historyReopened();
+      if (target) {
+        const latest = saved.arrangements.find(ref => ref.id === target.id);
+        if (
+          !latest ||
+          latest.revision !== target.revision ||
+          !['draft', 'needs_more_evidence', 'awaiting_user_review'].includes(latest.state)
+        ) {
+          context = null;
+          consent.refresh();
+          status.textContent =
+            'The revision target changed. Choose Revise with assistant on the current saved proposal, or explicitly start a new proposal. Your goal is kept.';
+          return;
+        }
+      }
       await readContext();
     } catch (_) {
       if (current() && run === generation)
@@ -179,9 +235,53 @@ export function mountHomeArrangementPlanner(
     }
   });
   return {
-    invalidate: () => {
+    revise: async (ref, initiator = null) => {
+      if (pending || !current() || !arrangementID(ref?.id)) return;
+      const previousTarget = target?.id;
+      const run = ++generation;
+      context = null;
+      consent.refresh();
+      try {
+        const saved = await request(`/arrangements/${encodeURIComponent(ref.id)}`, {
+          cache: 'no-store'
+        });
+        if (run !== generation || !current()) return;
+        const view = arrangementPresentation(saved);
+        if (
+          !view ||
+          view.id !== ref.id ||
+          view.revision !== ref.revision ||
+          saved.kind !== 'proposal' ||
+          !['draft', 'needs_more_evidence', 'awaiting_user_review'].includes(view.state)
+        )
+          throw new Error('Stale proposal');
+        target = { id: ref.id, revision: ref.revision };
+        if (previousTarget !== ref.id || !goal.value.trim())
+          goal.value = saved.revision_discussion?.goal || view.goal;
+        targetLabel.textContent = `Revising proposal ${target.id} · Revision ${target.revision}`;
+        details.open = true;
+        await readContext();
+        if (
+          current() &&
+          context &&
+          target?.id === ref.id &&
+          initiator &&
+          document.activeElement === initiator
+        )
+          goal.focus?.();
+      } catch (_) {
+        if (run === generation && current())
+          status.textContent =
+            'This proposal could not be reopened for revision. Reopen saved history; no model was called.';
+      }
+    },
+    invalidate: ({ clearResult = false } = {}) => {
       generation++;
       context = null;
+      if (clearResult) {
+        resultBody.replaceChildren();
+        status.textContent = 'Catalog changed. Refresh planning context before another request.';
+      }
       if (!pending) refresh.disabled = false;
       consent.refresh();
     }

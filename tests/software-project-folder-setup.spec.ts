@@ -335,29 +335,115 @@ async function lookIs(request: APIRequestContext, offerID: string, states: strin
 
 const card = (page: Page) => page.locator('#personalAssistantFolderOffer');
 
-// show opens the chooser the way Home's "Explore a folder" does and picks a chip.
-async function show(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
-  await page.goto('/?panel=today&folder=show');
-  const chooser = page.locator('#personalAssistantFolderChooser');
-  await expect(chooser).toBeVisible({ timeout: 30_000 });
-  const scanned = page.waitForResponse(
+// openAssistant opens Home's assistant panel.
+async function openAssistant(page: Page) {
+  await page.goto('/');
+  // The panel may already be open (it is remembered across loads) or closed.
+  await expect
+    .poll(
+      async () =>
+        (await page.locator('#personalAssistantPanel').isVisible()) ||
+        (await page.locator('#personalAssistantLauncher').isVisible()),
+      { timeout: 30_000 }
+    )
+    .toBeTruthy();
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+}
+
+// attach adds a folder in the assistant's composer, the entry that Home's
+// "Explore a folder" opens now. The retired digest-scan chooser
+// (#personalAssistantFolderChooser) no longer exists on this host.
+async function attach(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
+  await openAssistant(page);
+  // Each look at a folder is its own conversation, as a person would start it.
+  const fresh = page.locator('#personalAssistantConversationNew');
+  if ((await fresh.isVisible()) && (await fresh.isEnabled())) await fresh.click();
+  await page.locator('#personalAssistantFolderChip').click();
+  await pickChip(page, chip);
+}
+
+// pickChip picks a folder in the open attachment picker.
+async function pickChip(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
+  const attached = page.waitForResponse(
     response =>
-      response.request().method() === 'POST' && /\/folder-digest\/scan$/.test(response.url()),
+      response.request().method() === 'POST' &&
+      /\/api\/home-assistant\/folder-context\/select$/.test(response.url()),
     { timeout: 60_000 }
   );
-  await chooser.getByRole('button', { name: chip, exact: true }).click();
-  await scanned;
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: chip, exact: true })
+    .click();
+  expect((await attached).ok()).toBeTruthy();
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeEnabled({
+    timeout: 30_000
+  });
+}
+
+// chooseProject answers the setup chooser (shown after Review setup on a folder
+// that holds several observed folders) and opens that project's review.
+async function chooseProject(page: Page, project: string | RegExp) {
+  const choices = page.locator('#personalAssistantFolderSetupChoices');
+  await expect(choices).toBeVisible({ timeout: 30_000 });
+  const label = await page
+    .locator('#personalAssistantFolderSetupCandidate option')
+    .evaluateAll(
+      (options, wanted) =>
+        (options as HTMLOptionElement[])
+          .map(option => option.textContent || '')
+          .find(text => new RegExp(wanted).test(text)) || '',
+      project instanceof RegExp ? project.source : `^${project}`
+    );
+  expect(label, `no setup choice for ${project}`).not.toBe('');
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label });
+  await page.locator('#personalAssistantFolderSetupReview').click();
+}
+
+// show attaches a folder and opens its conversation-bound review card. A folder
+// of several projects asks which one first (the setup chooser), and `project`
+// names the one to review. Review setup opens the card without reading a file.
+async function show(
+  page: Page,
+  chip: 'Documents' | 'Desktop' | 'Downloads',
+  project?: string | RegExp
+) {
+  await attach(page, chip);
+  await page.locator('#personalAssistantReviewFolderSetup').click();
+  if (project) await chooseProject(page, project);
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
   await card(page).scrollIntoViewIfNeeded();
 }
 
-// comeBack reloads Home the way a person returning later sees it.
+// closeReview ends the open review with Keep chatting. A conversation-bound
+// review is one per relationship: while one is pending in another conversation
+// a new folder is answered with "a review in another conversation", whatever
+// folder it is (the retired scan had no such limit), so a test that is done
+// with its review closes it, as a person would, before the next test begins.
+async function closeReview(page: Page) {
+  await press(page, 'Keep chatting');
+  await expect(card(page)).toBeHidden({ timeout: 30_000 });
+}
+
+// comeBack reopens the saved assistant conversation the way a person returning
+// later does: the conversation list's Continue control, newest first. (Home's
+// attention summary card no longer carries the folder review.)
 async function comeBack(page: Page) {
-  await page.goto('/?panel=today');
-  const attention = page.locator('#personalAssistantSummaryToggle');
-  await expect(attention).toBeVisible({ timeout: 30_000 });
-  if ((await attention.getAttribute('aria-expanded')) === 'false') await attention.click();
+  await openAssistant(page);
+  if (
+    !(await card(page)
+      .isVisible()
+      .catch(() => false))
+  ) {
+    // The Continue control toggles the list: open it only when it is closed.
+    const list = page.locator('#personalAssistantConversationList');
+    if (!(await list.isVisible()))
+      await page.locator('#personalAssistantConversationContinue').click();
+    await expect(list).toBeVisible({ timeout: 30_000 });
+    await list.locator('button[data-conversation-id]').first().click();
+  }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
   await card(page).scrollIntoViewIfNeeded();
@@ -424,7 +510,9 @@ test.describe('a fresh server', () => {
     writeCarried(before);
 
     // Recognized by its markers alone: nothing in it was opened.
-    await show(page, 'Documents');
+    // The conversation-bound review asks which observed folder to set up first
+    // (the whole Documents folder or widget); the old scan went straight to widget.
+    await show(page, 'Documents', 'widget');
     await expect(headline(page)).toContainText('widget looks like a');
     await expect(page.locator('#personalAssistantFolderOfferCapability')).toContainText(
       'Nothing in it was opened.'
@@ -475,6 +563,7 @@ test.describe('a fresh server', () => {
     expect(await workspaceCount(request)).toBe(before.workspaces);
     expect(hashes()).toEqual(before.hashes);
     expect(provider.calls, 'a review called the model').toHaveLength(0);
+    await closeReview(page);
   });
 
   test('several projects are a question, and a linked worktree is a project of its own', async ({
@@ -482,14 +571,24 @@ test.describe('a fresh server', () => {
     request
   }) => {
     const before = readCarried();
-    await show(page, 'Desktop');
-    await expect(headline(page)).toHaveText('Desktop holds 3 software projects.');
-    // No review and no setup until one is chosen.
-    expect((await buttons(page)).some(label => /^(Set up|Review setup)/.test(label))).toBeFalsy();
+    // Conversation-bound review: Review setup on a folder of several projects
+    // opens the setup chooser (a question) instead of a card; no card, no
+    // review and no setup exist until one project is chosen.
+    await attach(page, 'Desktop');
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible({
+      timeout: 30_000
+    });
+    const projects = await page
+      .locator('#personalAssistantFolderSetupCandidate option')
+      .evaluateAll(options => (options as HTMLOptionElement[]).map(o => o.textContent || ''));
+    // The chooser lists the whole folder, then the 3 projects in it.
+    expect(projects.filter(text => / · /.test(text))).toHaveLength(3);
+    expect(projects.some(text => /^Desktop \(whole folder\)/.test(text))).toBeTruthy();
+    await expect(card(page)).toBeHidden();
+    expect(await workspaceCount(request)).toBe(before.workspaces);
 
-    await card(page)
-      .getByRole('button', { name: /^widget-hotfix/ })
-      .click();
+    await show(page, 'Desktop', 'widget-hotfix');
     await expect(headline(page)).toContainText('widget-hotfix looks like');
     await review(page);
     const evidence = (await list(page, '#personalAssistantFolderEvidence')).join('\n');
@@ -501,6 +600,7 @@ test.describe('a fresh server', () => {
 
     expect(await workspaceCount(request)).toBe(before.workspaces);
     expect(hashes()).toEqual(before.hashes);
+    await closeReview(page);
   });
 
   test('a project with no Git is reviewed as one, and a folder replaced since must be picked again', async ({
@@ -508,7 +608,7 @@ test.describe('a fresh server', () => {
     request
   }) => {
     const before = readCarried();
-    await show(page, 'Downloads');
+    await show(page, 'Downloads', 'scratchpad');
     await expect(headline(page)).toContainText('scratchpad looks like');
     await review(page);
     expect((await list(page, '#personalAssistantFolderEvidence')).join('\n')).toContain(
@@ -532,20 +632,26 @@ test.describe('a fresh server', () => {
     expect((await buttons(page))[0]).toBe('Pick it again');
 
     await press(page, 'Pick it again');
-    const chooser = page.locator('#personalAssistantFolderChooser');
-    await expect(chooser).toBeVisible();
-    await chooser.getByRole('button', { name: 'Downloads', exact: true }).click();
-    await expect(question(page)).toContainText('Review setup reads its README');
+    // Pick it again opens the assistant's attachment picker (the retired
+    // scan chooser is gone); the folder is attached anew and reviewed from the
+    // composer, then the card offers Review setup as before.
+    await expect(page.locator('#personalAssistantFolderChoices')).toBeVisible();
+    await pickChip(page, 'Downloads');
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseProject(page, 'scratchpad');
+    await expect(card(page)).toBeVisible({ timeout: 30_000 });
+    await expect(headline(page)).toContainText('scratchpad looks like');
     await review(page);
     expect(await list(page, '#personalAssistantFolderPlan')).toHaveLength(5);
 
     expect(await workspaceCount(request)).toBe(before.workspaces);
     expect(hashes()).toEqual(before.hashes);
+    await closeReview(page);
   });
 
   test('Set up with no model pauses before anything is created', async ({ page, request }) => {
     const before = readCarried();
-    await show(page, 'Documents');
+    await show(page, 'Documents', 'widget');
     await review(page);
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan[2]).toContain('has no model yet');
@@ -582,6 +688,18 @@ test.describe('after the server was restarted', () => {
     expect(before.offer, 'run the first phase first').toBeTruthy();
 
     await comeBack(page);
+    expect((await currentOffer(request))?.id).toBe(before.offer);
+    // The saved conversation's card says the held folder did not survive the
+    // restart (the conversation-bound review holds the folder in memory); the
+    // paused setup itself is saved, and shows again once the folder is picked.
+    await expect(question(page)).toContainText('the server was restarted');
+    // Picking the same folder again and reviewing the same project recovers
+    // the confirmed, paused setup; it never starts a second one.
+    await press(page, 'Pick it again');
+    await pickChip(page, 'Documents');
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseProject(page, 'widget');
+    await expect(card(page)).toBeVisible({ timeout: 30_000 });
     expect((await currentOffer(request))?.id).toBe(before.offer);
     await expect(question(page)).toContainText('has no model yet');
     expect(await buttons(page)).toEqual(['Set up a model', 'Continue']);
@@ -817,17 +935,24 @@ test.describe('after the server was restarted', () => {
     request
   }) => {
     const before = readCarried();
-    await show(page, 'Documents');
-    await expect(headline(page)).toContainText('already has a workspace');
-    const again = await buttons(page);
-    expect(again[0]).toBe('Open widget');
-    expect(again.some(label => /^(Set up|Review setup)/.test(label))).toBeFalsy();
+    // In a conversation, reviewing a folder that is already a project answers
+    // with that project instead of a setup card: nothing new is prepared.
+    await attach(page, 'Documents');
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseProject(page, 'widget');
+    const existing = page.locator('section[aria-label="Existing project"]');
+    await expect(existing).toBeVisible({ timeout: 30_000 });
+    await expect(existing).toContainText('widget is already set up as the project');
+    await expect(existing).toContainText('Nothing new has been prepared.');
+    await expect(existing.getByRole('link', { name: 'Open widget', exact: true })).toHaveAttribute(
+      'href',
+      '/workspaces/widget'
+    );
+    await expect(existing.getByRole('button', { name: /^(Set up|Review setup)/ })).toHaveCount(0);
+    await existing.getByRole('button', { name: 'Keep chatting', exact: true }).click();
 
     // Another checkout of the same repository is another folder, not that one.
-    await show(page, 'Desktop');
-    await card(page)
-      .getByRole('button', { name: /^widget-hotfix/ })
-      .click();
+    await show(page, 'Desktop', 'widget-hotfix');
     await expect(headline(page)).toContainText('widget-hotfix looks like');
     await expect(headline(page)).not.toContainText('already has a workspace');
     await review(page);

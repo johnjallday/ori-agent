@@ -3,10 +3,7 @@ package agenthttp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -175,7 +172,7 @@ func (h *HomeAssistantAskHandler) answerArrangementTurn(ctx context.Context, req
 		(req.Arrangement.ExpectedModel != "" && req.Arrangement.ExpectedModel != configuredModel) {
 		return refusal(workspacearrangement.ErrStale, "stale_context")
 	}
-	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d", configuredProvider, configuredModel, model, providerPointer)))
+	fingerprint := arrangementFingerprint(configuredProvider, configuredModel, model, providerPointer)
 	owner := conversation.turn.saveOwner()
 	expectedConversation := owner.ExpectedConversationRevision
 	check := func(ctx context.Context) error {
@@ -266,7 +263,7 @@ func (h *HomeAssistantAskHandler) answerArrangementTurn(ctx context.Context, req
 		failureStage = "save_failed"
 		var record *workspacearrangement.Record
 		if result.Draft != nil {
-			prepared, err := evidence.NewRecord(ctx, *result.Draft, workspacearrangement.Provenance{Origin: "model", SourceID: ref.SelectionID, Provider: provider.Name(), Model: model, ProviderFingerprint: hex.EncodeToString(fingerprint[:])})
+			prepared, err := evidence.NewRecord(ctx, *result.Draft, workspacearrangement.Provenance{Origin: "model", SourceID: ref.SelectionID, Provider: provider.Name(), Model: model, ProviderFingerprint: fingerprint})
 			if err != nil {
 				return err
 			}

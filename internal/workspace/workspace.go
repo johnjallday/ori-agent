@@ -135,6 +135,14 @@ func (w *Workspace) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(w, "", "  ")
 }
 
+// compactJSON is ToJSON without indentation, for in-memory copies only.
+func (w *Workspace) compactJSON() ([]byte, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	return json.Marshal(w)
+}
+
 // FromJSON deserializes a workspace from JSON
 func FromJSON(data []byte) (*Workspace, error) {
 	var ws Workspace

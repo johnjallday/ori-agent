@@ -23,7 +23,7 @@ export function arrangementDisclosure(kind) {
     source:
       kind === 'attachment'
         ? 'Planning can share names, formats, counts, observed dates and bounded tree metadata already held for this attachment—not only the eight names and 8 KiB discussion summary. Clear any discussion focus first; this choice covers the full held attachment.'
-        : "Planning can share names, formats, observed dates, availability, connection metadata and logical collection membership from this Home's saved catalog with its currently bound Manager's configured model.",
+        : "Planning can share names, formats, observed dates, availability, connection metadata and logical collection membership from this Home's saved catalog with its currently bound Manager's configured model. When revising, it also shares the saved proposal's exact selections and any pending revision question.",
     budget:
       'Up to 64 KiB of metadata evidence may be shared during one turn, across at most eight model requests and twelve tool calls. Prompts and conversation context are additional; earlier evidence may be sent again. The configured API model may be local or remote.',
     boundary:

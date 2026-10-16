@@ -312,19 +312,20 @@ func (b ActivationBinding) valid() bool {
 }
 
 type ReviewReceipt struct {
-	Activation       *ActivationBinding     `json:"activation,omitempty"`
-	Token            string                 `json:"token"`
-	Action           string                 `json:"action"`
-	Digest           string                 `json:"digest"`
-	Revision         int64                  `json:"revision"`
-	TargetID         string                 `json:"target_id,omitempty"`
-	FieldsRevision   int64                  `json:"fields_revision,omitempty"`
-	EntryRevision    int64                  `json:"entry_revision,omitempty"`
-	ProviderRevision int64                  `json:"provider_revision,omitempty"`
-	SharedFrom       *ExactLink             `json:"shared_from_project,omitempty"` // Pinned, reviewed user disclosure; not a project read grant.
-	Handoff          *ManagerHandoffReceipt `json:"handoff_citation,omitempty"`
-	ExpiresAt        time.Time              `json:"expires_at"`
-	ConsumedAt       *time.Time             `json:"consumed_at,omitempty"`
+	Collection       *CollectionReviewWitness `json:"collection,omitempty"`
+	Activation       *ActivationBinding       `json:"activation,omitempty"`
+	Token            string                   `json:"token"`
+	Action           string                   `json:"action"`
+	Digest           string                   `json:"digest"`
+	Revision         int64                    `json:"revision"`
+	TargetID         string                   `json:"target_id,omitempty"`
+	FieldsRevision   int64                    `json:"fields_revision,omitempty"`
+	EntryRevision    int64                    `json:"entry_revision,omitempty"`
+	ProviderRevision int64                    `json:"provider_revision,omitempty"`
+	SharedFrom       *ExactLink               `json:"shared_from_project,omitempty"` // Pinned, reviewed user disclosure; not a project read grant.
+	Handoff          *ManagerHandoffReceipt   `json:"handoff_citation,omitempty"`
+	ExpiresAt        time.Time                `json:"expires_at"`
+	ConsumedAt       *time.Time               `json:"consumed_at,omitempty"`
 }
 
 type OperationReceipt struct {
@@ -559,7 +560,7 @@ func (d Document) valid(scope Scope) bool {
 		}
 		sessions[session.ID] = true
 	}
-	if d.Queue != nil && !d.Queue.valid() {
+	if d.Queue != nil && (!d.Queue.valid() || (d.SchemaVersion == SchemaVersion && len(d.Queue.IDs) < 2)) {
 		return false
 	}
 	queueIDs := map[string]bool{}
@@ -567,7 +568,7 @@ func (d Document) valid(scope Scope) bool {
 		queueIDs[d.Queue.ID] = true
 	}
 	for _, outcome := range d.QueueHistory {
-		if !outcome.valid() || queueIDs[outcome.ID] {
+		if !outcome.valid() || queueIDs[outcome.ID] || (d.SchemaVersion == SchemaVersion && outcome.SelectedCount < 2) {
 			return false
 		}
 		queueIDs[outcome.ID] = true
@@ -625,7 +626,7 @@ func (d Document) valid(scope Scope) bool {
 	}
 	used := map[string]bool{}
 	for _, review := range d.Reviews {
-		if review.Token == "" || used[review.Token] || review.Action == "" || review.Digest == "" ||
+		if !validCollectionReview(review, d.SchemaVersion) || review.Token == "" || used[review.Token] || review.Action == "" || review.Digest == "" ||
 			review.Revision < 0 || review.FieldsRevision < 0 || review.EntryRevision < 0 || review.ProviderRevision < 0 ||
 			(review.Action == "edit_fields" && review.TargetID == "") || review.ExpiresAt.IsZero() ||
 			(review.Action == "activate_project" && (review.Activation == nil || !review.Activation.valid() || review.TargetID == "")) ||

@@ -14,11 +14,13 @@ import (
 )
 
 type libraryArrangementRequest struct {
-	Goal                 string `json:"goal"`
-	ExpectedRevision     int64  `json:"expected_revision"`
-	ShareCatalogMetadata bool   `json:"share_catalog_metadata"`
-	AllowUpgrade         bool   `json:"allow_upgrade"`
-	ExpectedContext      string `json:"expected_context,omitempty"`
+	Goal                   string `json:"goal"`
+	ExpectedRevision       int64  `json:"expected_revision"`
+	ShareCatalogMetadata   bool   `json:"share_catalog_metadata"`
+	AllowUpgrade           bool   `json:"allow_upgrade"`
+	ExpectedContext        string `json:"expected_context,omitempty"`
+	ReviseArrangementID    string `json:"revise_arrangement_id,omitempty"`
+	ExpectedRecordRevision int64  `json:"expected_record_revision,omitempty"`
 }
 
 func (r *libraryArrangementRequest) UnmarshalJSON(raw []byte) error {
@@ -47,6 +49,16 @@ func (r *libraryArrangementRequest) UnmarshalJSON(raw []byte) error {
 		switch name {
 		case "goal":
 			out.Goal, ok = value.(string)
+		case "revise_arrangement_id":
+			out.ReviseArrangementID, ok = value.(string)
+			ok = ok && len(out.ReviseArrangementID) > 0 && len(out.ReviseArrangementID) <= 160
+		case "expected_record_revision":
+			number, valid := value.(json.Number)
+			ok = valid
+			if ok {
+				out.ExpectedRecordRevision, err = number.Int64()
+				ok = err == nil && out.ExpectedRecordRevision > 0
+			}
 		case "expected_revision":
 			var number json.Number
 			number, ok = value.(json.Number)
@@ -72,6 +84,9 @@ func (r *libraryArrangementRequest) UnmarshalJSON(raw []byte) error {
 		}
 	}
 	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return workspacearrangement.ErrInvalid
+	}
+	if seen["revise_arrangement_id"] != seen["expected_record_revision"] {
 		return workspacearrangement.ErrInvalid
 	}
 	*r = out
@@ -140,7 +155,7 @@ func (h *Handler) PlanAssistantLibraryArrangement(w http.ResponseWriter, r *http
 		writeArrangementPlanningFailure(w, projectlibrary.ErrUnavailable)
 		return
 	}
-	result, err := h.arrangementPlanning(r.Context(), projectlibrary.ArrangementPlanningRequest{Owner: scope.OwnerUserID, HomeID: scope.HomeID, Goal: in.Goal, ExpectedRevision: in.ExpectedRevision, ShareCatalogMetadata: in.ShareCatalogMetadata, AllowUpgrade: in.AllowUpgrade, ExpectedContext: in.ExpectedContext})
+	result, err := h.arrangementPlanning(r.Context(), projectlibrary.ArrangementPlanningRequest{Owner: scope.OwnerUserID, HomeID: scope.HomeID, Goal: in.Goal, ExpectedRevision: in.ExpectedRevision, ShareCatalogMetadata: in.ShareCatalogMetadata, AllowUpgrade: in.AllowUpgrade, ExpectedContext: in.ExpectedContext, ReviseArrangementID: in.ReviseArrangementID, ExpectedRecordRevision: in.ExpectedRecordRevision})
 	if err != nil {
 		writeArrangementPlanningFailure(w, err)
 		return

@@ -86,6 +86,9 @@ type AssistantArrangement struct {
 	// grants no live source authority: restart, expiry and provider/skill loss
 	// still require the host's held-evidence and current-binding checks.
 	ContextCurrent bool
+	// Imported marks a record whose originating answer came from imported
+	// history. It is readable history only and can never be reviewed.
+	Imported bool
 }
 
 func (h *hybridStore) AppendArrangementTurn(ctx context.Context, id string, owner assistantcontext.SaveOwner, event *foldercontext.Event, revision, user, answer string, attribution *assistantcontext.Attribution, record workspacearrangement.Record) ([]Message, error) {
@@ -169,7 +172,7 @@ func (s *SQLiteStore) ReadAssistantArrangement(ctx context.Context, id string, o
 		if err != nil || result.Record.ID != recordID {
 			return workspacearrangement.ErrInvalid
 		}
-		result.ConversationID = id
+		result.ConversationID, result.Imported = id, imported
 		result.ContextCurrent = !imported && result.ContextRevision == currentRevision && result.StateVersion == owner.StateVersion
 		return nil
 	})

@@ -6,8 +6,16 @@ API-provider planning loop, atomic PA draft storage, opt-in PA/Home endpoints,
 read-only pinned Manager guidance and shared inert history cards are implemented.
 The PA attachment disclosure/Send path now reaches a canonical saved proposal.
 Home Organize library also reaches canonical proposals and clarifications through
-explicit sharing/upgrade consent. Correction/review and execution remain required;
-no Apply UI is enabled.
+explicit sharing/upgrade consent. Home proposals now have paged host review,
+explicit confirmation and atomic collection metadata / activation-selection receipts.
+Collection changes may be combined with one exact activation-review selection;
+queue preparation never approves project creation. Existing per-project reviews
+still own file choice, provider/staffing disclosure and activation confirmation.
+Home conversational revisions and manual names/member additions/exclusions are
+implemented. PA proposals now apply one arranged group at a time through the
+existing conversation-bound folder setup review, its digest-checked Set up,
+structure run and canonical receipt (see **PA arranged groups** below). Manual
+action conversion/global-choice editing remain incomplete.
 No new plugin protocol or filesystem permission.
 
 ## Evidence behind the contract
@@ -152,7 +160,8 @@ Only these tools are advertised in arrangement mode:
   separate signed cursor keep collections beyond the initial sample reachable.
   Collection cursors cannot be used as item-search cursors.
 - `arrangement_search`: typed AND filters (literal name text, format, connection,
-  observed availability, root handle, collection handle), sort by name/ID, opaque
+  observed availability, root handle, collection handle, and optional
+  `selection_handle` for an already-issued frozen set), sort by name/ID, opaque
   cursor. No glob, regex, SQL, path, expression or future-match rule.
 - `arrangement_detail`: one issued item ID; source-scoped metadata only. Never
   reuse Home detail's filesystem source projection or its larger byte budget.
@@ -174,6 +183,25 @@ set, not a live query. Handles expire after 10 minutes or earlier on source/owne
 loss; cap at 16 handles per turn/64 per owner and 128 active turns process-wide.
 They do not survive restart. Persist resolved exact membership when saving a
 draft, not an executable filter or a dependence on the ephemeral handle.
+
+The host-only `Evidence.RebindDraft` prepares canonical prior intent for a Home
+revision turn. Its caller must independently authorize the owning context and
+runtime, never pass browser/model records. It checks every referenced item and
+collection revision, retains the owner's names/exclusions/questions, and replaces
+large membership arrays with fresh exact handles. Distinct frozen sets share the
+existing 16-handle budget; failure issues no partial references. Search/select
+can intersect an issued set with ordinary literal filters without widening it.
+This helper is evidence preparation only: it neither persists a revision nor
+revives approval. Home **Revise with assistant** separately discloses the target
+and prior-proposal/question sharing, then requires fresh consent. Planning pins
+both target and catalog revisions. Canonical completion keeps the proposal ID,
+increments its revision and invalidates old approval; delayed replies cannot
+replace newer owner edits or commits. An unrelated live review blocks revision.
+A clarification saves a bounded `RevisionDiscussion` alongside the unchanged
+exact typed proposal and prevents review until resolved. A subsequent turn uses
+both that proposal and question, never a lossy summary as editable intent.
+Model revision diffs retain counts/flags only; Forget clears the question, and
+collection removal clears it while staling affected intent.
 
 | Budget | v1 bound / failure behavior |
 | --- | --- |
@@ -259,6 +287,82 @@ No automatic resume after restart or cancel. Reconcile first, then offer explici
 retry of remaining approved effects under current authority. Never roll back by
 deleting successfully created workspaces or source files.
 
+## PA arranged groups
+
+A saved PA proposal's `create_group` intentions are applied one group at a time
+through the existing conversation-bound folder setup review. Nothing new
+confirms an effect: **Review group** compiles and binds a review; **Set up** on
+that review card is the only confirmation.
+
+- **Compile.** `FolderObservationService.ReviewArrangementGroup` builds a
+  version-2 *selected* `FolderStructure` from the record's exact resolved
+  candidate IDs over the whole held scan, not the 8-name preview or the
+  collection threshold. Version 2 has its own validator: a new plain group,
+  1–24 members (the existing creator bound), every member included and plain,
+  no omitted tail, no blueprint and no Home/library type. The version-1
+  recognition rule and its validator are unchanged. The root, an invented or
+  padded ID, a nested candidate, a member that moved or became a link, a member
+  that already belongs to a workspace, an invalid or taken group name, and a
+  software-project root are refused by name, never dropped or substituted.
+  Member names are made free as other structures do; the group keeps the
+  arrangement's name.
+- **Bind.** The structure carries `arrangement {record_id, record_revision,
+  operation}`; the stamped plan intent carries the same binding, so the
+  confirmed digest covers it, and the plan adds an
+  `arrangement: Only the folders your saved arrangement selected` line. The
+  agenthttp handler first requires an open (`draft`/`needs_more_evidence`),
+  local, non-imported record at the expected revision and current assistant
+  state version; the conversation's current folder event must be the record's
+  own observation; no other setup review may be open; a model-authored record's
+  provider/model/registered instance must be unchanged; and the live held scan
+  must still validate every item revision. Session migration 82 adds
+  `assistant_arrangement_effects` (record, operation, record revision, offer ID,
+  binding message, state, read-back group ID/route/workspace count, receipt
+  digest; canonical IDs only). `BindAssistantArrangementReview` appends the
+  canonical folder event and upserts the binding in one transaction under the
+  folder-revision CAS. It moves the record's context pin forward only when the
+  pin was current before this append: the review's own event never stales the
+  record, and an unrelated change is never laundered into current.
+- **Protect.** One pending review per owner, as before. A manual review or its
+  Adjust never adopts, refreshes or retires a pending arranged review, and an
+  arranged review never replaces a manual one; each must be closed first (Keep
+  chatting). A finished, closed or pruned review is history: the next group can
+  follow it. Arranged reviews have no Adjust (a change is a new proposal), and
+  Decide refuses `later` and `no` on them: a put-off offer could return pending
+  on its own, and a no would become a folder decline outliving the arrangement.
+- **Confirm and run.** The existing guard additionally requires the canonical
+  record at the bound revision, this offer as the operation's current binding,
+  and (before Set up) the open state and unchanged runtime. Set up then runs the
+  existing `StructureRunner`: group with its disclosed Group Manager, each
+  member's plain workspace linked to its own folder, no task, nothing moved,
+  copied or read. Workspaces are found again by their recorded offer IDs, so
+  Continue after a stopped member creates nothing twice.
+- **Reconcile.** History reads (and the review/decline POSTs) record what each
+  bound review's own stored offer already shows, monotonic and CAS on offer and
+  prior state: `awaiting_user_review` → `applying` / `partially_applied` /
+  `completed` (only with the read-back group and receipt digest) or `closed`.
+  Reading an outcome never probes the folder. The history card shows each
+  group's state, a review control only while reviewable, Decline only while the
+  server says `declinable`, and Open group for a completed one; its aggregate
+  state is completed, partially applied, applying or awaiting review.
+- **Decline.** `DeclineAssistantArrangement` marks a current unapplied proposal
+  `cancelled` (revision + 1), keeps typed intent as history and closes open
+  bindings in the same transaction; the sidecar review is closed afterwards and
+  its guard already refuses the cancelled record. A proposal with any confirmed,
+  running or completed group cannot be declined; nothing is undone. Set up
+  records nothing in this journal, so under the conversation lease the handler
+  reads every awaiting group's own offer back first: one that cannot be read
+  (pruned or rebound) or that shows a confirmation the journal missed is never
+  declined (`arrangement_effects_unverified` / `arrangement_effects_applied`).
+
+Restart drops the held scan: an unconfirmed arranged review then fails its guard
+and asks for a new pick, while bindings, completed receipts and history survive.
+A confirmed, unfinished arranged run is recovered like any confirmed run: pick
+the folder again and review it, and the same offer returns for Continue; its
+guard then needs only the local canonical event for that offer, not the
+record's original observation. The record's other groups need that original
+observation, so after a re-attach they ask for a new arrangement.
+
 ## Canonical storage and migration
 
 One typed arrangement record (schema 1), one authoritative owner, no editable
@@ -282,7 +386,12 @@ Provider/model/skill fingerprints and coverage are provenance, not permission.
   Later revision updates must use CAS and the current owning conversation and
   attachment revision; the initial insert API never overwrites a record. Cap 32 records/4 MiB
   per conversation; 1 MiB per resolved record. Byte limits may reject a record
-  before its reference-count limit. Never evict retryable journals.
+  before its reference-count limit. Never evict retryable journals. Migration
+  82 adds the `assistant_arrangement_effects` group-review journal (see **PA
+  arranged groups**); its rows cascade with the record and session, are cleared
+  by Reset, and a completion requires a read-back group and receipt digest at
+  the schema level. Decline is the only PA intent-revision write today: CAS on
+  record revision, `cancelled`, revision + 1.
 - **Home:** `ProjectLibrary.arrangements` and `ProjectLibrary.collections` in
   the same canonical envelope, at most 32 arrangements and 100 collections.
   Home arrangements do not copy entry labels/notes into historical receipts:
@@ -293,8 +402,84 @@ Provider/model/skill fingerprints and coverage are provenance, not permission.
   live evidence and explicit schema-upgrade consent under the canonical Home CAS.
   A saved wrapper pins the **post-save** catalog revision and Manager binding:
   its own write does not invalidate it. Replays return canonical history, including
-  redacted tombstones, never the replayed original text. No public arbitrary
-  collection writer or review/apply path is wired yet.
+  redacted tombstones, never the replayed original text. There is no arbitrary
+  collection writer or model-tool mutation entrypoint.
+  Collection-only review/commit services compile exact canonical effects, persist
+  a ten-minute witness, and atomically consume explicit owner confirmation with
+  metadata plus per-effect consequence receipts. Owner-only HTTP and Home history
+  controls expose this path: review persists no collection changes; each 50-row
+  membership page reauthorizes current Manager/provider/runtime and catalog pins.
+  Before/after names, membership counts, exclusions, rationale, unknowns and
+  coverage are disclosed. Exact member IDs/names/last-observed availability are
+  available across pages; paths and private child content are not. Explicitly
+  unchanged/needs-review entries cannot be silently removed through an existing
+  collection selector. Choices reset on page changes and uncertain outcomes
+  require reopening canonical history, never an automatic retry. Unsupported
+  creator intent is refused whole. One `select_activation` intention may be
+  combined with collection changes: the whole metadata result plus a new review
+  queue are written atomically. At most 100 distinct current catalog-only entries
+  are selected, in stable ID order matching review pages. An existing active queue,
+  linked entry or second selection operation fails the whole preparation. Single
+  entry queues are allowed only in the v2 arrangement schema; existing manual bulk
+  selection retains its two-entry minimum. The receipt records an opaque queue ID
+  and selected count, never copied membership. Replaying it cannot restart a
+  discarded/completed queue. It means only **projects awaiting independent review**:
+  every actual project creation retains the existing exact-file, File-only,
+  provider/grant/staffing review and explicit per-project confirmation. Preparation
+  cannot use its token at that separate creation gate. Owner corrections in the Home
+  review can rename create/rename intentions or exclude up to 50 currently
+  proposed members from one create/set-members intention. These are local
+  intention exclusions, not global exclusions from other overlapping collections.
+  Saving a correction increments the canonical proposal revision, preserves
+  original model provenance/runtime checks, attributes the correction to the
+  owner, and invalidates every old review without applying metadata. A fresh
+  review and explicit confirmation are required. The latest compact diff retains
+  only counts/flags/timestamp, not old names or excluded IDs. Unsaved corrections
+  block Apply/paging; uncertain saves retain the entered correction as an inert
+  snapshot and require canonical-history recovery. An explicit saved-member picker
+  offers 20 metadata-only candidates per page with literal name search; up to 50
+  selected current Home entries may be added per correction. The review pins the
+  catalog and proposal; additions receive exact current item revision pins and
+  require another review. Global unchanged/unresolved selections cannot be
+  overridden locally, while local exclusions can be re-added in a later revision.
+  No picker action scans, grants access, calls a model or activates a project.
+  Activation-selection membership uses the same editor and fresh-review boundary,
+  excludes linked candidates, and must retain 1–100 catalog-only entries. A local
+  activation edit does not alter overlapping collection intentions or approve
+  project creation. The review's **Change what this proposal intends** section
+  sends exactly one structural edit through the same witness/CAS: convert an
+  activation selection back to catalog-only, add one activation selection of a
+  collection intention's current catalog-only members (1–100, linked excluded,
+  only when no activation or group intention exists), resolve an unresolved
+  question as explicit unchanged or dismiss it, or release every explicit
+  global unchanged item so a later local edit may add it. Each is a new owner
+  revision with a count/flag-only diff, never an apply, queue or approval.
+  PA proposals are applied per group through their own reviews (above);
+  they have no member editor. Home conversational
+  revisions use the separately consented planning path above.
+  Owners can decline a current unapplied Home proposal without resolving a model.
+  The same catalog/proposal CAS prevents closing an older proposal across another
+  live review, and fences late model completions or old confirmations. Decline
+  retains typed intent and saved revision questions as cancelled history; it does
+  not undo effects, alter collections/queues or resurrect authority. Uncertain
+  decline responses require canonical-history recovery. Unsaved editor changes
+  must be saved or discarded first. An unresolved question can be declined but
+  remains unavailable for effect review until explicitly resolved.
+  Home
+  `awaiting_user_review` and `completed` states require owning-store witnesses;
+  an initial draft save cannot manufacture these transitions. Replay returns
+  the stored receipt, not a recomputed success. Removal leaves referenced history
+  readable/stale; Forget clears intent while opaque receipts retain no copied
+  entry labels or membership. Read-only history may expose `collection_receipt`
+  and must not label applied/redacted metadata as an unapplied draft.
+  Home's Logical collections browser separately reads canonical collection cards
+  (20 per page) and exact members (50 per page), with scope/catalog/root-state
+  comparison pins and a 64 KiB projection cap. It deliberately uses saved catalog
+  names, not child workspace lookups; exposes no paths, song facts or activation
+  controls; and remains usable without a Manager/provider. Legacy reads never
+  upgrade. Revocation preserves membership with truthful unavailable status;
+  Forget removes references and invalidates old pages. Failed/stale reads clear
+  the visible page and require explicit refresh rather than mixing snapshots.
   `SaveArrangementClarification` also completes into this same envelope, never
   a second transcript. Its explicit `kind: clarification` preserves the user's
   goal/source/provenance in an empty `needs_more_evidence` envelope and stores
@@ -327,9 +512,11 @@ Provider/model/skill fingerprints and coverage are provenance, not permission.
   The general runtime resolver is not called: it can materialize MCP bindings.
   The route uses authenticated owner scope, exact request fields and explicit
   sharing/upgrade consent, returns canonical history only and sanitizes failures.
-  Runtime tests stage synthetic package fixtures in disposable data, not the
-  missing Music candidate; shared browser and candidate-guidance acceptance remain
-  unfinished.
+  Runtime unit tests stage synthetic package fixtures in disposable data. The
+  maintained exact-candidate browser path additionally exports a clean Music
+  commit, installs it only in sandbox state, and checks the complete staged skill
+  and primary-role prompt in actual provider system messages. This remains
+  scripted-provider evidence, not live-model judgment.
 - **Library schema 1 → 2:** new reader accepts exact v1 and v2; no read-time write
   or authority switch. V1 cannot contain new fields even if empty. The first
   explicit arrangement outcome save (including clarification) or reviewed collection write atomically moves
@@ -375,10 +562,29 @@ Music content-only candidate 0.3.0 retains both existing required host features,
 Home/role/profile shape, schema/protocol version 1 and reciprocal REAPER contract.
 Guidance checks the advertised tools; absent tools mean inert recommendation or
 existing reviewed UI, not a claimed saved plan. Guidance-only Home upgrade already
-supports prompt/skill changes, but actual 0.2.0/0.1.1 → candidate integration is a
-separate gate. Music source, disposable staging, immutable release and Ori's
+supports prompt/skill changes. Exact-candidate setup, empty-Home 0.2.0/0.1.1
+upgrades, both REAPER installation orders and restart have disposable browser
+coverage; populated arrangement preservation and broader lifecycle acceptance
+remain separate gates. Music source, disposable staging, immutable release and Ori's
 reviewed floor are four distinct states. No pin/release is authorized here.
 REAPER/SDK/devtools changes are not required by the effects above.
+
+Run `./scripts/e2e-pa-arrangement.sh music --source /absolute/clean/candidate`
+for exact-candidate planning, revision, correction, collection-only review/apply,
+and provider-loss history. It records the commit/tree/archive identity and
+provider trace in `tasks/evidence-agentic-workspace-arrangement/music-arrangement-browser/`.
+The full skill body and role prompt must appear in the system message; opening
+history/context must not call the model or establish trust. This empty-catalog
+scripted test does not establish large-catalog investigation or model judgment.
+`home` still selects the synthetic-package regression; `pa` tests the PA path.
+
+Guidance must leave room for host rules, schemas, evidence and revision history
+within the existing 24,000-token turn budget. The original Music candidate's
+full guidance failed before any model call; concise guidance now passes the
+exact-candidate flow without changing host limits or truncating instructions.
+The package checks skill/primary-prompt byte bounds, but these do not guarantee
+that every larger inventory or multi-call turn fits: the host still checks each
+request and refuses exhausted budgets.
 
 ## Implementation seams and validation gates
 
@@ -411,3 +617,13 @@ correction, ambiguous nested/partial evidence and no-model behavior; repeat pair
 goals at least twice with an explicitly authorized real model. Scripted tests
 and live judgment observations remain separate; unavailable live checks are
 NOT RUN, never substituted by a green fake.
+
+Measured (opt-in `ORI_ARRANGEMENT_PERF=1 go test -short ./internal/projectlibrary
+-run TestArrangementEnvelope -v`, normal build, Apple M5): 5,000 entries over
+four roots (2.4 MB document) — warm evidence search p95 151 ms, review page p95
+126 ms, first review page 304 ms, save 446 ms, metadata apply of 1,250
+memberships 267 ms; a 5,001st entry or an 8 MiB+ document is refused with no
+write. Canonical reads re-read the Home on every call by design; review pages
+project their members from the page's own authorized snapshot rather than
+rebuilding full planning evidence, and in-memory workspace copies use compact
+JSON. Seeded observations are fixture metadata, not a discovery claim.

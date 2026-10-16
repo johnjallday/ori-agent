@@ -21,14 +21,18 @@ var ErrArrangementUpgradeRequired = errors.New("saving an arrangement upgrades t
 // AFTER this save. Its own write therefore does not immediately stale the draft.
 // Later catalog changes require fresh review. Neither pin is approval.
 type Arrangement struct {
-	Record            workspacearrangement.Record `json:"record"`
-	CatalogRevision   int64                       `json:"catalog_revision"`
-	ManagerInstanceID string                      `json:"manager_instance_id"`
-	ManagerName       string                      `json:"manager_name"`
-	BindingDigest     string                      `json:"binding_digest"`
+	RevisionDiff       *ArrangementRevisionDiff    `json:"revision_diff,omitempty"`
+	RevisionDiscussion *RevisionDiscussion         `json:"revision_discussion,omitempty"`
+	Record             workspacearrangement.Record `json:"record"`
+	CatalogRevision    int64                       `json:"catalog_revision"`
+	ManagerInstanceID  string                      `json:"manager_instance_id"`
+	ManagerName        string                      `json:"manager_name"`
+	BindingDigest      string                      `json:"binding_digest"`
 	// Empty Kind denotes a proposal for compatibility with existing v2 records.
-	Kind          string `json:"kind,omitempty"`
-	Clarification string `json:"clarification,omitempty"`
+	Kind                 string                   `json:"kind,omitempty"`
+	Clarification        string                   `json:"clarification,omitempty"`
+	CollectionReceipt    *CollectionCommitReceipt `json:"collection_receipt,omitempty"`
+	CollectionCorrection *CollectionCorrection    `json:"collection_correction,omitempty"`
 }
 
 func (d Document) validArrangements() bool {
@@ -62,6 +66,9 @@ func (d Document) validArrangements() bool {
 			!validText(saved.ManagerInstanceID, 160) || !validText(saved.ManagerName, 160) || !validDigest(saved.BindingDigest) {
 			return false
 		}
+		if !validCollectionReceipt(saved, d.Revision) || !collectionWitnessesMatch(d, saved) || !validCollectionCorrection(saved) || !validRevisionDiscussion(saved) || !validArrangementRevisionDiff(saved) {
+			return false
+		}
 		ids[r.ID] = true
 		for id := range r.ItemRevisions {
 			if !entries[id] {
@@ -69,7 +76,7 @@ func (d Document) validArrangements() bool {
 			}
 		}
 		for id := range r.CollectionRevisions {
-			if !collectionIDs[id] {
+			if !collectionIDs[id] && r.State != "stale" && r.State != "completed" {
 				return false
 			}
 		}
@@ -241,6 +248,7 @@ func forgetArrangements(doc *Document, entryID string, now time.Time) {
 	}
 	for i := range doc.Arrangements {
 		doc.Arrangements[i].Clarification = ""
+		doc.Arrangements[i].RevisionDiscussion = nil
 		record := &doc.Arrangements[i].Record
 		record.State, record.Revision, record.UpdatedAt = "stale", record.Revision+1, now
 		record.Draft = workspacearrangement.Draft{Version: workspacearrangement.Version, SourceRevision: record.Draft.SourceRevision, Goal: "Catalog history was forgotten. Request a new arrangement."}

@@ -3,6 +3,23 @@ import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-c
 
 // No model request is made by attachment, opening the disclosure or refreshing
 // runtime labels. The existing Ask renderer owns the canonical reply/transcript.
+// libraryHomeLinks validates the host's Home list for the handoff: names and
+// Home routes only. Anything else is dropped rather than turned into a link.
+export function libraryHomeLinks(payload) {
+  const homes = Array.isArray(payload?.homes) ? payload.homes.slice(0, 32) : [];
+  return homes
+    .filter(
+      home =>
+        home &&
+        typeof home.name === 'string' &&
+        home.name.trim() &&
+        home.name.length <= 200 &&
+        typeof home.route === 'string' &&
+        /^\/workspaces\/[^/?#\s]+$/u.test(home.route)
+    )
+    .map(home => ({ name: home.name.trim(), href: home.route }));
+}
+
 export function arrangementAttachmentContext({
   assistant,
   view,
@@ -64,7 +81,13 @@ function init() {
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   const body = document.createElement('div');
-  details.append(title, hint, refreshButton, historyButton, status, body);
+  // A Home's saved catalog is organized inside that Home, by its own Manager.
+  // This is navigation only: the assistant shares nothing and plans nothing.
+  const homes = document.createElement('section');
+  homes.className = 'small';
+  homes.setAttribute('aria-label', 'Organize inside a Home instead');
+  homes.hidden = true;
+  details.append(title, hint, refreshButton, historyButton, status, body, homes);
   const scroll = document.getElementById('personalAssistantScroll');
   const chips = document.getElementById('personalAssistantChips');
   if (!scroll || !chips) return;
@@ -171,10 +194,45 @@ function init() {
       }
     }
   };
+  let homesGeneration = 0;
+  const loadHomes = async () => {
+    const run = ++homesGeneration;
+    homes.hidden = true;
+    homes.replaceChildren();
+    try {
+      const response = await fetch('/api/assistant-program/library-homes', {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return;
+      const links = libraryHomeLinks(await response.json());
+      if (run !== homesGeneration || !links.length) return;
+      const heading = document.createElement('h4');
+      heading.className = 'h6';
+      heading.textContent = 'Organize inside a Home instead';
+      const note = document.createElement('p');
+      note.textContent =
+        "A Home's saved catalog is organized there, by that Home's own Manager, with its own disclosure. Opening a Home shares nothing from this conversation, plans nothing and changes nothing.";
+      const list = document.createElement('ul');
+      for (const link of links) {
+        const item = document.createElement('li');
+        const anchor = document.createElement('a');
+        anchor.href = `${link.href}#projectLibraryArrangementPlanning`;
+        anchor.textContent = `Open ${link.name} → Organize library`;
+        item.append(anchor);
+        list.append(item);
+      }
+      homes.append(heading, note, list);
+      homes.hidden = false;
+    } catch (_) {
+      // The handoff is optional; planning here is unaffected.
+    }
+  };
   details.addEventListener('toggle', () => {
     openButton.setAttribute('aria-expanded', String(details.open));
     if (details.open) {
       void loadModel();
+      void loadHomes();
       details.scrollIntoView({ block: 'start' });
     } else consent.clearChoices();
   });

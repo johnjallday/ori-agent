@@ -52,6 +52,13 @@ func (h *HomeAssistantAskHandler) validateFolderReview(ctx context.Context, offe
 	if err != nil || !scope.owns(record) {
 		return foldercontext.ErrInvalid
 	}
+	// An arranged group is also held to its canonical record, revision and
+	// operation binding; the folder state alone cannot authorize it.
+	if offer.Structure.Arranged() {
+		if err := h.validateArrangementOffer(ctx, offer); err != nil {
+			return foldercontext.ErrInvalid
+		}
+	}
 	// Confirmed work can finish after detach, but not after deletion, import or
 	// an ownership change. Its exact local canonical review must still exist.
 	if offer.DecidedAt != nil {

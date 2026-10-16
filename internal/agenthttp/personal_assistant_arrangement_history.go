@@ -17,14 +17,21 @@ type PersonalAssistantArrangementHistory struct {
 	ConversationID string                       `json:"conversation_id"`
 	MessageID      string                       `json:"message_id"`
 	ContextCurrent bool                         `json:"context_current"`
+	// Execution lists each proposed group and what its own bound setup review
+	// became. It is read from canonical state only and grants nothing.
+	Execution *PersonalAssistantArrangementExecution `json:"execution,omitempty"`
 }
 
 type personalAssistantArrangementHistoryReader interface {
 	ReadArrangementSummary(context.Context, string, assistantcontext.SaveOwner, string) (*PersonalAssistantArrangementHistory, error)
 }
 
-// ArrangementHistoryHandler reads only canonical storage. Unlike the ordinary
-// folder drawer it must not call Status, resolve an attachment or probe a root.
+// ArrangementHistoryHandler reads only canonical storage: the record, its
+// group-review journal, the conversation's folder events and stored offers.
+// Unlike the ordinary folder drawer it never calls the folder service's
+// Status, resolves an attachment or probes a root. Its one write records, by
+// compare-and-swap, what a bound review's own offer already shows; the same
+// monotonic reconciliation runs again under the lease before any POST acts.
 func (h *HomeAssistantAskHandler) ArrangementHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	scope, ok := h.readScope(w, r)
@@ -51,6 +58,18 @@ func (h *HomeAssistantAskHandler) ArrangementHistoryHandler(w http.ResponseWrite
 		// Do not distinguish missing, foreign and unavailable record identities.
 		writeConversationError(w, http.StatusNotFound, "arrangement_unavailable", "That saved arrangement could not be read in this conversation.")
 		return
+	}
+	// Each group's state comes from its own bound review, read from stored
+	// offers and the canonical folder event: no attachment is resolved and no
+	// folder is probed. Recording what a review already shows is correlation,
+	// never a new effect.
+	if store, ok := h.Conversations.(personalAssistantArrangementExecutionStore); ok {
+		if target, err := h.folderTarget(scope, conversationID, ""); err == nil {
+			if saved, err := store.ReadArrangementExecution(r.Context(), conversationID, owner, recordID); err == nil && saved != nil {
+				h.reconcileArrangementEffects(r.Context(), target, owner, saved)
+				history.Execution = h.arrangementExecution(r.Context(), target, owner, saved)
+			}
+		}
 	}
 	orihttp.WriteJSON(w, history)
 }

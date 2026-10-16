@@ -37,6 +37,9 @@ const (
 	FolderPlanMembers     = "workspaces"
 	FolderPlanMember      = "member"
 	FolderPlanUnavailable = "unavailable"
+	// FolderPlanArrangement says a structure is a saved arrangement's exact
+	// selection, and that folders it did not select stay as they are.
+	FolderPlanArrangement = "arrangement"
 )
 
 // FolderRecipeStructure names the host's own setup of a folder that holds
@@ -168,6 +171,10 @@ type FolderStructureIntent struct {
 	RootKey      string                        `json:"root_key"`
 	RootIdentity string                        `json:"root_identity,omitempty"`
 	Members      []FolderStructureMemberIntent `json:"members"`
+	// Arrangement is the saved arrangement intention a selected structure was
+	// compiled from. It is part of the digest the user confirms, so a review of
+	// another record, revision or operation is a different review.
+	Arrangement *FolderStructureArrangement `json:"arrangement,omitempty"`
 }
 
 // FolderStructureMemberIntent is one member the plan promised a workspace for.
@@ -186,6 +193,9 @@ func (i FolderStructureIntent) Validate() error {
 	if !validStructureWorkspaceName(i.GroupName) || (i.GroupType != FolderGroupPlain && i.GroupType != FolderGroupHome) ||
 		validateFolderKey(i.RootKey) != nil || len(i.Members) == 0 || len(i.Members) > FolderStructureMaxMembers {
 		return fmt.Errorf("%w: structure intent", errFolderDigestInvalid)
+	}
+	if i.Arrangement != nil && (!i.Arrangement.valid() || i.GroupType != FolderGroupPlain || i.GroupExists) {
+		return fmt.Errorf("%w: structure arrangement", errFolderDigestInvalid)
 	}
 	switch i.ManagerAction {
 	case "":

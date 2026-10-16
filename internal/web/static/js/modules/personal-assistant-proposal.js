@@ -34,12 +34,15 @@ export function structureOption(structure) {
 function structureView(option) {
   const p = option.presentation;
   const s = option.structure;
+  // Version 2 is a saved arrangement's exact selection: a new plain group,
+  // never the rule-based proposal, and labelled as such.
+  const arranged = s?.version === 2 && s.group?.type === 'group' && Boolean(s.arrangement);
   if (
     p?.version !== 1 ||
     p.state !== 'proposed' ||
     p.kind !== 'structure' ||
     p.effect !== 'group_workspaces' ||
-    s?.version !== 1 ||
+    (s?.version !== 1 && !arranged) ||
     !['home', 'group'].includes(s.group?.type) ||
     !Array.isArray(s.members)
   )
@@ -56,10 +59,12 @@ function structureView(option) {
     kind: 'structure',
     state: 'proposed',
     art: 'district',
-    label: 'Rule-based setup option',
+    label: arranged ? 'Group from a saved arrangement' : 'Rule-based setup option',
     subject: bounded(s.group.name) || 'Selected folder',
     scope: `${members.length} workspace${members.length === 1 ? '' : 's'}`,
-    description: `Not an agent assessment. ${effects.structure}`,
+    description: arranged
+      ? `Only the folders the saved arrangement selected. ${effects.structure}`
+      : `Not an agent assessment. ${effects.structure}`,
     destination: existing
       ? `Adds to your existing ${bounded(s.group.name)}`
       : s.group.type === 'home'

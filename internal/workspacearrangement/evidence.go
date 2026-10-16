@@ -93,12 +93,13 @@ type Snapshot struct {
 type EvidenceSource func(context.Context) (Snapshot, error)
 
 type Filter struct {
-	Text         string `json:"text,omitempty"`
-	Format       string `json:"format,omitempty"`
-	Connection   string `json:"connection,omitempty"`
-	Availability string `json:"availability,omitempty"`
-	RootID       string `json:"root_id,omitempty"`
-	CollectionID string `json:"collection_id,omitempty"`
+	SelectionHandle string `json:"selection_handle,omitempty"`
+	Text            string `json:"text,omitempty"`
+	Format          string `json:"format,omitempty"`
+	Connection      string `json:"connection,omitempty"`
+	Availability    string `json:"availability,omitempty"`
+	RootID          string `json:"root_id,omitempty"`
+	CollectionID    string `json:"collection_id,omitempty"`
 }
 
 type Page struct {
@@ -384,9 +385,20 @@ func (e *Evidence) matching(filter Filter) ([]Item, error) {
 	if !text(filter.Text, 120) || strings.ContainsAny(filter.Text, `/\`) {
 		return nil, ErrInvalid
 	}
-	for _, value := range []string{filter.Format, filter.Connection, filter.Availability, filter.RootID, filter.CollectionID} {
+	for _, value := range []string{filter.Format, filter.Connection, filter.Availability, filter.RootID, filter.CollectionID, filter.SelectionHandle} {
 		if value != "" && !label(value, 160) {
 			return nil, ErrInvalid
+		}
+	}
+	var selected map[string]bool
+	if filter.SelectionHandle != "" {
+		frozen, ok := e.selections[filter.SelectionHandle]
+		if !ok {
+			return nil, ErrInvalid
+		}
+		selected = map[string]bool{}
+		for _, id := range frozen.ids {
+			selected[id] = true
 		}
 	}
 	var collection map[string]bool
@@ -422,7 +434,7 @@ func (e *Evidence) matching(filter Filter) ([]Item, error) {
 		}
 		if (filter.Text != "" && !strings.Contains(strings.ToLower(row.Name), strings.ToLower(filter.Text))) ||
 			(filter.Format != "" && filter.Format != projected.Format) || (filter.Connection != "" && filter.Connection != row.Connection) ||
-			(filter.Availability != "" && filter.Availability != projected.Availability) || (collection != nil && !collection[row.ID]) {
+			(filter.Availability != "" && filter.Availability != projected.Availability) || (collection != nil && !collection[row.ID]) || (selected != nil && !selected[row.ID]) {
 			continue
 		}
 		rows = append(rows, projected)
