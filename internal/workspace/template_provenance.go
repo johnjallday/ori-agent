@@ -55,6 +55,9 @@ type TemplateProvenance struct {
 	TemplateID string `json:"template_id,omitempty"`
 	// TemplateName is the human-facing template name at creation time.
 	TemplateName string `json:"template_name,omitempty"`
+	// BehaviorProfile preserves semantic read-consent boundaries on ordinary
+	// copies, independently of their name or an overridden workspace preset.
+	BehaviorProfile string `json:"behavior_profile,omitempty"`
 	// Builtin is true when the origin was a shipped built-in template.
 	Builtin bool `json:"builtin,omitempty"`
 	// Version is the template's builtin_version at creation time.

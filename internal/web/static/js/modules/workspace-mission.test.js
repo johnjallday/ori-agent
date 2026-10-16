@@ -7,16 +7,23 @@ const source = readFileSync(new URL('./workspace-mission.js', import.meta.url), 
 
 // Loads the module with no goal card on the page, so init() bails and only
 // the exposed API is exercised.
-function loadWorkspaceMission() {
+function loadWorkspaceMission(options = {}) {
   const window = { currentWorkspaceId: 'ws-1' };
   const document = {
     readyState: 'complete',
-    querySelector: () => null,
+    querySelector: selector => options.elements?.[selector] || null,
     querySelectorAll: () => [],
     addEventListener() {},
     body: { dataset: {} }
   };
-  vm.runInNewContext(source, { window, document, console, setTimeout, clearTimeout });
+  vm.runInNewContext(source, {
+    window,
+    document,
+    console,
+    clearTimeout,
+    setTimeout: options.setTimeout || setTimeout,
+    fetch: options.fetch
+  });
   return window.workspaceMission;
 }
 
@@ -151,6 +158,118 @@ test('a finished run keeps its result under the goal until the next run', () => 
   const next = mission.summarize({ mission: 'Ship the launch', run_in_flight: true });
   assert.equal(next.actionStatus, 'Looking for things to work on…');
   assert.equal(mission.summarize({ mission: '' }).actionStatus, '', 'no goal, no result line');
+});
+
+function lifecycleFixture(
+  initial,
+  firstResponse = { pending: true, first_run: { started: false } }
+) {
+  let state = initial;
+  const requests = [];
+  const mission = loadWorkspaceMission({
+    elements: { '#workspace-detail-mission-text': {}, '#workspace-detail-mission-enabled': {} },
+    setTimeout: fn => {
+      queueMicrotask(fn);
+      return 1;
+    },
+    fetch: async (url, options) => {
+      requests.push([url, options?.method || 'GET']);
+      if (url.endsWith('/first-open')) {
+        if (firstResponse instanceof Error) throw firstResponse;
+        return { ok: true, json: async () => firstResponse };
+      }
+      if (url.endsWith('/trigger')) {
+        state = {
+          ...state,
+          first_run_pending: false,
+          needs_attention: '',
+          mission_runs: [{ run_id: 'retry', succeeded: true }]
+        };
+        return { ok: true, json: async () => ({ run_id: 'retry' }) };
+      }
+      return { ok: true, json: async () => state };
+    }
+  });
+  return {
+    mission,
+    requests,
+    setState: value => {
+      state = value;
+    }
+  };
+}
+
+const flushLifecycle = () => new Promise(resolve => setImmediate(resolve));
+
+test('blocked pending reloads never recursively POST and explicit Run now retries after repair', async () => {
+  const f = lifecycleFixture({ mission: 'Draft chapters', first_run_pending: true });
+  await f.mission.reload();
+  await flushLifecycle();
+  for (let i = 0; i < 4; i++) await f.mission.reload();
+  assert.equal(f.requests.filter(([url]) => url.endsWith('/first-open')).length, 1);
+  f.setState({
+    mission: 'Draft chapters',
+    first_run_pending: false,
+    first_run_state: 'blocked',
+    needs_attention: 'Complete setup, then choose Run now'
+  });
+  await f.mission.reload();
+  assert.match(f.mission.getSummary().actionStatus, /Complete setup/);
+  f.mission.runNow();
+  await flushLifecycle();
+  assert.equal(f.requests.filter(([url]) => url.endsWith('/trigger')).length, 1);
+  assert.equal(f.requests.filter(([url]) => url.endsWith('/first-open')).length, 1);
+});
+
+test('an in-flight run takes precedence over a stale pending marker', async () => {
+  const f = lifecycleFixture({
+    mission: 'Draft chapters',
+    first_run_pending: true,
+    run_in_flight: true,
+    run_in_flight_detail: { run_id: 'other-tab' }
+  });
+  await f.mission.reload();
+  f.setState({
+    mission: 'Draft chapters',
+    first_run_pending: false,
+    run_in_flight: false,
+    mission_runs: [{ run_id: 'other-tab', succeeded: true }]
+  });
+  await flushLifecycle();
+  assert.equal(f.requests.filter(([, method]) => method === 'POST').length, 0);
+  assert.equal(f.mission.isRunning(), false);
+});
+
+test('failed first-open requests are not silently retried by reloads', async () => {
+  const f = lifecycleFixture(
+    { mission: 'Draft chapters', first_run_pending: true },
+    new Error('offline')
+  );
+  await f.mission.reload();
+  await flushLifecycle();
+  assert.match(f.mission.getSummary().actionStatus, /could not be confirmed/);
+  await f.mission.reload();
+  assert.equal(f.requests.filter(([, method]) => method === 'POST').length, 1);
+});
+
+test('cleared or already attempted goals do not POST and consent wording distinguishes the two actions', async () => {
+  for (const state of [
+    { mission: '', first_run_pending: true },
+    { mission: 'Read the project', first_run_pending: true, first_run_state: 'starting' },
+    { mission: 'Read the project', read_consent_required: true, first_run_state: 'blocked' }
+  ]) {
+    const f = lifecycleFixture(state);
+    await f.mission.reload();
+    await flushLifecycle();
+    assert.equal(f.requests.filter(([, method]) => method === 'POST').length, 0);
+    if (state.read_consent_required) {
+      assert.match(f.mission.getSummary().actionStatus, /Run now reads authorized project context/);
+      assert.match(
+        f.mission.getSummary().actionStatus,
+        /Start first look runs only the separate assessment/
+      );
+    }
+  }
 });
 
 test('a workspace with no goal asks for one so agents can suggest work (FR8)', () => {

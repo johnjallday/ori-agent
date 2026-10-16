@@ -35,9 +35,9 @@ type GoalPreflightResult struct {
 // PreflightGoalToolbox resolves and validates the Toolbox a Goal would run
 // with, without invoking anything.
 //
-// A goal with no policy passes: goals predate Toolboxes, and one that never
-// chose a policy should keep working exactly as it did (the entry agent's
-// current assignment applies, which is also what UseCurrentAtStart means).
+// A goal with no explicit policy uses the entry agent's current assignment.
+// Legacy agents with no assignment still pass; a broken assigned toolbox must
+// not wait until model execution to reveal that it is unavailable.
 func PreflightGoalToolbox(
 	ws *Workspace,
 	learned []ResolvedSkill,
@@ -46,14 +46,16 @@ func PreflightGoalToolbox(
 	thresholds FocusThresholds,
 ) GoalPreflightResult {
 	policy := ws.GoalToolboxPolicy
-	if policy == nil {
-		return GoalPreflightResult{OK: true, UsedCurrentAtStart: true}
+	implicit := policy == nil || strings.TrimSpace(policy.EntryAgentInstanceID) == ""
+	if implicit {
+		entry, ok := ws.FindAgentInstance(ws.EntryAgentName(), "")
+		if !ok {
+			return GoalPreflightResult{OK: true, UsedCurrentAtStart: true}
+		}
+		policy = &GoalToolboxPolicy{EntryAgentInstanceID: entry.ID, UseCurrentAtStart: true}
 	}
 
 	instanceID := strings.TrimSpace(policy.EntryAgentInstanceID)
-	if instanceID == "" {
-		return GoalPreflightResult{OK: true, UsedCurrentAtStart: true}
-	}
 	instance := findAgentInstanceByID(ws, instanceID)
 	if instance == nil {
 		return GoalPreflightResult{
@@ -76,6 +78,12 @@ func PreflightGoalToolbox(
 			return GoalPreflightResult{OK: true, UsedCurrentAtStart: true}
 		}
 		preview := PreviewToolbox(ws, instance, definition, recipe, learned, capacity, expertMode, thresholds)
+		if implicit && len(blockingIssueMessages(preview.Issues)) == 0 {
+			// Legacy/default assignments may carry advisory pin-tools guidance
+			// (notably the host filesystem binding). Do not manufacture a new
+			// setup requirement; still refuse every genuinely blocking issue.
+			return GoalPreflightResult{OK: true, ToolboxID: definition.ID, ToolboxVersion: recipe.Version, UsedCurrentAtStart: true}
+		}
 		return goalPreflightFromPreview(preview, definition.ID, recipe.Version, true)
 	}
 

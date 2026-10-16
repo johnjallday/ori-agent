@@ -1005,6 +1005,7 @@ func (b *ServerBuilder) initializeMissionBridge() {
 	}
 	b.taskScheduler.SetMissionTrigger(bridge)
 	b.taskScheduler.SetMissionModelCheck(b.goalRunModelCheck)
+	b.taskScheduler.SetMissionReadinessCheck(b.goalRunReadiness)
 	b.missionBridge = bridge
 	if b.workspaceHandler != nil {
 		b.workspaceHandler.SetScheduler(b.taskScheduler)
@@ -1058,7 +1059,7 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 		Opportunities:  opportunityStore,
 	}
 	if b.missionBridge != nil {
-		cfg.Mission = b.missionBridge
+		cfg.Mission = b.taskScheduler
 	}
 	svc, err := trigger.NewService(cfg)
 	if err != nil {

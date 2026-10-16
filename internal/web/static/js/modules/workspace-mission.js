@@ -120,6 +120,9 @@
   // Guards against overlapping runs and keeps the goal card's Run button
   // disabled while a run is in flight (see renderGoalCard).
   let runInProgress = false;
+  // Set before POST, including failed/ambiguous requests. Reload and polling
+  // may follow a run, but only an explicit Run now may retry admission.
+  let deferredFirstRunAttempted = false;
   let lastRunOutcome = null;
   // The last run's result line ("Run complete — 3 tasks suggested…"). It stays
   // under the goal until the next run starts or the goal state reloads, so a
@@ -425,6 +428,12 @@
     if (mission && lastRunReport) return lastRunReport;
     const reason = String((state && state.needs_attention) || '').trim();
     if (mission && reason) return { text: reason, kind: 'error' };
+    if (mission && state && state.read_consent_required) {
+      return {
+        text: 'Run now reads authorized project context for goal suggestions. Start first look runs only the separate assessment. Saving or opening this goal starts neither.',
+        kind: null
+      };
+    }
     const mcp = Array.isArray(state && state.unclassified_mcp_ids)
       ? state.unclassified_mcp_ids
       : [];
@@ -888,34 +897,44 @@
   // save, by the cadence or in another tab — is followed until it ends (FR27).
   function afterStateLoaded(state) {
     if (runInProgress || !state) return;
-    if (state.first_run_pending) {
-      startDeferredFirstRun();
-      return;
-    }
     if (state.run_in_flight) {
       const detail = state.run_in_flight_detail || {};
       followRun(detail.run_id || '', reportToCards);
+      return;
+    }
+    if (state.first_run_pending && !state.first_run_state && String(state.mission || '').trim()) {
+      startDeferredFirstRun();
     }
   }
 
   async function startDeferredFirstRun() {
     const wsId = getWorkspaceId();
-    if (!wsId) return;
+    if (!wsId || deferredFirstRunAttempted) return;
+    deferredFirstRunAttempted = true;
     try {
       const resp = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/mission/first-open`, {
         method: 'POST'
       });
-      if (!resp.ok) return;
-      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      const body = await resp.json();
       const firstRun = body.first_run || {};
       if (firstRun.started) {
         followRun(firstRun.run_id || '', reportToCards);
-      } else if (body.pending) {
-        // The run could not start; the reason now lives on the goal.
+      } else {
+        // Follow another tab's run or show the durable blocker. The attempt
+        // latch prevents pending → reload → pending from POSTing recursively.
         await reload();
+        if (!runIsInFlight(latestState) && firstRun.reason && !firstRun.handled) {
+          lastRunReport = { text: firstRun.reason, kind: 'error' };
+          if (latestState) renderReadOnly(latestState);
+        }
       }
     } catch (e) {
-      console.warn('Goal first-open check failed:', e);
+      lastRunReport = {
+        text: `The goal start could not be confirmed (${e.message}). Review run history, then choose Run now to retry.`,
+        kind: 'error'
+      };
+      if (latestState) renderReadOnly(latestState);
     }
   }
 

@@ -38,9 +38,12 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	running, inFlight := h.scheduler.MissionRunning(workspaceID)
-	needsAttention := ""
-	if ws.GoalToolboxPolicy != nil && ws.GoalToolboxPolicy.NeedsAttention {
-		needsAttention = ws.GoalToolboxPolicy.NeedsAttentionReason
+	needsAttention := goalRunAttention(ws, inFlight)
+	consentRequired := GoalRequiresReadConsent(ws)
+	if h.scheduler != nil {
+		if canonical, err := h.scheduler.missionWorkspace(workspaceID); err == nil && canonical != nil {
+			consentRequired = GoalRequiresReadConsent(canonical)
+		}
 	}
 
 	resp := map[string]any{
@@ -49,7 +52,9 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"run_in_flight":             inFlight,
 		"run_in_flight_detail":      running,
 		"needs_attention":           needsAttention,
-		"first_run_pending":         ws.GoalFirstRunPending,
+		"first_run_pending":         ws.GoalFirstRunPending && ws.GoalFirstRunState == "",
+		"first_run_state":           ws.GoalFirstRunState,
+		"read_consent_required":     consentRequired,
 		"mission":                   ws.Mission,
 		"cadence":                   ws.Cadence,
 		"autonomy_policy":           ws.AutonomyPolicy,
@@ -156,9 +161,13 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 			return ErrMissionBindingsUnclassified
 		}
 		if req.Mission != nil {
-			// A goal saved where there was none starts one run (FR24).
-			firstGoal = strings.TrimSpace(ws.Mission) == "" && strings.TrimSpace(*req.Mission) != ""
+			wasEmpty := strings.TrimSpace(ws.Mission) == ""
 			ws.Mission = *req.Mission
+			if strings.TrimSpace(ws.Mission) == "" {
+				cancelDeferredGoalRun(ws)
+			} else if wasEmpty {
+				firstGoal = ArmFirstGoalRun(ws)
+			}
 		}
 		if req.CadenceSet {
 			ws.Cadence = req.Cadence
@@ -232,6 +241,12 @@ func (h *HTTPHandler) startGoalRun(workspaceID, origin string) map[string]any {
 	runID, err := h.scheduler.StartMissionRun(workspaceID, origin)
 	if err != nil {
 		outcome := map[string]any{"started": false, "reason": err.Error()}
+		if errors.Is(err, ErrMissionFirstRunHandled) {
+			outcome["handled"] = true
+		}
+		if errors.Is(err, ErrMissionRunInFlight) {
+			outcome["in_flight"] = true
+		}
 		var blocked *MissionBlockedError
 		if errors.As(err, &blocked) {
 			outcome["code"] = blocked.Code
@@ -243,26 +258,18 @@ func (h *HTTPHandler) startGoalRun(workspaceID, origin string) map[string]any {
 
 // GoalFirstOpen handles POST /api/workspaces/{workspaceID}/mission/first-open.
 // A workspace created with a goal does not run at creation; its first goal
-// run starts the first time it is opened (FR25). The pending marker is
-// consumed atomically, so reloads and other tabs start nothing more.
+// run is attempted on first open. The scheduler durably claims that attempt
+// under the shared run slot. Blockers require explicit Run now, not a reload.
 func (h *HTTPHandler) GoalFirstOpen(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceID")
 	if workspaceID == "" {
 		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
-	consumed := false
-	if err := h.store.Update(workspaceID, func(ws *Workspace) error {
-		consumed = ws.GoalFirstRunPending
-		ws.GoalFirstRunPending = false
-		return nil
-	}); err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
-		return
-	}
-	resp := map[string]any{"pending": consumed}
-	if consumed {
-		resp["first_run"] = h.startGoalRun(workspaceID, MissionOriginFirstGoal)
+	firstRun := h.startGoalRun(workspaceID, MissionOriginFirstGoal)
+	resp := map[string]any{
+		"pending":   firstRun["handled"] != true && firstRun["in_flight"] != true,
+		"first_run": firstRun,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {

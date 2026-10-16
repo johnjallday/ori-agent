@@ -3,33 +3,41 @@ package server
 import (
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// goalRunModelCheck reports whether a workspace's goal runs have a model to
-// run on: its entry agent's provider, or the system model's when the agent
-// names none, must be registered (workspace-goal-suggestions FR24). It is
-// deliberately lenient — it blocks only when no provider can be resolved or
-// the named one is not registered — so it never refuses a setup that runs.
+// goalRunModelCheck checks stored agent/model configuration without building a
+// runtime, materializing connectors or invoking a model. Local snapshots are
+// valid agents; a missing/disabled agent cannot borrow the system provider.
 func (b *ServerBuilder) goalRunModelCheck(ws *workspace.Workspace) (bool, string) {
-	provider := ""
-	if agentName := strings.TrimSpace(ws.EntryAgentName()); agentName != "" && b.st != nil {
-		if ag, _, ok := store.ResolveAgent(b.st, agentName); ok && ag != nil {
-			provider = strings.TrimSpace(ag.Settings.Provider)
+	var ag *agent.Agent
+	name := strings.TrimSpace(ws.EntryAgentName())
+	if b.workspaceStore != nil {
+		local, found, err := b.workspaceStore.GetWorkspaceAgent(ws.ID, name)
+		if err != nil {
+			return false, "Repair this workspace's agent configuration, then choose Run now"
+		}
+		if found {
+			ag = local
 		}
 	}
-	if provider == "" {
-		provider, _ = b.systemModel()
+	if ag == nil && b.st != nil {
+		ag, _, _ = store.ResolveAgent(b.st, name)
 	}
-	provider = strings.ToLower(strings.TrimSpace(provider))
+	if ag == nil || ag.Status == types.AgentStatusDisabled {
+		return false, "Add or enable this workspace's entry agent, then choose Run now"
+	}
+	provider, model := strings.TrimSpace(ag.Settings.Provider), strings.TrimSpace(ag.Settings.Model)
 	if provider == "" {
-		return false, workspace.MissionNoModelReason
+		provider, model = b.systemModel()
 	}
 	if b.llmFactory == nil {
-		return true, ""
+		return false, workspace.MissionNoModelReason
 	}
-	if _, err := b.llmFactory.GetProvider(provider); err != nil {
+	if _, err := b.llmFactory.GetSystemModelProvider(strings.ToLower(strings.TrimSpace(provider)), model); err != nil {
 		return false, workspace.MissionNoModelReason
 	}
 	return true, ""

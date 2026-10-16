@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -25,58 +24,24 @@ import (
 //     boots before the bridge in some test paths; staying silent is safer
 //     than failing).
 func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
-	if ws == nil || !ws.MissionEnabled {
+	if !ts.missionDue(ws, now) {
 		return
 	}
-	if err := RequireWorkspaceExecution(context.Background(), ts.workspaceStore, ws.ID, true); err != nil {
+	finish, err := ts.acquireMissionRun(ws.ID)
+	if err != nil {
 		return
 	}
-	if ws.NextMissionRunAt == nil {
-		return
-	}
-	if ws.NextMissionRunAt.After(now) {
-		return
-	}
-	if ts.missionTrigger == nil {
-		// No bridge wired up yet. Note it once at debug so we don't spam
-		// the log every minute for every mission-enabled workspace.
-		logger.Debug("mission cadence due but no MissionTrigger configured",
-			logger.Fields{"workspace_id": ws.ID})
-		return
-	}
+	defer finish()
+	ts.checkAdmittedMissionCadence(ws, now)
+}
 
-	// Stop BEFORE the model is invoked when the goal's pinned toolbox has
-	// become unusable (PRD FR-105).
-	//
-	// This has to happen here, not inside the run, because an unattended
-	// cadence run that started with fewer capabilities than the goal was built
-	// around would produce a quietly worse result and no signal. Marking the
-	// goal `Needs attention` and advancing the cadence turns that into
-	// something a user can see and fix.
-	if preflight := ts.preflightGoalToolbox(ws); !preflight.OK {
-		logger.Warn("mission run stopped before invocation: the goal's toolbox is not usable", logger.Fields{
-			"workspace_id": ws.ID,
-			"toolbox_id":   preflight.ToolboxID,
-			"readiness":    preflight.Readiness,
-			"reason":       preflight.Reason,
-		})
-		_ = ts.workspaceStore.Update(ws.ID, func(w *Workspace) error {
-			MarkGoalNeedsAttention(w, preflight.Reason)
-			// Advance the cadence so the scheduler does not re-fire every tick
-			// against a goal that cannot run until a human intervenes.
-			if w.Cadence != nil {
-				w.NextMissionRunAt = CalculateNextRun(*w.Cadence, now)
-			}
-			return nil
-		})
+// checkAdmittedMissionCadence runs under the same slot/reset permit as Run now.
+// Reload after claiming: a manual run may have advanced the old poll snapshot.
+func (ts *TaskScheduler) checkAdmittedMissionCadence(snapshot *Workspace, now time.Time) {
+	ws, err := ts.workspaceStore.Get(snapshot.ID)
+	if err != nil || !ts.missionDue(ws, now) {
 		return
 	}
-	_ = ts.workspaceStore.Update(ws.ID, func(w *Workspace) error {
-		ClearGoalNeedsAttention(w)
-		return nil
-	})
-
-	// CycleOrdinal is 1 + the number of previously-executed mission runs.
 	cycleOrdinal := ws.MissionExecutionCount + 1
 
 	// Best-effort run creation. The trigger is responsible for setting
@@ -91,7 +56,21 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 	ctx, cancel := ts.missionRunContext()
 	defer cancel()
 
-	runID, err := ts.missionTrigger.TriggerMissionRun(ctx, ws.ID, cycleOrdinal)
+	runID, execute, err := ts.prepareClaimedMissionRun(ctx, ws.ID, MissionRunOptions{Origin: MissionOriginCadence})
+	if err != nil {
+		// A pre-start blocker is not an execution failure. Advance only the
+		// enabled cadence; do not re-arm the deferred first run.
+		if updateErr := ts.workspaceStore.Update(ws.ID, func(w *Workspace) error {
+			if w.Cadence != nil {
+				w.NextMissionRunAt = CalculateNextRun(*w.Cadence, now)
+			}
+			return nil
+		}); updateErr != nil {
+			logger.Warn("goal cadence admission could not be recorded", logger.Fields{"workspace_id": ws.ID, "error": updateErr})
+		}
+		return
+	}
+	runID, err = execute()
 	if err != nil {
 		logger.Warn("mission trigger failed", logger.Fields{
 			"workspace_id":  ws.ID,
@@ -148,17 +127,19 @@ func (ts *TaskScheduler) preflightGoalToolbox(ws *Workspace) GoalPreflightResult
 	var learned []ResolvedSkill
 	capacity, expertMode := 0, false
 
-	if ws.GoalToolboxPolicy != nil {
-		if instance := findAgentInstanceByID(ws, ws.GoalToolboxPolicy.EntryAgentInstanceID); instance != nil {
-			if ts.toolboxSkills != nil {
-				if resolved, err := ts.toolboxSkills.ListEnabledAgentSkills(instance.Name); err == nil {
-					learned = resolved
-				}
+	instance, _ := ws.FindAgentInstance(ws.EntryAgentName(), "")
+	if ws.GoalToolboxPolicy != nil && ws.GoalToolboxPolicy.EntryAgentInstanceID != "" {
+		instance = findAgentInstanceByID(ws, ws.GoalToolboxPolicy.EntryAgentInstanceID)
+	}
+	if instance != nil {
+		if ts.toolboxSkills != nil {
+			if resolved, err := ts.toolboxSkills.ListEnabledAgentSkills(instance.Name); err == nil {
+				learned = resolved
 			}
-			if ts.toolboxCapacity != nil {
-				if resolvedCapacity, resolvedExpert, ok := ts.toolboxCapacity.ResolveAgentCapacity(instance.Name); ok {
-					capacity, expertMode = resolvedCapacity, resolvedExpert
-				}
+		}
+		if ts.toolboxCapacity != nil {
+			if resolvedCapacity, resolvedExpert, ok := ts.toolboxCapacity.ResolveAgentCapacity(instance.Name); ok {
+				capacity, expertMode = resolvedCapacity, resolvedExpert
 			}
 		}
 	}
@@ -234,22 +215,8 @@ func (ts *TaskScheduler) missionRunContext() (context.Context, context.CancelFun
 // reference — keeping the dependency in one place avoids passing the trigger
 // around as a function argument everywhere it might be needed.
 func (ts *TaskScheduler) TriggerMissionManually(ctx context.Context, workspaceID string) (string, error) {
-	if ts.missionTrigger == nil {
+	if ts == nil || ts.missionTrigger == nil {
 		return "", ErrMissionTriggerNotConfigured
 	}
-	ws, err := ts.workspaceStore.Get(workspaceID)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(ws.Mission) == "" {
-		return "", ErrMissionGoalRequired
-	}
-	if !MissionBindingsReady(ws) {
-		return "", ErrMissionBindingsUnclassified
-	}
-	cycleOrdinal := ws.MissionExecutionCount + 1
-	if withOptions, ok := ts.missionTrigger.(MissionOptionsTrigger); ok {
-		return withOptions.TriggerMissionRunOpts(ctx, workspaceID, cycleOrdinal, MissionRunOptions{Origin: MissionOriginManual})
-	}
-	return ts.missionTrigger.TriggerMissionRun(ctx, workspaceID, cycleOrdinal)
+	return ts.TriggerMissionRunOpts(ctx, workspaceID, 0, MissionRunOptions{Origin: MissionOriginManual})
 }
