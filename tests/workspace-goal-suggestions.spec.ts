@@ -386,6 +386,67 @@ test('Action Center shows the suggestion summary and each finding with its evide
   await expect(drift).toContainText('Review the last three posts against one agreed tone.');
 });
 
+test('stock suggestions: a shipped goal reaches the model and starter tasks are not suggested twice', async ({
+  page,
+  request
+}, testInfo) => {
+  answerGoalRunsWith(
+    JSON.stringify({
+      items: [
+        {
+          kind: 'task',
+          title: 'Draft a style guide',
+          why: 'The goal needs a shared voice.',
+          first_step: 'Collect examples.'
+        },
+        {
+          kind: 'task',
+          title: 'Review the content queue against the agreed voice',
+          why: 'Keep the queue review-ready.',
+          first_step: 'Review the first draft.'
+        },
+        {
+          kind: 'finding',
+          title: 'Publishing preferences need review',
+          why: 'The publishing schedule is not agreed.',
+          recommended_action: 'Choose the review rhythm.'
+        }
+      ]
+    })
+  );
+  const before = goalRunPrompts().length;
+  const created = await ok(
+    await request.post('/api/workspaces', {
+      data: {
+        name: 'Stock Suggestions Desk',
+        template_id: 'content-production'
+      }
+    })
+  );
+  const { id, folder_slug: slug } = created.folder;
+  const state = await missionState(request, id);
+  expect(state.mission_runs).toHaveLength(0);
+  await page.goto(`/workspaces/${slug}?panel=backlog`);
+  const run = await waitForRuns(request, id, 1);
+  expect(run.tasks_created).toBe(1);
+  expect(run.duplicates_skipped).toBe(1);
+  expect(run.findings_created).toBe(1);
+  expect(await suggestedTitles(request, id)).toEqual([
+    'Review the content queue against the agreed voice'
+  ]);
+  expect(goalRunPrompts()).toHaveLength(before + 1);
+  expect(goalRunPrompts().at(-1)).toContain(state.mission);
+  expect(goalRunPrompts().at(-1)).toContain('Draft a style guide');
+  await expect(page.locator('.ws-cmd-drawer-row.is-suggested')).toHaveCount(1);
+  await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+    '1 duplicate skipped'
+  );
+  await captureGoalState(page, testInfo.outputPath('stock-backlog-suggestion.png'));
+  await page.goto('/action-center');
+  await expect(page.getByText('Publishing preferences need review', { exact: true })).toBeVisible();
+  await captureGoalState(page, testInfo.outputPath('stock-action-center-finding.png'));
+});
+
 test('stock authoring: preview, duplicate, edit and create preserve custom and empty goal intent', async ({
   page,
   request

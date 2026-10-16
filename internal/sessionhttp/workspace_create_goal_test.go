@@ -80,6 +80,25 @@ func TestCreateWorkspaceGoal(t *testing.T) {
 			wantBootstrap: "Ship the launch",
 		},
 		{
+			name:        "explicit goal beats template and bootstrap",
+			body:        `{"name":"Explicit Desk","template_id":"goal-template","mission":"  My outcome 日本語  ","workspace_bootstrap":{"goal":"Old fallback"}}`,
+			wantMission: "My outcome 日本語", wantBootstrap: "My outcome 日本語",
+		},
+		{
+			name:        "template beats legacy bootstrap",
+			body:        `{"name":"Default Desk","template_id":"goal-template","workspace_bootstrap":{"goal":"Old fallback"}}`,
+			wantMission: "Publish on-brand content weekly.", wantBootstrap: "Publish on-brand content weekly.",
+		},
+		{
+			name:        "null mission leaves template precedence intact",
+			body:        `{"name":"Null Desk","template_id":"goal-template","mission":null}`,
+			wantMission: "Publish on-brand content weekly.", wantBootstrap: "Publish on-brand content weekly.",
+		},
+		{
+			name: "explicit whitespace clears even the bootstrap mirror",
+			body: `{"name":"Cleared Desk","template_id":"goal-template","mission":" \n ","workspace_bootstrap":{"goal":"Old fallback","context":"Keep context"}}`,
+		},
+		{
 			name: "no goal anywhere leaves Mission empty",
 			body: `{"name":"Plain Desk","description":"Just a description"}`,
 		},
@@ -94,6 +113,25 @@ func TestCreateWorkspaceGoal(t *testing.T) {
 				t.Fatalf("bootstrap goal = %q, want %q", bootstrap, tc.wantBootstrap)
 			}
 		})
+	}
+}
+
+func TestGroupCreationDoesNotAssignWorkspaceGoal(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	var body map[string]any
+	if err := json.Unmarshal([]byte(groupRosterCreateBody(t, handler, "Group Desk", "")), &body); err != nil {
+		t.Fatal(err)
+	}
+	body["mission"] = "Ignore for group"
+	body["workspace_bootstrap"] = map[string]any{"goal": "Ignore legacy too"}
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mission, bootstrap := createdGoal(t, handler, string(data))
+	if mission != "" || bootstrap != "" {
+		t.Fatalf("group acquired a workspace goal: %q / %q", mission, bootstrap)
 	}
 }
 

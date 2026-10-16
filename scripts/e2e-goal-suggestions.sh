@@ -4,7 +4,9 @@
 # real browser against an isolated demo server backed by the fixture model.
 #
 # Usage:
-#   ./scripts/e2e-goal-suggestions.sh [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]
+#   ./scripts/e2e-goal-suggestions.sh [--upgrade] [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]
+# --upgrade runs the stock-template upgrade journey before/after a real server
+# restart in the same disposable sandbox instead of the ordinary goal suite.
 #
 # This:
 #
@@ -29,9 +31,14 @@ set -euo pipefail
 port=8967
 fixture_port=11530
 tail_lines=40
+upgrade=0
 pw_args=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--upgrade)
+		upgrade=1
+		shift
+		;;
 	--port)
 		port="${2:-}"
 		shift 2
@@ -50,7 +57,7 @@ while [[ $# -gt 0 ]]; do
 		break
 		;;
 	-h | --help)
-		echo "usage: $0 [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]"
+		echo "usage: $0 [--upgrade] [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]"
 		echo "Runs tests/workspace-goal-suggestions.spec.ts against an isolated demo"
 		echo "server and the fixture model. See the header of this script."
 		exit 0
@@ -115,17 +122,30 @@ python3 scripts/fixture-ollama.py --port "$fixture_port" \
 	--mission-delay 10 >"$sandbox/fixture.log" 2>&1 &
 fixture_pid=$!
 
-OLLAMA_BASE_URL="http://127.0.0.1:$fixture_port" \
-	./scripts/demo-server.sh "$port" "$sandbox" >"$sandbox/server.log" 2>&1 &
+run_phase() {
+	local phase="$1" spec="$2" result=0
+	log="$sandbox/playwright-$phase.log"
+	OLLAMA_BASE_URL="http://127.0.0.1:$fixture_port" \
+		./scripts/demo-server.sh "$port" "$sandbox" >"$sandbox/server-$phase.log" 2>&1 &
+	./scripts/e2e.sh --port "$port" --wait 300 --tail 0 \
+		--env "ORI_GOAL_E2E_SANDBOX=$sandbox" --env "ORI_GOAL_PHASE=$phase" \
+		"$spec" -- --workers=1 ${pw_args[@]+"${pw_args[@]}"} >"$log" 2>&1 || result=$?
+	./scripts/stop-demo-server.sh "$port" >/dev/null 2>&1 || true
+	if [[ "$tail_lines" != "0" ]]; then tail -n "$tail_lines" "$log"; else cat "$log"; fi
+	return "$result"
+}
 
 status=0
-log="$sandbox/playwright.log"
-./scripts/e2e.sh --port "$port" --wait 300 --tail 0 \
-	--env "ORI_GOAL_E2E_SANDBOX=$sandbox" \
-	tests/workspace-goal-suggestions.spec.ts -- --workers=1 ${pw_args[@]+"${pw_args[@]}"} \
-	>"$log" 2>&1 || status=$?
+if [[ "$upgrade" == "1" ]]; then
+	if run_phase before tests/stock-template-upgrade.spec.ts; then
+		run_phase after tests/stock-template-upgrade.spec.ts || status=$?
+	else
+		status=$?
+	fi
+else
+	run_phase main tests/workspace-goal-suggestions.spec.ts || status=$?
+fi
 cleanup
-if [[ "$tail_lines" != "0" ]]; then tail -n "$tail_lines" "$log"; else cat "$log"; fi
 if [[ "$status" == "0" ]]; then
 	echo "PASS  workspace goal suggestions"
 else

@@ -1,10 +1,13 @@
 package projecttemplates
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestUpdateManifestGoalIntent(t *testing.T) {
@@ -39,6 +42,67 @@ func TestUpdateManifestGoalIntent(t *testing.T) {
 }
 
 func goalPointer(value string) *string { return &value }
+
+func TestUserTemplateGoalImportAndCopyRoundTrip(t *testing.T) {
+	for _, goal := range []string{"", "  Résumer 日本語 <goal>  ", "A hand-authored outcome"} {
+		t.Run(goal, func(t *testing.T) {
+			source, library := t.TempDir(), t.TempDir()
+			data, err := json.Marshal(map[string]any{"name": "Hand authored", "goal": goal, "extra": []string{"keep"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(source, ManifestFileName), string(data))
+			imported, err := ImportFolder(library, source, "Imported Goal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			copy, err := Duplicate(library, imported.ID, "Copied Goal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tpl := range []Template{imported, copy} {
+				if tpl.Goal != strings.TrimSpace(goal) || tpl.Builtin {
+					t.Fatalf("goal round trip: %+v", tpl)
+				}
+				raw := mustReadFile(t, filepath.Join(library, tpl.ID, ManifestFileName))
+				var manifest map[string]any
+				if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+					t.Fatal(err)
+				}
+				if manifest["goal"] != goal || manifest["extra"] == nil {
+					t.Fatal("copy/import changed hand-authored fields")
+				}
+			}
+		})
+	}
+}
+
+func TestSourceVariantGoalIsInheritedAndOptional(t *testing.T) {
+	for _, goal := range []string{"", "Source-owned outcome 日本語"} {
+		t.Run(goal, func(t *testing.T) {
+			source := groupRequirementTemplate(t, `{"schema_version":1,"policy":"required","assistant_program_id":"project-guide","missing_home":"existing_only"}`)
+			source.ID, source.Goal = "plugin:neutral:project", goal
+			source.PluginOwner = &workspace.PluginTemplateOwner{PluginID: "neutral", PluginVersion: "1.2.0", BlueprintID: "project", BlueprintVersion: 3}
+			pin := VariantSource{Template: source, SkeletonDigest: strings.Repeat("a", 64)}
+			library := t.TempDir()
+			created, err := CreateTemplateVariant(library, pin, "owner", VariantEdit{Name: "Local Variant", GroupRequirement: source.GroupRequirement})
+			if err != nil || created.Goal != goal {
+				t.Fatalf("variant goal: %q %v", created.Goal, err)
+			}
+			loaded, err := FindLibraryTemplate(library, created.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := ResolveTemplateVariant(loaded, pin, "owner")
+			if err != nil || resolved.Goal != goal {
+				t.Fatalf("resolved goal: %q %v", resolved.Goal, err)
+			}
+			if strings.Contains(mustReadFile(t, filepath.Join(library, created.ID, ManifestFileName)), `"goal"`) {
+				t.Fatal("goal leaked into the overlay schema")
+			}
+		})
+	}
+}
 
 func TestDuplicateStockGoalIsEditableWithoutChangingSource(t *testing.T) {
 	dir := t.TempDir()
