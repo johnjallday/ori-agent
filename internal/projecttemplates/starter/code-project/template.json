@@ -4,7 +4,8 @@
   "icon": "💻",
   "behavior_profile": "software_project",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
+  "goal": "Understand this project, identify evidence-backed risks, and propose prioritized improvements before changing code.",
   "tags": [
     "code"
   ],

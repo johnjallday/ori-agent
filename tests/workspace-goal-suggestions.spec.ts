@@ -386,6 +386,75 @@ test('Action Center shows the suggestion summary and each finding with its evide
   await expect(drift).toContainText('Review the last three posts against one agreed tone.');
 });
 
+test('stock defaults: Writing and Code prefill from the real library and retain distinct first-open behavior', async ({
+  page,
+  request
+}, testInfo) => {
+  answerGoalRunsWith('{"items": []}');
+  const before = goalRunPrompts().length;
+  const cases = [
+    {
+      id: 'writing-project',
+      name: 'Writing Project',
+      goal: 'Develop this manuscript from outline into reviewed chapters with coherent structure and consistent voice.'
+    },
+    {
+      id: 'code-project',
+      name: 'Code Project',
+      goal: 'Understand this project, identify evidence-backed risks, and propose prioritized improvements before changing code.'
+    }
+  ];
+  for (const item of cases) {
+    await page.goto('/workspaces');
+    await page.evaluate(() => {
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
+    });
+    await cardByLabel(page, item.name).click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#folderGoalInput')).toHaveValue(item.goal);
+    await page.fill('#folderNameInput', `Stock ${item.name}`);
+    await page.locator('#folderGoalInput').focus();
+    await page.locator('#folderGoalInput').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath(`${item.id}-prefilled.png`),
+      fullPage: true
+    });
+    // The API omits mission altogether: this proves the shipped default also
+    // reaches callers that do not send back the modal's prefilled value.
+    const created = await ok(
+      await request.post('/api/workspaces', {
+        data: { name: `Stock ${item.name}`, template_id: item.id }
+      })
+    );
+    const { id, folder_slug: slug } = created.folder;
+    const state = await missionState(request, id);
+    expect(state.mission).toBe(item.goal);
+    expect(state.mission_runs).toHaveLength(0);
+    expect(state.run_in_flight).toBe(false);
+    await page.goto(`/workspaces/${slug}`);
+    await expect(page.locator('#workspace-command-mission-title')).toHaveText(item.goal);
+    if (item.id === 'writing-project') {
+      await expect(page.locator('#workspace-command-mission-action-status')).toHaveText(IN_FLIGHT);
+      await captureGoalState(page, testInfo.outputPath('writing-first-open.png'));
+      await waitForRuns(request, id, 1);
+      expect(goalRunPrompts()).toHaveLength(before + 1);
+      expect(goalRunPrompts().at(-1)).toContain(item.goal);
+    } else {
+      await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+        'Start first look'
+      );
+      await captureGoalState(page, testInfo.outputPath('code-explicit-action.png'));
+      await page.reload();
+      expect(goalRunPrompts()).toHaveLength(before + 1);
+      await page.locator('#workspace-command-mission-run').click();
+      await waitForRuns(request, id, 1);
+      expect(goalRunPrompts()).toHaveLength(before + 2);
+      expect(goalRunPrompts().at(-1)).toContain(item.goal);
+    }
+  }
+});
+
 async function captureGoalState(page: Page, path: string) {
   await expect(page.getByText('Loading workspace tasks…', { exact: true })).toHaveCount(0);
   await page.evaluate(async () => {

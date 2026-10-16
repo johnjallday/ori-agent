@@ -4,7 +4,8 @@
   "icon": "\ud83d\udcdd",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
+  "goal": "Develop this manuscript from outline into reviewed chapters with coherent structure and consistent voice.",
   "tags": [
     "writing"
   ],

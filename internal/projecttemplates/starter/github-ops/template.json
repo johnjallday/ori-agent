@@ -4,8 +4,8 @@
   "icon": "🐙",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
-  "goal": "Keep this repository's issues triaged so I always know what needs my attention.",
+  "builtin_version": 3,
+  "goal": "Surface issues needing attention and prepare evidence-backed triage changes for approval.",
   "tags": [
     "github",
     "development"

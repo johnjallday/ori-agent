@@ -2,10 +2,14 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func writeGoalTemplate(t *testing.T, libDir, id, goal string) {
@@ -130,6 +134,60 @@ func TestAssistantBuiltWorkspacesInheritTheBlueprintGoal(t *testing.T) {
 	}
 	if ws, err := handler.workspaceStore.Get(blank); err != nil || ws.Mission != "" {
 		t.Fatalf("blank folder offer Mission = %q, err = %v", ws.Mission, err)
+	}
+}
+
+func TestCreateWorkspaceInheritsEveryActiveStockGoalWithoutRunning(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	library := handler.templatesRootResolver()
+	if err := projecttemplates.EnsureLibrary(library); err != nil {
+		t.Fatal(err)
+	}
+	templates, err := projecttemplates.ListLibrary(library)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, tpl := range templates {
+		if !tpl.Builtin {
+			continue
+		}
+		count++
+		t.Run(tpl.ID, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"name": "Goal " + tpl.Name, "template_id": tpl.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w, resp := postCreateWorkspace(t, handler, string(body))
+			if w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			id := resp["folder"].(map[string]any)["id"].(string)
+			ws, err := handler.workspaceStore.Get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := handler.store.GetWorkspace(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tpl.Goal == "" || ws.Mission != tpl.Goal || workspaceBootstrapStringValue(stored.SharedData, "goal") != tpl.Goal {
+				t.Fatalf("stock goal did not reach canonical and legacy storage: %q / %q", tpl.Goal, ws.Mission)
+			}
+			if ws.MissionEnabled || ws.Cadence != nil || ws.MissionExecutionCount != 0 || ws.LastMissionRunAt != nil || len(ws.MissionRuns) != 0 || ws.GoalFirstRunState != "" {
+				t.Fatal("creation must store intent, not accept or execute a goal run")
+			}
+			if !ws.GoalFirstRunPending {
+				t.Fatal("creation must retain first-open intent for admission to evaluate")
+			}
+			if tpl.ID == "code-project" && !workspace.GoalRequiresReadConsent(ws) {
+				t.Fatal("the Code default must retain its separate read-consent boundary")
+			}
+		})
+	}
+	if count != 11 {
+		t.Fatalf("created %d active stock templates, want 11", count)
 	}
 }
 
