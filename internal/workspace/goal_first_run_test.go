@@ -226,7 +226,7 @@ func (s *failingGoalStore) GetFolderWorkspace(id string) (*Workspace, error) {
 	if s.canonicalError {
 		return nil, errors.New("unreadable canonical metadata")
 	}
-	return s.Store.Get(id)
+	return s.Get(id)
 }
 
 func TestGoalFirstRunPersistenceFailureNeverExecutes(t *testing.T) {

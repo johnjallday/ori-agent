@@ -44,11 +44,9 @@ func (ts *TaskScheduler) checkAdmittedMissionCadence(snapshot *Workspace, now ti
 	}
 	cycleOrdinal := ws.MissionExecutionCount + 1
 
-	// Best-effort run creation. The trigger is responsible for setting
-	// LastMissionRunAt/NextMissionRunAt/counters via ApplyMissionRunOutcome
-	// inside an atomic store Update; failures here just log and let the
-	// next poll tick retry on the same NextMissionRunAt (since the trigger
-	// did not advance it).
+	// The trigger records execution outcomes atomically. Admission failures
+	// advance only the explicitly enabled cadence below, preventing a retry
+	// on every poll tick without pretending a run executed.
 	//
 	// The context is bounded only by scheduler shutdown — the bridge applies
 	// its own per-run execution timeout. (This used to be a hard 30s cap that,
@@ -56,7 +54,7 @@ func (ts *TaskScheduler) checkAdmittedMissionCadence(snapshot *Workspace, now ti
 	ctx, cancel := ts.missionRunContext()
 	defer cancel()
 
-	runID, execute, err := ts.prepareClaimedMissionRun(ctx, ws.ID, MissionRunOptions{Origin: MissionOriginCadence})
+	_, execute, err := ts.prepareClaimedMissionRun(ctx, ws.ID, MissionRunOptions{Origin: MissionOriginCadence})
 	if err != nil {
 		// A pre-start blocker is not an execution failure. Advance only the
 		// enabled cadence; do not re-arm the deferred first run.
@@ -70,7 +68,7 @@ func (ts *TaskScheduler) checkAdmittedMissionCadence(snapshot *Workspace, now ti
 		}
 		return
 	}
-	runID, err = execute()
+	runID, err := execute()
 	if err != nil {
 		logger.Warn("mission trigger failed", logger.Fields{
 			"workspace_id":  ws.ID,

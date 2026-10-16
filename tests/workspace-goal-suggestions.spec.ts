@@ -345,7 +345,7 @@ test('Not useful removes a suggestion and the next run is told never to suggest 
 test('a run whose answer is not JSON is recorded as failed with its raw output (SM7)', async ({
   page,
   request
-}) => {
+}, testInfo) => {
   answerGoalRunsWith(NOT_JSON);
   await page.goto(`/workspaces/${workspaceSlug}`);
   await page.locator('#workspace-command-mission-run').click();
@@ -365,6 +365,8 @@ test('a run whose answer is not JSON is recorded as failed with its raw output (
   await expect(history.locator('.workspace-mission-runs > li').first()).toContainText('Failed');
   await history.locator('summary', { hasText: 'Show output' }).click();
   await expect(history.locator('pre')).toHaveText(NOT_JSON);
+  await history.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('failed-run-history.png') });
 });
 
 test('Action Center shows the suggestion summary and each finding with its evidence (FR16, FR22, FR29)', async ({
@@ -630,6 +632,115 @@ test('stock defaults: Writing and Code prefill from the real library and retain 
     }
   }
 });
+
+for (const theme of ['light', 'dark'] as const) {
+  for (const [layout, width] of [
+    ['desktop', 1280],
+    ['narrow', 390]
+  ] as const) {
+    test(`delivery matrix: ${layout} ${theme} stock preview, keyboard create and first suggestions`, async ({
+      page,
+      request
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      const before = goalRunPrompts().length;
+      const title = `Review the manuscript structure — ${layout} ${theme}`;
+      answerGoalRunsWith(
+        JSON.stringify({
+          items: [
+            {
+              kind: 'task',
+              title,
+              why: 'Align chapters with the intended story.',
+              first_step: 'Review the outline.'
+            }
+          ]
+        })
+      );
+      await page.goto('/templates');
+      await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
+      await page
+        .locator('#tplList [role="listitem"]')
+        .filter({ hasText: 'Writing Project' })
+        .click();
+      const goalField = page.locator('#tplEditGoal');
+      await expect(goalField).toHaveAttribute('readonly', '');
+      const goal = await goalField.inputValue();
+      expect(goal).toContain('reviewed chapters');
+      await goalField.focus();
+      await expect(goalField).toBeFocused();
+      await goalField.scrollIntoViewIfNeeded();
+      const rect = await goalField.boundingBox();
+      expect(rect!.x).toBeGreaterThanOrEqual(0);
+      expect(rect!.x + rect!.width).toBeLessThanOrEqual(width + 1);
+      await page.screenshot({ path: testInfo.outputPath(`${layout}-${theme}-readonly.png`) });
+      expect(goalRunPrompts()).toHaveLength(before);
+
+      await page.goto('/workspaces');
+      await page.evaluate(() => {
+        // @ts-expect-error bootstrap is a page global
+        window.bootstrap.Modal.getOrCreateInstance(
+          document.getElementById('addFolderModal')
+        ).show();
+      });
+      await cardByLabel(page, 'Writing Project').click();
+      await expect(page.locator('#templateBriefingGoalValue')).toHaveText(goal);
+      await page.locator('#wizardNextBtn').press('Enter');
+      await page.locator('#folderNameInput').fill(`Manuscript ${layout} ${theme}`);
+      await expect(page.locator('#folderGoalInput')).toHaveValue(goal);
+      await page.locator('#wizardNextBtn').press('Enter');
+      await page
+        .getByRole('button', { name: 'Assign an agent to Writing Coach', exact: true })
+        .click();
+      await page.locator('[data-existing-agent-add="Ask Ori"]').click();
+      await page.locator('#wizardNextBtn').press('Enter');
+      let resolveCreated!: (body: { folder: { id: string; folder_slug: string } }) => void;
+      const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
+        resolveCreated = resolve;
+      });
+      await page.route('**/api/workspaces', async route => {
+        if (route.request().method() !== 'POST') return route.continue();
+        const response = await route.fetch();
+        resolveCreated(await ok(response));
+        await route.fulfill({ response });
+      });
+      let release!: () => void;
+      const held = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      await page.route('**/mission/first-open', async route => {
+        await held;
+        await route.continue().catch(() => {});
+      });
+      await page.locator('#createFolderBtn').press('Enter');
+      await page
+        .getByRole('button', { name: 'Create workspace here' })
+        .click({ timeout: 5_000 })
+        .catch(() => {});
+      const { folder } = await created;
+      const initial = await missionState(request, folder.id);
+      expect(initial.mission).toBe(goal);
+      expect(initial.mission_runs).toHaveLength(0);
+      expect(goalRunPrompts()).toHaveLength(before);
+      release();
+      await page.unroute('**/mission/first-open');
+      await page.goto(`/workspaces/${folder.folder_slug}`);
+      const run = await waitForRuns(request, folder.id, 1);
+      expect(run.tasks_created).toBe(1);
+      expect(await suggestedTitles(request, folder.id)).toEqual([title]);
+      expect(goalRunPrompts()).toHaveLength(before + 1);
+      expect(goalRunPrompts().at(-1)).toContain(goal);
+      await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+        '1 task suggested'
+      );
+      await page.locator('#workspace-command-mission-title').scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath(`${layout}-${theme}-first-suggestions.png`)
+      });
+    });
+  }
+}
 
 async function captureGoalState(page: Page, path: string) {
   await expect(page.getByText('Loading workspace tasks…', { exact: true })).toHaveCount(0);

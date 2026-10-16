@@ -38,7 +38,8 @@ func TestResetAdmissionSchedulerRegistersDetachedWorkBeforePollReturns(t *testin
 			t.Error(err)
 		}
 	})
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "owned schedule"})
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "owned schedule", Agents: []string{"Writer"}})
+	ws.Mission = "Suggest reviewed improvements"
 	past := time.Now().Add(-time.Hour)
 	ws.Status = StatusActive
 	ws.MissionEnabled = true

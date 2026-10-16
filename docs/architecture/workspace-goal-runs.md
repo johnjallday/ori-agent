@@ -68,6 +68,22 @@ template or resurrects an accepted first run. Lifecycle state round-trips throug
 folder metadata and the SQLite mission envelope. It is inert, portable history:
 it never grants installation-local execution authority.
 
+### Stock defaults and authoring
+
+Every active stock template ships a short, outcome-focused `goal`, including
+Code Project and Writing Project. Blank remains optional. The create modal
+previews that default as literal text and prefills the existing Goal control;
+an explicit replacement or deliberately empty value wins over the template.
+Creation never starts a run or enables a cadence.
+
+Templates → Overview exposes the default in a read-only field for built-ins and
+source-owned templates. For built-ins, use **Duplicate** to make an ordinary
+editable copy; plugin customization remains on its separate variant path.
+Saving a nonempty goal trims it; clearing it removes the default. Omitted/null
+API fields preserve it, and user-authored text is not limited to the stock-copy
+budget. Source variants still inherit their source goal: `goal` is not a variant
+override. Copies of Code Project retain its explicit-read-consent behavior.
+
 ### Template refresh and existing workspaces
 
 Template defaults are creation-time input, not a live link. Refreshing a stock
