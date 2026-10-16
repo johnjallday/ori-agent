@@ -76,6 +76,9 @@ func TestHandleProjectTemplates(t *testing.T) {
 
 func newTemplateRoutesServer(t *testing.T, libDir string) *Server {
 	t.Helper()
+	// Deleting a template moves it to ~/.Trash on macOS; a private HOME keeps
+	// that out of the developer's real Trash.
+	t.Setenv("HOME", t.TempDir())
 	configMgr := config.NewManager(filepath.Join(t.TempDir(), "settings.json"))
 	if err := configMgr.Load(); err != nil {
 		t.Fatal(err)
