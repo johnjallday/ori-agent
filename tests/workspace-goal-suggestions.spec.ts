@@ -5,8 +5,8 @@ import {
   type APIResponse,
   type Page
 } from '@playwright/test';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // A workspace goal, from the moment it is written to the work its agents
@@ -345,7 +345,7 @@ test('Not useful removes a suggestion and the next run is told never to suggest 
 test('a run whose answer is not JSON is recorded as failed with its raw output (SM7)', async ({
   page,
   request
-}) => {
+}, testInfo) => {
   answerGoalRunsWith(NOT_JSON);
   await page.goto(`/workspaces/${workspaceSlug}`);
   await page.locator('#workspace-command-mission-run').click();
@@ -365,6 +365,8 @@ test('a run whose answer is not JSON is recorded as failed with its raw output (
   await expect(history.locator('.workspace-mission-runs > li').first()).toContainText('Failed');
   await history.locator('summary', { hasText: 'Show output' }).click();
   await expect(history.locator('pre')).toHaveText(NOT_JSON);
+  await history.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('failed-run-history.png') });
 });
 
 test('Action Center shows the suggestion summary and each finding with its evidence (FR16, FR22, FR29)', async ({
@@ -384,4 +386,507 @@ test('Action Center shows the suggestion summary and each finding with its evide
   const drift = finding.filter({ hasText: 'Newsletter is formal' });
   await drift.locator('summary').click();
   await expect(drift).toContainText('Review the last three posts against one agreed tone.');
+});
+
+test('stock suggestions: a shipped goal reaches the model and starter tasks are not suggested twice', async ({
+  page,
+  request
+}, testInfo) => {
+  answerGoalRunsWith(
+    JSON.stringify({
+      items: [
+        {
+          kind: 'task',
+          title: 'Draft a style guide',
+          why: 'The goal needs a shared voice.',
+          first_step: 'Collect examples.'
+        },
+        {
+          kind: 'task',
+          title: 'Review the content queue against the agreed voice',
+          why: 'Keep the queue review-ready.',
+          first_step: 'Review the first draft.'
+        },
+        {
+          kind: 'finding',
+          title: 'Publishing preferences need review',
+          why: 'The publishing schedule is not agreed.',
+          recommended_action: 'Choose the review rhythm.'
+        }
+      ]
+    })
+  );
+  const before = goalRunPrompts().length;
+  const created = await ok(
+    await request.post('/api/workspaces', {
+      data: {
+        name: 'Stock Suggestions Desk',
+        template_id: 'content-production'
+      }
+    })
+  );
+  const { id, folder_slug: slug } = created.folder;
+  const state = await missionState(request, id);
+  expect(state.mission_runs).toHaveLength(0);
+  await page.goto(`/workspaces/${slug}?panel=backlog`);
+  const run = await waitForRuns(request, id, 1);
+  expect(run.tasks_created).toBe(1);
+  expect(run.duplicates_skipped).toBe(1);
+  expect(run.findings_created).toBe(1);
+  expect(await suggestedTitles(request, id)).toEqual([
+    'Review the content queue against the agreed voice'
+  ]);
+  expect(goalRunPrompts()).toHaveLength(before + 1);
+  expect(goalRunPrompts().at(-1)).toContain(state.mission);
+  expect(goalRunPrompts().at(-1)).toContain('Draft a style guide');
+  await expect(page.locator('.ws-cmd-drawer-row.is-suggested')).toHaveCount(1);
+  await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+    '1 duplicate skipped'
+  );
+  await captureGoalState(page, testInfo.outputPath('stock-backlog-suggestion.png'));
+  await page.goto('/action-center');
+  await expect(page.getByText('Publishing preferences need review', { exact: true })).toBeVisible();
+  await captureGoalState(page, testInfo.outputPath('stock-action-center-finding.png'));
+});
+
+test('stock authoring: preview, duplicate, edit and create preserve custom and empty goal intent', async ({
+  page,
+  request
+}, testInfo) => {
+  const stockGoal =
+    'Understand this project, identify evidence-backed risks, and propose prioritized improvements before changing code.';
+  const customGoal = 'Review 日本語 evidence <b>literally</b> before proposing changes.';
+  const before = goalRunPrompts().length;
+  await page.goto('/workspaces');
+  await page.evaluate(() => {
+    // @ts-expect-error bootstrap is a page global
+    window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
+  });
+  await cardByLabel(page, 'Code Project').click();
+  await expect(page.locator('#templateBriefingGoalValue')).toHaveText(stockGoal);
+  await page.locator('#templateBriefingGoalValue').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('stock-goal-preview.png'), fullPage: true });
+  expect(goalRunPrompts()).toHaveLength(before);
+
+  await page.goto('/templates');
+  await page.locator('#tplList [role="listitem"]').filter({ hasText: 'Code Project' }).click();
+  const goal = page.locator('#tplEditGoal');
+  await expect(goal).toHaveValue(stockGoal);
+  await expect(goal).toHaveAttribute('readonly', '');
+  await goal.focus();
+  await expect(goal).toBeFocused();
+  await captureGoalState(page, testInfo.outputPath('stock-readonly-overview.png'));
+  await page.locator('#tplDuplicateBtn').click();
+  await page.locator('#tplNameModalInput').fill('Goal Review Copy');
+  await page.locator('#tplNameModalInput').press('Enter');
+  await expect(page.locator('#tplEditName')).toHaveValue('Goal Review Copy');
+  await expect(goal).toBeEditable();
+  await expect(goal).toHaveValue(stockGoal);
+  await goal.fill(customGoal);
+  await page.locator('#tplSaveBtn').click();
+  await expect(page.getByText('Template saved.', { exact: true })).toBeVisible();
+  await page.reload();
+  await page.locator('#tplList [role="listitem"]').filter({ hasText: 'Goal Review Copy' }).click();
+  await expect(goal).toHaveValue(customGoal);
+  await goal.fill('Unsaved changes');
+  await page.locator('#tplResetBtn').click();
+  await expect(goal).toHaveValue(customGoal);
+  await goal.focus();
+  await captureGoalState(page, testInfo.outputPath('copy-saved-goal.png'));
+  const catalog = await ok(await request.get('/api/project-templates'));
+  expect(catalog.templates.find((t: { id: string }) => t.id === 'code-project').goal).toBe(
+    stockGoal
+  );
+  const copy = catalog.templates.find((t: { id: string }) => t.id === 'goal-review-copy');
+  expect(copy.builtin).toBeFalsy();
+  expect(copy.behavior_profile).toBe('software_project');
+  expect(copy.goal).toBe(customGoal);
+
+  for (const [index, override] of ['My reviewed project outcome', ''].entries()) {
+    await page.goto('/workspaces');
+    await page.evaluate(() => {
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
+    });
+    await page.locator('[data-template-id="goal-review-copy"]').click();
+    await expect(page.locator('#templateBriefingGoalValue')).toHaveText(customGoal);
+    await expect(page.locator('#templateBriefingGoalValue b')).toHaveCount(0);
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(`Copy Goal Intent ${index}`);
+    await expect(page.locator('#folderGoalInput')).toHaveValue(customGoal);
+    await page.locator('#folderGoalInput').fill(override);
+    // Re-selecting after Back and a real catalog reload must not erase edits.
+    await page.locator('#wizardBackBtn').click();
+    await page.evaluate(async () => {
+      // @ts-expect-error picker is a page global
+      await window.ProjectTemplateCard.populate();
+    });
+    await page.locator('[data-template-id="goal-review-copy"]').click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#folderGoalInput')).toHaveValue(override);
+    await page.locator('#wizardNextBtn').click();
+    await page
+      .getByRole('button', { name: 'Assign an agent to Development Assistant', exact: true })
+      .click();
+    await page.locator('[data-existing-agent-add="Ask Ori"]').click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    let resolveCreated!: (body: { folder: { id: string; folder_slug: string } }) => void;
+    const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
+      resolveCreated = resolve;
+    });
+    // Read before fulfilling: navigation otherwise discards Chromium's body.
+    await page.route('**/api/workspaces', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const response = await route.fetch();
+      resolveCreated(await ok(response));
+      await route.fulfill({ response });
+    });
+    await page.locator('#createFolderBtn').click();
+    await page
+      .getByRole('button', { name: 'Create workspace here' })
+      .click({ timeout: 5_000 })
+      .catch(() => {});
+    const body = await created;
+    await page.unroute('**/api/workspaces');
+    const state = await missionState(request, body.folder.id);
+    expect(state.mission).toBe(override);
+    expect(state.mission_runs).toHaveLength(0);
+    await page.goto(`/workspaces/${body.folder.folder_slug}`);
+    await expect(page.locator('#workspace-command-mission-title')).toHaveText(
+      override || 'No goal yet'
+    );
+    await captureGoalState(
+      page,
+      testInfo.outputPath(override ? 'copy-workspace-override.png' : 'copy-workspace-empty.png')
+    );
+    expect(goalRunPrompts()).toHaveLength(before);
+  }
+});
+
+test('stock defaults: Writing and Code prefill from the real library and retain distinct first-open behavior', async ({
+  page,
+  request
+}, testInfo) => {
+  answerGoalRunsWith('{"items": []}');
+  const before = goalRunPrompts().length;
+  const cases = [
+    {
+      id: 'writing-project',
+      name: 'Writing Project',
+      goal: 'Develop this manuscript from outline into reviewed chapters with coherent structure and consistent voice.'
+    },
+    {
+      id: 'code-project',
+      name: 'Code Project',
+      goal: 'Understand this project, identify evidence-backed risks, and propose prioritized improvements before changing code.'
+    }
+  ];
+  for (const item of cases) {
+    await page.goto('/workspaces');
+    await page.evaluate(() => {
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(document.getElementById('addFolderModal')).show();
+    });
+    await cardByLabel(page, item.name).click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#folderGoalInput')).toHaveValue(item.goal);
+    await page.fill('#folderNameInput', `Stock ${item.name}`);
+    await page.locator('#folderGoalInput').focus();
+    await page.locator('#folderGoalInput').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath(`${item.id}-prefilled.png`),
+      fullPage: true
+    });
+    // The API omits mission altogether: this proves the shipped default also
+    // reaches callers that do not send back the modal's prefilled value.
+    const created = await ok(
+      await request.post('/api/workspaces', {
+        data: { name: `Stock ${item.name}`, template_id: item.id }
+      })
+    );
+    const { id, folder_slug: slug } = created.folder;
+    const state = await missionState(request, id);
+    expect(state.mission).toBe(item.goal);
+    expect(state.mission_runs).toHaveLength(0);
+    expect(state.run_in_flight).toBe(false);
+    await page.goto(`/workspaces/${slug}`);
+    await expect(page.locator('#workspace-command-mission-title')).toHaveText(item.goal);
+    if (item.id === 'writing-project') {
+      await expect(page.locator('#workspace-command-mission-action-status')).toHaveText(IN_FLIGHT);
+      await captureGoalState(page, testInfo.outputPath('writing-first-open.png'));
+      await waitForRuns(request, id, 1);
+      expect(goalRunPrompts()).toHaveLength(before + 1);
+      expect(goalRunPrompts().at(-1)).toContain(item.goal);
+    } else {
+      await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+        'Start first look'
+      );
+      await captureGoalState(page, testInfo.outputPath('code-explicit-action.png'));
+      await page.reload();
+      expect(goalRunPrompts()).toHaveLength(before + 1);
+      await page.locator('#workspace-command-mission-run').click();
+      await waitForRuns(request, id, 1);
+      expect(goalRunPrompts()).toHaveLength(before + 2);
+      expect(goalRunPrompts().at(-1)).toContain(item.goal);
+    }
+  }
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  for (const [layout, width] of [
+    ['desktop', 1280],
+    ['narrow', 390]
+  ] as const) {
+    test(`delivery matrix: ${layout} ${theme} stock preview, keyboard create and first suggestions`, async ({
+      page,
+      request
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      const before = goalRunPrompts().length;
+      const title = `Review the manuscript structure — ${layout} ${theme}`;
+      answerGoalRunsWith(
+        JSON.stringify({
+          items: [
+            {
+              kind: 'task',
+              title,
+              why: 'Align chapters with the intended story.',
+              first_step: 'Review the outline.'
+            }
+          ]
+        })
+      );
+      await page.goto('/templates');
+      await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
+      await page
+        .locator('#tplList [role="listitem"]')
+        .filter({ hasText: 'Writing Project' })
+        .click();
+      const goalField = page.locator('#tplEditGoal');
+      await expect(goalField).toHaveAttribute('readonly', '');
+      const goal = await goalField.inputValue();
+      expect(goal).toContain('reviewed chapters');
+      await goalField.focus();
+      await expect(goalField).toBeFocused();
+      await goalField.scrollIntoViewIfNeeded();
+      const rect = await goalField.boundingBox();
+      expect(rect!.x).toBeGreaterThanOrEqual(0);
+      expect(rect!.x + rect!.width).toBeLessThanOrEqual(width + 1);
+      await page.screenshot({ path: testInfo.outputPath(`${layout}-${theme}-readonly.png`) });
+      expect(goalRunPrompts()).toHaveLength(before);
+
+      await page.goto('/workspaces');
+      await page.evaluate(() => {
+        // @ts-expect-error bootstrap is a page global
+        window.bootstrap.Modal.getOrCreateInstance(
+          document.getElementById('addFolderModal')
+        ).show();
+      });
+      await cardByLabel(page, 'Writing Project').click();
+      await expect(page.locator('#templateBriefingGoalValue')).toHaveText(goal);
+      await page.locator('#wizardNextBtn').press('Enter');
+      await page.locator('#folderNameInput').fill(`Manuscript ${layout} ${theme}`);
+      await expect(page.locator('#folderGoalInput')).toHaveValue(goal);
+      await page.locator('#wizardNextBtn').press('Enter');
+      await page
+        .getByRole('button', { name: 'Assign an agent to Writing Coach', exact: true })
+        .click();
+      await page.locator('[data-existing-agent-add="Ask Ori"]').click();
+      await page.locator('#wizardNextBtn').press('Enter');
+      let resolveCreated!: (body: { folder: { id: string; folder_slug: string } }) => void;
+      const created = new Promise<{ folder: { id: string; folder_slug: string } }>(resolve => {
+        resolveCreated = resolve;
+      });
+      await page.route('**/api/workspaces', async route => {
+        if (route.request().method() !== 'POST') return route.continue();
+        const response = await route.fetch();
+        resolveCreated(await ok(response));
+        await route.fulfill({ response });
+      });
+      let release!: () => void;
+      const held = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      await page.route('**/mission/first-open', async route => {
+        await held;
+        await route.continue().catch(() => {});
+      });
+      await page.locator('#createFolderBtn').press('Enter');
+      await page
+        .getByRole('button', { name: 'Create workspace here' })
+        .click({ timeout: 5_000 })
+        .catch(() => {});
+      const { folder } = await created;
+      const initial = await missionState(request, folder.id);
+      expect(initial.mission).toBe(goal);
+      expect(initial.mission_runs).toHaveLength(0);
+      expect(goalRunPrompts()).toHaveLength(before);
+      release();
+      await page.unroute('**/mission/first-open');
+      await page.goto(`/workspaces/${folder.folder_slug}`);
+      const run = await waitForRuns(request, folder.id, 1);
+      expect(run.tasks_created).toBe(1);
+      expect(await suggestedTitles(request, folder.id)).toEqual([title]);
+      expect(goalRunPrompts()).toHaveLength(before + 1);
+      expect(goalRunPrompts().at(-1)).toContain(goal);
+      await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+        '1 task suggested'
+      );
+      await page.locator('#workspace-command-mission-title').scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath(`${layout}-${theme}-first-suggestions.png`)
+      });
+    });
+  }
+}
+
+async function captureGoalState(page: Page, path: string) {
+  await expect(page.getByText('Loading workspace tasks…', { exact: true })).toHaveCount(0);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    window.scrollTo(0, 0);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await page.screenshot({ path, fullPage: true });
+}
+
+test('first-goal lifecycle: readiness blocks once, repair needs an explicit retry, and tabs do not replay', async ({
+  page,
+  request,
+  context
+}, testInfo) => {
+  answerGoalRunsWith('{"items": []}');
+  const catalog = await ok(await request.get('/api/project-templates'));
+  const root = catalog.templates_root || catalog.data?.templates_root;
+  expect(typeof root).toBe('string');
+  const within = relative(realpathSync(sandbox), realpathSync(root));
+  expect(
+    within.startsWith('..') || isAbsolute(within),
+    'fixture must stay in the isolated library'
+  ).toBe(false);
+  const templateDir = join(root, 'goal-readiness-fixture');
+  mkdirSync(templateDir, { recursive: true, mode: 0o750 });
+  writeFileSync(
+    join(templateDir, 'template.json'),
+    JSON.stringify({
+      name: 'Goal Readiness Fixture',
+      description: 'A deterministic reviewed setup decision.',
+      goal: 'Summarize the approved project decisions.',
+      setup_wizard: {
+        version: 1,
+        title: 'Review goal setup',
+        steps: [
+          { id: 'summary', kind: 'summary', required: true, title: 'Review the setup boundary' }
+        ]
+      }
+    }),
+    { mode: 0o600 }
+  );
+  const body = await ok(
+    await request.post('/api/workspaces', {
+      data: {
+        name: 'Goal Readiness Desk',
+        template_id: 'goal-readiness-fixture',
+        entry_agent_name: 'Ask Ori',
+        create_template_agents: false
+      }
+    })
+  );
+  const { id, folder_slug: slug } = body.folder;
+  const before = goalRunPrompts().length;
+  await page.goto(`/workspaces/${slug}`);
+  await expect
+    .poll(async () => (await missionState(request, id)).needs_attention || '')
+    .toContain('workspace setup');
+  await ok(await request.post(`/api/workspaces/${id}/setup-wizard/dismiss`));
+  await page.reload();
+  await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+    'workspace setup'
+  );
+  await captureGoalState(page, testInfo.outputPath('setup-blocked.png'));
+  for (let i = 0; i < 3; i++)
+    await ok(await request.post(`/api/workspaces/${id}/mission/first-open`));
+  expect(goalRunPrompts()).toHaveLength(before);
+  await ok(
+    await request.post(`/api/workspaces/${id}/setup-wizard/steps/summary/confirm`, { data: {} })
+  );
+  await page.reload();
+  expect(goalRunPrompts()).toHaveLength(before);
+  await page.locator('#workspace-command-mission-run').click();
+  await expect(page.locator('#workspace-command-mission-action-status')).toHaveText(IN_FLIGHT);
+  await captureGoalState(page, testInfo.outputPath('explicit-retry-running.png'));
+  const second = await context.newPage();
+  await installLocalCdn(second);
+  await second.goto(`/workspaces/${slug}`);
+  await expect(second.locator('#workspace-command-mission-run')).toBeDisabled();
+  await waitForRuns(request, id, 1);
+  await second.reload();
+  await page.reload();
+  expect(goalRunPrompts()).toHaveLength(before + 1);
+  await second.close();
+});
+
+test('first-goal lifecycle: eligible opening runs once but Code opening and saving require Run now', async ({
+  page,
+  request,
+  context
+}, testInfo) => {
+  answerGoalRunsWith('{"items": []}');
+  const before = goalRunPrompts().length;
+  const ordinary = await ok(
+    await request.post('/api/workspaces', {
+      data: {
+        name: 'Eligible Goal Desk',
+        mission: 'Prepare reviewed chapter suggestions.',
+        entry_agent_name: 'Ask Ori'
+      }
+    })
+  );
+  expect((await missionState(request, ordinary.folder.id)).mission_runs).toHaveLength(0);
+  await page.goto(`/workspaces/${ordinary.folder.folder_slug}`);
+  await expect(page.locator('#workspace-command-mission-action-status')).toHaveText(IN_FLIGHT);
+  await captureGoalState(page, testInfo.outputPath('eligible-first-open.png'));
+  await waitForRuns(request, ordinary.folder.id, 1);
+  expect(goalRunPrompts()).toHaveLength(before + 1);
+
+  const code = await ok(
+    await request.post('/api/workspaces', {
+      data: {
+        name: 'Code Consent Desk',
+        template_id: 'code-project',
+        mission: 'Understand this project before proposing changes.',
+        create_template_agents: true
+      }
+    })
+  );
+  const base = `/api/workspaces/${code.folder.id}/mission`;
+  await page.goto(`/workspaces/${code.folder.folder_slug}`);
+  await expect(page.locator('#workspace-command-mission-action-status')).toContainText(
+    'Start first look'
+  );
+  await captureGoalState(page, testInfo.outputPath('code-consent-required.png'));
+  await ok(
+    await request.put(base, {
+      data: { mission: 'Identify evidence-backed project risks without changing code.' }
+    })
+  );
+  const second = await context.newPage();
+  await installLocalCdn(second);
+  await second.goto(`/workspaces/${code.folder.folder_slug}`);
+  await page.reload();
+  expect(goalRunPrompts()).toHaveLength(before + 1);
+  const writes: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST') writes.push(req.url());
+  });
+  await page.locator('#workspace-command-mission-run').click();
+  await waitForRuns(request, code.folder.id, 1);
+  expect(goalRunPrompts()).toHaveLength(before + 2);
+  expect(goalRunPrompts().at(-1)).toContain('Identify evidence-backed project risks');
+  expect(writes.some(url => url.includes('/folder-first-task/start'))).toBe(false);
+  await second.reload();
+  expect(goalRunPrompts()).toHaveLength(before + 2);
+  await second.close();
 });

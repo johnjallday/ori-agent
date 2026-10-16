@@ -1739,7 +1739,7 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 	}
 	provenance := &agentworkspace.TemplateProvenance{
 		TemplateID: tmpl.ID, TemplateName: tmpl.Name, Builtin: tmpl.Builtin, Version: version,
-		AppliedAt: time.Now(), PluginOwner: tmpl.PluginOwner,
+		AppliedAt: time.Now(), PluginOwner: tmpl.PluginOwner, BehaviorProfile: tmpl.BehaviorProfile,
 		// Setup requirements stay unresolved: this snapshot chooses no path,
 		// registers no watcher, enables no schedule, and grants no capability.
 		DirectoryRequirements:  tmpl.DirectoryRequirements,

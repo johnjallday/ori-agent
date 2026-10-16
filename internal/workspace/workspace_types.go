@@ -250,6 +250,10 @@ type Workspace struct {
 	// goal run waits for the first time it is opened (FR25). Consumed once by
 	// POST .../mission/first-open; the startup backfill never sets it.
 	GoalFirstRunPending bool `json:"goal_first_run_pending,omitempty"`
+	// GoalFirstRunState records a spent first-start attempt. A blocker or an
+	// interrupted admission needs an explicit retry, never a reload-driven run.
+	// It is inert lifecycle metadata, not installation-local execution authority.
+	GoalFirstRunState string `json:"goal_first_run_state,omitempty"`
 	// MissionRuns is the recent goal-run history, newest first and capped at
 	// MissionRunHistoryLimit: what each run created, skipped and dropped, and
 	// for an unreadable answer the raw tail (FR21). Persisted with the Goal.

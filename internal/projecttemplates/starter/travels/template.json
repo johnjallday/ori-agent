@@ -4,8 +4,8 @@
   "icon": "\u2708",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 3,
-  "goal": "Plan my trips end to end so flights, stays and plans are ready before I leave.",
+  "builtin_version": 4,
+  "goal": "Prepare an itinerary and travel options within the agreed dates, budget, and preferences; highlight unresolved decisions before booking.",
   "tags": [
     "travel"
   ],

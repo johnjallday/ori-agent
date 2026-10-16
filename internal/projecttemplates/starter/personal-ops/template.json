@@ -4,8 +4,8 @@
   "icon": "🗓",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 7,
-  "goal": "Keep my days organized: brief me each morning, track my follow-ups, and help me reflect.",
+  "builtin_version": 8,
+  "goal": "Keep priorities and follow-ups visible through a daily overview of authorized workspace information, without duplicating its ownership.",
   "tags": [
     "personal"
   ],

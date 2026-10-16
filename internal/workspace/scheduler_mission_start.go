@@ -3,31 +3,20 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// Asynchronous goal runs (workspace-goal-suggestions FR24-FR27).
-//
-// Run now, the first run after a goal is first saved, and the deferred first
-// run of a workspace created with a goal all start through StartMissionRun: it
-// checks that the run can start, claims the workspace's single in-flight slot
-// (the same guard the cadence uses, so at most one goal run per workspace
-// executes at a time), creates the run, and executes it on a scheduler
-// goroutine. The caller gets the run ID at once.
-
-// ErrMissionRunInFlight is returned when a goal run is already executing for
-// the workspace. The HTTP layer surfaces it as 409.
 var ErrMissionRunInFlight = errors.New("a goal run is already in progress for this workspace")
 
-// MissionNoModelReason is what the goal card says when no model can run.
+// ErrMissionFirstRunHandled is a successful no-op for a repeated first-open.
+var ErrMissionFirstRunHandled = errors.New("the first goal attempt has already been handled")
+
 const MissionNoModelReason = "Set up a model to get suggestions"
 
-// MissionBlockedError is a goal run that could not start for a reason the user
-// can fix. Code is the API error code; Reason is shown on the goal card and is
-// also stored on the goal's needs-attention state.
 type MissionBlockedError struct {
 	Code   string
 	Reason string
@@ -35,36 +24,35 @@ type MissionBlockedError struct {
 
 func (e *MissionBlockedError) Error() string { return e.Reason }
 
-// MissionModelCheck reports whether a workspace's goal runs have a model to run
-// on, and why not when they do not.
 type MissionModelCheck func(ws *Workspace) (ok bool, reason string)
 
-// MissionRunStarter is a MissionTrigger that can create a run and hand back
-// its execution separately. MissionBridge implements it.
+// MissionReadinessCheck evaluates canonical setup/capability/folder state.
+// It runs outside store mutations: setup status may persist progress and invoke
+// its completion hooks. It must neither invoke a goal model nor grant access.
+type MissionReadinessCheck func(context.Context, *Workspace) *MissionBlockedError
+
 type MissionRunStarter interface {
 	StartMissionRun(ctx context.Context, workspaceID string, cycleOrdinal int, opts MissionRunOptions) (runID string, execute func() error, err error)
 }
 
-// MissionRunInFlight describes a goal run started through StartMissionRun
-// while it executes.
 type MissionRunInFlight struct {
 	RunID     string    `json:"run_id,omitempty"`
 	Origin    string    `json:"origin"`
 	StartedAt time.Time `json:"started_at"`
 }
 
-// SetMissionModelCheck wires the model availability check StartMissionRun
-// runs before a goal run. Optional.
 func (ts *TaskScheduler) SetMissionModelCheck(check MissionModelCheck) {
-	if ts == nil {
-		return
+	if ts != nil {
+		ts.missionModelCheck = check
 	}
-	ts.missionModelCheck = check
 }
 
-// MissionRunning reports whether a goal run is executing for the workspace —
-// started by StartMissionRun, by the cadence, or by an event trigger — and
-// what is known about it.
+func (ts *TaskScheduler) SetMissionReadinessCheck(check MissionReadinessCheck) {
+	if ts != nil {
+		ts.missionReadinessCheck = check
+	}
+}
+
 func (ts *TaskScheduler) MissionRunning(workspaceID string) (MissionRunInFlight, bool) {
 	if ts == nil {
 		return MissionRunInFlight{}, false
@@ -81,87 +69,207 @@ func (ts *TaskScheduler) MissionRunning(workspaceID string) (MissionRunInFlight,
 	return running, true
 }
 
-// StartMissionRun starts one goal run for the workspace and returns its run ID
-// without waiting for it. It refuses with ErrMissionGoalRequired,
-// ErrMissionBindingsUnclassified, ErrMissionRunInFlight, ErrMissionTriggerNotConfigured,
-// or a *MissionBlockedError (no agent, no model, an unusable goal toolbox) —
-// the last also recorded on the goal so the card can say why. It ignores
-// MissionEnabled and never changes the cadence.
-func (ts *TaskScheduler) StartMissionRun(workspaceID, origin string) (string, error) {
-	if ts == nil || ts.missionTrigger == nil {
-		return "", ErrMissionTriggerNotConfigured
-	}
-	ws, err := ts.workspaceStore.Get(workspaceID)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(ws.Mission) == "" {
-		return "", ErrMissionGoalRequired
-	}
-	if !MissionBindingsReady(ws) {
-		return "", ErrMissionBindingsUnclassified
-	}
-	if blocked := ts.missionStartBlocker(ws); blocked != nil {
-		_ = ts.workspaceStore.Update(workspaceID, func(w *Workspace) error {
-			MarkGoalNeedsAttention(w, blocked.Reason)
-			return nil
-		})
-		return "", blocked
+// acquireMissionRun is shared by automatic, manual, cadence and event starts.
+// Its permit is retained through execution, including asynchronous execution.
+func (ts *TaskScheduler) acquireMissionRun(workspaceID string) (func(), error) {
+	if ts == nil {
+		return nil, ErrMissionTriggerNotConfigured
 	}
 	if !ts.claimMission(workspaceID) {
-		return "", ErrMissionRunInFlight
-	}
-	release := func() {
-		ts.missionMu.Lock()
-		delete(ts.missionRunning, workspaceID)
-		ts.missionMu.Unlock()
-		ts.releaseMission(workspaceID)
+		return nil, ErrMissionRunInFlight
 	}
 	finishAdmission, err := ts.admissionGate.Enter()
 	if err != nil {
-		release()
+		ts.releaseMission(workspaceID)
+		return nil, err
+	}
+	return func() {
+		ts.missionMu.Lock()
+		delete(ts.missionRunning, workspaceID)
+		delete(ts.missionInFlight, workspaceID)
+		ts.missionMu.Unlock()
+		finishAdmission()
+	}, nil
+}
+
+// StartMissionRun returns promptly after admission and run creation. Creating,
+// opening or saving a goal does not enable cadence or imply read consent.
+func (ts *TaskScheduler) StartMissionRun(workspaceID, origin string) (string, error) {
+	finish, err := ts.acquireMissionRun(workspaceID)
+	if err != nil {
 		return "", err
 	}
-	_ = ts.workspaceStore.Update(workspaceID, func(w *Workspace) error {
-		ClearGoalNeedsAttention(w)
-		return nil
-	})
-
-	cycleOrdinal := ws.MissionExecutionCount + 1
-	opts := MissionRunOptions{Origin: origin}
 	ctx, cancel := ts.missionRunContext()
-	finish := func() {
-		cancel()
-		release()
-		finishAdmission()
-	}
-
-	starter, ok := ts.missionTrigger.(MissionRunStarter)
-	if !ok {
-		// A trigger that cannot hand back its execution runs whole in the
-		// background; its run ID is known only from the run record.
-		ts.markMissionRunning(workspaceID, MissionRunInFlight{Origin: origin, StartedAt: time.Now()})
-		ts.wg.Go(func() {
-			defer finish()
-			if _, err := ts.missionTrigger.TriggerMissionRun(ctx, workspaceID, cycleOrdinal); err != nil {
-				logger.Warn("goal run failed", logger.Fields{"workspace_id": workspaceID, "origin": origin, "error": err})
-			}
-		})
-		return "", nil
-	}
-	runID, execute, err := starter.StartMissionRun(ctx, workspaceID, cycleOrdinal, opts)
+	runID, execute, err := ts.prepareClaimedMissionRun(ctx, workspaceID, MissionRunOptions{Origin: origin})
 	if err != nil {
+		cancel()
 		finish()
 		return "", err
 	}
-	ts.markMissionRunning(workspaceID, MissionRunInFlight{RunID: runID, Origin: origin, StartedAt: time.Now()})
 	ts.wg.Go(func() {
 		defer finish()
-		if err := execute(); err != nil {
+		defer cancel()
+		if _, err := execute(); err != nil {
 			logger.Warn("goal run failed", logger.Fields{"workspace_id": workspaceID, "run_id": runID, "origin": origin, "error": err})
 		}
 	})
 	return runID, nil
+}
+
+// TriggerMissionRunOpts keeps the synchronous event/manual API while sharing
+// the same admission and single-flight protection as HTTP and cadence. The
+// ordinal supplied by an event snapshot is deliberately recomputed under claim.
+func (ts *TaskScheduler) TriggerMissionRunOpts(ctx context.Context, workspaceID string, _ int, opts MissionRunOptions) (string, error) {
+	finish, err := ts.acquireMissionRun(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
+	_, execute, err := ts.prepareClaimedMissionRun(ctx, workspaceID, opts)
+	if err != nil {
+		return "", err
+	}
+	return execute()
+}
+
+// missionWorkspace uses canonical metadata whenever the composed store exposes
+// it. An unreadable folder is not a workspace with no setup requirements.
+func (ts *TaskScheduler) missionWorkspace(id string) (*Workspace, error) {
+	if reader, ok := ts.workspaceStore.(interface {
+		GetFolderWorkspace(string) (*Workspace, error)
+	}); ok {
+		return reader.GetFolderWorkspace(id)
+	}
+	return ts.workspaceStore.Get(id)
+}
+
+// prepareClaimedMissionRun requires the caller's single-flight/reset permit.
+// Claiming is durable BEFORE readiness or bridge creation. A crash at any point
+// leaves explicit recovery, not a fresh automatic intent. Nothing here reads
+// project contents; consent precedes even setup evaluation.
+func (ts *TaskScheduler) prepareClaimedMissionRun(ctx context.Context, id string, opts MissionRunOptions) (string, func() (string, error), error) {
+	origin := opts.Origin
+	if origin == "" {
+		origin = MissionOriginCadence
+		if opts.Event != nil {
+			origin = MissionOriginEvent
+		}
+	}
+	first := origin == MissionOriginFirstGoal
+	handled := false
+	err := ts.workspaceStore.Update(id, func(ws *Workspace) error {
+		if first && (!ws.GoalFirstRunPending || ws.GoalFirstRunState != "" || goalFirstRunAccepted(ws)) {
+			handled = true
+			ws.GoalFirstRunPending = false
+			return nil
+		}
+		if strings.TrimSpace(ws.Mission) == "" {
+			if ws.GoalFirstRunPending {
+				cancelDeferredGoalRun(ws)
+			}
+			return nil
+		}
+		ws.GoalFirstRunPending = false
+		if !goalFirstRunAccepted(ws) {
+			ws.GoalFirstRunState = GoalFirstRunStarting
+		}
+		return nil
+	})
+	if err != nil {
+		return "", nil, err // never invoke the bridge after a failed claim write
+	}
+	if handled {
+		return "", nil, ErrMissionFirstRunHandled
+	}
+	fail := func(cause error, state string) (string, func() (string, error), error) {
+		persistErr := ts.workspaceStore.Update(id, func(ws *Workspace) error {
+			if strings.TrimSpace(ws.Mission) == "" {
+				cancelDeferredGoalRun(ws)
+				return nil
+			}
+			if !goalFirstRunAccepted(ws) {
+				ws.GoalFirstRunState = state
+			}
+			MarkGoalNeedsAttention(ws, cause.Error())
+			return nil
+		})
+		if persistErr != nil {
+			return "", nil, fmt.Errorf("record goal admission: %w (start refused: %v)", persistErr, cause)
+		}
+		return "", nil, cause
+	}
+	ws, err := ts.missionWorkspace(id)
+	if err != nil || ws == nil {
+		return fail(&MissionBlockedError{Code: "goal_setup_unavailable", Reason: "Workspace setup could not be read. Repair workspace storage, then choose Run now."}, GoalFirstRunBlocked)
+	}
+	if strings.TrimSpace(ws.Mission) == "" {
+		return "", nil, ErrMissionGoalRequired
+	}
+	if first && GoalRequiresReadConsent(ws) {
+		return fail(&MissionBlockedError{Code: "goal_read_consent_required", Reason: GoalReadConsentReason}, GoalFirstRunBlocked)
+	}
+	if err := RequireWorkspaceExecution(ctx, ts.workspaceStore, id, origin != MissionOriginManual); err != nil {
+		return fail(&MissionBlockedError{Code: "goal_local_admission_required", Reason: "Activate this workspace on this installation before running its goal."}, GoalFirstRunBlocked)
+	}
+	if ts.missionTrigger == nil {
+		return fail(ErrMissionTriggerNotConfigured, GoalFirstRunBlocked)
+	}
+	if !MissionBindingsReady(ws) {
+		return fail(ErrMissionBindingsUnclassified, GoalFirstRunBlocked)
+	}
+	if ts.missionReadinessCheck != nil {
+		if blocked := ts.missionReadinessCheck(ctx, ws); blocked != nil {
+			return fail(blocked, GoalFirstRunBlocked)
+		}
+	} else if p := ws.GetTemplateProvenance(); p != nil && (p.SetupWizard != nil || p.RuntimeRequirements != nil || len(p.CapabilityRequirements)+len(p.DirectoryRequirements)+len(p.IntakeRequirements) > 0) {
+		return fail(&MissionBlockedError{Code: "goal_setup_unavailable", Reason: "Required workspace setup cannot be checked. Restore setup support, then choose Run now."}, GoalFirstRunBlocked)
+	}
+	if blocked := ts.missionStartBlocker(ws); blocked != nil {
+		return fail(blocked, GoalFirstRunBlocked)
+	}
+	// Recheck the saved goal before bridge preparation, after potentially slow
+	// readiness checks. Clearing during admission cancels deferred intent.
+	current, err := ts.workspaceStore.Get(id)
+	if err != nil {
+		return fail(err, GoalFirstRunFailed)
+	}
+	if strings.TrimSpace(current.Mission) == "" {
+		return "", nil, ErrMissionGoalRequired
+	}
+	ordinal := current.MissionExecutionCount + 1
+	var runID string
+	var execute func() (string, error)
+	if starter, ok := ts.missionTrigger.(MissionRunStarter); ok {
+		var run func() error
+		runID, run, err = starter.StartMissionRun(ctx, id, ordinal, opts)
+		if err != nil {
+			return fail(err, GoalFirstRunFailed)
+		}
+		execute = func() (string, error) { return runID, run() }
+	} else {
+		// Legacy triggers cannot separate creation from execution. Persist
+		// acceptance conservatively before dispatching them, never after.
+		execute = func() (string, error) {
+			if trigger, ok := ts.missionTrigger.(MissionOptionsTrigger); ok {
+				return trigger.TriggerMissionRunOpts(ctx, id, ordinal, opts)
+			}
+			return ts.missionTrigger.TriggerMissionRun(ctx, id, ordinal)
+		}
+	}
+	err = ts.workspaceStore.Update(id, func(ws *Workspace) error {
+		if strings.TrimSpace(ws.Mission) == "" {
+			return ErrMissionGoalRequired
+		}
+		ws.GoalFirstRunPending = false
+		ws.GoalFirstRunState = GoalFirstRunAccepted
+		ClearGoalNeedsAttention(ws)
+		return nil
+	})
+	if err != nil {
+		return "", nil, err // created-but-unexecuted is ambiguous, never replayed
+	}
+	ts.markMissionRunning(id, MissionRunInFlight{RunID: runID, Origin: origin, StartedAt: time.Now()})
+	return runID, execute, nil
 }
 
 func (ts *TaskScheduler) markMissionRunning(workspaceID string, running MissionRunInFlight) {
@@ -173,7 +281,6 @@ func (ts *TaskScheduler) markMissionRunning(workspaceID string, running MissionR
 	ts.missionRunning[workspaceID] = running
 }
 
-// missionStartBlocker returns why a goal run cannot start, or nil.
 func (ts *TaskScheduler) missionStartBlocker(ws *Workspace) *MissionBlockedError {
 	if strings.TrimSpace(ws.EntryAgentName()) == "" {
 		return &MissionBlockedError{Code: "goal_no_agent", Reason: "Add an agent to this workspace so it can suggest work"}
