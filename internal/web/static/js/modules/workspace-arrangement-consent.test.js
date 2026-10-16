@@ -292,6 +292,30 @@ test('one request, no automatic retry, no raw error and no input loss after an u
   await retry;
 });
 
+test('a refusal decided before any save says so and needs no history reopen', async () => {
+  let calls = 0;
+  const input = home();
+  const ui = component(input, true, async () => {
+    calls++;
+    const refused = new Error('Planning outcome requires canonical history');
+    refused.definite = true;
+    throw refused;
+  });
+  choose(ui.share);
+  choose(ui.upgrade);
+  await ui.send.events.click();
+  assert.equal(calls, 1);
+  assert.match(ui.status.textContent, /Refused before anything was saved or applied/);
+  assert.doesNotMatch(ui.status.textContent, /could not be confirmed|Reopen/);
+  assert.equal(input.goal, home().goal);
+  // The one-turn choices were consumed; choosing them again may send again.
+  assert.equal(ui.share.checked, false);
+  choose(ui.share);
+  choose(ui.upgrade);
+  await ui.send.events.click();
+  assert.equal(calls, 2, 'a certain refusal does not wait for a history reopen');
+});
+
 test('late completion is not presented as the new context outcome', async () => {
   let finish;
   const input = home();

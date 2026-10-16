@@ -586,6 +586,26 @@ The package checks skill/primary-prompt byte bounds, but these do not guarantee
 that every larger inventory or multi-call turn fits: the host still checks each
 request and refuses exhausted budgets.
 
+Measured on the populated six-song suite (scripted model): the candidate's
+second request (after one search and one select) is 21,057 bytes, against
+about 21,432 allowed by the pre-call check (24,000 minus the 2,048-token output
+reservation minus 520 already charged, counting request bytes as tokens). The
+margin is small, so a larger search page can end the turn with
+`limit_reached`. The published 0.2.0 and 0.1.1 packages carry a 9,626-byte skill:
+their first call fits, their second does not, and Organize library is refused
+with `limit_reached` before anything is saved. The reviewed Home upgrade to the
+candidate then plans normally with the new skill and role prompt, keeping the
+library, roots and projects, and the owner's existing skill trust carries over.
+The upgrade review names the release's skills but does not show that a skill's
+text changed (only role-prompt diffs are shown); that disclosure belongs to the
+package-upgrade review, not this feature.
+
+A typed 409 planning refusal (`upgrade_required`, `model_unavailable`, `busy`,
+`stale_context`, `limit_reached`, `invalid_result`, `unavailable`) is decided
+before the single canonical save, so the Home panel reports it as certain and
+lets the owner choose again. Cancellation, timeout, `planning_failed` and a lost
+response may have raced a save and still require reopening canonical history.
+
 ## Implementation seams and validation gates
 
 Freeze names: `workspacearrangement/{contract,evidence,tools,planner,record,review}.go`;

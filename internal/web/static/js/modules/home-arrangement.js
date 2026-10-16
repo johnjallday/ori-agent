@@ -5,6 +5,23 @@ import {
   renderArrangementHistory
 } from './workspace-arrangement.js';
 
+// The server decides these refusals before its single canonical save, so
+// nothing was saved. A cancellation, timeout, lost response or any other
+// failure may have raced a save and still needs canonical history.
+const DEFINITE_REFUSALS = new Set([
+  'upgrade_required',
+  'model_unavailable',
+  'busy',
+  'stale_context',
+  'limit_reached',
+  'invalid_result',
+  'unavailable'
+]);
+
+export function homeArrangementRefusalIsDefinite(error) {
+  return error?.status === 409 && DEFINITE_REFUSALS.has(error?.payload?.arrangement_error?.code);
+}
+
 export function homeArrangementFailure(error, { readOnly = false } = {}) {
   const code = error?.payload?.arrangement_error?.code;
   const messages = {
@@ -175,7 +192,9 @@ export function mountHomeArrangementPlanner(
         return { canonicalSaved: true };
       } catch (error) {
         if (run === generation && current()) status.textContent = homeArrangementFailure(error);
-        throw new Error('Planning outcome requires canonical history');
+        const outcome = new Error('Planning outcome requires canonical history');
+        outcome.definite = homeArrangementRefusalIsDefinite(error);
+        throw outcome;
       } finally {
         pending = false;
         refresh.disabled = false;

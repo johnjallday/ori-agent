@@ -3,9 +3,29 @@ import assert from 'node:assert/strict';
 import {
   homeArrangementContext,
   homeArrangementFailure,
+  homeArrangementRefusalIsDefinite,
   mountHomeArrangementPlanner
 } from './home-arrangement.js';
 import { ArrangementConsent } from './workspace-arrangement-consent.js';
+
+test('only typed pre-save refusals are certain; anything that may have raced a save is not', () => {
+  const refusal = (status, code) => ({ status, payload: { arrangement_error: { code } } });
+  for (const code of ['limit_reached', 'busy', 'stale_context', 'upgrade_required'])
+    assert.equal(homeArrangementRefusalIsDefinite(refusal(409, code)), true, code);
+  for (const [status, code] of [
+    [409, 'cancelled'],
+    [409, 'timed_out'],
+    [503, 'planning_failed'],
+    [503, 'limit_reached'],
+    [409, 'something_new']
+  ])
+    assert.equal(
+      homeArrangementRefusalIsDefinite(refusal(status, code)),
+      false,
+      `${status} ${code}`
+    );
+  assert.equal(homeArrangementRefusalIsDefinite(new TypeError('Failed to fetch')), false);
+});
 
 const context = () => ({
   home_id: 'home-a',

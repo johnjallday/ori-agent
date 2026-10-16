@@ -9,6 +9,7 @@
 #   ./scripts/reaper-demo.sh artifact                # only refresh the root artifact
 #   ./scripts/reaper-demo.sh test --music-source DIR --install-order music-first
 #   ./scripts/reaper-demo.sh test --install-order reaper-only -- --headed
+#   ./scripts/reaper-demo.sh test --suite arrangement --music-source DIR --install-order music-first
 
 set -euo pipefail
 
@@ -30,9 +31,18 @@ Commands:
 Options:
   --reaper-source DIR   Clean REAPER plugin candidate worktree.
   --music-source DIR    Clean Music Project Management candidate worktree.
+  --music-upgrade-source DIR
+                        Arrangement suite only: a newer clean Music commit. The
+                        Home is populated on --music-source, whose planning turn
+                        is expected to be refused, then upgraded to this one
+                        through its reviewed Home upgrade, which must keep the
+                        library and plan with the new guidance.
   --install-order MODE  music-first, reaper-first, or reaper-only. Providing a
                         music source defaults to music-first.
-  --suite NAME          legacy (default), guidance, or awareness (drawer baseline).
+  --suite NAME          legacy (default), guidance, awareness (drawer baseline), or
+                        arrangement (populated Home: Organize library, collection
+                        review, one queued activation; only the model is a
+                        scripted loopback fixture, so this is not live judgment).
   --restart-before-staffing  For guidance: restart after the unstaffed child,
                              then staff/associate and restart once more.
   --port PORT           Server port (default: 8931).
@@ -47,6 +57,10 @@ Environment:
   ORI_REAPER_PLUGIN_SOURCE=DIR      Same as --reaper-source.
   ORI_MUSIC_PLUGIN_SOURCE=DIR       Same as --music-source.
   ORI_MUSIC_REAPER_INSTALL_ORDER=MODE
+  ORI_ARRANGEMENT_MODEL_PORT=PORT    Arrangement suite only: loopback port of the
+                                    spec's scripted OpenAI-compatible model
+                                    (default 18965). Refused if already listening;
+                                    the server gets LM_STUDIO_BASE_URL for it.
 
 The refreshed binary is written to ./reaper-plugin-darwin-arm64. Candidate
 commits are exported into disposable plugin-source paths; only the staged REAPER
@@ -74,6 +88,7 @@ keep_sandbox="${ORI_KEEP_REAPER_SANDBOX:-0}"
 open_browser=0
 reaper_source="${ORI_REAPER_PLUGIN_SOURCE:-}"
 music_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
+music_upgrade_source=""
 install_order="${ORI_MUSIC_REAPER_INSTALL_ORDER:-}"
 test_suite="legacy"
 restart_before_staffing=0
@@ -91,13 +106,18 @@ while [[ $# -gt 0 ]]; do
 		music_source="$2"
 		shift 2
 		;;
+	--music-upgrade-source)
+		[[ $# -ge 2 ]] || fail "--music-upgrade-source needs a directory"
+		music_upgrade_source="$2"
+		shift 2
+		;;
 	--install-order)
 		[[ $# -ge 2 ]] || fail "--install-order needs a value"
 		install_order="$2"
 		shift 2
 		;;
 	--suite)
-		[[ $# -ge 2 ]] || fail "--suite needs legacy, guidance or awareness"
+		[[ $# -ge 2 ]] || fail "--suite needs legacy, guidance, awareness or arrangement"
 		test_suite="$2"
 		shift 2
 		;;
@@ -158,12 +178,27 @@ fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
-[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" ]] || fail "--suite needs legacy, guidance or awareness"
+[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" || "$test_suite" == "arrangement" ]] || fail "--suite needs legacy, guidance, awareness or arrangement"
 if [[ "$test_suite" != "legacy" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
 	fail "$test_suite suite requires test with --music-source and a paired installation order"
 fi
+# The arrangement suite's spec serves a scripted OpenAI-compatible model on a
+# loopback port. Never contact or stop whatever already listens there.
+model_port=""
+if [[ "$test_suite" == "arrangement" ]]; then
+	model_port="${ORI_ARRANGEMENT_MODEL_PORT:-18965}"
+	[[ "$model_port" =~ ^[0-9]+$ ]] || fail "ORI_ARRANGEMENT_MODEL_PORT must be numeric"
+	((model_port >= 1 && model_port <= 65535)) || fail "ORI_ARRANGEMENT_MODEL_PORT must be between 1 and 65535"
+	[[ "$model_port" != "$port" ]] || fail "the model fixture port must differ from the Ori port"
+	if lsof -nP -t -iTCP:"$model_port" -sTCP:LISTEN >/dev/null 2>&1; then
+		fail "model fixture port $model_port is occupied; refusing to contact it (set ORI_ARRANGEMENT_MODEL_PORT)"
+	fi
+fi
 if [[ "$restart_before_staffing" == "1" && "$test_suite" != "guidance" ]]; then
 	fail "--restart-before-staffing requires the guidance test suite"
+fi
+if [[ -n "$music_upgrade_source" && "$test_suite" != "arrangement" ]]; then
+	fail "--music-upgrade-source requires the arrangement test suite"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
@@ -202,6 +237,21 @@ if [[ -n "$music_source" ]]; then
 		fail "music candidate has no executable scripts/validate-package.py"
 	music_revision="$(git -C "$music_root" rev-parse HEAD)"
 	music_tree="$(git -C "$music_root" rev-parse HEAD^{tree})"
+fi
+upgrade_root=""
+upgrade_revision=""
+if [[ -n "$music_upgrade_source" ]]; then
+	upgrade_root="$(CDPATH= cd -- "$music_upgrade_source" 2>/dev/null && pwd)" || \
+		fail "music upgrade source does not exist: $music_upgrade_source"
+	git -C "$upgrade_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
+		fail "music upgrade source is not a Git worktree"
+	[[ -z "$(git -C "$upgrade_root" status --porcelain --untracked-files=all)" ]] || \
+		fail "music upgrade source must be clean so its exact commit can be staged"
+	[[ -x "$upgrade_root/scripts/validate-package.py" ]] || \
+		fail "music upgrade candidate has no executable scripts/validate-package.py"
+	upgrade_revision="$(git -C "$upgrade_root" rev-parse HEAD)"
+	[[ "$upgrade_revision" != "$music_revision" ]] || \
+		fail "--music-upgrade-source must be a different commit from --music-source"
 fi
 
 # Candidate build helpers rewrite manifests and create artifacts. Execute them
@@ -309,6 +359,19 @@ if [[ -n "$music_root" ]]; then
 	printf '%s\n' "$music_tree" >"$sandbox/evidence/music-candidate-tree.txt"
 	printf '%s\n' "$music_archive_sha256" >"$sandbox/evidence/music-candidate-archive-sha256.txt"
 fi
+# The newer Music commit is exported beside the installed one and only swapped
+# in by the browser test, which then upgrades the Home through its review.
+bundled_upgrade=""
+if [[ -n "$upgrade_root" ]]; then
+	upgrade_archive="$sandbox/evidence/music-upgrade.tar"
+	bundled_upgrade="$sandbox/plugin-upgrade/music-project-management"
+	git -C "$upgrade_root" archive --format=tar --output="$upgrade_archive" "$upgrade_revision"
+	mkdir -p "$bundled_upgrade"
+	tar -xf "$upgrade_archive" -C "$bundled_upgrade"
+	"$bundled_upgrade/scripts/validate-package.py" "$bundled_upgrade" \
+		| tee "$sandbox/evidence/music-upgrade-validation.txt"
+	printf '%s\n' "$upgrade_revision" >"$sandbox/evidence/music-upgrade-revision.txt"
+fi
 
 cd "$repo_root"
 printf 'Building Ori server...\n'
@@ -347,6 +410,11 @@ start_server() {
 }
 
 : >"$server_log"
+if [[ -n "$model_port" ]]; then
+	# Inherited by the server only for the arrangement suite: its lmstudio
+	# provider reaches the spec's scripted loopback model and nothing else.
+	export LM_STUDIO_BASE_URL="http://127.0.0.1:$model_port/v1"
+fi
 start_server
 
 install_candidate() {
@@ -457,8 +525,20 @@ if [[ "$mode" == "test" ]]; then
 			if [[ "${ORI_WORKSPACE_NEW_HOME_ACCEPTANCE:-0}" == "1" ]]; then
 				playwright_file="tests/personal-assistant-workspace-new-home.spec.ts"
 			fi
+		elif [[ "$test_suite" == "arrangement" ]]; then
+			playwright_file="tests/music-home-arrangement-populated.spec.ts"
+		fi
+		suite_env=()
+		if [[ -n "$model_port" ]]; then
+			suite_env=(ORI_ARRANGEMENT_MODEL_PORT="$model_port")
+		fi
+		# With an upgrade source, the installed package is the older one: the
+		# main test expects its planning turn to be refused, then stops there.
+		if [[ -n "$bundled_upgrade" ]]; then
+			suite_env+=(ORI_ARRANGEMENT_OLD_GUIDANCE=1)
 		fi
 		env PLAYWRIGHT_BASE_URL="$base_url" \
+			${suite_env[@]+"${suite_env[@]}"} \
 			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
 			ORI_MUSIC_REAPER_CONSTRUCTION_ONLY="$restart_before_staffing" \
 			ORI_MUSIC_REAPER_INSTALL_ORDER="$install_order" \
@@ -506,9 +586,45 @@ if [[ "$mode" == "test" ]]; then
 			--project=chromium --workers=1 --grep 'only a distinct reviewed child staffing action'
 		test_status=$?
 	fi
-	# The drawer baseline owns a different fixture and does not substitute for
-	# legacy/paired-guidance completed-project and restart acceptance.
-	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" ]]; then
+	# The arrangement suite has its own restart check: the same sandbox comes back
+	# and its saved arrangement, collection and queue are reopened from canonical
+	# state with no planning call. An upgrade run has none of these to reopen.
+	if ((test_status == 0)) && [[ "$test_suite" == "arrangement" && -z "$bundled_upgrade" ]]; then
+		printf 'Restarting Ori to reopen the saved arrangement...\n'
+		kill "$server_pid"
+		wait "$server_pid" 2>/dev/null || true
+		server_pid=""
+		printf '\n--- controlled arrangement restart ---\n' >>"$server_log"
+		start_server
+		env PLAYWRIGHT_BASE_URL="$base_url" \
+			${suite_env[@]+"${suite_env[@]}"} \
+			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
+			ORI_ARRANGEMENT_RESTART_CHECK=1 \
+			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
+			npx playwright test "$playwright_file" \
+			--project=chromium --workers=1 --grep 'restart reopens' ${playwright_args[@]+"${playwright_args[@]}"}
+		test_status=$?
+	fi
+	# The owner upgrades the Home populated on the older package to the newer
+	# Music commit through its own review, then plans with the new guidance.
+	if ((test_status == 0)) && [[ -n "$bundled_upgrade" ]]; then
+		printf 'Upgrading the Home to the newer Music commit...\n'
+		env PLAYWRIGHT_BASE_URL="$base_url" \
+			${suite_env[@]+"${suite_env[@]}"} \
+			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
+			ORI_ARRANGEMENT_UPGRADE_CHECK=1 \
+			ORI_MUSIC_PLUGIN_PATH="$bundled_music" \
+			ORI_MUSIC_UPGRADE_PATH="$bundled_upgrade" \
+			ORI_MUSIC_UPGRADE_REVISION="$upgrade_revision" \
+			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
+			npx playwright test "$playwright_file" \
+			--project=chromium --workers=1 --grep 'upgrade keeps' ${playwright_args[@]+"${playwright_args[@]}"}
+		test_status=$?
+	fi
+	# The drawer baseline and the arrangement suite own different fixtures and
+	# do not substitute for legacy/paired-guidance completed-project and restart
+	# acceptance, so neither re-runs that restart check.
+	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" && "$test_suite" != "arrangement" ]]; then
 		printf 'Restarting Ori against the same isolated candidate state...\n'
 		kill "$server_pid"
 		wait "$server_pid" 2>/dev/null || true

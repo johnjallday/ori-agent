@@ -274,12 +274,19 @@ export function mountArrangementConsent(
           : consent.update(current()).epoch === operationEpoch
             ? 'Request finished. Check canonical saved history for the outcome before sending again.'
             : 'Context changed while the request was running. Reopen its original saved history to check the outcome.';
-    } catch (_) {
+    } catch (error) {
+      // A refusal the host decided before any save is certain: nothing was
+      // saved, so the owner may choose again without reopening history.
+      const sameContext = consent.update(current()).epoch === operationEpoch;
+      if (error?.definite === true && sameContext) {
+        status.textContent =
+          'Refused before anything was saved or applied. Your goal is kept; choose sharing again to send.';
+        return;
+      }
       needsHistory = true;
-      status.textContent =
-        consent.update(current()).epoch === operationEpoch
-          ? 'The request or its save could not be confirmed. Your goal is kept. Reopen saved history before choosing to send again.'
-          : 'Context changed while the request was running. Reopen its original saved history to check the outcome.';
+      status.textContent = sameContext
+        ? 'The request or its save could not be confirmed. Your goal is kept. Reopen saved history before choosing to send again.'
+        : 'Context changed while the request was running. Reopen its original saved history to check the outcome.';
     } finally {
       pending = false;
       paint(consent.update(current()));
