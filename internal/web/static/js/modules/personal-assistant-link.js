@@ -232,8 +232,16 @@ function render() {
   const { state } = controller;
   const link = controller.shown() ? state.link : null;
   const busy = state.pending;
-  elements.add.hidden = !available;
+  // The pinned composer keeps one attachment row, so Add link is offered
+  // only while nothing is attached: no folder, and no link (remove one to
+  // attach another). A row that wraps pushes the reply box off a short screen.
+  const folder = window.PersonalAssistantFolderContext?.hasFolder?.() === true;
+  elements.add.hidden = !available || Boolean(link) || folder;
   elements.add.disabled = busy;
+  if (elements.add.hidden && !elements.field.hidden && !busy) {
+    elements.field.hidden = true;
+    elements.add.setAttribute('aria-expanded', 'false');
+  }
   elements.active.hidden = !link;
   const name = linkDisplayName(link?.observation);
   elements.name.textContent = name;
@@ -244,9 +252,13 @@ function render() {
     name ? `${LINK_COPY.remove} ${name}` : LINK_COPY.remove
   );
   elements.remove.disabled = busy;
+  // The summary rides on the chip (a tooltip, and text for screen readers)
+  // rather than taking a place of its own in the row.
   const summary = link ? linkSummary(link.observation) : '';
   if (elements.summary.textContent !== summary) elements.summary.textContent = summary;
   elements.summary.hidden = !summary;
+  if (summary) elements.active.title = summary;
+  else elements.active.removeAttribute('title');
   elements.input.disabled = busy;
   elements.attach.disabled = busy;
   elements.attach.textContent = busy ? LINK_COPY.checking : 'Attach';
@@ -354,6 +366,14 @@ function init() {
   });
   document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
   document.addEventListener('personal-assistant:sent', updateSendHint);
+  // A folder attached or removed changes whether Add link is offered.
+  const activeFolder = document.getElementById('personalAssistantActiveFolder');
+  if (activeFolder && typeof MutationObserver === 'function') {
+    new MutationObserver(render).observe(activeFolder, {
+      attributes: true,
+      attributeFilter: ['hidden']
+    });
+  }
   void refreshAvailability();
   render();
 }

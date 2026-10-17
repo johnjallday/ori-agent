@@ -200,6 +200,24 @@ test('a link attached in the composer rides the turn and its reply offers the bu
     'aria-label',
     'Remove link golang/go'
   );
+  // The summary rides on the chip; Add link waits until nothing is attached,
+  // so the attachment row stays one line.
+  await expect(page.locator('#personalAssistantActiveLink')).toHaveAttribute(
+    'title',
+    'GitHub repository · Go · 10,354 open issues'
+  );
+  await expect(page.locator('#personalAssistantLinkChip')).toBeHidden();
+  // A short, zoomed screen keeps the reply box in view with a link attached.
+  await page.setViewportSize({ width: 720, height: 450 });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const input = document.getElementById('personalAssistantInput')!.getBoundingClientRect();
+        return input.top >= 0 && input.bottom <= innerHeight + 1;
+      })
+    )
+    .toBe(true);
+  await page.setViewportSize({ width: 1280, height: 800 });
 
   // An empty Send asks about the link; the turn names the held link only.
   await page.locator('#personalAssistantInput').fill('');
@@ -287,5 +305,6 @@ test('removing the link detaches it, and a new conversation starts without one',
   await expect(page.locator('#personalAssistantActiveLink')).toBeVisible();
   await page.evaluate(() => (window as any).PersonalAssistantLink.reset());
   await expect(page.locator('#personalAssistantActiveLink')).toBeHidden();
+  await expect(page.locator('#personalAssistantLinkChip')).toBeVisible();
   expect(fixture.requests.filter(item => item.stage === 'detach')).toHaveLength(2);
 });
