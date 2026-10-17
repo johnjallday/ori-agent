@@ -1136,7 +1136,7 @@
                   <div class="workspace-detail-config-pane-head">
                     <div class="workspace-detail-config-pane-title">Workspace Memory</div>
                     <div class="workspace-detail-config-pane-subtitle">
-                      Durable knowledge agents accumulate across runs and chats in this workspace — facts, decisions, dead ends, and watch-state. It's injected into every mission run and workspace chat. Edit or remove anything that's wrong; never store secrets here (use the Vault).
+                      Durable knowledge agents accumulate across runs and chats in this workspace — facts, decisions, dead ends, and watch-state. It's injected into every mission run and workspace chat. Edit or remove anything that's wrong; never store secrets here (use the Vault). Promote an entry to global memory to share it with your assistant everywhere.
                     </div>
                   </div>
                   <div id="workspace-detail-memory-meta" class="workspace-detail-memory-meta" aria-live="polite"></div>
@@ -3491,6 +3491,12 @@
       flex: 0 0 auto;
     }
 
+    /* Category names ("How you work") are longer than entry types. */
+    .workspace-detail-memory-type.is-category {
+      max-width: 13rem;
+      min-width: 10.5rem;
+    }
+
     .workspace-detail-memory-input {
       flex: 1 1 18rem;
     }
@@ -3573,6 +3579,40 @@
 
     .workspace-detail-memory-action.is-danger {
       color: var(--danger, #c62828);
+    }
+
+    /* Promote is unavailable without an assistant and a Personal HQ; the
+       button stays focusable so its explanation can be read and opened. */
+    .workspace-detail-memory-action.is-unavailable {
+      color: var(--text-secondary);
+      opacity: 0.75;
+    }
+
+    a.workspace-detail-memory-action {
+      text-decoration: none;
+    }
+
+    /* A reviewed global-memory line: read-only here, changed on the Profile. */
+    .workspace-detail-memory-entry.is-global {
+      border-left: 3px solid var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-promote-note,
+    .workspace-detail-memory-notice {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-notice {
+      padding: 0.55rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--accent-color, #4a7dff) 35%, transparent);
+      background: color-mix(in srgb, var(--accent-color, #4a7dff) 8%, transparent);
+    }
+
+    .workspace-detail-memory-notice a {
+      color: var(--accent-color, #4a7dff);
+      font-weight: 600;
     }
 
     .workspace-detail-memory-edit {

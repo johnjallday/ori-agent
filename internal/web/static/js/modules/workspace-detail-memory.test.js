@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
+import {
+  WorkspaceMemoryManager,
+  defaultPromoteCategory,
+  memoryEntryKind
+} from './workspace-detail-memory.js';
 
 // Minimal host: escapeHtml mirrors the page helper closely enough for assertions.
 function makeManager() {
@@ -98,4 +102,89 @@ test('renderList switches the editing row into an edit form', () => {
   // Row 0 stays read-only, row 1 is an edit form.
   assert.match(m.elements.list.innerHTML, /data-action="edit" data-index="0"/);
   assert.match(m.elements.list.innerHTML, /data-edit-text="1"/);
+});
+
+test('memoryEntryKind tells reviewed, copied and ordinary entries apart', () => {
+  assert.equal(memoryEntryKind({ provenance: 'ori-hq:item:rev' }), 'managed');
+  assert.equal(memoryEntryKind({ provenance: 'agent:Scout', managed: true }), 'managed');
+  assert.equal(memoryEntryKind({ provenance: 'global:item-1' }), 'global_copy');
+  assert.equal(memoryEntryKind({ provenance: 'user' }), 'ordinary');
+  assert.equal(defaultPromoteCategory('feedback'), 'how_you_work');
+  assert.equal(defaultPromoteCategory('fact'), 'projects');
+});
+
+test('an ordinary entry offers Promote to global when global memory is available', () => {
+  const m = makeManager();
+  m.globalMemory = { available: true, review_href: '/profile#personalHQKnowledge' };
+  const html = m.entryRowHtml({ type: 'fact', provenance: 'user', text: 'alpha' }, 3);
+  assert.match(html, /data-action="promote" data-index="3">Promote to global/);
+  assert.doesNotMatch(html, /aria-disabled/);
+});
+
+test('Promote is explained, not hidden, when there is no Personal HQ, and absent in the HQ', () => {
+  const m = makeManager();
+  m.globalMemory = {
+    available: false,
+    message: 'Global memory needs a personal assistant with a Personal HQ. Set one up from Home.',
+    setup_href: '/'
+  };
+  const html = m.entryRowHtml({ type: 'fact', provenance: 'user', text: 'alpha' }, 0);
+  assert.match(html, /aria-disabled="true"/);
+  assert.match(html, /title="Global memory needs a personal assistant with a Personal HQ/);
+  m.elements = { list: { innerHTML: '' } };
+  m.entries = [{ type: 'fact', provenance: 'user', text: 'alpha' }];
+  m.handleListClick({
+    target: { closest: () => ({ dataset: { action: 'promote', index: '0' } }) }
+  });
+  assert.equal(m.promotingIndex, -1);
+  assert.match(m.elements.list.innerHTML, /workspace-detail-memory-notice/);
+  assert.match(m.elements.list.innerHTML, /Set one up from Home/);
+  assert.match(m.elements.list.innerHTML, /href="\/"/);
+
+  m.globalMemory = { available: true, is_personal_hq: true };
+  assert.doesNotMatch(
+    m.entryRowHtml({ type: 'fact', provenance: 'user', text: 'alpha' }, 0),
+    /Promote/
+  );
+});
+
+test('the promote form edits the wording and defaults the category by type', () => {
+  const m = makeManager();
+  m.globalMemory = { available: true };
+  m.elements = { list: { innerHTML: '' } };
+  m.entries = [
+    { type: 'feedback', provenance: 'user', text: 'Prefers short replies' },
+    { type: 'fact', provenance: 'user', text: 'Masters at -14 LUFS' }
+  ];
+  m.handleListClick({
+    target: { closest: () => ({ dataset: { action: 'promote', index: '0' } }) }
+  });
+  assert.equal(m.promotingIndex, 0);
+  const html = m.elements.list.innerHTML;
+  assert.match(html, /data-promote-text="0" maxlength="500" value="Prefers short replies"/);
+  assert.match(html, /<option value="how_you_work" selected>How you work<\/option>/);
+  assert.match(html, /data-action="promote-confirm" data-index="0"/);
+  assert.match(html, /The entry stays in this workspace/);
+  assert.match(m.promoteRowHtml(m.entries[1], 1), /<option value="projects" selected>Projects/);
+});
+
+test('reviewed global-memory lines are read-only with a Profile link', () => {
+  const m = makeManager();
+  m.globalMemory = { available: true, is_personal_hq: true, review_href: '//evil.example' };
+  const html = m.entryRowHtml(
+    { type: 'fact', provenance: 'ori-hq:item:rev', managed: true, text: 'Reviewed fact' },
+    0
+  );
+  assert.match(html, /Global memory \(reviewed\)/);
+  assert.match(html, /href="\/profile#personalHQKnowledge"/);
+  assert.doesNotMatch(html, /data-action="edit"|data-action="delete"|data-action="promote"/);
+});
+
+test('a copied-from-global entry stays editable but cannot be promoted again', () => {
+  const m = makeManager();
+  m.globalMemory = { available: true };
+  const html = m.entryRowHtml({ type: 'fact', provenance: 'global:item-1', text: 'Copied' }, 0);
+  assert.match(html, /data-action="edit"/);
+  assert.match(html, /data-action="delete"/);
+  assert.doesNotMatch(html, /data-action="promote"/);
 });

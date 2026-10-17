@@ -71,10 +71,7 @@ func (s *KnowledgeLearningService) ProposeWorkspaceFact(ctx context.Context, use
 	}
 	binding, err := s.store.resolve(ctx, userID)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrNeedsHQ) || errors.Is(err, ErrRepairNeeded) {
-			return "", KnowledgeItem{}, ErrGlobalMemoryUnavailable
-		}
-		return "", KnowledgeItem{}, err
+		return "", KnowledgeItem{}, globalMemoryResolveError(err)
 	}
 	if binding.Paused {
 		return "", KnowledgeItem{}, ErrKnowledgePaused

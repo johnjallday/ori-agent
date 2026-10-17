@@ -1397,6 +1397,7 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries", s.Handlers.WorkspaceMemory.AddEntry)
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries/{index}/promote", s.Handlers.WorkspaceMemory.PromoteEntry)
 	}
 }
 

@@ -5,9 +5,33 @@ import {
   approvedSourceChip,
   dossierEmptyGuidance,
   groupReviewedKnowledge,
+  promotedFromWorkspace,
   reviewTextValid,
   workspaceProposalSource
 } from './personal-hq-knowledge.js';
+
+test('a fact promoted from a workspace names and links that workspace', () => {
+  assert.deepEqual(
+    promotedFromWorkspace({
+      source: {
+        kind: 'explicit',
+        workspace_id: 'album-3',
+        workspace_name: 'Album 3',
+        workspace_slug: 'album-3'
+      }
+    }),
+    { workspace: 'Album 3', href: '/workspaces/album-3' }
+  );
+  assert.deepEqual(promotedFromWorkspace({ source: { kind: 'explicit', workspace_id: 'gone' } }), {
+    workspace: 'a workspace',
+    href: ''
+  });
+  assert.equal(promotedFromWorkspace({ source: { kind: 'explicit' } }), null);
+  assert.equal(
+    promotedFromWorkspace({ source: { kind: 'workspace_agent', workspace_id: 'x' } }),
+    null
+  );
+});
 
 test('every approved global fact names its origin', () => {
   const chip = kind => approvedSourceChip({ source: { kind } });

@@ -14,6 +14,13 @@ import (
 // A request ID identifies one user action, not the meaning: after Forget the
 // user may explicitly state the same fact again under a new request ID.
 func (s *KnowledgeLearningService) SaveExplicit(ctx context.Context, userID string, stateVersion int64, requestID, category, text string) (KnowledgeItem, error) {
+	return s.saveExplicit(ctx, userID, stateVersion, requestID, category, text, nil)
+}
+
+// saveExplicit optionally records inert evidence of where the user took the
+// statement from (a promoted workspace entry). Evidence never grants anything:
+// explicit facts are not revalidated against it.
+func (s *KnowledgeLearningService) saveExplicit(ctx context.Context, userID string, stateVersion int64, requestID, category, text string, evidence []KnowledgeEvidence) (KnowledgeItem, error) {
 	if s == nil || s.store == nil || s.memory == nil || s.now == nil ||
 		!validInterviewID(requestID) || stateVersion < 1 {
 		return KnowledgeItem{}, ErrConflict
@@ -94,7 +101,7 @@ func (s *KnowledgeLearningService) SaveExplicit(ctx context.Context, userID stri
 				SubjectID: requestID, Predicate: "confirmed statement", Value: category,
 			}),
 		}
-		item.Revisions = []KnowledgeRevision{{ID: uuid.NewString(), Text: text, CreatedAt: at}}
+		item.Revisions = []KnowledgeRevision{{ID: uuid.NewString(), Text: text, CreatedAt: at, Evidence: append([]KnowledgeEvidence(nil), evidence...)}}
 		item.CurrentRevisionID = item.Revisions[0].ID
 		_, err = s.store.Update(ctx, userID, doc.Version, func(latest *KnowledgeDocument) error {
 			if _, reused := knowledgeReceiptByID(*latest, requestID); reused {

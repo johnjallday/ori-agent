@@ -257,6 +257,16 @@ func IsHQManagedProvenance(provenance string) bool {
 	return strings.HasPrefix(strings.TrimSpace(provenance), "ori-hq:")
 }
 
+// GlobalCopyProvenancePrefix marks an ordinary workspace entry the user
+// copied from global memory: "global:<item-id>". The copy is ordinary data
+// that diverges on purpose; the prefix only records where it came from.
+const GlobalCopyProvenancePrefix = "global:"
+
+// IsGlobalCopyProvenance reports whether an entry was copied from global memory.
+func IsGlobalCopyProvenance(provenance string) bool {
+	return strings.HasPrefix(strings.TrimSpace(provenance), GlobalCopyProvenancePrefix)
+}
+
 func plural(n int, one, many string) string {
 	if n == 1 {
 		return one

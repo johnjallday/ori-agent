@@ -115,6 +115,31 @@ export function approvedSourceChip(item) {
   return APPROVED_SOURCE_CHIPS[item?.source?.kind || item?.source_kind] || '';
 }
 
+// promotedFromWorkspace: a fact you promoted from a workspace's Memory tab is
+// your own statement that names the workspace it came from.
+export function promotedFromWorkspace(item) {
+  const source = item?.source;
+  if (!source || source.kind !== 'explicit' || !source.workspace_id) return null;
+  const slug = typeof source.workspace_slug === 'string' ? source.workspace_slug : '';
+  return {
+    workspace: source.workspace_name || 'a workspace',
+    href: slug ? `/workspaces/${encodeURIComponent(slug)}` : ''
+  };
+}
+
+function promotedSourceChip(promoted) {
+  const chip = element('p', 'reviewed-knowledge-source');
+  chip.append('From you, promoted from ');
+  if (promoted.href) {
+    const link = element('a', '', promoted.workspace);
+    link.href = promoted.href;
+    chip.append(link);
+  } else {
+    chip.append(promoted.workspace);
+  }
+  return chip;
+}
+
 function workspaceSourceChip(attribution) {
   const chip = element('p', 'reviewed-knowledge-source');
   chip.append(`Proposed by ${attribution.agent} in `);
@@ -447,8 +472,11 @@ export function mountPersonalHQKnowledge(root = document) {
       )
     );
     const attribution = workspaceProposalSource(item);
+    const promoted = promotedFromWorkspace(item);
     if (attribution) {
       card.append(workspaceSourceChip(attribution));
+    } else if (promoted) {
+      card.append(promotedSourceChip(promoted));
     } else if (item.state === 'approved' && approvedSourceChip(item)) {
       card.append(element('p', 'reviewed-knowledge-source', approvedSourceChip(item)));
     }

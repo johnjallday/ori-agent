@@ -14,6 +14,38 @@
 
 const MEMORY_TYPES = ['fact', 'feedback', 'decision', 'dead-end', 'watch', 'thread'];
 
+// Categories an entry can be promoted into: the explicit-save path takes the
+// dossier sections a user states facts in.
+const PROMOTE_CATEGORIES = [
+  ['how_you_work', 'How you work'],
+  ['people', 'People'],
+  ['projects', 'Projects'],
+  ['routines', 'Routines']
+];
+
+const PROFILE_GLOBAL_MEMORY = '/profile#personalHQKnowledge';
+
+// memoryEntryKind: "managed" is a reviewed global-memory line (read-only here),
+// "global_copy" was copied from global memory, everything else is "ordinary".
+export function memoryEntryKind(entry) {
+  const provenance = String(entry?.provenance || '').trim();
+  if (entry?.managed || provenance.startsWith('ori-hq:')) return 'managed';
+  if (provenance.startsWith('global:')) return 'global_copy';
+  return 'ordinary';
+}
+
+// defaultPromoteCategory: user feedback is about how the user works; any other
+// entry most often describes their projects.
+export function defaultPromoteCategory(type) {
+  return type === 'feedback' ? 'how_you_work' : 'projects';
+}
+
+// Only same-origin page links are rendered from server data.
+function safeLocalHref(href, fallback) {
+  const value = String(href || '');
+  return value.startsWith('/') && !value.startsWith('//') ? value : fallback;
+}
+
 export class WorkspaceMemoryManager {
   constructor(host) {
     this.host = host;
@@ -21,7 +53,10 @@ export class WorkspaceMemoryManager {
     this.entries = [];
     this.managedLearnings = [];
     this.unstructured = [];
+    this.globalMemory = {};
     this.editingIndex = -1;
+    this.promotingIndex = -1;
+    this.notice = null;
     this.elements = {};
   }
 
@@ -64,23 +99,33 @@ export class WorkspaceMemoryManager {
         `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory`
       );
       if (!response.ok) throw new Error('Failed to load workspace memory');
-      const payload = await response.json();
-      this.entries = Array.isArray(payload?.entries) ? payload.entries : [];
-      this.managedLearnings = Array.isArray(payload?.managed_learnings)
-        ? payload.managed_learnings
-        : [];
-      this.unstructured = Array.isArray(payload?.unstructured) ? payload.unstructured : [];
-      this.meta = {
-        rawSize: Number(payload?.raw_size) || 0,
-        charBudget: Number(payload?.char_budget) || 0,
-        overBudget: Boolean(payload?.over_budget)
-      };
+      this.applyPayload(await response.json());
       this.loaded = true;
       this.editingIndex = -1;
+      this.promotingIndex = -1;
       this.render();
     } catch (error) {
       if (window.Toast) window.Toast.error(error.message || 'Failed to load workspace memory');
     }
+  }
+
+  // applyPayload takes the authoritative memory response of a read or a
+  // mutation.
+  applyPayload(payload) {
+    this.entries = Array.isArray(payload?.entries) ? payload.entries : [];
+    this.managedLearnings = Array.isArray(payload?.managed_learnings)
+      ? payload.managed_learnings
+      : [];
+    this.unstructured = Array.isArray(payload?.unstructured) ? payload.unstructured : [];
+    this.globalMemory =
+      payload?.global_memory && typeof payload.global_memory === 'object'
+        ? payload.global_memory
+        : {};
+    this.meta = {
+      rawSize: Number(payload?.raw_size) || 0,
+      charBudget: Number(payload?.char_budget) || 0,
+      overBudget: Boolean(payload?.over_budget)
+    };
   }
 
   render() {
@@ -116,11 +161,11 @@ export class WorkspaceMemoryManager {
     }
 
     const entriesHtml = this.entries
-      .map((entry, index) =>
-        index === this.editingIndex
-          ? this.editRowHtml(entry, index)
-          : this.entryRowHtml(entry, index)
-      )
+      .map((entry, index) => {
+        if (index === this.editingIndex) return this.editRowHtml(entry, index);
+        if (index === this.promotingIndex) return this.promoteRowHtml(entry, index);
+        return this.entryRowHtml(entry, index);
+      })
       .join('');
 
     let managedHtml = '';
@@ -147,7 +192,71 @@ export class WorkspaceMemoryManager {
         </div>`;
     }
 
-    list.innerHTML = entriesHtml + managedHtml + unstructuredHtml;
+    list.innerHTML = this.noticeHtml() + entriesHtml + managedHtml + unstructuredHtml;
+  }
+
+  noticeHtml() {
+    if (!this.notice?.message) return '';
+    const link = this.notice.href
+      ? ` <a href="${this.esc(safeLocalHref(this.notice.href, PROFILE_GLOBAL_MEMORY))}">${this.esc(this.notice.label || 'Open')}</a>`
+      : '';
+    return `<div class="workspace-detail-memory-notice" role="status">${this.esc(this.notice.message)}${link}</div>`;
+  }
+
+  // promoteActionHtml: none in the Personal HQ itself (its memory already is
+  // global memory), a disabled-looking button that explains why when there is
+  // no assistant with a Personal HQ, and the Promote action otherwise.
+  promoteActionHtml(index) {
+    const global = this.globalMemory || {};
+    if (global.is_personal_hq) return '';
+    if (!global.available) {
+      const reason = global.message || 'Global memory is unavailable.';
+      return `<button type="button" class="workspace-detail-memory-action is-unavailable" data-action="promote" data-index="${index}" aria-disabled="true" title="${this.esc(reason)}">Promote to global</button>`;
+    }
+    return `<button type="button" class="workspace-detail-memory-action" data-action="promote" data-index="${index}">Promote to global</button>`;
+  }
+
+  // managedEntryHtml renders a reviewed global-memory line read-only: it
+  // changes only through review on the Profile page.
+  managedEntryHtml(entry, index) {
+    const type = this.esc(entry?.type || 'fact');
+    const href = safeLocalHref(this.globalMemory?.review_href, PROFILE_GLOBAL_MEMORY);
+    return `
+      <article class="workspace-detail-memory-entry is-global" data-index="${index}">
+        <div class="workspace-detail-memory-entry-main">
+          <span class="workspace-detail-memory-badge workspace-detail-memory-badge-${type}">${type}</span>
+          <span class="workspace-detail-memory-text">${this.esc(entry?.text || '')}</span>
+        </div>
+        <div class="workspace-detail-memory-entry-foot">
+          <span class="workspace-detail-memory-prov">Global memory (reviewed)</span>
+          <span class="workspace-detail-memory-actions">
+            <a class="workspace-detail-memory-action" href="${this.esc(href)}">Review on Profile</a>
+          </span>
+        </div>
+      </article>`;
+  }
+
+  promoteRowHtml(entry, index) {
+    const selected = defaultPromoteCategory(entry?.type);
+    const options = PROMOTE_CATEGORIES.map(
+      ([value, label]) =>
+        `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`
+    ).join('');
+    return `
+      <article class="workspace-detail-memory-entry is-promoting" data-index="${index}">
+        <div class="workspace-detail-memory-promote-note">Promote to global memory: your assistant will know this on every page. The entry stays in this workspace.</div>
+        <div class="workspace-detail-memory-edit">
+          <select class="form-select workspace-detail-memory-type is-category" data-promote-category="${index}" aria-label="Global memory category">${options}</select>
+          <input type="text" class="form-control workspace-detail-memory-input" data-promote-text="${index}" maxlength="500" value="${this.esc(entry?.text || '')}" aria-label="Wording for global memory">
+        </div>
+        <div class="workspace-detail-memory-entry-foot">
+          <span class="workspace-detail-memory-prov">${this.esc(entry?.provenance || '')}</span>
+          <span class="workspace-detail-memory-actions">
+            <button type="button" class="workspace-detail-memory-action" data-action="promote-confirm" data-index="${index}">Promote</button>
+            <button type="button" class="workspace-detail-memory-action" data-action="promote-cancel" data-index="${index}">Cancel</button>
+          </span>
+        </div>
+      </article>`;
   }
 
   managedLearningHtml(learning) {
@@ -175,6 +284,8 @@ export class WorkspaceMemoryManager {
   }
 
   entryRowHtml(entry, index) {
+    const kind = memoryEntryKind(entry);
+    if (kind === 'managed') return this.managedEntryHtml(entry, index);
     const type = this.esc(entry?.type || 'fact');
     const meta = [entry?.provenance, entry?.date]
       .filter(Boolean)
@@ -189,6 +300,7 @@ export class WorkspaceMemoryManager {
         <div class="workspace-detail-memory-entry-foot">
           <span class="workspace-detail-memory-prov">${meta}</span>
           <span class="workspace-detail-memory-actions">
+            ${kind === 'ordinary' ? this.promoteActionHtml(index) : ''}
             <button type="button" class="workspace-detail-memory-action" data-action="edit" data-index="${index}">Edit</button>
             <button type="button" class="workspace-detail-memory-action is-danger" data-action="delete" data-index="${index}">Delete</button>
           </span>
@@ -224,11 +336,32 @@ export class WorkspaceMemoryManager {
     switch (button.dataset.action) {
       case 'edit':
         this.editingIndex = index;
+        this.promotingIndex = -1;
         this.renderList();
         break;
       case 'cancel':
         this.editingIndex = -1;
         this.renderList();
+        break;
+      case 'promote':
+        if (!this.globalMemory?.available) {
+          this.notice = {
+            message: this.globalMemory?.message || 'Global memory is unavailable.',
+            href: this.globalMemory?.setup_href || '/',
+            label: 'Go to Home'
+          };
+        } else {
+          this.promotingIndex = index;
+          this.editingIndex = -1;
+        }
+        this.renderList();
+        break;
+      case 'promote-cancel':
+        this.promotingIndex = -1;
+        this.renderList();
+        break;
+      case 'promote-confirm':
+        this.promoteEntry(index);
         break;
       case 'save':
         this.saveEdit(index);
@@ -284,6 +417,52 @@ export class WorkspaceMemoryManager {
     );
   }
 
+  // promoteEntry copies one entry into global memory as an approved fact. The
+  // workspace entry is unchanged, so the list itself needs no refresh.
+  async promoteEntry(index) {
+    const categoryEl = this.elements.list.querySelector(`[data-promote-category="${index}"]`);
+    const textEl = this.elements.list.querySelector(`[data-promote-text="${index}"]`);
+    const text = (textEl?.value || '').trim();
+    const category = categoryEl?.value || defaultPromoteCategory(this.entries[index]?.type);
+    if (!text) return;
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries/${index}/promote`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, category })
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (payload?.code === 'global_memory_unavailable') {
+          this.notice = {
+            message: payload.message,
+            href: this.globalMemory?.setup_href || '/',
+            label: 'Go to Home'
+          };
+          this.promotingIndex = -1;
+          this.renderList();
+          return;
+        }
+        throw new Error(
+          payload?.message || payload?.error?.message || `Request failed (${response.status})`
+        );
+      }
+      this.notice = {
+        message: payload.message || 'Promoted to global memory.',
+        href: payload.href || PROFILE_GLOBAL_MEMORY,
+        label: 'Review on your Profile'
+      };
+      this.promotingIndex = -1;
+      this.renderList();
+      if (window.Toast) window.Toast.success(this.notice.message);
+    } catch (error) {
+      if (window.Toast) window.Toast.error(error.message || 'Promote to global memory failed');
+    }
+  }
+
   // mutate performs a memory mutation, refreshes from the authoritative
   // response, and re-renders. onSuccess runs before re-render.
   async mutate(method, url, body, onSuccess) {
@@ -297,17 +476,9 @@ export class WorkspaceMemoryManager {
           payload?.error?.message || payload?.message || `Request failed (${response.status})`
         );
       }
-      const payload = await response.json();
-      this.entries = Array.isArray(payload?.entries) ? payload.entries : [];
-      this.managedLearnings = Array.isArray(payload?.managed_learnings)
-        ? payload.managed_learnings
-        : [];
-      this.unstructured = Array.isArray(payload?.unstructured) ? payload.unstructured : [];
-      this.meta = {
-        rawSize: Number(payload?.raw_size) || 0,
-        charBudget: Number(payload?.char_budget) || 0,
-        overBudget: Boolean(payload?.over_budget)
-      };
+      this.applyPayload(await response.json());
+      // Indexes may have shifted; never keep a promote form on another entry.
+      this.promotingIndex = -1;
       if (typeof onSuccess === 'function') onSuccess();
       this.render();
     } catch (error) {

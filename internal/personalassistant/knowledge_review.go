@@ -57,6 +57,22 @@ func knowledgeReviewSource(item KnowledgeItem, interviewed map[string]bool) Know
 	if item.SourceKind == "explicit" && interviewed[item.ID] {
 		source.Kind = KnowledgeInterviewSourceKind
 	}
+	if item.SourceKind == "explicit" {
+		// A fact the user promoted from a workspace names that workspace.
+		for _, revision := range item.Revisions {
+			for _, evidence := range revision.Evidence {
+				if evidence.SourceKind == WorkspacePromoteSourceKind && evidence.SourceID != "" {
+					source.WorkspaceID = evidence.SourceID
+					if !evidence.ObservedAt.IsZero() {
+						observed := evidence.ObservedAt
+						source.ObservedAt = &observed
+					}
+					return source
+				}
+			}
+		}
+		return source
+	}
 	if item.SourceKind != WorkspaceAgentSourceKind {
 		return source
 	}
