@@ -160,6 +160,26 @@ func (r Repo) validate() error {
 	return nil
 }
 
+// SafeLabel names the link from validated parts only: "the GitHub repository
+// owner/name" or "a link to host". A page's title is the page's own words and
+// can say anything, so it never stands where a model would read it as the
+// user's or the host's; SafeLabel does.
+func (o Observation) SafeLabel() string {
+	if o.Kind == KindGitHubRepo && o.Repo != nil && ValidRepoName(o.Repo.Owner, o.Repo.Name) {
+		return "the GitHub repository " + o.Repo.Owner + "/" + o.Repo.Name
+	}
+	host := strings.TrimSpace(o.Host)
+	if host == "" || strings.IndexFunc(host, notHostRune) >= 0 {
+		return "a link"
+	}
+	return "a link to " + host
+}
+
+// notHostRune reports a rune no host name, IP literal or port is made of.
+func notHostRune(r rune) bool {
+	return r != '.' && r != '-' && r != ':' && r != '[' && r != ']' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+}
+
 // DisplayName is what the pane and the transcript call the link: its title,
 // else the repository's full name, else its host.
 func (o Observation) DisplayName() string {
@@ -176,8 +196,13 @@ func (o Observation) DisplayName() string {
 // stripped, whitespace collapsed, at most MaxTextRunes runes.
 func Text(value string) string {
 	value = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		switch {
+		case unicode.IsControl(r):
 			return ' '
+		case unicode.Is(unicode.Cf, r):
+			// Format characters (bidirectional overrides, zero-width joiners)
+			// can make a title display as something it is not.
+			return -1
 		}
 		return r
 	}, value)
@@ -194,7 +219,7 @@ func boundedText(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return false
 		}
 	}

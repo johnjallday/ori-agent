@@ -94,45 +94,57 @@ test('replacing names the old link, a refusal keeps the old one, and remove lets
   const { post, calls } = fakePost([
     { ok: true, body: { link_id: 'obs-1', observation: repo } },
     { ok: false, status: 422, body: { error: 'That address can’t be used here.', code: 'link' } },
-    { ok: true, body: { link_id: 'obs-2', observation: { ...repo, id: 'obs-2' } } },
-    { ok: true, body: { detached: true } }
+    { ok: true, body: { link_id: 'obs-2', observation: { ...repo, id: 'obs-2' } } }
   ]);
+  const detaches = () =>
+    calls.filter(call => call.url.endsWith('/detach')).map(call => call.body.link_id);
   const controller = createLinkController({ post, currentId: () => '' });
   await controller.select('https://github.com/golang/go');
+  // A refused attach keeps the link already held, and never lets it go.
   assert.equal(await controller.select('http://127.0.0.1/'), false);
+  await settled();
   assert.equal(controller.state.notice, 'That address can’t be used here.');
   assert.equal(controller.state.failed, true);
   assert.deepEqual(controller.request(), { link_id: 'obs-1' });
-  assert.equal(calls[1].body.replaces, 'obs-1');
+  assert.deepEqual(detaches(), []);
+  assert.equal(calls[1].body.replaces, undefined);
 
+  // The old link goes only once the new one is held.
   assert.equal(await controller.select('https://github.com/golang/tools'), true);
-  assert.equal(calls[2].body.replaces, 'obs-1');
+  await settled();
   assert.deepEqual(controller.request(), { link_id: 'obs-2' });
+  assert.deepEqual(detaches(), ['obs-1']);
 
   assert.equal(await controller.remove(), true);
-  assert.deepEqual(calls[3], {
-    url: '/api/home-assistant/link-context/detach',
-    body: { link_id: 'obs-2' }
-  });
+  assert.deepEqual(detaches(), ['obs-1', 'obs-2']);
   assert.equal(controller.request(), null);
 });
 
-test('a result that arrives after the conversation changed is dropped, and lost or reset clears it', async () => {
+const settled = () => new Promise(resolve => setImmediate(resolve));
+
+test('a result that arrives after the conversation changed is let go, and lost or reset clears it', async () => {
   let current = 'conv-1';
   let release;
-  const post = url =>
-    url.endsWith('/select')
+  const detached = [];
+  const post = (url, body) => {
+    if (url.endsWith('/detach')) detached.push(body.link_id);
+    return url.endsWith('/select')
       ? new Promise(resolve => {
-          release = () => resolve({ ok: true, body: { link_id: 'obs-1', observation: repo } });
+          release = () => resolve({ ok: true, body: { link_id: 'obs-9', observation: repo } });
         })
       : Promise.resolve({ ok: true, body: {} });
+  };
   const controller = createLinkController({ post, currentId: () => current });
   const pending = controller.select('https://github.com/golang/go');
   assert.equal(controller.request(), null, 'nothing is sent while it is checked');
   current = 'conv-2';
   release();
   assert.equal(await pending, false);
+  await settled();
   assert.equal(controller.state.link, null);
+  assert.deepEqual(detached, ['obs-9'], 'the late hold is let go');
+  assert.equal(controller.state.pending, false);
+  assert.equal(controller.state.notice, '', 'no "Checking…" is left behind');
 
   current = 'conv-1';
   const again = createLinkController({
@@ -149,6 +161,26 @@ test('a result that arrives after the conversation changed is dropped, and lost 
   assert.equal(again.state.notice, '');
 });
 
+test('an attach in flight across a new draft’s first turn lands on the conversation it started', async () => {
+  let current = '';
+  let release;
+  const post = url =>
+    url.endsWith('/select')
+      ? new Promise(resolve => {
+          release = () => resolve({ ok: true, body: { link_id: 'obs-3', observation: repo } });
+        })
+      : Promise.resolve({ ok: true, body: {} });
+  const controller = createLinkController({ post, currentId: () => current });
+  const pending = controller.select('https://github.com/golang/go');
+  // The draft's first reply is stored meanwhile: it becomes conv-7.
+  current = 'conv-7';
+  controller.adopt('conv-7');
+  release();
+  assert.equal(await pending, true);
+  assert.deepEqual(controller.request(), { link_id: 'obs-3' });
+  assert.equal(controller.shown(), true);
+});
+
 test('Set up a workspace from this link starts a build, attaches the link, then opens it', async () => {
   const requests = [];
   let resumed = 0;
@@ -159,9 +191,13 @@ test('Set up a workspace from this link starts a build, attaches the link, then 
       return { ok: true, body: { session: { id: 'build 1', version: 4 }, resumed: true } };
     return { ok: true, body: { session: { id: 'build 1', version: 5 } } };
   };
+  const opened = [];
   const ok = await startLinkBuild(' https://arxiv.org/abs/1706.03762 ', {
     request,
-    resume: () => resumed++,
+    resume: options => {
+      resumed++;
+      opened.push(options);
+    },
     notify: message => notes.push(message)
   });
   assert.equal(ok, true);
@@ -178,7 +214,22 @@ test('Set up a workspace from this link starts a build, attaches the link, then 
     }
   ]);
   assert.equal(resumed, 1);
+  // The build was already open, so the pane is told to say the link joined it.
+  assert.equal(opened[0].joined, true);
   assert.deepEqual(notes, []);
+
+  // A build this started is not "joined".
+  const fresh = [];
+  await startLinkBuild('https://arxiv.org/abs/1706.03762', {
+    request: async (method, url) =>
+      url === '/api/workspaces/build-sessions'
+        ? { ok: true, status: 201, body: { session: { id: 'b2', version: 1 } } }
+        : { ok: true, body: { session: { id: 'b2', version: 2 } } },
+    resume: options => fresh.push(options),
+    notify: () => {}
+  });
+  assert.equal(fresh[0].joined, false);
+  assert.match(LINK_COPY.joined, /already building/);
 });
 
 test('a build that cannot start or take the link opens nothing and says why', async () => {

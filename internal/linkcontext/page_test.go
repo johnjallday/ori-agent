@@ -209,8 +209,13 @@ func TestHTTPPages_FollowsAPublicRedirectAndReportsTheFinalAddress(t *testing.T)
 			http.Redirect(w, r, "https://tok.example.org/x?access_token=abc123", http.StatusFound)
 		},
 	}}
-	if _, err := NewHTTPPages(&http.Client{Transport: token}).Fetch(context.Background(), mustURL(t, "https://tok.example.org/")); !errors.Is(err, ErrPageRedirect) {
+	_, err = NewHTTPPages(&http.Client{Transport: token}).Fetch(context.Background(), mustURL(t, "https://tok.example.org/"))
+	if !errors.Is(err, ErrPageRedirect) {
 		t.Fatalf("a hop carrying a token is refused, got %v", err)
+	}
+	// The refusal never repeats the refused address: it may be signed.
+	if strings.Contains(err.Error(), "access_token") || strings.Contains(err.Error(), "tok.example.org") {
+		t.Fatalf("the refusal names the refused target: %v", err)
 	}
 }
 

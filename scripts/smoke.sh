@@ -2532,6 +2532,10 @@ print("ok   %s has no agent type" % label)' "$1"
 #                            agents (Luna, Scout), and set the system model
 #                            (default codex / gpt-5.6-luna) so a build can talk
 #   availability             print GET /api/workspaces/build-sessions/availability
+#   link <address> ...       attach each address to a build in turn (Add link,
+#                            tasks/prd-assistant-link-attach.md) and print what
+#                            Ori observed, or the refusal; a build this started
+#                            is abandoned afterwards, an open one is left as is
 #
 # The default runs the assistant on the Codex CLI with your own Codex login.
 # A demo sandbox has its own HOME, so start the server with your Codex home:
@@ -2564,7 +2568,48 @@ smoke_build_session() {
     curl -s "$BASE_URL/api/workspaces/build-sessions/availability"
     echo
     ;;
-  *) fail "usage: $0 build-session <base-url> <seed [provider] [model]|availability>" ;;
+  link)
+    [[ $# -ge 4 ]] || fail "usage: $0 build-session <base-url> link <address> [address ...]"
+    python3 -I -c '
+import json, sys, urllib.error, urllib.request
+
+base, addresses = sys.argv[1].rstrip("/"), sys.argv[2:]
+
+def call(method, path, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(base + path, data=data, method=method,
+                                     headers={"Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as err:
+        return err.code, json.loads(err.read() or b"{}")
+
+status, body = call("POST", "/api/workspaces/build-sessions", {"entry_point": "workspace_hub_create"})
+session = body.get("session") or {}
+if not session.get("id"):
+    sys.exit("no build: %d %s" % (status, body))
+started = status == 201
+print("build %s (%s)" % (session["id"], "started" if started else "already open"))
+for address in addresses:
+    status, body = call("POST", "/api/workspaces/build-sessions/%s/link" % session["id"],
+                        {"url": address, "version": session.get("version", 0)})
+    if status != 200:
+        print("%s\n  %d %s" % (address, status, body.get("error", body)))
+        continue
+    session = body["session"]
+    seen = session["link"]["observation"]
+    line = "%s\n  %s %s readable=%s title=%r" % (address, seen["kind"], seen["host"], seen["readable"], seen.get("title"))
+    repo = seen.get("repo")
+    if repo:
+        line += " repo=%s reachable=%s issues=%s" % (repo["full_name"], repo["reachable"], repo.get("open_issues"))
+    print(line + " bytes=%d" % len(json.dumps(seen)))
+if started:
+    call("POST", "/api/workspaces/build-sessions/%s/abandon" % session["id"], {})
+    print("abandoned the build this started")
+' "$BASE_URL" "${@:4}"
+    ;;
+  *) fail "usage: $0 build-session <base-url> <seed [provider] [model]|availability|link <address> ...>" ;;
   esac
 }
 

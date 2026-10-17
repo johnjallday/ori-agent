@@ -360,7 +360,13 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		}
 		resp, err := h.LinkConversation(r.Context(), req.Conversation, req.LinkContext, req.Context)
 		if err != nil {
-			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "The attached link is no longer held. Attach it again; your message is kept.", "code": PersonalAssistantLinkUnavailable})
+			// Only a link that is gone is reported as gone; the browser lets
+			// its chip go for that code alone.
+			if errors.Is(err, errLinkNotHeld) {
+				_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "The attached link is no longer held. Attach it again; your message is kept.", "code": PersonalAssistantLinkUnavailable})
+				return
+			}
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "This conversation can’t take that turn right now. Your message is kept; reopen the conversation and try again.", "code": PersonalAssistantConversationUnavailable})
 			return
 		}
 		orihttp.WriteJSON(w, resp)

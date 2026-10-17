@@ -107,8 +107,13 @@ func (o *Observer) Observe(ctx context.Context, rawURL string) (*Observation, er
 		return nil, ErrURLTooLong
 	}
 	// A clone address (git@github.com:owner/name.git) is not a URL at all, so
-	// repositories are recognized before the address is parsed as one.
+	// repositories are recognized before the address is parsed as one. The
+	// address is still checked first: one carrying credentials, a token, or a
+	// signature is refused whatever it points at.
 	if owner, name, ok := ParseGitHubRepo(raw); ok {
+		if err := checkRepoAddress(raw); err != nil {
+			return nil, err
+		}
 		return o.observeRepo(ctx, owner, name)
 	}
 	parsed, err := urlsafety.Parse(raw, urlsafety.Policy{BlockPrivateHosts: true})
@@ -173,6 +178,25 @@ func (o *Observer) observeRepo(ctx context.Context, owner, name string) (*Observ
 		return nil, err
 	}
 	return observation, nil
+}
+
+// checkRepoAddress refuses a repository address that carries credentials, a
+// token, or a signature, the same rule every other address meets.
+func checkRepoAddress(raw string) error {
+	if strings.HasPrefix(raw, "git@") {
+		if publicread.ContainsCredentialMaterial(raw) {
+			return fmt.Errorf("%w: credentials in the address", ErrURLUnsafe)
+		}
+		return nil
+	}
+	candidate := raw
+	if !strings.Contains(candidate, "://") {
+		candidate = "https://" + candidate
+	}
+	if _, err := publicread.ValidateURL(candidate); err != nil {
+		return fmt.Errorf("%w: %v", ErrURLUnsafe, err)
+	}
+	return nil
 }
 
 func utf8RuneCount(s string) int { return utf8.RuneCountInString(s) }

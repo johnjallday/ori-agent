@@ -9709,6 +9709,7 @@ const sessionManager = {
         // blockers remain exactly as before.
         createBtn.disabled =
           Boolean(this.workspaceBuild?.busy) ||
+          this.workspaceBuildAttachmentPending() ||
           (importMode &&
             this.importContinuityStatus !== '' &&
             this.importContinuityStatus !== 'legacy' &&
@@ -11853,6 +11854,9 @@ const sessionManager = {
     // the user makes by hand to the paused build.
     if (result.body.resumed && !fresh && build.context.buildResume) {
       await this.applyWorkspaceBuildSession(session, { resume: true, revision });
+      if (this.workspaceBuild === build && build.context.buildNote) {
+        pane.showLine(build.context.buildNote);
+      }
       return;
     }
     if (result.body.resumed && !fresh) {
@@ -12937,7 +12941,12 @@ const sessionManager = {
       // assistant re-staffs it without being asked (FR17), after the turn in
       // flight if there is one.
       if (result.body.blueprint_changed) {
-        if (build.busy || !this.workspaceBuildAssisted()) build.restaffPending = true;
+        if (
+          build.busy ||
+          this.workspaceBuildAttachmentPending(build) ||
+          !this.workspaceBuildAssisted()
+        )
+          build.restaffPending = true;
         else void this.sendWorkspaceBuildRestaff(build);
       }
     };
@@ -13024,6 +13033,30 @@ const sessionManager = {
     return Boolean(build.busy || build.turnPending || build.folderPending || build.linkPending);
   },
 
+  // Whether a folder or link request is in flight. Create waits for it: a
+  // create that closed the build first would lose the attachment.
+  workspaceBuildAttachmentPending(build = this.workspaceBuild) {
+    return Boolean(build?.folderPending || build?.linkPending);
+  },
+
+  // setWorkspaceBuildAttachmentPending marks a folder or link request as in
+  // flight or done. The Create button follows it, and a re-staff the user's
+  // blueprint switch asked for while it was in flight is sent once it ends.
+  setWorkspaceBuildAttachmentPending(build, flag, pending) {
+    if (!build) return;
+    build[flag] = Boolean(pending);
+    this.refreshWizardChrome?.();
+    if (
+      !pending &&
+      this.workspaceBuild === build &&
+      build.restaffPending &&
+      !build.busy &&
+      !this.workspaceBuildAttachmentPending(build)
+    ) {
+      void this.sendWorkspaceBuildRestaff(build);
+    }
+  },
+
   async openWorkspaceBuildFolderChooser() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
@@ -13077,7 +13110,7 @@ const sessionManager = {
     }
     // One pick at a time from here: a second Use this path, or a chip while
     // a path is still being checked, is ignored rather than sent.
-    build.folderPending = true;
+    this.setWorkspaceBuildAttachmentPending(build, 'folderPending', true);
     let attaching = false;
     let note = '';
     try {
@@ -13132,7 +13165,7 @@ const sessionManager = {
       pane.showLine(pane.COPY.folderAttached);
     } finally {
       if (this.workspaceBuild === build) {
-        build.folderPending = false;
+        this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
         if (attaching) {
           pane.setFolderBusy(false, note);
           pane.focusComposer?.();
@@ -13178,7 +13211,7 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build?.session?.folder || !pane || this.workspaceBuildFolderLocked(build)) return;
     if (!this.workspaceBuildAssisted()) return;
-    build.folderPending = true;
+    this.setWorkspaceBuildAttachmentPending(build, 'folderPending', true);
     pane.setFolderBusy(true);
     try {
       await this.flushWorkspaceBuildDraft();
@@ -13204,7 +13237,7 @@ const sessionManager = {
       this.adoptWorkspaceBuildSession(session);
     } finally {
       if (this.workspaceBuild === build) {
-        build.folderPending = false;
+        this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
         pane.setFolderBusy(false);
         pane.focusComposer?.();
       }
@@ -13229,7 +13262,7 @@ const sessionManager = {
       pane.linkFieldStatus(pane.COPY.linkEmpty, true);
       return;
     }
-    build.linkPending = true;
+    this.setWorkspaceBuildAttachmentPending(build, 'linkPending', true);
     pane.setLinkBusy(true);
     pane.linkFieldStatus(pane.COPY.linkChecking);
     let attached = false;
@@ -13270,7 +13303,7 @@ const sessionManager = {
       attached = true;
     } finally {
       if (this.workspaceBuild === build) {
-        build.linkPending = false;
+        this.setWorkspaceBuildAttachmentPending(build, 'linkPending', false);
         pane.setLinkBusy(false);
         if (attached) {
           pane.linkAttachedDone();
@@ -13286,7 +13319,7 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build?.session?.link || !pane || this.workspaceBuildFolderLocked(build)) return;
     if (!this.workspaceBuildAssisted()) return;
-    build.linkPending = true;
+    this.setWorkspaceBuildAttachmentPending(build, 'linkPending', true);
     pane.setLinkBusy(true);
     try {
       await this.flushWorkspaceBuildDraft();
@@ -13312,7 +13345,7 @@ const sessionManager = {
       this.adoptWorkspaceBuildSession(session);
     } finally {
       if (this.workspaceBuild === build) {
-        build.linkPending = false;
+        this.setWorkspaceBuildAttachmentPending(build, 'linkPending', false);
         pane.setLinkBusy(false);
         pane.focusComposer?.();
       }
@@ -13433,6 +13466,12 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build || !pane || this.isCreatingFolder || !this.workspaceBuildCanApply(build, revision))
       return;
+    if (this.workspaceBuildAttachmentPending(build)) {
+      pane.showLine(
+        'Not yet — wait for the attached link or folder to finish, then say “create it”.'
+      );
+      return;
+    }
     const problem = this.workspaceBuildGateProblem();
     if (problem) {
       pane.showLine(`${pane.COPY.gateFailurePrefix}${problem}`);
@@ -13620,6 +13659,10 @@ const sessionManager = {
   // Create folder
   async createFolder(options = {}) {
     if (this.isCreatingFolder) return;
+    // A folder or link still being attached would be lost by a create that
+    // closes the build first; the button is disabled meanwhile, and this
+    // covers any other path that submits.
+    if (this.workspaceBuildAttachmentPending()) return;
     const placement = options.placement || null;
 
     const nameInput = document.getElementById('folderNameInput');

@@ -39,8 +39,11 @@ type WorkspaceBuildLinks interface {
 
 // Fixed copy the host writes into the transcript for the link: form lines, the
 // user's own act, which the model hears on its next turn.
+// The attach line names the link only by validated parts
+// (Observation.SafeLabel), never its title: the model hears form lines as the
+// user's own words, and a page's title is not.
 const (
-	buildCopyLinkAttached = "You attached the link “%s”."
+	buildCopyLinkAttached = "You attached %s."
 	buildCopyLinkRemoved  = "You removed the attached link."
 )
 
@@ -143,7 +146,7 @@ func (h *Handler) postWorkspaceBuildLink(w http.ResponseWriter, r *http.Request,
 		now := deps.Store.Now()
 		build.Link = &personalassistant.BuildLink{Observation: *observation}
 		build.Append(personalassistant.BuildTranscriptEntry{
-			Role: personalassistant.BuildRoleForm, Text: fmt.Sprintf(buildCopyLinkAttached, observation.DisplayName()), At: now,
+			Role: personalassistant.BuildRoleForm, Text: fmt.Sprintf(buildCopyLinkAttached, observation.SafeLabel()), At: now,
 		})
 		build.Applied = nil
 		build.Touch(now)
@@ -293,7 +296,7 @@ func (h *Handler) recordCreateWorkspaceBuildLink(ctx context.Context, workspaceI
 	case bound != "":
 		return &agentworkspace.BuildDecision{Section: "link", Text: fmt.Sprintf("Bound this workspace to %s, the repository you attached.", bound)}
 	case noted:
-		return &agentworkspace.BuildDecision{Section: "link", Text: fmt.Sprintf("Added the link “%s” you attached to Sources.", observation.DisplayName())}
+		return &agentworkspace.BuildDecision{Section: "link", Text: fmt.Sprintf("Added %s, which you attached, to Sources.", observation.SafeLabel())}
 	}
 	return nil
 }
@@ -342,9 +345,14 @@ func (h *Handler) addBuildLinkSource(ctx context.Context, workspaceID string, ob
 	return true
 }
 
-// buildLinkSourceLine is one Markdown list item for a link. The title is a
-// web page's own words, so the characters that would end a Markdown link
-// are escaped, and the address is percent-encoded where it would.
+// buildLinkSourceLine is one Markdown list item for a link: its title, its
+// address, what it is, and when it was attached. The title is a web page's own
+// words, so every character that can start Markdown or HTML inline syntax in
+// it is backslash-escaped (no link, image, emphasis, code span, strikethrough,
+// entity, or tag can form; plain "/", "." and "-" stay readable in the file),
+// and the address is percent-encoded where it would end the link. The page's
+// description is not written: nothing asked for it, and it is the page's words
+// too.
 func buildLinkSourceLine(observation linkcontext.Observation) string {
 	kind := "Page"
 	switch observation.Kind {
@@ -353,13 +361,15 @@ func buildLinkSourceLine(observation linkcontext.Observation) string {
 	case linkcontext.KindDocument:
 		kind = "Document"
 	}
-	title := strings.NewReplacer(`\`, `\\`, "[", `\[`, "]", `\]`, "<", `\<`, ">", `\>`).Replace(observation.DisplayName())
-	address := strings.NewReplacer("(", "%28", ")", "%29", " ", "%20", "<", "%3C", ">", "%3E").Replace(observation.URL)
-	line := fmt.Sprintf("- [%s](%s) · %s · attached %s", title, address, kind, observation.FetchedAt.UTC().Format("2006-01-02"))
-	if description := strings.TrimSpace(observation.Description); description != "" {
-		line += " — " + strings.NewReplacer(`\`, `\\`, "<", `\<`, ">", `\>`).Replace(description)
+	var title strings.Builder
+	for _, r := range observation.DisplayName() {
+		if strings.ContainsRune("\\`*_[]()<>!&~|", r) {
+			title.WriteByte('\\')
+		}
+		title.WriteRune(r)
 	}
-	return line
+	address := strings.NewReplacer("(", "%28", ")", "%29", " ", "%20", "<", "%3C", ">", "%3E", "`", "%60").Replace(observation.URL)
+	return fmt.Sprintf("- [%s](%s) · %s · attached %s", title.String(), address, kind, observation.FetchedAt.UTC().Format("2006-01-02"))
 }
 
 // linkPromptInstructions is what the model is told to do with an attached

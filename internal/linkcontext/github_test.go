@@ -63,12 +63,9 @@ func TestParseGitHubRepo_NotARepository(t *testing.T) {
 
 // A fixture GitHub API. The README sentinel and the extra fields stand in for
 // everything the resolver must not copy.
-func fixtureGitHub(t *testing.T, status int, headers map[string]string, body map[string]any) (*httptest.Server, *http.Request) {
+func fixtureGitHub(t *testing.T, status int, headers map[string]string, body map[string]any) *httptest.Server {
 	t.Helper()
-	var seen *http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		copied := r.Clone(context.Background())
-		seen = copied
 		for key, value := range headers {
 			w.Header().Set(key, value)
 		}
@@ -78,7 +75,7 @@ func fixtureGitHub(t *testing.T, status int, headers map[string]string, body map
 		}
 	}))
 	t.Cleanup(server.Close)
-	return server, seen
+	return server
 }
 
 const readmeSentinel = "README_SENTINEL_NEVER_IN_OBSERVATION"
@@ -102,7 +99,7 @@ func repoBody() map[string]any {
 }
 
 func TestGitHubResolver_ReadsTheRepositoryFacts(t *testing.T) {
-	server, _ := fixtureGitHub(t, http.StatusOK, nil, repoBody())
+	server := fixtureGitHub(t, http.StatusOK, nil, repoBody())
 	var tokenAsked bool
 	resolver := NewGitHubResolver(server.Client(), func(context.Context) (string, bool) { tokenAsked = true; return "", false }).WithBase(server.URL)
 	repo, err := resolver.Resolve(context.Background(), "acme", "widgets")
@@ -146,7 +143,7 @@ func TestGitHubResolver_SendsTheStoredTokenAsBearer(t *testing.T) {
 
 func TestGitHubResolver_NotFoundAndForbiddenAreUnreachable(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusForbidden} {
-		server, _ := fixtureGitHub(t, status, map[string]string{"X-RateLimit-Remaining": "41"}, map[string]any{"message": "Not Found"})
+		server := fixtureGitHub(t, status, map[string]string{"X-RateLimit-Remaining": "41"}, map[string]any{"message": "Not Found"})
 		resolver := NewGitHubResolver(server.Client(), nil).WithBase(server.URL)
 		repo, err := resolver.Resolve(context.Background(), "acme", "widgets")
 		if err != nil || repo.Reachable != ReachableNo || repo.FullName != "acme/widgets" {
@@ -167,7 +164,7 @@ func TestGitHubResolver_RateLimitBadTokenAndOutagesAreUnknown(t *testing.T) {
 		{http.StatusBadGateway, nil},
 	}
 	for _, tc := range cases {
-		server, _ := fixtureGitHub(t, tc.status, tc.headers, map[string]any{"message": "nope"})
+		server := fixtureGitHub(t, tc.status, tc.headers, map[string]any{"message": "nope"})
 		resolver := NewGitHubResolver(server.Client(), nil).WithBase(server.URL)
 		repo, err := resolver.Resolve(context.Background(), "acme", "widgets")
 		if err != nil || repo.Reachable != ReachableUnknown || repo.FullName != "acme/widgets" {
@@ -175,7 +172,7 @@ func TestGitHubResolver_RateLimitBadTokenAndOutagesAreUnknown(t *testing.T) {
 		}
 	}
 	// A server that is not there at all.
-	server, _ := fixtureGitHub(t, http.StatusOK, nil, nil)
+	server := fixtureGitHub(t, http.StatusOK, nil, nil)
 	server.Close()
 	resolver := NewGitHubResolver(server.Client(), nil).WithBase(server.URL)
 	repo, err := resolver.Resolve(context.Background(), "acme", "widgets")
@@ -198,7 +195,7 @@ func TestGitHubResolver_OversizedOrMalformedBodiesAreUnknown(t *testing.T) {
 }
 
 func TestGitHubResolver_RefusesAMalformedName(t *testing.T) {
-	server, _ := fixtureGitHub(t, http.StatusOK, nil, repoBody())
+	server := fixtureGitHub(t, http.StatusOK, nil, repoBody())
 	resolver := NewGitHubResolver(server.Client(), nil).WithBase(server.URL)
 	if _, err := resolver.Resolve(context.Background(), "acme/evil", "../widgets"); err == nil {
 		t.Fatal("a malformed name must not become a request path")

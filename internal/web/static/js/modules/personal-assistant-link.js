@@ -17,7 +17,9 @@ export const LINK_COPY = {
   remove: 'Remove link',
   buildUnavailable:
     'Create Workspace can’t build with your assistant right now. Nothing was created; your link is still attached here.',
-  buildRefused: 'The link could not be added to a workspace build. Nothing was changed.'
+  buildRefused: 'The link could not be added to a workspace build. Nothing was changed.',
+  joined:
+    'I added the link to the workspace you were already building. Choose Start over if you meant a new one.'
 };
 
 /** What an attached link is called: its title, a repository's name, or its host. */
@@ -51,6 +53,9 @@ export function linkSummary(observation) {
 export function createLinkController({ post, changed = () => {}, currentId }) {
   const state = {
     conversationId: currentId(),
+    // The id a new draft's first stored turn gave it, so an attach that was
+    // in flight across that turn still lands on it.
+    adopted: '',
     link: null,
     pending: false,
     notice: '',
@@ -58,6 +63,12 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
     generation: 0
   };
   const done = () => changed(state);
+  const letGo = id => {
+    if (!id) return;
+    Promise.resolve()
+      .then(() => post(`${ENDPOINT}/detach`, { link_id: id }))
+      .catch(() => {});
+  };
 
   async function select(url) {
     const address = String(url || '').trim();
@@ -70,24 +81,39 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
     }
     const generation = ++state.generation;
     const owner = currentId();
+    // Still this attach's conversation: the same one, or the one a new draft
+    // became while the address was being read.
+    const sameOwner = () =>
+      owner === currentId() || (!owner && Boolean(state.adopted) && state.adopted === currentId());
     state.pending = true;
     state.notice = LINK_COPY.checking;
     state.failed = false;
     done();
     try {
-      const body = { url: address };
-      if (state.link?.id) body.replaces = state.link.id;
-      const result = await post(`${ENDPOINT}/select`, body);
-      if (generation !== state.generation || owner !== currentId()) return false;
-      if (!result?.ok || !result.body?.link_id) {
+      // The link already attached stays held until the new one is: a
+      // refused or late attach must not cost the conversation its link.
+      const result = await post(`${ENDPOINT}/select`, { url: address });
+      const heldId = String(result?.body?.link_id || '');
+      if (generation !== state.generation || !sameOwner()) {
+        // Too late for anything on screen: let the new hold go, keep the old.
+        letGo(heldId);
+        if (generation === state.generation) {
+          state.notice = '';
+          state.failed = false;
+        }
+        return false;
+      }
+      if (!result?.ok || !heldId) {
         state.notice = String(result?.body?.error || '').trim() || LINK_COPY.refused;
         state.failed = true;
         return false;
       }
-      state.link = { id: String(result.body.link_id), observation: result.body.observation || {} };
-      state.conversationId = owner;
+      const previous = state.link;
+      state.link = { id: heldId, observation: result.body.observation || {} };
+      state.conversationId = currentId();
       state.notice = '';
       state.failed = false;
+      if (previous?.id && previous.id !== heldId) letGo(previous.id);
       return true;
     } catch (_) {
       if (generation === state.generation) {
@@ -127,8 +153,9 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
 
   /** A link attached in a new draft follows that draft into the conversation it started. */
   function adopt(id) {
-    if (state.link && !state.conversationId && id) {
-      state.conversationId = String(id);
+    if (!state.conversationId && id) {
+      state.adopted = String(id);
+      if (state.link) state.conversationId = String(id);
       done();
     }
   }
@@ -141,9 +168,10 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
     state.pending = false;
     state.notice = '';
     state.failed = false;
+    state.adopted = '';
     state.conversationId = currentId();
     done();
-    if (link) void post(`${ENDPOINT}/detach`, { link_id: link.id }).catch(() => {});
+    if (link) letGo(link.id);
   }
 
   /** The server no longer holds the link a turn named. */
@@ -197,8 +225,25 @@ export async function startLinkBuild(url, { request, resume, notify }) {
     notify(String(attached?.body?.error || '').trim() || LINK_COPY.buildRefused);
     return false;
   }
-  resume();
+  // A build already in progress took the link: the pane says so, so the
+  // user is never surprised by an earlier draft.
+  resume({ joined: created.body.resumed === true });
   return true;
+}
+
+// openBuild opens Create Workspace on the open build, as the assistant's
+// Today "Resume" does, with an optional line for the pane. A page without the
+// dialog goes Home, which has it.
+function openBuild(win, { joined = false } = {}) {
+  const manager = win.sessionManager;
+  if (manager?.showAddWorkspaceModal && win.document?.getElementById?.('addFolderModal')) {
+    win.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+    const options = { entryPoint: 'personal_assistant_ask', buildResume: true };
+    if (joined) options.buildNote = LINK_COPY.joined;
+    manager.showAddWorkspaceModal(options);
+    return;
+  }
+  win.location.href = '/?build=resume';
 }
 
 // ----- the drawer -----
@@ -392,10 +437,7 @@ const api = {
     startLinkBuild(url, {
       request: jsonRequest,
       notify: message => window.PersonalAssistantConversation?.notify?.(message),
-      resume: async () => {
-        const { resumeWorkspaceBuild } = await import('./personal-assistant-home.js');
-        resumeWorkspaceBuild();
-      }
+      resume: options => openBuild(window, options)
     }),
   _controller: () => controller
 };

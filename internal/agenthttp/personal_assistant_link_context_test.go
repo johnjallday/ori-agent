@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,16 +199,24 @@ func TestComposerLink_TheRouteSendsALinkTurnToTheConversation(t *testing.T) {
 	if err != nil || route == nil || route.Intent != homeAssistantConversationIntent.Key || route.RouteMode != "home_inline" {
 		t.Fatalf("route: %+v %v", route, err)
 	}
-	if _, err := f.handler.LinkConversationRoute(context.Background(), &HomeAssistantConversationRef{ID: ""}, &HomeAssistantLinkRef{LinkID: "gone"}, nil); err == nil {
-		t.Fatal("a link that is not held does not route")
+	if _, err := f.handler.LinkConversationRoute(context.Background(), &HomeAssistantConversationRef{ID: ""}, &HomeAssistantLinkRef{LinkID: "gone"}, nil); !errors.Is(err, errLinkNotHeld) {
+		t.Fatalf("a link that is not held is reported as gone, got %v", err)
 	}
-	if _, err := f.handler.LinkConversationRoute(context.Background(), &HomeAssistantConversationRef{ID: ""}, &HomeAssistantLinkRef{LinkID: id}, &HomeAssistantRouteContext{Origin: "workspace_chat"}); err == nil {
-		t.Fatal("a link never routes outside the panel")
+	// Any other refusal is not "the link is gone": the browser keeps it.
+	if _, err := f.handler.LinkConversationRoute(context.Background(), &HomeAssistantConversationRef{ID: ""}, &HomeAssistantLinkRef{LinkID: id}, &HomeAssistantRouteContext{Origin: "workspace_chat"}); !errors.Is(err, errLinkRouteRefused) {
+		t.Fatalf("a link never routes outside the panel, and is not called gone, got %v", err)
 	}
 }
 
 func TestComposerLink_TheActionComesOnlyWithAnAnsweredReply(t *testing.T) {
-	turn := &preparedLinkTurn{id: "a", observation: *composerRepoLink()}
+	// A reply whose model turn never saw the link gets nothing.
+	unseen := &preparedLinkTurn{id: "a", observation: *composerRepoLink()}
+	reply := HomeAssistantAskResponse{Response: "Saved for review."}
+	unseen.finalize(&reply)
+	if len(reply.Actions) != 0 || reply.LinkContext != nil {
+		t.Fatalf("a reply that never saw the link: %+v", reply)
+	}
+	turn := &preparedLinkTurn{id: "a", observation: *composerRepoLink(), used: true}
 	for name, response := range map[string]HomeAssistantAskResponse{
 		"model unavailable":  {Response: "x", ModelUnavailable: true},
 		"confirmation":       {Response: "x", RequiresConfirmation: true},

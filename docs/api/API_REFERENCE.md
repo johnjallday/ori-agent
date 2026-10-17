@@ -444,7 +444,7 @@ request fields:
 
 and these response fields:
 
-- `conversation`: `id`, `title`, `started`, `stored`, `user_message_id`, `assistant_message_id`, `history_truncated`, or `error` (`conversation_not_found`, `conversation_out_of_scope`, `conversation_unavailable`). Only an answered turn is stored. When `stored` is false nothing was saved and the client returns the text to the composer.
+- `conversation`: `id`, `title`, `started`, `stored`, `user_message_id`, `assistant_message_id`, `history_truncated`, or `error` (`conversation_not_found`, `conversation_out_of_scope`, `conversation_unavailable`, `link_context_unavailable`). Only an answered turn is stored. When `stored` is false nothing was saved and the client returns the text to the composer.
 - `model_unavailable`: `true` when no model could answer.
 - `draft_review`: present when the prompt asked to save the draft ("save this draft and put it in my todo list"). It is the same object `POST …/drafts/review` returns. Nothing has been written.
 - `memory_review`: present when the prompt asked to remember something. `{ "text", "destination", "max_bytes" }` — editable starting text (empty when no fact was stated). Nothing has been written, no model was called, and the request is not stored as a turn.
@@ -459,6 +459,31 @@ and these response fields:
 
 Conversations are canonical Sessions; they are renamed and deleted through the
 Sessions API. Deleting one never deletes a saved Ticket or a remembered fact.
+
+**Attached link (the composer's Add link):** one link per conversation, read
+once by the host and held in memory, by id, for 30 minutes after its last use
+(at most 20 per user). The observation is the same record the build pane keeps
+(see [Attach a Link](#attach-a-link)); nothing behind the address is read.
+
+| Endpoint | Body | Returns |
+|---|---|---|
+| `GET /api/home-assistant/link-context/availability` | — | `{ "available": true }` when the link observer is wired. |
+| `POST /api/home-assistant/link-context/select` | `{ "url", "replaces"? }` | `{ "link_id", "observation" }`; `replaces` lets the previous link go. A refused address is `422` with `code: link` and a sentence to show. |
+| `POST /api/home-assistant/link-context/detach` | `{ "link_id" }` | `{ "detached": true }`. Harmless twice. |
+
+A turn carries `link_context`: `{ "link_id" }` on both `POST /api/home-assistant/route`
+(which then routes it to the conversation, like a folder) and `POST /api/home-assistant/ask`.
+The model gets the observation as untrusted reference data. An answered reply
+returns `link_context` (`link_id`, `observation`) and one host action,
+`{ "type": "workspace_build_from_link", "label": "Set up a workspace from this link", "arguments": { "url" } }`,
+which the browser runs: it starts or joins the user's build (`POST /api/workspaces/build-sessions`
+with no first message), attaches the same address (`POST …/{id}/link`), and opens
+Create Workspace on it; when the build was already in progress the pane says the
+link was added to it. The server never executes it. A route refusal other than a
+lost link is `409 conversation_unavailable`, and the drawer keeps the link. A link that is no longer
+held (expired, detached, a restart) refuses the turn before any model call:
+`conversation.error` is `link_context_unavailable` and the client keeps the message.
+A link never rides a confirmed action.
 
 **Assistant operations ("Operate Ori"):** an explicit request such as "open the
 Album workspace and select Mixer" lets the assistant ask Ori to carry out a
@@ -1389,7 +1414,7 @@ Bodies are capped at 256 KiB and must be one JSON object with only the fields na
 { "available": false, "reason": "no_model" }
 ```
 
-`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the system model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. When available, `folders` says whether the pane may offer Add folder (the composer's folder chooser is wired for builds). The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
+`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the system model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. When available, `folders` says whether the pane may offer Add folder (the composer's folder chooser is wired for builds), and `links` whether it may offer Add link (the link observer is wired). The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
 
 ### Create or Resume
 
@@ -1438,9 +1463,9 @@ There is at most one open build per user. When one is open it is returned unchan
 }
 ```
 
-- `draft` holds only create-request keys: `template_id`/`blank`, `name`, `description`, `blueprint_inputs`, `parent_id`, `color`, `tags`, `workspace_preset`, `workspace_bootstrap`, `project_connection`, `team_intent`, `role_staffing`, `template_agent_overrides`, `template_agent_review`, `existing_agent_names`, `entry_agent_name`, `create_template_agents`.
+- `draft` holds only create-request keys: `template_id`/`blank`, `name`, `description`, `mission` (the form's Goal), `blueprint_inputs`, `parent_id`, `color`, `tags`, `workspace_preset`, `workspace_bootstrap`, `project_connection`, `team_intent`, `role_staffing`, `template_agent_overrides`, `template_agent_review`, `existing_agent_names`, `entry_agent_name`, `create_template_agents`.
 - `transcript` entries have `role` `user`, `assistant`, or `form` (the user's own form edits, said in plain words). Chip ids are the server's (`c<turn>-<n>`, plus the reserved `try_again`, `folder_choose`, `folder_none`); an answered question records `chosen`. The transcript keeps the last 40 entries and 32 KiB.
-- `applied` names what the last turn set on the form (`blueprint`, `name`, `description`, `inputs`, `parent`, `color`, `tags`, `team`); `team_patch` is the assistant's staffing (`mode`, `roles[]` with `role_id`, `mode` `assign`/`create`, `agent_name`, and optional `provider`/`model`/`system_prompt`, `saved_agents[]`). `team_state` is the serialized Team step, restored on resume.
+- `applied` names what the last turn set on the form (`blueprint`, `name`, `description`, `goal`, `inputs`, `parent`, `color`, `tags`, `team`); a `goal` is at most 300 characters and lands in `draft.mission`; `team_patch` is the assistant's staffing (`mode`, `roles[]` with `role_id`, `mode` `assign`/`create`, `agent_name`, and optional `provider`/`model`/`system_prompt`, `saved_agents[]`). `team_state` is the serialized Team step, restored on resume.
 - `rejections` are the fields the host refused on the last turn, with a reason; the assistant sees them on its next turn and the transcript says so.
 - `ready` is the model's opinion only; the wizard's own gates decide Create. `create_now` means the user said "create it": the client runs the ordinary Create submit and reports a closed gate in the pane instead of submitting. It is never set on the first turn, even when the first message asks to create — the user always sees a filled form first.
 
@@ -1499,6 +1524,46 @@ What the pane's Add folder sheet can offer: the composer's known-folder chips, w
 ```
 
 Clears the attached folder and says so in the transcript. Removing twice is harmless. Returns `{ "session": … }`.
+
+### Attach a Link
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/link`
+
+```json
+{ "url": "https://github.com/golang/go", "version": 3 }
+```
+
+One link per build; attaching another replaces it. The server reads what the address says about itself, once, and stores the bounded observation on the session as `link.observation`:
+
+```json
+{
+  "version": 1, "id": "…", "url": "https://github.com/golang/go", "host": "github.com",
+  "kind": "github_repo", "title": "golang/go", "description": "The Go programming language",
+  "readable": true, "fetched_at": "2026-10-17T09:00:00Z",
+  "repo": { "owner": "golang", "name": "go", "full_name": "golang/go", "language": "Go",
+            "topics": ["go"], "default_branch": "master", "open_issues": 10354,
+            "pushed_at": "2026-10-16", "reachable": "yes" }
+}
+```
+
+- `kind` is `github_repo` (`github.com/owner/name`, any trailing path, or `git@github.com:owner/name.git`; read through the GitHub REST API with the stored GitHub token when connected and unlocked, anonymously otherwise; `reachable` is `yes`, `no` for a 404/403, or `unknown` for a rate limit or outage, and the link still attaches by name), `document` (a PDF, known by its address and never downloaded), or `page` (anything else: the `<title>` and meta or Open Graph description from the document head only).
+- `readable: false` means only the address could be read (an image, an empty or script-only page, an error).
+- Nothing behind the address — page text, README, issues — is read or kept. The observation is at most 4 KiB; title and description at most 200 characters.
+- Refused (`422`, `code: link`, with a sentence to show): not http/https, longer than 2,000 characters, a private, loopback, link-local or `.internal`-style host, a non-default port, credentials or a token/key/signature in the address, or a redirect to any of those (each of up to three hops is checked).
+
+The transcript gets a `form` entry naming the link by validated parts only — "You attached the GitHub repository owner/name." or "You attached a link to host." — never by its title, because the model hears form entries as the user's own words; the title appears only inside the untrusted observation. The model sees the observation as untrusted data and is told to name the workspace after it (never with a slash), set the Goal naming the source, and, for a repository, ask "Triage its issues" or "Work on the code" (Code Project asks for the folder; nothing is ever cloned). `code: version`, `closed`, and `not_found` as elsewhere. Returns `{ "session": … }`.
+
+**At Create:** a `github_repo` link on a GitHub Ops build binds that repository to the new workspace's GitHub MCP binding (`scope.repo`), after the template's tool step, whether or not GitHub is connected yet; every link is added to the workspace's `Sources` note (its title with all Markdown punctuation escaped, its address, its kind, the date; never the page's description); and "How this was set up" gets a `link` decision that names the link by its validated parts. None of these can fail the create.
+
+### Remove the Link
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/link/detach`
+
+```json
+{ "version": 4 }
+```
+
+Clears the attached link and says so in the transcript. Removing twice is harmless. Returns `{ "session": … }`.
 
 ### Abandon
 

@@ -132,6 +132,9 @@
       // buildResume opens straight into the open build: the user already
       // chose Resume (from the assistant's Today).
       buildResume: Boolean(options.buildResume),
+      // buildNote is one line the pane says once the resumed build is on
+      // screen (a link added to a build already in progress).
+      buildNote: String(options.buildNote || '').trim(),
       drafts: {
         workspace: cloneDraft(options.drafts?.workspace),
         group: cloneDraft(options.drafts?.group)

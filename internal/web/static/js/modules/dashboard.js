@@ -10408,11 +10408,18 @@
         folderRef: folderRef,
         linkRef: linkRef
       });
-    } catch (_) {
+    } catch (error) {
+      // Only the server's "no longer held" means the link is gone; any other
+      // refusal or a network failure keeps it attached for a retry.
+      var linkGone = Boolean(
+        !folderRef && error && error.data && error.data.code === 'link_context_unavailable'
+      );
       var notice = folderRef
         ? 'The folder context could not be validated. Nothing was sent to the model. Your draft is kept; reopen the conversation or pick again before sending.'
-        : 'The attached link is no longer held. Nothing was sent to the model. Your draft is kept; attach the link again before sending.';
-      if (!folderRef) window.PersonalAssistantLink?.lost?.();
+        : linkGone
+          ? 'The attached link is no longer held. Nothing was sent to the model. Your draft is kept; attach the link again before sending.'
+          : 'The attached link could not be checked just now. Nothing was sent to the model. Your draft is kept; try again.';
+      if (linkGone) window.PersonalAssistantLink?.lost?.();
       var failedRow = appendHomeAssistantMessage('assistant', notice);
       window.PersonalAssistantTranscript?.reply?.(failedRow);
       conversations && conversations.notify(notice);

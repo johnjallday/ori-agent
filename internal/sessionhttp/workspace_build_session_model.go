@@ -474,7 +474,9 @@ func buildPromptDraft(session *personalassistant.WorkspaceBuildSession) map[stri
 		out["attached_folder"] = session.Folder.Observation.Folder
 	}
 	if session.Link != nil {
-		out["attached_link"] = session.Link.Observation.DisplayName()
+		// Validated parts only; the title is in <link_observation>, framed
+		// as untrusted data.
+		out["attached_link"] = session.Link.Observation.SafeLabel()
 	}
 	return out
 }

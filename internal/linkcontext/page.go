@@ -89,7 +89,9 @@ func (p *HTTPPages) Fetch(ctx context.Context, target *url.URL) (Page, error) {
 	resp, err := p.client.Do(req)
 	if err != nil {
 		if errors.Is(err, ErrPageRedirect) {
-			return Page{}, err
+			// Bare: the client's error names the refused target, which may be
+			// a signed address that must not reach a log.
+			return Page{}, ErrPageRedirect
 		}
 		return page, nil
 	}
@@ -103,19 +105,19 @@ func (p *HTTPPages) Fetch(ctx context.Context, target *url.URL) (Page, error) {
 	}
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	mediaType = strings.ToLower(mediaType)
-	switch {
-	case mediaType == "application/pdf":
+	switch mediaType {
+	case "application/pdf":
 		// A document is known by its address. It is never downloaded here.
 		page.Kind = KindDocument
 		page.Title = documentTitle(resp.Request.URL)
 		return page, nil
-	case mediaType == "text/html" || mediaType == "application/xhtml+xml":
+	case "text/html", "application/xhtml+xml":
 		page.Kind = KindPage
 		page.Title, page.Description = readHead(io.LimitReader(resp.Body, pageMaxBytes))
-	case mediaType == "text/markdown" || mediaType == "text/x-markdown":
+	case "text/markdown", "text/x-markdown":
 		page.Kind = KindPage
 		page.Title = markdownTitle(io.LimitReader(resp.Body, pageMaxBytes))
-	case mediaType == "text/plain":
+	case "text/plain":
 		page.Kind = KindPage
 	default:
 		return page, nil

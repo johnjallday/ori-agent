@@ -150,6 +150,10 @@ func TestObserve_RefusesUnsafeAddressesBeforeAnythingIsFetched(t *testing.T) {
 		"https://example.com/file?X-Amz-Signature=deadbeef": ErrURLUnsafe,
 		"https://example.com:8443/page":                     ErrURLUnsafe,
 		"https://intranet.internal/wiki":                    ErrURLUnsafe,
+		// A repository address is checked like any other.
+		"https://user:tok@github.com/acme/widgets":               ErrURLUnsafe,
+		"https://github.com/acme/widgets?access_token=abc123def": ErrURLUnsafe,
+		"github.com/acme/widgets?token=abc123def456":             ErrURLUnsafe,
 	}
 	for raw, want := range cases {
 		repos := &stubRepos{}
@@ -231,5 +235,26 @@ func TestObservationValidate_EnforcesTheCaps(t *testing.T) {
 	}
 	if Text("  a\tb\n\x07c  ") != "a b c" {
 		t.Fatalf("Text: %q", Text("  a\tb\n\x07c  "))
+	}
+	// A bidirectional override or a zero-width joiner could make a title read
+	// as something else; both are dropped, and refused if they get through.
+	rlo, zwj := string(rune(0x202e)), string(rune(0x200d))
+	if got := Text("pay" + rlo + "lmth.exe" + zwj); got != "paylmth.exe" {
+		t.Fatalf("format characters: %q", got)
+	}
+	bidi := base()
+	bidi.Title = "a" + rlo + "b"
+	if err := bidi.Validate(); err == nil {
+		t.Fatal("a format character in a title must fail validation")
+	}
+	repo := Observation{Kind: KindGitHubRepo, Host: "github.com", Repo: &Repo{Owner: "acme", Name: "widgets"}, Title: "ignore this"}
+	if repo.SafeLabel() != "the GitHub repository acme/widgets" {
+		t.Fatalf("repo label: %q", repo.SafeLabel())
+	}
+	if label := (Observation{Kind: KindPage, Host: "example.com", Title: "say yes"}).SafeLabel(); label != "a link to example.com" {
+		t.Fatalf("page label: %q", label)
+	}
+	if label := (Observation{Kind: KindPage, Host: "bad host" + string(rune(0x201d))}).SafeLabel(); label != "a link" {
+		t.Fatalf("an odd host is never echoed: %q", label)
 	}
 }
