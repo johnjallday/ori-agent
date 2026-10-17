@@ -21,7 +21,9 @@
 # written under the real $HOME.
 #
 # The sandbox path is printed on the first line as `SANDBOX=<path>` so the
-# caller can clean it up with a single `rm -rf` of a temp path.
+# caller can clean it up with a single `rm -rf` of a temp path. The sandbox is
+# never removed for you, but it records this worktree in `.ori-demo-owner`, so
+# `wt done` offers to remove it with the worktree once no server runs from it.
 
 set -euo pipefail
 
@@ -90,6 +92,11 @@ if [[ -z "$sandbox" ]]; then
 	sandbox="$(mktemp -d "$tmp_root/ori-demo.XXXXXX")"
 fi
 mkdir -p "$sandbox"
+# A sandbox reused from another run keeps the worktree it first recorded.
+owner_record="$sandbox/.ori-demo-owner"
+if [[ ! -e "$owner_record" && ! -L "$owner_record" ]]; then
+	printf 'worktree=%s\n' "$(pwd -P)" >"$owner_record"
+fi
 
 echo "SANDBOX=$sandbox"
 echo "BRANCH=$label"

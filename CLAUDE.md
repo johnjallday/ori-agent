@@ -288,6 +288,7 @@ HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ORI_NO_DESKTOP_OPEN=1 ./bi
 Rules:
 - Start the server as a tracked background process (`run_in_background`) and stop it by PID — never `pkill -f <pattern>`. `./scripts/stop-demo-server.sh [port]` does this in one command and only stops an `ori-agent` on that port. `./scripts/wait-demo-server.sh [port] [seconds]` waits until the server answers (it builds first), instead of an inline polling loop.
 - Keep every smoke artifact under `$SMOKE_DIR`; cleanup is then a single `rm -rf "$SMOKE_DIR"` of a temp path. Nothing under the real `$HOME` should ever need deleting after a smoke test.
+- `scripts/demo-server.sh` never removes its sandbox, and a killed `wt demo` cannot. Both record the worktree in the sandbox (`.ori-demo-owner`), and `wt done` lists that worktree's leftover `$TMPDIR/ori-demo.*` sandboxes and offers to remove them, skipping any a process still runs from.
 - Verify the sandbox exists before starting the server. An empty `$SMOKE_DIR` is the failure above, not a no-op.
 - Run destructive commands (`rm`, `kill`) as standalone commands, not chained with `&&`/`;` onto safe ones — chaining forces a permission prompt for the whole compound and a denial kills the safe parts too.
 

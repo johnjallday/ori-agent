@@ -35,7 +35,8 @@ class ProjectTests(unittest.TestCase):
         (self.dev / "go.mod").write_text("module github.com/johnjallday/ori-agent\n")
         (self.dev / ".gitignore").write_text("/.env\n/.claude/\n/bin/\n")
         (self.dev / "scripts/lib").mkdir(parents=True)
-        for name in ("devtools-project.sh", "lib/devtools-selector.sh", "lib/devtools-project.zsh"):
+        for name in ("devtools-project.sh", "lib/devtools-selector.sh", "lib/devtools-project.zsh",
+                     "demo-server.sh"):
             shutil.copy(ROOT / "scripts" / name, self.dev / "scripts" / name)
         (self.dev / "scripts/ci-local.sh").write_text("# fixture target CI marker\n")
         (self.dev / "scripts/build-folder-picker.sh").write_text(
@@ -48,6 +49,12 @@ class ProjectTests(unittest.TestCase):
         fake.mkdir()
         self.executable(fake / "npm", '#!/bin/sh\nprintf "npm:%s:%s\\n" "$PWD" "$*" >> "$ADAPTER_EVENTS"\nexit 31\n')
         self.executable(fake / "make", '#!/bin/sh\nprintf "make:%s:%s\\n" "$PWD" "$*" >> "$ADAPTER_EVENTS"\nexit "${MAKE_EXIT:-0}"\n')
+        # Working directories of "every process": one unrelated, plus FAKE_LSOF_CWD.
+        self.executable(fake / "lsof", '''#!/bin/sh
+[ "${FAKE_LSOF_SILENT:-0}" = 1 ] && exit 1
+printf 'p1\\nfcwd\\nn/\\n'
+[ -z "${FAKE_LSOF_CWD:-}" ] || printf 'p2\\nfcwd\\nn%s\\n' "$FAKE_LSOF_CWD"
+''')
         self.executable(fake / "go", '''#!/bin/sh
 printf 'go:%s:%s\\n' "$PWD" "$*" >> "$ADAPTER_EVENTS"
 [ "${BUILD_FAIL:-0}" = 0 ] || exit 12
@@ -144,6 +151,71 @@ raise SystemExit(int(os.environ.get('SERVER_EXIT', '0')))
         record = json.loads((self.root / "server.json").read_text())
         self.assertTrue(Path(record["HOME"]).is_dir())
         self.assertEqual(record["PORT"], "8931")
+
+    def sandbox(self, name, owner=None):
+        path = self.root / name
+        path.mkdir()
+        if owner is not None:
+            (path / ".ori-demo-owner").write_text(f"worktree={owner}\n")
+        return path
+
+    def test_demo_records_its_worktree_in_the_sandbox(self):
+        self.adapter("demo", env={"ORI_KEEP_DEMO_SANDBOX": "1"})
+        sandbox = Path(json.loads((self.root / "server.json").read_text())["HOME"])
+        self.assertEqual((sandbox / ".ori-demo-owner").read_text(), f"worktree={self.feature}\n")
+
+    def test_demo_server_records_its_worktree_and_keeps_an_existing_record(self):
+        result = self.command(["bash", self.feature / "scripts/demo-server.sh", "9300"], self.feature)
+        sandbox = Path(result.stdout.splitlines()[0].removeprefix("SANDBOX="))
+        self.assertTrue(sandbox.name.startswith("ori-demo."))
+        self.assertEqual((sandbox / ".ori-demo-owner").read_text(), f"worktree={self.feature}\n")
+        reused = self.sandbox("ori-demo.reused", "/elsewhere")
+        self.command(["bash", self.feature / "scripts/demo-server.sh", "9301", reused], self.feature)
+        self.assertEqual((reused / ".ori-demo-owner").read_text(), "worktree=/elsewhere\n")
+
+    def test_demo_sandboxes_lists_and_removes_only_this_worktrees_idle_sandboxes(self):
+        mine = self.sandbox("ori-demo.mine", self.feature)
+        (mine / "sessions.db").write_text("data")
+        busy = self.sandbox("ori-demo.busy", self.feature)
+        (busy / "Desktop").mkdir()
+        other = self.sandbox("ori-demo.other", self.dev)
+        legacy = self.sandbox("ori-demo.legacy")
+        relative = self.sandbox("ori-demo.relative", "feature with spaces")
+        linked = self.sandbox("ori-demo.linked")
+        (linked / ".ori-demo-owner").symlink_to(mine / ".ori-demo-owner")
+        elsewhere = self.root / "not-a-sandbox"
+        elsewhere.mkdir()
+        (elsewhere / ".ori-demo-owner").write_text(f"worktree={self.feature}\n")
+        (self.root / "ori-demo.symlink").symlink_to(elsewhere)
+        (self.root / "ori-demo.file").write_text(f"worktree={self.feature}\n")
+        env = {"FAKE_LSOF_CWD": str(busy / "Desktop")}
+
+        listed = self.adapter("demo-sandboxes", "list", env=env).stdout
+        self.assertEqual(listed.splitlines(), [f"in-use\t{busy}", f"unmarked\t{legacy}", f"owned\t{mine}"])
+
+        removed = self.adapter("demo-sandboxes", "remove", env=env).stdout
+        self.assertEqual(removed.splitlines(), [f"removed\t{mine}"])
+        self.assertFalse(mine.exists())
+        for kept in (busy, other, legacy, relative, linked, elsewhere, self.root / "ori-demo.file"):
+            self.assertTrue(kept.exists(), kept)
+
+        # Once its server stops, the busy sandbox is removable too.
+        self.assertEqual(self.adapter("demo-sandboxes", "remove").stdout.splitlines(), [f"removed\t{busy}"])
+        self.assertTrue(legacy.is_dir() and other.is_dir())
+
+    def test_demo_sandboxes_keeps_everything_when_lsof_cannot_answer(self):
+        mine = self.sandbox("ori-demo.mine", self.feature)
+        env = {"FAKE_LSOF_SILENT": "1"}
+        self.assertEqual(self.adapter("demo-sandboxes", "list", env=env).stdout.splitlines(),
+                         [f"in-use\t{mine}"])
+        self.assertEqual(self.adapter("demo-sandboxes", "remove", env=env).stdout, "")
+        self.assertTrue(mine.is_dir())
+
+    def test_demo_sandboxes_requires_list_or_remove(self):
+        mine = self.sandbox("ori-demo.mine", self.feature)
+        for args in ((), ("purge",), ("remove", "extra")):
+            self.adapter("demo-sandboxes", *args, status=2)
+        self.assertTrue(mine.is_dir())
 
     def test_pre_pr_uses_target_and_propagates_failure_or_missing_gate(self):
         self.adapter("pre-pr", env={"MAKE_EXIT": "17"}, status=17)
