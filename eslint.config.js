@@ -170,6 +170,7 @@ export default defineConfig([
       'internal/web/static/js/modules/ori-operation-targets.js',
       'internal/web/static/js/modules/personal-assistant-message-actions.js',
       'internal/web/static/js/modules/personal-assistant-folder-context.js',
+      'internal/web/static/js/modules/personal-assistant-link.js',
       'internal/web/static/js/modules/personal-assistant-folder-presentation.js',
       'internal/web/static/js/modules/personal-assistant-folder-tree.js',
       'internal/web/static/js/modules/personal-assistant-folder-explorer.js',

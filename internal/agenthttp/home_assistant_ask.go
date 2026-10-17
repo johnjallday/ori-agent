@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
@@ -15,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/assistantops"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -49,6 +51,10 @@ const (
 	// browser builds the link; it is not a mutation and the server never
 	// executes it.
 	HomeActionOpenSetupQuest = "open_setup_quest"
+	// HomeActionBuildFromLink opens "Build with your assistant" with the
+	// conversation's attached link attached to the build. The browser does it;
+	// the server never executes it, and the host adds it, never the model.
+	HomeActionBuildFromLink = "workspace_build_from_link"
 )
 
 // homeMutatingActionTypes are the only action types that change state and thus
@@ -99,6 +105,9 @@ type HomeAssistantAskRequest struct {
 	// conversation. Its ID is opaque; the server derives the owner.
 	Conversation  *HomeAssistantConversationRef `json:"conversation,omitempty"`
 	FolderContext *HomeAssistantFolderRef       `json:"folder_context,omitempty"`
+	// LinkContext names a link the composer attached; the server holds what it
+	// observed and the turn uses that, never anything the browser sends.
+	LinkContext *HomeAssistantLinkRef `json:"link_context,omitempty"`
 	// Draft names the saved draft the conversation is working on, so the turn
 	// sees its current text. It is read, never written, by a turn.
 	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
@@ -128,6 +137,7 @@ type HomeAssistantAskResponse struct {
 	// Conversation is set only for a hired-assistant conversation turn.
 	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
 	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
+	LinkContext           *PersonalAssistantLinkState             `json:"link_context,omitempty"`
 	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
 	// FolderReviewContext is the canonical review summary given to the model for
 	// this turn: description only, with no offer ID, digest or control.
@@ -239,6 +249,10 @@ type HomeAssistantAskHandler struct {
 	FolderObservations PersonalAssistantFolderObservations
 	FolderSetups       PersonalAssistantFolderSetups
 	folderRequests     folderRequestGate
+	// Links observes a link the composer attaches; nil leaves Add link off.
+	Links     PersonalAssistantLinks
+	linksOnce sync.Once
+	heldLinks *linkcontext.HeldLinks
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.
 	Drafts PersonalAssistantDraftSaver
@@ -455,6 +469,21 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		intent = homeAssistantConversationIntent.Key
 	}
 
+	// A held link is reference data for an answered conversation turn, like a
+	// folder: never a confirmation, never outside the panel.
+	if req.LinkContext != nil {
+		if conversation == nil || req.ConfirmedAction != nil || (req.Context != nil && req.Context.Origin != "personal_assistant_panel") {
+			return linkTurnRefusal(identity, conversation)
+		}
+		linkTurn, err := h.prepareLinkTurn(req.LinkContext)
+		if err != nil {
+			return linkTurnRefusal(identity, conversation)
+		}
+		ctx = context.WithValue(ctx, linkTurnKey{}, linkTurn)
+		defer func() { linkTurn.finalize(&response) }()
+		intent = homeAssistantConversationIntent.Key
+	}
+
 	// Confirmed mutation path: execute only known action types (FR #24). The
 	// relationship is freshly resolved above so stale/replaced HQ state cannot
 	// execute a previously prepared action.
@@ -604,7 +633,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		answer, err := h.runModel(ctx, modelTurn{
 			system:      buildAssistantConversationSystemPrompt(workContext),
 			history:     history,
-			user:        buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft,
+			user:        buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft + linkTurnFrom(ctx).prompt(),
 			sources:     promptSources,
 			temperature: 0.6,
 		})

@@ -36,7 +36,10 @@ type HomeAssistantRouteHandler struct {
 	UserID                   string
 	PanelContext             func(context.Context, string, *HomeAssistantRouteContext) (*assistantcontext.Attribution, error)
 	FolderConversation       func(context.Context, *HomeAssistantConversationRef, *HomeAssistantFolderRef, *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error)
-	ConversationRoute        func(context.Context, *HomeAssistantConversationRef, *HomeAssistantRouteContext) error
+	// LinkConversation routes a turn that carries a held link to the
+	// assistant's conversation, as FolderConversation does for a folder.
+	LinkConversation  func(context.Context, *HomeAssistantConversationRef, *HomeAssistantLinkRef, *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error)
+	ConversationRoute func(context.Context, *HomeAssistantConversationRef, *HomeAssistantRouteContext) error
 	// OperationRequest reports an explicit request to operate the app that
 	// this installation can carry out. Such a request stays in the hired
 	// assistant's conversation, whatever else its words resemble.
@@ -110,6 +113,7 @@ type HomeAssistantRouteRequest struct {
 	Context       *HomeAssistantRouteContext    `json:"context,omitempty"`
 	Conversation  *HomeAssistantConversationRef `json:"conversation,omitempty"`
 	FolderContext *HomeAssistantFolderRef       `json:"folder_context,omitempty"`
+	LinkContext   *HomeAssistantLinkRef         `json:"link_context,omitempty"`
 }
 
 type HomeAssistantRouteContext struct {
@@ -344,6 +348,19 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		resp, err := h.FolderConversation(r.Context(), req.Conversation, req.FolderContext, req.Context)
 		if err != nil {
 			writeFolderError(w, err)
+			return
+		}
+		orihttp.WriteJSON(w, resp)
+		return
+	}
+	if req.LinkContext != nil {
+		if h.LinkConversation == nil {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Links can’t be discussed here.", "code": PersonalAssistantLinkUnavailable})
+			return
+		}
+		resp, err := h.LinkConversation(r.Context(), req.Conversation, req.LinkContext, req.Context)
+		if err != nil {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "The attached link is no longer held. Attach it again; your message is kept.", "code": PersonalAssistantLinkUnavailable})
 			return
 		}
 		orihttp.WriteJSON(w, resp)

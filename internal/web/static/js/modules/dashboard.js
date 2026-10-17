@@ -10372,7 +10372,7 @@
   // Explicit personal-folder turns must not enter local create/specialist
   // shortcuts, including an old natural-language yes. Capture the exact refs
   // once, validate at Route, and validate again at Ask; never fall back locally.
-  async function runPersonalFolderTurn(text, routeContext, folderRef) {
+  async function runPersonalFolderTurn(text, routeContext, folderRef, linkRef) {
     var conversations = window.PersonalAssistantConversation;
     var conversationRef = conversations && conversations.request(routeContext);
     clearHomeAssistantPlanning();
@@ -10382,15 +10382,20 @@
     homeAssistantState.pendingIntent = HOME_INTENTS.assistant_conversation;
     homeAssistantState.personalConversation = true;
     appendHomeAssistantMessage('user', text);
-    setHomeAssistantBusy(true, 'Checking folder context…');
+    setHomeAssistantBusy(
+      true,
+      folderRef ? 'Checking folder context…' : 'Checking the attached link…'
+    );
     renderHomeAssistantActions([]);
     try {
-      var route = await API.post('/api/home-assistant/route', {
+      var routeBody = {
         prompt: text,
         context: routeContext,
-        conversation: conversationRef,
-        folder_context: folderRef
-      });
+        conversation: conversationRef
+      };
+      if (folderRef) routeBody.folder_context = folderRef;
+      if (linkRef) routeBody.link_context = linkRef;
+      var route = await API.post('/api/home-assistant/route', routeBody);
       if (
         !route ||
         route.intent !== 'assistant_conversation' ||
@@ -10400,11 +10405,14 @@
       }
       await runHomeAssistantInline(text, routeContext, 'assistant_conversation', {
         conversationRef: conversationRef,
-        folderRef: folderRef
+        folderRef: folderRef,
+        linkRef: linkRef
       });
     } catch (_) {
-      var notice =
-        'The folder context could not be validated. Nothing was sent to the model. Your draft is kept; reopen the conversation or pick again before sending.';
+      var notice = folderRef
+        ? 'The folder context could not be validated. Nothing was sent to the model. Your draft is kept; reopen the conversation or pick again before sending.'
+        : 'The attached link is no longer held. Nothing was sent to the model. Your draft is kept; attach the link again before sending.';
+      if (!folderRef) window.PersonalAssistantLink?.lost?.();
       var failedRow = appendHomeAssistantMessage('assistant', notice);
       window.PersonalAssistantTranscript?.reply?.(failedRow);
       conversations && conversations.notify(notice);
@@ -10475,6 +10483,7 @@
       if (conversationRef) {
         payload.conversation = conversationRef;
         if (options.folderRef && !confirmedAction) payload.folder_context = options.folderRef;
+        if (options.linkRef && !confirmedAction) payload.link_context = options.linkRef;
         // The saved draft this conversation is working on, by Ticket ID, so
         // the turn reads its current text. A turn never writes it.
         var drafts = window.PersonalAssistantDrafts;
@@ -10826,6 +10835,21 @@
     var label = String(action.label || '').trim();
     var type = String(action.type || '').trim();
     if (!label || !type) return null;
+
+    // The host's own action for a conversation's attached link: open Create
+    // Workspace with the same address attached. The server never runs it.
+    if (type === 'workspace_build_from_link') {
+      var linkURL = String((action.arguments && action.arguments.url) || '').trim();
+      var links = window.PersonalAssistantLink;
+      if (!linkURL || !links || typeof links.startBuild !== 'function') return null;
+      return {
+        label: label,
+        variant: 'primary',
+        onClick: function () {
+          void links.startBuild(linkURL);
+        }
+      };
+    }
 
     var navigableTypes = { navigate: 1, open_workspace: 1, open_task: 1, open_session: 1 };
     if (navigableTypes[type]) {
@@ -13662,12 +13686,17 @@
     var text = String(prompt || '').trim();
     if (!text) return;
     var folderRouteContext = normalizeHomeRouteContext(options && options.routeContext);
+    var fromPanel = folderRouteContext.origin === 'personal_assistant_panel';
     var folderRef =
-      folderRouteContext.origin === 'personal_assistant_panel' &&
+      fromPanel &&
       window.PersonalAssistantFolderContext &&
       window.PersonalAssistantFolderContext.request();
-    if (folderRef) {
-      await runPersonalFolderTurn(text, folderRouteContext, folderRef);
+    // An attached link is checked by the host like a folder: the turn goes to
+    // the assistant's conversation, never a local shortcut.
+    var linkRef =
+      fromPanel && window.PersonalAssistantLink && window.PersonalAssistantLink.request();
+    if (folderRef || linkRef) {
+      await runPersonalFolderTurn(text, folderRouteContext, folderRef || null, linkRef || null);
       return;
     }
     var panelTurn = await runPersonalPanelTurn(text, folderRouteContext);
