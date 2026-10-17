@@ -80,7 +80,7 @@ test('a workspace proposal names its agent, workspace link and task or chat', ()
       workspace_name: 'Album 3',
       workspace_slug: 'album 3',
       agent: 'Scout',
-      task_id: '42',
+      task_id: '8fffe1ea-5c66-402f-b6e2-90aa95e0bd0d',
       observed_at: '2026-10-17T12:00:00Z'
     }
   });
@@ -88,15 +88,20 @@ test('a workspace proposal names its agent, workspace link and task or chat', ()
     agent: 'Scout',
     workspace: 'Album 3',
     href: '/workspaces/album%203',
-    run: 'from task 42',
+    task: '8fffe1ea',
+    taskHref: '/workspaces/album%203?panel=backlog&task=8fffe1ea-5c66-402f-b6e2-90aa95e0bd0d',
     observedAt: '2026-10-17T12:00:00Z'
   });
   const fromChat = workspaceProposalSource({
     source: { kind: 'workspace_agent', workspace_name: 'Album 3', agent: 'Scout' }
   });
-  assert.equal(fromChat.run, 'from chat');
+  assert.equal(fromChat.task, '');
   // A removed workspace keeps its recorded name and gets no link.
   assert.equal(fromChat.href, '');
+  const removedWithTask = workspaceProposalSource({
+    source: { kind: 'workspace_agent', task_id: '8fffe1ea-5c66' }
+  });
+  assert.equal(removedWithTask.taskHref, '');
   const anonymous = workspaceProposalSource({ source: { kind: 'workspace_agent' } });
   assert.equal(anonymous.agent, 'An agent');
   assert.equal(anonymous.workspace, 'a workspace');

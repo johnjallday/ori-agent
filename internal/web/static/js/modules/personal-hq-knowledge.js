@@ -7,6 +7,11 @@ export { reviewTextValid };
 
 const REVIEW_API = '/api/personal-assistant/knowledge';
 
+// The one explanation every global-memory control shows without an assistant
+// and a Personal HQ (personalassistant.GlobalMemoryUnavailableMessage).
+export const GLOBAL_MEMORY_UNAVAILABLE =
+  'Global memory needs a personal assistant with a Personal HQ. Set one up from Home.';
+
 const CATEGORIES = {
   how_you_work: 'How you work',
   people: 'People',
@@ -91,11 +96,17 @@ export function workspaceProposalSource(item) {
   const source = item?.source;
   if (!source || source.kind !== 'workspace_agent') return null;
   const slug = typeof source.workspace_slug === 'string' ? source.workspace_slug : '';
+  const taskID = typeof source.task_id === 'string' ? source.task_id : '';
   return {
     agent: source.agent || 'An agent',
     workspace: source.workspace_name || 'a workspace',
     href: slug ? `/workspaces/${encodeURIComponent(slug)}` : '',
-    run: source.task_id ? `from task ${source.task_id}` : 'from chat',
+    // Task IDs are UUIDs: show a short label and link to the task itself.
+    task: taskID ? taskID.slice(0, 8) : '',
+    taskHref:
+      taskID && slug
+        ? `/workspaces/${encodeURIComponent(slug)}?panel=backlog&task=${encodeURIComponent(taskID)}`
+        : '',
     observedAt: source.observed_at || ''
   };
 }
@@ -150,7 +161,17 @@ function workspaceSourceChip(attribution) {
   } else {
     chip.append(attribution.workspace);
   }
-  chip.append(` · ${attribution.run} · ${reviewDate(attribution.observedAt)}`);
+  if (!attribution.task) {
+    chip.append(' · from chat');
+  } else if (attribution.taskHref) {
+    chip.append(' · from task ');
+    const task = element('a', '', attribution.task);
+    task.href = attribution.taskHref;
+    chip.append(task);
+  } else {
+    chip.append(` · from task ${attribution.task}`);
+  }
+  chip.append(` · ${reviewDate(attribution.observedAt)}`);
   return chip;
 }
 
@@ -285,10 +306,14 @@ export function mountPersonalHQKnowledge(root = document) {
         approved.forEach(item => factsElement.append(renderItem(item)));
       }
       buildLink.hidden = true;
+      if (addButton) addButton.disabled = false;
       setStatus(`${queue.length} to review · ${approved.length} approved in Personal HQ`);
       return true;
     } catch (error) {
       buildLink.hidden = error.status !== 409;
+      // Without an assistant and a Personal HQ there is no global memory to
+      // save into; say so instead of letting a save fail.
+      if (addButton && error.status === 409) addButton.disabled = true;
       if (sourcesElement) {
         const warning =
           error.status === 409
@@ -301,7 +326,7 @@ export function mountPersonalHQKnowledge(root = document) {
       }
       setStatus(
         error.status === 409
-          ? 'Build or repair Personal HQ to review assistant memory. Your global profile is still available above.'
+          ? `${GLOBAL_MEMORY_UNAVAILABLE} Your global profile is still available above.`
           : 'Review state is unavailable. The latest approval status is unknown; refresh to verify it.',
         true
       );

@@ -78,7 +78,7 @@ func TestWorkspaceProposalOrigin_RoundTripsAwkwardLabels(t *testing.T) {
 	}{
 		{"separator in workspace", "Mix · Master", "Scout", "", WorkspaceProposalOrigin{WorkspaceName: "Mix - Master", Agent: "Scout"}},
 		{"separator in agent", "Album", "A · B", "7", WorkspaceProposalOrigin{WorkspaceName: "Album", Agent: "A - B", TaskID: "7"}},
-		{"unsafe workspace name", "Album‮3", "Scout", "7", WorkspaceProposalOrigin{Agent: "Scout", TaskID: "7"}},
+		{"unsafe workspace name", "Album" + string(rune(0x202e)) + "3", "Scout", "7", WorkspaceProposalOrigin{Agent: "Scout", TaskID: "7"}},
 		{"no agent", "Album", "", "", WorkspaceProposalOrigin{WorkspaceName: "Album", Agent: workspaceOriginNoAgent}},
 		{"over-long workspace name", strings.Repeat("w", workspaceOriginMaxLabel+1), "Scout", "", WorkspaceProposalOrigin{Agent: "Scout"}},
 	}
@@ -349,6 +349,18 @@ func TestReviewItemsLabelInterviewFactsApartFromFactsYouTold(t *testing.T) {
 	}
 	if kinds["Finish my portfolio"] != KnowledgeInterviewSourceKind || kinds["My manager is Mina."] != "explicit" {
 		t.Fatalf("source kinds = %v", kinds)
+	}
+}
+
+// The Profile page shows the same no-assistant explanation as the tool reply
+// and the Memory tab; the browser keeps its own copy of the sentence.
+func TestGlobalMemoryUnavailableMessageMatchesTheProfilePage(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "web", "static", "js", "modules", "personal-hq-knowledge.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "'"+GlobalMemoryUnavailableMessage+"'") {
+		t.Fatalf("personal-hq-knowledge.js does not carry %q", GlobalMemoryUnavailableMessage)
 	}
 }
 

@@ -381,7 +381,7 @@ func TestMemoryProposeGlobalTool_ValidatesBeforeCallingTheHost(t *testing.T) {
 		"empty":        `{"text":"  ","category":"people"}`,
 		"too long":     `{"text":"` + strings.Repeat("x", workspace.MemoryEntryMaxLen+1) + `","category":"people"}`,
 		"secret":       `{"text":"the api key is sk-abc1234567890def","category":"people"}`,
-		"bidi":         `{"text":"visible‮hidden","category":"people"}`,
+		"bidi":         `{"text":"visible` + string(rune(0x202e)) + `hidden","category":"people"}`,
 		"no category":  `{"text":"A fact."}`,
 		"bad category": `{"text":"A fact.","category":"secrets"}`,
 	} {
