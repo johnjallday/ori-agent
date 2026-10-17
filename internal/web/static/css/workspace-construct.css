@@ -2698,6 +2698,10 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-link .bi {
   color: var(--wc-faction);
 }
+.workspace-create-modal .workspace-review-card-url {
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+}
 .workspace-create-modal .workspace-build-pane__input {
   flex: 1 1 auto;
   min-height: 44px;

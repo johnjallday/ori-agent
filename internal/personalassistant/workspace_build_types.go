@@ -174,10 +174,12 @@ type BuildAssistant struct {
 // of POST /api/workspaces the wizard fills. Team keys stay raw because the
 // wizard derives them and the create handler is their one validator.
 type BuildDraft struct {
-	TemplateID             string                     `json:"template_id,omitempty"`
-	Blank                  bool                       `json:"blank,omitempty"`
-	Name                   string                     `json:"name,omitempty"`
-	Description            string                     `json:"description,omitempty"`
+	TemplateID  string `json:"template_id,omitempty"`
+	Blank       bool   `json:"blank,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Mission is the workspace goal Create sends: the form's Goal field.
+	Mission                string                     `json:"mission,omitempty"`
 	BlueprintInputs        map[string]json.RawMessage `json:"blueprint_inputs,omitempty"`
 	ParentID               string                     `json:"parent_id,omitempty"`
 	Color                  string                     `json:"color,omitempty"`

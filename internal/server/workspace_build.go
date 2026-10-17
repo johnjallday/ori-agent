@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
@@ -15,10 +16,22 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 )
 
-// newLinkObserver is the one observer every attach path shares: GitHub
-// repositories through the REST API (with the user's stored GitHub token when
-// one is connected and the vault is unlocked, anonymously otherwise), and
-// every other address through the bounded public page reader.
+var (
+	linkObserverOnce sync.Once
+	linkObserver     *linkcontext.Observer
+)
+
+// sharedLinkObserver is the one observer every attach path shares: the build
+// pane's Add link and the assistant composer's. It holds no per-user state.
+func sharedLinkObserver() *linkcontext.Observer {
+	linkObserverOnce.Do(func() { linkObserver = newLinkObserver() })
+	return linkObserver
+}
+
+// newLinkObserver reads GitHub repositories through the REST API (with the
+// user's stored GitHub token when one is connected and the vault is unlocked,
+// anonymously otherwise), and every other address through the bounded public
+// page reader.
 func newLinkObserver() *linkcontext.Observer {
 	token := func(ctx context.Context) (string, bool) {
 		value, ok, err := mcp.LoadStaticBearerToken(ctx, githubhttp.MCPServerConfig())
@@ -27,7 +40,7 @@ func newLinkObserver() *linkcontext.Observer {
 		}
 		return value, true
 	}
-	return linkcontext.NewObserver(linkcontext.NewGitHubResolver(nil, token), nil)
+	return linkcontext.NewObserver(linkcontext.NewGitHubResolver(nil, token), linkcontext.NewHTTPPages(nil))
 }
 
 // wireWorkspaceBuild wires "Build with your assistant": build sessions kept
@@ -82,7 +95,7 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 		deps.Folders = buildFolderObservations{builder: b}
 	}
 	if b.linkObserver == nil {
-		b.linkObserver = newLinkObserver()
+		b.linkObserver = sharedLinkObserver()
 	}
 	deps.Links = b.linkObserver
 	b.sessionHandler.SetWorkspaceBuild(deps)

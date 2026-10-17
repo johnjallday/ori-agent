@@ -8445,6 +8445,7 @@ const sessionManager = {
       details +
       this.renderBlueprintInputsReceipt() +
       this.renderBuildFolderReceipt() +
+      this.renderBuildLinkReceipt(selectedTemplate) +
       this.renderExistingProjectReceipt(selectedTemplate) +
       this.renderWorkspaceGroupRequirementReceipt(selectedTemplate) +
       this.renderWorkspaceReceiptTeam(view)
@@ -12387,6 +12388,12 @@ const sessionManager = {
         field: document.getElementById('folderDescriptionInput')
       };
     }
+    if (key === 'goal') {
+      return {
+        anchor: document.getElementById('folderGoalLabel'),
+        field: document.getElementById('folderGoalInput')
+      };
+    }
     if (key === 'parent') {
       return {
         anchor: document.getElementById('folderParentLabel'),
@@ -12470,6 +12477,7 @@ const sessionManager = {
     const id = String(target.id || '');
     if (id === 'folderNameInput') return 'name';
     if (id === 'folderDescriptionInput') return 'description';
+    if (id === 'folderGoalInput') return 'goal';
     if (id === 'folderParentSelect') return 'parent';
     if (target.closest?.('.folder-color-btn')) return 'color';
     const inputID = target.closest?.('[data-input-id]')?.dataset?.inputId;
@@ -12576,6 +12584,26 @@ const sessionManager = {
           if (input.dataset) input.dataset.autofillDescription = '';
           applied.push('description');
           this.markWorkspaceBuildChosen('description', name, { animate });
+        }
+      }
+      if (has('mission')) {
+        // The Goal field mirrors the blueprint's goal or the description until
+        // someone writes in it. A goal equal to that mirror is the mirror (a
+        // resumed draft records it too); any other is the assistant's, and it
+        // stays put like a typed one.
+        const input = document.getElementById('folderGoalInput');
+        const goal = String(value.mission || '');
+        const mirror = this.mirroredWorkspaceGoal({
+          description: document.getElementById('folderDescriptionInput')?.value || '',
+          templateGoal: this.selectedTemplateGoal()
+        });
+        if (input && goal.trim() && goal.trim() !== mirror.trim()) {
+          input.value = goal;
+          if (input.dataset) input.dataset.goalEdited = '1';
+          applied.push('goal');
+          this.markWorkspaceBuildChosen('goal', name, { animate });
+        } else if (input) {
+          this.syncWorkspaceGoalMirror();
         }
       }
       if (value.blueprint_inputs && typeof value.blueprint_inputs === 'object') {
@@ -12789,6 +12817,7 @@ const sessionManager = {
     'blank',
     'name',
     'description',
+    'mission',
     'blueprint_inputs',
     'parent_id',
     'color',
@@ -13320,6 +13349,50 @@ const sessionManager = {
           <span class="workspace-review-card-label">Attached folder</span>
           <span class="workspace-review-card-meta">${this.escapeHtml(name)} · ${files} ${files === 1 ? 'file' : 'files'} observed</span>
           <span class="workspace-review-card-note">Ori will link this folder to the workspace. Nothing in it is moved or changed; its contents have not been read.</span>
+        </div>
+      </div>`;
+  },
+
+  // buildLinkReceiptView is Review's statement of the link attached in the
+  // conversation, and what Create does with it for the chosen blueprint: a
+  // repository is bound to a GitHub Ops workspace; any other pairing makes the
+  // link the workspace's starting source. null when there is nothing to say.
+  buildLinkReceiptView(session, template) {
+    const observation = session?.link?.observation;
+    if (!observation || session.status !== 'open') return null;
+    const repo = observation.repo && typeof observation.repo === 'object' ? observation.repo : null;
+    const name = String(observation.title || repo?.full_name || observation.host || 'Link').trim();
+    const kind =
+      observation.kind === 'github_repo'
+        ? 'GitHub repository'
+        : observation.kind === 'document'
+          ? 'Document'
+          : 'Page';
+    const templateId = String(template?.id || '')
+      .split(':')
+      .pop();
+    const binds = observation.kind === 'github_repo' && templateId === 'github-ops' && repo;
+    const note = binds
+      ? `Ori will bind this workspace to ${repo.full_name}. If GitHub isn’t connected yet, its setup asks you to connect it first.`
+      : 'Ori will add this link to the workspace’s Sources note and keep it in “How this was set up”. Nothing behind the link has been read.';
+    return { name, kind, url: String(observation.url || ''), note, binds: Boolean(binds) };
+  },
+
+  renderBuildLinkReceipt(selectedTemplate) {
+    const view = this.buildLinkReceiptView(this.workspaceBuild?.session, selectedTemplate);
+    if (!view) return '';
+    // A link's title is whatever a web page said about itself, so it is
+    // escaped here unconditionally rather than through escapeHtml, which
+    // passes text through unchanged when the note editor is not loaded.
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => entities[ch]);
+    return `
+      <div class="workspace-review-card" data-build-link-receipt>
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Attached link</span>
+          <span class="workspace-review-card-meta">${escape(view.name)} · ${escape(view.kind)}</span>
+          <span class="workspace-review-card-meta workspace-review-card-url">${escape(view.url)}</span>
+          <span class="workspace-review-card-note">${escape(view.note)}</span>
         </div>
       </div>`;
   },

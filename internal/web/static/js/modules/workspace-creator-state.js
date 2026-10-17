@@ -255,6 +255,7 @@
   const BUILD_PATCH_FIELDS = {
     name: ['name'],
     description: ['description'],
+    goal: ['mission'],
     inputs: ['blueprint_inputs'],
     parent: ['parent_id'],
     color: ['color'],

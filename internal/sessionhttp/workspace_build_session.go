@@ -554,6 +554,7 @@ func withoutFormEdits(outcome buildOutcome, before, after personalassistant.Buil
 		buildFieldBlueprint:   before.Blank != after.Blank || before.TemplateID != after.TemplateID,
 		buildFieldName:        before.Name != after.Name,
 		buildFieldDescription: before.Description != after.Description,
+		buildFieldGoal:        before.Mission != after.Mission,
 		buildFieldInputs:      !reflect.DeepEqual(before.BlueprintInputs, after.BlueprintInputs),
 		buildFieldParent:      before.ParentID != after.ParentID,
 		buildFieldTags:        !reflect.DeepEqual(before.Tags, after.Tags),
@@ -565,7 +566,7 @@ func withoutFormEdits(outcome buildOutcome, before, after personalassistant.Buil
 	kept := []string{}
 	dropped := false
 	for _, field := range []string{
-		buildFieldBlueprint, buildFieldName, buildFieldDescription, buildFieldInputs, buildFieldParent,
+		buildFieldBlueprint, buildFieldName, buildFieldDescription, buildFieldGoal, buildFieldInputs, buildFieldParent,
 		buildFieldAskFolder, buildFieldTeam, buildFieldTags, buildFieldColor,
 	} {
 		if !patch.sets(field) {
@@ -1077,6 +1078,13 @@ func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspace
 		return
 	}
 	summary := buildSummaryFor(finished, created)
+	// The link goes in after every create step, then its line joins the
+	// summary, which states what was actually done.
+	if link := finished.Link; link != nil {
+		if decision := h.recordCreateWorkspaceBuildLink(ctx, workspaceID, link.Observation, created); decision != nil {
+			summary.Decisions = append(summary.Decisions, *decision)
+		}
+	}
 	if err := h.workspaceTaskStore.Update(workspaceID, func(w *agentworkspace.Workspace) error {
 		provenance := w.GetTemplateProvenance()
 		if provenance == nil {

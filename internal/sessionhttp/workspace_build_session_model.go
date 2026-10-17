@@ -45,10 +45,11 @@ type buildReplyChoice struct {
 }
 
 type buildReplyPatch struct {
-	Set         []string          `json:"set" jsonschema_description:"Names of the fields below that this reply sets: blueprint_id, name, description, inputs, parent_id, ask_folder, team, tags, color."`
+	Set         []string          `json:"set" jsonschema_description:"Names of the fields below that this reply sets: blueprint_id, name, description, goal, inputs, parent_id, ask_folder, team, tags, color."`
 	BlueprintID string            `json:"blueprint_id" jsonschema_description:"A blueprint id from the catalog, or empty for Blank."`
 	Name        string            `json:"name" jsonschema_description:"The workspace name, at most 80 characters."`
 	Description string            `json:"description" jsonschema_description:"What the workspace is for, one or two sentences."`
+	Goal        string            `json:"goal" jsonschema_description:"The workspace's goal: one sentence it works toward, at most 300 characters. Empty keeps the blueprint's own goal."`
 	Inputs      []buildReplyInput `json:"inputs" jsonschema_description:"Values for the blueprint's declared inputs."`
 	ParentID    string            `json:"parent_id" jsonschema_description:"A group id from the list of groups, or empty for no group."`
 	AskFolder   bool              `json:"ask_folder" jsonschema_description:"True to offer the user a folder picker for an existing project."`
@@ -101,6 +102,7 @@ const (
 	buildFieldBlueprint   = "blueprint_id"
 	buildFieldName        = "name"
 	buildFieldDescription = "description"
+	buildFieldGoal        = "goal"
 	buildFieldInputs      = "inputs"
 	buildFieldParent      = "parent_id"
 	buildFieldAskFolder   = "ask_folder"
@@ -127,6 +129,8 @@ func (p buildReplyPatch) sets(field string) bool {
 		return strings.TrimSpace(p.Name) != ""
 	case buildFieldDescription:
 		return strings.TrimSpace(p.Description) != ""
+	case buildFieldGoal:
+		return strings.TrimSpace(p.Goal) != ""
 	case buildFieldInputs:
 		return len(p.Inputs) > 0
 	case buildFieldParent:
@@ -442,6 +446,7 @@ func buildPromptDraft(session *personalassistant.WorkspaceBuildSession) map[stri
 		"blank":        draft.Blank,
 		"name":         draft.Name,
 		"description":  draft.Description,
+		"goal":         draft.Mission,
 		"parent_id":    draft.ParentID,
 		"tags":         draft.Tags,
 		"color":        draft.Color,
@@ -549,7 +554,7 @@ func callBuildModel(ctx context.Context, model WorkspaceBuildModel, system strin
 const buildJSONInstruction = `
 Reply with one JSON object only, no prose around it, with exactly these keys:
 {"say":"","ask":{"question":"","choices":[{"id":"","label":""}],"allow_free_text":true},
-"patch":{"set":[],"blueprint_id":"","name":"","description":"","inputs":[{"id":"","value":""}],"parent_id":"","ask_folder":false,
+"patch":{"set":[],"blueprint_id":"","name":"","description":"","goal":"","inputs":[{"id":"","value":""}],"parent_id":"","ask_folder":false,
 "team":{"mode":"","agents":[{"name":"","action":"","rename":"","model":"","provider":"","system_prompt":""}],"roles":[{"role_id":"","mode":"","agent_name":""}],"saved_agents":[]},
 "tags":[],"color":""},"why":[{"section":"","text":""}],"alternatives":[{"blueprint_id":"","reason":""}],"ready":false,"create_now":false}`
 
