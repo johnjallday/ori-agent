@@ -11644,7 +11644,9 @@ const sessionManager = {
       abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {}),
       folderChoices: () => call('GET', `${base}/folder-choices`),
       folder: (id, body) => call('POST', sessionURL(id, 'folder'), body),
-      detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body)
+      detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
+      link: (id, body) => call('POST', sessionURL(id, 'link'), body),
+      detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body)
     };
   },
 
@@ -11682,6 +11684,12 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-folder-remove', () => {
       void this.detachWorkspaceBuildFolder();
+    });
+    modal.addEventListener('workspace-build-link', event => {
+      void this.attachWorkspaceBuildLink(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-link-remove', () => {
+      void this.detachWorkspaceBuildLink();
     });
     // Bootstrap focuses the dialog once it is shown; in build mode the
     // conversation is where the user starts, so focus moves to the composer.
@@ -11786,7 +11794,10 @@ const sessionManager = {
       // folder chooser for builds.
       folders: availability?.folders === true,
       folderPending: false,
-      folderGeneration: 0
+      folderGeneration: 0,
+      // Add link likewise, when the server wires the link observer.
+      links: availability?.links === true,
+      linkPending: false
     };
     this.mountWorkspaceBuildPane();
     // A slow availability read must not replace the wizard the user is already using.
@@ -11802,7 +11813,7 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
-    pane.mount({ assistant: build.assistant, folders: build.folders });
+    pane.mount({ assistant: build.assistant, folders: build.folders, links: build.links });
     this.syncWorkspaceBuildPresentation();
   },
 
@@ -11980,6 +11991,7 @@ const sessionManager = {
       build.busy ||
       build.turnPending ||
       build.folderPending ||
+      build.linkPending ||
       !this.workspaceBuildAssisted()
     )
       return;
@@ -12268,7 +12280,11 @@ const sessionManager = {
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
       const folder = String(this.workspaceBuild?.session?.folder?.observation?.folder || '').trim();
-      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}`;
+      const linkObservation = this.workspaceBuild?.session?.link?.observation;
+      const link = String(
+        linkObservation?.title || linkObservation?.repo?.full_name || linkObservation?.host || ''
+      ).trim();
+      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}${link ? ` · Link: ${link}` : ''}`;
     }
   },
 
@@ -12959,16 +12975,24 @@ const sessionManager = {
   // could ever stop the key itself.
   consumeWorkspaceBuildEscape() {
     const pane = this.workspaceBuildPane();
-    if (!this.workspaceBuild || !pane?.folderChooserOpen?.()) return false;
-    pane.closeFolderChooser();
-    return true;
+    if (!this.workspaceBuild || !pane) return false;
+    if (pane.folderChooserOpen?.()) {
+      pane.closeFolderChooser();
+      return true;
+    }
+    if (pane.linkFieldOpen?.()) {
+      pane.closeLinkField();
+      return true;
+    }
+    return false;
   },
 
-  // A folder request never overlaps a turn, the draft flush before a turn, or
-  // another folder request: each would move the session's version under the
-  // other, and the loser's 409 would cost the user what they typed.
+  // A folder or link request never overlaps a turn, the draft flush before a
+  // turn, or another attachment request: each would move the session's
+  // version under the other, and the loser's 409 would cost the user what
+  // they typed.
   workspaceBuildFolderLocked(build) {
-    return Boolean(build.busy || build.turnPending || build.folderPending);
+    return Boolean(build.busy || build.turnPending || build.folderPending || build.linkPending);
   },
 
   async openWorkspaceBuildFolderChooser() {
@@ -13153,6 +13177,114 @@ const sessionManager = {
       if (this.workspaceBuild === build) {
         build.folderPending = false;
         pane.setFolderBusy(false);
+        pane.focusComposer?.();
+      }
+    }
+  },
+
+  // ----- Add link (the pane's own) -----
+  //
+  // One link per build. The server reads what the address says about itself
+  // (a page's title and description, or a GitHub repository's public facts),
+  // keeps that on the session for the model, and attaching another replaces
+  // it. A refused address is said under the field, which stays open with the
+  // typed address so it can be fixed.
+
+  async attachWorkspaceBuildLink(detail = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    const url = String(detail.url || '').trim();
+    if (!url) {
+      pane.linkFieldStatus(pane.COPY.linkEmpty, true);
+      return;
+    }
+    build.linkPending = true;
+    pane.setLinkBusy(true);
+    pane.linkFieldStatus(pane.COPY.linkChecking);
+    let attached = false;
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      let result;
+      try {
+        result = await this.workspaceBuildApi().link(build.session.id, {
+          url,
+          version: Number(build.session.version) || 0
+        });
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+        if (this.workspaceBuild === build) {
+          pane.linkFieldStatus('The build moved on in another tab. Attach the link again.', true);
+        }
+        return;
+      }
+      if (result?.status === 409 && result.body?.code === 'unavailable') {
+        this.failWorkspaceBuild();
+        return;
+      }
+      const session = result?.body?.session || null;
+      if (!result?.ok || !session) {
+        pane.linkFieldStatus(
+          String(result?.body?.error || '').trim() ||
+            'That link could not be used. Your draft is unchanged.',
+          true
+        );
+        return;
+      }
+      this.adoptWorkspaceBuildSession(session);
+      attached = true;
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.linkPending = false;
+        pane.setLinkBusy(false);
+        if (attached) {
+          pane.linkAttachedDone();
+          pane.showLine(pane.COPY.linkAttached);
+          pane.focusComposer?.();
+        }
+      }
+    }
+  },
+
+  async detachWorkspaceBuildLink() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session?.link || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    build.linkPending = true;
+    pane.setLinkBusy(true);
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      let result;
+      try {
+        result = await this.workspaceBuildApi().detachLink(build.session.id, {
+          version: Number(build.session.version) || 0
+        });
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+        return;
+      }
+      const session = result?.body?.session || null;
+      if (!result?.ok || !session) {
+        pane.showLine('The link could not be removed. Try again.');
+        return;
+      }
+      this.adoptWorkspaceBuildSession(session);
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.linkPending = false;
+        pane.setLinkBusy(false);
         pane.focusComposer?.();
       }
     }

@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -154,6 +155,15 @@ type BuildFolder struct {
 	Observation foldercontext.Observation `json:"observation"`
 }
 
+// BuildLink is the link the user attached to the build from the pane's own
+// Add link: what the page or repository says about itself (title,
+// description, host, kind, a repository's public facts), never what it
+// contains. The observation is self-contained: Create needs nothing the
+// server holds to act on it.
+type BuildLink struct {
+	Observation linkcontext.Observation `json:"observation"`
+}
+
 // BuildAssistant is the face the pane shows: the hired assistant's.
 type BuildAssistant struct {
 	DisplayName string                 `json:"display_name"`
@@ -218,6 +228,9 @@ type WorkspaceBuildSession struct {
 	Retry     *BuildRetry `json:"retry,omitempty"`
 	// Folder is the folder the user attached in the pane, if any.
 	Folder *BuildFolder `json:"folder,omitempty"`
+	// Link is the link the user attached in the pane, if any. One at a time:
+	// attaching another replaces it.
+	Link *BuildLink `json:"link,omitempty"`
 	// TurnCount counts the user's own turns; FirstRequest is their first
 	// description, both kept for the workspace's provenance.
 	TurnCount          int    `json:"turn_count"`
@@ -275,6 +288,7 @@ func (s *WorkspaceBuildSession) Settle() {
 	s.Applied = nil
 	s.Retry = nil
 	s.Folder = nil
+	s.Link = nil
 	s.Draft = BuildDraft{Name: s.Draft.Name}
 }
 

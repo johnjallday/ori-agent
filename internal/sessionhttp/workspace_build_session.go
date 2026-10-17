@@ -64,6 +64,9 @@ type WorkspaceBuildDeps struct {
 	// Folders observes a folder the user attaches in the pane and resolves it
 	// at Create. Nil leaves the pane without Add folder.
 	Folders WorkspaceBuildFolders
+	// Links observes a link the user attaches in the pane. Nil leaves the
+	// pane without Add link.
+	Links WorkspaceBuildLinks
 }
 
 // SetWorkspaceBuild wires build sessions. Without it every build endpoint
@@ -148,12 +151,16 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		h.createWorkspaceBuildSession(w, r)
 	default:
 		parts := strings.Split(rest, "/")
-		if len(parts) == 3 && strings.TrimSpace(parts[0]) != "" && parts[1] == "folder" && parts[2] == "detach" {
+		if len(parts) == 3 && strings.TrimSpace(parts[0]) != "" && (parts[1] == "folder" || parts[1] == "link") && parts[2] == "detach" {
 			if r.Method != http.MethodPost {
 				_ = orihttp.RespondMethodNotAllowed(w)
 				return
 			}
-			h.postWorkspaceBuildFolderDetach(w, r, parts[0])
+			if parts[1] == "link" {
+				h.postWorkspaceBuildLinkDetach(w, r, parts[0])
+			} else {
+				h.postWorkspaceBuildFolderDetach(w, r, parts[0])
+			}
 			return
 		}
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
@@ -170,7 +177,9 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			h.abandonWorkspaceBuildSession(w, r, id)
 		case action == "folder" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildFolder(w, r, id)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder":
+		case action == "link" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildLink(w, r, id)
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -230,8 +239,10 @@ func (h *Handler) getWorkspaceBuildAvailability(w http.ResponseWriter, r *http.R
 	if !readiness.available {
 		body["reason"] = readiness.reason
 	} else {
-		// Whether the pane may offer Add folder (the folder seam is wired).
+		// Whether the pane may offer Add folder and Add link (each seam is
+		// wired).
 		body["folders"] = h.workspaceBuild.Folders != nil
+		body["links"] = h.workspaceBuild.Links != nil
 	}
 	_ = orihttp.RespondJSON(w, http.StatusOK, body)
 }

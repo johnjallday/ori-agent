@@ -418,6 +418,12 @@ func buildSystemPrompt(input buildPromptInput) string {
 			fmt.Fprintf(&b, "<folder_observation>%s</folder_observation>\n\n", data)
 		}
 	}
+	if link := session.Link; link != nil {
+		if data, err := buildLinkPromptJSON(link.Observation); err == nil {
+			b.WriteString(linkPromptInstructions(link.Observation, session.Folder != nil))
+			fmt.Fprintf(&b, "<link_observation>%s</link_observation>\n\n", data)
+		}
+	}
 	if len(session.Rejections) > 0 {
 		fmt.Fprintf(&b, "The form refused these from your last reply:\n%s\n\n", rejectionsJSON)
 	}
@@ -461,6 +467,9 @@ func buildPromptDraft(session *personalassistant.WorkspaceBuildSession) map[stri
 	}
 	if session.Folder != nil {
 		out["attached_folder"] = session.Folder.Observation.Folder
+	}
+	if session.Link != nil {
+		out["attached_link"] = session.Link.Observation.DisplayName()
 	}
 	return out
 }

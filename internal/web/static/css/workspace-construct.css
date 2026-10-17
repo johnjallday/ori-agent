@@ -2567,7 +2567,9 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-folder__hint[hidden],
 .workspace-create-modal .workspace-build-folder__summary[hidden],
 .workspace-create-modal .workspace-build-folder-chooser[hidden],
-.workspace-create-modal .workspace-build-folder-chooser__note[hidden] {
+.workspace-create-modal .workspace-build-folder-chooser__note[hidden],
+.workspace-create-modal .workspace-build-link-field[hidden],
+.workspace-create-modal .workspace-build-link-field .folder-path-entry__status[hidden] {
   display: none;
 }
 .workspace-create-modal .workspace-build-pane__chip {
@@ -2671,6 +2673,30 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-folder-chooser__actions {
   display: flex;
   justify-content: flex-end;
+}
+/* Add link: one inline field, the same frame as the Add folder sheet. */
+.workspace-create-modal .workspace-build-link-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+}
+.workspace-create-modal .workspace-build-link-field .folder-path-entry__input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.workspace-create-modal .workspace-build-link-field .folder-path-entry__status {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-link-field .folder-path-entry__status.is-error {
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-build-link .bi {
+  color: var(--wc-faction);
 }
 .workspace-create-modal .workspace-build-pane__input {
   flex: 1 1 auto;

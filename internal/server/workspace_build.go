@@ -6,11 +6,29 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
+	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
+
+// newLinkObserver is the one observer every attach path shares: GitHub
+// repositories through the REST API (with the user's stored GitHub token when
+// one is connected and the vault is unlocked, anonymously otherwise), and
+// every other address through the bounded public page reader.
+func newLinkObserver() *linkcontext.Observer {
+	token := func(ctx context.Context) (string, bool) {
+		value, ok, err := mcp.LoadStaticBearerToken(ctx, githubhttp.MCPServerConfig())
+		if err != nil || !ok {
+			return "", false
+		}
+		return value, true
+	}
+	return linkcontext.NewObserver(linkcontext.NewGitHubResolver(nil, token), nil)
+}
 
 // wireWorkspaceBuild wires "Build with your assistant": build sessions kept
 // beside the assistant's knowledge under the HQ, the same creation catalog
@@ -63,6 +81,10 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 	if b.personalAssistantFolderDigest != nil {
 		deps.Folders = buildFolderObservations{builder: b}
 	}
+	if b.linkObserver == nil {
+		b.linkObserver = newLinkObserver()
+	}
+	deps.Links = b.linkObserver
 	b.sessionHandler.SetWorkspaceBuild(deps)
 }
 
