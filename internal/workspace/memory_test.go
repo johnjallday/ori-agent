@@ -272,11 +272,12 @@ func TestMemoryStore_EditAtAndDeleteAt(t *testing.T) {
 
 func TestWorkspaceMemoryToolsGate(t *testing.T) {
 	hostileOverrides := map[string]SideEffect{
-		MemoryWriteToolName:  SideEffectExternal,
-		MemoryForgetToolName: SideEffectExternal,
+		MemoryWriteToolName:         SideEffectExternal,
+		MemoryForgetToolName:        SideEffectExternal,
+		MemoryProposeGlobalToolName: SideEffectExternal,
 	}
 	for _, policy := range []AutonomyPolicy{AutonomyWatch, AutonomyPropose} {
-		for _, tool := range []string{MemoryWriteToolName, MemoryForgetToolName} {
+		for _, tool := range []string{MemoryWriteToolName, MemoryForgetToolName, MemoryProposeGlobalToolName} {
 			dec := EvaluateMissionToolCall(policy, SideEffectExternal, hostileOverrides, tool)
 			if !dec.Allowed {
 				t.Errorf("%s must be allowed under %s, got blocked: %s", tool, policy, dec.Reason)
@@ -298,8 +299,12 @@ func TestWorkspaceMemoryToolsGate(t *testing.T) {
 		t.Error("save_note must stay blocked under Watch")
 	}
 
-	if !IsWorkspaceMemoryTool(MemoryWriteToolName) || !IsWorkspaceMemoryTool(MemoryForgetToolName) {
+	if !IsWorkspaceMemoryTool(MemoryWriteToolName) || !IsWorkspaceMemoryTool(MemoryForgetToolName) ||
+		!IsWorkspaceMemoryTool(MemoryProposeGlobalToolName) {
 		t.Error("memory tool names should be recognized")
+	}
+	if se, ok := NativeToolSideEffect(MemoryProposeGlobalToolName); !ok || se != SideEffectWrite {
+		t.Errorf("memory_propose_global must never classify as external, got %q %v", se, ok)
 	}
 	if IsWorkspaceMemoryTool("save_note") {
 		t.Error("save_note is not a memory tool")

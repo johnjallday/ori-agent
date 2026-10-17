@@ -13,9 +13,10 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await expect(page.getByRole('heading', { name: 'What Ori knows about you' })).toBeVisible();
     await expect(page.locator('#personalHQKnowledge')).toHaveAttribute('aria-busy', 'false');
     await expect(page.locator('#personalHQKnowledgeStatus')).toContainText(
-      'Build or repair Personal HQ'
+      'Global memory needs a personal assistant with a Personal HQ. Set one up from Home.'
     );
     await expect(page.getByRole('link', { name: 'Build or repair Personal HQ' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save this fact' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Scan recent apps' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Shared assistant learnings' })).toBeVisible();
     for (const section of ['You', 'How you work', 'People', 'Projects', 'Routines', 'Sources']) {

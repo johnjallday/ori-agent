@@ -56,9 +56,10 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 	eventBus := b.eventBus
 	userStore := b.userStore
 	userProvider := b.userProvider
-	return func(workspaceID, agentName string) []toolapi.Tool {
+	return func(workspaceID, agentName, taskID string) []toolapi.Tool {
 		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID, b.hqVisibilityDeps())
 		provider.SetExecutingAgent(agentName)
+		provider.SetRunTaskID(taskID)
 		if fileStore != nil {
 			provider.SetFileStore(fileStore)
 		}
@@ -199,6 +200,20 @@ func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
 				return time.Time{}, err
 			}
 			return current.UpdatedAt, nil
+		},
+		// The tool supplies the verified workspace, agent and task; the host
+		// adds the user and the workspace's current name.
+		ProposeGlobal: func(ctx context.Context, req personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error) {
+			if b.personalAssistantLearning == nil {
+				return "", personalassistant.ErrGlobalMemoryUnavailable
+			}
+			if b.workspaceStore != nil {
+				if ws, err := b.workspaceStore.Get(req.WorkspaceID); err == nil && ws != nil {
+					req.WorkspaceName = ws.Name
+				}
+			}
+			result, _, err := b.personalAssistantLearning.ProposeWorkspaceFact(ctx, userprofile.LocalUserID, req)
+			return result, err
 		},
 	}
 }

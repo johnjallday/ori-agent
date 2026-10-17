@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -36,6 +37,9 @@ type WorkspaceToolProvider struct {
 	// taskID, when set, marks this chat as scoped to a single task and
 	// enables the current_task / task_runs tools.
 	taskID string
+	// runTaskID is the task a task run executes. Unlike taskID it enables no
+	// tools; it only attributes a global-memory proposal to the run.
+	runTaskID string
 
 	// executingAgent is the name of the agent driving this provider. It gates
 	// coordinator-only tools (delegate_task) to the workspace coordinator.
@@ -96,6 +100,11 @@ type HQVisibilityDeps struct {
 	// all workspace tools, because profile_set mutates one global user profile.
 	// A nonzero version requires an atomic versioned commit after this check.
 	ProfileWriteGuard func(context.Context, string, map[string]any) (time.Time, error)
+	// ProposeGlobal sends one fact about the user to the Personal HQ review
+	// queue (global memory). memory_propose_global fills the request from the
+	// model's category and text plus this provider's verified workspace, agent
+	// and task; the host adds the user and workspace name.
+	ProposeGlobal func(context.Context, personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error)
 }
 
 // mcpServerLister allows listing available MCP servers.
@@ -168,6 +177,11 @@ func (p *WorkspaceToolProvider) SetTaskID(taskID string) {
 	p.taskID = strings.TrimSpace(taskID)
 }
 
+// SetRunTaskID records the task a task run executes, for attribution only.
+func (p *WorkspaceToolProvider) SetRunTaskID(taskID string) {
+	p.runTaskID = strings.TrimSpace(taskID)
+}
+
 // SetExecutingAgent records which agent is driving this provider, used to gate
 // the coordinator-only delegate_task tool.
 func (p *WorkspaceToolProvider) SetExecutingAgent(name string) {
@@ -203,6 +217,9 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	// Workspace memory tools (need folder storage for MEMORY.md)
 	if p.fileStore != nil {
 		tools = append(tools, p.memoryWriteTool(), p.memoryForgetTool())
+	}
+	if p.hqVisibility.ProposeGlobal != nil {
+		tools = append(tools, p.memoryProposeGlobalTool())
 	}
 	if p.userStore != nil {
 		tools = append(tools, p.profileSetTool())

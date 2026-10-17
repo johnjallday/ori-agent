@@ -795,6 +795,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	}
 	if b.workspaceFileStore != nil {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
+		handlers.WorkspaceMemory.SetGlobalMemory(builderGlobalMemory{b: b})
 	}
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
