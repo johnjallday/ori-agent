@@ -53,7 +53,9 @@ func TestTaskPlanningKeepsCheckpointsNonTerminalWithoutBypassingStops(t *testing
 		"### PR readiness gate",
 		"make ci-local",
 		"manual test guide, and PR body",
-		"creation/merge and post-merge cleanup items remain unchecked",
+		"Then open the PR with `wt pr`",
+		"merge and post-merge cleanup items stay unchecked",
+		"no auto-merge",
 		"Never auto-continue solely",
 	} {
 		if !strings.Contains(execution, required) {
@@ -105,7 +107,7 @@ func TestTaskPlanningScopesValidationWithoutDeferringRiskChecks(t *testing.T) {
 	}
 }
 
-func TestTaskPlanningTemplateSeparatesPRReadinessFromApprovedActions(t *testing.T) {
+func TestTaskPlanningTemplateSeparatesOpeningThePRFromTheMerge(t *testing.T) {
 	protocol := taskPlanningProtocol(t)
 	_, template, ok := strings.Cut(protocol, "```markdown\n")
 	if !ok {
@@ -131,8 +133,8 @@ func TestTaskPlanningTemplateSeparatesPRReadinessFromApprovedActions(t *testing.
 		"1.4 Commit:",
 		"Complete required validation and demos",
 		"Prepare PR body with evidence and limitations",
-		"PR gate: verify readiness and wait for explicit PR approval",
-		"After PR approval: Open PR",
+		"PR readiness: verify the gate, then open the PR with `wt pr`",
+		"Merge: a person reviews the open PR and squash-merges it to `dev`",
 		"Run `wt done <feature>` after merge",
 	} {
 		index := strings.Index(template, checkpoint)
