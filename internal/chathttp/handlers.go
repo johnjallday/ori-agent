@@ -75,6 +75,7 @@ type Handler struct {
 	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
 	toolCallStore          session.ToolCallStore
 	calendarOpsPreference  chatCalendarOpsPreference
+	backupAdvisorReader    backupAdvisorReader
 	// planOpener starts a durable Plan for chat requests that need one. It is
 	// deliberately one method wide: chat may open a plan and link to it, never
 	// edit, review, or approve one (FR-19, FR-149).
@@ -958,6 +959,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	originalQuery := q
 	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
 	normalizedRouteContext := normalizeChatRouteContext(req.RouteContext)
+	executionAgent := h.resolveExecutionAgentName(r.Context(), h.getSessionID(r), req.AgentName, normalizedRouteContext.WorkspaceID)
+	if h.maybeHandleBackupAdvisor(w, r, executionAgent.Name, normalizedRouteContext.WorkspaceID, q, len(req.Files) > 0) {
+		return
+	}
 
 	// Signal that the user sent a chat message. Consumed by the onboarding
 	// progression detector (Tier 1 "first contact"). Fire-and-forget: Publish
@@ -973,7 +978,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		"file_count": len(req.Files),
 		"session_id": sessionID,
 	})
-	executionAgent := h.resolveExecutionAgentName(r.Context(), sessionID, req.AgentName, normalizedRouteContext.WorkspaceID)
 	if executionAgent.usesCompatibilityFallback() {
 		logger.Info("Chat request used compatibility execution-agent fallback", logger.Fields{
 			"agent_name": executionAgent.Name,

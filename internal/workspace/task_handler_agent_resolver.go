@@ -18,6 +18,12 @@ import (
 
 func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*resolvedTaskAgent, error) {
 	normalizedAgentName := strings.TrimSpace(agentName)
+	// Applies even on stripped-down handlers with no runtime resolver. Task,
+	// mission and delegated execution cannot turn an advisor into a native or
+	// generic tool runner through a global-profile/name collision.
+	if BackupAdvisorRuntimeRestricted(h.workspaceStore, task.WorkspaceID, normalizedAgentName, h.agentStore) {
+		return nil, ErrBackupAdvisorRuntime
+	}
 
 	if h.runtimeResolver != nil {
 		resolved, err := h.runtimeResolver.ResolveAgentForTask(normalizedAgentName, task)

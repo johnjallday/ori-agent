@@ -14,6 +14,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestMetadataAnchorIdentityRequiresPositiveDeviceAndFileID(t *testing.T) {
+	for _, info := range []unix.Stat_t{{}, {Dev: 1}, {Ino: 1}} {
+		if anchorID(info) != (anchoredIdentity{}) || metadataStatEqual(info, info) || trustedExecutableStat(info) {
+			t.Fatal("missing identity was accepted")
+		}
+	}
+}
+
 func metadataAnchorFixture(t *testing.T) (string, *metadataAnchor) {
 	t.Helper()
 	base, err := filepath.EvalSymlinks(t.TempDir())

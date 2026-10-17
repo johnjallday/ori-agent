@@ -46,6 +46,10 @@ const (
 	// compiled into this build, or the capability's runtime is not wired. The
 	// install record stays visible as metadata; nothing is executed.
 	StatusUnavailable StatusState = "unavailable"
+	// Ready and Monitoring describe a reviewed metadata connection and optional
+	// observation checks. Neither means backup success or verified recovery.
+	StatusReady      StatusState = "ready"
+	StatusMonitoring StatusState = "monitoring"
 )
 
 // StationStatusPriority is the display order required when several conditions
@@ -56,6 +60,8 @@ var StationStatusPriority = []StatusState{
 	StatusReviewReady,
 	StatusPaused,
 	StatusWatching,
+	StatusMonitoring,
+	StatusReady,
 }
 
 // HighestPriorityStatus returns whichever of the given states ranks highest in
@@ -117,6 +123,9 @@ type Requirements struct {
 	// Program Home whose declaration explicitly offers a Home-scoped optional
 	// role for this capability. It grants that role no authority by itself.
 	AssistantProgramHomeOnly bool `json:"assistant_program_home_only,omitempty"`
+	// OrdinaryWorkspaceOnly excludes groups and Assistant Program Homes. It is
+	// an installation constraint, never a filesystem or execution grant.
+	OrdinaryWorkspaceOnly bool `json:"ordinary_workspace_only,omitempty"`
 }
 
 // SetupDescriptor names the capability's setup adapter and the directory
@@ -251,6 +260,9 @@ func (d Definition) Validate() error {
 	}
 	if d.Owner != nil && !d.Owner.Valid() {
 		return fmt.Errorf("capability definition %q: plugin owner is invalid", d.ID)
+	}
+	if d.Requirements.AssistantProgramHomeOnly && d.Requirements.OrdinaryWorkspaceOnly {
+		return fmt.Errorf("capability definition %q: incompatible workspace requirements", d.ID)
 	}
 	if d.Requirements.MaxInstallsPerWorkspace < 0 {
 		return fmt.Errorf("capability definition %q: max installs per workspace cannot be negative", d.ID)

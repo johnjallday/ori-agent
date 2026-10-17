@@ -69,6 +69,9 @@ func (l *serverResetLifecycle) Drain(ctx context.Context) error {
 
 	var drainErr error
 	drainErr = errors.Join(drainErr, l.server.shutdownBackground(ctx))
+	if drainErr != nil {
+		return drainErr
+	} // retain stores/lease when any owned work is ambiguous
 	if l.server.Integration != nil && l.server.Integration.MCPRegistry != nil {
 		drainErr = errors.Join(drainErr, l.server.Integration.MCPRegistry.StopAll())
 	}

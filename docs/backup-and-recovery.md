@@ -1,0 +1,108 @@
+# Backup & Recovery
+
+**Status:** implementation in progress. Manual setup and a first real observation
+have been exercised through the product on an approved disposable USB fixture.
+Periodic monitoring, recovery reports and full delivery acceptance remain incomplete.
+
+Ori observes explicitly approved backup metadata and guides recovery. The external
+application performs backups and restores. Completing setup, choosing folders or
+connecting metadata is **not proof that your files are protected**. Core guidance
+and status do not require a model.
+
+## Supported first integration
+
+- Official **restic 0.19.1**, Apple Silicon, repository format **2**.
+- Validated host: macOS **26.3.1**, product build **25D771280a**. Other builds,
+  binaries and platforms remain unavailable until separately validated.
+- Selected folders on internal Apple Fabric APFS storage; one independent,
+  physical USB APFS destination and one existing repository inside its actual
+  mounted volume root. Cloud/NAS, other Macs and whole-Mac recovery are excluded.
+- The server operator supplies the exact trusted executable through
+  `ORI_BACKUP_RESTIC_EXECUTABLE` in its launch environment. Ori does
+  not download/install software, search for alternative binaries or run commands
+  from workspace/template/model text. Missing containment never permits an
+  unsandboxed fallback.
+
+## Set up outside Ori
+
+1. **Check your drive.** Connect a suitable existing drive using macOS. Account
+   for its existing contents and confirm its identity, actual mounted root and
+   free space. Do not erase/reformat it just to satisfy this guide. Ori does not
+   mount, unlock, format or eject drives.
+2. **Check space outside Ori.** Use Finder Get Info or your existing tools to
+   estimate the selected data. Allow multiple versions and future growth. Ori
+   does not inspect source contents or predict whether the next backup will fit.
+3. **Install the supported application yourself**, following the version-pinned
+   official documentation below. An unsupported or unavailable prerequisite is a
+   limitation, not a reason to disable containment or grant broad root access.
+4. **Prepare an encrypted, versioned repository outside Ori.** Review the exact
+   destination first. Ori does not initialize repositories. Keep password/key
+   recovery information securely **separate from the drive**: losing every usable
+   password/key can make encrypted backups unrecoverable. Never put secrets or
+   executable recovery commands in chat or recovery notes.
+5. **Choose the intended folders and exclusions, then run the first backup in
+   the external application.** Inspect its own result and warnings. A snapshot
+   does not prove the latest attempt fully succeeded, every current file is
+   included, or recovery works.
+6. **Choose the backup schedule and retention outside Ori.** Ori creates neither
+   backup jobs nor OS daemons. Account for sleep, disconnection and full storage.
+   Pausing/closing Ori stops Ori's checks, **not** the external backup schedule.
+
+## Connect metadata in Ori
+
+The owning workspace console has **Overview, History, Recovery and Settings**;
+rich connection controls live in Settings, not the generic setup wizard.
+
+1. Choose the source folders, actual external volume root and existing repository
+   through the user controls. A selection is not permission and grants no agent
+   filesystem tools. A same-named folder or replacement volume is not accepted as
+   the saved destination merely because its spelling matches.
+2. Explicitly select one existing workspace-scoped Vault secret reference. Unlock
+   its Vault outside this console if needed. Ori does not discover credentials,
+   ask for plaintext passwords in an API/prompt/note, or unlock a Vault for you.
+3. Review the exact selection and explicitly approve **one metadata read**.
+   Selection/review alone creates no connection receipt. A failed candidate stays
+   inactive; retrying the same completed request does not run another check.
+4. After a successful read, an empty repository says **No completed backup
+   observed**. Intended scope remains distinct from provider-declared historical
+   paths. Latest-attempt success, exhaustive coverage and recoverability remain
+   unavailable rather than guessed.
+5. The current build is **manual-only**. Periodic consent, cadence and health
+   policy controls remain planned; installation/connect cannot enable them.
+   Ori cannot promise checks while the server/Mac is off. Disconnection is not
+   automatically a failed backup. Unknown capacity remains unknown.
+
+Opening setup, pressing Done, viewing status/history or asking the advisor a
+question does not start a provider read, decrypt a backup password or enable
+monitoring. A missing tool/permission stays unavailable; older successful evidence
+retains its original timestamp through later failures.
+
+## Recovery and removal
+
+Use vetted guidance in **Recovery** and the external application to restore a
+sample to a **separate location**. Do not overwrite your working source as a test.
+Ori does not restore or inspect recovered file contents. The planned reporting
+UI will label a dated result **User reports passed/failed**, never “Ori verified.”
+That UI is not yet available. A passed sample does not prove every file is recoverable.
+
+Revoke/remove stops or fences Ori's access and drains owned checks. Removing Ori
+configuration clears selected paths/credential references while retaining bounded,
+generation-labelled local history. It never deletes backups/source files or
+changes the external application's schedule. Copied/imported state does not carry
+local access consent.
+
+**External-drive-only backup is not off-site protection.** Plan a separate
+strategy outside this v1 integration. Ori does not repair/prune repositories,
+perform integrity scans, rotate keys, purchase software or execute backup/restore
+operations.
+
+## Official version-pinned references
+
+- [Installation](https://github.com/restic/restic/blob/v0.19.1/doc/020_installation.rst)
+- [Repository preparation](https://github.com/restic/restic/blob/v0.19.1/doc/030_preparing_a_new_repo.rst)
+- [Backup and exclusions](https://github.com/restic/restic/blob/v0.19.1/doc/040_backup.rst)
+- [Recovery](https://github.com/restic/restic/blob/v0.19.1/doc/050_restore.rst)
+
+The engineering/privacy boundary is in
+[the integration contract](architecture/backup-and-recovery-contract.md).
+No page or link in this guide executes an installation or recovery action.

@@ -84,7 +84,11 @@ func encodeMetadataBundle(bundle metadataBundle) ([]byte, error) {
 		var id [64]byte
 		copy(id[:], entry.id)
 		output = append(output, id[:]...)
-		output = binary.BigEndian.AppendUint32(output, uint32(len(entry.data))) // bounded above to at most 1 MiB
+		size := len(entry.data)
+		if size < 1 || size > maxEncryptedSnapshotBytes {
+			return nil, errMetadataBundle
+		}
+		output = binary.BigEndian.AppendUint32(output, uint32(size))
 		output = append(output, entry.data...)
 	}
 	return append(output, metadataEnd), nil
@@ -122,15 +126,19 @@ func decodeMetadataBundle(data []byte) (metadataBundle, error) {
 			}
 			id = ""
 		}
-		size := uint64(binary.BigEndian.Uint32(header[64:]))
+		wireSize := binary.BigEndian.Uint32(header[64:])
+		if wireSize == 0 || wireSize > maxEncryptedSnapshotBytes {
+			return metadataBundle{}, errMetadataBundle
+		}
+		size := int(wireSize) // at most 1 MiB, including on 32-bit test builds
 		limit := maxEncryptedSnapshotBytes
 		if kind != metadataSnapshot {
 			limit = maxEncryptedKeyBytes
 		}
-		if size == 0 || size > uint64(limit) || size > uint64(reader.Len()) || size > uint64(maxEncryptedMetadataBytes-total) {
+		if size > limit || size > reader.Len() || size > maxEncryptedMetadataBytes-total {
 			return metadataBundle{}, errMetadataBundle
 		}
-		content := make([]byte, int(size))
+		content := make([]byte, size)
 		if _, err := io.ReadFull(reader, content); err != nil {
 			return metadataBundle{}, errMetadataBundle
 		}

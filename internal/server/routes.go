@@ -45,6 +45,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerFileJanitorRoutes(mux, s)
+	registerBackupRecoveryRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
 	registerWorkspaceSurfaceRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)

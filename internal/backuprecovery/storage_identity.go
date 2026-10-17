@@ -24,6 +24,13 @@ type storageIdentity struct {
 	physicalStores []physicalStoreIdentity
 }
 
+// anchoredIdentity binds an opened directory to a current native file identity.
+// It is transient evidence, never a portable storage identifier or a grant.
+type anchoredIdentity struct {
+	device uint64
+	inode  uint64
+}
+
 type storageLocation uint8
 
 const (

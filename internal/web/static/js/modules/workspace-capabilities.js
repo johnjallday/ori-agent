@@ -113,7 +113,17 @@
           '/capabilities/' +
           encodeURIComponent(capability) +
           '/install',
-        { method: 'POST', headers: { Accept: 'application/json' } }
+        capability === 'backup-recovery'
+          ? {
+              method: 'POST',
+              headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Ori-Backup-Action': 'user-control'
+              },
+              body: JSON.stringify({ source: 'in-place' })
+            }
+          : { method: 'POST', headers: { Accept: 'application/json' } }
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {

@@ -4,8 +4,8 @@
 selected metadata interface has software and designated physical-USB probe
 evidence. Pure identity/metadata tests, native descriptor/broker-transport tests,
 bounded child-process tests and scoped Vault resolver tests pin its foundations.
-This is the task 1.4 design boundary, not proof that the later service, local
-activation, production sandbox wiring or UI exists. The implementation/acceptance
+The compiled read adapter now has end-to-end fixture evidence. This still does
+not establish domain admission, local activation, monitoring or finished UI. The implementation/acceptance
 gates at the end remain mandatory.
 
 ## Authority and evidence
@@ -77,8 +77,9 @@ needed read access to the literal root directory, not its descendants.
 Apple marks `sandbox-exec` deprecated. V1 deliberately requires this measured
 containment on the tested macOS/architecture only, with the fixed launcher and
 negative controls described below. Other environments remain unavailable; there
-is no unsandboxed fallback. The production composition/self-test still belongs
-to task 2.3 and must pass before activation.
+is no unsandboxed fallback. The compiled read composition now has bounded fixture controls and a designated
+external-fixture acceptance read. Domain consent/lifecycle integration remains a
+separate activation gate.
 
 The test password was generated in memory, delivered over a pipe, and never
 written to evidence or passed as an argument/environment variable. Production
@@ -115,8 +116,9 @@ itself did not create Vault permissions or inspect real secrets.
    and hit the probe's deadline during retry. Defaults are not read-only.
 
 No failed/partial check may replace previous evidence with an empty healthy
-result or update its successful-observation timestamp. That preservation belongs
-to the future revision-fenced store/service, not the decoder added here.
+result or update its successful-observation timestamp. The private local store now enforces that
+observation transition; the future service must still authorize and fence each
+publication. The decoder alone provides neither guarantee.
 
 ## Designated physical-volume probe (not product acceptance)
 
@@ -225,9 +227,10 @@ separate evaluator; parsing does not declare a snapshot fresh/healthy.
 
 ## Host contract
 
-These decisions specify the implementation and required tests. They do **not**
-register a template, runtime, API, persistence schema or monitoring consent.
-Contract freeze permits the ordered implementation tasks, not a readiness claim.
+These decisions specify the implementation and required tests. The private
+persistence schema/store and inert template are now implemented; no provider
+runtime, domain API or monitoring consent is registered yet. Contract freeze permits the ordered
+implementation tasks, not a readiness claim.
 
 ### Stable names and setup semantics
 
@@ -290,12 +293,19 @@ cloned hardware/volume/repository identifiers are not cryptographic device
 attestation; this policy does not claim to authenticate malicious replacement
 hardware. Ambiguous or incomplete OS mappings fail closed.
 
-These are private evidence predicates, not a native collector or permission
-grant. The future collector must validate the exact selected canonical path,
-actual local mount, no symlink ancestors, no nested foreign mount, no ordinary
-leftover directory, and exact repository-relative location before access. Source
-selection authorizes directory/storage metadata only, never source enumeration
-or file contents. Repo ID alone cannot replace this gate.
+These private predicates are not permission. The partial native collector now
+binds the exact directory to a no-follow search descriptor, canonical F_GETPATH,
+native APFS/local statfs and a separately opened mount-root identity. `selected_metadata_darwin_arm64.go` now composes exact mount-root/repository
+location, persistent selection and selected-directory identity, supported
+physical independence, scoped OS mappings and fresh post-collection checks.
+It deduplicates repeated source mounts without caching across the before/after
+phases. This collector now runs through the private compiled broker. It is not an
+application access grant: reviewed domain admission and full finished-product
+acceptance remain mandatory. Nested
+foreign mounts, ordinary leftover directories and changed repository-relative
+locations must remain rejected. Source selection authorizes directory/storage
+metadata only, never source enumeration or file contents. Repo ID alone cannot
+replace this gate.
 
 ### Stronger process boundary
 
@@ -336,11 +346,109 @@ versioned, bounded encrypted-only broker pipe format with exact termination and
 no partial-frame acceptance. `read_process.go` owns process-group termination,
 pipe limits, deadlines and reaping; tests also stop a pipe-holding descendant
 after its parent exits. A test child composes native collection and this pipe.
-These are private primitives, not a shipped helper entrypoint, OS volume collector
-or sandbox composition. Task 2.3 must bind and test those before adapter wiring.
-Each pipeline owns its process group, pipes and scratch lifetime; overflow,
-cancellation or any stderr discards the whole attempted observation before
-releasing access. No server goroutine may substitute for the cancellable broker.
+The private adapter now composes these primitives through fixed `broker-v1` and
+`reader-v1` helper modes. Server and embedded-menubar entrypoints intercept those
+modes before dotenv/settings/stores/ports/native UI initialization. Each pipeline
+owns its process group, pipes and scratch lifetime; overflow, cancellation or any
+stderr discards the whole attempted observation before releasing access. No
+server goroutine substitutes for the cancellable broker.
+
+#### Compiled read adapter (task 2.3)
+
+The bounded XML plist decoder rejects duplicate/ambiguous keys, unsafe device
+references, external entities, truncated/trailing documents and excessive
+bytes/tokens/depth/entries. Labels are discarded. A pure scoped query planner
+visits only the native-observed volume and its explicit APFS stores/parents;
+there is no device inventory or guessed mapping. The private fixed runner now
+selects only `/usr/sbin/diskutil info -plist /dev/<validated device>`, with clean
+environment and bounded streams/deadline. Fixed OS entrypoints (diskutil,
+sandbox-exec and the startup-only product-version reader sw_vers) must be
+root-owned, no-follow descriptor/path bound and on local read-only APFS; no
+PATH/caller override is accepted. Exact product build `25D771280a` is checked via
+fixed `sw_vers -buildVersion`; `kern.osversion` is only the base kernel build
+`25D2128`, not the installed security-response build.
+
+The full private adapter passed a designated USB-fixture read through native
+selection, encrypted collection, provider reads and final native/config checks.
+A deliberately wrong persisted volume ID was rejected before the credential
+callback. These are actual compiled-adapter controls, not a second physical
+same-name swap, UI consent or finished-product acceptance.
+
+The measured diskutil result omitted the optional `Mounted` key. Absence remains
+unreported, never false or an inferred permission. Native descriptor/statfs/root
+evidence and the exact diskutil MountPoint establish the current mount; an
+explicit contradictory `Mounted=false` still invalidates it. Missing native
+mount evidence cannot be repaired by that optional-field handling.
+
+`native_directory_darwin_arm64.go` uses no-follow **O_SEARCH** traversal, native
+F_GETPATH/statfs and an independently opened mount root; rechecks bind the held
+folder, selected name and current mount facts. It inspects metadata only. The
+invented-folder sandbox test proves successful native collection while directory
+listing, openat source-file reads and source writes are denied. An earlier
+O_EVTONLY experiment allowed listing, then failed to open under the data-denying
+sandbox; it is not an isolation mechanism and is no longer used. Native capacity
+is overflow-checked, point-in-time filesystem capacity, with unknown distinct
+from known zero. These functions must still run in a bounded compiled helper,
+not a server goroutine.
+
+Executable verification retains a no-follow descriptor, hashes the complete
+fixed release, checks ownership/permissions/size/link count and rejects same-name
+replacement even with identical bytes. This is not containment. Executing the
+binary through `/dev/fd` failed in a separate software probe on the tested Mac;
+there is no descriptor-exec fallback. Instead, the kernel's read-only csops
+STATUS/CDHASH operations successfully identified the owned sandboxed restic
+process. Its pinned CodeDirectory hash is
+`6f23d5d672ad8600f5867ae25464f992835d35db`, supplementing (not replacing) the full
+file digest. The launcher can initially have a different image: production must
+wait for the exact pinned valid image **before releasing any password**, while
+retaining process ownership without reaping/PID reuse. The signing check alone attests only CodeDirectory identity/status.
+`mapped_executable_darwin_arm64.go` now additionally queries bounded native
+region/vnode metadata for the owned unreaped child, requiring its first executable
+mapping to match the retained descriptor's device/inode/size/mode/timestamps.
+No process memory contents are read. The complete-file digest is checked again
+before releasing password bytes, followed by another signing-identity check.
+An unavailable ABI/query/mapping fails closed. The signing boolean alone still
+cannot authorize a transfer; version text is not a substitute.
+
+The Go provider phase now stages only the encrypted bundle in exclusive private
+scratch, starts the pinned child with an empty password pipe, performs that
+handshake and runs only no-lock/no-cache config and snapshot reads. Any stderr,
+nonzero exit, overflow, cancellation or changed replica/executable invalidates
+the entire result. Cleanup unlinks only the owned manifest through retained
+descriptors; it does not recursively delete a selected path. Real software-only
+fixtures exercised empty, completed-snapshot and wrong-password outcomes through
+this Go path, including original-fixture preservation and replica removal.
+The host also pins its own application helper's signing identity, mapped vnode
+and complete descriptor digest before sending a request or invoking the scoped
+password callback. Helpers do not resolve Vault records themselves. The measured
+debug server image is about 148 MB; its separate bound is 256 MiB, while restic
+retains its fixed release digest and 128 MiB bound. The private adapter creates
+only a fresh job directory inside the composition-owned app data root and
+cleans it through a retained root handle after child drain. These entrypoints do
+not establish domain admission, monitoring consent or full product acceptance.
+
+Private sandbox text is sent through an owned pipe, never through arguments
+containing selected folders. The directory-only, encrypted-metadata broker and scoped-OS-query policies have
+independent compiled fixture controls and now compose into the read adapter.
+They do not replace the owning service's live permission/lifecycle gates. Search-only traversal now
+also avoids ancestor/root listing grants in the encrypted metadata anchor and
+executable ancestry checks. Broker controls allow only config/keys/snapshots and
+deny source content, repository data/index/locks, root enumeration and writes.
+
+macOS rejected applying a second sandbox to a child which inherited one. The
+controller must therefore launch broker and provider as separately sandboxed
+children, not attempt to tighten an inherited broker sandbox around restic.
+The controller only handles bounded IPC, executable checks and its own private
+scratch; original repository reads belong to the broker. A sandbox application
+failure remains unavailable: there is no direct/unsandboxed provider fallback.
+
+Nested OS queries must retain the outer helper's process group. The group-leading
+helper can cancel/reap its direct child; outer cancellation kills the whole
+pipeline even when the helper blocks. A guarded private member mode now enforces
+that inheritance; an invented heartbeat regression verifies a blocked helper's
+nested child stops at the outer deadline. This is not complete revoke/reset/
+shutdown integration or a production admission permit. No capability runtime,
+HTTP authority, stored setup reader or monitoring is activated by this adapter.
 
 Trust only the exact signed-release digest, not `restic version` text. Select an
 operator-configured absolute executable at server composition, not PATH search,
@@ -387,7 +495,7 @@ resolver or vault tool even if other workspace roles have unrelated grants.
 
 Owning records are installation-local, keyed by exact owner + stable workspace
 ID + capability install identity; never by workspace/folder display names. The
-service will use transactionally updated DB state, with encrypted private fields
+private store uses transactionally updated DB state, with encrypted private fields
 for paths, volume/repository IDs and secret references. Reuse the existing secure
 key-management primitive with separate authenticated domain data, not a plaintext
 fallback. Current `workspace.LocalConfigStore` admits only `agent`/`bindings`
@@ -414,9 +522,11 @@ claim protection against an administrator copying the entire machine/keychain
 or deliberately rolling back all trusted local authority.
 
 The owning schema is `backup_recovery_local`, one encrypted state row per exact
-workspace/owner, and `backup_recovery_receipts`, a distinct local activation row
-bound to that state. No migration number is preassigned. Use the existing
-`workspace_config_dek` secure key with AES-GCM randomized nonces and domain-
+workspace/owner, `backup_recovery_receipts`, a distinct local activation row
+bound to that state, and `backup_recovery_authority`, a path/secret/grant-free
+workspace epoch counter. The counter also fences reviews made before any encrypted
+configuration exists; lifecycle triggers must not depend on a saved state row. Implementation allocated migration 81 after inspecting the
+current schema. Use the existing `workspace_config_dek` secure key with AES-GCM randomized nonces and domain-
 separated authenticated data `ori.backup-recovery.local.v1` including owner,
 workspace, configuration generation and schema version. The receipt binds a
 random local grant nonce, config fingerprint, data-root canonical path/device/
@@ -441,6 +551,42 @@ Private directories/files use 0700/0600. Register every new DB/local domain and
 its credential/receipt lifecycle with the reset inventory before enabling it.
 No backup state or secret is exported through canonical workspace continuity.
 
+#### Persistence foundations implemented (task 2.1)
+
+`local_state.go` bounds the encrypted schema; `local_store.go` performs exact
+canonical-owner/install/attachment checks, transactional revisions and encrypted
+state/receipt publication. `local_root*.go` binds the composition-owned app data
+root's canonical location and native identity; it never inspects backup sources.
+Private persistence DTOs are not API/model DTOs. Reads create neither keys nor
+receipts. Missing/corrupt/future/foreign state is left intact and unavailable.
+Activation transactions require a successful-read observation for the current
+generation and cannot enable monitoring; consent remains a separate user change.
+The real provider/service must supply that evidence; the store cannot attest it.
+These private entrypoints are not substitutes for 2.4's reviewed one-read permits.
+
+A separate monotonic **authority epoch** fences workspace ownership/status,
+capability replacement, attachment/import changes and native provisioning. The
+migration's triggers discard access receipts and advance that epoch without
+rewriting encrypted history. Reviews/publication bind the epoch as well as live
+identity: an initial read with no receipt cannot survive an archive→restore or
+uninstall→reinstall round trip, even when the initial review has not saved any
+configuration. The epoch is recorded independently of encrypted state; advancing
+it creates neither an encryption key nor access permission. All three local
+tables are reset-inventoried. Missing schema fences disable store construction.
+Partial legacy schemas are not silently repaired or given weaker authority.
+
+`vault.WorkspaceConfigCipher` now centralizes the existing secure-key creation
+lock for both workspace configuration and backup state. Separate package locks
+could otherwise race to generate and overwrite the shared key. Backup writes
+never mint a missing key over any existing encrypted owner. No new secret backend,
+plaintext fallback, filesystem grant or credential tool is introduced.
+
+Focused tests cover bounded/canonical serialization, unknown counts, failed-read
+preservation, separate user revision/observation sequence, concurrent stale
+writers, atomic state/receipt rollback, wrapped-error redaction, lifecycle ABA,
+reset admission, copied roots/workspaces and imported enabled intent. They use
+invented local state, not a production provider or finished-product acceptance.
+
 ### HTTP and lifecycle rules
 
 All routes use the existing authenticated/local user provider and exact active
@@ -454,6 +600,9 @@ disk or decrypt a backup password. Domain endpoints are:
 | GET `/` | Redacted stored status, timestamps, current revision and limits |
 | GET `/history` | Stored history, stable bounded cursor, max 25 records |
 | GET `/settings` | Owner-only saved selections/reference availability; no secret |
+| GET `/guide` | Compiled model-free, version-pinned guidance after exact workspace scope check |
+| POST `/selection` | Explicit native folder choice; owner/workspace/role-scoped opaque token, no grant or filesystem-tool binding |
+| POST `/credential` | Describe only the explicitly chosen scoped Vault record/revision; no decryption or listing |
 | POST `/review` | User-selected scoped picker tokens and vault reference; no provider start |
 | POST `/connect` | Exact review token/revision; explicit metadata-read consent, one guarded validation |
 | POST `/refresh` | Explicit single-flight manual check, independent of periodic consent |
@@ -468,7 +617,10 @@ validation on mutations; the current connections guard ignores ports and is not
 alone sufficient. Require JSON and a non-simple same-origin action header;
 reject cross-site/null origins and unsupported methods before body parsing.
 Non-browser local clients must satisfy the same host/user/action contract, not
-bypass it through absent Origin. Fail closed on untrusted forwarded headers.
+bypass it through absent Origin. Require the actual peer to be loopback; forwarded
+peer/host/proto headers cannot override that or actual TLS/Host. The compiled
+action header is `X-Ori-Backup-Action: user-control`. API responses are no-store;
+raw backend/provider errors and request bodies are not logged or returned.
 
 Requests reject unknown/duplicate keys, trailing JSON, executable/path overrides
 and excessive bodies. Selection tokens are owner/workspace scoped, short-lived,
@@ -479,6 +631,25 @@ of the same completed operation returns its outcome without running a second
 read; changed payload/key reuse conflicts. Pending/expired tokens do not grant
 access. Config changes, revoke, ownership/attachment change and reset invalidate
 outstanding review tokens and in-flight results.
+
+Manual refresh additionally echoes the stored sequence and server time. Before
+starting it, a dedicated admission transaction reserves the next sequence without
+changing settings revision, successful-read time or attempt/observation facts.
+Thus an identical old request cannot become another probe after bounded outcome
+eviction or interrupted execution. Old request times expire after 24 hours;
+future times beyond five minutes reject. Connect instead consumes a five-minute,
+single-use process-local review. At most four reviews per workspace and 128
+server-wide are retained. Native choice tokens have the existing 30-minute TTL
+and separate owner/workspace/source-versus-volume-versus-repository scopes;
+legacy/unscoped tokens cannot be upgraded. Same-path known identities are retained
+through review, not reset merely by choosing the same mount spelling again.
+
+Revoke/removal persist a new inactive generation before cancellation, but their
+operation is not marked complete until owned work drains. A four-second bounded
+wait can return still-in-progress while retaining the fence and lifetime/finite
+ownership; retry cannot restart a read. Clearing configuration removes selected
+paths/credential reference but keeps bounded, generation-labelled local history.
+Neither operation touches the external repository, source or backup schedule.
 
 All external work enters `resetstate.WorkGate` before spawn and holds admission
 through publication/cleanup. Monitoring also owns a registered lifetime permit.
@@ -551,6 +722,70 @@ provider labels. At most one current item per problem/config generation, max 20
 backup items per projection. A source failure is a named gap, not an empty healthy
 source. Asking a question cannot install, activate, schedule or refresh anything.
 
+## Current inert template integration
+
+The version-1 built-in definition and template now use the normal reviewed team
+creator for one `backup-advisor` role, including explicit creation/assignment and
+stale-plan rejection. They declare no directory requirements, tool bindings,
+automation or optional companion provisioner. Installing the capability is
+idempotent metadata and is unavailable in a Home, group or inactive workspace.
+It does not construct a provider, activate access or schedule work. The neutral
+`ready` / `monitoring` status vocabulary preserves existing status priorities.
+
+Normal managed-workspace scaffolding still creates its own `workspace-files`
+binding and self-folder reference, as for other ordinary workspaces. No selected
+source/repository root is added. **This is not advisor isolation:** the compiled
+role guard now refuses generic core/toolbox/native/task execution, including
+alias, caller-selected-node, nil-resolver and missing/unassigned workspace
+fallbacks. A shared definition genuinely attached in another role keeps that
+workspace's independent policy. Prompts and template defaults are not authority.
+
+The compiled `backup_recovery` wizard adapter accepts only the two fixed
+readiness/summary steps. Confirm repeats a stored-only read; it accepts no
+connection, refresh, path selection or approval option. Server registration now
+uses the canonical-user stored reader. Missing service/tool/valid evidence stays
+unavailable; Confirm cannot establish permission. Opening setup does not auto-run
+either optional starter task.
+
+### Server composition and lifecycle (tasks 2.8–2.9)
+
+The host composes the service after the canonical database, workspace, Vault,
+selection store and shared WorkGate exist. It registers domain HTTP, stored
+wizard/advisor readers and bounded capability status/removal. Only the operator's
+`ORI_BACKUP_RESTIC_EXECUTABLE` selects a binary location; the existing pinned
+image/platform checks remain mandatory. Missing configuration leaves the real
+stored-only console/guide available, never an alternate executable search.
+
+Normal non-private workspace creation has no continuity attachment row, as
+recognized by `workspacecontinuity.CheckExecution`. Its `legacy_native` origin
+is separately bound from an explicit native attachment. This compatibility
+refinement creates/adopts no attachment and grants no read: exact canonical
+owner, ordinary active workspace, install, root, epoch, fresh reviewed consent
+and successful activation remain required. Attachment insertion changes that
+binding; delete/round trips advance the independent epoch and cannot reuse an
+old review/receipt. Foreign/corrupt encrypted state remains intact/unavailable.
+
+Generic capability catalog/removal also enforces canonical owner, actual local
+peer and exact Origin, with bounded exact JSON and the non-simple control header
+for backup mutations. Removal requires a generation/revision/UUID-bound domain
+prepare action; a context-free runtime callback cannot initiate it. Its durable
+pending barrier fences and drains first and prevents fresh admission before the
+later install-record write. Identical retries drain without probing; changed
+payloads or a reinstalled authority reject. An optional final removal fence runs
+under the canonical workspace update lock, so a stale callback cannot drop a
+new install. Expiring an outcome cannot expire the admission barrier.
+
+Advisor conversations intercept generic execution before commands/files/skills/
+utilities/planning/native dispatch. An optional verified-isolated model selects
+only a fixed explanation topic. Host code alone renders re-authorized **latest**
+stored facts and compiled guidance, after rechecking actor and live role. Model
+prose, commands, tools and factual claims never reach display or execution.
+
+Service close closes admission/cancels and joins all entered work before releasing
+provider/lifetime ownership. An ambiguous close retains stores/lease ownership.
+Server loop stop and dependency close are separate once-only phases around a
+retryable finite-work join; reset never closes stores after a drain error.
+
 ## Implementation and acceptance gates
 
 Freeze resolves design/feasibility, not all later implementation tests:
@@ -559,11 +794,23 @@ Freeze resolves design/feasibility, not all later implementation tests:
   bounds, conflicts, copied-state behavior and reset inventory.
 - **2.2–2.5:** inert IDs/roster, real native OS collector and sandboxed broker/
   provider composition, trusted-executable checks, exact-origin/owner/selection/
-  revision/idempotency enforcement, and stored-only wizard readiness. No runtime
-  registration may precede its required permission/execution tests.
-- **2.8–3.5:** actual advisor runtime isolation (including core/default/native
-  tool paths), pause/revoke/removal/ownership races, monitor scheduling and
-  reset/shutdown drain. Prompts and these private primitives are not proof.
+  revision/idempotency enforcement, and stored-only wizard readiness. No provider
+  or capability runtime binding may precede its required permission/execution
+  tests; an inert wizard adapter with no reader remains unavailable.
+- **2.5–2.9 implemented:** stored wizard/advisor bridges, model-free guide,
+  console, effective role isolation, guarded server composition and manual
+  revoke/removal/shutdown admission. Focused tests include the actual server's
+  ordinary creator, inert install, missing tool, stored guide, versioned removal
+  and retryable shutdown. They do not constitute browser/provider acceptance.
+- **2.10:** affected-package/frontend validation is in progress; full delivery
+  CI remains a separate gate.
+- **2.11 exercised:** real no-model UI creator, stored missing-tool wizard/guide,
+  native picker cancellation/choices, unavailable selected reference, cancelled
+  review and an explicitly approved first product read of a newly prepared
+  disposable external snapshot. This does not establish periodic monitoring,
+  a sample restore, another physical same-name swap or full 5.3 acceptance.
+- **3–3.5:** periodic consent/scheduling, pause, lifecycle/ownership races and
+  monitor/reset integration remain separate gates. No scheduler is bound.
 - **4:** stored-only scoped Today/Brief/advisor projections and user-reported
   recovery, with no provider calls or filesystem/secret authority in readers.
 - **5.3:** full real-product live acceptance and a sample external restore.

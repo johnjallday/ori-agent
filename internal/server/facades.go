@@ -7,6 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/assistantops"
+	"github.com/johnjallday/ori-agent/internal/backuprecoveryhttp"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
@@ -198,6 +199,7 @@ type HandlerFacade struct {
 	Triggers        *triggerhttp.Handler
 	WorkspaceMemory *memoryhttp.Handler
 	FileJanitor     *filejanitorhttp.Handler
+	BackupRecovery  *backuprecoveryhttp.Handler
 	// WorkspaceCapabilities serves the built-in Workspace Capability catalog
 	// and install lifecycle. One set of routes serves every capability; there
 	// is no per-capability lifecycle API.

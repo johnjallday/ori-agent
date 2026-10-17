@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -46,6 +47,45 @@ func TestBackupReadProcessHelper(t *testing.T) {
 		if _, err := os.Stdout.Write(encoded); err != nil {
 			os.Exit(6)
 		}
+	case "pipeline":
+		if syscall.Getpgrp() != os.Getpid() {
+			os.Exit(7)
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			os.Exit(7)
+		}
+		directory, err := os.Getwd()
+		if err != nil {
+			os.Exit(7)
+		}
+		out, err := runReadProcess(t.Context(), readProcessSpec{executable: executable, arguments: []string{"-test.run=^TestBackupReadProcessHelper$"}, directory: directory, environment: []string{"ORI_BACKUP_TEST_PROCESS=pipeline_child"}, stdoutLimit: 1024, timeout: 5 * time.Second, pipelineMember: true})
+		if err != nil || string(out) != "[]" {
+			os.Exit(7)
+		}
+		_, _ = os.Stdout.Write(out)
+	case "pipeline_blocked":
+		if syscall.Getpgrp() != os.Getpid() {
+			os.Exit(7)
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			os.Exit(7)
+		}
+		directory, err := os.Getwd()
+		if err != nil {
+			os.Exit(7)
+		}
+		_, _ = runReadProcess(t.Context(), readProcessSpec{executable: executable, arguments: []string{"-test.run=^TestBackupReadProcessHelper$"}, directory: directory, environment: []string{"ORI_BACKUP_TEST_PROCESS=heartbeat", "ORI_BACKUP_TEST_HEARTBEAT=" + os.Getenv("ORI_BACKUP_TEST_HEARTBEAT")}, stdoutLimit: 1024, timeout: providerReadLimit, pipelineMember: true})
+		os.Exit(7)
+	case "pipeline_child":
+		if syscall.Getpgrp() != os.Getppid() || syscall.Getpgrp() == os.Getpid() {
+			os.Exit(7)
+		}
+		if configurePipelineReadProcess(exec.Command("must-not-run")) {
+			os.Exit(7)
+		}
+		_, _ = os.Stdout.WriteString("[]")
 	case "success":
 		_, _ = os.Stdout.WriteString("[]")
 	case "input":
@@ -115,6 +155,32 @@ func readProcessFixture(t *testing.T, mode string) readProcessSpec {
 	return readProcessSpec{executable: executable, arguments: []string{"-test.run=^TestBackupReadProcessHelper$"},
 		environment: []string{"ORI_BACKUP_TEST_PROCESS=" + mode}, directory: directory,
 		stdoutLimit: 1024, timeout: 5 * time.Second}
+}
+
+func TestReadProcessNestedChildRetainsOwnedPipelineGroup(t *testing.T) {
+	out, err := runReadProcess(t.Context(), readProcessFixture(t, "pipeline"))
+	if err != nil || string(out) != "[]" {
+		t.Fatal("nested child escaped/lost pipeline ownership")
+	}
+}
+
+func TestReadProcessDeadlineStopsBlockedHelpersNestedPipelineChild(t *testing.T) {
+	spec := readProcessFixture(t, "pipeline_blocked")
+	heartbeat := filepath.Join(spec.directory, "invented-heartbeat")
+	spec.environment = append(spec.environment, "ORI_BACKUP_TEST_HEARTBEAT="+heartbeat)
+	spec.timeout = 750 * time.Millisecond
+	if out, err := runReadProcess(t.Context(), spec); err != errReadProcessDeadline || len(out) != 0 {
+		t.Fatal("blocked nested pipeline escaped its outer deadline")
+	}
+	before, err := os.Stat(heartbeat)
+	if err != nil {
+		t.Fatal("nested writer never started; control is inconclusive")
+	}
+	time.Sleep(150 * time.Millisecond)
+	after, err := os.Stat(heartbeat)
+	if err != nil || before.ModTime() != after.ModTime() {
+		t.Fatal("nested pipeline child continued writing after its owner was reaped")
+	}
 }
 
 func TestReadProcessRejectsExitZeroWithStderrAndReapsBoundedFailures(t *testing.T) {

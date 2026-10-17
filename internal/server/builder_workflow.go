@@ -516,6 +516,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 
 	b.wireCalendarOpsSetup()
 	b.wireFileJanitor()
+	b.wireBackupRecovery()
 	// Build the compiled capability registry before restoring plugin surfaces:
 	// enabled plugin contributions register owner-aware definitions into this
 	// same catalog and must collide fail-closed with built-ins.

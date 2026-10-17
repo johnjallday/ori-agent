@@ -26,11 +26,6 @@ type metadataAnchor struct {
 	identity anchoredIdentity
 }
 
-type anchoredIdentity struct {
-	device uint64
-	inode  uint64
-}
-
 func validMetadataPath(path string) bool {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" ||
 		len(path) > maxSourcePathBytes || !utf8.ValidString(path) {
@@ -48,6 +43,9 @@ func statAnchor(file *os.File) (unix.Stat_t, error) {
 }
 
 func anchorID(info unix.Stat_t) anchoredIdentity {
+	if info.Dev <= 0 || info.Ino == 0 {
+		return anchoredIdentity{}
+	}
 	return anchoredIdentity{device: uint64(info.Dev), inode: info.Ino}
 }
 
@@ -55,7 +53,7 @@ func openMetadataDirectory(path string) (*os.File, error) {
 	if !validMetadataPath(path) {
 		return nil, errMetadataBundle
 	}
-	flags := unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
+	flags := directoryTraversalFlags()
 	fd, err := unix.Open("/", flags, 0)
 	if err != nil {
 		return nil, errMetadataBundle
@@ -108,7 +106,8 @@ func (anchor *metadataAnchor) unchanged() bool {
 
 func metadataStatEqual(a, b unix.Stat_t) bool {
 	// Atime is intentionally excluded: reading is allowed to update it.
-	return anchorID(a) == anchorID(b) && a.Mode == b.Mode && a.Nlink == b.Nlink &&
+	id := anchorID(a)
+	return id.device != 0 && id.inode != 0 && id == anchorID(b) && a.Mode == b.Mode && a.Nlink == b.Nlink &&
 		a.Size == b.Size && a.Mtim == b.Mtim && a.Ctim == b.Ctim
 }
 
@@ -124,7 +123,7 @@ func (anchor *metadataAnchor) readFile(ctx context.Context, parent *os.File, nam
 	defer func() { _ = file.Close() }()
 	before, err := statAnchor(file)
 	if err != nil || before.Mode&unix.S_IFMT != unix.S_IFREG || before.Nlink != 1 ||
-		uint64(before.Dev) != anchor.identity.device || before.Size <= 0 || before.Size > int64(limit) || before.Size > int64(remaining) {
+		anchorID(before).device != anchor.identity.device || before.Size <= 0 || before.Size > int64(limit) || before.Size > int64(remaining) {
 		return nil, errMetadataBundle
 	}
 	data, err := io.ReadAll(io.LimitReader(file, before.Size+1))
@@ -187,7 +186,7 @@ func (anchor *metadataAnchor) collectSection(ctx context.Context, name string, k
 	dir := os.NewFile(uintptr(fd), "backup-metadata-section")
 	defer func() { _ = dir.Close() }()
 	before, err := statAnchor(dir)
-	if err != nil || uint64(before.Dev) != anchor.identity.device {
+	if err != nil || anchorID(before).device != anchor.identity.device {
 		return nil, errMetadataBundle
 	}
 	// Limit enumeration itself, not only the list after allocating it.

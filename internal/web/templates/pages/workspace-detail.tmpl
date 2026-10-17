@@ -116,6 +116,8 @@
              so there is no second copy to fall out of date or to act on
              unnoticed (FR-100, FR-114). The console mounts itself on <body>. -->
         <div id="fileJanitorMount" class="file-janitor-mount" hidden></div>
+        <!-- Stored backup evidence only. All controls live in one owning console. -->
+        <div id="backupRecoveryMount" hidden></div>
         <!-- GitHub changes awaiting approval. Populated by
              github-proposals.js, which mounts it only when this workspace has
              proposals pending.
@@ -9190,6 +9192,7 @@
        never at load time. -->
   <script type="module" src="/js/modules/workspace-overlay-coordinator.js"></script>
   <script defer src="/js/modules/file-janitor-console.js"></script>
+  <script defer src="/js/modules/backup-recovery-console.js"></script>
   <script defer src="/js/modules/github-proposals.js"></script>
   <script defer src="/js/modules/workspace-capabilities.js"></script>
   <!-- The Workshop: named, versioned toolboxes for one agent instance. It
