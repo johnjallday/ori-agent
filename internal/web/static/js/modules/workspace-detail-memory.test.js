@@ -183,8 +183,13 @@ test('reviewed global-memory lines are read-only with a Profile link', () => {
 test('a copied-from-global entry stays editable but cannot be promoted again', () => {
   const m = makeManager();
   m.globalMemory = { available: true };
-  const html = m.entryRowHtml({ type: 'fact', provenance: 'global:item-1', text: 'Copied' }, 0);
+  const html = m.entryRowHtml(
+    { type: 'fact', date: '2026-10-17', provenance: 'global:item-1', text: 'Copied' },
+    0
+  );
   assert.match(html, /data-action="edit"/);
   assert.match(html, /data-action="delete"/);
   assert.doesNotMatch(html, /data-action="promote"/);
+  assert.match(html, /copied from global · 2026-10-17/);
+  assert.match(html, /is-global-copy/);
 });

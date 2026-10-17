@@ -154,6 +154,31 @@ function workspaceSourceChip(attribution) {
   return chip;
 }
 
+// copyTargetWorkspaces turns GET /api/workspaces into the Copy to workspace
+// picker: active workspaces only, never the Personal HQ (its memory already
+// is global memory), sorted by name.
+export function copyTargetWorkspaces(payload) {
+  const list = Array.isArray(payload?.workspaces) ? payload.workspaces : [];
+  return list
+    .filter(
+      ws =>
+        ws &&
+        typeof ws.id === 'string' &&
+        ws.id &&
+        ws.designation !== 'personal_hq' &&
+        (!ws.status || ws.status === 'active')
+    )
+    .map(ws => ({ id: ws.id, name: String(ws.name || ws.id) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// copiesSummary is the line shown next to a fact's copies.
+export function copiesSummary(copies) {
+  const names = (Array.isArray(copies) ? copies : []).map(copy => copy?.name).filter(Boolean);
+  if (!names.length) return 'No workspace holds a copy of this fact.';
+  return `Copies in: ${names.join(', ')}. A copy is ordinary workspace memory and does not change with this fact.`;
+}
+
 function reviewDate(value) {
   if (!value || Number.isNaN(Date.parse(value))) return 'Date unavailable';
   return new Date(value).toLocaleDateString(undefined, {
@@ -382,6 +407,10 @@ export function mountPersonalHQKnowledge(root = document) {
       });
       retries.delete(key);
       await reload();
+      if (action === 'forget') {
+        busy = false;
+        await showCopiesAfterForget(item);
+      }
     } catch (error) {
       setStatus(
         error.status === 409
@@ -393,6 +422,159 @@ export function mountPersonalHQKnowledge(root = document) {
       busy = false;
       button.disabled = false;
     }
+  }
+
+  // renderCopies lists the workspaces holding a copy of a fact, each with a
+  // Remove copy action, and resolves to the number of copies found.
+  async function renderCopies(container, itemID) {
+    container.replaceChildren(
+      element('p', 'reviewed-knowledge-evidence', 'Checking which workspaces hold a copy…')
+    );
+    let copies;
+    try {
+      const payload = await request(`${REVIEW_API}/${encodeURIComponent(itemID)}/copies`);
+      copies = Array.isArray(payload.copies) ? payload.copies : [];
+    } catch {
+      container.replaceChildren(
+        element(
+          'p',
+          'reviewed-knowledge-warning',
+          'Copies could not be checked. Refresh to try again.'
+        )
+      );
+      return 0;
+    }
+    const list = element('ul', 'reviewed-knowledge-copies');
+    for (const copy of copies) {
+      const row = element('li');
+      if (safeDossierRoute(copy.href)) {
+        const link = element('a', '', copy.name || 'Workspace');
+        link.href = copy.href;
+        row.append(link);
+      } else {
+        row.append(copy.name || 'Workspace');
+      }
+      const remove = actionButton('Remove copy', async () => {
+        if (busy) return;
+        busy = true;
+        remove.disabled = true;
+        try {
+          await request(
+            `${REVIEW_API}/${encodeURIComponent(itemID)}/copies/${encodeURIComponent(copy.workspace_id)}`,
+            { method: 'DELETE' }
+          );
+          setStatus(`Removed the copy from ${copy.name || 'that workspace'}.`);
+          busy = false;
+          await renderCopies(container, itemID);
+        } catch {
+          setStatus('Could not remove that copy. Refresh and try again.', true);
+          remove.disabled = false;
+        } finally {
+          busy = false;
+        }
+      });
+      row.append(' ', remove);
+      list.append(row);
+    }
+    container.replaceChildren(element('p', 'reviewed-knowledge-evidence', copiesSummary(copies)));
+    if (copies.length) container.append(list);
+    return copies.length;
+  }
+
+  // showCopiesAfterForget keeps a forgotten fact's copies visible: the fact
+  // leaves the list, but copies stay in their workspaces until removed.
+  async function showCopiesAfterForget(item) {
+    root.getElementById('reviewedKnowledgeForgottenCopies')?.remove();
+    const panel = element('div', 'reviewed-knowledge-forgotten-copies');
+    panel.id = 'reviewedKnowledgeForgottenCopies';
+    const box = element('div');
+    panel.append(
+      element(
+        'p',
+        'reviewed-knowledge-forgotten-title',
+        `You forgot "${item.text || 'this fact'}". Copies you made stay in their workspaces until you remove them.`
+      ),
+      box,
+      actionButton('Done', () => panel.remove())
+    );
+    factsElement.before(panel);
+    if (!(await renderCopies(box, item.id))) panel.remove();
+  }
+
+  async function copyForm(item, card) {
+    if (card.querySelector('.reviewed-knowledge-copy')) return;
+    const form = element('form', 'reviewed-knowledge-copy');
+    const select = element('select', 'form-select');
+    select.id = `copy-target-${item.id}`;
+    const label = element('label', '', 'Copy this fact into a workspace');
+    label.htmlFor = select.id;
+    const copy = element('button', 'modern-btn modern-btn-primary', 'Copy');
+    copy.type = 'submit';
+    copy.disabled = true;
+    select.disabled = true;
+    select.append(element('option', '', 'Loading workspaces…'));
+    const result = element('p', 'reviewed-knowledge-evidence');
+    form.append(
+      label,
+      select,
+      copy,
+      actionButton('Cancel', () => form.remove()),
+      result
+    );
+    card.append(form);
+    try {
+      const targets = copyTargetWorkspaces(await request('/api/workspaces'));
+      if (targets.length) {
+        select.replaceChildren(
+          ...targets.map(target => {
+            const option = element('option', '', target.name);
+            option.value = target.id;
+            return option;
+          })
+        );
+        select.disabled = false;
+        copy.disabled = false;
+      } else {
+        select.replaceChildren(element('option', '', 'No other workspace yet'));
+      }
+    } catch {
+      select.replaceChildren(element('option', '', 'Workspaces could not be loaded'));
+    }
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (busy || !select.value) return;
+      const name = select.selectedOptions[0]?.textContent || 'the workspace';
+      busy = true;
+      copy.disabled = true;
+      try {
+        const copied = await request(`${REVIEW_API}/${encodeURIComponent(item.id)}/copy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: select.value, if_version: item.version })
+        });
+        result.replaceChildren(
+          copied.created
+            ? `Copied into ${name}. Its agents now have this fact in their workspace memory. `
+            : `${name} already has this fact. `
+        );
+        if (safeDossierRoute(copied.href)) {
+          const open = element('a', '', `Open ${name}'s memory`);
+          open.href = copied.href;
+          result.append(open);
+        }
+        setStatus(copied.created ? `Copied into ${name}.` : `${name} already has this fact.`);
+      } catch (error) {
+        setStatus(
+          error.status === 409
+            ? 'This fact changed. Refresh and review it before copying.'
+            : 'Could not copy the fact. Try again.',
+          true
+        );
+      } finally {
+        busy = false;
+        copy.disabled = false;
+      }
+    });
   }
 
   function editForm(item, parent, action) {
@@ -581,7 +763,19 @@ export function mountPersonalHQKnowledge(root = document) {
       actions.append(reject);
     } else if (item.state === 'approved' || item.state === 'needs_review') {
       if (item.state === 'approved') {
-        actions.append(actionButton('Edit', () => editForm(item, card, 'edit-approved')));
+        actions.append(
+          actionButton('Edit', () => {
+            editForm(item, card, 'edit-approved');
+            if (!card.querySelector('.reviewed-knowledge-copies-box')) {
+              const box = element('div', 'reviewed-knowledge-copies-box');
+              card.append(box);
+              void renderCopies(box, item.id);
+            }
+          })
+        );
+        if (item.scope !== 'global_profile') {
+          actions.append(actionButton('Copy to workspace…', () => copyForm(item, card)));
+        }
       } else if (item.source_kind === 'file_janitor' && item.evidence_checkpoint) {
         actions.append(
           actionButton('Review current evidence and reconfirm', () =>

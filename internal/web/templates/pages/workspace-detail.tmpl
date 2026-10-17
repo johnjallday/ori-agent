@@ -3597,6 +3597,11 @@
       border-left: 3px solid var(--accent-color, #4a7dff);
     }
 
+    /* Copied from global memory: ordinary and editable, marked by origin. */
+    .workspace-detail-memory-entry.is-global-copy {
+      border-left: 3px dashed color-mix(in srgb, var(--accent-color, #4a7dff) 60%, transparent);
+    }
+
     .workspace-detail-memory-promote-note,
     .workspace-detail-memory-notice {
       font-size: 0.8rem;

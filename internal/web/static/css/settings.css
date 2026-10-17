@@ -862,6 +862,64 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   font-weight: 650;
 }
 
+/* Copy to workspace, and the workspaces holding a copy of a global fact. */
+.reviewed-knowledge-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.reviewed-knowledge-copy label {
+  flex: 1 1 100%;
+  color: var(--text-secondary);
+  font-size: 0.83rem;
+}
+
+.reviewed-knowledge-copy .form-select {
+  flex: 1 1 12rem;
+  max-width: 22rem;
+}
+
+.reviewed-knowledge-copy .reviewed-knowledge-evidence {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.reviewed-knowledge-copies-box {
+  margin-top: 0.75rem;
+}
+
+.reviewed-knowledge-copies {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.reviewed-knowledge-copies .modern-btn {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.reviewed-knowledge-forgotten-copies {
+  margin-bottom: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--warning-color, #ae762e);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.reviewed-knowledge-forgotten-title {
+  margin: 0 0 0.35rem;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
 .reviewed-profile-actions {
   display: flex;
   flex-wrap: wrap;

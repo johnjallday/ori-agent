@@ -3,12 +3,38 @@ import test from 'node:test';
 
 import {
   approvedSourceChip,
+  copiesSummary,
+  copyTargetWorkspaces,
   dossierEmptyGuidance,
   groupReviewedKnowledge,
   promotedFromWorkspace,
   reviewTextValid,
   workspaceProposalSource
 } from './personal-hq-knowledge.js';
+
+test('the copy picker offers active workspaces only, never the Personal HQ', () => {
+  const targets = copyTargetWorkspaces({
+    workspaces: [
+      { id: 'hq', name: 'My HQ', designation: 'personal_hq', status: 'active' },
+      { id: 'b', name: 'Beta', status: 'active' },
+      { id: 'a', name: 'Album 3' },
+      { id: 'old', name: 'Finished', status: 'completed' },
+      { id: '', name: 'Broken' },
+      null
+    ]
+  });
+  assert.deepEqual(targets, [
+    { id: 'a', name: 'Album 3' },
+    { id: 'b', name: 'Beta' }
+  ]);
+  assert.deepEqual(copyTargetWorkspaces({}), []);
+});
+
+test('the copies line names every workspace holding a copy', () => {
+  assert.match(copiesSummary([{ name: 'Album 3' }, { name: 'EP' }]), /^Copies in: Album 3, EP\./);
+  assert.match(copiesSummary([{ name: 'Album 3' }]), /does not change with this fact/);
+  assert.equal(copiesSummary([]), 'No workspace holds a copy of this fact.');
+});
 
 test('a fact promoted from a workspace names and links that workspace', () => {
   assert.deepEqual(

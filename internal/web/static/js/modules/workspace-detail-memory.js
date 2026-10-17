@@ -287,12 +287,15 @@ export class WorkspaceMemoryManager {
     const kind = memoryEntryKind(entry);
     if (kind === 'managed') return this.managedEntryHtml(entry, index);
     const type = this.esc(entry?.type || 'fact');
-    const meta = [entry?.provenance, entry?.date]
+    // A copy of a global fact is ordinary memory; it no longer follows the
+    // global fact, so say where it came from instead of its raw provenance.
+    const origin = kind === 'global_copy' ? 'copied from global' : entry?.provenance;
+    const meta = [origin, entry?.date]
       .filter(Boolean)
       .map(v => this.esc(v))
       .join(' · ');
     return `
-      <article class="workspace-detail-memory-entry" data-index="${index}">
+      <article class="workspace-detail-memory-entry${kind === 'global_copy' ? ' is-global-copy' : ''}" data-index="${index}">
         <div class="workspace-detail-memory-entry-main">
           <span class="workspace-detail-memory-badge workspace-detail-memory-badge-${type}">${type}</span>
           <span class="workspace-detail-memory-text">${this.esc(entry?.text || '')}</span>
