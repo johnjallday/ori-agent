@@ -1885,6 +1885,66 @@ The same rules as the snapshot's `suggestion` apply, so a project already rememb
 
 A cancelled native dialog answers `{ "cancelled": true }` and records nothing. Errors read as they do for a scan (`400` unknown chip, missing folder or a root that cannot be looked at; `409` when the dialog is unavailable or Personal HQ is not built), except a scan that is still running, which is `409` with "I'm still looking at the last folder. Try again in a moment."
 
+## Global Memory API
+
+Global memory is the Personal HQ's `MEMORY.md` together with its reviewed-knowledge sidecar (`.ori/personal-assistant-knowledge.json`). There is no other store. Only the hired personal assistant reads it (Home, the HQ page, and the assistant drawer on workspace pages), under the prompt heading `## Global memory (Personal HQ, user-approved)`. Workspace agents never receive it; to give a workspace's agents a fact, copy it into that workspace (below).
+
+Without a hired assistant and a Personal HQ, every global-memory control answers with the same message: "Global memory needs a personal assistant with a Personal HQ. Set one up from Home."
+
+### Propose a fact from any workspace (agent tool)
+
+Agents in every workspace's chat and task runs have the workspace tool `memory_propose_global`, allowed under every autonomy policy, including Watch, because it writes no canonical memory. The model supplies only `text` (one line, at most 500 characters, the same rules as `memory_write`) and `category` (`how_you_work`, `people`, `projects`, `routines`, `sources`). The server fills the workspace, agent and task from the verified execution context; any other argument is ignored.
+
+A proposal becomes a review candidate (source kind `workspace_agent`) with evidence `{source_kind: "workspace_agent", source_id: <workspace ID>, summary: "<workspace> · <agent> · task <id>" | "… · chat"}`. It never writes `MEMORY.md`. Proposals are keyed by normalized text, so the same fact from two workspaces is one item. Workspace proposals have their own quota: 10 pending and 10 per rolling 24 hours, separate from the folder-scan, saved-app and File Janitor sources.
+
+The tool replies `{"status", "message"}`:
+
+| `status` | Meaning |
+|---|---|
+| `proposed` | Sent for the user's review on the Profile page; not active until approved |
+| `already_pending` | The same fact is already waiting for review |
+| `already_known` | Global memory already holds the fact (an approved item or an HQ `MEMORY.md` line) |
+| `refused` | The user rejected or forgot this wording, the queue is full, or the assistant is paused; the message says not to retry |
+| `unavailable` | No hired assistant with a Personal HQ |
+
+Native CLI runs cannot call Ori tools, so they cannot propose. Workspace chat with a `codex` agent runs on that native CLI path and has no Ori workspace tools; Codex task runs do, through the brokered tool protocol.
+
+### Review items carry their source
+
+`GET /api/personal-assistant/knowledge` items have a `source` object: `kind` for every item (`interview` marks an explicit fact saved from the assistant's interview). For a workspace agent's proposal, or a fact the user promoted from a workspace, it also has `workspace_id`, the workspace's current `workspace_name` and `workspace_slug` (omitted when the workspace is gone), and, for a proposal, `agent`, `task_id` (absent for a chat) and `observed_at`. Approving a `workspace_agent` proposal is not revalidated against its source workspace: the user approved the exact wording.
+
+### Copy a fact into a workspace
+
+**Endpoint:** `POST /api/personal-assistant/knowledge/{item_id}/copy`
+
+```json
+{ "workspace_id": "album-3", "if_version": 2 }
+```
+
+Appends one ordinary entry `- [fact, <today>, global:<item-id>] <text>` to that workspace's `MEMORY.md`, with the text read from the canonical HQ line. `if_version` must be the version of the approved fact the user is looking at. Repeating the copy changes nothing. The copy is ordinary workspace memory from then on: editable, deletable, and never updated or removed when the global fact changes.
+
+```json
+{ "created": true, "workspace_id": "album-3", "href": "/workspaces/album-3#memory" }
+```
+
+`400` for the Personal HQ itself or a malformed request, `404` for an unknown or unavailable workspace or fact, `409` when the fact is not approved or its version changed, and `409` with the shared message when there is no Personal HQ.
+
+### List the workspaces holding a copy
+
+**Endpoint:** `GET /api/personal-assistant/knowledge/{item_id}/copies`
+
+```json
+{ "copies": [{ "workspace_id": "album-3", "name": "Album 3", "slug": "album-3", "href": "/workspaces/album-3#memory" }] }
+```
+
+Scans active workspaces' `MEMORY.md` files for `global:<item-id>` provenance, on demand and read-only. It also works after the fact is forgotten, so the Profile page can show where copies live on.
+
+### Remove a copy
+
+**Endpoint:** `DELETE /api/personal-assistant/knowledge/{item_id}/copies/{workspace_id}`
+
+Deletes that workspace's copied line and nothing else. Returns `{"removed": true, "workspace_id": …}`; `404` when the workspace holds no copy.
+
 ## Home Project Library Notifications API
 
 After a reviewed library scan completes, a program Home keeps a small, model-free digest of what the scan found, may ask its bound Manager for at most three inert suggestions, and shows both through navigation-only entry points (PRD `library-manager-notifications`; contract in `docs/architecture/project-library.md`). Every route below is for the authenticated owner of that exact Home: any other owner, a linked project's ID, or a Home without an assistant program gets `404`. No route here scans, reads a folder, grants anything or changes notes.
@@ -2149,7 +2209,7 @@ Re-derives the plan and requires the reviewed digest, then installs exactly the 
 
 ## Workspace Memory API
 
-Each workspace keeps a curated `MEMORY.md` of durable operational knowledge (facts, decisions, dead ends, watch-state) at the root of its folder. The file on disk is canonical — there is no database copy. Memory is injected into every mission run and workspace chat (capped at ~2,000 tokens) and can be written by agents via the `memory_write` / `memory_forget` tools under every autonomy policy, including Watch.
+Each workspace keeps a curated `MEMORY.md` of durable operational knowledge (facts, decisions, dead ends, watch-state) at the root of its folder. The file on disk is canonical — there is no database copy. Memory is injected into every mission run and workspace chat (capped at ~2,000 tokens) and can be written by agents via the `memory_write` / `memory_forget` tools under every autonomy policy, including Watch. A fact about the user rather than the workspace belongs in global memory instead; see the [Global Memory API](#global-memory-api).
 
 Each entry is one line: `- [<type>, <YYYY-MM-DD>, <provenance>] <text>`, where `<type>` is one of `fact`, `feedback`, `decision`, `dead-end`, `watch`, `thread`. Entries are capped at 500 characters and obvious secrets are refused (store credentials in the Vault).
 
@@ -2166,11 +2226,12 @@ Each entry is one line: `- [<type>, <YYYY-MM-DD>, <provenance>] <text>`, where `
   "raw_size": 149,
   "char_budget": 8000,
   "token_budget": 2000,
-  "over_budget": false
+  "over_budget": false,
+  "global_memory": { "available": true, "review_href": "/profile#personalHQKnowledge" }
 }
 ```
 
-`entries` are the structured lines (with their file-order `index`); `unstructured` holds non-entry lines (the header, hand-written prose) for display. `404` if the workspace doesn't exist; `503` if folder storage is unavailable.
+`entries` are the structured lines (with their file-order `index`); `unstructured` holds non-entry lines (the header, hand-written prose) for display. An entry with `"managed": true` is a reviewed global-memory line (`ori-hq:` provenance, only in the Personal HQ); it changes only through review on the Profile page. An entry with `global:<item-id>` provenance was copied from global memory and is ordinary memory. `global_memory` says whether global memory exists (`available`), whether this workspace is the Personal HQ (`is_personal_hq`), and otherwise carries the shared `message` and a `setup_href`. `404` if the workspace doesn't exist; `503` if folder storage is unavailable.
 
 ### Add Memory Entry
 
@@ -2186,13 +2247,29 @@ Each entry is one line: `- [<type>, <YYYY-MM-DD>, <provenance>] <text>`, where `
 
 **Endpoint:** `PUT /api/workspaces/{workspaceID}/memory/entries/{index}`
 
-Body identical to add. `index` is the structured-entry index from GET. Returns the updated document. `400` for a non-numeric index or invalid text; `404` when the index is out of range.
+Body identical to add. `index` is the structured-entry index from GET. Returns the updated document. `400` for a non-numeric index or invalid text; `404` when the index is out of range; `409` with code `memory_entry_managed` for a reviewed global-memory line.
 
 ### Delete Memory Entry
 
 **Endpoint:** `DELETE /api/workspaces/{workspaceID}/memory/entries/{index}`
 
-Removes one entry by index and returns the updated document. `404` when the index is out of range.
+Removes one entry by index and returns the updated document. `404` when the index is out of range; `409` with code `memory_entry_managed` for a reviewed global-memory line.
+
+### Promote an Entry to Global Memory
+
+**Endpoint:** `POST /api/workspaces/{workspaceID}/memory/entries/{index}/promote`
+
+```json
+{ "text": "I reference my mixes at -14 LUFS.", "category": "how_you_work" }
+```
+
+Copies one ordinary entry into global memory as an approved fact, because the user performed the action. Both fields are optional: `text` defaults to the entry's text, and `category` (`how_you_work`, `people`, `projects`, `routines`) defaults to `how_you_work` for a `feedback` entry and `projects` otherwise. The workspace entry stays where it is. The approved fact records the source workspace and the original entry as evidence and never consumes proposal quota.
+
+```json
+{ "status": "promoted", "created": true, "item_id": "…", "href": "/profile#personalHQKnowledge", "message": "Promoted to global memory. Your assistant now knows it everywhere." }
+```
+
+`status` is `already_known` when global memory already holds the text (repeating a promote changes nothing; an entry in the Personal HQ itself is already global), or `already_pending` when the same fact is waiting for review. `409 memory_entry_not_promotable` for a reviewed (`ori-hq:`) or copied (`global:`) entry, `409 global_memory_unavailable` with the shared message when there is no Personal HQ, `400` for invalid text or category, `404` for an index out of range.
 
 ## Workspace Outputs API
 

@@ -99,7 +99,8 @@ func (s *KnowledgeLearningService) Propose(ctx context.Context, userID string, p
 	if err != nil {
 		return KnowledgeItem{}, false, err
 	}
-	key := proposalSemanticKey(binding, proposal)
+	key := knowledgeProposalKey(binding, proposal)
+	quota := knowledgeQuotaFor(proposal.SourceKind)
 	for range knowledgeRetryLimit {
 		doc, err := s.store.Read(ctx, userID)
 		if err != nil {
@@ -109,7 +110,7 @@ func (s *KnowledgeLearningService) Propose(ctx context.Context, userID string, p
 			return KnowledgeItem{}, false, ErrKnowledgeSuppressed
 		}
 		for _, item := range doc.Items {
-			if item.SemanticKey == key || hasKnowledgeAlias(item, key) {
+			if knowledgeItemMatches(item, key) {
 				if item.State == KnowledgeRejected || item.State == KnowledgeForgotten {
 					return KnowledgeItem{}, false, ErrKnowledgeSuppressed
 				}
@@ -129,20 +130,37 @@ func (s *KnowledgeLearningService) Propose(ctx context.Context, userID string, p
 				return ErrKnowledgeSuppressed
 			}
 			for _, existing := range latest.Items {
-				if existing.SemanticKey == key || hasKnowledgeAlias(existing, key) {
+				if knowledgeItemMatches(existing, key) {
 					return ErrConflict
 				}
 			}
 			var pending int
 			for _, existing := range latest.Items {
-				if existing.State == KnowledgeCandidate {
+				if existing.State == KnowledgeCandidate && knowledgeQuotaFor(existing.SourceKind) == quota {
 					pending++
 				}
 			}
-			if pending >= knowledgePendingLimit || len(latest.Items) >= knowledgeMaxItems {
+			if pending >= quota.pending || len(latest.Items) >= knowledgeMaxItems {
 				return ErrKnowledgeQuota
 			}
 			cutoff := at.Add(-24 * time.Hour)
+			if quota.sourceKind != "" {
+				// A pool of its own counts its items' creation times: items are
+				// never removed, and a new sidecar field would make an older Ori
+				// (strict decoding) read this file as corrupt. A future time
+				// still counts, so a skewed clock cannot erase the quota.
+				admitted := 0
+				for _, existing := range latest.Items {
+					if existing.SourceKind == quota.sourceKind && existing.CreatedAt.After(cutoff) {
+						admitted++
+					}
+				}
+				if admitted >= quota.daily {
+					return ErrKnowledgeQuota
+				}
+				latest.Items = append(latest.Items, item)
+				return nil
+			}
 			active := make([]time.Time, 0, len(latest.Admissions)+1)
 			for _, admitted := range latest.Admissions {
 				if admitted.After(at) {
@@ -152,7 +170,7 @@ func (s *KnowledgeLearningService) Propose(ctx context.Context, userID string, p
 					active = append(active, admitted)
 				}
 			}
-			if len(active) >= knowledgeDailyLimit {
+			if len(active) >= quota.daily {
 				return ErrKnowledgeQuota
 			}
 			latest.Admissions = append(active, at)
@@ -355,6 +373,9 @@ func validateKnowledgeProposal(input KnowledgeProposal) (KnowledgeProposal, erro
 		if input.Category != "projects" && input.Category != "how_you_work" {
 			return KnowledgeProposal{}, fmt.Errorf("%w: unsupported category for source", ErrValidation)
 		}
+	case WorkspaceAgentSourceKind:
+		// Any of the five dossier categories; ProposeWorkspaceFact is the only
+		// constructor and fills everything but Category and Text itself.
 	default:
 		return KnowledgeProposal{}, fmt.Errorf("%w: unsupported source", ErrValidation)
 	}
@@ -388,6 +409,52 @@ func validateKnowledgeProposal(input KnowledgeProposal) (KnowledgeProposal, erro
 		}
 	}
 	return input, nil
+}
+
+// knowledgeProposalKey keys a workspace agent's free-text fact by its
+// normalized text instead of the workspace that proposed it. The same fact
+// about the user from two workspaces is one review item, and a rejected or
+// forgotten wording stays suppressed because tombstones hold text keys.
+func knowledgeProposalKey(binding KnowledgeBinding, proposal KnowledgeProposal) string {
+	if proposal.SourceKind == WorkspaceAgentSourceKind {
+		return knowledgeTextKey(proposal.Text)
+	}
+	return proposalSemanticKey(binding, proposal)
+}
+
+// knowledgeItemMatches reports whether item already holds the meaning key. A
+// text key also matches any revision with the same normalized wording, from
+// any source; a source key never equals a text key.
+func knowledgeItemMatches(item KnowledgeItem, key string) bool {
+	if item.SemanticKey == key || hasKnowledgeAlias(item, key) {
+		return true
+	}
+	if !strings.HasPrefix(key, knowledgeTextKeyPrefix) {
+		return false
+	}
+	for _, revision := range item.Revisions {
+		if revision.Text != "" && knowledgeTextKey(revision.Text) == key {
+			return true
+		}
+	}
+	return false
+}
+
+// knowledgeQuota is one admission pool. Workspace agents get their own pool,
+// so a chatty run cannot block folder-scan, saved-app or janitor suggestions
+// and those cannot block a workspace proposal; every other source shares the
+// original pool, whose admissions are KnowledgeDocument.Admissions.
+type knowledgeQuota struct {
+	sourceKind string // empty for the shared pool
+	pending    int
+	daily      int
+}
+
+func knowledgeQuotaFor(sourceKind string) knowledgeQuota {
+	if sourceKind == WorkspaceAgentSourceKind {
+		return knowledgeQuota{sourceKind: WorkspaceAgentSourceKind, pending: workspaceProposalPendingLimit, daily: workspaceProposalDailyLimit}
+	}
+	return knowledgeQuota{pending: knowledgePendingLimit, daily: knowledgeDailyLimit}
 }
 
 // KnowledgeSemanticKey is for trusted host-owned source adapters that must

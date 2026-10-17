@@ -3,8 +3,29 @@ import assert from 'node:assert/strict';
 import {
   activeKnowledgeWorkspaces,
   assistantLearningSources,
-  buildUserKnowledgeView
+  buildUserKnowledgeView,
+  workspaceMemoryMeta,
+  workspaceMemoryOrigin
 } from './user-knowledge.js';
+
+test('an overview entry shows its recorded date when it has a valid one', () => {
+  assert.equal(
+    workspaceMemoryMeta({ provenance: 'global:item-1', date: '2026-10-17' }),
+    'Copied from global memory · recorded entry date 2026-10-17'
+  );
+  assert.equal(
+    workspaceMemoryMeta({ provenance: 'user', date: 'yesterday' }),
+    'Existing workspace memory · origin unverified · entry date unavailable'
+  );
+});
+
+test('a workspace entry copied from global memory is labelled as such', () => {
+  assert.equal(workspaceMemoryOrigin({ provenance: 'global:item-1' }), 'Copied from global memory');
+  assert.equal(
+    workspaceMemoryOrigin({ provenance: 'agent:Scout' }),
+    'Existing workspace memory · origin unverified'
+  );
+});
 
 const workspaces = [
   {

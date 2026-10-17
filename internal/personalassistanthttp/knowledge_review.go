@@ -44,6 +44,7 @@ func (h *Handler) GetKnowledgeReview(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []personalassistant.KnowledgeReviewItem{}
 	}
+	h.attributeReviewItems(items)
 	sources := KnowledgeSources{
 		SavedApps:   KnowledgeSourceCard{Status: "unavailable"},
 		FileJanitor: KnowledgeSourceCard{Status: "unavailable"},
@@ -212,6 +213,7 @@ func (h *Handler) MutateKnowledgeReview(w http.ResponseWriter, r *http.Request) 
 		orihttp.ServiceUnavailable(w, "The review was saved. Reload to verify the current value")
 		return
 	}
+	h.attributeReviewItems(items)
 	for _, item := range items {
 		if item.ID == itemID {
 			orihttp.Success(w, map[string]any{"item": item})

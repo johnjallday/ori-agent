@@ -19,8 +19,10 @@ import (
 func knowledgeTextKey(text string) string {
 	value := strings.Join(strings.Fields(cases.Fold().String(norm.NFKC.String(text))), " ")
 	sum := sha256.Sum256([]byte(value))
-	return "text:" + hex.EncodeToString(sum[:])
+	return knowledgeTextKeyPrefix + hex.EncodeToString(sum[:])
 }
+
+const knowledgeTextKeyPrefix = "text:"
 
 func knowledgeSuppressionKeys(item KnowledgeItem) []string {
 	keys := append(append([]string(nil), item.Aliases...), item.SemanticKey)

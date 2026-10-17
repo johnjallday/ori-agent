@@ -108,6 +108,9 @@ func MissionBindingsReady(ws *Workspace) bool {
 const (
 	MemoryWriteToolName  = "memory_write"
 	MemoryForgetToolName = "memory_forget"
+	// MemoryProposeGlobalToolName sends a fact about the user to the Personal
+	// HQ review queue. It writes no canonical memory anywhere.
+	MemoryProposeGlobalToolName = "memory_propose_global"
 )
 
 // nativeToolSideEffects classifies the tools Ori itself offers in a workspace:
@@ -148,6 +151,7 @@ var nativeToolSideEffects = map[string]SideEffect{
 	"github_propose_change":               SideEffectWrite,
 	MemoryWriteToolName:                   SideEffectWrite,
 	MemoryForgetToolName:                  SideEffectWrite,
+	MemoryProposeGlobalToolName:           SideEffectWrite,
 	"delegate_task":                       SideEffectExternal,
 	"workspace_create_project":            SideEffectExternal,
 	"workspace_manage_agents":             SideEffectExternal,
@@ -235,9 +239,11 @@ func EffectiveAutonomyPolicy(p AutonomyPolicy) AutonomyPolicy {
 // state, and a Watch mission that cannot remember what it watched can never
 // deduplicate findings or track trends across runs. The user-facing Watch
 // guarantee is correspondingly worded "no writes anywhere — except workspace
-// memory".
+// memory". memory_propose_global is included: it only queues an inert
+// candidate for the user's review and writes no canonical memory.
 func IsWorkspaceMemoryTool(toolName string) bool {
-	return toolName == MemoryWriteToolName || toolName == MemoryForgetToolName
+	return toolName == MemoryWriteToolName || toolName == MemoryForgetToolName ||
+		toolName == MemoryProposeGlobalToolName
 }
 
 // IsAllowedUnderPolicy reports whether a tool call classified with `se` is

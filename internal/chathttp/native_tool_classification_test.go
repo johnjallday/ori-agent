@@ -39,8 +39,9 @@ func TestNativeWorkspaceToolsAreClassified(t *testing.T) {
 func toolDefinitionNames(t *testing.T, dir string) []string {
 	t.Helper()
 	constants := map[string]string{
-		"MemoryWriteToolName":  workspace.MemoryWriteToolName,
-		"MemoryForgetToolName": workspace.MemoryForgetToolName,
+		"MemoryWriteToolName":         workspace.MemoryWriteToolName,
+		"MemoryForgetToolName":        workspace.MemoryForgetToolName,
+		"MemoryProposeGlobalToolName": workspace.MemoryProposeGlobalToolName,
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

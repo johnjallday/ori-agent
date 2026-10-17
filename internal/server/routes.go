@@ -1186,6 +1186,10 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/check-janitor", s.Handlers.PersonalAssistant.CheckJanitorSuggestions)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-forget", s.Handlers.PersonalAssistant.ResumeKnowledgeForget)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-operation", s.Handlers.PersonalAssistant.ResumeKnowledgeOperation)
+		// Global memory: copy a fact into a workspace and track the copies.
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/copy", s.Handlers.PersonalAssistant.CopyGlobalFact)
+		mux.HandleFunc("GET /api/personal-assistant/knowledge/{item_id}/copies", s.Handlers.PersonalAssistant.GetGlobalFactCopies)
+		mux.HandleFunc("DELETE /api/personal-assistant/knowledge/{item_id}/copies/{workspace_id}", s.Handlers.PersonalAssistant.RemoveGlobalFactCopy)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/{action}", s.Handlers.PersonalAssistant.MutateKnowledgeReview)
 		// Show me a folder: chips and offer identifiers only, never a path.
 		const folderDigest = "/api/personal-assistant/folder-digest"
@@ -1397,6 +1401,7 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries", s.Handlers.WorkspaceMemory.AddEntry)
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries/{index}/promote", s.Handlers.WorkspaceMemory.PromoteEntry)
 	}
 }
 
