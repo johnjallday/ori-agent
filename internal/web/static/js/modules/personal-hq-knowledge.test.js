@@ -2,11 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  approvedSourceChip,
   dossierEmptyGuidance,
   groupReviewedKnowledge,
   reviewTextValid,
   workspaceProposalSource
 } from './personal-hq-knowledge.js';
+
+test('every approved global fact names its origin', () => {
+  const chip = kind => approvedSourceChip({ source: { kind } });
+  assert.equal(chip('explicit'), 'From you');
+  assert.equal(chip('interview'), 'From your interview');
+  assert.equal(chip('workspace_agent'), 'From a workspace');
+  assert.equal(chip('folder_scan'), 'From a folder scan');
+  assert.equal(chip('saved_app'), 'From saved apps');
+  assert.equal(chip('file_janitor'), 'From File Janitor');
+  // An older server without the source object still labels by source_kind.
+  assert.equal(approvedSourceChip({ source_kind: 'saved_app' }), 'From saved apps');
+  assert.equal(chip('something_new'), '');
+});
 
 test('a workspace proposal names its agent, workspace link and task or chat', () => {
   const fromTask = workspaceProposalSource({

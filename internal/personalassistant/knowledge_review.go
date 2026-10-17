@@ -33,9 +33,11 @@ type KnowledgeReviewItem struct {
 }
 
 // KnowledgeReviewSource says where a fact came from, for the Profile page's
-// source chip. A workspace agent's proposal also names the workspace, agent
-// and task (or chat) it came from; the HTTP layer refreshes the workspace's
-// name and page slug when the workspace still exists.
+// source chip. Kind is the item's source kind, except "interview" for an
+// explicit fact the user confirmed in the assistant's interview. A workspace
+// agent's proposal also names the workspace, agent and task (or chat) it came
+// from; the HTTP layer refreshes the workspace's name and page slug when the
+// workspace still exists.
 type KnowledgeReviewSource struct {
 	Kind          string     `json:"kind"`
 	WorkspaceID   string     `json:"workspace_id,omitempty"`
@@ -46,8 +48,15 @@ type KnowledgeReviewSource struct {
 	ObservedAt    *time.Time `json:"observed_at,omitempty"`
 }
 
-func knowledgeReviewSource(item KnowledgeItem) KnowledgeReviewSource {
+// KnowledgeInterviewSourceKind is the review display kind of an explicit fact
+// saved from the assistant's interview. It is never a stored source kind.
+const KnowledgeInterviewSourceKind = "interview"
+
+func knowledgeReviewSource(item KnowledgeItem, interviewed map[string]bool) KnowledgeReviewSource {
 	source := KnowledgeReviewSource{Kind: item.SourceKind}
+	if item.SourceKind == "explicit" && interviewed[item.ID] {
+		source.Kind = KnowledgeInterviewSourceKind
+	}
 	if item.SourceKind != WorkspaceAgentSourceKind {
 		return source
 	}
@@ -86,6 +95,15 @@ func (s *KnowledgeLearningService) ReviewItems(ctx context.Context, userID strin
 	if err != nil {
 		return nil, err
 	}
+	// An interview row that saved to memory records "memory:<item ID>".
+	interviewed := map[string]bool{}
+	if doc.Interview != nil {
+		for _, receipt := range doc.Interview.RowReceipts {
+			if id, ok := strings.CutPrefix(receipt.CanonicalRef, "memory:"); ok {
+				interviewed[id] = true
+			}
+		}
+	}
 	var items []KnowledgeReviewItem
 	for _, item := range doc.Items {
 		if item.State == KnowledgeRejected || item.State == KnowledgeForgotten {
@@ -95,7 +113,7 @@ func (s *KnowledgeLearningService) ReviewItems(ctx context.Context, userID strin
 			ID: item.ID, Version: item.Version, State: item.State,
 			Category: item.Category, SourceKind: item.SourceKind,
 			RevisionID: item.CurrentRevisionID, UpdatedAt: item.UpdatedAt,
-			Scope: "personal_hq", Source: knowledgeReviewSource(item),
+			Scope: "personal_hq", Source: knowledgeReviewSource(item, interviewed),
 		}
 		if item.Target != nil && item.Target.Kind == "profile" {
 			view.Scope = "global_profile"

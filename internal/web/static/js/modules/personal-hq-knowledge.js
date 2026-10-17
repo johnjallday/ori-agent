@@ -75,6 +75,7 @@ function actionButton(label, onClick, className = 'modern-btn modern-btn-seconda
 }
 
 function sourceLabel(item) {
+  if (item.source?.kind === 'interview') return 'Your interview with Ori';
   if (item.source_kind === 'saved_app') return 'Saved app evidence';
   if (item.source_kind === 'file_janitor') return 'Approved File Janitor actions';
   if (item.source_kind === 'folder_scan') return 'A folder you showed Ori';
@@ -97,6 +98,21 @@ export function workspaceProposalSource(item) {
     run: source.task_id ? `from task ${source.task_id}` : 'from chat',
     observedAt: source.observed_at || ''
   };
+}
+
+const APPROVED_SOURCE_CHIPS = {
+  explicit: 'From you',
+  interview: 'From your interview',
+  workspace_agent: 'From a workspace',
+  folder_scan: 'From a folder scan',
+  saved_app: 'From saved apps',
+  file_janitor: 'From File Janitor'
+};
+
+// approvedSourceChip names the origin of an approved global fact (FR 14):
+// you, interview, workspace, folder scan, saved apps or janitor.
+export function approvedSourceChip(item) {
+  return APPROVED_SOURCE_CHIPS[item?.source?.kind || item?.source_kind] || '';
 }
 
 function workspaceSourceChip(attribution) {
@@ -431,7 +447,11 @@ export function mountPersonalHQKnowledge(root = document) {
       )
     );
     const attribution = workspaceProposalSource(item);
-    if (attribution) card.append(workspaceSourceChip(attribution));
+    if (attribution) {
+      card.append(workspaceSourceChip(attribution));
+    } else if (item.state === 'approved' && approvedSourceChip(item)) {
+      card.append(element('p', 'reviewed-knowledge-source', approvedSourceChip(item)));
+    }
     const evidence = attribution
       ? []
       : (Array.isArray(item.evidence) ? item.evidence : []).slice(0, 3);

@@ -322,6 +322,36 @@ func TestReviewItemsAttributeEverySourceAndWorkspaceProposals(t *testing.T) {
 	}
 }
 
+func TestReviewItemsLabelInterviewFactsApartFromFactsYouTold(t *testing.T) {
+	ctx := context.Background()
+	f, interview, version := interviewSaveFixture(t)
+	if _, err := interview.SaveReviewed(ctx, "local", KnowledgeInterviewSaveRequest{
+		StateVersion: version, RequestID: "interview-chip",
+		Rows: []KnowledgeInterviewReviewedRow{{RowID: "priority", Category: "projects", Destination: "personal_hq", Text: "Finish my portfolio"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := NewKnowledgeLifecycleService(NewKnowledgeStore(f.resolver(), f.folder), f.memory, nil)
+	current, err := lifecycle.CurrentStateVersion(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lifecycle.SaveExplicit(ctx, "local", current, "told-directly", "people", "My manager is Mina."); err != nil {
+		t.Fatal(err)
+	}
+	items, err := lifecycle.ReviewItems(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, item := range items {
+		kinds[item.Text] = item.Source.Kind
+	}
+	if kinds["Finish my portfolio"] != KnowledgeInterviewSourceKind || kinds["My manager is Mina."] != "explicit" {
+		t.Fatalf("source kinds = %v", kinds)
+	}
+}
+
 // The sidecar is decoded with DisallowUnknownFields, so a field this feature
 // added would make an older Ori read a newer file as corrupt. Workspace
 // proposals must persist only fields the pre-feature schema already knows.
