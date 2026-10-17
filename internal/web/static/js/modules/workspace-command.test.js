@@ -6832,4 +6832,19 @@ test('How this was set up shows the assistant, the request, and each reason, esc
   assert.match(html, /a newsletter &lt;b&gt;every&lt;\/b&gt; monday/);
   assert.equal((html.match(/<li>/g) || []).length, 2, 'blank reasons are left out');
   assert.match(html, /<strong>Blueprint<\/strong> It already has a drafting flow\./);
+  // What Create did with an attached folder or link is labelled too.
+  const attached = view.buildSummaryHTML({
+    build_summary: {
+      assistant_name: 'Luna',
+      decisions: [
+        { section: 'folder', text: 'Linked the folder “Elite School” you attached.' },
+        {
+          section: 'link',
+          text: 'Bound this workspace to acme/widgets, the repository you attached.'
+        }
+      ]
+    }
+  });
+  assert.match(attached, /<strong>Folder<\/strong> Linked the folder/);
+  assert.match(attached, /<strong>Link<\/strong> Bound this workspace to acme\/widgets/);
 });

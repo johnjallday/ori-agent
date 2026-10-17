@@ -1547,7 +1547,9 @@ export class WorkspaceCommandView {
       blueprint: 'Blueprint',
       details: 'Details',
       team: 'Team',
-      placement: 'Placement'
+      placement: 'Placement',
+      folder: 'Folder',
+      link: 'Link'
     };
     const decisions = (Array.isArray(summary.decisions) ? summary.decisions : [])
       .filter(decision => decision && String(decision.text || '').trim())

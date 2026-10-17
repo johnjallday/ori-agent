@@ -717,9 +717,17 @@ function submit(event) {
   moveSharedWorkActivity();
   const text =
     String(state.els?.input?.value || '').trim() ||
-    (window.PersonalAssistantFolderContext?.hasFolder?.() ? 'Explore this folder' : '');
+    (window.PersonalAssistantFolderContext?.hasFolder?.()
+      ? 'Explore this folder'
+      : window.PersonalAssistantLink?.hasLink?.()
+        ? window.PersonalAssistantLink.sendText()
+        : '');
   if (window.PersonalAssistantConversation?.isLoading?.()) {
     setStatus('Wait for the conversation to open before sending. Your draft is kept.');
+    return false;
+  }
+  if (window.PersonalAssistantLink?.isPending?.()) {
+    setStatus('Wait for the link to be checked before sending. Your message is kept here.');
     return false;
   }
   // While a reply is in flight the text stays in the box: sending it now would

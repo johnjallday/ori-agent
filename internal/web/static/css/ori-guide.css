@@ -1129,6 +1129,27 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: var(--pa-accent-text);
 }
 
+/* Add link: hidden until the server offers it, and one inline field. */
+#personalAssistantLinkChip[hidden] {
+  display: none;
+}
+
+.personal-assistant-link-field__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.personal-assistant-link-field__row input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.personal-assistant-link-field .is-error {
+  color: var(--danger-color);
+}
+
 /* What the composer last did. It takes no room while it has nothing to say. */
 .personal-assistant-panel__status {
   flex: none;

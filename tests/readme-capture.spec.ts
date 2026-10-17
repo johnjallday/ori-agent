@@ -432,6 +432,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { specialists: [] });
       return;
     }
+    // The drawer asks whether Add link is on. The accepted README pictures
+    // predate it, and a feature branch cannot re-accept them, so the scenes
+    // keep it off until the next README refresh shows it.
+    if (url.pathname === '/api/home-assistant/link-context/availability') {
+      await json(route, { available: false });
+      return;
+    }
     if (url.pathname === '/api/onboarding/detect') {
       await json(route, { specialist: null });
       return;

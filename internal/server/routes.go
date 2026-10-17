@@ -333,6 +333,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// list and open those conversations; both validate the relationship first.
 	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
 	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
+	homeAssistantRouteHandler.LinkConversation = homeAssistantAskHandler.LinkConversationRoute
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
 	homeAssistantRouteHandler.ConversationRoute = homeAssistantAskHandler.ValidateRouteConversation
 	homeAssistantRouteHandler.OperationRequest = homeAssistantAskHandler.OperationRequestSupported
@@ -359,6 +360,10 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/home-assistant/folder-context/detach", homeAssistantAskHandler.DetachFolderContextHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/review", homeAssistantAskHandler.ReviewFolderSetupHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/review/close", homeAssistantAskHandler.CloseFolderReviewHandler)
+	// The composer's Add link: observe one address and hold it for the turn.
+	mux.HandleFunc("GET /api/home-assistant/link-context/availability", homeAssistantAskHandler.LinkAvailabilityHandler)
+	mux.HandleFunc("POST /api/home-assistant/link-context/select", homeAssistantAskHandler.SelectLinkContextHandler)
+	mux.HandleFunc("POST /api/home-assistant/link-context/detach", homeAssistantAskHandler.DetachLinkContextHandler)
 	// Saving a conversation draft to the HQ backlog: review (no write), then save.
 	mux.HandleFunc("POST /api/home-assistant/drafts/review", homeAssistantAskHandler.DraftReviewHandler)
 	mux.HandleFunc("POST /api/home-assistant/drafts/save", homeAssistantAskHandler.DraftSaveHandler)
