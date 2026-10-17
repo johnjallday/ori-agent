@@ -196,10 +196,21 @@ skill read-only; the retained Ori skill delegates without a harness-wide install
 ### Project adapter API (v1)
 
 The companion invokes the target's `scripts/devtools-project.sh` with zsh and
-separate argv: `v1 provision <dev-path> <permission-mode>`, `v1 demo [port]`, or
-`v1 pre-pr`. Ori validates the target and same-repository provisioning source;
-its library owns permissions/secrets, picker/npm, demo environment/cleanup, and
-target `make ci-local`. No configuration/model defaults move to the companion.
+separate argv: `v1 provision <dev-path> <permission-mode>`, `v1 demo [port]`,
+`v1 pre-pr`, or `v1 demo-sandboxes list|remove`. Ori validates the target and
+same-repository provisioning source; its library owns permissions/secrets,
+picker/npm, demo environment/cleanup, and target `make ci-local`. No
+configuration/model defaults move to the companion.
+
+Every demo sandbox (`wt demo`, `scripts/demo-server.sh`) records the worktree
+that made it in `.ori-demo-owner`. `demo-sandboxes list` prints one
+`<kind><TAB><path>` line per `ori-demo.*` directory directly in `$TMPDIR`:
+`owned` (this worktree's, no process running from it), `in-use` (this
+worktree's, but a process's working directory is inside it, or `lsof` cannot
+tell), or `unmarked` (no record, idle). Another worktree's sandboxes are never
+listed. `demo-sandboxes remove` deletes only the `owned` ones, checking each
+again, and prints `removed`/`failed` lines. `wt done` lists them, asks, and then
+removes them before it removes the worktree; it never removes an `unmarked` one.
 Provisioning supports the documented `acceptEdits`/`bypassPermissions` modes and
 refuses malformed modes rather than interpolating them into JSON.
 
