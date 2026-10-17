@@ -4,8 +4,41 @@ import test from 'node:test';
 import {
   dossierEmptyGuidance,
   groupReviewedKnowledge,
-  reviewTextValid
+  reviewTextValid,
+  workspaceProposalSource
 } from './personal-hq-knowledge.js';
+
+test('a workspace proposal names its agent, workspace link and task or chat', () => {
+  const fromTask = workspaceProposalSource({
+    source: {
+      kind: 'workspace_agent',
+      workspace_id: 'album-3',
+      workspace_name: 'Album 3',
+      workspace_slug: 'album 3',
+      agent: 'Scout',
+      task_id: '42',
+      observed_at: '2026-10-17T12:00:00Z'
+    }
+  });
+  assert.deepEqual(fromTask, {
+    agent: 'Scout',
+    workspace: 'Album 3',
+    href: '/workspaces/album%203',
+    run: 'from task 42',
+    observedAt: '2026-10-17T12:00:00Z'
+  });
+  const fromChat = workspaceProposalSource({
+    source: { kind: 'workspace_agent', workspace_name: 'Album 3', agent: 'Scout' }
+  });
+  assert.equal(fromChat.run, 'from chat');
+  // A removed workspace keeps its recorded name and gets no link.
+  assert.equal(fromChat.href, '');
+  const anonymous = workspaceProposalSource({ source: { kind: 'workspace_agent' } });
+  assert.equal(anonymous.agent, 'An agent');
+  assert.equal(anonymous.workspace, 'a workspace');
+  assert.equal(workspaceProposalSource({ source: { kind: 'saved_app' } }), null);
+  assert.equal(workspaceProposalSource({}), null);
+});
 
 test('review ledger keeps pending and suspended separate from current canonical facts', () => {
   const { queue, approved } = groupReviewedKnowledge([

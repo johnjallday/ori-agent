@@ -111,6 +111,7 @@ type Handler struct {
 	janitorSuggestions         SavedAppSuggestions
 	knowledgeReview            *personalassistant.KnowledgeLearningService
 	knowledgeSources           KnowledgeSourceReader
+	workspaces                 GlobalMemoryWorkspaces
 	interviewOffer             InterviewOffer
 	interview                  *personalassistant.KnowledgeInterviewService
 	folderDigest               FolderDigestService

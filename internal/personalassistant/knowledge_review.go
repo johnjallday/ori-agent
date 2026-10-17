@@ -14,21 +14,57 @@ import (
 // store only after exact target and source validation, never from an old
 // sidecar revision.
 type KnowledgeReviewItem struct {
-	ID                 string              `json:"id"`
-	Version            int64               `json:"version"`
-	State              KnowledgeState      `json:"state"`
-	Category           string              `json:"category"`
-	SourceKind         string              `json:"source_kind"`
-	Text               string              `json:"text,omitempty"`
-	Scope              string              `json:"scope"`
-	RevisionID         string              `json:"revision_id,omitempty"`
-	Evidence           []KnowledgeEvidence `json:"evidence,omitempty"`
-	FreshEvidence      []KnowledgeEvidence `json:"fresh_evidence,omitempty"`
-	EvidenceCheckpoint string              `json:"evidence_checkpoint,omitempty"`
-	UpdatedAt          time.Time           `json:"updated_at"`
-	ReviewUnavailable  string              `json:"review_unavailable,omitempty"`
-	CanResumeForget    bool                `json:"can_resume_forget,omitempty"`
-	CanResumeOperation bool                `json:"can_resume_operation,omitempty"`
+	ID                 string                `json:"id"`
+	Version            int64                 `json:"version"`
+	State              KnowledgeState        `json:"state"`
+	Category           string                `json:"category"`
+	SourceKind         string                `json:"source_kind"`
+	Text               string                `json:"text,omitempty"`
+	Scope              string                `json:"scope"`
+	RevisionID         string                `json:"revision_id,omitempty"`
+	Evidence           []KnowledgeEvidence   `json:"evidence,omitempty"`
+	FreshEvidence      []KnowledgeEvidence   `json:"fresh_evidence,omitempty"`
+	EvidenceCheckpoint string                `json:"evidence_checkpoint,omitempty"`
+	UpdatedAt          time.Time             `json:"updated_at"`
+	ReviewUnavailable  string                `json:"review_unavailable,omitempty"`
+	CanResumeForget    bool                  `json:"can_resume_forget,omitempty"`
+	CanResumeOperation bool                  `json:"can_resume_operation,omitempty"`
+	Source             KnowledgeReviewSource `json:"source"`
+}
+
+// KnowledgeReviewSource says where a fact came from, for the Profile page's
+// source chip. A workspace agent's proposal also names the workspace, agent
+// and task (or chat) it came from; the HTTP layer refreshes the workspace's
+// name and page slug when the workspace still exists.
+type KnowledgeReviewSource struct {
+	Kind          string     `json:"kind"`
+	WorkspaceID   string     `json:"workspace_id,omitempty"`
+	WorkspaceName string     `json:"workspace_name,omitempty"`
+	WorkspaceSlug string     `json:"workspace_slug,omitempty"`
+	Agent         string     `json:"agent,omitempty"`
+	TaskID        string     `json:"task_id,omitempty"`
+	ObservedAt    *time.Time `json:"observed_at,omitempty"`
+}
+
+func knowledgeReviewSource(item KnowledgeItem) KnowledgeReviewSource {
+	source := KnowledgeReviewSource{Kind: item.SourceKind}
+	if item.SourceKind != WorkspaceAgentSourceKind {
+		return source
+	}
+	for _, revision := range item.Revisions {
+		origin, ok := WorkspaceProposalOriginOf(revision.Evidence)
+		if !ok {
+			continue
+		}
+		source.WorkspaceID, source.WorkspaceName = origin.WorkspaceID, origin.WorkspaceName
+		source.Agent, source.TaskID = origin.Agent, origin.TaskID
+		if !origin.ObservedAt.IsZero() {
+			observed := origin.ObservedAt
+			source.ObservedAt = &observed
+		}
+		break
+	}
+	return source
 }
 
 // ReviewItems performs no writes or source detection. A stale canonical
@@ -59,7 +95,7 @@ func (s *KnowledgeLearningService) ReviewItems(ctx context.Context, userID strin
 			ID: item.ID, Version: item.Version, State: item.State,
 			Category: item.Category, SourceKind: item.SourceKind,
 			RevisionID: item.CurrentRevisionID, UpdatedAt: item.UpdatedAt,
-			Scope: "personal_hq",
+			Scope: "personal_hq", Source: knowledgeReviewSource(item),
 		}
 		if item.Target != nil && item.Target.Kind == "profile" {
 			view.Scope = "global_profile"

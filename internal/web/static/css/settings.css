@@ -843,6 +843,25 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   font-size: 0.84rem;
 }
 
+/* Where a global-memory fact came from: an inline badge, not a new card. */
+.reviewed-knowledge-source {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0 0 0.65rem;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.reviewed-knowledge-source a {
+  color: var(--primary-color);
+  font-weight: 650;
+}
+
 .reviewed-profile-actions {
   display: flex;
   flex-wrap: wrap;

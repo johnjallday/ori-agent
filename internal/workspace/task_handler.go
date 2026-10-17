@@ -146,7 +146,8 @@ type UtilityToolProvider interface {
 // WorkspaceToolFactory returns workspace-scoped tools (notes, tasks, sessions, files, etc.)
 // for use during task execution. Tools are constructed per workspace so the agent can
 // read and update workspace state without forcing the user to paste it into the prompt.
-type WorkspaceToolFactory func(workspaceID, agentName string) []toolapi.Tool
+// taskID is the task being run, so a tool can attribute what the run does.
+type WorkspaceToolFactory func(workspaceID, agentName, taskID string) []toolapi.Tool
 
 // RuntimeTaskToolFactory returns tools whose authority is tied to the exact
 // task, workspace, and stable agent instance. It is separate from ordinary
@@ -1425,7 +1426,7 @@ func (h *LLMTaskHandler) getWorkspaceTools(task Task) []toolapi.Tool {
 	if h.workspaceToolsFn != nil {
 		// task.To is the executing agent; the ordinary factory uses it to gate
 		// coordinator-only tools (delegate_task) to the coordinator.
-		tools = append(tools, h.workspaceToolsFn(workspaceID, agentName)...)
+		tools = append(tools, h.workspaceToolsFn(workspaceID, agentName, task.ID)...)
 	}
 	if h.runtimeToolsFn != nil {
 		agentInstanceID := h.taskAgentInstanceID(task, agentName)

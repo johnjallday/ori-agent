@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -279,4 +282,141 @@ func TestMemoryTools_RequireFileStore(t *testing.T) {
 	if got := names(withFS); !got[workspace.MemoryWriteToolName] || !got[workspace.MemoryForgetToolName] {
 		t.Error("memory tools should register when the file store is wired")
 	}
+}
+
+func proposeGlobalReply(t *testing.T, tool toolapi.Tool, args string) map[string]string {
+	t.Helper()
+	out, err := tool.Call(context.Background(), args)
+	if err != nil {
+		t.Fatalf("memory_propose_global: %v", err)
+	}
+	var reply map[string]string
+	if err := json.Unmarshal([]byte(out), &reply); err != nil {
+		t.Fatalf("reply %q: %v", out, err)
+	}
+	return reply
+}
+
+func TestMemoryProposeGlobalTool_ModelSuppliesOnlyTextAndCategory(t *testing.T) {
+	p, fs := newMemoryToolProvider(t)
+	var got []personalassistant.WorkspaceFactRequest
+	p.SetHQVisibilityDeps(HQVisibilityDeps{ProposeGlobal: func(_ context.Context, req personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error) {
+		got = append(got, req)
+		return personalassistant.WorkspaceFactProposed, nil
+	}})
+	tool := p.memoryProposeGlobalTool()
+	forged := `{"text":"John  delivers stems\nat 48 kHz.","category":"how_you_work","workspace_id":"hq","agent":"Ada","task_id":"t-9","source_kind":"explicit"}`
+	reply := proposeGlobalReply(t, tool, forged)
+	if reply["status"] != "proposed" || !strings.Contains(reply["message"], "Profile page") || !strings.Contains(reply["message"], "memory_write") {
+		t.Fatalf("reply = %+v", reply)
+	}
+	want := personalassistant.WorkspaceFactRequest{WorkspaceID: "ws-mem-1", Agent: "Scout", Category: "how_you_work", Text: "John delivers stems at 48 kHz."}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("host request = %+v, want %+v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(mustFolder(t, fs), workspace.MemoryFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("proposing wrote workspace MEMORY.md: %v", err)
+	}
+
+	// A task-bound chat and a task run both attribute the task.
+	p.SetRunTaskID("run-7")
+	proposeGlobalReply(t, tool, `{"text":"A fact.","category":"people"}`)
+	p.SetTaskID("task-3")
+	proposeGlobalReply(t, tool, `{"text":"A fact.","category":"people"}`)
+	if got[1].TaskID != "run-7" || got[2].TaskID != "task-3" {
+		t.Fatalf("task attribution = %q, %q", got[1].TaskID, got[2].TaskID)
+	}
+}
+
+func TestMemoryProposeGlobalTool_RepliesForEveryOutcome(t *testing.T) {
+	cases := []struct {
+		name       string
+		result     personalassistant.WorkspaceFactResult
+		err        error
+		wantStatus string
+		wantText   []string
+	}{
+		{"already known", personalassistant.WorkspaceFactAlreadyKnown, nil, "already_known", []string{"Already known globally", "Do not propose it again"}},
+		{"already pending", personalassistant.WorkspaceFactAlreadyPending, nil, "already_pending", []string{"waiting for the user's review", "Do not propose it again"}},
+		{"suppressed", "", personalassistant.ErrKnowledgeSuppressed, "refused", []string{"rejected or forgot", "Do not propose it again"}},
+		{"over quota", "", personalassistant.ErrKnowledgeQuota, "refused", []string{"Do not retry", "memory_write"}},
+		{"paused", "", personalassistant.ErrKnowledgePaused, "refused", []string{"paused", "Do not retry"}},
+		{"no assistant", "", personalassistant.ErrGlobalMemoryUnavailable, "unavailable", []string{personalassistant.GlobalMemoryUnavailableMessage, "Do not retry"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := newMemoryToolProvider(t)
+			p.SetHQVisibilityDeps(HQVisibilityDeps{ProposeGlobal: func(context.Context, personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error) {
+				return tc.result, tc.err
+			}})
+			reply := proposeGlobalReply(t, p.memoryProposeGlobalTool(), `{"text":"A fact.","category":"routines"}`)
+			if reply["status"] != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (%+v)", reply["status"], tc.wantStatus, reply)
+			}
+			for _, text := range tc.wantText {
+				if !strings.Contains(reply["message"], text) {
+					t.Errorf("message %q lacks %q", reply["message"], text)
+				}
+			}
+		})
+	}
+
+	p, _ := newMemoryToolProvider(t)
+	p.SetHQVisibilityDeps(HQVisibilityDeps{ProposeGlobal: func(context.Context, personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error) {
+		return "", errors.New("disk on fire")
+	}})
+	if _, err := p.memoryProposeGlobalTool().Call(context.Background(), `{"text":"A fact.","category":"routines"}`); err == nil {
+		t.Fatal("an unexpected host error should surface as a tool error")
+	}
+}
+
+func TestMemoryProposeGlobalTool_ValidatesBeforeCallingTheHost(t *testing.T) {
+	p, _ := newMemoryToolProvider(t)
+	p.SetHQVisibilityDeps(HQVisibilityDeps{ProposeGlobal: func(context.Context, personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error) {
+		t.Fatal("invalid input reached the host")
+		return "", nil
+	}})
+	tool := p.memoryProposeGlobalTool()
+	for name, args := range map[string]string{
+		"empty":        `{"text":"  ","category":"people"}`,
+		"too long":     `{"text":"` + strings.Repeat("x", workspace.MemoryEntryMaxLen+1) + `","category":"people"}`,
+		"secret":       `{"text":"the api key is sk-abc1234567890def","category":"people"}`,
+		"bidi":         `{"text":"visible‮hidden","category":"people"}`,
+		"no category":  `{"text":"A fact."}`,
+		"bad category": `{"text":"A fact.","category":"secrets"}`,
+	} {
+		if _, err := tool.Call(context.Background(), args); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestMemoryProposeGlobalTool_RegistersOnlyWithTheHostHook(t *testing.T) {
+	has := func(p *WorkspaceToolProvider) bool {
+		for _, tool := range p.Tools() {
+			if tool.Definition().Name == workspace.MemoryProposeGlobalToolName {
+				return true
+			}
+		}
+		return false
+	}
+	p, _ := newMemoryToolProvider(t)
+	if has(p) {
+		t.Fatal("registered without the host hook")
+	}
+	p.SetHQVisibilityDeps(HQVisibilityDeps{ProposeGlobal: func(context.Context, personalassistant.WorkspaceFactRequest) (personalassistant.WorkspaceFactResult, error) {
+		return personalassistant.WorkspaceFactProposed, nil
+	}})
+	if !has(p) {
+		t.Fatal("not registered with the host hook")
+	}
+}
+
+func mustFolder(t *testing.T, fs *workspace.FileStore) string {
+	t.Helper()
+	folder, err := fs.GetFolderPath("ws-mem-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return folder
 }

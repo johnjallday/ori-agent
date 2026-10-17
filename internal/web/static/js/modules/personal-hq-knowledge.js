@@ -79,7 +79,38 @@ function sourceLabel(item) {
   if (item.source_kind === 'file_janitor') return 'Approved File Janitor actions';
   if (item.source_kind === 'folder_scan') return 'A folder you showed Ori';
   if (item.source_kind === 'explicit') return 'You told Ori';
+  if (item.source_kind === 'workspace_agent') return 'Proposed by a workspace agent';
   return 'Source not available';
+}
+
+// workspaceProposalSource describes where a workspace agent's proposal came
+// from: "Proposed by Scout in Album 3 · from task 42", the workspace linking
+// to its page when it still exists. Null for every other source.
+export function workspaceProposalSource(item) {
+  const source = item?.source;
+  if (!source || source.kind !== 'workspace_agent') return null;
+  const slug = typeof source.workspace_slug === 'string' ? source.workspace_slug : '';
+  return {
+    agent: source.agent || 'An agent',
+    workspace: source.workspace_name || 'a workspace',
+    href: slug ? `/workspaces/${encodeURIComponent(slug)}` : '',
+    run: source.task_id ? `from task ${source.task_id}` : 'from chat',
+    observedAt: source.observed_at || ''
+  };
+}
+
+function workspaceSourceChip(attribution) {
+  const chip = element('p', 'reviewed-knowledge-source');
+  chip.append(`Proposed by ${attribution.agent} in `);
+  if (attribution.href) {
+    const link = element('a', '', attribution.workspace);
+    link.href = attribution.href;
+    chip.append(link);
+  } else {
+    chip.append(attribution.workspace);
+  }
+  chip.append(` · ${attribution.run} · ${reviewDate(attribution.observedAt)}`);
+  return chip;
 }
 
 function reviewDate(value) {
@@ -399,7 +430,11 @@ export function mountPersonalHQKnowledge(root = document) {
         item.text || 'Current value unavailable — review the source before using this fact.'
       )
     );
-    const evidence = (Array.isArray(item.evidence) ? item.evidence : []).slice(0, 3);
+    const attribution = workspaceProposalSource(item);
+    if (attribution) card.append(workspaceSourceChip(attribution));
+    const evidence = attribution
+      ? []
+      : (Array.isArray(item.evidence) ? item.evidence : []).slice(0, 3);
     if (evidence.length) {
       const descriptions = evidence.map(
         entry => `${entry.summary || 'Saved source observation'} · ${reviewDate(entry.observed_at)}`
