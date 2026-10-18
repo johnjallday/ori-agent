@@ -1907,7 +1907,7 @@ The tool replies `{"status", "message"}`:
 | `refused` | The user rejected or forgot this wording, the queue is full, or the assistant is paused; the message says not to retry |
 | `unavailable` | No hired assistant with a Personal HQ |
 
-Native CLI runs cannot call Ori tools, so they cannot propose. Workspace chat with a `codex` agent runs on that native CLI path and has no Ori workspace tools; Codex task runs do, through the brokered tool protocol.
+Agents on the CLI providers (`codex`, `claude_code`) call it through the brokered tool protocol, in workspace chat and in task runs alike: the CLI names the tool and Ori runs it. A CLI's own native MCP servers have no route to it.
 
 ### Review items carry their source
 

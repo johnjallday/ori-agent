@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -151,56 +152,91 @@ func TestCodexProviderCapabilitiesIncludeBrokeredTools(t *testing.T) {
 	}
 }
 
-func TestCodexBrokeredToolProtocolAndResponse(t *testing.T) {
-	tools := []Tool{{
-		Name: "plugin_reaper_tidy_survey", Description: "Run the survey.",
-		Parameters: map[string]any{"type": "object", "additionalProperties": false},
-	}}
-	prompt, err := appendCodexBrokeredToolProtocol("User:\nSurvey", tools)
-	if err != nil {
-		t.Fatal(err)
+// writeFakeCodexCLI writes a codex stand-in that saves its stdin prompt and
+// schema file into dir and answers with the contents of dir/reply.json.
+func writeFakeCodexCLI(t *testing.T, dir string) string {
+	t.Helper()
+	cliPath := filepath.Join(dir, "codex")
+	script := `#!/bin/sh
+out=""
+schema=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output-last-message) out="$2"; shift 2 ;;
+    --output-schema) schema="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat > "` + dir + `/prompt.txt"
+if [ -n "$schema" ]; then cp "$schema" "` + dir + `/schema.json"; fi
+cat "` + dir + `/reply.json" > "$out"
+`
+	if err := os.WriteFile(cliPath, []byte(script), 0700); err != nil {
+		t.Fatalf("write fake codex cli: %v", err)
 	}
-	for _, want := range []string{"not Codex MCP servers", "plugin_reaper_tidy_survey", "arguments_json"} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("tool prompt missing %q: %s", want, prompt)
-		}
-	}
-
-	toolResponse, err := decodeCodexBrokeredToolResponse(
-		`{"kind":"tool_call","content":"","tool_name":"plugin_reaper_tidy_survey","arguments_json":"{}"}`,
-		tools,
-		&ChatResponse{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if toolResponse.FinishReason != FinishReasonToolCalls || len(toolResponse.ToolCalls) != 1 ||
-		toolResponse.ToolCalls[0].Name != tools[0].Name || toolResponse.ToolCalls[0].Arguments != "{}" || toolResponse.ToolCalls[0].ID == "" {
-		t.Fatalf("tool response = %+v", toolResponse)
-	}
-
-	finalResponse, err := decodeCodexBrokeredToolResponse(
-		`{"kind":"final","content":"Survey complete.","tool_name":"","arguments_json":"{}"}`,
-		tools,
-		&ChatResponse{},
-	)
-	if err != nil || finalResponse.Content != "Survey complete." || len(finalResponse.ToolCalls) != 0 {
-		t.Fatalf("final response = %+v, %v", finalResponse, err)
-	}
+	return cliPath
 }
 
-func TestCodexBrokeredToolResponseRejectsUntrustedShape(t *testing.T) {
-	tools := []Tool{{Name: "allowed", Parameters: map[string]any{"type": "object"}}}
-	cases := []string{
-		`{"kind":"tool_call","content":"","tool_name":"other","arguments_json":"{}"}`,
-		`{"kind":"tool_call","content":"","tool_name":"allowed","arguments_json":"[]"}`,
-		`{"kind":"final","content":"done","tool_name":"allowed","arguments_json":"{}"}`,
-		`{"kind":"final","content":"done","tool_name":"","arguments_json":"{}"} {}`,
-	}
-	for _, input := range cases {
-		if _, err := decodeCodexBrokeredToolResponse(input, tools, &ChatResponse{}); err == nil {
-			t.Fatalf("expected refusal for %s", input)
+func TestCodexProviderChat_BrokersToolsThroughSharedProtocol(t *testing.T) {
+	dir := t.TempDir()
+	provider := &CodexProvider{cliPath: writeFakeCodexCLI(t, dir)}
+	tools := []Tool{{
+		Name: "memory_write", Description: "Write a workspace memory entry.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+	}}
+	reply := func(envelope string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "reply.json"), []byte(envelope), 0600); err != nil {
+			t.Fatalf("write reply: %v", err)
 		}
+	}
+
+	reply(`{"kind":"tool_call","content":"","tool_name":"memory_write","arguments_json":"{\"text\":\"D minor\"}"}`)
+	resp, err := provider.Chat(context.Background(), ChatRequest{
+		Model:    "gpt-test",
+		Messages: []Message{NewUserMessage("Remember the key")},
+		Tools:    tools,
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if resp.FinishReason != FinishReasonToolCalls || len(resp.ToolCalls) != 1 ||
+		resp.ToolCalls[0].Name != "memory_write" || resp.ToolCalls[0].Arguments != `{"text":"D minor"}` ||
+		!strings.HasPrefix(resp.ToolCalls[0].ID, "codex_tool_") {
+		t.Fatalf("tool response = %+v", resp)
+	}
+
+	prompt, err := os.ReadFile(filepath.Join(dir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("read prompt: %v", err)
+	}
+	definitions, _ := json.Marshal(tools)
+	for _, want := range []string{
+		string(definitions),
+		"Return exactly one JSON object with all four fields",
+		"not Codex's own MCP servers",
+	} {
+		if !strings.Contains(string(prompt), want) {
+			t.Fatalf("codex prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	schema, err := os.ReadFile(filepath.Join(dir, "schema.json"))
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	wantSchema, _ := json.Marshal(brokeredToolResponseSchema())
+	if string(schema) != string(wantSchema) {
+		t.Fatalf("codex schema = %s, want %s", schema, wantSchema)
+	}
+
+	reply(`{"kind":"tool_call","content":"","tool_name":"shell","arguments_json":"{}"}`)
+	_, err = provider.Chat(context.Background(), ChatRequest{
+		Model:    "gpt-test",
+		Messages: []Message{NewUserMessage("Remember the key")},
+		Tools:    tools,
+	})
+	if err == nil || !strings.HasPrefix(err.Error(), "codex ") {
+		t.Fatalf("expected a codex-named refusal, got %v", err)
 	}
 }
 

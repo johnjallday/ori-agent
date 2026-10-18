@@ -55,8 +55,9 @@ func (b *ServerBuilder) libraryManagerReviewTools(authority projectlibrary.Manag
 }
 
 // libraryManagerModel resolves the bound Manager's own model from its
-// Home-local agent settings. A provider that cannot round-trip tool calls
-// (for example a CLI provider) is not a model for this turn.
+// Home-local agent settings. A provider that cannot round-trip tool calls is
+// not a model for this turn; the CLI providers can, through the brokered
+// protocol.
 func (b *ServerBuilder) libraryManagerModel(_ context.Context, homeID, agentName string) (projectlibrary.ManagerChat, string, error) {
 	if b.workspaceStore == nil || b.llmFactory == nil {
 		return nil, "", projectlibrary.ErrNoManagerModel

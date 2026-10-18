@@ -724,15 +724,22 @@ adapter checks, **not real vendor responses**.
 
 - OpenAI/Claude/Gemini and local HTTP providers declare host tool support.
   Expose only the explicit read allowlist where the selected adapter supports it.
-- Codex supports Ori-brokered calls: tools are prompt/schema data; Ori validates
-  and executes calls. Native MCP is separate.
-- Claude Code declares `SupportsTools=false`. Keep a validated overview and
-  review controls, explain deeper-read limitations, and send no unavailable
-  tool definitions. Its text-only posture uses tools empty / dontAsk.
+- Codex and Claude Code both support Ori-brokered calls through one shared
+  protocol (`internal/llm/brokered_tools.go`): tools are prompt/schema data, the
+  CLI answers with one envelope (a final answer or one tool call), and Ori
+  validates and executes the call. Native MCP is separate. Claude Code was
+  snapshot-only here until the `cli-provider-ori-tools` PRD deliberately gave it
+  the brokered protocol and `SupportsTools=true`; it now gets the same readers as
+  Codex. Its text-only posture is unchanged (tools empty / dontAsk), with the
+  envelope schema passed through `--json-schema`.
+- A provider that declares no tool support still gets the snapshot treatment:
+  keep a validated overview and review controls, explain deeper-read
+  limitations, and send no unavailable tool definitions.
 - Both CLI adapters treat **nonempty ChatRequest.WorkspaceID as native execution
   opt-in**, even without MCP servers. Keep WorkspaceID, WorkspaceDir, MCPServers
   and ExecutionScope empty on this panel. Display/attribution IDs belong in the
-  separate context DTO. Do not change providers, dual gates or models as a fix.
+  separate context DTO. Do not change the dual native-MCP gates or the selected
+  model as a fix for this panel.
 - `runModel` now makes advertisement capability-aware while preserving empty
   native-execution fields. Keep four tool rounds and final tool-free synthesis.
 
