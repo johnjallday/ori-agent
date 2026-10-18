@@ -5830,8 +5830,7 @@ function readyMemory(commandView, summary) {
   commandView._memoryStation = {
     workspaceID: commandView.workspaceId(),
     status: 'ready',
-    absent: false,
-    summary: { count: 0, watching: 0, dropped: 0, rawSize: 0, overBudget: false, ...summary }
+    summary: { count: 0, watching: 0, dropped: 0, overBudget: false, ...summary }
   };
 }
 
@@ -6037,7 +6036,7 @@ test('a 404 removes the Memory station and a failed read degrades it', async () 
     folderless.render = () => {};
     folderless.memoryStationState();
     await flush();
-    assert.equal(folderless.memoryStationData().absent, true);
+    assert.equal(folderless.memoryStationData().status, 'absent');
     assert.deepEqual(folderless.mapStationRegistry(), []);
     assert.equal(folderless.renderMapHQStations(), '');
 
@@ -6117,17 +6116,14 @@ test('opening the Memory station records what was seen and opens the memory moda
         }
       );
       plain.page.memoryManager = manager;
-      readyMemory(plain, { count: 3, rawSize: 120 });
+      readyMemory(plain, { count: 3 });
       const opened = [];
       plain.openStatModal = (section, trigger) => opened.push([section, trigger]);
 
       const trigger = { id: 'rail-row' };
       plain.runHQStationAction('memory', trigger);
       assert.deepEqual(opened, [['memory', trigger]]);
-      assert.equal(
-        values.get('ori:memory-station-seen:ws-1'),
-        JSON.stringify({ count: 3, rawSize: 120 })
-      );
+      assert.equal(values.get('ori:memory-station-seen:ws-1'), JSON.stringify({ count: 3 }));
       assert.equal(typeof manager.onPayload, 'function', 'the station follows the manager');
 
       // A direct link has no opener: focus returns to the building.
@@ -6135,7 +6131,7 @@ test('opening the Memory station records what was seen and opens the memory moda
       assert.deepEqual(opened[1], ['memory', building]);
 
       // The baseline makes later entries read as new until the panel opens.
-      readyMemory(plain, { count: 5, rawSize: 300 });
+      readyMemory(plain, { count: 5 });
       assert.equal(plain.memoryStationBadge().value, '+2 new');
       plain.openMemoryPanel(trigger);
       assert.equal(plain.memoryStationBadge().value, '5 entries');
@@ -6151,9 +6147,6 @@ test('the manager payload repaints the badge, and while the panel is open it is 
   try {
     withRailStorage({}, values => {
       const chip = { textContent: '' };
-      const panel = {
-        querySelector: selector => (selector === '.ws-cmd-modal-count' ? chip : null)
-      };
       const plain = makeMemoryCommandView();
       let renders = 0;
       Object.assign(plain, {
@@ -6164,15 +6157,12 @@ test('the manager payload repaints the badge, and while the panel is open it is 
         statModalSection: 'memory',
         statModalEl: {
           hidden: false,
-          querySelector: selector => (selector === '.ws-cmd-modal-panel' ? panel : null)
+          querySelector: selector => (selector === '.ws-cmd-modal-count' ? chip : null)
         }
       });
       plain.noteMemoryStationPayload({ entries: [{ type: 'fact' }, { type: 'watch' }] });
       assert.equal(chip.textContent, '2');
-      assert.equal(
-        values.get('ori:memory-station-seen:ws-1'),
-        JSON.stringify({ count: 2, rawSize: 0 })
-      );
+      assert.equal(values.get('ori:memory-station-seen:ws-1'), JSON.stringify({ count: 2 }));
       assert.equal(renders, 0, 'the open panel owns the screen');
 
       plain.statModalSection = '';

@@ -1,17 +1,53 @@
 // memory-station.js — the facts the Memory station needs about a workspace's
-// MEMORY.md: what its short status is called on the map and in the Stations
-// rail, and the per-browser "seen" baseline behind "+K new". Pure helpers only
-// (no DOM, no network; storage is passed in), so memory-station.test.js can
-// exercise every badge row under plain Node.
-
-import { memoryEntryKind } from './workspace-detail-memory.js';
+// MEMORY.md: what kind each entry is, what its short status is called on the
+// map and in the Stations rail, the per-browser "seen" baseline behind "+K
+// new", and what a run's memory_diff artifact says. Pure helpers only (no DOM,
+// no network; storage is passed in), so memory-station.test.js can exercise
+// every badge row under plain Node, and the panel manager and the run page
+// read the same rules.
 
 export const MEMORY_STATION = 'memory';
 
 const SEEN_KEY_PREFIX = 'ori:memory-station-seen:';
 
-function plural(count, one, many) {
+export function plural(count, one, many) {
   return count + ' ' + (count === 1 ? one : many);
+}
+
+// memoryEntryKind: "managed" is a reviewed global-memory line (read-only in
+// the panel), "global_copy" was copied from global memory, everything else is
+// "ordinary".
+export function memoryEntryKind(entry) {
+  const provenance = String(entry?.provenance || '').trim();
+  if (entry?.managed || provenance.startsWith('ori-hq:')) return 'managed';
+  if (provenance.startsWith('global:')) return 'global_copy';
+  return 'ordinary';
+}
+
+// droppedEntryCount is how many of the workspace's own entries the prompt
+// budget leaves out (`in_prompt: false`, the server's own selection). Reviewed
+// global-memory lines are never part of that section, so they never count.
+export function droppedEntryCount(entries) {
+  return (Array.isArray(entries) ? entries : []).filter(
+    entry => memoryEntryKind(entry) !== 'managed' && entry?.in_prompt === false
+  ).length;
+}
+
+// notShownToAgents is the one sentence the badge and the panel's meter share
+// for a dropped count, so the two can never say it differently.
+export function notShownToAgents(count) {
+  return plural(count, 'entry is', 'entries are') + ' not shown to agents';
+}
+
+// memoryDiffCounts reads a run's memory_diff artifact: the lines it added to
+// and removed from workspace memory, or empty lists when the run wrote none.
+export function memoryDiffCounts(artifacts) {
+  const list = Array.isArray(artifacts) ? artifacts : [];
+  const diff = list.find(artifact => artifact?.metadata?.role === 'memory_diff');
+  return {
+    added: Array.isArray(diff?.metadata?.added) ? diff.metadata.added : [],
+    removed: Array.isArray(diff?.metadata?.removed) ? diff.metadata.removed : []
+  };
 }
 
 // memoryStationSummary reduces a GET /api/workspaces/{id}/memory payload to
@@ -23,8 +59,7 @@ export function memoryStationSummary(payload) {
   return {
     count: own.length,
     watching: own.filter(entry => entry?.type === 'watch' || entry?.type === 'thread').length,
-    dropped: own.filter(entry => entry?.in_prompt === false).length,
-    rawSize: Number(payload?.raw_size) || 0,
+    dropped: droppedEntryCount(own),
     overBudget: Boolean(payload?.over_budget)
   };
 }
@@ -33,18 +68,17 @@ export function memoryStationSeenKey(workspaceID) {
   return SEEN_KEY_PREFIX + String(workspaceID || '');
 }
 
-// readMemoryStationBaseline returns the { count, rawSize } stored when the
-// panel was last opened in this browser, or null when there is none or the
-// storage cannot be read.
+// readMemoryStationBaseline returns the { count } stored when the panel was
+// last opened in this browser, or null when there is none or the storage
+// cannot be read.
 export function readMemoryStationBaseline(storage, workspaceID) {
   if (!workspaceID || !storage) return null;
   try {
     const raw = storage.getItem(memoryStationSeenKey(workspaceID));
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const count = Number(parsed?.count);
+    const count = Number(JSON.parse(raw)?.count);
     if (!Number.isInteger(count) || count < 0) return null;
-    return { count, rawSize: Number(parsed?.rawSize) || 0 };
+    return { count };
   } catch (_) {
     return null;
   }
@@ -55,10 +89,7 @@ export function readMemoryStationBaseline(storage, workspaceID) {
 export function writeMemoryStationBaseline(storage, workspaceID, summary) {
   if (!workspaceID || !storage || !summary) return false;
   try {
-    storage.setItem(
-      memoryStationSeenKey(workspaceID),
-      JSON.stringify({ count: summary.count, rawSize: summary.rawSize })
-    );
+    storage.setItem(memoryStationSeenKey(workspaceID), JSON.stringify({ count: summary.count }));
     return true;
   } catch (_) {
     return false;
@@ -102,7 +133,7 @@ export function memoryStationState({ status, summary, baseline, reviewCount, per
     state = {
       value: 'Over budget',
       description: summary.dropped
-        ? plural(summary.dropped, 'entry is', 'entries are') + ' not shown to agents'
+        ? notShownToAgents(summary.dropped)
         : 'memory is over what agents are shown',
       tone: 'attention'
     };

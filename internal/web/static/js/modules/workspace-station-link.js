@@ -17,7 +17,7 @@ export function isStationKey(key) {
 export function stationLink(slug, key) {
   const workspace = String(slug || '').trim();
   const station = String(key || '').trim();
-  if (!SLUG.test(workspace) || !SLUG.test(station)) return '';
+  if (!isStationKey(workspace) || !isStationKey(station)) return '';
   return `/workspaces/${workspace}?station=${station}`;
 }
 
@@ -31,7 +31,7 @@ export function stationFromSearch(search) {
   } catch (_) {
     return '';
   }
-  return SLUG.test(value) ? value : '';
+  return isStationKey(value) ? value : '';
 }
 
 // isStationLink accepts exactly the shape stationLink builds and nothing
@@ -39,6 +39,6 @@ export function stationFromSearch(search) {
 // that station.
 export function isStationLink(href, key) {
   const match = /^\/workspaces\/([^/?#]+)\?station=([^&#]+)$/.exec(String(href || ''));
-  if (!match || !SLUG.test(match[1]) || !SLUG.test(match[2])) return false;
+  if (!match || !isStationKey(match[1]) || !isStationKey(match[2])) return false;
   return key === undefined || match[2] === key;
 }

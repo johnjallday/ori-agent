@@ -7,9 +7,9 @@ import {
   copyTargetWorkspaces,
   dossierEmptyGuidance,
   groupReviewedKnowledge,
+  memoryStationHref,
   promotedFromWorkspace,
   reviewTextValid,
-  workspaceMemoryLink,
   workspaceProposalSource
 } from './personal-hq-knowledge.js';
 
@@ -25,17 +25,22 @@ test('the copy picker offers active workspaces only, never the Personal HQ', () 
     ]
   });
   assert.deepEqual(targets, [
-    { id: 'a', name: 'Album 3', slug: '' },
-    { id: 'b', name: 'Beta', slug: 'beta' }
+    { id: 'a', name: 'Album 3' },
+    { id: 'b', name: 'Beta' }
   ]);
   assert.deepEqual(copyTargetWorkspaces({}), []);
 });
 
-test('a copied fact links to the target workspace Memory station (FR26)', () => {
-  assert.equal(workspaceMemoryLink('album-3'), '/workspaces/album-3?station=memory');
-  assert.equal(workspaceMemoryLink(''), '');
-  assert.equal(workspaceMemoryLink('Album 3'), '');
-  assert.equal(workspaceMemoryLink(undefined), '');
+test('a copied fact links to the target workspace Memory station the server names (FR26)', () => {
+  assert.equal(
+    memoryStationHref('/workspaces/album-3?station=memory'),
+    '/workspaces/album-3?station=memory'
+  );
+  assert.equal(memoryStationHref(''), '');
+  assert.equal(memoryStationHref(undefined), '');
+  assert.equal(memoryStationHref('/workspaces/album-3'), '', 'the station must be named');
+  assert.equal(memoryStationHref('/workspaces/album-3?station=daily-brief'), '', 'only Memory');
+  assert.equal(memoryStationHref('https://evil.example/workspaces/a?station=memory'), '');
 });
 
 test('the copies line names every workspace holding a copy', () => {

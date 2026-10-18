@@ -41,20 +41,8 @@ test('summary counts own entries, watching, and entries agents are not shown', (
     raw_size: 9100,
     over_budget: true
   });
-  assert.deepEqual(summary, {
-    count: 5,
-    watching: 2,
-    dropped: 1,
-    rawSize: 9100,
-    overBudget: true
-  });
-  assert.deepEqual(summaryOf(null), {
-    count: 0,
-    watching: 0,
-    dropped: 0,
-    rawSize: 0,
-    overBudget: false
-  });
+  assert.deepEqual(summary, { count: 5, watching: 2, dropped: 1, overBudget: true });
+  assert.deepEqual(summaryOf(null), { count: 0, watching: 0, dropped: 0, overBudget: false });
 });
 
 test('every badge row of PRD FR5', () => {
@@ -94,7 +82,7 @@ test('every badge row of PRD FR5', () => {
     memoryStationState({
       status: 'ready',
       summary: summaryOf({ entries: entries(['fact', 'fact', 'fact']) }),
-      baseline: { count: 1, rawSize: 40 }
+      baseline: { count: 1 }
     }),
     {
       value: '+2 new',
@@ -133,7 +121,7 @@ test('over budget beats new; an unavailable read beats both', () => {
     entries: [...entries(['fact', 'fact']), { type: 'fact', in_prompt: false }],
     over_budget: true
   });
-  const baseline = { count: 1, rawSize: 10 };
+  const baseline = { count: 1 };
   assert.equal(memoryStationState({ status: 'ready', summary, baseline }).value, 'Over budget');
   assert.equal(memoryStationState({ status: 'error', summary, baseline }).value, 'Memory');
   assert.equal(memoryStationState({ status: 'loading', summary, baseline }).value, '—');
@@ -142,12 +130,12 @@ test('over budget beats new; an unavailable read beats both', () => {
 test('"+K new" needs a baseline and growth; deletions never read as new (FR7)', () => {
   const summary = summaryOf({ entries: entries(['fact', 'fact', 'fact']) });
   assert.equal(memoryNewSinceBaseline(summary, null), 0);
-  assert.equal(memoryNewSinceBaseline(summary, { count: 1, rawSize: 0 }), 2);
-  assert.equal(memoryNewSinceBaseline(summary, { count: 3, rawSize: 0 }), 0);
-  assert.equal(memoryNewSinceBaseline(summary, { count: 5, rawSize: 0 }), 0);
+  assert.equal(memoryNewSinceBaseline(summary, { count: 1 }), 2);
+  assert.equal(memoryNewSinceBaseline(summary, { count: 3 }), 0);
+  assert.equal(memoryNewSinceBaseline(summary, { count: 5 }), 0);
   assert.equal(memoryStationState({ status: 'ready', summary }).value, '3 entries');
   assert.equal(
-    memoryStationState({ status: 'ready', summary, baseline: { count: 5, rawSize: 0 } }).value,
+    memoryStationState({ status: 'ready', summary, baseline: { count: 5 } }).value,
     '3 entries'
   );
 });
@@ -156,8 +144,9 @@ test('the seen baseline round-trips per workspace and survives storage that thro
   const storage = memoryStorage();
   assert.equal(memoryStationSeenKey('ws-1'), 'ori:memory-station-seen:ws-1');
   assert.equal(readMemoryStationBaseline(storage, 'ws-1'), null);
-  assert.equal(writeMemoryStationBaseline(storage, 'ws-1', { count: 4, rawSize: 210 }), true);
-  assert.deepEqual(readMemoryStationBaseline(storage, 'ws-1'), { count: 4, rawSize: 210 });
+  assert.equal(writeMemoryStationBaseline(storage, 'ws-1', { count: 4, watching: 1 }), true);
+  assert.equal(storage.values.get(memoryStationSeenKey('ws-1')), JSON.stringify({ count: 4 }));
+  assert.deepEqual(readMemoryStationBaseline(storage, 'ws-1'), { count: 4 });
   assert.equal(readMemoryStationBaseline(storage, 'ws-2'), null, 'baselines are per workspace');
 
   storage.values.set(memoryStationSeenKey('ws-3'), '{not json');
@@ -174,7 +163,7 @@ test('the seen baseline round-trips per workspace and survives storage that thro
     }
   };
   assert.equal(readMemoryStationBaseline(throwing, 'ws-1'), null);
-  assert.equal(writeMemoryStationBaseline(throwing, 'ws-1', { count: 1, rawSize: 1 }), false);
+  assert.equal(writeMemoryStationBaseline(throwing, 'ws-1', { count: 1 }), false);
   assert.equal(readMemoryStationBaseline(null, 'ws-1'), null);
   const summary = summaryOf({ entries: entries(['fact']) });
   assert.equal(
@@ -201,7 +190,7 @@ test('the Personal HQ badge says global memory and ranks "to review" between ove
       summary,
       personalHQ: true,
       reviewCount: 2,
-      baseline: { count: 1, rawSize: 0 }
+      baseline: { count: 1 }
     }),
     {
       value: '2 to review',
@@ -224,7 +213,7 @@ test('the Personal HQ badge says global memory and ranks "to review" between ove
       summary,
       personalHQ: true,
       reviewCount: 0,
-      baseline: { count: 1, rawSize: 0 }
+      baseline: { count: 1 }
     }).description,
     'global memory, +2 new, 2 entries recorded since you last looked'
   );

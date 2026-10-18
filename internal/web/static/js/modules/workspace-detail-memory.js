@@ -16,6 +16,13 @@
  */
 
 import { workspacePageURL } from './workspace-routes.js';
+import {
+  droppedEntryCount,
+  memoryDiffCounts,
+  memoryEntryKind,
+  notShownToAgents,
+  plural
+} from './memory-station.js';
 
 const MEMORY_TYPES = ['fact', 'feedback', 'decision', 'dead-end', 'watch', 'thread'];
 
@@ -42,15 +49,6 @@ const PROMOTE_CATEGORIES = [
 
 const PROFILE_GLOBAL_MEMORY = '/profile#personalHQKnowledge';
 
-// memoryEntryKind: "managed" is a reviewed global-memory line (read-only here),
-// "global_copy" was copied from global memory, everything else is "ordinary".
-export function memoryEntryKind(entry) {
-  const provenance = String(entry?.provenance || '').trim();
-  if (entry?.managed || provenance.startsWith('ori-hq:')) return 'managed';
-  if (provenance.startsWith('global:')) return 'global_copy';
-  return 'ordinary';
-}
-
 // defaultPromoteCategory: user feedback is about how the user works; any other
 // entry most often describes their projects.
 export function defaultPromoteCategory(type) {
@@ -64,15 +62,20 @@ export function defaultPromoteCategory(type) {
 export function memoryBudgetMeter(meta, entries) {
   const rawSize = Number(meta?.rawSize) || 0;
   const charBudget = Number(meta?.charBudget) || 0;
-  const list = Array.isArray(entries) ? entries : [];
   return {
     available: charBudget > 0,
     percent: charBudget > 0 ? Math.min(100, Math.round((rawSize / charBudget) * 100)) : 0,
     overBudget: Boolean(meta?.overBudget),
-    dropped: list.filter(
-      entry => memoryEntryKind(entry) !== 'managed' && entry?.in_prompt === false
-    ).length
+    dropped: droppedEntryCount(entries)
   };
+}
+
+// sectionKeyFor is the panel section an entry is listed under.
+function sectionKeyFor(entry) {
+  if (memoryEntryKind(entry) === 'global_copy') return 'global';
+  const type = String(entry?.type || '');
+  const section = MEMORY_SECTIONS.find(candidate => candidate.types.includes(type));
+  return section ? section.key : 'facts';
 }
 
 // memorySections groups the entries for display (FR18): each section's rows
@@ -81,19 +84,15 @@ export function memoryBudgetMeter(meta, entries) {
 // the sort is display only. Reviewed global-memory lines are not here: they
 // belong with the reviewed assistant learnings.
 export function memorySections(entries) {
-  const rows = (Array.isArray(entries) ? entries : []).map((entry, index) => ({ entry, index }));
-  const sectionKeyFor = entry => {
-    if (memoryEntryKind(entry) === 'global_copy') return 'global';
-    const type = String(entry?.type || '');
-    const section = MEMORY_SECTIONS.find(candidate => candidate.types.includes(type));
-    return section ? section.key : 'facts';
-  };
+  const rows = new Map(MEMORY_SECTIONS.map(section => [section.key, []]));
+  (Array.isArray(entries) ? entries : []).forEach((entry, index) => {
+    if (memoryEntryKind(entry) !== 'managed') rows.get(sectionKeyFor(entry)).push({ entry, index });
+  });
   return MEMORY_SECTIONS.map(section => ({
     key: section.key,
     title: section.title,
     rows: rows
-      .filter(row => memoryEntryKind(row.entry) !== 'managed')
-      .filter(row => sectionKeyFor(row.entry) === section.key)
+      .get(section.key)
       .sort((a, b) => String(b.entry?.date || '').localeCompare(String(a.entry?.date || '')))
   })).filter(section => section.rows.length);
 }
@@ -105,16 +104,13 @@ export function recentMemoryLearnings(runs, limit = RECENT_LEARNINGS_LIMIT) {
   const list = Array.isArray(runs) ? runs : [];
   return list
     .map(run => {
-      const artifacts = Array.isArray(run?.artifacts) ? run.artifacts : [];
-      const diff = artifacts.find(artifact => artifact?.metadata?.role === 'memory_diff');
-      const added = Array.isArray(diff?.metadata?.added) ? diff.metadata.added.length : 0;
-      const removed = Array.isArray(diff?.metadata?.removed) ? diff.metadata.removed.length : 0;
-      if (!run?.id || (!added && !removed)) return null;
+      const { added, removed } = memoryDiffCounts(run?.artifacts);
+      if (!run?.id || (!added.length && !removed.length)) return null;
       return {
         id: String(run.id),
         at: String(run.finished_at || run.created_at || ''),
-        added,
-        removed
+        added: added.length,
+        removed: removed.length
       };
     })
     .filter(Boolean)
@@ -342,7 +338,7 @@ export class WorkspaceMemoryManager {
     let over = '';
     if (meter.overBudget) {
       over = meter.dropped
-        ? `Over budget: ${meter.dropped} ${meter.dropped === 1 ? 'entry is' : 'entries are'} not shown to agents`
+        ? `Over budget: ${notShownToAgents(meter.dropped)}`
         : 'Over budget: every entry is still shown to agents, but the next ones may not be';
     }
     meta.innerHTML = `
@@ -431,7 +427,7 @@ export class WorkspaceMemoryManager {
     const count = this.reviewQueue;
     if (!count || !this.globalMemory?.is_personal_hq) return '';
     const href = safeLocalHref(this.globalMemory.review_href, PROFILE_GLOBAL_MEMORY);
-    return `<a class="workspace-detail-memory-review" href="${this.esc(href)}">Review ${count} ${count === 1 ? 'proposal' : 'proposals'} on Profile</a>`;
+    return `<a class="workspace-detail-memory-review" href="${this.esc(href)}">Review ${plural(count, 'proposal', 'proposals')} on Profile</a>`;
   }
 
   // sectionHtml is one titled group of the panel: a real heading with its

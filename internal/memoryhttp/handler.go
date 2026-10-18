@@ -222,7 +222,7 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, r *http.Request, wo
 	}
 	doc := workspace.ParseMemoryDocument(raw)
 	entries := doc.Entries()
-	inPrompt := workspace.MemoryPromptSelection(doc) // aligned with entries
+	inPrompt := workspace.MemoryPromptSelection(entries)
 	dtos := make([]entryDTO, len(entries))
 	for i, e := range entries {
 		dtos[i] = entryDTO{

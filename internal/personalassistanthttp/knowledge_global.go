@@ -3,7 +3,6 @@ package personalassistanthttp
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -66,12 +65,12 @@ func (h *Handler) liveWorkspace(workspaceID string) *workspace.Workspace {
 }
 
 // workspaceMemoryHref opens the workspace's Memory station, where a copied
-// fact lands (the same address the web UI's stationLink builds).
+// fact lands; "" for a workspace without a usable address.
 func workspaceMemoryHref(ws *workspace.Workspace) string {
-	if ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
+	if ws == nil {
 		return ""
 	}
-	return "/workspaces/" + url.PathEscape(ws.FolderSlug) + "?station=memory"
+	return workspace.StationURL(ws.FolderSlug, "memory")
 }
 
 type globalFactCopyRequest struct {
