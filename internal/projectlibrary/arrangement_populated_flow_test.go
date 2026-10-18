@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,23 +17,32 @@ import (
 
 // Saved-catalog domain evidence: not a browser discovery grant, installed Music
 // prompt test, or a claim about live-model judgment. Both goals see the same
-// 1,001-entry inventory; the scripted model selects a different exact subset.
+// inventory; the scripted model selects a different exact subset. The default
+// 301-entry inventory still spans several search and review pages while the
+// whole planning turn stays well inside the planner's 90-second deadline under
+// the race detector on CI runners; ORI_ARRANGEMENT_PERF=1 runs the 1,001-entry
+// inventory the envelope measurements use.
 func TestArrangementPopulatedFlow_InvestigateReviewApplyRestart(t *testing.T) {
+	total, clientCount := 301, 180
+	if os.Getenv("ORI_ARRANGEMENT_PERF") == "1" {
+		total, clientCount = 1001, 600
+	}
+	terminalID := fmt.Sprintf("entry-%04d", total-1)
 	for _, tc := range []struct {
 		label string
 		count int
-	}{{"Client", 600}, {"Experiment", 401}} {
+	}{{"Client", clientCount}, {"Experiment", total - clientCount}} {
 		t.Run(tc.label, func(t *testing.T) {
 			f, authority, _ := homeArrangementFixture(t)
 			wanted := map[string]bool{}
 			_, _, err := f.library.mutate(f.scope, f.doc(t).Revision, operation{key: "populated-fixture", action: "fixture", digest: "fixture"}, func(doc *Document) (string, error) {
 				seed := doc.Entries[0]
 				doc.Entries = nil
-				for i := 0; i < 1001; i++ {
+				for i := 0; i < total; i++ {
 					entry := seed
 					entry.ID = fmt.Sprintf("entry-%04d", i)
 					label := "Experiment"
-					if i < 600 {
+					if i < clientCount {
 						label = "Client"
 					}
 					entry.Fields.DisplayName = fmt.Sprintf("%s %04d", label, i)
@@ -59,7 +69,7 @@ func TestArrangementPopulatedFlow_InvestigateReviewApplyRestart(t *testing.T) {
 					t.Fatal("oversized or private request")
 				}
 				// The terminal catalog ID must not be dumped into overview or model history.
-				if strings.Contains(string(raw), "entry-1000") {
+				if strings.Contains(string(raw), terminalID) {
 					t.Fatal("full inventory leaked into model context")
 				}
 				reply := &llm.ChatResponse{Usage: llm.Usage{PromptTokens: 500, CompletionTokens: 100, TotalTokens: 600}}
