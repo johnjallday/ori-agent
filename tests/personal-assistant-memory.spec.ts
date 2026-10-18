@@ -82,10 +82,14 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await page.goto(hqPath);
     await expect(page.locator('#personalHQKnowledgeEntry')).toBeVisible();
     await page.locator('[data-cmd-view-mode="details"]').click();
-    await page.locator('[data-cmd-manage-section="systems"]').click();
-    await page.locator('[data-cmd-system-tab="memory"]').click();
+    // The HQ's memory is its Memory station; an empty HQ already has Stations open.
+    const stations = page.locator('[data-cmd-manage-section="stations"]');
+    if ((await stations.getAttribute('aria-expanded')) !== 'true') await stations.click();
+    await page.locator('.ws-cmd-rail [data-cmd-hq-station="memory"]').click();
     await expect(page.locator('#workspace-detail-config-memory-pane')).toBeVisible();
     await expect(page.locator('#workspace-detail-memory-add-type')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#workspace-detail-config-memory-pane')).toBeHidden();
     const hqUrl = page.url();
     await page.locator('#personalHQKnowledgeEntry a[href="/profile#personalHQInterview"]').click();
     await expect(page.locator('#personalHQInterviewWizard')).toBeVisible();

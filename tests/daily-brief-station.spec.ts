@@ -90,8 +90,9 @@ test.describe.serial('Daily Brief station in My HQ', () => {
     await expect(station.locator('[data-building-variant="briefing"]')).toHaveCount(1);
     await expect(station).toHaveAttribute('aria-label', /^Daily Brief station, /);
 
-    // Listed last, so the three stations that were already there keep their
-    // default slots and this one takes the fourth.
+    // Listed after the three stations that were already there, so they keep
+    // their default slots and this one takes the fourth. The Memory station
+    // every workspace has comes after it, in the fifth.
     const slots = await page
       .locator('.ws-cmd-map-hq-station')
       .evaluateAll(stations =>
@@ -104,7 +105,8 @@ test.describe.serial('Daily Brief station in My HQ', () => {
       ['watchtower', '22.00%'],
       ['email', '39.00%'],
       ['calendar-ops', '56.00%'],
-      ['daily-brief', '73.00%']
+      ['daily-brief', '73.00%'],
+      ['memory', '90.00%']
     ]);
 
     await page.goto(`/workspaces/${slug}`);

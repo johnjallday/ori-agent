@@ -106,3 +106,36 @@ test('renders catalog, map, and station contexts from the same inert artwork', (
   assert.match(catalogSVG, /data-building-emblem="research"/);
   assert.equal(art.svgForVariant('unknown', { context: 'map' }), '');
 });
+
+test('the Memory station archive renders in station context and is never a blueprint variant', () => {
+  const art = loadBuildingArt();
+  const stationSVG = art.svgForVariant('archive', { context: 'station' });
+
+  assert.match(stationSVG, /class="ws-cmd-map-station-art"/);
+  assert.match(stationSVG, /data-building-variant="archive"/);
+  assert.match(stationSVG, /style="color:var\(--ws-keeper\)"/);
+  assert.match(stationSVG, /viewBox="0 0 120 88"/);
+  assert.match(stationSVG, /data-building-emblem="archive"/);
+  assert.match(stationSVG, /data-archive-shelves="stacks"/);
+  assert.match(stationSVG, /data-archive-lantern="door"/);
+  assert.doesNotMatch(stationSVG, /<script|on\w+=|href=/);
+
+  for (const blueprintID of [
+    'archive',
+    'memory',
+    'personal-ops',
+    'email-ops',
+    'calendar-ops',
+    'research-project',
+    'content-production',
+    'writing-project',
+    'daily-briefings',
+    'downloads-janitor',
+    'file-janitor',
+    'github-ops',
+    'travels'
+  ]) {
+    assert.notEqual(art.variantForBlueprint(blueprintID, true), 'archive');
+  }
+  assert.equal(art.variantForWorkspace({ blueprint_id: 'archive', blueprint_builtin: true }), '');
+});

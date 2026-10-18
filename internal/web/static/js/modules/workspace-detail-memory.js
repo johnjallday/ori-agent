@@ -58,6 +58,8 @@ export class WorkspaceMemoryManager {
     this.promotingIndex = -1;
     this.notice = null;
     this.elements = {};
+    // Set by the Command view's Memory station; called with every payload.
+    this.onPayload = null;
   }
 
   get workspaceId() {
@@ -126,6 +128,8 @@ export class WorkspaceMemoryManager {
       charBudget: Number(payload?.char_budget) || 0,
       overBudget: Boolean(payload?.over_budget)
     };
+    // The Memory station's badge follows every authoritative payload.
+    if (typeof this.onPayload === 'function') this.onPayload(payload);
   }
 
   render() {
@@ -331,20 +335,42 @@ export class WorkspaceMemoryManager {
       </article>`;
   }
 
+  // The list is rebuilt from a string, so the control that was focused is
+  // replaced and focus falls to <body>. Inside the Memory station's modal that
+  // would also lose Escape and the focus trap, so focus goes back to the first
+  // of `selectors` that exists in the list, else to the add input. Focus the
+  // user has moved elsewhere is left alone.
+  keepFocus(...selectors) {
+    if (typeof document === 'undefined') return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const list = this.elements.list;
+    const found =
+      list && typeof list.querySelector === 'function'
+        ? selectors.map(selector => list.querySelector(selector)).find(Boolean)
+        : null;
+    const target = found || this.elements.addText;
+    if (target && typeof target.focus === 'function') target.focus();
+  }
+
   handleListClick(event) {
     const button = event.target.closest('[data-action]');
     if (!button) return;
     const index = Number(button.dataset.index);
     if (!Number.isInteger(index)) return;
+    const promoteButton = `[data-action="promote"][data-index="${index}"]`;
+    const editButton = `[data-action="edit"][data-index="${index}"]`;
     switch (button.dataset.action) {
       case 'edit':
         this.editingIndex = index;
         this.promotingIndex = -1;
         this.renderList();
+        this.keepFocus(`[data-edit-text="${index}"]`);
         break;
       case 'cancel':
         this.editingIndex = -1;
         this.renderList();
+        this.keepFocus(editButton);
         break;
       case 'promote':
         if (!this.globalMemory?.available) {
@@ -358,10 +384,12 @@ export class WorkspaceMemoryManager {
           this.editingIndex = -1;
         }
         this.renderList();
+        this.keepFocus(`[data-promote-text="${index}"]`, promoteButton);
         break;
       case 'promote-cancel':
         this.promotingIndex = -1;
         this.renderList();
+        this.keepFocus(promoteButton, editButton);
         break;
       case 'promote-confirm':
         this.promoteEntry(index);
@@ -407,6 +435,7 @@ export class WorkspaceMemoryManager {
         if (window.Toast) window.Toast.success('Memory entry updated');
       }
     );
+    this.keepFocus(`[data-action="edit"][data-index="${index}"]`);
   }
 
   async deleteEntry(index) {
@@ -417,6 +446,11 @@ export class WorkspaceMemoryManager {
       () => {
         if (window.Toast) window.Toast.info('Memory entry removed');
       }
+    );
+    // The entry that took its place, else the one before it.
+    this.keepFocus(
+      `[data-action="edit"][data-index="${index}"]`,
+      `[data-action="edit"][data-index="${index - 1}"]`
     );
   }
 
@@ -447,6 +481,7 @@ export class WorkspaceMemoryManager {
           };
           this.promotingIndex = -1;
           this.renderList();
+          this.keepFocus('.workspace-detail-memory-notice a');
           return;
         }
         throw new Error(
@@ -460,6 +495,10 @@ export class WorkspaceMemoryManager {
       };
       this.promotingIndex = -1;
       this.renderList();
+      this.keepFocus(
+        '.workspace-detail-memory-notice a',
+        `[data-action="edit"][data-index="${index}"]`
+      );
       if (window.Toast) window.Toast.success(this.notice.message);
     } catch (error) {
       if (window.Toast) window.Toast.error(error.message || 'Promote to global memory failed');

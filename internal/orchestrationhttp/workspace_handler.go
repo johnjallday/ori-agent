@@ -676,9 +676,10 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// SaveStationLayoutHandler saves HQ command-map station positions for a
-// workspace, scoped to ONLY Layout.StationPositions. It is a deliberately
-// separate write path from SaveLayoutHandler (canvas layout): that handler
+// SaveStationLayoutHandler saves command-map station positions for any
+// workspace (the HQ's stations, capability stations such as File Janitor, and
+// every workspace's Memory station), scoped to ONLY Layout.StationPositions.
+// It is a deliberately separate write path from SaveLayoutHandler (canvas layout): that handler
 // full-replaces the fields it knows about on the in-place *ws.Layout, so as
 // long as it never learns about StationPositions, a canvas save can never
 // clobber a station drag and vice versa (same precedent as DirectoryPositions,
