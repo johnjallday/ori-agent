@@ -33,10 +33,10 @@ Options:
   --music-source DIR    Clean Music Project Management candidate worktree.
   --music-upgrade-source DIR
                         Arrangement suite only: a newer clean Music commit. The
-                        Home is populated on --music-source, whose planning turn
-                        is expected to be refused, then upgraded to this one
-                        through its reviewed Home upgrade, which must keep the
-                        library and plan with the new guidance.
+                        Home is populated on --music-source and plans once with
+                        that older guidance, then is upgraded to this one through
+                        its reviewed Home upgrade, which must keep the library
+                        and the saved proposal and plan with the new guidance.
   --install-order MODE  music-first, reaper-first, or reaper-only. Providing a
                         music source defaults to music-first.
   --suite NAME          legacy (default), guidance, awareness (drawer baseline), or
@@ -533,7 +533,7 @@ if [[ "$mode" == "test" ]]; then
 			suite_env=(ORI_ARRANGEMENT_MODEL_PORT="$model_port")
 		fi
 		# With an upgrade source, the installed package is the older one: the
-		# main test expects its planning turn to be refused, then stops there.
+		# main test plans once with its guidance, saves the proposal and stops.
 		if [[ -n "$bundled_upgrade" ]]; then
 			suite_env+=(ORI_ARRANGEMENT_OLD_GUIDANCE=1)
 		fi

@@ -156,8 +156,14 @@ func arrangementWireReply(t *testing.T, wire, name string, arguments map[string]
 
 func TestArrangementTransport_CLIToolsAreNotAnIsolationGuarantee(t *testing.T) {
 	codex := &CodexProvider{listFeatures: tableOf(codexFeatureTable)}
-	if !codex.Capabilities().SupportsTools || (&ClaudeCodeProvider{}).Capabilities().SupportsTools {
-		t.Fatal("revisit CLI transport decision: declared capabilities changed")
+	// Both CLIs broker Ori tools through their own JSON protocol and both run
+	// with inherited native MCP/configuration. The planner keeps excluding them
+	// by that native-MCP capability and by name (SupportsMetadataPlanning); a
+	// change in either declaration means that decision needs another look.
+	for name, capabilities := range map[string]ProviderCapabilities{"codex": codex.Capabilities(), "claude_code": (&ClaudeCodeProvider{}).Capabilities()} {
+		if !capabilities.SupportsTools || !capabilities.SupportsNativeMCP {
+			t.Fatalf("revisit CLI transport decision for %s: declared capabilities changed: %+v", name, capabilities)
+		}
 	}
 	args := strings.Join(buildCodexArgs("fixture", "", "schema", "output", nil), " ")
 	if !strings.Contains(args, "--sandbox read-only") || strings.Contains(args, "--ignore-user-config") {

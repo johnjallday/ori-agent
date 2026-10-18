@@ -92,6 +92,30 @@ func SupportsMetadataPlanning(provider llm.Provider) bool {
 	}
 }
 
+// promptEstimate bounds the next request's prompt tokens for the pre-call
+// budget check. Until the provider reports prompt usage, UTF-8 bytes are
+// charged at one token per three bytes: JSON and English run three to five
+// bytes per token, so that still over-estimates. Every reported prompt usage
+// then calibrates the rate for the following request with a 20% margin. The
+// estimate never drops below one token per eight bytes, so a misreported tiny
+// usage cannot unlock an unbounded request. Post-call accounting is separate:
+// it charges the reported usage, or the byte upper bound when usage is missing.
+type promptEstimate struct{ tokens, bytes int }
+
+func (e promptEstimate) estimate(size int) int {
+	estimate := (size + 2) / 3
+	if e.bytes > 0 && e.tokens > 0 {
+		estimate = (size*e.tokens*6 + e.bytes*5 - 1) / (e.bytes * 5)
+	}
+	return max(estimate, (size+7)/8)
+}
+
+func (e *promptEstimate) calibrate(size, promptTokens int) {
+	if size > 0 && promptTokens > 0 {
+		e.tokens, e.bytes = promptTokens, size
+	}
+}
+
 // Run never returns an actionable unsaved draft. complete must perform the
 // canonical atomic owning-turn save (with its own CAS and cancellation checks),
 // including the draft if present. It runs under the same bounded lease only
@@ -151,16 +175,23 @@ func (p *Planner) Run(ctx context.Context, in PlanInput, complete func(context.C
 	}
 	result := PlanResult{}
 	var reportedModel, reportedProvider string
+	var estimate promptEstimate
+	// Local servers (Ollama, LM Studio) size their context from this field and
+	// would otherwise truncate the prompt silently at a small default, losing
+	// rules or evidence. Use the model's known window, never less than one
+	// bounded turn; cloud providers ignore it.
+	window := max(llm.ResolveModelContextWindow(in.Provider, in.Model), MaxTurnTokens+MaxOutputTokens)
 	for result.ModelCalls < MaxModelCalls {
 		if err := check(); err != nil {
 			return PlanResult{}, err
 		}
-		request := llm.ChatRequest{Model: in.Model, SystemPrompt: system, Messages: messages, Tools: tools, Temperature: 0.2, MaxTokens: MaxOutputTokens}
+		request := llm.ChatRequest{Model: in.Model, SystemPrompt: system, Messages: messages, Tools: tools, Temperature: 0.2, MaxTokens: MaxOutputTokens, ContextWindowTokens: window}
 		encoded, err := json.Marshal(request)
-		if err != nil || len(encoded) > MaxRequestBytes || len(encoded)+MaxOutputTokens > MaxTurnTokens-result.ChargedTokens {
+		if err != nil || len(encoded) > MaxRequestBytes || estimate.estimate(len(encoded))+MaxOutputTokens > MaxTurnTokens-result.ChargedTokens {
 			return PlanResult{}, ErrLimit
 		}
-		// UTF-8 bytes conservatively bound the next prompt's token charge. The
+		// The estimate bounds the next prompt's token charge (bytes/3 until the
+		// provider has reported usage, then its observed rate with a margin). The
 		// explicit output reservation prevents starting a call with no budget.
 		response, err := in.Provider.Chat(ctx, request)
 		result.ModelCalls++
@@ -197,6 +228,7 @@ func (p *Planner) Run(ctx context.Context, in PlanInput, complete func(context.C
 			return PlanResult{}, ErrLimit
 		}
 		result.ChargedTokens += charge
+		estimate.calibrate(len(encoded), response.Usage.PromptTokens)
 		if response.FinishReason == llm.FinishReasonLength || response.FinishReason == llm.FinishReasonError || response.FinishReason == llm.FinishReasonContentFilter {
 			return PlanResult{}, ErrLimit
 		}

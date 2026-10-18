@@ -56,9 +56,14 @@ func ToolDefinitions() []toolapi.ToolDefinition {
 	filter := schemaObject(map[string]any{"text": schemaString(120), "format": schemaString(80), "connection": schemaString(80),
 		"availability": schemaString(80), "root_id": schemaString(160), "collection_id": schemaString(160), "selection_handle": schemaString(160)})
 	selection := schemaObject(map[string]any{"ids": schemaArray(schemaString(160), MaxExplicitItems), "handle": schemaString(160)})
+	// Live models tend to send a handle and the ids it stands for together; the
+	// contract takes one or the other, and a refused draft ends the turn.
+	selection["description"] = "Name items in exactly one way: a frozen selection handle from arrangement_select, or up to 100 explicit ids copied from issued rows. Never both. An empty selection is {}."
+	existingCollection := schemaString(160)
+	existingCollection["description"] = "Only for " + RenameCollection + ", " + SetMembers + " and " + RemoveCollection + ": the existing collection's id, with collection_revision. Leave unset for " + CreateCollection + ", " + CreateGroup + " and " + SelectActivation + "."
 	operation := schemaObject(map[string]any{
 		"kind": map[string]any{"type": "string", "enum": []string{CreateCollection, RenameCollection, SetMembers, RemoveCollection, CreateGroup, SelectActivation}},
-		"name": schemaString(128), "collection_id": schemaString(160), "collection_revision": map[string]any{"type": "integer", "minimum": 1}, "members": selection,
+		"name": schemaString(128), "collection_id": existingCollection, "collection_revision": map[string]any{"type": "integer", "minimum": 1}, "members": selection,
 	}, "kind", "members")
 	proposal := schemaObject(map[string]any{
 		"version": map[string]any{"type": "integer", "enum": []int{Version}}, "source_revision": schemaString(160),
@@ -71,7 +76,7 @@ func ToolDefinitions() []toolapi.ToolDefinition {
 		{Name: "arrangement_search", Description: "Page already-held metadata with literal AND filters; no expressions, globs or new discovery. Optional selection_handle restricts results to a previously issued frozen set from this turn. At most 20 rows. Preserve the returned cursor and filter together.", Parameters: schemaObject(map[string]any{"filter": filter, "cursor": schemaString(8192), "page_size": map[string]any{"type": "integer", "minimum": 0, "maximum": ModelPageSize}})},
 		{Name: "arrangement_detail", Description: "Read bounded metadata for one previously issued item ID. Tree nodes are observations, not creator targets.", Parameters: schemaObject(map[string]any{"id": schemaString(160)}, "id")},
 		{Name: "arrangement_select", Description: "Freeze the exact current set matching literal filters; returns a handle/count/digest, not approval or a future-match rule. Empty matches issue no handle.", Parameters: schemaObject(map[string]any{"filter": filter})},
-		{Name: "arrangement_propose", Description: "Submit inert intent as the sole call in its batch. This does not save, approve or execute anything. Unmentioned items stay unchanged; use needs_review for unsupported effects. Attachment supports plain create_group; Home supports logical collections and selected activation for later independent review.", Parameters: proposal},
+		{Name: "arrangement_propose", Description: "Submit inert intent as the sole call in its batch. This does not save, approve or execute anything. Unmentioned items stay unchanged; use needs_review for unsupported effects. Attachment supports plain create_group; Home supports logical collections and selected activation for later independent review. Each selection (members, unchanged, needs_review items) takes a frozen handle OR explicit ids, never both; collection_id and collection_revision belong only to operations on an existing collection. A draft that breaks these rules is refused whole.", Parameters: proposal},
 	}
 }
 

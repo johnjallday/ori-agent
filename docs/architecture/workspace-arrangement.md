@@ -211,7 +211,9 @@ collection removal clears it while staling affected intent.
 | Newly shared evidence | 64 KiB per turn including overview and results |
 | Each full model request | 96 KiB, including rules, skill, history, tools and evidence; no silent truncation of authority |
 | Provider work | 8 calls, 12 total tools, 2,048 output tokens per response, 24,000 cumulative charged tokens, 90-second deadline |
-| Missing token accounting | Charge conservative UTF-8 byte upper bound for request + response; stop before the next call when insufficient budget |
+| Context window | Each request asks for the model's known window, never less than 26,048 tokens (one bounded turn), so a local server (Ollama, LM Studio) does not truncate rules or evidence at its small default; cloud providers ignore the field |
+| Pre-call prompt estimate | One token per three UTF-8 bytes until the provider reports prompt usage, then that request's observed tokens per byte with a 20% margin, never below one token per eight bytes; plus the 2,048-token output reservation. Stop before the next call when the estimate does not fit |
+| Missing token accounting | Charge conservative UTF-8 byte upper bound for request + response after a call whose usage is missing |
 | Concurrency | One planning turn per conversation/Home; 2 per owner; cancellation/expired lease prevents terminal persistence |
 | Draft | 32 KiB model intent; 32 operations; 100 explicit item IDs per selection, larger sets use a handle |
 | Generic creation | Existing 24-member limit per group; each group separately reviewed; no silent tail drop |
@@ -587,15 +589,19 @@ that every larger inventory or multi-call turn fits: the host still checks each
 request and refuses exhausted budgets.
 
 Measured on the populated six-song suite (scripted model): the candidate's
-second request (after one search and one select) is 21,057 bytes, against
-about 21,432 allowed by the pre-call check (24,000 minus the 2,048-token output
-reservation minus 520 already charged, counting request bytes as tokens). The
-margin is small, so a larger search page can end the turn with
-`limit_reached`. The published 0.2.0 and 0.1.1 packages carry a 9,626-byte skill:
-their first call fits, their second does not, and Organize library is refused
-with `limit_reached` before anything is saved. The reviewed Home upgrade to the
-candidate then plans normally with the new skill and role prompt, keeping the
-library, roots and projects, and the owner's existing skill trust carries over.
+second request (after one search and one select) is 21,057 bytes. An earlier
+pre-call check counted request bytes as tokens, which left about 375 bytes of
+margin there and refused the published 0.2.0 and 0.1.1 packages (9,626-byte
+skill) on their second call with `limit_reached` before anything was saved.
+The check now estimates the prompt instead: one token per three bytes until the
+provider reports usage, then the observed rate with a 20% margin (never below
+one token per eight bytes). The same 21,057-byte request is estimated at about
+7,019 tokens before calibration, and the published packages finish an
+investigate → propose turn. Reported usage is still charged in full against the
+24,000-token budget after every call, so a model that really spends the budget
+is still stopped. The reviewed Home upgrade to the candidate keeps working as
+before: library, roots and projects are kept, and the owner's existing skill
+trust carries over.
 The upgrade review names the release's skills but does not show that a skill's
 text changed (only role-prompt diffs are shown); that disclosure belongs to the
 package-upgrade review, not this feature.

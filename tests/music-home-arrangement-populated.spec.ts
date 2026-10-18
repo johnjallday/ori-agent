@@ -516,41 +516,6 @@ test('populated Home: Organize library → reviewed collection + one queued acti
     const plannedResponse = page.waitForResponse(r => r.url().endsWith('/arrangements/plan'));
     await send.click();
     const planned = await plannedResponse;
-    if (oldGuidance) {
-      // The older package's full guidance leaves no room for an investigate-
-      // then-propose turn inside the host's fixed budget, which is never raised
-      // or truncated for it: the turn is refused, nothing is saved or created.
-      const refusal = await planned.json();
-      await dump('12-plan-refusal', {
-        status: planned.status(),
-        body: refusal,
-        planning: planning.length
-      });
-      expect(planned.status(), JSON.stringify(refusal)).toBe(409);
-      expect(refusal.arrangement_error?.code).toBe('limit_reached');
-      expect((await ok(await request.get(`${base}/arrangements`))).arrangements).toHaveLength(0);
-      expect((await ok(await request.get('/api/workspaces'))).folders.length).toBe(
-        workspacesBeforePlanning
-      );
-      // A refusal decided before any save is reported as certain, not as an
-      // unconfirmed save that would demand a history reopen.
-      await expect(panel).toContainText('Refused before anything was saved or applied');
-      await expect(panel).not.toContainText('could not be confirmed');
-      await shot(panel, '12-old-guidance-refusal');
-      expect(await hashes()).toEqual(sourceHashes);
-      await dump('99-summary', {
-        kind: 'old-guidance-refusal-before-upgrade',
-        boundary:
-          'Only the model is scripted. The older package is installed; planning is refused before the Home upgrade.',
-        candidates: { music: { path: musicPath, revision: process.env.ORI_MUSIC_PLUGIN_REVISION } },
-        home_id: homeID,
-        library_path: libraryURL,
-        planning_calls_before_refusal: planning.length,
-        source_hashes: sourceHashes,
-        workspaces: { before_planning: workspacesBeforePlanning }
-      });
-      return;
-    }
     expect(
       planned.ok(),
       `planning ${planned.status()} ${await planned.text()} errors=${fixtureErrors.join('; ')}`
@@ -588,6 +553,26 @@ test('populated Home: Organize library → reviewed collection + one queued acti
     expect((await ok(await request.get('/api/workspaces'))).folders.length).toBe(
       workspacesBeforePlanning
     );
+    if (oldGuidance) {
+      // The older package's longer guidance fits the turn: the pre-call budget
+      // check estimates tokens instead of counting bytes, so planning completed
+      // with the OLD skill and role (asserted above) and saved one inert
+      // proposal. Nothing is applied here; the upgrade test takes over.
+      await shot(panel, '12-old-guidance-planned');
+      expect(await hashes()).toEqual(sourceHashes);
+      await dump('99-summary', {
+        kind: 'old-guidance-planned-before-upgrade',
+        boundary:
+          'Only the model is scripted. The older package is installed; its planning turn completed and saved one inert proposal before the Home upgrade.',
+        candidates: { music: { path: musicPath, revision: process.env.ORI_MUSIC_PLUGIN_REVISION } },
+        home_id: homeID,
+        library_path: libraryURL,
+        planning_calls: planning.length,
+        source_hashes: sourceHashes,
+        workspaces: { before_planning: workspacesBeforePlanning }
+      });
+      return;
+    }
     const rows = page.locator('#projectLibraryArrangementRows');
     const startReview = rows.getByRole('button', {
       name: 'Review collection metadata',
@@ -966,10 +951,11 @@ test('restart reopens the saved arrangement, collection and queue from canonical
 });
 
 // Run by the harness with --music-upgrade-source, after the main test populated
-// the Home on the installed (older) Music commit and saw planning refused: the
-// owner upgrades the Home to the newer commit through the existing reviewed Home
-// upgrade. The library, roots and projects stay; the next planning turn fits and
-// carries the NEW skill and role guidance, never the old.
+// the Home on the installed (older) Music commit and planned once with its
+// guidance: the owner upgrades the Home to the newer commit through the existing
+// reviewed Home upgrade. The library, roots, projects and the saved proposal
+// stay; the next planning turn carries the NEW skill and role guidance, never
+// the old.
 test('upgrade keeps the library and plans with the new guidance', async ({ page, request }) => {
   const upgradePath = process.env.ORI_MUSIC_UPGRADE_PATH || '';
   test.skip(
@@ -1049,11 +1035,12 @@ test('upgrade keeps the library and plans with the new guidance', async ({ page,
     server.listen(modelPort, '127.0.0.1', () => resolve());
   });
   try {
-    expect(summary.kind).toBe('old-guidance-refusal-before-upgrade');
+    expect(summary.kind).toBe('old-guidance-planned-before-upgrade');
     const workspaces = (await ok(await request.get('/api/workspaces'))).folders;
     const rootsBefore = await ok(await request.get(`${base}/roots`));
     const arrangementsBefore = (await ok(await request.get(`${base}/arrangements`))).arrangements;
-    expect(arrangementsBefore).toHaveLength(0);
+    expect(arrangementsBefore).toHaveLength(1);
+    expect(arrangementsBefore[0]).toMatchObject({ kind: 'proposal' });
 
     // A developer replaces the installed export with the newer commit in place.
     for (const entry of await readdir(musicPath))
@@ -1096,7 +1083,9 @@ test('upgrade keeps the library and plans with the new guidance', async ({ page,
     expect(JSON.stringify(rootsAfter.roots ?? rootsAfter)).toBe(
       JSON.stringify(rootsBefore.roots ?? rootsBefore)
     );
-    expect((await ok(await request.get(`${base}/arrangements`))).arrangements).toHaveLength(0);
+    const arrangementsAfter = (await ok(await request.get(`${base}/arrangements`))).arrangements;
+    expect(arrangementsAfter).toHaveLength(1);
+    expect(arrangementsAfter[0]).toMatchObject({ kind: 'proposal' });
 
     await page.goto(summary.library_path);
     const shelf = page.locator('#projectLibraryPanel');
@@ -1147,11 +1136,13 @@ test('upgrade keeps the library and plans with the new guidance', async ({ page,
     await panel
       .getByRole('checkbox', { name: 'Share this bounded metadata for one planning turn' })
       .check();
-    // Nothing was saved before the upgrade, so the library is still version 1:
-    // the owner separately accepts its storage upgrade.
-    await panel
-      .getByRole('checkbox', { name: /Saving a proposal or clarification upgrades/ })
-      .check();
+    // The proposal saved before the upgrade already moved the library to its
+    // current storage version, so the storage-upgrade consent normally does not
+    // appear; accept it if it does.
+    const storageUpgrade = panel.getByRole('checkbox', {
+      name: /Saving a proposal or clarification upgrades/
+    });
+    if (await storageUpgrade.isVisible()) await storageUpgrade.check();
     const send = panel.getByRole('button', { name: 'Send organizing goal' });
     await expect(send).toBeEnabled();
     const planned = page.waitForResponse(r => r.url().endsWith('/arrangements/plan'));
@@ -1159,10 +1150,12 @@ test('upgrade keeps the library and plans with the new guidance', async ({ page,
     const response = await planned;
     expect(response.ok(), `planning ${response.status()} ${await response.text()}`).toBeTruthy();
     expect(planning.length).toBeGreaterThan(0);
-    // The scripted reply is a question: saved as clarification, never a proposal.
+    // The scripted reply is a question: saved as a clarification beside the
+    // proposal from before the upgrade, never as another proposal.
     const saved = (await ok(await request.get(`${base}/arrangements`))).arrangements;
-    expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({ kind: 'clarification' });
+    expect(saved).toHaveLength(2);
+    expect(saved.filter((entry: any) => entry.kind === 'clarification')).toHaveLength(1);
+    expect(saved.filter((entry: any) => entry.kind === 'proposal')).toHaveLength(1);
     for (const body of planning) {
       const system = body.messages
         .filter((m: any) => m.role === 'system')
