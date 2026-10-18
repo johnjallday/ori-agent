@@ -211,8 +211,8 @@ fmt.Printf("Max context window: %d tokens\n", caps.MaxContextWindow)
 ### CLI providers: brokered tools
 
 The two CLI providers, `codex` (Codex CLI) and `claude_code` (Claude Code CLI),
-report `SupportsTools: true` and `SupportsNativeMCP: true`. They do not speak a
-tool-calling API, so Ori brokers its tools through one shared protocol in
+report `SupportsTools: true` and `SupportsNativeMCP: true`. A CLI has no API
+for function calls, so Ori brokers its tools through one shared protocol in
 `brokered_tools.go`:
 
 1. When `ChatRequest.Tools` is set, the provider appends the protocol and the
