@@ -9,14 +9,20 @@ import {
   clearOtherPicks,
   commanderLabel,
   createRecipientController,
+  createRecipientMenu,
   NEW_CONVERSATION_MARK,
   entryAgentPlaceholder,
   entrySessionRows,
   loadEntryAgent,
   loadEntrySession,
+  menuKeyIntent,
+  nextMenuIndex,
   readEntrySession,
   readPick,
+  recipientButtonLabel,
+  recipientMenuRows,
   resolveRecipient,
+  switchLockMessage,
   writeEntrySession,
   writePick
 } from './personal-assistant-recipient.js';
@@ -582,4 +588,278 @@ test('loading a session is a no-op unless the entry agent is the ready recipient
   await controller.refresh();
   assert.deepEqual(await controller.loadSession(), { session: null, error: false });
   assert.deepEqual(fetchImpl.seen, []);
+});
+
+test('the pick survives a reload and a mode change of the same workspace (FR7)', async () => {
+  const storage = memoryStorage();
+  let ctx = { surface: 'workspace_detail', workspace_id: 'ws-1' };
+  const first = createRecipientController({
+    fetchImpl: fakeFetch(reaperRoutes),
+    storage,
+    pageContext: () => ctx
+  });
+  await first.refresh();
+  first.pick(RECIPIENT_PERSONAL);
+  // Map → Details → Dashboard → Tickets keep the surface and the workspace id.
+  await first.refresh();
+  assert.equal(first.current().kind, RECIPIENT_PERSONAL);
+  // A reload is a new controller over the same tab storage.
+  const reloaded = createRecipientController({
+    fetchImpl: fakeFetch(reaperRoutes),
+    storage,
+    pageContext: () => ctx
+  });
+  await reloaded.refresh();
+  assert.equal(reloaded.current().kind, RECIPIENT_PERSONAL);
+  // The canvas of the same workspace is still the same visit.
+  ctx = { surface: 'workspace_canvas', workspace_id: 'ws-1' };
+  await reloaded.refresh();
+  assert.equal(reloaded.current().kind, RECIPIENT_PERSONAL);
+  // Leaving for an app-wide page drops it; coming back starts at the default.
+  ctx = { surface: 'workspace_hub', workspace_id: '' };
+  await reloaded.refresh();
+  ctx = { surface: 'workspace_detail', workspace_id: 'ws-1' };
+  await reloaded.refresh();
+  assert.equal(reloaded.current().kind, RECIPIENT_WORKSPACE_ENTRY);
+});
+
+test('switching is refused while a reply or a review is pending (FR14, FR15)', () => {
+  const mira = { name: 'Mira' };
+  assert.equal(switchLockMessage(mira, {}), '');
+  assert.equal(
+    switchLockMessage(mira, { busy: true }),
+    'Wait for Mira to reply before switching. Your message is kept.'
+  );
+  assert.equal(
+    switchLockMessage(mira, { hasPendingConfirmation: true }),
+    'Answer the review Mira is waiting on before switching. Your message is kept.'
+  );
+  assert.match(switchLockMessage(mira, { hasPlanning: true }), /review Mira is waiting on/);
+  assert.match(switchLockMessage(mira, { loading: true }), /conversation to open/);
+  // Busy wins over a review: the reply is what the user is waiting for.
+  assert.match(switchLockMessage(mira, { busy: true, hasPlanning: true }), /^Wait for Mira/);
+});
+
+test('menu rows list the entry agent first and mark the current recipient (FR9)', () => {
+  const rows = recipientMenuRows(resolveRecipient(page));
+  assert.deepEqual(
+    rows.map(row => [row.kind, row.name, row.role, row.checked, row.disabled]),
+    [
+      [RECIPIENT_WORKSPACE_ENTRY, 'REAPER Assistant', 'Commander · test_reaper', true, false],
+      [RECIPIENT_PERSONAL, 'Mina', 'Personal Assistant', false, false]
+    ]
+  );
+  // Locked: only the other row is disabled, and it says why when chosen.
+  const locked = recipientMenuRows(resolveRecipient(page), { locked: true });
+  assert.equal(locked[0].disabled, false);
+  assert.equal(locked[1].disabled, true);
+  assert.equal(locked[1].locked, true);
+  // A vacant Commander's row is disabled and offers the Roles link (FR4).
+  const vacant = recipientMenuRows(resolveRecipient({ ...page, entry: { status: 'vacant' } }), {
+    fillHref: '/workspaces/test-reaper?mode=details'
+  });
+  assert.equal(vacant[0].disabled, true);
+  assert.equal(vacant[0].role, 'No Commander yet');
+  assert.equal(vacant[0].fillHref, '/workspaces/test-reaper?mode=details');
+  assert.equal(vacant[1].checked, true);
+  // An unset assistant can still be chosen; its row says it is not set up (FR6).
+  const unhired = recipientMenuRows(
+    resolveRecipient({ ...page, personal: { name: 'Assistant', available: false } })
+  );
+  assert.equal(unhired[1].disabled, false);
+  assert.equal(unhired[1].role, 'Personal Assistant · not set up');
+  assert.deepEqual(recipientMenuRows(resolveRecipient({ ...page, surface: 'home' })), []);
+});
+
+test('the menu keys and wrap-around navigation (FR12)', () => {
+  assert.equal(menuKeyIntent('ArrowDown'), 'next');
+  assert.equal(menuKeyIntent('ArrowUp'), 'prev');
+  assert.equal(menuKeyIntent('Home'), 'first');
+  assert.equal(menuKeyIntent('End'), 'last');
+  assert.equal(menuKeyIntent('Enter'), 'choose');
+  assert.equal(menuKeyIntent(' '), 'choose');
+  assert.equal(menuKeyIntent('Escape'), 'close');
+  assert.equal(menuKeyIntent('Tab'), 'tab');
+  assert.equal(menuKeyIntent('a'), null);
+  assert.equal(nextMenuIndex(0, 2, 'next'), 1);
+  assert.equal(nextMenuIndex(1, 2, 'next'), 0);
+  assert.equal(nextMenuIndex(0, 2, 'prev'), 1);
+  assert.equal(nextMenuIndex(-1, 3, 'next'), 0);
+  assert.equal(nextMenuIndex(-1, 3, 'prev'), 2);
+  assert.equal(nextMenuIndex(1, 3, 'first'), 0);
+  assert.equal(nextMenuIndex(0, 3, 'last'), 2);
+  assert.equal(nextMenuIndex(0, 0, 'next'), -1);
+});
+
+test('the menu button is named after the selected recipient', () => {
+  const resolved = resolveRecipient(page);
+  assert.equal(
+    recipientButtonLabel(resolved.current),
+    'REAPER Assistant, Commander · test_reaper. Choose who to talk to'
+  );
+  assert.equal(
+    recipientButtonLabel(resolved.options[1]),
+    'Mina, Personal Assistant. Choose who to talk to'
+  );
+});
+
+// A minimal DOM for the menu controller: enough elements, events and focus to
+// drive it from the keyboard the way a browser would.
+function fakeDocument() {
+  const doc = { activeElement: null, listeners: {} };
+  function element(tag) {
+    const el = {
+      tagName: tag.toUpperCase(),
+      children: [],
+      parent: null,
+      attributes: {},
+      dataset: {},
+      listeners: {},
+      hidden: false,
+      textContent: '',
+      innerHTML: '',
+      setAttribute(name, value) {
+        el.attributes[name] = String(value);
+      },
+      getAttribute(name) {
+        return name in el.attributes ? el.attributes[name] : null;
+      },
+      append(...nodes) {
+        for (const node of nodes) {
+          node.parent = el;
+          el.children.push(node);
+        }
+      },
+      replaceChildren() {
+        el.children = [];
+      },
+      addEventListener(type, fn) {
+        (el.listeners[type] ||= []).push(fn);
+      },
+      dispatch(type, init = {}) {
+        const event = {
+          type,
+          key: init.key,
+          target: init.target || el,
+          defaultPrevented: false,
+          propagationStopped: false,
+          preventDefault() {
+            this.defaultPrevented = true;
+          },
+          stopPropagation() {
+            this.propagationStopped = true;
+          }
+        };
+        for (let node = el; node && !event.propagationStopped; node = node.parent) {
+          for (const fn of node.listeners[type] || []) fn(event);
+        }
+        if (!event.propagationStopped) for (const fn of doc.listeners[type] || []) fn(event);
+        return event;
+      },
+      click() {
+        return el.dispatch('click');
+      },
+      focus() {
+        doc.activeElement = el;
+      },
+      contains(node) {
+        for (let current = node; current; current = current.parent) if (current === el) return true;
+        return false;
+      },
+      querySelectorAll() {
+        return el.children.filter(child =>
+          ['menuitemradio', 'menuitem'].includes(child.getAttribute('role'))
+        );
+      }
+    };
+    return el;
+  }
+  doc.createElement = element;
+  doc.addEventListener = (type, fn) => (doc.listeners[type] ||= []).push(fn);
+  return doc;
+}
+
+function mountMenu({ locked = false } = {}) {
+  const doc = fakeDocument();
+  const button = doc.createElement('button');
+  const menu = doc.createElement('div');
+  menu.hidden = true;
+  const chosen = [];
+  const refused = [];
+  let resolution = resolveRecipient(page);
+  const controller = createRecipientMenu({
+    button,
+    menu,
+    doc,
+    rows: () => recipientMenuRows(resolution, { locked }),
+    choose: kind => {
+      chosen.push(kind);
+      resolution = resolveRecipient({ ...page, pick: kind });
+    },
+    refuse: row => refused.push(row.kind),
+    avatar: () => ''
+  });
+  return { doc, button, menu, controller, chosen, refused };
+}
+
+test('the menu opens, moves, chooses and closes from the keyboard', () => {
+  const { doc, button, menu, controller, chosen } = mountMenu();
+  // Enter on the button activates it like a click.
+  button.click();
+  assert.equal(controller.isOpen(), true);
+  assert.equal(menu.hidden, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  const [entry, personal] = menu.children;
+  assert.equal(entry.getAttribute('role'), 'menuitemradio');
+  assert.equal(entry.getAttribute('aria-checked'), 'true');
+  assert.equal(personal.getAttribute('aria-checked'), 'false');
+  // Focus starts on the checked row.
+  assert.equal(doc.activeElement, entry);
+  menu.dispatch('keydown', { key: 'ArrowDown', target: entry });
+  assert.equal(doc.activeElement, personal);
+  menu.dispatch('keydown', { key: 'ArrowDown', target: personal });
+  assert.equal(doc.activeElement, entry, 'wraps');
+  menu.dispatch('keydown', { key: 'End' });
+  assert.equal(doc.activeElement, personal);
+  menu.dispatch('keydown', { key: 'Enter' });
+  assert.deepEqual(chosen, [RECIPIENT_PERSONAL]);
+  assert.equal(controller.isOpen(), false);
+  assert.equal(doc.activeElement, button, 'focus returns to the button');
+  // Choosing the current recipient only closes.
+  button.click();
+  menu.dispatch('keydown', { key: ' ' });
+  assert.deepEqual(chosen, [RECIPIENT_PERSONAL]);
+});
+
+test('Escape closes only the menu, and a click outside closes it', () => {
+  const { doc, button, menu, controller } = mountMenu();
+  button.click();
+  const escape = menu.dispatch('keydown', { key: 'Escape' });
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(escape.propagationStopped, true, 'the drawer never sees it');
+  assert.equal(controller.isOpen(), false);
+  assert.equal(doc.activeElement, button);
+  // Escape on the button while open does the same.
+  button.click();
+  const onButton = button.dispatch('keydown', { key: 'Escape' });
+  assert.equal(onButton.propagationStopped, true);
+  assert.equal(controller.isOpen(), false);
+  // ArrowUp on the closed button opens on the last row.
+  button.dispatch('keydown', { key: 'ArrowUp' });
+  assert.equal(controller.isOpen(), true);
+  assert.equal(doc.activeElement, menu.children[1]);
+  const outside = doc.createElement('div');
+  for (const fn of doc.listeners.click) fn({ target: outside });
+  assert.equal(controller.isOpen(), false);
+});
+
+test('a locked row explains itself instead of switching', () => {
+  const { button, menu, chosen, refused, controller } = mountMenu({ locked: true });
+  button.click();
+  const personal = menu.children[1];
+  assert.equal(personal.getAttribute('aria-disabled'), 'true');
+  personal.click();
+  assert.deepEqual(chosen, []);
+  assert.deepEqual(refused, [RECIPIENT_PERSONAL]);
+  assert.equal(controller.isOpen(), true, 'the menu stays open for another choice');
 });

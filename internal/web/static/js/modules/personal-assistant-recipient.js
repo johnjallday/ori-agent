@@ -490,6 +490,241 @@ export function createRecipientController({
   };
 }
 
+/**
+ * Why the drawer may not switch recipient right now (FR14, FR15), or ''. A
+ * reply in flight, or a review the current recipient is waiting on, stays
+ * with the conversation it belongs to.
+ */
+export function switchLockMessage(current, state = {}) {
+  const name = text(current?.name) || 'the assistant';
+  if (state.busy) return `Wait for ${name} to reply before switching. Your message is kept.`;
+  if (state.hasPendingConfirmation || state.hasPlanning)
+    return `Answer the review ${name} is waiting on before switching. Your message is kept.`;
+  if (state.loading)
+    return 'Wait for the conversation to open before switching. Your message is kept.';
+  return '';
+}
+
+/** The menu's rows, entry agent first, from the resolver's answer. */
+export function recipientMenuRows(resolution, { locked = false, fillHref = '' } = {}) {
+  const current = resolution?.current;
+  return (resolution?.options || []).map(option => {
+    const checked = option.kind === current?.kind;
+    const unavailable = option.kind === RECIPIENT_PERSONAL && option.available === false;
+    return {
+      kind: option.kind,
+      name:
+        option.kind === RECIPIENT_WORKSPACE_ENTRY
+          ? option.name || 'Commander'
+          : option.name || 'Assistant',
+      role:
+        option.kind === RECIPIENT_PERSONAL && unavailable
+          ? 'Personal Assistant · not set up'
+          : option.role,
+      appearance: option.appearance || null,
+      checked,
+      // A row that cannot be chosen is still focusable, so its reason is heard.
+      disabled: option.disabled === true || (locked && !checked),
+      locked: locked && !checked && option.disabled !== true,
+      fillHref: option.vacant && fillHref ? fillHref : ''
+    };
+  });
+}
+
+const MENU_KEYS = {
+  ArrowDown: 'next',
+  ArrowUp: 'prev',
+  Home: 'first',
+  End: 'last',
+  Enter: 'choose',
+  ' ': 'choose',
+  Escape: 'close',
+  Tab: 'tab'
+};
+
+export function menuKeyIntent(key) {
+  return MENU_KEYS[key] || null;
+}
+
+/** The item a navigation key moves to, wrapping at either end. */
+export function nextMenuIndex(index, count, intent) {
+  if (count <= 0) return -1;
+  if (intent === 'first') return 0;
+  if (intent === 'last') return count - 1;
+  const from = index < 0 ? (intent === 'prev' ? 0 : -1) : index;
+  if (intent === 'next') return (from + 1) % count;
+  if (intent === 'prev') return (from - 1 + count) % count;
+  return index;
+}
+
+/** The menu button's accessible name: who is selected, and what it does. */
+export function recipientButtonLabel(current) {
+  const name = text(current?.name) || 'Assistant';
+  const role = text(current?.kind === RECIPIENT_WORKSPACE_ENTRY ? current?.subline : current?.role);
+  return `${role ? `${name}, ${role}` : name}. Choose who to talk to`;
+}
+
+/**
+ * The recipient menu button's behaviour (FR9, FR12): open on click, Enter,
+ * Space or ArrowDown; arrows move; Enter or Space chooses; Escape closes only
+ * the menu and returns focus to the button; a click outside closes it.
+ * `rows()` gives recipientMenuRows; `choose(kind)` switches, `refuse(row)`
+ * explains a row that cannot be chosen.
+ */
+export function createRecipientMenu({ button, menu, doc, rows, choose, refuse, avatar }) {
+  if (!button || !menu || !doc) return null;
+  let open = false;
+
+  function items() {
+    return Array.from(menu.querySelectorAll('[role="menuitemradio"], [role="menuitem"]'));
+  }
+
+  function render() {
+    const list = rows();
+    menu.replaceChildren();
+    for (const row of list) {
+      const item = doc.createElement('button');
+      item.type = 'button';
+      item.className = 'personal-assistant-recipient-menu__item';
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', row.checked ? 'true' : 'false');
+      item.tabIndex = -1;
+      item.dataset.recipient = row.kind;
+      if (row.disabled) item.setAttribute('aria-disabled', 'true');
+      const face = doc.createElement('span');
+      face.className = 'personal-assistant-recipient-menu__avatar';
+      face.setAttribute('aria-hidden', 'true');
+      if (typeof avatar === 'function') face.innerHTML = avatar(row);
+      const copy = doc.createElement('span');
+      copy.className = 'personal-assistant-recipient-menu__copy';
+      const name = doc.createElement('span');
+      name.className = 'personal-assistant-recipient-menu__name';
+      name.textContent = row.name;
+      const role = doc.createElement('span');
+      role.className = 'personal-assistant-recipient-menu__role';
+      role.textContent = row.role;
+      copy.append(name, role);
+      const check = doc.createElement('i');
+      check.className = 'bi bi-check2 personal-assistant-recipient-menu__check';
+      check.setAttribute('aria-hidden', 'true');
+      item.append(face, copy, check);
+      item.addEventListener('click', event => {
+        event.preventDefault();
+        activate(row);
+      });
+      menu.append(item);
+      if (row.fillHref) {
+        const fill = doc.createElement('a');
+        fill.className = 'personal-assistant-recipient-menu__fill';
+        fill.setAttribute('role', 'menuitem');
+        fill.tabIndex = -1;
+        fill.href = row.fillHref;
+        fill.textContent = 'Fill the role';
+        menu.append(fill);
+      }
+    }
+    return list;
+  }
+
+  function activate(shown) {
+    // Decide on the rows as they are now: a reply may have arrived since the
+    // menu was drawn.
+    const row = rows().find(item => item.kind === shown.kind) || shown;
+    if (row.disabled) {
+      refuse(row);
+      refreshRows();
+      return;
+    }
+    close({ focus: true });
+    if (!row.checked) choose(row.kind);
+  }
+
+  function refreshRows() {
+    if (!open) return;
+    const index = items().indexOf(doc.activeElement);
+    render();
+    if (index >= 0) focusItem(index);
+  }
+
+  function focusItem(index) {
+    const list = items();
+    if (index >= 0 && list[index]) list[index].focus();
+  }
+
+  function show({ focus = 'checked' } = {}) {
+    render();
+    open = true;
+    menu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    const list = items();
+    const checked = list.findIndex(item => item.getAttribute('aria-checked') === 'true');
+    focusItem(focus === 'last' ? list.length - 1 : checked >= 0 ? checked : 0);
+  }
+
+  function close({ focus = false } = {}) {
+    if (!open) return;
+    open = false;
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (focus) button.focus();
+  }
+
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    if (open) close({ focus: true });
+    else show();
+  });
+  button.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      close({ focus: true });
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      show({ focus: event.key === 'ArrowUp' ? 'last' : 'checked' });
+    }
+  });
+  menu.addEventListener('keydown', event => {
+    const intent = menuKeyIntent(event.key);
+    if (!intent) return;
+    const list = items();
+    const index = list.indexOf(doc.activeElement);
+    if (intent === 'close') {
+      // Escape closes this menu, never the drawer around it.
+      event.preventDefault();
+      event.stopPropagation();
+      close({ focus: true });
+      return;
+    }
+    if (intent === 'tab') {
+      close();
+      return;
+    }
+    if (intent === 'choose') {
+      const active = list[index];
+      if (active?.getAttribute('role') === 'menuitem') return; // the link follows itself
+      event.preventDefault();
+      active?.click();
+      return;
+    }
+    event.preventDefault();
+    focusItem(nextMenuIndex(index, list.length, intent));
+  });
+  doc.addEventListener('click', event => {
+    if (open && !menu.contains(event.target) && !button.contains(event.target)) close();
+  });
+
+  return {
+    isOpen: () => open,
+    close,
+    show,
+    // Rows change while open when a reply arrives; keep the user's place.
+    refresh: refreshRows
+  };
+}
+
 // One controller per tab. The panel drives it; the personal conversation and
 // the work controller read it at call time and listen for its event.
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {

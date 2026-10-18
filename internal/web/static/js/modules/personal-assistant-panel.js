@@ -4,8 +4,12 @@ import {
 } from './personal-assistant-workspace-context.js';
 import {
   RECIPIENT_WORKSPACE_ENTRY,
+  createRecipientMenu,
   entryAgentPlaceholder,
-  entrySessionRows
+  entrySessionRows,
+  recipientButtonLabel,
+  recipientMenuRows,
+  switchLockMessage
 } from './personal-assistant-recipient.js';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
@@ -295,6 +299,11 @@ const state = {
   lastTrigger: null,
   // True while Home's folder flow is waiting for a folder or exploring one.
   folderBusy: false,
+  // The recipient picker's menu, once the drawer is mounted.
+  recipientMenu: null,
+  // The last "N need you" line read for this page, shown only with the hired
+  // assistant selected.
+  needsLine: { visible: false, text: '' },
   els: null
 };
 
@@ -424,6 +433,88 @@ async function hydrateEntryConversation({ force = false } = {}) {
   return true;
 }
 
+/**
+ * With two recipients on offer the name becomes the menu button (FR8). The
+ * one name element moves into the button and back, so the heading's text is
+ * always just the name.
+ */
+function renderPicker(who) {
+  const els = state.els;
+  if (!els?.recipientButton || !els.name) return;
+  const visible = recipients()?.resolution?.()?.pickerVisible === true;
+  if (visible && els.name.parentElement !== els.recipientButton)
+    els.recipientButton.prepend(els.name);
+  if (!visible && els.name.parentElement !== els.title) els.title.prepend(els.name);
+  els.recipientButton.hidden = !visible;
+  els.recipientButton.setAttribute(
+    'aria-label',
+    recipientButtonLabel(recipients()?.current?.() || { name: who.name, role: who.role })
+  );
+  if (!visible) state.recipientMenu?.close?.();
+  state.recipientMenu?.refresh?.();
+}
+
+/** Why switching recipient is refused right now (FR14, FR15), or ''. */
+function switchLock() {
+  const work = window.OriAskRouting?.getState?.() || {};
+  return switchLockMessage(recipients()?.current?.(), {
+    busy: work.busy === true || state.pending,
+    hasPendingConfirmation: work.hasPendingConfirmation === true,
+    hasPlanning: work.hasPlanning === true,
+    loading: window.PersonalAssistantConversation?.isLoading?.() === true
+  });
+}
+
+/** Where a vacant Commander is filled: the workspace's Roles, in Details. */
+function rolesHref() {
+  const slug = routeContext().workspace_slug;
+  return slug ? `/workspaces/${encodeURIComponent(slug)}?mode=details` : '';
+}
+
+function menuRows() {
+  return recipientMenuRows(recipients()?.resolution?.(), {
+    locked: Boolean(switchLock()),
+    fillHref: rolesHref()
+  });
+}
+
+function refuseRecipient(row) {
+  const lock = switchLock();
+  if (lock) setStatus(lock);
+  else if (row.fillHref)
+    setStatus('This workspace has no Commander yet. Fill the role to talk to one.');
+  else if (row.kind === RECIPIENT_WORKSPACE_ENTRY)
+    setStatus('This workspace’s Commander could not be loaded. Reload the page to try again.');
+}
+
+/**
+ * Switches who the drawer talks to (FR13, FR16): clears the thread, loads the
+ * other recipient's conversation, and leaves the composer exactly as it is.
+ * Nothing is sent and no session is created by the switch itself.
+ */
+function chooseRecipient(kind) {
+  const ctl = recipients();
+  const resolution = ctl?.resolution?.();
+  if (!resolution || resolution.current?.kind === kind) return false;
+  const target = (resolution.options || []).find(option => option.kind === kind);
+  if (!target || target.disabled) return false;
+  const lock = switchLock();
+  if (lock || !window.OriAskRouting?.resetConversation?.()) {
+    setStatus(lock || switchLockMessage(resolution.current, { busy: true }));
+    return false;
+  }
+  // A review belongs to the conversation it was opened in.
+  window.PersonalAssistantDrafts?.close?.();
+  window.PersonalAssistantMemory?.close?.();
+  window.PersonalAssistantFolderContext?.close?.();
+  setStatus('');
+  entryHydration.target = '';
+  // The new recipient's conversation loads from the recipient event: the
+  // hired assistant's through its own module, the entry agent's here.
+  ctl.pick(kind);
+  return true;
+}
+
 /** New, with the entry agent selected: forget this tab's session (FR22). */
 function startNewEntryConversation() {
   const who = identity();
@@ -451,8 +542,10 @@ function renderIdentity() {
   els.launcher.hidden = !who.launcherVisible;
   els.launcherName.textContent = who.name;
   if (els.launcherRole) els.launcherRole.textContent = who.role;
-  els.title.textContent =
-    state.workActivityOnly && !who.launcherVisible ? 'Work activity' : who.name;
+  const title = state.workActivityOnly && !who.launcherVisible ? 'Work activity' : who.name;
+  if (els.name) els.name.textContent = title;
+  else els.title.textContent = title;
+  renderPicker(who);
   els.input.placeholder = who.placeholder;
   els.input.disabled = !who.available;
   els.send.disabled = !who.available || state.pending;
@@ -473,6 +566,7 @@ function renderIdentity() {
   renderChip();
   renderCheckIn();
   renderEntrySessionBar();
+  renderNeedsLine();
   // The hired assistant's setup notices describe it, not a workspace agent.
   if (!who.personal) return;
   // Home says these in the banner under the header. A page without that banner
@@ -494,7 +588,7 @@ function renderChip() {
   if (!els?.chips || !els.folderChip) return;
   const chip = assistantChipView({
     // Folder context belongs to the hired assistant's conversation only.
-    available: state.view.available && identity().personal,
+    available: state.view.available && recipientChromeView(identity()).attachments,
     folderBusy: state.folderBusy
   });
   els.chips.hidden = !chip.visible;
@@ -581,11 +675,29 @@ function setToday(today) {
   renderHeader();
 }
 
+/**
+ * The hired assistant's own chrome — the "N need you" line, Add folder, Add
+ * link, Watch Ori and its New/Continue strip — shows only while it is the
+ * recipient; the entry agent has its session strip instead (FR17). The
+ * page's "Context · …" line describes the page and stays for both (FR18).
+ */
+export function recipientChromeView(who, needsLine = { visible: false }) {
+  const personal = who?.personal !== false;
+  return {
+    needsLine: personal && needsLine.visible === true,
+    attachments: personal,
+    personalConversation: personal,
+    entrySession: !personal,
+    context: true
+  };
+}
+
 function renderNeedsLine(line) {
   const els = state.els;
+  if (line) state.needsLine = line;
   if (!els?.needsLine) return;
-  els.needsLine.hidden = !line.visible;
-  if (els.needsLineText) els.needsLineText.textContent = line.text;
+  els.needsLine.hidden = !recipientChromeView(identity(), state.needsLine).needsLine;
+  if (els.needsLineText) els.needsLineText.textContent = state.needsLine.text;
 }
 
 let todayRead = 0;
@@ -1069,6 +1181,9 @@ function init() {
     launcher,
     launcherName: document.getElementById('personalAssistantLauncherName'),
     launcherRole: document.getElementById('personalAssistantLauncherRole'),
+    name: document.getElementById('personalAssistantPanelName'),
+    recipientButton: document.getElementById('personalAssistantRecipientButton'),
+    recipientMenu: document.getElementById('personalAssistantRecipientMenu'),
     entrySessionBar: document.getElementById('personalAssistantEntrySessionBar'),
     entrySessionTitle: document.getElementById('personalAssistantEntrySessionTitle'),
     entrySessionNew: document.getElementById('personalAssistantEntrySessionNew'),
@@ -1136,6 +1251,18 @@ function init() {
   });
   document.addEventListener('personal-assistant:entry-session', renderEntrySessionBar);
   state.els.entrySessionNew?.addEventListener('click', startNewEntryConversation);
+  state.recipientMenu = createRecipientMenu({
+    button: state.els.recipientButton,
+    menu: state.els.recipientMenu,
+    doc: document,
+    rows: menuRows,
+    choose: chooseRecipient,
+    refuse: refuseRecipient,
+    avatar: row =>
+      row.kind === RECIPIENT_WORKSPACE_ENTRY
+        ? assistantAvatarMarkup(row.name, row.appearance)
+        : assistantAvatarMarkup(state.view.name, state.personalAssistant?.appearance)
+  });
   document.addEventListener('ori:workspace-context', () => void recipients()?.refresh?.());
   window.addEventListener('popstate', () => void recipients()?.refresh?.());
   void recipients()?.refresh?.();

@@ -97,11 +97,22 @@
   <section id="personalAssistantPanel" class="personal-assistant-panel" role="dialog"
            aria-labelledby="personalAssistantPanelTitle" hidden>
     <header class="personal-assistant-panel__header">
-      <span id="personalAssistantPanelAvatar" class="personal-assistant-panel__avatar" aria-hidden="true"></span>
-      <div class="personal-assistant-panel__ident">
-        <h2 id="personalAssistantPanelTitle" class="personal-assistant-panel__title">Personal assistant</h2>
-        <!-- When the next check-in is. "Personal Assistant" until that is known. -->
-        <p id="personalAssistantCheckIn" class="personal-assistant-panel__checkin">Personal Assistant</p>
+      <!-- Who the drawer is talking to. Inside a workspace that is its entry
+           agent or the hired assistant; then the name moves into a menu button
+           whose hit area covers the whole block, and the menu offers both. -->
+      <div id="personalAssistantIdentity" class="personal-assistant-panel__identity">
+        <span id="personalAssistantPanelAvatar" class="personal-assistant-panel__avatar" aria-hidden="true"></span>
+        <div class="personal-assistant-panel__ident">
+          <h2 id="personalAssistantPanelTitle" class="personal-assistant-panel__title"><span id="personalAssistantPanelName" class="personal-assistant-panel__name">Personal assistant</span><button
+              type="button" id="personalAssistantRecipientButton" class="personal-assistant-panel__recipient"
+              aria-haspopup="menu" aria-expanded="false" aria-controls="personalAssistantRecipientMenu" hidden><i
+                class="bi bi-chevron-down" aria-hidden="true"></i></button></h2>
+          <!-- When the next check-in is, or "Commander · <workspace>" for the
+               entry agent. "Personal Assistant" until that is known. -->
+          <p id="personalAssistantCheckIn" class="personal-assistant-panel__checkin">Personal Assistant</p>
+        </div>
+        <div id="personalAssistantRecipientMenu" class="personal-assistant-recipient-menu" role="menu"
+             aria-label="Who to talk to" hidden></div>
       </div>
       <details id="personalAssistantMore" class="personal-assistant-panel__more">
         <summary class="personal-assistant-panel__icon" aria-label="More assistant options">

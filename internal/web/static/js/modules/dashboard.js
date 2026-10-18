@@ -422,6 +422,8 @@
     // (the recipient picker), so activity is labelled with that agent and
     // never with the hired assistant's name.
     entryAgentTurn: '',
+    // What a shown Confirm/Cancel review is about, until it is answered.
+    pendingConfirmation: '',
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: '',
     // The most recently rendered user message, so its row can be marked with
@@ -4514,6 +4516,8 @@
   }
 
   function renderHomeAssistantActions(actions) {
+    // Any other set of actions replaces a pending Confirm/Cancel.
+    homeAssistantState.pendingConfirmation = '';
     var els = getHomeAssistantElements();
     var container = els.actions;
     if (!container) return;
@@ -11104,6 +11108,11 @@
     renderHomeAssistantActions(
       (Array.isArray(leadingButtons) ? leadingButtons : []).concat(confirmButtons)
     );
+    // Shown until it is answered or replaced; the recipient picker refuses to
+    // switch away from it, so the review never follows the user elsewhere.
+    homeAssistantState.pendingConfirmation = String(
+      confirmation.summary || confirmation.action_type || 'change'
+    );
   }
 
   function formatHomeAskSummary(data) {
@@ -14708,7 +14717,11 @@
       routingSummary: homeAssistantState.routingSummary,
       hasPlanning: Boolean(homeAssistantState.planningState),
       hasInlineReply: Boolean(homeAssistantState.inlineReplyState),
-      hasConversation: hasHomeAssistantConversation()
+      hasConversation: hasHomeAssistantConversation(),
+      // A Confirm/Cancel review or a create-an-agent yes/no awaiting an answer.
+      hasPendingConfirmation:
+        Boolean(homeAssistantState.pendingConfirmation) ||
+        Boolean(homeAssistantState.awaitingCreateConfirmation)
     };
   };
 

@@ -21,6 +21,7 @@ import {
   entryAgentSendRecipient,
   entrySessionStripView,
   personalAssistantPanelView,
+  recipientChromeView,
   recipientIdentityView,
   restoreAssistantPanelFocus,
   restoredDraft,
@@ -164,6 +165,70 @@ test('the session strip names the entry agent session or a new conversation (FR2
     false
   );
   assert.equal(entrySessionStripView({}).visible, false);
+});
+
+test('the hired assistant chrome shows only while it is the recipient (FR17, FR18)', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  const entry = recipientIdentityView(view, resolveRecipient(workspacePage));
+  const personal = recipientIdentityView(
+    view,
+    resolveRecipient({ ...workspacePage, pick: 'personal' })
+  );
+  assert.deepEqual(recipientChromeView(entry, { visible: true }), {
+    needsLine: false,
+    attachments: false,
+    personalConversation: false,
+    entrySession: true,
+    context: true
+  });
+  assert.deepEqual(recipientChromeView(personal, { visible: true }), {
+    needsLine: true,
+    attachments: true,
+    personalConversation: true,
+    entrySession: false,
+    context: true
+  });
+  // Nothing needs the user: the line stays hidden for the assistant too.
+  assert.equal(recipientChromeView(personal, { visible: false }).needsLine, false);
+});
+
+test('the header name is one element that moves into the menu button', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const heading = markup.match(/<h2 id="personalAssistantPanelTitle"[^>]*>([\s\S]*?)<\/h2>/)?.[1];
+  assert.ok(heading, 'the drawer keeps its heading');
+  // Only the name has text, so the heading reads as the name in either state.
+  assert.equal(heading.replace(/<[^>]+>/g, '').trim(), 'Personal assistant');
+  assert.match(heading, /^<span id="personalAssistantPanelName"/);
+  const button = heading.match(/<button[\s\S]*?>/)?.[0] || '';
+  assert.match(button, /id="personalAssistantRecipientButton"/);
+  assert.match(button, /aria-haspopup="menu"/);
+  assert.match(button, /aria-expanded="false"/);
+  assert.match(button, /aria-controls="personalAssistantRecipientMenu"/);
+  assert.match(button, /\bhidden\b/);
+  assert.match(
+    markup,
+    /id="personalAssistantRecipientMenu"[^>]*role="menu"[\s\S]*?aria-label="Who to talk to" hidden>/
+  );
+});
+
+test('the hired assistant flows in the shared thread are hidden for the entry agent', () => {
+  const css = readFileSync(new URL('../../css/ori-guide.css', import.meta.url), 'utf8');
+  const rule = css.match(
+    /\.personal-assistant-panel\[data-recipient="workspace_entry"\]\s*:is\(([^)]*)\)\s*\{\s*display: none;/
+  );
+  assert.ok(rule, 'one rule hides them while the entry agent is the recipient');
+  for (const id of [
+    'personalAssistantFolder',
+    'personalAssistantDraftReview',
+    'personalAssistantMemoryReview',
+    'assistantLedSetup',
+    'personalAssistantFolderExplorer',
+    'personalAssistantOperation'
+  ])
+    assert.match(rule[1], new RegExp(`#${id}\\b`), id);
 });
 
 test('a failed hydration says what happens next and does not block sending (FR21)', () => {
