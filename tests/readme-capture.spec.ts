@@ -709,6 +709,17 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { linked: false });
       return;
     }
+    // Every workspace's Memory station reads its memory once for its badge.
+    if (/^\/api\/workspaces\/[^/]+\/memory$/.test(url.pathname)) {
+      await json(route, {
+        entries: [],
+        unstructured: [],
+        raw_size: 0,
+        char_budget: 8000,
+        over_budget: false
+      });
+      return;
+    }
     if (
       url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/mission`
     ) {

@@ -43,7 +43,7 @@ Each MCP/skill binding is classified by side effect (read / write / external), a
 - **Multiple agents** — create named agents, each with its own provider/model, system prompt, skills, and MCP servers.
 - **Multi-agent orchestration** — chain agents into workflows and combine their results.
 - **MCP servers & Skills** — extend agents with external tools (MCP) and reusable prompt-based capabilities (Skills), bound per workspace.
-- **Workspace memory** — each workspace keeps a curated `MEMORY.md` of durable knowledge (facts, decisions, dead ends, watch-state) that agents read at the start of every run and chat and update as they learn, so missions compound instead of restarting cold. Editable from a Memory tab; travels with the workspace folder.
+- **Workspace memory** — each workspace keeps a curated `MEMORY.md` of durable knowledge (facts, decisions, dead ends, watch-state) that agents read at the start of every run and chat and update as they learn, so missions compound instead of restarting cold. Reached from the Memory station on the workspace map, which shows which entries agents are shown and what recent runs learned; travels with the workspace folder.
 - **Sessions** — persistent, searchable chat history with folders and tagging.
 - **Private Vault** — local encrypted storage for secrets and sensitive records, backed by the OS keychain.
 - **Usage & cost tracking** — monitor token usage and spend across providers.
