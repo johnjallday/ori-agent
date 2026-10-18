@@ -1,18 +1,35 @@
 /**
- * Workspace Memory tab manager.
+ * Workspace Memory panel manager.
  *
- * Owns the Memory tab on the workspace detail page: loads MEMORY.md entries
- * from the memory API, renders them with provenance, and handles add / inline
- * edit / delete. MEMORY.md on disk is canonical; this is a thin CRUD surface
- * over /api/workspaces/{id}/memory.
+ * Owns the memory pane that the Memory station's panel shows: loads MEMORY.md
+ * entries from the memory API and renders what agents are shown (the budget
+ * meter), what recent runs learned, the entries grouped by kind with their
+ * provenance, and the workspace's link to global memory; handles add / inline
+ * edit / delete / promote. MEMORY.md on disk is canonical; this is a thin
+ * CRUD surface over /api/workspaces/{id}/memory.
  *
- * Instantiated by WorkspaceDetailPage, which provides workspaceId and
- * escapeHtml through the host. Lazy-loads the first time its tab is shown.
+ * Instantiated by WorkspaceDetailPage, which provides workspaceId,
+ * workspaceSlug and escapeHtml through the host. The Command view's Memory
+ * station loads it when its panel opens.
  *
  * @module workspace-detail-memory
  */
 
+import { workspacePageURL } from './workspace-routes.js';
+
 const MEMORY_TYPES = ['fact', 'feedback', 'decision', 'dead-end', 'watch', 'thread'];
+
+// The panel's sections, in order (PRD memory-station FR18). An entry copied
+// from global memory is listed under "Copied from global" whatever its type;
+// an entry of a type outside these lands with the facts.
+export const MEMORY_SECTIONS = [
+  { key: 'watching', title: 'Watching', types: ['watch', 'thread'] },
+  { key: 'decisions', title: 'Decisions and dead ends', types: ['decision', 'dead-end'] },
+  { key: 'facts', title: 'Facts and feedback', types: ['fact', 'feedback'] },
+  { key: 'global', title: 'Copied from global', types: [] }
+];
+
+const RECENT_LEARNINGS_LIMIT = 5;
 
 // Categories an entry can be promoted into: the explicit-save path takes the
 // dossier sections a user states facts in.
@@ -58,6 +75,59 @@ export function memoryBudgetMeter(meta, entries) {
   };
 }
 
+// memorySections groups the entries for display (FR18): each section's rows
+// newest first by date, file order kept for equal dates; empty sections are
+// left out. Rows keep their file index, which edit and delete address, so
+// the sort is display only. Reviewed global-memory lines are not here: they
+// belong with the reviewed assistant learnings.
+export function memorySections(entries) {
+  const rows = (Array.isArray(entries) ? entries : []).map((entry, index) => ({ entry, index }));
+  const sectionKeyFor = entry => {
+    if (memoryEntryKind(entry) === 'global_copy') return 'global';
+    const type = String(entry?.type || '');
+    const section = MEMORY_SECTIONS.find(candidate => candidate.types.includes(type));
+    return section ? section.key : 'facts';
+  };
+  return MEMORY_SECTIONS.map(section => ({
+    key: section.key,
+    title: section.title,
+    rows: rows
+      .filter(row => memoryEntryKind(row.entry) !== 'managed')
+      .filter(row => sectionKeyFor(row.entry) === section.key)
+      .sort((a, b) => String(b.entry?.date || '').localeCompare(String(a.entry?.date || '')))
+  })).filter(section => section.rows.length);
+}
+
+// recentMemoryLearnings picks the latest runs that wrote to memory (FR20):
+// a run counts when its memory_diff artifact added or removed a line. The
+// diff already leaves out reviewed global-memory lines.
+export function recentMemoryLearnings(runs, limit = RECENT_LEARNINGS_LIMIT) {
+  const list = Array.isArray(runs) ? runs : [];
+  return list
+    .map(run => {
+      const artifacts = Array.isArray(run?.artifacts) ? run.artifacts : [];
+      const diff = artifacts.find(artifact => artifact?.metadata?.role === 'memory_diff');
+      const added = Array.isArray(diff?.metadata?.added) ? diff.metadata.added.length : 0;
+      const removed = Array.isArray(diff?.metadata?.removed) ? diff.metadata.removed.length : 0;
+      if (!run?.id || (!added && !removed)) return null;
+      return {
+        id: String(run.id),
+        at: String(run.finished_at || run.created_at || ''),
+        added,
+        removed
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, limit);
+}
+
+function shortDate(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Earlier';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 // Only same-origin page links are rendered from server data.
 function safeLocalHref(href, fallback) {
   const value = String(href || '');
@@ -76,8 +146,16 @@ export class WorkspaceMemoryManager {
     this.promotingIndex = -1;
     this.notice = null;
     this.elements = {};
+    // Runs that wrote to memory, newest first (the "What recent runs learned"
+    // strip); a token drops a slow response from an earlier opening.
+    this.learnings = [];
+    this.learningsRequest = 0;
     // Set by the Command view's Memory station; called with every payload.
     this.onPayload = null;
+  }
+
+  get workspaceSlug() {
+    return String(this.host?.workspaceSlug || '').trim();
   }
 
   get workspaceId() {
@@ -92,7 +170,9 @@ export class WorkspaceMemoryManager {
     this.elements = {
       tab: document.getElementById('workspace-detail-config-memory-tab'),
       meta: document.getElementById('workspace-detail-memory-meta'),
+      learnings: document.getElementById('workspace-detail-memory-learnings'),
       list: document.getElementById('workspace-detail-memory-list'),
+      global: document.getElementById('workspace-detail-memory-global'),
       addForm: document.getElementById('workspace-detail-memory-add-form'),
       addType: document.getElementById('workspace-detail-memory-add-type'),
       addText: document.getElementById('workspace-detail-memory-add-text')
@@ -114,6 +194,7 @@ export class WorkspaceMemoryManager {
 
   async load() {
     if (!this.workspaceId || !this.elements.list) return;
+    void this.loadLearnings();
     try {
       const response = await fetch(
         `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory`
@@ -150,9 +231,91 @@ export class WorkspaceMemoryManager {
     if (typeof this.onPayload === 'function') this.onPayload(payload);
   }
 
+  // loadLearnings reads the workspace's runs, which carry their artifacts
+  // inline, for the "What recent runs learned" strip (FR20). Asked for only
+  // when the panel loads; a failure just hides the strip.
+  async loadLearnings() {
+    if (!this.workspaceId) return;
+    const request = this.learningsRequest + 1;
+    this.learningsRequest = request;
+    let learnings = [];
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs`);
+      if (response.ok) learnings = recentMemoryLearnings((await response.json())?.runs);
+    } catch {
+      learnings = [];
+    }
+    if (request !== this.learningsRequest) return;
+    this.learnings = learnings;
+    this.renderLearnings();
+  }
+
   render() {
     this.renderMeta();
+    this.renderLearnings();
     this.renderList();
+    this.renderGlobal();
+  }
+
+  runHref(runId) {
+    try {
+      return workspacePageURL(this.workspaceSlug, ['runs', runId]);
+    } catch {
+      return '';
+    }
+  }
+
+  // renderLearnings draws "What recent runs learned": each run's date (a link
+  // to its record) and how many lines it remembered and forgot. Hidden when
+  // no recent run wrote to memory.
+  renderLearnings() {
+    const strip = this.elements.learnings;
+    if (!strip) return;
+    if (!this.learnings.length) {
+      strip.hidden = true;
+      strip.innerHTML = '';
+      return;
+    }
+    const rows = this.learnings
+      .map(run => {
+        const href = this.runHref(run.id);
+        const date = this.esc(shortDate(run.at));
+        const when = href
+          ? `<a class="workspace-detail-memory-learning-link" href="${this.esc(href)}">${date}</a>`
+          : `<span>${date}</span>`;
+        return `<li class="workspace-detail-memory-learning">${when}<span class="workspace-detail-memory-learning-counts">remembered ${run.added} · forgot ${run.removed}</span></li>`;
+      })
+      .join('');
+    strip.hidden = false;
+    strip.innerHTML = `
+      <h4 class="workspace-detail-memory-heading" id="workspace-detail-memory-learnings-title">What recent runs learned</h4>
+      <ul class="workspace-detail-memory-learnings-list" aria-labelledby="workspace-detail-memory-learnings-title">${rows}</ul>`;
+  }
+
+  // renderGlobal is the workspace's line to global memory (FR21): how many
+  // entries were copied from it and where to browse it, or why it is not
+  // there yet. The Personal HQ's memory is global memory, so it has none.
+  renderGlobal() {
+    const row = this.elements.global;
+    if (!row) return;
+    const global = this.globalMemory || {};
+    if (global.is_personal_hq) {
+      row.hidden = true;
+      row.innerHTML = '';
+      return;
+    }
+    row.hidden = false;
+    if (!global.available) {
+      const message = global.message || 'Global memory is unavailable.';
+      const setup = global.setup_href
+        ? ` <a href="${this.esc(safeLocalHref(global.setup_href, '/'))}">Go to Home</a>`
+        : '';
+      row.innerHTML = `<p class="workspace-detail-memory-global-text">${this.esc(message)}${setup}</p>`;
+      return;
+    }
+    const copies = this.entries.filter(entry => memoryEntryKind(entry) === 'global_copy').length;
+    const href = safeLocalHref(global.review_href, PROFILE_GLOBAL_MEMORY);
+    row.innerHTML = `<p class="workspace-detail-memory-global-text">${copies} copied from global memory · <a href="${this.esc(href)}">Browse global memory on Profile</a></p>`;
   }
 
   // renderMeta draws the budget meter. The fill width is set through the
@@ -196,43 +359,70 @@ export class WorkspaceMemoryManager {
         <div class="workspace-detail-memory-empty">
           <p>No memory yet. As missions and chats run in this workspace, agents record durable facts here — or add one yourself.</p>
           <p class="workspace-detail-memory-empty-example">Example: <code>[watch] build baseline is ~7 min; flag if &gt;10</code></p>
+          <p class="workspace-detail-memory-empty-note">Agents write here under every autonomy policy, including Watch.</p>
         </div>`;
       return;
     }
 
-    const entriesHtml = this.entries
-      .map((entry, index) => {
-        if (index === this.editingIndex) return this.editRowHtml(entry, index);
-        if (index === this.promotingIndex) return this.promoteRowHtml(entry, index);
-        return this.entryRowHtml(entry, index);
-      })
+    const rowHtml = ({ entry, index }) => {
+      if (index === this.editingIndex) return this.editRowHtml(entry, index);
+      if (index === this.promotingIndex) return this.promoteRowHtml(entry, index);
+      return this.entryRowHtml(entry, index);
+    };
+    const sectionsHtml = memorySections(this.entries)
+      .map(section =>
+        this.sectionHtml(
+          section.key,
+          section.title,
+          section.rows.length,
+          section.rows.map(rowHtml).join('')
+        )
+      )
       .join('');
 
-    let managedHtml = '';
-    if (this.managedLearnings.length) {
-      const cards = this.managedLearnings
-        .map(learning => this.managedLearningHtml(learning))
-        .join('');
-      managedHtml = `
-        <section class="workspace-detail-memory-managed" aria-label="Approved assistant learnings">
-          <div class="workspace-detail-memory-unstructured-label">Approved assistant learnings</div>
-          ${cards}
-        </section>`;
-    }
+    // Reviewed assistant learnings (Personal HQ): the reviewed global-memory
+    // lines in this file and the learnings the assistant had approved, both
+    // read-only here.
+    const managedRows = this.entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(row => memoryEntryKind(row.entry) === 'managed');
+    const managedCount = managedRows.length + this.managedLearnings.length;
+    const managedHtml = managedCount
+      ? this.sectionHtml(
+          'reviewed',
+          'Reviewed assistant learnings',
+          managedCount,
+          managedRows.map(row => this.managedEntryHtml(row.entry, row.index)).join('') +
+            this.managedLearnings.map(learning => this.managedLearningHtml(learning)).join('')
+        )
+      : '';
 
-    let unstructuredHtml = '';
-    if (this.unstructured.length) {
-      const items = this.unstructured
-        .map(line => `<li class="workspace-detail-memory-unstructured-line">${this.esc(line)}</li>`)
-        .join('');
-      unstructuredHtml = `
-        <div class="workspace-detail-memory-unstructured">
-          <div class="workspace-detail-memory-unstructured-label">Unstructured lines (not injected as entries)</div>
-          <ul class="workspace-detail-memory-unstructured-list">${items}</ul>
-        </div>`;
-    }
+    const unstructuredHtml = this.unstructured.length
+      ? this.sectionHtml(
+          'unstructured',
+          'Unstructured lines',
+          this.unstructured.length,
+          `<p class="workspace-detail-memory-section-note">Not injected as entries.</p>
+          <ul class="workspace-detail-memory-unstructured-list">${this.unstructured
+            .map(
+              line => `<li class="workspace-detail-memory-unstructured-line">${this.esc(line)}</li>`
+            )
+            .join('')}</ul>`
+        )
+      : '';
 
-    list.innerHTML = this.noticeHtml() + entriesHtml + managedHtml + unstructuredHtml;
+    list.innerHTML = this.noticeHtml() + sectionsHtml + managedHtml + unstructuredHtml;
+  }
+
+  // sectionHtml is one titled group of the panel: a real heading with its
+  // count, then its rows.
+  sectionHtml(key, title, count, body) {
+    const headingId = `workspace-detail-memory-section-${key}`;
+    return `
+      <section class="workspace-detail-memory-section" data-memory-section="${key}" aria-labelledby="${headingId}">
+        <h4 class="workspace-detail-memory-heading" id="${headingId}">${this.esc(title)} <span class="workspace-detail-memory-heading-count">${count}</span></h4>
+        ${body}
+      </section>`;
   }
 
   noticeHtml() {

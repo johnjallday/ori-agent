@@ -2196,6 +2196,7 @@ export class WorkspaceCommandView {
     this.rememberRailFocus();
     this.captureAgentDeckViewState();
     this.captureDailyBriefPanelView();
+    this.captureStatModalFocus();
     if (this.commandTagInput) {
       try {
         this.commandTagDraft = this.commandTagInput.getTags();
@@ -2305,6 +2306,7 @@ export class WorkspaceCommandView {
         this.renderStatModalBody();
         this.setCommandBackgroundInert(true);
         this.restoreDailyBriefPanelView();
+        this.restoreStatModalFocus();
       }
     }
 
@@ -2606,6 +2608,7 @@ export class WorkspaceCommandView {
     if (section === 'tools') {
       this.activeToolsTab = this.toolsTab(this.activeToolsTab).key;
     }
+    this._memoryPanelLoaded = false;
     this.statModalTrigger = trigger || null;
     const el = this.ensureStatModal();
     if (!el) return;
@@ -2659,6 +2662,47 @@ export class WorkspaceCommandView {
     }
     const opener = this.resolveStatModalTrigger(trigger);
     if (opener && typeof opener.focus === 'function') opener.focus();
+  }
+
+  // render() takes the open stat modal out of the container and puts it back,
+  // and a modal hosting a shared surface re-mounts it, so focus inside falls
+  // to <body> on the way, taking Escape and the focus trap with it. The
+  // focused control gets focus back (a node of the shared surface survives the
+  // move, caret included); one that was rebuilt hands focus to the panel.
+  captureStatModalFocus() {
+    this._statModalFocus = null;
+    if (!this.statModalSection || !this.statModalEl || typeof document === 'undefined') return;
+    const active = document.activeElement;
+    if (!active || typeof this.statModalEl.contains !== 'function') return;
+    if (!this.statModalEl.contains(active)) return;
+    const caret =
+      typeof active.selectionStart === 'number'
+        ? [active.selectionStart, active.selectionEnd]
+        : null;
+    this._statModalFocus = { el: active, caret };
+  }
+
+  restoreStatModalFocus() {
+    const saved = this._statModalFocus;
+    this._statModalFocus = null;
+    if (!saved || !this.statModalSection || !this.statModalEl) return;
+    if (typeof document === 'undefined' || document.activeElement === saved.el) return;
+    const target = saved.el.isConnected
+      ? saved.el
+      : this.statModalEl.querySelector('.ws-cmd-modal-panel');
+    if (!target || typeof target.focus !== 'function') return;
+    try {
+      target.focus({ preventScroll: true });
+    } catch (err) {
+      target.focus();
+    }
+    if (target === saved.el && saved.caret && typeof target.setSelectionRange === 'function') {
+      try {
+        target.setSelectionRange(saved.caret[0], saved.caret[1]);
+      } catch (err) {
+        /* not a text control */
+      }
+    }
   }
 
   // render() rebuilds the container, so the element that opened a panel may be
@@ -2916,7 +2960,10 @@ export class WorkspaceCommandView {
     if (config.classList) config.classList.add('is-command-modal');
     const tabId = this.configTabIdFor(section);
     if (tabId) this.showConfigTab({ tabId });
-    this.refreshConfigData(section);
+    // The memory pane keeps live state (an inline edit, a promote form) and
+    // loads once when its panel opens; a background repaint only re-mounts it.
+    if (section !== MEMORY_STATION || !this._memoryPanelLoaded) this.refreshConfigData(section);
+    if (section === MEMORY_STATION) this._memoryPanelLoaded = true;
     // expandMountedConfig must run LAST: refreshConfigData re-collapses the config
     // content, so the rail (syncSystemsSurface) also expands last — mirror that order.
     this.expandMountedConfig(config);

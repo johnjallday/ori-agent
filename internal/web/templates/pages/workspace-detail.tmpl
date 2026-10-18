@@ -1139,7 +1139,6 @@
                       Durable knowledge agents accumulate across runs and chats in this workspace — facts, decisions, dead ends, and watch-state. It's injected into every mission run and workspace chat. Edit or remove anything that's wrong; never store secrets here (use the Vault). Promote an entry to global memory to share it with your assistant everywhere.
                     </div>
                   </div>
-                  <div id="workspace-detail-memory-meta" class="workspace-detail-memory-meta" aria-live="polite"></div>
                   <form id="workspace-detail-memory-add-form" class="workspace-detail-memory-add" autocomplete="off">
                     <select id="workspace-detail-memory-add-type" class="form-select workspace-detail-memory-type" aria-label="Memory entry type">
                       <option value="fact">fact</option>
@@ -1152,7 +1151,10 @@
                     <input type="text" id="workspace-detail-memory-add-text" class="form-control workspace-detail-memory-input" maxlength="500" placeholder="Add a memory entry (one line)…" aria-label="New memory entry text">
                     <button type="submit" class="btn btn-primary" id="workspace-detail-memory-add-btn">Add</button>
                   </form>
+                  <div id="workspace-detail-memory-meta" class="workspace-detail-memory-meta" aria-live="polite"></div>
+                  <section id="workspace-detail-memory-learnings" class="workspace-detail-memory-learnings" hidden></section>
                   <div id="workspace-detail-memory-list" class="workspace-detail-memory-list"></div>
+                  <div id="workspace-detail-memory-global" class="workspace-detail-memory-global" hidden></div>
                 </div>
                 <div
                   class="tab-pane fade workspace-detail-config-pane"
@@ -3683,16 +3685,97 @@
       opacity: 0.85;
     }
 
-    .workspace-detail-memory-unstructured {
+    .workspace-detail-memory-empty-note {
+      margin: 0.4rem 0 0;
+      font-size: 0.8rem;
+    }
+
+    /* Sections by kind (Watching, Decisions and dead ends, ...): a real
+       heading with its count above the rows. */
+    .workspace-detail-memory-section {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-memory-section + .workspace-detail-memory-section {
+      margin-top: 0.6rem;
+    }
+
+    .workspace-detail-memory-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      margin: 0;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-memory-heading-count {
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-section-note {
+      margin: 0;
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+    }
+
+    /* What recent runs learned: one line per run that wrote to memory. */
+    .workspace-detail-memory-learnings {
+      display: grid;
+      gap: 0.4rem;
+      margin: 0 0 0.85rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+    }
+
+    .workspace-detail-memory-learnings[hidden] {
+      display: none;
+    }
+
+    .workspace-detail-memory-learnings-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .workspace-detail-memory-learning {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      font-size: 0.8rem;
+    }
+
+    .workspace-detail-memory-learning-link {
+      font-weight: 600;
+      color: var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-learning-counts {
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-global {
       margin-top: 0.85rem;
       padding-top: 0.6rem;
       border-top: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
     }
 
-    .workspace-detail-memory-unstructured-label {
-      font-size: 0.74rem;
+    .workspace-detail-memory-global-text {
+      margin: 0;
+      font-size: 0.8rem;
       color: var(--text-secondary);
-      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-memory-global-text a {
+      color: var(--accent-color, #4a7dff);
+      font-weight: 600;
     }
 
     .workspace-detail-memory-unstructured-list {

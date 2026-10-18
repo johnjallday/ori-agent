@@ -6340,6 +6340,91 @@ test('closing the Memory modal hands the config surface back to Systems on Trigg
   }
 });
 
+test('a background repaint re-mounts the open Memory panel without reloading it', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const plain = makeMemoryCommandView();
+    let loads = 0;
+    plain.page.memoryManager = { load: () => (loads += 1) };
+    const host = { innerHTML: '' };
+    Object.assign(plain, {
+      statModalSection: 'memory',
+      statModalEl: {
+        hidden: false,
+        querySelector: selector => (selector === '[data-cmd-config-host]' ? host : null)
+      },
+      mountSharedSurface: () => ({ classList: { add() {} } }),
+      showConfigTab() {},
+      expandMountedConfig() {}
+    });
+    plain.syncConfigModalSurface();
+    plain.syncConfigModalSurface();
+    plain.syncConfigModalSurface();
+    assert.equal(loads, 1, 'an inline edit survives a task event repainting the view');
+
+    // Opening the panel again loads it again.
+    plain.ensureStatModal = () => plain.statModalEl;
+    plain.renderStatModalBody = () => plain.syncConfigModalSurface();
+    plain.setCommandBackgroundInert = () => {};
+    plain.statModalEl.querySelector = selector =>
+      selector === '[data-cmd-config-host]' ? host : null;
+    plain.openStatModal('memory', null);
+    assert.equal(loads, 2);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('focus inside an open stat modal survives a full render', () => {
+  const originalDocument = globalThis.document;
+  const body = { id: 'body' };
+  const calls = [];
+  const input = {
+    isConnected: true,
+    selectionStart: 3,
+    selectionEnd: 5,
+    focus: () => calls.push('input'),
+    setSelectionRange: (start, end) => calls.push(['caret', start, end])
+  };
+  const panel = { focus: () => calls.push('panel') };
+  globalThis.document = { getElementById: () => null, body, activeElement: input };
+  try {
+    const commandView = makeMemoryCommandView(
+      {},
+      {
+        statModalSection: 'memory',
+        statModalEl: {
+          contains: el => el === input,
+          querySelector: selector => (selector === '.ws-cmd-modal-panel' ? panel : null)
+        }
+      }
+    );
+    commandView.captureStatModalFocus();
+    globalThis.document.activeElement = body; // the re-render moved the node
+    commandView.restoreStatModalFocus();
+    assert.deepEqual(calls, ['input', ['caret', 3, 5]]);
+
+    // A control that was rebuilt hands focus to the panel, never to <body>.
+    calls.length = 0;
+    globalThis.document.activeElement = input;
+    commandView.captureStatModalFocus();
+    input.isConnected = false;
+    globalThis.document.activeElement = body;
+    commandView.restoreStatModalFocus();
+    assert.deepEqual(calls, ['panel']);
+
+    // Focus outside the modal is not the modal's to restore.
+    calls.length = 0;
+    globalThis.document.activeElement = { id: 'elsewhere' };
+    commandView.captureStatModalFocus();
+    commandView.restoreStatModalFocus();
+    assert.deepEqual(calls, []);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
 test('a dragged Memory building keeps its saved, clamped position on an ordinary workspace (FR3)', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {};

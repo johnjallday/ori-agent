@@ -4,7 +4,9 @@ import {
   WorkspaceMemoryManager,
   defaultPromoteCategory,
   memoryBudgetMeter,
-  memoryEntryKind
+  memoryEntryKind,
+  memorySections,
+  recentMemoryLearnings
 } from './workspace-detail-memory.js';
 
 // Minimal host: escapeHtml mirrors the page helper closely enough for assertions.
@@ -85,7 +87,7 @@ test('renderList keeps approved assistant learnings read-only and evidence-linke
     }
   ];
   m.renderList();
-  assert.match(m.elements.list.innerHTML, /Approved assistant learnings/);
+  assert.match(m.elements.list.innerHTML, /Reviewed assistant learnings/);
   assert.match(m.elements.list.innerHTML, /Keep the preflight concise/);
   assert.match(m.elements.list.innerHTML, /href="\/workspaces\/song-a\/task\/task-1"/);
   assert.doesNotMatch(m.elements.list.innerHTML, /data-action="edit"/);
@@ -248,11 +250,22 @@ test('the add form and list delegation work after the pane is mounted elsewhere'
     elements['workspace-detail-memory-add-type'].value = 'watch';
     listeners['workspace-detail-memory-add-form:submit']({ preventDefault() {} });
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(requests[1], [
-      'POST',
-      '/api/workspaces/ws1/memory/entries',
-      JSON.stringify({ text: 'second', type: 'watch' })
-    ]);
+    // Loading read the memory and the runs (for the learnings strip).
+    assert.deepEqual(
+      requests
+        .filter(request => request[0] === 'GET')
+        .map(request => request[1])
+        .sort(),
+      ['/api/workspaces/ws1/memory', '/api/workspaces/ws1/runs']
+    );
+    assert.deepEqual(
+      requests.find(request => request[0] === 'POST'),
+      [
+        'POST',
+        '/api/workspaces/ws1/memory/entries',
+        JSON.stringify({ text: 'second', type: 'watch' })
+      ]
+    );
 
     listeners['workspace-detail-memory-list:click']({
       target: { closest: () => ({ dataset: { action: 'edit', index: '0' } }) }
@@ -389,6 +402,233 @@ test('an entry agents are not shown is marked in words and keeps its actions (FR
   assert.doesNotMatch(shown, /is-not-in-prompt|not shown to agents/);
   // Before in_prompt existed the field is absent: never read as dropped.
   assert.doesNotMatch(m.entryRowHtml({ type: 'fact', text: 'legacy' }, 0), /not shown/);
+});
+
+// One entry of every kind, in file order (index = position in this array).
+const EVERY_KIND = [
+  { type: 'fact', date: '2026-10-01', provenance: 'user', text: 'fact old' },
+  { type: 'watch', date: '2026-10-02', provenance: 'run:a', text: 'watch' },
+  { type: 'decision', date: '2026-10-03', provenance: 'user', text: 'decision' },
+  { type: 'feedback', date: '2026-10-05', provenance: 'user', text: 'feedback new' },
+  { type: 'fact', date: '2026-10-05', provenance: 'user', text: 'fact same day' },
+  { type: 'thread', date: '2026-10-04', provenance: 'run:b', text: 'thread' },
+  { type: 'dead-end', date: '2026-10-06', provenance: 'user', text: 'dead end' },
+  { type: 'watch', date: '2026-10-07', provenance: 'global:item-1', text: 'copied watch' },
+  { type: 'fact', provenance: 'ori-hq:item:r', managed: true, text: 'reviewed' }
+];
+
+test('sections come in order with counts, newest first, keeping file indexes (FR18)', () => {
+  const sections = memorySections(EVERY_KIND);
+  assert.deepEqual(
+    sections.map(section => [section.title, section.rows.map(row => row.index)]),
+    [
+      ['Watching', [5, 1]],
+      ['Decisions and dead ends', [6, 2]],
+      // Equal dates keep file order: 3 before 4.
+      ['Facts and feedback', [3, 4, 0]],
+      ['Copied from global', [7]]
+    ]
+  );
+  assert.deepEqual(
+    memorySections([{ type: 'watch', text: 'only' }]).map(s => s.key),
+    ['watching']
+  );
+  assert.deepEqual(memorySections([]), []);
+});
+
+test('the panel renders sections as real headings and an edit on a sorted row targets its file index', () => {
+  const m = makeManager();
+  m.globalMemory = { available: true, is_personal_hq: true };
+  m.elements = { list: { innerHTML: '' } };
+  m.entries = EVERY_KIND;
+  m.managedLearnings = [{ id: 'l1', type: 'workflow', text: 'Approved learning', evidence: [] }];
+  m.unstructured = ['# Workspace Memory'];
+  m.renderList();
+  const html = m.elements.list.innerHTML;
+  const headings = [
+    ...html.matchAll(
+      /<h4 class="workspace-detail-memory-heading"[^>]*>([^<]+)<span[^>]*>(\d+)<\/span><\/h4>/g
+    )
+  ].map(match => [match[1].trim(), Number(match[2])]);
+  assert.deepEqual(headings, [
+    ['Watching', 2],
+    ['Decisions and dead ends', 2],
+    ['Facts and feedback', 3],
+    ['Copied from global', 1],
+    ['Reviewed assistant learnings', 2],
+    ['Unstructured lines', 1]
+  ]);
+  // The first Facts row on screen is the newest (file index 3).
+  const facts = html.slice(html.indexOf('data-memory-section="facts"'));
+  assert.match(facts, /^[^]*?data-action="edit" data-index="3"/);
+
+  // Editing that sorted row opens the form for index 3, and saving it PUTs
+  // to /entries/3.
+  m.handleListClick({ target: { closest: () => ({ dataset: { action: 'edit', index: '3' } }) } });
+  assert.equal(m.editingIndex, 3);
+  assert.match(m.elements.list.innerHTML, /data-edit-text="3"[^>]*value="feedback new"/);
+});
+
+test('adding puts the entry at the top of its section and updates the meter and the station without a reload (FR19)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  const today = '2026-10-18';
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.method, 'POST');
+    return {
+      ok: true,
+      json: async () => ({
+        entries: [
+          { type: 'watch', date: '2026-10-01', provenance: 'user', text: 'older watch' },
+          { type: 'fact', date: '2026-10-02', provenance: 'user', text: 'a fact' },
+          { type: 'watch', date: today, provenance: 'user', text: 'just added', in_prompt: true }
+        ],
+        raw_size: 4000,
+        char_budget: 8000
+      })
+    };
+  };
+  try {
+    const m = makeManager();
+    const payloads = [];
+    m.onPayload = payload => payloads.push(payload.entries.length);
+    const meta = { innerHTML: '', querySelector: () => null };
+    m.elements = {
+      meta,
+      list: { innerHTML: '' },
+      addText: { value: 'just added' },
+      addType: { value: 'watch' }
+    };
+    await m.addEntry();
+    const watching = m.elements.list.innerHTML.slice(
+      m.elements.list.innerHTML.indexOf('data-memory-section="watching"')
+    );
+    assert.ok(
+      watching.indexOf('just added') < watching.indexOf('older watch'),
+      'the new entry leads its section'
+    );
+    assert.match(meta.innerHTML, /50% of what agents are shown/);
+    assert.deepEqual(payloads, [3], 'the Memory station hears about it');
+    assert.equal(m.elements.addText.value, '');
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the empty state says agents write here under every autonomy policy (FR22)', () => {
+  const m = makeManager();
+  m.elements = { list: { innerHTML: '' } };
+  m.renderList();
+  assert.match(m.elements.list.innerHTML, /No memory yet/);
+  assert.match(
+    m.elements.list.innerHTML,
+    /Agents write here under every autonomy policy, including Watch\./
+  );
+});
+
+const RUNS = [
+  {
+    id: 'run-old',
+    finished_at: '2026-10-10T09:00:00Z',
+    artifacts: [{ metadata: { role: 'memory_diff', added: ['a'], removed: [] } }]
+  },
+  {
+    id: 'run-quiet',
+    finished_at: '2026-10-17T09:00:00Z',
+    artifacts: [{ metadata: { role: 'report' } }]
+  },
+  {
+    id: 'run-empty-diff',
+    finished_at: '2026-10-16T09:00:00Z',
+    artifacts: [{ metadata: { role: 'memory_diff', added: [], removed: [] } }]
+  },
+  {
+    id: 'run-new',
+    finished_at: '2026-10-18T09:00:00Z',
+    artifacts: [{ metadata: { role: 'memory_diff', added: ['b', 'c'], removed: ['d'] } }]
+  }
+];
+
+test('recent learnings keep runs that wrote to memory, newest first, five at most (FR20)', () => {
+  assert.deepEqual(
+    recentMemoryLearnings(RUNS).map(run => [run.id, run.added, run.removed]),
+    [
+      ['run-new', 2, 1],
+      ['run-old', 1, 0]
+    ]
+  );
+  const many = Array.from({ length: 8 }, (_, i) => ({
+    id: 'r' + i,
+    created_at: `2026-10-0${i + 1}T00:00:00Z`,
+    artifacts: [{ metadata: { role: 'memory_diff', added: ['x'] } }]
+  }));
+  assert.deepEqual(
+    recentMemoryLearnings(many).map(run => run.id),
+    ['r7', 'r6', 'r5', 'r4', 'r3']
+  );
+  assert.deepEqual(recentMemoryLearnings(undefined), []);
+});
+
+test('the learnings strip links each run and hides when no run wrote memory or the read fails', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const m = makeManager();
+    m.host.workspaceSlug = 'album-three';
+    const strip = { hidden: true, innerHTML: '' };
+    m.elements = { learnings: strip };
+    globalThis.fetch = async url => {
+      assert.equal(url, '/api/workspaces/ws1/runs');
+      return { ok: true, json: async () => ({ runs: RUNS }) };
+    };
+    await m.loadLearnings();
+    assert.equal(strip.hidden, false);
+    assert.match(strip.innerHTML, /<h4[^>]*>What recent runs learned<\/h4>/);
+    assert.match(strip.innerHTML, /href="\/workspaces\/album-three\/runs\/run-new"/);
+    assert.match(strip.innerHTML, /remembered 2 · forgot 1/);
+    assert.doesNotMatch(strip.innerHTML, /run-quiet|run-empty-diff/);
+
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ runs: [RUNS[1]] }) });
+    await m.loadLearnings();
+    assert.equal(strip.hidden, true);
+
+    globalThis.fetch = async () => {
+      throw new Error('offline');
+    };
+    await m.loadLearnings();
+    assert.equal(strip.hidden, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the global memory row counts copies and links to the Profile, or explains, or is absent in the HQ (FR21)', () => {
+  const m = makeManager();
+  const row = { hidden: true, innerHTML: '' };
+  m.elements = { global: row };
+  m.entries = EVERY_KIND;
+  m.globalMemory = { available: true, review_href: '/profile#personalHQKnowledge' };
+  m.renderGlobal();
+  assert.equal(row.hidden, false);
+  assert.match(row.innerHTML, /1 copied from global memory/);
+  assert.match(
+    row.innerHTML,
+    /<a href="\/profile#personalHQKnowledge">Browse global memory on Profile<\/a>/
+  );
+
+  m.globalMemory = {
+    available: false,
+    message: 'Global memory needs a personal assistant with a Personal HQ. Set one up from Home.',
+    setup_href: '/'
+  };
+  m.renderGlobal();
+  assert.match(row.innerHTML, /Set one up from Home\. <a href="\/">Go to Home<\/a>/);
+
+  m.globalMemory = { available: true, is_personal_hq: true };
+  m.renderGlobal();
+  assert.equal(row.hidden, true);
+  assert.equal(row.innerHTML, '');
 });
 
 test('a copied-from-global entry stays editable but cannot be promoted again', () => {
