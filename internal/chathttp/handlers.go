@@ -1248,13 +1248,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if this is a Claude Code provider - route to Claude Code handler
-	if providerName == "claude_code" && h.llmFactory != nil {
-		runtimeSystemPrompt := ""
-		if !basePromptHasVars {
-			runtimeSystemPrompt = h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
-		}
-		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
+	// The CLI providers (Codex, Claude Code) broker Ori's tools through the
+	// shared tool loop.
+	if isCLIChatProvider(providerName) && h.llmFactory != nil {
+		h.handleCLIChat(w, r, providerName, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 
@@ -1272,11 +1269,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	if providerName == "gemini" {
 		h.handleGeminiChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt)
-		return
-	}
-
-	if providerName == "codex" && h.llmFactory != nil {
-		h.handleCodexChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 
