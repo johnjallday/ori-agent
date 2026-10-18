@@ -5,9 +5,11 @@ in progress.** The selected metadata interface has designated physical-USB probe
 and actual product read/periodic-monitoring evidence. Domain consent, lifecycle
 fences and advisor isolation are implemented. Model-free recovery/user-report and
 scoped-summary UI have actual-product evidence over explicitly invented stored
-metadata, not a real sample restore. No installation or wizard completion opts a
-workspace into access. The remaining live recovery/hardware and full current
-repository/browser gates at the end remain mandatory; this is not PR readiness.
+metadata. Separate acceptance includes an externally executed invented sample
+restore and actual in-product disconnect, second physical same-name unavailable
+refusal, original reconnect, restart and revocation. Ori performed no restore.
+No installation or wizard completion opts a workspace into access. Full current
+repository/browser gates and final readiness remain mandatory.
 
 ## Authority and evidence
 
@@ -118,7 +120,7 @@ itself did not create Vault permissions or inspect real secrets.
 
 No failed/partial check may replace previous evidence with an empty healthy
 result or update its successful-observation timestamp. The private local store now enforces that
-observation transition; the future service must still authorize and fence each
+observation transition; the service separately authorizes and fences each
 publication. The decoder alone provides neither guarantee.
 
 ## Designated physical-volume probe (not product acceptance)
@@ -229,9 +231,9 @@ separate evaluator; parsing does not declare a snapshot fresh/healthy.
 ## Host contract
 
 These decisions specify the implementation and required tests. The private
-persistence schema/store and inert template are now implemented; no provider
-runtime, domain API or monitoring consent is registered yet. Contract freeze permits the ordered
-implementation tasks, not a readiness claim.
+persistence, template, contained provider, domain API and explicit server-owned
+monitoring are implemented. Runtime registration is not user consent. Contract
+freeze and implementation do not substitute for the final acceptance/readiness gate.
 
 ### Stable names and setup semantics
 
@@ -860,16 +862,19 @@ Freeze resolves design/feasibility, not all later implementation tests:
   explicitly invented encrypted stale/overdue metadata and an illustrative user
   assertion. Both Today/Brief links returned to the owning console. No group-4
   provider/drive/restore operation is claimed; full delivery remains separate.
-- **5.3 partially exercised:** a separate external restic operator restored one
-  invented sample to a new empty target and byte-compared it. The current product
-  made one approved metadata read and recorded the explicitly user-reported
-  result; Ori did not restore or inspect recovered contents. Source/repository
-  contents and checked identity/mode/timestamp metadata remained unchanged.
-  Connected identity/source independence and user-operated unplug/replug already
-  have probe evidence, but a second physical same-name swap has **not** been
-  performed. Wrong-identity and ordinary-directory fixtures are controls, not
-  substitute hardware/product acceptance. Remaining hardware cases still require
-  evidence and any additional device permission.
+- **5.3 exercised:** a separate external restic operator restored one invented
+  sample to a new empty target and byte-compared it. Ori recorded the explicitly
+  user-reported result without restoring or inspecting recovered contents.
+  Separate actual product acceptance covered user-operated physical disconnect,
+  a designated second physical USB/APFS volume at the same mount name, original
+  reconnect, normal restart without duplicate reads and explicit revocation.
+  Failures retained the previous successful timestamp/configuration; only the
+  original reconnect published a fresh read. The second drive had no selected
+  private repository: its generic unavailable refusal is not an isolated native
+  identity-only experiment. Separate identity/symlink/non-mount and containment
+  controls keep their own provenance. Bounded invented source/repository bytes
+  and identity/mode/timestamp metadata remained unchanged (atime excluded).
+  No user drive action was performed by Ori or the test operator.
 - **5.8–5.12:** full repository/browser/security gates, manual guide, final demo
   and PR readiness. Open the PR after the canonical gate passes; a person owns
   review and merge. No partial result is a delivery-readiness claim.

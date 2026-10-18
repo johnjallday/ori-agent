@@ -147,7 +147,9 @@ test.describe.serial('Backup & Recovery console accessibility', () => {
         await expect(
           dialog.getByRole('button', { name: 'Check metadata now', exact: true })
         ).toHaveCount(0);
-        expect(await contrast(page, '#backupRecoveryTitle')).toBeGreaterThanOrEqual(4.5);
+        // Stored-view readiness does not imply that a theme's paint has settled.
+        // Wait for the actual measured threshold; never substitute a guessed color.
+        await expect.poll(() => contrast(page, '#backupRecoveryTitle')).toBeGreaterThanOrEqual(4.5);
         expect(
           await dialog.evaluate(element =>
             getComputedStyle(element)
@@ -194,7 +196,9 @@ test.describe.serial('Backup & Recovery console accessibility', () => {
           await expect(
             dialog.getByRole('button', { name: 'Record user-reported result', exact: true })
           ).toBeDisabled();
-          expect(await contrast(page, '.br-reports .br-note')).toBeGreaterThanOrEqual(4.5);
+          await expect
+            .poll(() => contrast(page, '.br-reports .br-note'))
+            .toBeGreaterThanOrEqual(4.5);
         }
         expect(
           await closeIsUncovered(),

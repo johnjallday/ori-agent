@@ -151,7 +151,9 @@ test('designated drive: real choices, cancellation, scoped reference failure and
       response.request().method() === 'POST'
   );
   await dialog.getByRole('button', { name: 'Review metadata access', exact: true }).click();
-  expect((await (await reviewed).json()).review).toMatchObject({
+  const reviewResponse = await reviewed;
+  expect(reviewResponse.ok(), await reviewResponse.text()).toBeTruthy();
+  expect((await reviewResponse.json()).review).toMatchObject({
     source_paths: [control.source],
     volume_path: control.volume,
     repository_path: control.repository

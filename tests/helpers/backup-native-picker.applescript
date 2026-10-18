@@ -27,6 +27,8 @@ on run argv
           delay 0.1
         end repeat
         if not (exists sheet 1 of window 1) then error "owned path sheet is not ready"
+        -- Replace any remembered Go-to-Folder text, rather than appending to it.
+        keystroke "a" using {command down}
         keystroke selectedPath
         repeat 3 times
           key code 36
@@ -36,7 +38,10 @@ on run argv
         if exists sheet 1 of window 1 then error "owned path sheet did not navigate"
         -- Return navigates the Go-to-Folder sheet; the explicit native Choose
         -- button commits the selection. A second Return can only navigate on
-        -- newer macOS and leave the chooser open.
+        -- newer macOS and leave the chooser open. Sheet dismissal precedes
+        -- the panel's asynchronous directory navigation; do not choose the old
+        -- highlighted folder while that navigation is still settling.
+        delay 0.6
         click button "Choose" of splitter group 1 of window 1
       end tell
     end tell

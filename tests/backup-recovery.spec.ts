@@ -442,6 +442,10 @@ test('live server: reviewed one-advisor creation and missing-tool setup work wit
   await expect(advisor).toBeVisible();
   await advisor.getByRole('button', { name: /^Create an agent for / }).click();
   await expect(page.locator('#addAgentModal')).toBeVisible();
+  await expect(page.locator('#agentName')).toBeFocused();
+  // A repeated journey may share the sandbox with an earlier saved advisor.
+  // Review a fresh definition rather than bypassing the collision guard.
+  await page.locator('#agentName').fill(name + ' advisor');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addAgentModal')).toBeHidden();
   await expect(advisor).not.toContainText('Required · Missing');

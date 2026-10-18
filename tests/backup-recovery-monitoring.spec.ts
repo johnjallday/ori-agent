@@ -6,23 +6,28 @@ import { installLocalCdn } from './helpers/offline-cdn';
 
 /** OPT-IN actual product acceptance, not an intercepted prototype. The owned
  * operator coordinator creates only an invented repository/Vault on the approved
- * disposable drive, retains passwords in memory, restarts Ori and unlocks the
- * fixture Vault through its normal user API. No test password reaches the page.
+ * disposable drive, keeps invented credentials outside browser controls,
+ * restarts Ori and unlocks the fixture Vault through its normal user API.
+ * No test password reaches the page.
  * Run the two phases in order through the coordinator, never normal CI. */
 function control() {
   test.skip(!process.env.ORI_BACKUP_DRIVE_DEMO, 'Needs the designated disposable-drive operator.');
   const root = resolve(import.meta.dirname, '..');
   const path = resolve(process.env.ORI_BACKUP_DRIVE_DEMO!);
-  expect(dirname(path)).toBe(resolve(root, 'tasks/evidence-backup-and-recovery'));
+  expect([
+    resolve(root, 'tasks/evidence-backup-and-recovery'),
+    resolve(root, '.tmp/backup-recovery-delivery')
+  ]).toContain(dirname(path));
   expect(basename(path)).toMatch(/^monitor-drive-demo-control-[0-9]+\.json$/);
   const data = JSON.parse(readFileSync(path, 'utf8'));
   expect(data.workspace_id).toMatch(/^[a-f0-9-]{36}$/);
   expect(data.volume).toMatch(/^\/Volumes\/[^/\r\n]+$/);
-  expect(
-    data.source.startsWith(
-      resolve(root, 'tasks/evidence-backup-and-recovery/external-restic-probe/invented-')
-    )
-  ).toBeTruthy();
+  const sourceParent = resolve(data.source, '../..');
+  expect([
+    resolve(root, 'tasks/evidence-backup-and-recovery/external-restic-probe'),
+    resolve(root, '.tmp/backup-recovery-delivery/external-restic-probe')
+  ]).toContain(sourceParent);
+  expect(data.source.slice(sourceParent.length)).toMatch(/^\/invented-[a-z0-9_]+\/source$/);
   expect(data.repository.startsWith(data.volume + '/Ori Backup Test/invented-')).toBeTruthy();
   expect(data.repository.slice(data.volume.length)).toMatch(
     /^\/Ori Backup Test\/invented-[a-z0-9_]+\/repository$/
@@ -49,8 +54,72 @@ async function open(page: Page, slug: string) {
   );
   const dialog = page.locator('#backupRecoveryConsole');
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-busy', 'false');
   return dialog;
 }
+
+test('live final walkthrough: review retained selections and open recovery without inventing a report', async ({
+  page,
+  request
+}, info) => {
+  test.skip(!process.env.ORI_BACKUP_FINAL_DEMO, 'Requires the owned final walkthrough.');
+  const { data } = control();
+  test.setTimeout(160000);
+  const before = await status(request, data.workspace_id);
+  expect(before.connection).toBe('review_required');
+  const dialog = await open(page, data.slug);
+  await dialog
+    .getByLabel('Use the saved folder selection (known identity bindings are retained)', {
+      exact: true
+    })
+    .check();
+  await dialog.getByRole('button', { name: 'Describe selected reference', exact: true }).click();
+  const reviewed = page.waitForResponse(
+    r =>
+      new URL(r.url()).pathname.endsWith('/backup-recovery/review') &&
+      r.request().method() === 'POST'
+  );
+  await dialog.getByRole('button', { name: 'Review metadata access', exact: true }).click();
+  const reviewResponse = await reviewed;
+  expect(reviewResponse.ok(), await reviewResponse.text()).toBeTruthy();
+  expect((await reviewResponse.json()).review).toMatchObject({
+    source_paths: [data.source],
+    volume_path: data.volume,
+    repository_path: data.repository
+  });
+  const consent = dialog.locator('#brReadConsent');
+  await expect(consent).not.toBeChecked();
+  const completed = page.waitForResponse(
+    r =>
+      new URL(r.url()).pathname.endsWith('/backup-recovery/connect') &&
+      r.request().method() === 'POST',
+    { timeout: 130000 }
+  );
+  await consent.check();
+  await dialog.getByRole('button', { name: 'Approve one metadata read', exact: true }).click();
+  const response = await completed;
+  expect(response.ok(), await response.text()).toBeTruthy();
+  expect((await response.json()).operation.outcome).toBe('read_ok');
+  await expect(dialog).toHaveAttribute('aria-busy', 'false');
+  const connected = await status(request, data.workspace_id);
+  expect(connected).toMatchObject({
+    connection: 'configured',
+    monitoring: 'manual_only',
+    destination: 'present',
+    snapshot_count: 1
+  });
+  expect(connected.last_successful_read).not.toBe(before.last_successful_read);
+  await dialog.getByRole('tab', { name: 'Recovery', exact: true }).click();
+  await expect(dialog).toContainText('Ori does not restore or inspect recovered contents.');
+  const recoveryResponse = await request.get(
+    '/api/workspaces/' + data.workspace_id + '/backup-recovery/recovery'
+  );
+  expect(recoveryResponse.ok()).toBeTruthy();
+  const recovery = (await recoveryResponse.json()).recovery;
+  expect(recovery.reports).toEqual([]);
+  expect((await status(request, data.workspace_id)).sequence).toBe(connected.sequence);
+  await dialog.screenshot({ path: info.outputPath('actual-final-recovery-not-tested.png') });
+});
 
 test('live monitoring: opt-in, observed history, pause and fresh resume', async ({
   page,
@@ -65,6 +134,11 @@ test('live monitoring: opt-in, observed history, pause and fresh resume', async 
     monitoring: 'manual_only',
     snapshot_count: 1
   });
+  const initialHistoryResponse = await request.get(
+    '/api/workspaces/' + data.workspace_id + '/backup-recovery/history'
+  );
+  expect(initialHistoryResponse.ok()).toBeTruthy();
+  const initialHistoryCount = (await initialHistoryResponse.json()).history.items.length;
   const dialog = await open(page, data.slug);
   await dialog.getByRole('combobox', { name: 'Check cadence', exact: true }).selectOption('900');
   const enable = async () => {
@@ -100,7 +174,7 @@ test('live monitoring: opt-in, observed history, pause and fresh resume', async 
   await page.reload();
   await expect(dialog).toBeVisible();
   await dialog.getByRole('tab', { name: 'History', exact: true }).click();
-  await expect(dialog.locator('.br-history li')).toHaveCount(2);
+  await expect(dialog.locator('.br-history li')).toHaveCount(Math.min(25, initialHistoryCount + 1));
   await dialog.screenshot({ path: info.outputPath('actual-periodic-observed-history.png') });
   await dialog.getByRole('tab', { name: 'Settings', exact: true }).click();
   await dialog.getByRole('button', { name: 'Pause periodic checks', exact: true }).click();
@@ -200,4 +274,42 @@ test('live monitoring: restart retains consent without duplicate read; revoke st
     }),
     contentType: 'application/json'
   });
+});
+
+test('live final walkthrough: remove Ori configuration without another metadata check', async ({
+  page,
+  request
+}, info) => {
+  test.skip(!process.env.ORI_BACKUP_FINAL_DEMO, 'Requires the owned final walkthrough.');
+  const { data } = control();
+  const before = await status(request, data.workspace_id);
+  expect(before).toMatchObject({
+    connection: 'review_required',
+    monitoring: 'manual_only',
+    in_progress: false
+  });
+  const dialog = await open(page, data.slug);
+  const endpoint = '/api/workspaces/' + data.workspace_id + '/backup-recovery';
+  const completed = page.waitForResponse(
+    r => new URL(r.url()).pathname === endpoint && r.request().method() === 'DELETE'
+  );
+  await dialog.getByRole('button', { name: 'Remove Ori configuration', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Confirm removal', exact: true }).click();
+  const response = await completed;
+  expect(response.ok(), await response.text()).toBeTruthy();
+  expect((await response.json()).operation.outcome).toBe('applied');
+  await expect(dialog).toHaveAttribute('aria-busy', 'false');
+  expect(await status(request, data.workspace_id)).toMatchObject({
+    connection: 'not_configured',
+    monitoring: 'manual_only',
+    sequence: before.sequence,
+    last_successful_read: before.last_successful_read
+  });
+  const settingsResponse = await request.get(endpoint + '/settings');
+  expect(settingsResponse.ok()).toBeTruthy();
+  const settings = (await settingsResponse.json()).settings;
+  expect(settings.source_paths).toEqual([]);
+  expect(settings.credential).toBeUndefined();
+  await dialog.getByRole('tab', { name: 'Overview', exact: true }).click();
+  await dialog.screenshot({ path: info.outputPath('actual-final-configuration-removed.png') });
 });
