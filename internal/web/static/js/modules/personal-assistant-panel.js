@@ -92,7 +92,23 @@ export function recipientIdentityView(view, resolution) {
   const entryOption = (resolution?.options || []).find(
     option => option.kind === RECIPIENT_WORKSPACE_ENTRY
   );
-  const entryReachable = Boolean(entryOption && !entryOption.disabled);
+  const entryReachable = Boolean(entryOption && !entryOption.disabled && !entryOption.pending);
+  // The hired assistant's status has not answered yet, so this page may be its
+  // Personal HQ: nobody is named or offered, as before the status was known.
+  if (recipient?.kind === RECIPIENT_WORKSPACE_ENTRY && recipient.pending) {
+    return {
+      personal: true,
+      kind: 'personal',
+      name: view.name,
+      role: 'Personal Assistant',
+      subline: '',
+      placeholder: view.placeholder,
+      available: false,
+      launcherVisible: false,
+      openable: false,
+      appearance: null
+    };
+  }
   if (recipient?.kind === RECIPIENT_WORKSPACE_ENTRY) {
     return {
       personal: false,
@@ -102,7 +118,10 @@ export function recipientIdentityView(view, resolution) {
       subline: recipient.subline,
       placeholder: entryAgentPlaceholder(recipient),
       available: recipient.available === true,
-      launcherVisible: true,
+      // The launcher appears once it can name the agent; the drawer itself may
+      // already open (a reload of an open drawer) and says it is still looking.
+      launcherVisible: recipient.loading !== true,
+      openable: true,
       appearance: recipient.appearance || null
     };
   }
@@ -115,6 +134,7 @@ export function recipientIdentityView(view, resolution) {
     placeholder: view.placeholder,
     available: view.available,
     launcherVisible: view.visible || entryReachable,
+    openable: view.visible || entryReachable,
     appearance: null
   };
 }
@@ -123,7 +143,7 @@ export function recipientIdentityView(view, resolution) {
 export function entrySessionStripView({ recipient, session, hasMessages } = {}) {
   const id = String(session?.id || '');
   return {
-    visible: recipient?.kind === RECIPIENT_WORKSPACE_ENTRY,
+    visible: recipient?.kind === RECIPIENT_WORKSPACE_ENTRY && recipient.pending !== true,
     title: id ? String(session?.title || '').trim() || 'Conversation' : 'New conversation',
     // A new conversation that has nothing in it yet has nothing to leave.
     newDisabled: !id && hasMessages !== true
@@ -441,7 +461,8 @@ async function hydrateEntryConversation({ force = false } = {}) {
 function renderPicker(who) {
   const els = state.els;
   if (!els?.recipientButton || !els.name) return;
-  const visible = recipients()?.resolution?.()?.pickerVisible === true;
+  const resolution = recipients()?.resolution?.();
+  const visible = resolution?.pickerVisible === true && resolution.current?.pending !== true;
   if (visible && els.name.parentElement !== els.recipientButton)
     els.recipientButton.prepend(els.name);
   if (!visible && els.name.parentElement !== els.title) els.title.prepend(els.name);
@@ -542,7 +563,7 @@ function renderIdentity() {
   els.launcher.hidden = !who.launcherVisible;
   els.launcherName.textContent = who.name;
   if (els.launcherRole) els.launcherRole.textContent = who.role;
-  const title = state.workActivityOnly && !who.launcherVisible ? 'Work activity' : who.name;
+  const title = state.workActivityOnly && !who.openable ? 'Work activity' : who.name;
   if (els.name) els.name.textContent = title;
   else els.title.textContent = title;
   renderPicker(who);
@@ -560,7 +581,7 @@ function renderIdentity() {
     : assistantAvatarMarkup(who.name, who.appearance);
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
-  els.panelAvatar.hidden = !who.launcherVisible;
+  els.panelAvatar.hidden = !who.openable;
   els.panel.dataset.relationshipState = view.state;
   els.panel.dataset.recipient = who.kind;
   renderChip();
@@ -743,7 +764,8 @@ function applyPersonalAssistant(personalAssistant) {
     available: state.view.available,
     state: state.view.state,
     appearance: personalAssistant?.appearance || null,
-    hqWorkspaceId: personalAssistant?.hq_workspace_id || ''
+    // Unknown when the status could not be read: the last known HQ stands.
+    hqWorkspaceId: personalAssistant ? personalAssistant.hq_workspace_id || '' : undefined
   });
   if (window.OriGuide?.setHelpOnly) {
     window.OriGuide.setHelpOnly({
@@ -829,7 +851,7 @@ function focusOnOpen() {
  * that is about to put focus somewhere of its own passes `{ focus: false }`.
  */
 function open(trigger, options = {}) {
-  if (!state.els || (!identity().launcherVisible && options.workActivity !== true)) return false;
+  if (!state.els || (!identity().openable && options.workActivity !== true)) return false;
   state.workActivityOnly = options.workActivity === true;
   if (window.OriGuide?.close) window.OriGuide.close({ restoreFocus: false });
   renderIdentity();

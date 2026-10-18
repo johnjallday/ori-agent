@@ -15,6 +15,9 @@ const WORKSPACE_SURFACES = new Set(['workspace_detail', 'workspace_canvas', 'wor
 
 export const PICK_KEY_PREFIX = 'ori.personalAssistant.recipient.';
 export const SESSION_KEY_PREFIX = 'ori.personalAssistant.recipientSession.';
+// The Personal HQ id the hired assistant last reported in this tab, so a
+// reload of the HQ page is recognised before the status request answers.
+export const HQ_KEY = 'ori.personalAssistant.hqWorkspaceId';
 // Stored in place of a session id after New: this tab chose a new
 // conversation, so the most recent session is not offered again until the
 // next message creates one (FR22).
@@ -80,6 +83,11 @@ export function resolveRecipient(input = {}) {
     ? entryInput.status
     : 'loading';
   if (status === 'ready' && !name) status = 'vacant';
+  // Until the hired assistant's status says which workspace is its Personal
+  // HQ, this page may be that HQ, so its own agent is neither addressable nor
+  // named yet.
+  const pending = personalInput.known === false && status !== 'vacant' && status !== 'error';
+  if (pending) status = 'loading';
   const workspaceName = text(input.workspaceName);
   const label = commanderLabel(entryInput.role);
   const roleLine = workspaceName ? `${label} · ${workspaceName}` : label;
@@ -103,6 +111,7 @@ export function resolveRecipient(input = {}) {
     appearance: entryInput.appearance || null,
     available: status === 'ready',
     loading: status === 'loading',
+    pending,
     vacant,
     disabled: vacant || unreachable,
     disabledReason
@@ -343,13 +352,16 @@ export function createRecipientController({
   fetchImpl = typeof fetch === 'function' ? (url, init) => fetch(url, init) : null,
   storage,
   pageContext = () => ({}),
-  loadedWorkspace = () => null
+  loadedWorkspace = () => null,
+  // The page's controller waits for the hired assistant's status before it
+  // lets a workspace's own agent be addressed (it may be the Personal HQ).
+  waitForPersonal = false
 } = {}) {
   let page = { surface: '', workspaceId: '' };
   let workspaceName = '';
   let entry = { status: 'loading' };
-  let personal = {};
-  let hqWorkspaceId = '';
+  let personal = waitForPersonal ? { known: false } : {};
+  let hqWorkspaceId = waitForPersonal ? read(storage, HQ_KEY) : '';
   let sequence = 0;
   let resolution = resolveRecipient({});
   const listeners = new Set();
@@ -436,7 +448,12 @@ export function createRecipientController({
         subline: next.subline,
         appearance: next.appearance
       };
-      hqWorkspaceId = text(next.hqWorkspaceId);
+      // A status that could not be read says nothing about the HQ; the id
+      // already known is kept.
+      if (next.hqWorkspaceId !== undefined) {
+        hqWorkspaceId = text(next.hqWorkspaceId);
+        write(storage, HQ_KEY, hqWorkspaceId);
+      }
       return recompute();
     },
     pick(kind) {
@@ -730,7 +747,8 @@ export function createRecipientMenu({ button, menu, doc, rows, choose, refuse, a
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   const controller = createRecipientController({
     pageContext: () => collectCurrentWorkspaceContext(),
-    loadedWorkspace: () => window.workspaceDetail?.workspace || null
+    loadedWorkspace: () => window.workspaceDetail?.workspace || null,
+    waitForPersonal: true
   });
   controller.onChange((resolution, previous) => {
     try {

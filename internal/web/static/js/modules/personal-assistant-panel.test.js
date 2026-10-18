@@ -95,6 +95,21 @@ test('the launcher stays for a reachable entry agent when the assistant is not s
   assert.equal(vacant.launcherVisible, false);
 });
 
+test('before the assistant status answers, no workspace agent is named or offered', () => {
+  // The page may be the Personal HQ, whose own agent must never flash in.
+  const view = personalAssistantPanelView(null);
+  const resolution = resolveRecipient({ ...workspacePage, personal: { known: false } });
+  const who = recipientIdentityView(view, resolution);
+  assert.equal(who.personal, true);
+  assert.equal(who.name, view.name);
+  assert.equal(who.launcherVisible, false);
+  assert.equal(who.available, false);
+  assert.equal(
+    entrySessionStripView({ recipient: resolution.current, session: { id: '' } }).visible,
+    false
+  );
+});
+
 test('a loading Commander is named by role and cannot be sent to yet', () => {
   const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
   const who = recipientIdentityView(
@@ -104,6 +119,11 @@ test('a loading Commander is named by role and cannot be sent to yet', () => {
   assert.equal(who.name, 'Commander');
   assert.equal(who.available, false);
   assert.equal(who.placeholder, 'Finding this workspace’s Commander…');
+  // The launcher waits for the agent's name; a drawer reopened on reload may
+  // already show, and says it is still looking.
+  assert.equal(who.launcherVisible, false);
+  assert.equal(who.openable, true);
+  assert.equal(recipientIdentityView(view, resolveRecipient(workspacePage)).launcherVisible, true);
 });
 
 test('only a ready entry agent gives a send its recipient and current session', () => {

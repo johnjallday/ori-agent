@@ -623,6 +623,64 @@ test('the pick survives a reload and a mode change of the same workspace (FR7)',
   assert.equal(reloaded.current().kind, RECIPIENT_WORKSPACE_ENTRY);
 });
 
+test('a workspace agent is not addressable until the hired assistant status is known (FR5)', () => {
+  const waiting = resolveRecipient({ ...page, personal: { known: false } });
+  assert.equal(waiting.current.kind, RECIPIENT_WORKSPACE_ENTRY);
+  assert.equal(waiting.current.loading, true);
+  assert.equal(waiting.current.pending, true);
+  assert.equal(waiting.current.available, false);
+  // A vacancy is already certain without the status.
+  const vacant = resolveRecipient({
+    ...page,
+    entry: { status: 'vacant' },
+    personal: { known: false }
+  });
+  assert.equal(vacant.current.kind, RECIPIENT_PERSONAL);
+  assert.equal(vacant.options[0].pending, false);
+  // Once known, the same page addresses it.
+  assert.equal(resolveRecipient(page).current.available, true);
+});
+
+test('the Personal HQ is recognised from this tab before the status answers', async () => {
+  const storage = memoryStorage();
+  storage.setItem('ori.personalAssistant.hqWorkspaceId', 'hq-1');
+  const hqRoutes = {
+    '/api/workspaces/hq-1': {
+      body: { id: 'hq-1', name: 'My HQ', entry_agent_name: 'Atlas HQ Agent' }
+    },
+    '/api/agents?name=Atlas%20HQ%20Agent': { body: { name: 'Atlas HQ Agent', role: 'x' } }
+  };
+  const controller = createRecipientController({
+    fetchImpl: fakeFetch(hqRoutes),
+    storage,
+    pageContext: () => ({ surface: 'workspace_detail', workspace_id: 'hq-1' }),
+    waitForPersonal: true
+  });
+  await controller.refresh();
+  assert.equal(controller.resolution().pickerVisible, false);
+  assert.equal(controller.current().kind, RECIPIENT_PERSONAL);
+  // A status that could not be read keeps the HQ id; a real one replaces it.
+  controller.setPersonal({ name: 'Atlas', available: false });
+  assert.equal(controller.resolution().pickerVisible, false);
+  controller.setPersonal({ name: 'Atlas', available: true, hqWorkspaceId: 'hq-2' });
+  assert.equal(storage.getItem('ori.personalAssistant.hqWorkspaceId'), 'hq-2');
+  assert.equal(controller.current().kind, RECIPIENT_WORKSPACE_ENTRY);
+  assert.equal(controller.current().name, 'Atlas HQ Agent');
+
+  // Without a remembered HQ, the HQ's own agent waits for the status.
+  const fresh = createRecipientController({
+    fetchImpl: fakeFetch(hqRoutes),
+    storage: memoryStorage(),
+    pageContext: () => ({ surface: 'workspace_detail', workspace_id: 'hq-1' }),
+    waitForPersonal: true
+  });
+  await fresh.refresh();
+  assert.equal(fresh.current().available, false);
+  fresh.setPersonal({ name: 'Atlas', available: true, hqWorkspaceId: 'hq-1' });
+  assert.equal(fresh.current().kind, RECIPIENT_PERSONAL);
+  assert.equal(fresh.resolution().pickerVisible, false);
+});
+
 test('switching is refused while a reply or a review is pending (FR14, FR15)', () => {
   const mira = { name: 'Mira' };
   assert.equal(switchLockMessage(mira, {}), '');
