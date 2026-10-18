@@ -9,6 +9,7 @@ import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-wor
 import { renderResearchSources } from './personal-assistant-research.js';
 import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
+import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
 // Installs window.PersonalAssistantFolderProposal, the reply card the work
 // controller draws for a folder path the user wrote.
 import './personal-assistant-folder-proposal.js';
@@ -204,6 +205,103 @@ function attachMessage(row, conversationId, messageId) {
   window.PersonalAssistantMemory?.decorate?.(row);
 }
 
+function attachArrangementHistory(row, conversationId, reference, initial = null) {
+  if (
+    !row ||
+    !arrangementID(reference?.id) ||
+    !reference.message_id ||
+    reference.review_available !== false
+  )
+    return;
+  const container = row.ownerDocument.createElement('div');
+  container.className = 'workspace-arrangement-history';
+  row.classList.add('personal-assistant-arrangement-row');
+  const generation = state.generation;
+  row.append(container);
+  const base = `${LIST_ENDPOINT}/${encodeURIComponent(conversationId)}/arrangements/${encodeURIComponent(reference.id)}`;
+  const load = async () => {
+    const result = await readJSON(base);
+    if (
+      !result.ok ||
+      result.body?.conversation_id !== conversationId ||
+      result.body?.message_id !== reference.message_id
+    )
+      throw new Error('Unavailable history');
+    return result.body;
+  };
+  mountArrangementHistory(container, {
+    id: reference.id,
+    initial,
+    isCurrent: () =>
+      state.available &&
+      state.generation === generation &&
+      state.id === conversationId &&
+      row.dataset.messageId === reference.message_id,
+    load,
+    actions: {
+      // Opens the existing setup review for one arranged group. It calls no
+      // model and creates nothing: Set up on that review card is the only
+      // confirmation, and the host checks this exact binding again then.
+      reviewGroup: async (operation, history) => {
+        const folder = window.PersonalAssistantFolderContext?.current?.();
+        if (!folder || folder.conversationId !== conversationId || !folder.revision)
+          throw new Error(
+            'Reopen this conversation with its folder attached before reviewing a group. Nothing was created.'
+          );
+        const result = await postJSON(`${base}/group-review`, {
+          revision: folder.revision,
+          expected_record_revision: history.arrangement.revision,
+          operation
+        });
+        if (!result.ok)
+          throw new Error(
+            String(result.body?.message || 'This group could not be reviewed. Nothing was created.')
+          );
+        // Reload canonical data only; the review card arrives with it.
+        if (await resume(conversationId)) {
+          const card = document.getElementById('personalAssistantFolderOffer');
+          if (card && !card.hidden) {
+            card.tabIndex = -1;
+            card.focus({ preventScroll: false });
+          }
+        }
+        return {};
+      },
+      decline: async history => {
+        const result = await postJSON(`${base}/decline`, {
+          expected_record_revision: history.arrangement.revision
+        });
+        if (!result.ok)
+          throw new Error(
+            String(
+              result.body?.message || 'The proposal could not be declined. Nothing was changed.'
+            )
+          );
+        return {
+          history: await load(),
+          message: 'Proposal declined. It stays here as history; nothing was applied or undone.'
+        };
+      }
+    }
+  });
+  return container;
+}
+
+async function postJSON(url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = null;
+  }
+  return { ok: response.ok, status: response.status, body: payload };
+}
+
 /** A review belongs to the conversation it was opened in; leaving it closes it. */
 function closeReviews() {
   window.PersonalAssistantDrafts?.close?.();
@@ -300,6 +398,16 @@ async function resume(id, options = {}) {
         renderResearchSources(row, message.workspace_context, { historical: true });
       }
       attachMessage(row, conversation.id, message.id);
+      if (
+        message.role === 'assistant' &&
+        Array.isArray(result.body.arrangements) &&
+        result.body.arrangements.length <= 32
+      ) {
+        for (const reference of result.body.arrangements) {
+          if (reference.message_id === message.id)
+            attachArrangementHistory(row, conversation.id, reference);
+        }
+      }
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
     // its latest part even when the server returned all of it.
@@ -411,6 +519,7 @@ async function toggleList() {
     items.push(item);
   }
   els.list.replaceChildren(...items);
+  return true;
 }
 
 function listItem(text) {
@@ -460,13 +569,33 @@ function applyReply(data, rows = {}) {
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };
   if (reply.error === 'link_context_unavailable') window.PersonalAssistantLink?.lost?.();
   const nextId = nextConversationId(state.id, reply);
+  let arrangementMount = null;
   if (reply.stored) {
     attachMessage(rows.userRow, nextId, reply.user_message_id);
     renderFolderFocus(rows.userRow, reply.folder_focus);
     attachMessage(rows.assistantRow, nextId, reply.assistant_message_id);
     if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
+    if (data.arrangement && rows.assistantRow && reply.assistant_message_id) {
+      // The reply's own saved summary shows at once. One canonical read then
+      // adds each proposed group's review state; it calls no model.
+      arrangementMount = attachArrangementHistory(
+        rows.assistantRow,
+        nextId,
+        {
+          id: data.arrangement.id,
+          message_id: reply.assistant_message_id,
+          review_available: false
+        },
+        { arrangement: data.arrangement, context_current: true }
+      );
+    }
   }
   setCurrent(nextId, reply.title);
+  if (
+    arrangementMount &&
+    data.arrangement?.proposed_operations?.some(op => op?.kind === 'create_group')
+  )
+    arrangementMount.querySelector('button')?.click();
   // A link attached in a new draft stays with the conversation that draft
   // started; on any other conversation it is not shown or sent.
   if (reply.stored) window.PersonalAssistantLink?.adopt?.(nextId);
@@ -554,6 +683,12 @@ const api = {
   applyReply,
   startNew,
   resume,
+  reopenHistory: async () => {
+    if (state.loading) return false;
+    if (state.id) return resume(state.id);
+    closeList();
+    return (await toggleList()) === true;
+  },
   // Lets a message action report a refusal in the conversation bar.
   notify: setNote,
   currentId: () => state.id,

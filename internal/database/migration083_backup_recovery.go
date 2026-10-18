@@ -6,7 +6,7 @@ import "context"
 // records, never canonical workspace exports. Creating these empty tables grants
 // no access. Workspace/attachment lifecycle changes invalidate receipts even if
 // an obsolete service instance still holds an in-memory configuration.
-func (db *DB) migration081BackupRecovery(ctx context.Context) error {
+func (db *DB) migration083BackupRecovery(ctx context.Context) error {
 	// Partial legacy installations (and focused upgrade fixtures) may omit a
 	// canonical domain or an old baseline column. Do not invent those owners or
 	// install triggers with unresolved NEW fields. The backup store requires

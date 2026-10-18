@@ -23,7 +23,9 @@ import {
   portfolioLibraryURL,
   portfolioProviderAction,
   profileReceiptLine,
-  setupModalView
+  setupModalView,
+  arrangedStructure,
+  conversationFolderOfferView
 } from './personal-assistant-folder.js';
 
 test('setup busy text names the reviewed project, not its observation root', () => {
@@ -927,6 +929,58 @@ test('a collection listed in its Home can still be made a plain group', () => {
   assert.ok(!ids({ status: 'awaiting_outcome' }).includes('group'));
 });
 
+test('an arranged group is its saved selection: Set up or Keep chatting, never Adjust', () => {
+  const offer = {
+    id: 'arranged',
+    status: 'pending',
+    verdict: 'project',
+    folder: 'Desktop',
+    conversation_id: 'chat-1',
+    subject: { name: 'Desktop', kind: 'project', is_root: true },
+    reason: 'Selected in a saved arrangement from this conversation.',
+    plan: {
+      digest: 'd'.repeat(64),
+      lines: [
+        { kind: 'group', name: 'Creates group Client work' },
+        { kind: 'arrangement', name: 'Only the folders your saved arrangement selected' }
+      ]
+    },
+    structure: {
+      version: 2,
+      folder: 'Desktop',
+      group: { name: 'Client work', type: 'group', destination_state: 'new' },
+      members: [
+        { candidate_id: 'candidate-25', name: 'Song 25', folder: 'Song 25', included: true },
+        { candidate_id: 'candidate-29', name: 'Song 29', folder: 'Song 29', included: true }
+      ],
+      arrangement: { record_id: 'arrangement-1', record_revision: 1, operation: 0 }
+    }
+  };
+  assert.ok(arrangedStructure(offer));
+  const view = conversationFolderOfferView(offer);
+  assert.equal(view.structured, true);
+  assert.match(
+    view.question,
+    /Set up the group Client work with 2 plain workspaces from your saved arrangement\?/
+  );
+  assert.match(view.capabilityDetail, /ask the assistant for a revised arrangement/);
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['setup', 'keep-chatting']
+  );
+  assert.ok(view.plan.lines.some(line => line.kind === 'arrangement'));
+  // A version-2 structure without its binding is not an arranged group.
+  for (const broken of [
+    { ...offer.structure, arrangement: undefined },
+    { ...offer.structure, arrangement: { record_id: '', record_revision: 1, operation: 0 } },
+    { ...offer.structure, group: { ...offer.structure.group, type: 'home' } },
+    { ...offer.structure, members: [] }
+  ]) {
+    assert.equal(arrangedStructure({ ...offer, structure: broken }), null);
+    assert.notEqual(folderOfferView({ ...offer, structure: broken }).structured, true);
+  }
+});
+
 test('a resolved existing-Home outcome says nothing was created, moved, linked, or scanned', () => {
   const added = folderOutcomeNote({
     status: 'resolved',
@@ -1346,6 +1400,18 @@ test('an offer whose folder the server no longer holds asks for it again before 
     waiting.actions.map(a => a.id),
     ['repick']
   );
+  // A decided card draws actions only when marked resumable: the way back
+  // after a restart must not disappear, including for a conversation review.
+  assert.equal(waiting.resume, true);
+  const conversationPaused = conversationFolderOfferView({
+    ...thesisOffer,
+    conversation_id: 'chat-1',
+    needs_pick: true,
+    status: 'awaiting_outcome',
+    software: { marker: 'go.mod' }
+  });
+  assert.equal(conversationPaused.resume, true);
+  assert.equal(conversationPaused.actions[0]?.id, 'repick');
   const decided = folderOfferView({ ...thesisOffer, needs_pick: true, status: 'later' });
   assert.equal(decided.decided, true);
   assert.notEqual(decided.actions[0]?.id, 'repick');
@@ -1679,15 +1745,15 @@ test('Set up sends only the plan digest and a chosen file name, and polls only w
   assert.doesNotMatch(source, /folder_card_stub/);
 });
 
-test('Home entry points open the one-card chooser, or the HQ card before an HQ exists', () => {
+test('Home Explore uses the attachment chooser, with the legacy HQ/manual fallback', () => {
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   const body = source.slice(
     source.indexOf('function openChooser()'),
     source.indexOf('async function load()')
   );
-  // The mission's Start, "Show me a folder" and the first-folder prompt no longer
-  // delegate to the chat-context chooser (the composer chip still does, itself).
-  assert.doesNotMatch(body, /PersonalAssistantFolderContext\??\.(open|guide)/);
+  // A new selection enters the same held-evidence discussion/planning path as Add.
+  assert.match(body, /PersonalAssistantFolderContext\.open\(\);\s*return;/);
+  assert.ok(body.indexOf('PersonalAssistantFolderContext') < body.indexOf('openHQCard'));
   assert.match(body, /openHQCard\(\)/);
   assert.doesNotMatch(
     source.slice(source.indexOf('async function load()'), source.indexOf('async function scan(')),

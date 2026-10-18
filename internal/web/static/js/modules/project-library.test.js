@@ -113,6 +113,35 @@ test('forget cancellation erases no saved Home record or session', async () => {
   assert.equal(refreshes, 1);
 });
 
+test('forget review discloses collection removal and conservative arrangement redaction', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  panel.refresh = async () => {};
+  panel.post = async path => {
+    assert.ok(path.endsWith('/review'), 'declining must not commit');
+    return {
+      project_name: 'Song',
+      source_count: 1,
+      session_count: 0,
+      collection_count: 2,
+      arrangement_count: 3
+    };
+  };
+  panel.confirm = async (_heading, consequences) => {
+    assert.ok(consequences.some(line => line.includes('2 logical collection(s)')));
+    assert.ok(
+      consequences.some(
+        line =>
+          line.includes('3 saved arrangement draft(s)') &&
+          line.includes('text and selections will be erased')
+      )
+    );
+    return false;
+  };
+  await panel.forgetRecord({ revision: 1, row: { id: 'song' } });
+});
+
 test('user-written linked recap requires its own Home review and explicit confirmation', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
   panel.run = async (_trigger, _message, work) => work();

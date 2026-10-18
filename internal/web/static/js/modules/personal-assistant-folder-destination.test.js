@@ -65,6 +65,34 @@ test('changed and unavailable pinned destinations have a visible recovery and no
   );
 });
 
+test('an unavailable library offers only a fresh plain-group review, never its old setup', () => {
+  const library = {
+    ...offer,
+    conversation_id: 'chat',
+    destination_status: 'unavailable',
+    structure: { version: 1, folder: 'Music', group: { type: 'library' }, members: [] }
+  };
+  const view = conversationFolderOfferView(library);
+  assert.equal(view.plan, null);
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Review plain group instead…', 'Keep chatting']
+  );
+  assert.equal(view.actions[0].structureGroup, true);
+  for (const changed of [
+    { conversation_id: '' },
+    { status: 'resolved' },
+    { needs_pick: true },
+    { structure: undefined }
+  ]) {
+    const blocked = folderOfferView({ ...library, ...changed });
+    assert.equal(
+      blocked.actions.some(action => action.structureGroup),
+      false
+    );
+  }
+});
+
 test('a blocked generic review in a conversation does not describe a confirmation', () => {
   const generic = {
     id: 'review',

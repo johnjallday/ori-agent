@@ -21,11 +21,13 @@ func TestBuiltInHomeProviderMatchesTheProjectIntegrationThatReferencesIt(t *test
 		t.Fatalf("Home provider %s/%d does not match the integration's Home %s/%d",
 			provider.ProgramID, provider.HomeSchemaVersion, integration.ExpectedProgramID, integration.ExpectedProgramSchema)
 	}
-	if provider.MinimumVersion != "0.1.0" || provider.FallbackCommit != "5f748d2de4457ac9dd02ea1ec31e34e1493744cf" ||
+	// v0.3.0 (2026-10-18): workspace-arrangement guidance; same two host
+	// features as 0.2.0. The pin is the squash-merge commit the tag peels to.
+	if provider.MinimumVersion != "0.3.0" || provider.FallbackCommit != "2d5f01e6daa24c77327a84376d8feb75b965d575" ||
 		provider.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed Home provider floor drifted: %#v", provider)
 	}
-	if strings.Join(provider.RequiredHostFeatures, ",") != plugin.HostFeatureIndependentProgramHomesV1 {
+	if strings.Join(provider.RequiredHostFeatures, ",") != plugin.HostFeatureHomeProfileV1+","+plugin.HostFeatureIndependentProgramHomesV1 {
 		t.Fatalf("required host features = %v", provider.RequiredHostFeatures)
 	}
 	release := provider.ReleaseEntry()
@@ -101,7 +103,7 @@ func TestHomeProviderNormalizationRejectsInvalidEntries(t *testing.T) {
 
 func TestHomeProviderCheckReleaseAcceptsOnlyTheReviewedHome(t *testing.T) {
 	provider := HomeProviders()[0]
-	const version = "0.2.0"
+	const version = "0.3.0"
 	source := provider.ReleaseEntry().PinnedSource(strings.Repeat("a", 40))
 	loadable := func() (plugin.PluginDescriptor, plugin.TrustReport) {
 		descriptor := plugin.PluginDescriptor{
@@ -110,7 +112,7 @@ func TestHomeProviderCheckReleaseAcceptsOnlyTheReviewedHome(t *testing.T) {
 			WorkspaceSurfaces: &plugin.SurfaceContribution{
 				Name: provider.PluginID, Version: version,
 				Protocol:              plugin.ProtocolRange{Min: 1, Max: 1},
-				RequiresHostFeatures:  []string{plugin.HostFeatureIndependentProgramHomesV1},
+				RequiresHostFeatures:  []string{plugin.HostFeatureIndependentProgramHomesV1, plugin.HostFeatureHomeProfileV1},
 				AssistantProgramHomes: []projecttemplates.AssistantProgramHome{{ID: provider.ProgramID, SchemaVersion: provider.HomeSchemaVersion, Version: 1}},
 			},
 		}
@@ -126,7 +128,7 @@ func TestHomeProviderCheckReleaseAcceptsOnlyTheReviewedHome(t *testing.T) {
 		want   ReleaseCheck
 	}{
 		"another plugin":       {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) { d.Name = "other" }, ReleaseRejected},
-		"another version":      {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) { d.Version = "0.3.0" }, ReleaseRejected},
+		"another version":      {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) { d.Version = "0.4.0" }, ReleaseRejected},
 		"another source":       {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) { d.SourceLocation = "elsewhere" }, ReleaseRejected},
 		"trust report differs": {func(_ *plugin.PluginDescriptor, r *plugin.TrustReport) { r.Name = "other" }, ReleaseRejected},
 		"no contribution":      {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) { d.WorkspaceSurfaces = nil }, ReleaseRejected},
@@ -135,6 +137,9 @@ func TestHomeProviderCheckReleaseAcceptsOnlyTheReviewedHome(t *testing.T) {
 		}, ReleaseNeedsNewerHost},
 		"missing host feature": {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) {
 			d.WorkspaceSurfaces.RequiresHostFeatures = nil
+		}, ReleaseRejected},
+		"missing the profile feature the floor requires": {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) {
+			d.WorkspaceSurfaces.RequiresHostFeatures = []string{plugin.HostFeatureIndependentProgramHomesV1}
 		}, ReleaseRejected},
 		"another Home": {func(d *plugin.PluginDescriptor, _ *plugin.TrustReport) {
 			d.WorkspaceSurfaces.AssistantProgramHomes[0].ID = "another-home"

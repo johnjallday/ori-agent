@@ -620,9 +620,31 @@ function capabilityConfirmView(offer, base, subject) {
 // into the Home-plus-library listing in Adjust, which is the earlier card.
 export function offerStructure(offer) {
   const structure = offer?.structure;
-  return structure?.version === 1 &&
+  return (structure?.version === 1 &&
     ['home', 'group'].includes(structure.group?.type) &&
-    Array.isArray(structure.members)
+    Array.isArray(structure.members)) ||
+    arrangedStructure(offer)
+    ? structure
+    : null;
+}
+
+// arrangedStructure is a saved arrangement's exact selection (version 2): a new
+// plain group of the folders that arrangement chose. It has no Adjust; a change
+// is a revised arrangement, never an edit of this review.
+export function arrangedStructure(offer) {
+  const structure = offer?.structure;
+  const binding = structure?.arrangement;
+  return structure?.version === 2 &&
+    structure.group?.type === 'group' &&
+    Array.isArray(structure.members) &&
+    structure.members.length > 0 &&
+    binding &&
+    typeof binding.record_id === 'string' &&
+    binding.record_id &&
+    Number.isSafeInteger(binding.record_revision) &&
+    binding.record_revision >= 1 &&
+    Number.isSafeInteger(binding.operation) &&
+    binding.operation >= 0
     ? structure
     : null;
 }
@@ -659,8 +681,10 @@ function structureOfferView(offer, base, subject) {
   const run = offer.setup ? setupRunView(offer.setup, subject, { structure: true }) : null;
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
-  let question =
-    structure.group.destination_state === 'existing'
+  const arranged = Boolean(arrangedStructure(offer));
+  let question = arranged
+    ? `Set up the group ${group} with ${count} plain workspace${count === 1 ? '' : 's'} from your saved arrangement?`
+    : structure.group.destination_state === 'existing'
       ? `Add ${workspaces} to your ${group}?`
       : structure.group.type === 'home'
         ? `Set up ${group} with ${workspaces}?`
@@ -671,7 +695,8 @@ function structureOfferView(offer, base, subject) {
   if (run) actions = run.actions;
   else if (!base.decided) {
     if (hasPlan) actions.push({ id: 'setup', label: 'Set up', style: 'primary', oneCard: true });
-    actions.push({ id: 'adjust', label: 'Adjust…', style: 'outline', adjustStructure: true });
+    if (!arranged)
+      actions.push({ id: 'adjust', label: 'Adjust…', style: 'outline', adjustStructure: true });
     // On Home the proposal can be declined or put off; in a conversation its
     // review is closed with Keep chatting instead.
     actions.push(
@@ -681,22 +706,29 @@ function structureOfferView(offer, base, subject) {
   }
   return {
     ...base,
-    headline: segments([
-      { text: String(structure.folder || subject) },
-      ` has ${structureCounts(structure)}.`
-    ]),
+    headline: arranged
+      ? segments([
+          { text: String(structure.folder || subject) },
+          `: ${count} selected folder${count === 1 ? '' : 's'} from a saved arrangement.`
+        ])
+      : segments([
+          { text: String(structure.folder || subject) },
+          ` has ${structureCounts(structure)}.`
+        ]),
     question,
     // What the proposal goes without is said once: by the proposal card's own
     // notes, and by the plan's lines once there is a plan. A proposal with no
     // plan says the one thing that stops it.
     capabilityDetail:
-      hasPlan || run || base.decided
-        ? ''
-        : offer.setup_unavailable_reason === 'name_taken'
-          ? `The name ${group} is not one a group can have. Choose another in Adjust.`
-          : offer.setup_unavailable_reason
-            ? 'Set up is not available for this proposal right now. You can adjust it or keep chatting.'
-            : '',
+      arranged && !run && !base.decided
+        ? `Only these folders are set up; other folders here stay as they are. To change the selection or names, ask the assistant for a revised arrangement.${offer.setup_unavailable_reason ? ' Set up is not available for this group right now.' : ''}`
+        : hasPlan || run || base.decided
+          ? ''
+          : offer.setup_unavailable_reason === 'name_taken'
+            ? `The name ${group} is not one a group can have. Choose another in Adjust.`
+            : offer.setup_unavailable_reason
+              ? 'Set up is not available for this proposal right now. You can adjust it or keep chatting.'
+              : '',
     reason: run ? '' : base.reason,
     actions,
     resume: base.status === 'awaiting_outcome',
@@ -772,10 +804,28 @@ export function folderOfferView(offer, options = {}) {
   // before offering anything a yes would need.
   if (view.visible && ['changed', 'unavailable'].includes(offer.destination_status)) {
     const destination = folderSetupDestinationLabel(offer);
+    // A blocked Home must not strand the user's manual fallback. This action
+    // requests a fresh, conversation-bound plain-group review; it cannot set up
+    // the unavailable destination or execute the previous plan.
+    const plainReview =
+      offer.conversation_id &&
+      status === 'pending' &&
+      !view.needsPick &&
+      offer.structure?.version === 1 &&
+      offer.structure.group?.type === 'library';
     return {
       ...view,
       plan: null,
-      actions: [],
+      actions: plainReview
+        ? [
+            {
+              id: 'group',
+              label: 'Review plain group instead…',
+              style: 'link',
+              structureGroup: true
+            }
+          ]
+        : [],
       question: `${destination ? `${destination} ` : ''}${
         offer.destination_status === 'changed'
           ? 'The reviewed destination has changed.'
@@ -786,6 +836,9 @@ export function folderOfferView(offer, options = {}) {
   if (view.visible && view.needsPick && status === 'awaiting_outcome') {
     return {
       ...repickView(view, subject),
+      // A confirmed setup whose folder was lost (a restart drops a held folder)
+      // must still draw its way back; a decided card shows actions only then.
+      resume: true,
       actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
     };
   }
@@ -3434,12 +3487,14 @@ function openHQCard() {
 // Start, or an offer's own "Show another folder". Every one of them starts
 // the same turn in the conversation.
 //
-// It is the one-card flow, with the chips and the picker, then a read-only scan,
-// then the verdict card with Set up. The composer's "Add folder" chip is the chat
-// flow and calls PersonalAssistantFolderContext itself. Every folder starts at
-// the HQ, so until one is built this opens its card instead of a chooser that
-// the server would refuse (FR24, FR25).
+// New selections use the same held attachment and explicit planning consent as
+// Add folder. Existing reviewed offers retain their legacy execution controls.
+// Older hosts without the attachment adapter retain the manual chooser.
 function openChooser() {
+  if (window.PersonalAssistantFolderContext?.open) {
+    window.PersonalAssistantFolderContext.open();
+    return;
+  }
   if (!state.available) {
     openHQCard();
     return;

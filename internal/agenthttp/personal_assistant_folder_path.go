@@ -98,7 +98,7 @@ func folderPathTurnFromContext(ctx context.Context) *folderPathTurn {
 // mistaken for a workspace's.
 func (h *HomeAssistantAskHandler) folderPathFound(prompt string, req HomeAssistantAskRequest) (FolderPathFound, bool) {
 	if h == nil || h.FolderPaths == nil || req.Conversation == nil || req.FolderContext != nil ||
-		req.ConfirmedAction != nil || req.ResearchApproval != nil {
+		req.ConfirmedAction != nil || req.ResearchApproval != nil || req.Arrangement != nil {
 		return FolderPathFound{}, false
 	}
 	return h.FolderPaths.Find(prompt)

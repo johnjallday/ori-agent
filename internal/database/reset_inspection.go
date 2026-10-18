@@ -23,6 +23,8 @@ func ResetRecordTables() []string {
 		"workspace_local_config", "backup_recovery_local", "backup_recovery_receipts", "backup_recovery_authority",
 		"users", "user_preference_revisions", "workspaces", "sessions", "messages", "session_tags", "tool_calls",
 		"assistant_conversation_checkpoints", // disposable Session-owned derived context, never retained memory
+		"assistant_arrangements",             // device-local inert drafts, before their owning messages/sessions
+		"assistant_arrangement_effects",      // device-local review/receipt correlation, before its owning draft
 		"assistant_operations",               // device-local operation/receipt state for "Operate Ori"; never portable history
 		"review_issues", "review_runs", "session_review_status", "session_tasks",
 		"scheduled_task_reminders", "smart_input_overrides", "workspace_notes",

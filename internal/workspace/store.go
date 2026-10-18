@@ -749,7 +749,9 @@ func appendWorkspaceSlugSuffix(baseSlug string, suffix int) string {
 }
 
 func cloneWorkspaceForRebind(ws *Workspace) (*Workspace, error) {
-	data, err := ws.ToJSON()
+	// An in-memory copy needs no indentation; the bytes never reach disk. The
+	// field set and values are exactly those ToJSON would write.
+	data, err := ws.compactJSON()
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone workspace for rebind: %w", err)
 	}

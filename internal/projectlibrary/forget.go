@@ -14,13 +14,15 @@ import (
 // file operation. A project still linked to a child or observed under an
 // active grant cannot be forgotten through this endpoint.
 type ForgetReview struct {
-	Token        string    `json:"token"`
-	EntryID      string    `json:"entry_id"`
-	ProjectName  string    `json:"project_name"`
-	SourceCount  int       `json:"source_count"`
-	SessionCount int       `json:"session_count"`
-	QueuedAt     int       `json:"queued_at,omitempty"` // 1-based pending position, never queue authority
-	ExpiresAt    time.Time `json:"expires_at"`
+	Token            string    `json:"token"`
+	EntryID          string    `json:"entry_id"`
+	ProjectName      string    `json:"project_name"`
+	SourceCount      int       `json:"source_count"`
+	SessionCount     int       `json:"session_count"`
+	CollectionCount  int       `json:"collection_count"`
+	ArrangementCount int       `json:"arrangement_count"`
+	QueuedAt         int       `json:"queued_at,omitempty"` // 1-based pending position, never queue authority
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 func forgetImpact(doc Document, state *workspace.AssistantProgramState, entryID string) (ForgetReview, string, error) {
@@ -73,6 +75,15 @@ func forgetImpact(doc Document, state *workspace.AssistantProgramState, entryID 
 			}
 		}
 	}
+	impact.ArrangementCount = len(doc.Arrangements)
+	for _, collection := range doc.Collections {
+		for _, id := range collection.EntryIDs {
+			if id == entryID {
+				impact.CollectionCount++
+				break
+			}
+		}
+	}
 	// Hash the entire record and related sessions: both user notes and history
 	// must be identical between review and the final Home CAS.
 	rows := make([]StudioSession, 0, impact.SessionCount)
@@ -82,9 +93,11 @@ func forgetImpact(doc Document, state *workspace.AssistantProgramState, entryID 
 		}
 	}
 	encoded, err := json.Marshal(struct {
-		Entry    Entry           `json:"entry"`
-		Sessions []StudioSession `json:"sessions"`
-	}{*entry, rows})
+		Entry        Entry               `json:"entry"`
+		Sessions     []StudioSession     `json:"sessions"`
+		Arrangements []Arrangement       `json:"arrangements,omitempty"`
+		Collections  []LogicalCollection `json:"collections,omitempty"`
+	}{*entry, rows, doc.Arrangements, doc.Collections})
 	if err != nil {
 		return ForgetReview{}, "", ErrCorrupt
 	}
@@ -197,6 +210,7 @@ func (s *Store) CommitForget(scope Scope, entryID, token, key string) (bool, err
 						}
 					}
 					current.Proposals = remaining
+					forgetArrangements(current, entryID, at)
 					return entryID, nil
 				}
 			}

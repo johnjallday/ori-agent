@@ -49,6 +49,9 @@ type StructureFacts struct {
 	Members      []StructureMember
 	// Unavailable are the sentences for what the proposal goes without.
 	Unavailable []string
+	// Arrangement is the saved arrangement intention a selected structure came
+	// from; the plan says so and its intent (and so its digest) carries it.
+	Arrangement *personalassistant.FolderStructureArrangement
 }
 
 // BuildStructurePlan lists every consequence of Set up on a proposed group, in
@@ -91,6 +94,14 @@ func BuildStructurePlan(facts StructureFacts) personalassistant.FolderSetupPlan 
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanMember, Name: member.Name, Detail: strings.TrimPrefix(detail, "· ")})
 		intent.Members = append(intent.Members, personalassistant.FolderStructureMemberIntent{
 			CandidateID: member.CandidateID, Name: member.Name, Blueprint: member.Blueprint, Identity: member.Identity,
+		})
+	}
+	if facts.Arrangement != nil {
+		binding := *facts.Arrangement
+		intent.Arrangement = &binding
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanArrangement, Name: "Only the folders your saved arrangement selected",
+			Detail: fmt.Sprintf("Arrangement revision %d. Other folders here stay as they are; changing the selection needs a revised arrangement.", binding.RecordRevision),
 		})
 	}
 	lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Nothing is moved, copied or read"})

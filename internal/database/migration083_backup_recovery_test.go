@@ -42,11 +42,11 @@ func backupRowCounts(t *testing.T, db *DB, stateWant, receiptWant int) {
 	}
 }
 
-func TestMigration081BackupStateIsLocalBoundedAndResetInventoried(t *testing.T) {
+func TestMigration083BackupStateIsLocalBoundedAndResetInventoried(t *testing.T) {
 	db := newBackupMigrationFixture(t)
 	seedBackupReceipt(t, db)
 	for range 2 {
-		if err := db.migration081BackupRecovery(t.Context()); err != nil {
+		if err := db.migration083BackupRecovery(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -77,7 +77,7 @@ func TestMigration081BackupStateIsLocalBoundedAndResetInventoried(t *testing.T) 
 	if _, err := db.ExecContext(t.Context(), `UPDATE backup_recovery_local SET schema_version=2`); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.migration081BackupRecovery(t.Context()); err != nil {
+	if err := db.migration083BackupRecovery(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	backupRowCounts(t, db, 1, 1)
@@ -87,7 +87,7 @@ func TestMigration081BackupStateIsLocalBoundedAndResetInventoried(t *testing.T) 
 	backupRowCounts(t, db, 0, 0)
 }
 
-func TestMigration081LifecycleFencesReceiptWithoutErasingHistory(t *testing.T) {
+func TestMigration083LifecycleFencesReceiptWithoutErasingHistory(t *testing.T) {
 	cases := map[string]string{
 		"archive":            `UPDATE workspaces SET status='archived'`,
 		"unknown status":     `UPDATE workspaces SET status=NULL`,
@@ -112,7 +112,7 @@ func TestMigration081LifecycleFencesReceiptWithoutErasingHistory(t *testing.T) {
 	}
 }
 
-func TestMigration081OtherCapabilityAndRenameDoNotRevokeBackup(t *testing.T) {
+func TestMigration083OtherCapabilityAndRenameDoNotRevokeBackup(t *testing.T) {
 	db := newBackupMigrationFixture(t)
 	seedBackupReceipt(t, db)
 	if _, err := db.ExecContext(t.Context(), `UPDATE workspaces SET name='Renamed',installed_capabilities_json='[{"id":"backup-recovery","version":1,"installed_at":"2026-01-01T00:00:00Z"},{"id":"unrelated","version":1}]'`); err != nil {

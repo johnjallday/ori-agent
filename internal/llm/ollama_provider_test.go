@@ -144,6 +144,61 @@ func TestOllamaChat_SendsNumCtxAndParsesUsage(t *testing.T) {
 	}
 }
 
+// Ollama returns tool calls without IDs and reports truncation only through
+// done_reason. A tool loop keys results and replay protection by call ID, so
+// IDs must stay unique across the rounds of one turn, and a reply cut off at
+// num_predict must surface as a length stop rather than an empty answer.
+func TestOllamaChat_ToolCallIDsAreUniqueAcrossRoundsAndDoneReasonMaps(t *testing.T) {
+	replies := []string{
+		`{"model":"gemma4:26b","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"arrangement_search","arguments":{"filter":{"text":"client"}}}},{"function":{"name":"arrangement_detail","arguments":{"id":"live-00"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":5}`,
+		`{"model":"gemma4:26b","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"arrangement_propose","arguments":{"version":1}}}]},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":5}`,
+		`{"model":"gemma4:26b","message":{"role":"assistant","content":""},"done":true,"done_reason":"length","prompt_eval_count":10,"eval_count":2048}`,
+		`{"model":"gemma4:26b","message":{"role":"assistant","content":"Which songs are client work?"},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":9}`,
+		`{"model":"llama3.1:8b","message":{"role":"assistant","content":"older server, no reason"},"done":true,"prompt_eval_count":10,"eval_count":9}`,
+	}
+	round := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, replies[round])
+		round++
+	}))
+	defer srv.Close()
+
+	p := NewOllamaProvider(ProviderConfig{BaseURL: srv.URL})
+	request := ChatRequest{Model: "gemma4:26b", Messages: []Message{NewUserMessage("organize")}, Tools: []Tool{{Name: "arrangement_search"}}}
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		resp, err := p.Chat(context.Background(), request)
+		if err != nil {
+			t.Fatalf("round %d: %v", i, err)
+		}
+		if resp.FinishReason != FinishReasonToolCalls {
+			t.Fatalf("round %d: finish reason %q", i, resp.FinishReason)
+		}
+		for _, call := range resp.ToolCalls {
+			if call.ID == "" || seen[call.ID] {
+				t.Fatalf("round %d reused or empty tool-call ID %q (seen %v)", i, call.ID, seen)
+			}
+			seen[call.ID] = true
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("expected three distinct IDs across two rounds, got %v", seen)
+	}
+	truncated, err := p.Chat(context.Background(), request)
+	if err != nil || truncated.FinishReason != FinishReasonLength || truncated.Content != "" || truncated.Usage.CompletionTokens != 2048 {
+		t.Fatalf("length stop not surfaced: %+v err=%v", truncated, err)
+	}
+	answered, err := p.Chat(context.Background(), request)
+	if err != nil || answered.FinishReason != FinishReasonStop || answered.Content == "" {
+		t.Fatalf("natural stop not surfaced: %+v err=%v", answered, err)
+	}
+	legacy, err := p.Chat(context.Background(), request)
+	if err != nil || legacy.FinishReason != "" {
+		t.Fatalf("an absent done_reason must stay unknown, got %q err=%v", legacy.FinishReason, err)
+	}
+}
+
 func TestOllamaBuildRequest_MapsResponseSchema(t *testing.T) {
 	p := NewOllamaProvider(ProviderConfig{BaseURL: "http://localhost:11434"})
 	schema := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}

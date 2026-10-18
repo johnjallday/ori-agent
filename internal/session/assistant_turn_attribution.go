@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 )
 
 // AssistantTurnStore extends canonical Messages with one atomic, attributed
@@ -29,6 +30,15 @@ func (h *hybridStore) AppendAttributedTurn(ctx context.Context, id string, owner
 }
 
 func (s *SQLiteStore) AppendAttributedTurn(ctx context.Context, id string, owner assistantcontext.SaveOwner, event *foldercontext.Event, revision, user, answer string, attribution *assistantcontext.Attribution) ([]Message, error) {
+	return s.appendAttributedTurn(ctx, id, owner, event, revision, user, answer, attribution, nil)
+}
+
+func (s *SQLiteStore) appendAttributedTurn(ctx context.Context, id string, owner assistantcontext.SaveOwner, event *foldercontext.Event, revision, user, answer string, attribution *assistantcontext.Attribution, arrangement *workspacearrangement.Record) ([]Message, error) {
+	if arrangement != nil {
+		if err := validateNewArrangement(owner, event, user, answer, *arrangement); err != nil {
+			return nil, err
+		}
+	}
 	encodedAttribution, err := assistantcontext.EncodeAttribution(attribution)
 	if err != nil {
 		return nil, err
@@ -102,8 +112,14 @@ func (s *SQLiteStore) AppendAttributedTurn(ctx context.Context, id string, owner
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET message_count=message_count+?,updated_at=? WHERE id=?`, len(messages), now, id); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE sessions_fts SET content=content||' '||?||' '||? WHERE session_id=?`, user, answer, id)
-		return err
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions_fts SET content=content||' '||?||' '||? WHERE session_id=?`, user, answer, id); err != nil {
+			return err
+		}
+		if arrangement != nil {
+			contextRevision := assistantcontext.ConversationRevision(now, actualCount+len(messages), actualEpoch)
+			return insertArrangement(ctx, tx, id, owner, *arrangement, messages, contextRevision)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

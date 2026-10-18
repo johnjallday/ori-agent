@@ -29,7 +29,7 @@ type ActivationQueue struct {
 }
 
 func (q ActivationQueue) valid() bool {
-	if q.ID == "" || !validText(q.ID, 160) || len(q.IDs) < 2 || len(q.IDs) > 100 ||
+	if q.ID == "" || !validText(q.ID, 160) || len(q.IDs) < 1 || len(q.IDs) > 100 ||
 		q.Revision < 1 || q.Index < 0 || q.Index > len(q.IDs) ||
 		q.CreatedAt.IsZero() || q.UpdatedAt.Before(q.CreatedAt) || !q.ExpiresAt.After(q.CreatedAt) ||
 		len(q.Skipped)+len(q.Connected) != q.Index {
@@ -97,7 +97,7 @@ func activationQueueCommitGuard(scope Scope) *sync.Mutex {
 }
 
 func (o ActivationQueueOutcome) valid() bool {
-	if o.ID == "" || !validText(o.ID, 160) || o.SelectedCount < 2 || o.SelectedCount > 100 ||
+	if o.ID == "" || !validText(o.ID, 160) || o.SelectedCount < 1 || o.SelectedCount > 100 ||
 		o.SkippedCount < 0 || o.ConnectedCount < 0 || o.SkippedCount+o.ConnectedCount > o.SelectedCount ||
 		o.StartedAt.IsZero() || o.FinishedAt.Before(o.StartedAt) {
 		return false
@@ -214,6 +214,28 @@ func (s *Store) CurrentActivationQueue(scope Scope) (ActivationQueueView, error)
 	return view, nil
 }
 
+// activationQueueForSelection is shared by manual bulk selection and reviewed
+// arrangements. A single-entry queue is useful for an arrangement; neither path
+// grants approval to create a project. Current links must never be duplicated.
+func activationQueueForSelection(doc Document, ids []string, id string, at time.Time) (ActivationQueue, error) {
+	if len(ids) < 1 || len(ids) > 100 || (doc.Queue != nil && doc.Queue.Status == "active") {
+		return ActivationQueue{}, ErrConflict
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		entry := sessionEntry(doc, id)
+		if seen[id] || entry == nil || entry.Link != nil {
+			return ActivationQueue{}, ErrConflict
+		}
+		seen[id] = true
+	}
+	q := ActivationQueue{ID: id, IDs: slices.Clone(ids), Revision: 1, Status: "active", CreatedAt: at, UpdatedAt: at, ExpiresAt: at.Add(7 * 24 * time.Hour)}
+	if !q.valid() {
+		return ActivationQueue{}, ErrConflict
+	}
+	return q, nil
+}
+
 // StartActivationQueue is an explicit owner action, not a bulk activation.
 // All IDs must be distinct, current catalog-only entries in this exact Home.
 func (s *Store) StartActivationQueue(scope Scope, ids []string, key string) (ActivationQueue, bool, error) {
@@ -252,9 +274,10 @@ func (s *Store) StartActivationQueue(scope Scope, ids []string, key string) (Act
 			return ActivationQueue{}, false, ErrConflict
 		}
 	}
-	at := s.now().UTC()
-	queue := ActivationQueue{ID: newID(), IDs: append([]string(nil), ids...), Revision: 1, Status: "active",
-		CreatedAt: at, UpdatedAt: at, ExpiresAt: at.Add(7 * 24 * time.Hour)}
+	queue, err := activationQueueForSelection(doc, ids, newID(), s.now().UTC())
+	if err != nil {
+		return ActivationQueue{}, false, err
+	}
 	receipt, replay, err := s.mutate(scope, doc.Revision, operation{key: key, action: "start_activation_queue", digest: digest},
 		func(current *Document) (string, error) {
 			if current.Queue != nil && current.Queue.Status == "active" {

@@ -528,8 +528,10 @@ The owning schema is `backup_recovery_local`, one encrypted state row per exact
 workspace/owner, `backup_recovery_receipts`, a distinct local activation row
 bound to that state, and `backup_recovery_authority`, a path/secret/grant-free
 workspace epoch counter. The counter also fences reviews made before any encrypted
-configuration exists; lifecycle triggers must not depend on a saved state row. Implementation allocated migration 81 after inspecting the
-current schema. Use the existing `workspace_config_dek` secure key with AES-GCM randomized nonces and domain-
+configuration exists; lifecycle triggers must not depend on a saved state row.
+Backup & Recovery uses migration 83, after the upstream assistant-arrangement
+migrations 81–82; their published numbering remains unchanged. Use the existing
+`workspace_config_dek` secure key with AES-GCM randomized nonces and domain-
 separated authenticated data `ori.backup-recovery.local.v1` including owner,
 workspace, configuration generation and schema version. The receipt binds a
 random local grant nonce, config fingerprint, data-root canonical path/device/

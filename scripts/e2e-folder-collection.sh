@@ -13,8 +13,8 @@
 #   composer  the folder is attached in the assistant's composer, proposed as a
 #             group at once, reviewed and set up; attaching it again proposes
 #             nothing.
-#   home      the folder is shown through Home's "Explore a folder", adjusted on
-#             its card and set up.
+#   home      Explore uses the same attachment picker; no-model planning refuses,
+#             while explicit rule-based review/adjust/setup remains usable.
 #
 # For each phase this:
 #

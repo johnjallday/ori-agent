@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 )
 
 // A folder that holds several projects is proposed as one group with a
@@ -23,11 +24,37 @@ import (
 // shows before anything is created, and what a confirmed setup is held to.
 const (
 	FolderStructureVersion = 1
+	// FolderStructureSelectedVersion is a saved arrangement's exact selection:
+	// its members are the folders that arrangement chose from the whole held
+	// scan, not the recognition rule's collection or its bounded preview. It
+	// has no threshold, no omitted tail and no Adjust; a change is a new
+	// arrangement revision.
+	FolderStructureSelectedVersion = 2
 	// FolderStructureMaxMembers bounds the member list. Subfolders past it are
 	// counted in Omitted and get no workspace from this proposal.
 	FolderStructureMaxMembers = 24
 	folderStructureMaxBytes   = 16 * 1024
 )
+
+// FolderStructureArrangement binds a selected structure to the one canonical
+// arrangement intention it was compiled from. It is a fence, never approval:
+// the owning conversation must still hold that record at that revision, with
+// that operation bound to this exact review.
+type FolderStructureArrangement struct {
+	RecordID       string `json:"record_id"`
+	RecordRevision int64  `json:"record_revision"`
+	Operation      int    `json:"operation"`
+}
+
+func (a *FolderStructureArrangement) valid() bool {
+	return a != nil && validStructureName(a.RecordID) && !strings.ContainsAny(a.RecordID, `/\:`) &&
+		a.RecordRevision >= 1 && a.Operation >= 0 && a.Operation < workspacearrangement.MaxOperations
+}
+
+// Arranged reports whether the structure is a saved arrangement's selection.
+func (s *FolderStructure) Arranged() bool {
+	return s != nil && s.Version == FolderStructureSelectedVersion && s.Arrangement != nil
+}
 
 // Group types of a proposed structure.
 const (
@@ -635,6 +662,9 @@ type FolderStructure struct {
 	// Notes are the availability sentences of the group and the included
 	// members, each said once. Projected for display; never stored.
 	Notes []string `json:"notes,omitempty"`
+	// Arrangement is set on a selected structure (version 2) only: the saved
+	// arrangement intention its exact members came from.
+	Arrangement *FolderStructureArrangement `json:"arrangement,omitempty"`
 }
 
 // FolderStructureGroup is the proposed parent of the member workspaces.
@@ -858,6 +888,10 @@ func (s *FolderStructure) clone() *FolderStructure {
 	copied := *s
 	copied.Members = append([]FolderStructureMember(nil), s.Members...)
 	copied.Notes = append([]string(nil), s.Notes...)
+	if s.Arrangement != nil {
+		binding := *s.Arrangement
+		copied.Arrangement = &binding
+	}
 	return &copied
 }
 
@@ -895,7 +929,11 @@ func validStructureName(value string) bool {
 // display names only, known types and reasons, counts within the scan's bounds.
 func (s FolderStructure) Validate() error {
 	invalid := func(part string) error { return fmt.Errorf("%w: structure %s", errFolderDigestInvalid, part) }
-	if s.Version != FolderStructureVersion || !validStructureName(s.Folder) || s.MinMembers != folderdigest.CollectionMinProjects {
+	selected := s.Version == FolderStructureSelectedVersion
+	if selected {
+		return s.validateSelected(invalid)
+	}
+	if s.Version != FolderStructureVersion || !validStructureName(s.Folder) || s.MinMembers != folderdigest.CollectionMinProjects || s.Arrangement != nil {
 		return invalid("header")
 	}
 	if !validStructureName(s.Group.Name) ||
@@ -935,6 +973,52 @@ func (s FolderStructure) Validate() error {
 		if member.LastChanged != "" {
 			if _, err := time.Parse(foldercontext.DateLayout, member.LastChanged); err != nil {
 				return invalid("member date")
+			}
+		}
+	}
+	if len(s.Notes) > FolderStructureMaxMembers+1 {
+		return invalid("notes")
+	}
+	encoded, err := json.Marshal(s)
+	if err != nil || len(encoded) > folderStructureMaxBytes {
+		return invalid("size")
+	}
+	return nil
+}
+
+// validateSelected holds a saved arrangement's selection to its own rules, not
+// the recognition rule's: only a new plain group, between one and the creator's
+// limit of exact members, every one of them created, none already a workspace,
+// and no omitted tail. It never accepts a weaker version-1 proposal.
+func (s FolderStructure) validateSelected(invalid func(string) error) error {
+	if !validStructureName(s.Folder) || s.MinMembers != 0 || s.Omitted != 0 || !s.Arrangement.valid() {
+		return invalid("selection header")
+	}
+	if !validStructureWorkspaceName(s.Group.Name) || s.Group.Type != FolderGroupPlain || s.Group.DestinationState != "new" ||
+		s.Group.HomeName != "" || s.Group.HomeAvailable || !validFolderAvailability(s.Group.Availability) {
+		return invalid("selection group")
+	}
+	if len(s.Members) < 1 || len(s.Members) > FolderStructureMaxMembers || s.Projects < 0 || s.Projects > len(s.Members) {
+		return invalid("selection members")
+	}
+	seen := map[string]bool{}
+	for _, member := range s.Members {
+		if !validStructureName(member.CandidateID) || member.CandidateID == folderRootCandidateID || seen[member.CandidateID] ||
+			!validStructureWorkspaceName(member.Name) || !validStructureName(member.Folder) || member.TypeLabel != folderPlainWorkspaceLabel ||
+			member.Files < 0 || member.Files > foldercontext.MaxEntries || !member.Included || member.ExistingWorkspace != "" ||
+			member.BlueprintID != "" || member.BlueprintLabel != "" || member.Integration != "" || !validFolderAvailability(member.Availability) ||
+			member.RelPath == "" || validateFolderName(member.RelPath) != nil {
+			return invalid("selection member")
+		}
+		seen[member.CandidateID] = true
+		for _, text := range []string{member.Shape, member.Marker, member.MarkerName, member.DominantExtension, member.Identity} {
+			if len(text) > 200 || strings.ContainsAny(text, "/\\\x00\r\n") {
+				return invalid("selection member text")
+			}
+		}
+		if member.LastChanged != "" {
+			if _, err := time.Parse(foldercontext.DateLayout, member.LastChanged); err != nil {
+				return invalid("selection member date")
 			}
 		}
 	}

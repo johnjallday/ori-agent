@@ -487,10 +487,16 @@ just as a reviewed project integration does. A provider that is not on the list
 keeps the manual guidance: install it from the Plugins page, then return.
 
 The reviewed Home provider is Music Project Management with a floor of
-`0.1.0` and fallback commit `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`, the
-resolved commit of the `v0.1.0` tag, published 2026-09-22. The release is
-content-only and has no platform artifact. The fallback commit was checked by
-loading that exact commit and passing it through the same release check:
+`0.3.0` and fallback commit `2d5f01e6daa24c77327a84376d8feb75b965d575`, the
+resolved commit of the `v0.3.0` tag, published 2026-10-18 (workspace-arrangement
+guidance in the skill and the Portfolio Manager prompt; the required host
+features are `independent_program_homes_v1` and `home_profile_v1`, the same two
+as 0.2.0). Earlier floors: `0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`
+(`v0.1.0`, 2026-09-22). The release is content-only and has no platform
+artifact; its `git archive` tarball and checksum were downloaded and diffed
+against the tested candidate tree (`f43e7b39…`, identical). The fallback
+commit was checked by loading that exact commit and passing it through the
+same release check:
 
 ```bash
 ORI_REVIEWED_HOME_PROVIDER_CANDIDATE=1 go test ./internal/reviewedintegration \

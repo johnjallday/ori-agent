@@ -16,6 +16,8 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`INSERT INTO assistant_arrangements(id,session_id,message_id,user_id,workspace_id,agent_name,state_version,context_revision,folder_revision,revision,state,record_json)
+			SELECT 'reset-arrangement',session_id,id,'local','reset-hq','Atlas',1,'context',id,1,'draft','{"version":1,"id":"reset-arrangement","revision":1,"state":"draft"}' FROM messages LIMIT 1`,
 		`INSERT INTO assistant_conversation_checkpoints(session_id,owner_user_id,hq_workspace_id,profile_name,state_version,source_epoch,through_rowid,generation,recap_json,updated_at)
 			SELECT id,'local','reset-hq','Atlas',1,0,1,1,'{"version":1,"items":[]}',CURRENT_TIMESTAMP FROM sessions LIMIT 1`,
 		`INSERT INTO assistant_operations(id,contract_version,kind,status,revision,user_id,assistant_id,state_version,hq_workspace_id,profile_name,
@@ -56,7 +58,7 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 	for _, name := range []string{
 		"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts",
 		"group_requirement_reviews", "group_requirement_operations", "assistant_conversation_checkpoints",
-		"assistant_operations",
+		"assistant_operations", "assistant_arrangements",
 	} {
 		if before.Counts[name] == nil || *before.Counts[name] == 0 {
 			t.Fatalf("fixture app-record domain %s is empty: %#v", name, before.Counts)
@@ -70,7 +72,7 @@ func TestResetAppRecordsClearsFixedDomainsAndPreservesSchemaAndBackingFiles(t *t
 	for _, name := range []string{
 		"sessions", "messages", "setup_journey_run", "sample_library_state", "agent_map_layouts",
 		"group_requirement_reviews", "group_requirement_operations", "assistant_conversation_checkpoints",
-		"assistant_operations",
+		"assistant_operations", "assistant_arrangements",
 	} {
 		if deleted[name] == 0 {
 			t.Fatalf("deletion count for %s = 0: %#v", name, deleted)

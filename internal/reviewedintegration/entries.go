@@ -33,16 +33,18 @@ var builtInEntries = mustRegistry([]Entry{
 // Assistant Program Home. Same floor rule as above; a content-only release has
 // no platform asset, so its fallback commit is verified against the published
 // tag alone. See docs/architecture/independent-program-homes.md for the v0.1.0
-// evidence.
+// and v0.3.0 evidence.
 var builtInHomeProviders = mustHomeProviders([]HomeProvider{
 	{
-		Key: "music_project_management", PluginID: "music-project-management", MinimumVersion: "0.1.0",
+		Key: "music_project_management", PluginID: "music-project-management", MinimumVersion: "0.3.0",
 		DisplayName:      "Music Project Management",
 		SourceRepository: "https://github.com/johnjallday/music-project-management",
-		FallbackCommit:   "5f748d2de4457ac9dd02ea1ec31e34e1493744cf", SourceFormat: reviewedClaudeFormat,
+		// v0.3.0: workspace-arrangement guidance in the skill and the Portfolio
+		// Manager prompt; requires the same two host features as 0.2.0.
+		FallbackCommit: "2d5f01e6daa24c77327a84376d8feb75b965d575", SourceFormat: reviewedClaudeFormat,
 		PublisherLabel: "Ori", SourceLabel: "johnjallday/music-project-management",
 		ProgramID: "music-producer-assistant", HomeSchemaVersion: 1,
-		RequiredHostFeatures: []string{"independent_program_homes_v1"},
+		RequiredHostFeatures: []string{"independent_program_homes_v1", "home_profile_v1"},
 		ExpectedProtocol:     1,
 		ReleaseReady:         true,
 	},

@@ -580,6 +580,7 @@ func (b *ServerBuilder) initializeEventSystem() {
 	// A completed library scan asks the Home's bound Manager for at most a
 	// few inert suggestions; it needs the bus, the store and the handlers.
 	b.wireLibraryManagerReview()
+	b.wireLibraryArrangementPlanning()
 	if b.chatHandler != nil {
 		b.chatHandler.SetProjectTemplateDeps(func() string {
 			return resolveTemplatesRoot(b.configManager)
