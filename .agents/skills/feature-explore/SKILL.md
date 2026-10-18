@@ -92,7 +92,8 @@ The report file is the only thing a run writes.
      owed. `MISSING` worktrees go to Housekeeping too.
    - An Issue is selected when an artifact carries its exact number: a plan
      file, a worktree, a branch under "branches carrying an Issue number", or
-     a PR. An archived `(done #N)` plan marks shipped work.
+     a PR. An archived `(done #N)` plan, listed from `tasks/archive/`, marks
+     shipped work.
    - In flight: a feature worktree or open PR touched within 14 days whose
      next step is not the user's. List it under "In flight", never on the
      shortlist.
