@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/testutil/processfixture"
 )
 
 func TestBackupMainProcessHelper(t *testing.T) {
@@ -32,13 +33,10 @@ func TestBackupHelperExitsBeforeApplicationStartup(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	executable := processfixture.Executable(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	// #nosec G204 -- current compiled test binary and one fixed process helper.
+	// #nosec G204 -- this package's compiled test binary and one fixed process helper.
 	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestBackupMainProcessHelper$")
 	cmd.Dir = root
 	cmd.Env = []string{"HOME=" + home, "ORI_DATA_DIR=" + data, "ORI_DISABLE_NATIVE_SECRET_STORE=1", "ORI_BACKUP_MAIN_TEST_CHILD=1"}

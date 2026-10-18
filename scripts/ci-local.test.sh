@@ -58,4 +58,23 @@ if (cd "$repo_root" && bash scripts/ci-local.sh --dry-run --bogus >/dev/null 2>&
   exit 1
 fi
 
-printf 'ci-local pins gosec to CI, selects the README gate from photographed paths, and plans in CI order\n'
+# The full gate delegates to CI's canonical coverage-enabled runner, rather
+# than duplicating flags that can drift. Inherited hosted scope must not shard it.
+unit_sandbox="$(mktemp -d "${TMPDIR:-/tmp}/ori-ci-unit-contract.XXXXXX")"
+trap 'rm -rf "$unit_sandbox"' EXIT
+mkdir "$unit_sandbox/scripts"
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+  '[[ $# == 0 && -z "${RUNNER_OS:-}${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]' \
+  'printf "canonical full unit runner invoked\\n"' > "$unit_sandbox/scripts/run-unit-tests.sh"
+chmod 700 "$unit_sandbox/scripts/run-unit-tests.sh"
+unit_result="$(
+  cd "$unit_sandbox"
+  export RUNNER_OS=macOS ORI_UNIT_SHARD=2 ORI_UNIT_SHARD_COUNT=4
+  ci_local_run_gate unit-tests origin/dev
+)"
+if [[ "$unit_result" != 'canonical full unit runner invoked' ]]; then
+  echo "full unit gate did not invoke the unsharded canonical runner" >&2
+  exit 1
+fi
+
+printf 'ci-local pins gosec to CI, selects the README gate, plans in CI order, and uses the full canonical unit runner\n'

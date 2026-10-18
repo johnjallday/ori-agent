@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/testutil/processfixture"
 )
 
 func TestBackupReadProcessHelper(t *testing.T) {
@@ -144,10 +146,7 @@ func TestBackupReadProcessHelper(t *testing.T) {
 
 func readProcessFixture(t *testing.T, mode string) readProcessSpec {
 	t.Helper()
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	executable := processfixture.Executable(t)
 	directory, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -172,13 +171,63 @@ func TestReadProcessDeadlineStopsBlockedHelpersNestedPipelineChild(t *testing.T)
 	if out, err := runReadProcess(t.Context(), spec); err != errReadProcessDeadline || len(out) != 0 {
 		t.Fatal("blocked nested pipeline escaped its outer deadline")
 	}
-	before, err := os.Stat(heartbeat)
-	if err != nil {
-		t.Fatal("nested writer never started; control is inconclusive")
+	// Admission includes cold process startup. A deadline may expire before the
+	// nested writer starts; neither an existing writer nor a late one may survive.
+	assertNestedHeartbeatStopped(t, heartbeat)
+}
+
+func TestReadProcessCancellationStopsRunningNestedPipelineChild(t *testing.T) {
+	spec := readProcessFixture(t, "pipeline_blocked")
+	heartbeat := filepath.Join(spec.directory, "invented-heartbeat")
+	spec.environment = append(spec.environment, "ORI_BACKUP_TEST_HEARTBEAT="+heartbeat)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	var out []byte
+	var readErr error
+	go func() {
+		defer close(done)
+		out, readErr = runReadProcess(ctx, spec)
+	}()
+	defer func() { cancel(); <-done }()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	ready := time.NewTimer(spec.timeout)
+	defer ready.Stop()
+	for {
+		if _, err := os.Stat(heartbeat); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+			t.Fatal("nested writer exited before the active-child control was ready")
+		case <-ready.C:
+			t.Fatal("nested writer never started; active-child control is inconclusive")
+		case <-ticker.C:
+		}
+	}
+	cancel()
+	<-done
+	if readErr != errReadProcessCancelled || len(out) != 0 {
+		t.Fatal("cancellation did not drain the running nested pipeline")
+	}
+	assertNestedHeartbeatStopped(t, heartbeat)
+}
+
+func assertNestedHeartbeatStopped(t *testing.T, heartbeat string) {
+	t.Helper()
+	before, beforeErr := os.Stat(heartbeat)
+	if beforeErr != nil && !errors.Is(beforeErr, os.ErrNotExist) {
+		t.Fatal(beforeErr)
 	}
 	time.Sleep(150 * time.Millisecond)
-	after, err := os.Stat(heartbeat)
-	if err != nil || before.ModTime() != after.ModTime() {
+	after, afterErr := os.Stat(heartbeat)
+	if errors.Is(beforeErr, os.ErrNotExist) {
+		if !errors.Is(afterErr, os.ErrNotExist) {
+			t.Fatal("nested pipeline child started writing after its owner was reaped")
+		}
+	} else if afterErr != nil || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatal("nested pipeline child continued writing after its owner was reaped")
 	}
 }

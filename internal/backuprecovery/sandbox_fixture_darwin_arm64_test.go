@@ -11,19 +11,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/testutil/processfixture"
 )
 
 func sandboxFixtureExecutable(t *testing.T) string {
 	t.Helper()
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return executable
+	return processfixture.Executable(t)
 }
 
 // Only our compiled test helpers and invented fixture paths reach this seam.
