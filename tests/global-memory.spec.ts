@@ -39,13 +39,17 @@ test.describe.serial('Global memory across workspaces', () => {
     }
   }
 
-  async function openMemoryTab(page: Page, slug: string) {
+  // Memory is a station in every workspace: its row in the Details-mode
+  // Stations rail opens the memory panel. The HQ may already have Stations
+  // open, so the toggle is only clicked when the section is closed.
+  async function openMemoryStation(page: Page, slug: string) {
     await page.goto(`/workspaces/${slug}`);
     await clearBlockingModals(page);
     await page.locator('[data-cmd-view-mode="details"]').click();
-    await page.locator('[data-cmd-manage-section="systems"]').click();
-    await page.locator('[data-cmd-system-tab="memory"]').click();
-    const pane = page.locator('#workspace-detail-config-memory-pane');
+    const stations = page.locator('[data-cmd-manage-section="stations"]');
+    if ((await stations.getAttribute('aria-expanded')) !== 'true') await stations.click();
+    await page.locator('.ws-cmd-rail [data-cmd-hq-station="memory"]').click();
+    const pane = page.locator('.ws-cmd-modal-panel.is-memory #workspace-detail-config-memory-pane');
     await expect(pane).toBeVisible();
     return pane;
   }
@@ -124,7 +128,7 @@ test.describe.serial('Global memory across workspaces', () => {
     await skipOnboarding(page);
   });
 
-  test('without an assistant, the tool and the Memory tab explain how to get global memory', async ({
+  test('without an assistant, the tool and the Memory station explain how to get global memory', async ({
     page
   }) => {
     const album = await projectWorkspace(page, 'Album Three');
@@ -140,7 +144,7 @@ test.describe.serial('Global memory across workspaces', () => {
       data: { text: 'Album masters at -14 LUFS.', type: 'fact' }
     });
     expect(added.status(), await added.text()).toBe(200);
-    const pane = await openMemoryTab(page, album.folder_slug);
+    const pane = await openMemoryStation(page, album.folder_slug);
     const entry = pane
       .locator('.workspace-detail-memory-entry')
       .filter({ hasText: 'Album masters at -14 LUFS.' });
@@ -249,7 +253,7 @@ test.describe.serial('Global memory across workspaces', () => {
     expect(after.entries.some((entry: { text: string }) => entry.text === proposal)).toBe(false);
   });
 
-  test('an entry is promoted from the Memory tab and the HQ shows reviewed lines read-only', async ({
+  test('an entry is promoted from the Memory station and the HQ shows reviewed lines read-only', async ({
     page
   }) => {
     await ensurePersonalHQ(page);
@@ -259,7 +263,7 @@ test.describe.serial('Global memory across workspaces', () => {
     });
     expect(added.status(), await added.text()).toBe(200);
 
-    const pane = await openMemoryTab(page, album.folder_slug);
+    const pane = await openMemoryStation(page, album.folder_slug);
     await expect(pane).toContainText('Promote an entry to global memory');
     const entry = pane
       .locator('.workspace-detail-memory-entry')
@@ -277,7 +281,7 @@ test.describe.serial('Global memory across workspaces', () => {
     await page.screenshot({ path: 'test-results/global-memory-promoted.png', fullPage: true });
 
     const hq = (await (await page.request.get('/api/personal-hq/status')).json()).status.workspace;
-    const hqPane = await openMemoryTab(page, hq.folder_slug);
+    const hqPane = await openMemoryStation(page, hq.folder_slug);
     const reviewed = hqPane
       .locator('.workspace-detail-memory-entry.is-global')
       .filter({ hasText: 'I reference my mixes at -14 LUFS.' });

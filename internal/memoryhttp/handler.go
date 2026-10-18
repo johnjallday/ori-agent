@@ -51,6 +51,10 @@ type entryDTO struct {
 	// Managed marks a reviewed global-memory line (ori-hq:). It changes only
 	// through review on the Profile page, never through this API.
 	Managed bool `json:"managed,omitempty"`
+	// InPrompt reports whether the workspace prompt section includes this
+	// entry, from workspace.MemoryPromptSelection (the renderer's own
+	// selection). Always false for a Managed line: it is never in that section.
+	InPrompt bool `json:"in_prompt"`
 }
 
 type managedLearningDTO struct {
@@ -218,6 +222,7 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, r *http.Request, wo
 	}
 	doc := workspace.ParseMemoryDocument(raw)
 	entries := doc.Entries()
+	inPrompt := workspace.MemoryPromptSelection(doc) // aligned with entries
 	dtos := make([]entryDTO, len(entries))
 	for i, e := range entries {
 		dtos[i] = entryDTO{
@@ -227,6 +232,7 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, r *http.Request, wo
 			Provenance: e.Provenance,
 			Text:       e.Text,
 			Managed:    workspace.IsHQManagedProvenance(e.Provenance),
+			InPrompt:   inPrompt[i],
 		}
 	}
 	unstructured := doc.UnstructuredLines()

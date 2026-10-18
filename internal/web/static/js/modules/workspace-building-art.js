@@ -166,6 +166,30 @@
           <path d="M42 42h25M54 38v11M50 46l4 4 4-4" fill="none" stroke="#f6f0df" stroke-opacity=".9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
         </g>`
     }),
+    // Station-only: the Memory station's low, wide stacks. Deliberately absent
+    // from BLUEPRINT_VARIANTS so no workspace building ever takes it.
+    archive: Object.freeze({
+      color: '#b8a27a',
+      markup: `
+        <polygon points="60 54 112 71 60 87 8 71" fill="currentColor" opacity=".13" stroke="currentColor" stroke-opacity=".48"/>
+        <polygon points="12 44 60 59 60 79 12 64" fill="currentColor" opacity=".4"/>
+        <polygon points="108 44 60 59 60 79 108 64" fill="currentColor" opacity=".58"/>
+        <polygon points="12 44 60 29 108 44 60 59" fill="currentColor" opacity=".86"/>
+        <g data-archive-shelves="stacks">
+          <path d="M17 51l38 12M17 56l38 12M17 61l38 12" stroke="#101619" stroke-opacity=".52" stroke-width="1.8"/>
+          <path d="M23 48v5M31 51v5M41 54v5M27 54v5M37 57v5M47 60v5" stroke="#101619" stroke-opacity=".32" stroke-width="1.4"/>
+        </g>
+        <polygon points="72 64 82 61 82 72 72 75" fill="#101619" opacity=".62"/>
+        <g data-archive-lantern="door">
+          <path d="M77 53.5v3.5" stroke="currentColor" stroke-width="1.4"/>
+          <rect x="75" y="57" width="4" height="4" rx="1" fill="#f6f0df" fill-opacity=".9" stroke="currentColor" stroke-width="1"/>
+        </g>
+        <g data-building-emblem="archive">
+          <rect x="47" y="34" width="26" height="18" rx="1.5" fill="#101619" fill-opacity=".76" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M52 39h9M52 43h11M52 47h7" stroke="#f6f0df" stroke-opacity=".88" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M65 34v9l2.5-2 2.5 2v-9" fill="currentColor" stroke="#101619" stroke-width="1" stroke-linejoin="round"/>
+        </g>`
+    }),
     github: Object.freeze({
       color: '#8fb3cc',
       markup: `

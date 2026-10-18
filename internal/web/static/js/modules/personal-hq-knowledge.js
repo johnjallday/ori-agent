@@ -1,5 +1,7 @@
 import { renderDossierSources, safeDossierRoute } from './personal-hq-sources.js';
 import { factByteLength, newRequestID, reviewTextValid } from './personal-hq-fact.js';
+import { MEMORY_STATION } from './memory-station.js';
+import { stationLink } from './workspace-station-link.js';
 
 // The fact rules live in personal-hq-fact.js so the assistant's Remember…
 // review applies exactly the same ones; this page's behavior is unchanged.
@@ -189,8 +191,14 @@ export function copyTargetWorkspaces(payload) {
         ws.designation !== 'personal_hq' &&
         (!ws.status || ws.status === 'active')
     )
-    .map(ws => ({ id: ws.id, name: String(ws.name || ws.id) }))
+    .map(ws => ({ id: ws.id, name: String(ws.name || ws.id), slug: String(ws.folder_slug || '') }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// workspaceMemoryLink opens a workspace's Memory station, where a copied fact
+// lands; '' (no link) for a workspace without a usable address.
+export function workspaceMemoryLink(slug) {
+  return stationLink(slug, MEMORY_STATION);
 }
 
 // copiesSummary is the line shown next to a fact's copies.
@@ -472,9 +480,10 @@ export function mountPersonalHQKnowledge(root = document) {
     const list = element('ul', 'reviewed-knowledge-copies');
     for (const copy of copies) {
       const row = element('li');
-      if (safeDossierRoute(copy.href)) {
+      const href = workspaceMemoryLink(copy.slug);
+      if (href) {
         const link = element('a', '', copy.name || 'Workspace');
-        link.href = copy.href;
+        link.href = href;
         row.append(link);
       } else {
         row.append(copy.name || 'Workspace');
@@ -539,6 +548,7 @@ export function mountPersonalHQKnowledge(root = document) {
     select.disabled = true;
     select.append(element('option', '', 'Loading workspaces…'));
     const result = element('p', 'reviewed-knowledge-evidence');
+    let targets = [];
     form.append(
       label,
       select,
@@ -548,7 +558,7 @@ export function mountPersonalHQKnowledge(root = document) {
     );
     card.append(form);
     try {
-      const targets = copyTargetWorkspaces(await request('/api/workspaces'));
+      targets = copyTargetWorkspaces(await request('/api/workspaces'));
       if (targets.length) {
         select.replaceChildren(
           ...targets.map(target => {
@@ -582,9 +592,12 @@ export function mountPersonalHQKnowledge(root = document) {
             ? `Copied into ${name}. Its agents now have this fact in their workspace memory. `
             : `${name} already has this fact. `
         );
-        if (safeDossierRoute(copied.href)) {
+        // The copy is in that workspace's Memory station: link straight to it.
+        const target = targets.find(entry => entry.id === select.value);
+        const memoryHref = workspaceMemoryLink(target?.slug);
+        if (memoryHref) {
           const open = element('a', '', `Open ${name}'s memory`);
-          open.href = copied.href;
+          open.href = memoryHref;
           result.append(open);
         }
         setStatus(copied.created ? `Copied into ${name}.` : `${name} already has this fact.`);

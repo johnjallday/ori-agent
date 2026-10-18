@@ -216,16 +216,8 @@ const memoryPromptGuidance = "Persistent knowledge accumulated for this workspac
 // pass true where those tools are available (mission/chat) and false for the
 // native-CLI path, which only reads memory as context.
 func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) string {
-	// A raw workspace document contains no lifecycle proof. A managed HQ
-	// marker is inert here even if its bytes appear to be a structured entry;
-	// only a separate, bound eligibility projection may render it.
-	entries := make([]MemoryEntry, 0)
-	for _, entry := range doc.Entries() {
-		if !IsHQManagedProvenance(entry.Provenance) {
-			entries = append(entries, entry)
-		}
-	}
-	if len(entries) == 0 && !includeToolGuidance {
+	pick := selectMemoryPrompt(doc)
+	if pick.eligible == 0 && !includeToolGuidance {
 		return ""
 	}
 
@@ -235,20 +227,74 @@ func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) str
 		b.WriteString(memoryPromptGuidance)
 		b.WriteString("\n\n")
 	}
-	if len(entries) == 0 {
+	if pick.eligible == 0 {
 		b.WriteString("_(empty — nothing recorded yet)_\n")
 		return b.String()
 	}
 
-	kept, dropped := selectMemoryEntriesForBudget(entries, memoryPromptCharBudget)
-	for _, e := range kept {
+	for _, e := range pick.kept {
 		b.WriteString(e.Render())
 		b.WriteString("\n")
 	}
-	if dropped > 0 {
-		fmt.Fprintf(&b, "\n(memory truncated — %d entr%s not shown; consider pruning)\n", dropped, plural(dropped, "y", "ies"))
+	if pick.dropped > 0 {
+		fmt.Fprintf(&b, "\n(memory truncated — %d entr%s not shown; consider pruning)\n", pick.dropped, plural(pick.dropped, "y", "ies"))
 	}
 	return b.String()
+}
+
+// MemoryPromptSelection reports which entries RenderMemoryPromptSection puts
+// in the prompt. The result is aligned with doc.Entries(): element i is for
+// entry i, the same 0-based file-order index the memory API returns and
+// EditAt/DeleteAt address. HQ-managed markers are always false (they are never
+// in the workspace prompt section); an ordinary entry is false only when the
+// prompt budget drops it. It shares selectMemoryPrompt with the renderer, so
+// the two cannot disagree.
+func MemoryPromptSelection(doc MemoryDocument) []bool {
+	pick := selectMemoryPrompt(doc)
+	inPrompt := make([]bool, pick.total)
+	for _, index := range pick.keptIndexes {
+		inPrompt[index] = true
+	}
+	return inPrompt
+}
+
+// memoryPromptPick is the outcome of the one prompt selection path.
+type memoryPromptPick struct {
+	total       int           // len(doc.Entries()), managed markers included
+	eligible    int           // entries considered: managed markers excluded
+	kept        []MemoryEntry // surviving entries, in file order
+	keptIndexes []int         // doc.Entries() index of each kept entry
+	dropped     int           // eligible entries the budget left out
+}
+
+// selectMemoryPrompt excludes HQ-managed markers, then applies the prompt
+// budget. Both RenderMemoryPromptSection and MemoryPromptSelection use it.
+func selectMemoryPrompt(doc MemoryDocument) memoryPromptPick {
+	// A raw workspace document contains no lifecycle proof. A managed HQ
+	// marker is inert here even if its bytes appear to be a structured entry;
+	// only a separate, bound eligibility projection may render it.
+	all := doc.Entries()
+	entries := make([]MemoryEntry, 0, len(all))
+	docIndexes := make([]int, 0, len(all))
+	for i, entry := range all {
+		if !IsHQManagedProvenance(entry.Provenance) {
+			entries = append(entries, entry)
+			docIndexes = append(docIndexes, i)
+		}
+	}
+	positions, dropped := selectMemoryEntriesForBudget(entries, memoryPromptCharBudget)
+	pick := memoryPromptPick{
+		total:       len(all),
+		eligible:    len(entries),
+		kept:        make([]MemoryEntry, len(positions)),
+		keptIndexes: make([]int, len(positions)),
+		dropped:     dropped,
+	}
+	for i, position := range positions {
+		pick.kept[i] = entries[position]
+		pick.keptIndexes[i] = docIndexes[position]
+	}
+	return pick
 }
 
 // IsHQManagedProvenance reserves the Ori-managed HQ marker namespace. Other
@@ -274,10 +320,11 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// selectMemoryEntriesForBudget chooses which entries survive the char budget,
-// then returns them in original file order along with the dropped count.
+// selectMemoryEntriesForBudget chooses which entries survive the char budget
+// and returns their positions in entries, ascending (original file order),
+// along with the dropped count.
 // Priority: watch/thread entries first, then others newest-first by date.
-func selectMemoryEntriesForBudget(entries []MemoryEntry, charBudget int) (kept []MemoryEntry, dropped int) {
+func selectMemoryEntriesForBudget(entries []MemoryEntry, charBudget int) (kept []int, dropped int) {
 	type indexed struct {
 		entry MemoryEntry
 		order int
@@ -316,9 +363,9 @@ func selectMemoryEntriesForBudget(entries []MemoryEntry, charBudget int) (kept [
 
 	// Restore original file order for readable output.
 	sort.Slice(selected, func(i, j int) bool { return selected[i].order < selected[j].order })
-	kept = make([]MemoryEntry, len(selected))
+	kept = make([]int, len(selected))
 	for i, it := range selected {
-		kept[i] = it.entry
+		kept[i] = it.order
 	}
 	return kept, dropped
 }

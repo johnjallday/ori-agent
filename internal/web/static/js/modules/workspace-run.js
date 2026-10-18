@@ -1,4 +1,6 @@
 import { workspacePageURL } from './workspace-routes.js';
+import { MEMORY_STATION } from './memory-station.js';
+import { stationLink } from './workspace-station-link.js';
 
 const ACTIVE_STATUSES = new Set([
   'pending',
@@ -345,10 +347,18 @@ export class WorkspaceRunPage {
       `;
     };
 
+    // The workspace's Memory station holds what the run wrote; '' (no link)
+    // when the workspace has no usable address.
+    const memoryHref = stationLink(this.workspaceSlug, MEMORY_STATION);
+    const memoryLink = memoryHref
+      ? `<a class="workspace-run-memory-link" href="${escapeHtml(memoryHref)}">Open workspace memory</a>`
+      : '';
+
     this.elements.memoryCard.hidden = false;
     this.elements.memory.innerHTML =
       renderGroup(`Remembered (${added.length})`, added, 'is-added') +
-      renderGroup(`Forgotten (${removed.length})`, removed, 'is-removed');
+      renderGroup(`Forgotten (${removed.length})`, removed, 'is-removed') +
+      memoryLink;
   }
 
   renderHero() {

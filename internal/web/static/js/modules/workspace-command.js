@@ -40,9 +40,17 @@ import {
   briefPanelMeta,
   dailyBriefStationLink,
   dailyBriefStationState,
-  dailyBriefStatus,
-  stationFromSearch
+  dailyBriefStatus
 } from './daily-brief-station.js';
+import { stationFromSearch } from './workspace-station-link.js';
+import { groupReviewedKnowledge } from './personal-hq-knowledge.js';
+import {
+  MEMORY_STATION,
+  memoryStationState as memoryBadgeState,
+  memoryStationSummary,
+  readMemoryStationBaseline,
+  writeMemoryStationBaseline
+} from './memory-station.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -274,7 +282,8 @@ export class WorkspaceCommandView {
     this.commandTagInput = null;
     this.commandTagDraft = [];
     this.commandTagError = '';
-    this.activeSystemTab = 'memory';
+    // Memory is a station now (PRD memory-station FR12); Systems opens on Triggers.
+    this.activeSystemTab = 'triggers';
     this.activeToolsTab = 'mcp';
     this.selectedAgentKey = '';
     this.agentSelectionInitialized = false;
@@ -827,6 +836,7 @@ export class WorkspaceCommandView {
 
   /** The page forwards every realtime event it receives (FR30: no second stream). */
   handleActivityEvent(event) {
+    this.noteMemoryStationActivity(event);
     if (this.isGroupWorkspace()) return false;
     return this.mapActivityLayer().handleRealtimeEvent(event);
   }
@@ -939,10 +949,11 @@ export class WorkspaceCommandView {
    * Opens a station's panel when the URL carries `?station=<key>`, then takes
    * the parameter off the address bar so a reload does not reopen it.
    *
-   * The Daily Brief station exists only on the designated Personal HQ, and
-   * that is known only once the workspace has loaded, so this waits for it;
-   * refresh() calls again when the data arrives. On any other workspace the
-   * link is dropped without opening anything.
+   * Which stations a workspace has (the Daily Brief only on the designated
+   * Personal HQ, Memory on every workspace) is known only once the workspace
+   * has loaded, so this waits for it; refresh() calls again when the data
+   * arrives. A key this workspace has no station for is dropped without
+   * opening anything.
    */
   applyStationDeepLink() {
     if (!this._bootStation || typeof window === 'undefined') return;
@@ -959,7 +970,11 @@ export class WorkspaceCommandView {
     } catch {
       /* the panel still opens; only the address bar keeps the parameter */
     }
-    if (station === DAILY_BRIEF_STATION && this.isPersonalHQ()) this.openDailyBriefPanel(null);
+    // A direct link has no opener: each station's action falls back to its
+    // own building, so closing the panel lands there.
+    if (this.mapStationRegistry().some(entry => entry.key === station)) {
+      this.runHQStationAction(station, null);
+    }
   }
 
   applyBootURLState() {
@@ -2187,6 +2202,7 @@ export class WorkspaceCommandView {
     this.rememberRailFocus();
     this.captureAgentDeckViewState();
     this.captureDailyBriefPanelView();
+    this.captureStatModalFocus();
     if (this.commandTagInput) {
       try {
         this.commandTagDraft = this.commandTagInput.getTags();
@@ -2296,6 +2312,7 @@ export class WorkspaceCommandView {
         this.renderStatModalBody();
         this.setCommandBackgroundInert(true);
         this.restoreDailyBriefPanelView();
+        this.restoreStatModalFocus();
       }
     }
 
@@ -2563,6 +2580,8 @@ export class WorkspaceCommandView {
         return { title: 'Calendar Ops', addLabel: '' };
       case DAILY_BRIEF_STATION:
         return { title: 'Daily Brief', addLabel: '' };
+      case MEMORY_STATION:
+        return { title: 'Memory', addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -2595,6 +2614,7 @@ export class WorkspaceCommandView {
     if (section === 'tools') {
       this.activeToolsTab = this.toolsTab(this.activeToolsTab).key;
     }
+    this._memoryPanelLoaded = false;
     this.statModalTrigger = trigger || null;
     const el = this.ensureStatModal();
     if (!el) return;
@@ -2618,6 +2638,7 @@ export class WorkspaceCommandView {
     const wasBoard = this.taskModalBoardMode;
     const wasConfig = this.sectionUsesConfigSurface(this.statModalSection);
     const wasTools = this.statModalSection === 'tools';
+    const wasMemory = this.statModalSection === MEMORY_STATION;
     this.statModalSection = '';
     this.statModalTrigger = null;
     this.taskModalBoardMode = false;
@@ -2638,8 +2659,57 @@ export class WorkspaceCommandView {
     if (this._dailyBriefPanel) this._dailyBriefPanel.brief.setOnScreen(false);
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
+    // The building behind the panel still says what it said before the panel
+    // opened ("+3 new"): repaint it from what was just seen, then re-read
+    // (FR6). The repaint comes first so focus returns to the new building.
+    if (wasMemory) {
+      if (this.active) this.render();
+      this.requestMemoryStationData(true);
+      this.requestHQReviewQueue(true);
+    }
     const opener = this.resolveStatModalTrigger(trigger);
     if (opener && typeof opener.focus === 'function') opener.focus();
+  }
+
+  // render() takes the open stat modal out of the container and puts it back,
+  // and a modal hosting a shared surface re-mounts it, so focus inside falls
+  // to <body> on the way, taking Escape and the focus trap with it. The
+  // focused control gets focus back (a node of the shared surface survives the
+  // move, caret included); one that was rebuilt hands focus to the panel.
+  captureStatModalFocus() {
+    this._statModalFocus = null;
+    if (!this.statModalSection || !this.statModalEl || typeof document === 'undefined') return;
+    const active = document.activeElement;
+    if (!active || typeof this.statModalEl.contains !== 'function') return;
+    if (!this.statModalEl.contains(active)) return;
+    const caret =
+      typeof active.selectionStart === 'number'
+        ? [active.selectionStart, active.selectionEnd]
+        : null;
+    this._statModalFocus = { el: active, caret };
+  }
+
+  restoreStatModalFocus() {
+    const saved = this._statModalFocus;
+    this._statModalFocus = null;
+    if (!saved || !this.statModalSection || !this.statModalEl) return;
+    if (typeof document === 'undefined' || document.activeElement === saved.el) return;
+    const target = saved.el.isConnected
+      ? saved.el
+      : this.statModalEl.querySelector('.ws-cmd-modal-panel');
+    if (!target || typeof target.focus !== 'function') return;
+    try {
+      target.focus({ preventScroll: true });
+    } catch (err) {
+      target.focus();
+    }
+    if (target === saved.el && saved.caret && typeof target.setSelectionRange === 'function') {
+      try {
+        target.setSelectionRange(saved.caret[0], saved.caret[1]);
+      } catch (err) {
+        /* not a text control */
+      }
+    }
   }
 
   // render() rebuilds the container, so the element that opened a panel may be
@@ -2764,6 +2834,9 @@ export class WorkspaceCommandView {
     // attached rather than re-serialized on every repaint.
     const isBrief = this.statModalSection === DAILY_BRIEF_STATION;
     if (panel.classList) panel.classList.toggle('is-daily-brief', isBrief);
+    // Memory is a reading surface: it takes its own width (FR10).
+    if (panel.classList)
+      panel.classList.toggle('is-memory', this.statModalSection === MEMORY_STATION);
     if (isBrief) this.mountDailyBriefPanel(panel);
     else panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
@@ -2894,15 +2967,18 @@ export class WorkspaceCommandView {
     if (config.classList) config.classList.add('is-command-modal');
     const tabId = this.configTabIdFor(section);
     if (tabId) this.showConfigTab({ tabId });
-    this.refreshConfigData(section);
+    // The memory pane keeps live state (an inline edit, a promote form) and
+    // loads once when its panel opens; a background repaint only re-mounts it.
+    if (section !== MEMORY_STATION || !this._memoryPanelLoaded) this.refreshConfigData(section);
+    if (section === MEMORY_STATION) this._memoryPanelLoaded = true;
     // expandMountedConfig must run LAST: refreshConfigData re-collapses the config
     // content, so the rail (syncSystemsSurface) also expands last — mirror that order.
     this.expandMountedConfig(config);
   }
 
   // Hand the config surface back to its hidden home and, if the Systems rail is still
-  // expanded on a config-host tab, re-mount it there so Plugins/Memory/Triggers is not
-  // left blank (single-node arbitration).
+  // expanded on a config-host tab, re-mount it there so Triggers is not left blank
+  // (single-node arbitration).
   releaseConfigModalSurface() {
     const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors.config;
     if (record && record.node && record.node.classList) {
@@ -3170,7 +3246,8 @@ export class WorkspaceCommandView {
 
   // These stat sections host the live Workspace config surface in the modal:
   // MCP and Skills (header stat boxes), Manager Settings (entry-agent card gear),
-  // and Goal Settings (the goal modal's "Advanced settings" button).
+  // Goal Settings (the goal modal's "Advanced settings" button), and Memory
+  // (the Memory station).
   sectionUsesConfigSurface(section) {
     const key = String(section || '');
     return (
@@ -3178,7 +3255,8 @@ export class WorkspaceCommandView {
       key === 'skills' ||
       key === 'settings' ||
       key === 'mission' ||
-      key === 'intent'
+      key === 'intent' ||
+      key === MEMORY_STATION
     );
   }
 
@@ -3232,6 +3310,10 @@ export class WorkspaceCommandView {
         return this.skillRowData().length;
       case 'tools':
         return this.mcpRowData().length + this.skillRowData().length;
+      case MEMORY_STATION: {
+        const summary = this.memoryStationData().summary;
+        return summary ? summary.count : '—';
+      }
       default:
         return 0;
     }
@@ -3760,7 +3842,7 @@ export class WorkspaceCommandView {
         if (page && typeof page.showFileModal === 'function') page.showFileModal();
         break;
       case 'systems':
-        this.openSystemTab(this.activeSystemTab || 'memory');
+        this.openSystemTab(this.activeSystemTab || 'triggers');
         break;
       case 'members':
         if (this.activeRailSection !== 'members') {
@@ -8050,8 +8132,9 @@ export class WorkspaceCommandView {
   // surface (FR6, FR8), replacing their old home inside the Stations panel.
   // Each is a real <button> (keyboard-focusable, state-bearing aria-label,
   // FR8) absolutely positioned from its fractional coordinate via the
-  // --station-x/--station-y custom props. Only the designated HQ renders
-  // these; non-HQ workspaces get an empty string (FR16).
+  // --station-x/--station-y custom props. HQ stations render only in the
+  // designated HQ (FR16); every workspace has its Memory station, plus any
+  // capability station it earned.
   renderMapHQStations() {
     return this.mapStationRegistry()
       .map(station => {
@@ -8069,10 +8152,17 @@ export class WorkspaceCommandView {
         const location = String(station.location || '').trim();
         const accessibleParts = [String(station.label || '') + ' station'];
         if (location) accessibleParts.push('managed folder ' + location);
-        if (state.value) accessibleParts.push(String(state.value));
-        if (state.description && state.description !== state.value) {
-          accessibleParts.push(String(state.description));
-        }
+        const value = String(state.value || '');
+        const description = String(state.description || '');
+        // The value is read unless it says nothing ("—"), only repeats the
+        // station's name, or the description already says it ("14 entries,
+        // 2 watching"), so nothing is heard twice.
+        const valueSaysSomething =
+          /[\p{L}\p{N}]/u.test(value) &&
+          value !== String(station.label || '') &&
+          !description.includes(value);
+        if (valueSaysSomething) accessibleParts.push(value);
+        if (description) accessibleParts.push(description);
         return (
           '<button type="button" class="ws-cmd-map-hq-station' +
           (visualMarkup ? ' has-visual' : '') +
@@ -8144,11 +8234,15 @@ export class WorkspaceCommandView {
 
   // Every station on this workspace's map, whatever its source. Keyed lookups
   // (position, dispatch) go through here so a workspace station behaves exactly
-  // like an HQ one without duplicating the rendering plumbing.
+  // like an HQ one without duplicating the rendering plumbing. Memory is in
+  // every workspace and comes last: default slots follow this order, so
+  // appending it leaves every existing building where it was.
   mapStationRegistry() {
+    const memory = this.memoryStation();
     return [
       ...(this.isPersonalHQ() ? this.hqStationRegistry() : []),
-      ...this.workspaceStationRegistry()
+      ...this.workspaceStationRegistry(),
+      ...(memory ? [memory] : [])
     ];
   }
 
@@ -8158,11 +8252,251 @@ export class WorkspaceCommandView {
     if (station && typeof station.action === 'function') station.action(trigger);
   }
 
-  // HQ-gated "Stations" rail panel for Details mode (FR14): one row per
-  // registry entry (label + live state meta from the same state fn as the map
-  // structure). Rows carry data-cmd-hq-station so the rail click delegation
-  // dispatches through runHQStationAction — the same registry action() as the
-  // map surface. Non-HQ workspaces render nothing (FR16).
+  // --- Memory station (PRD memory-station) ----------------------------------
+  // Every workspace's MEMORY.md, as a building: its badge reads the memory's
+  // state and its panel is the memory manager. It needs no capability,
+  // template, folder or agent; only a workspace whose memory cannot be read at
+  // all (the endpoint answers 404) has none (FR1).
+  memoryStation() {
+    const data = this.memoryStationData();
+    if (!data.workspaceID || data.absent) return null;
+    return {
+      key: MEMORY_STATION,
+      label: 'Memory',
+      icon: 'bi-journal-bookmark',
+      visualVariant: 'archive',
+      state: () => this.memoryStationState(),
+      action: trigger => this.openMemoryPanel(trigger)
+    };
+  }
+
+  // The badge's data, cached per workspace like the Daily Brief's so a
+  // workspace switch never shows another workspace's memory.
+  memoryStationData() {
+    const workspaceID = this.workspaceId();
+    if (!this._memoryStation || this._memoryStation.workspaceID !== workspaceID) {
+      this._memoryStation = { workspaceID, status: 'idle', summary: null, absent: false };
+    }
+    return this._memoryStation;
+  }
+
+  memoryStationStorage() {
+    try {
+      return typeof localStorage === 'undefined' ? null : localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  // The station's state function: the first render on an active view asks
+  // for the data.
+  memoryStationState() {
+    const data = this.memoryStationData();
+    if (data.status === 'idle' && this.active) this.requestMemoryStationData();
+    if (this.isPersonalHQ() && this.hqReviewQueueData().status === 'idle' && this.active) {
+      this.requestHQReviewQueue();
+    }
+    return this.memoryStationBadge();
+  }
+
+  memoryStationBadge() {
+    const data = this.memoryStationData();
+    const personalHQ = this.isPersonalHQ();
+    return memoryBadgeState({
+      status: data.status,
+      summary: data.summary,
+      baseline: readMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID),
+      reviewCount: personalHQ ? this.hqReviewQueueData().count : 0,
+      personalHQ
+    });
+  }
+
+  // In the Personal HQ, the Memory station also says when proposals from
+  // other workspaces wait for review (FR29). The count is the Profile's own
+  // review queue (groupReviewedKnowledge), so the two can never disagree.
+  hqReviewQueueData() {
+    const workspaceID = this.workspaceId();
+    if (!this._hqReviewQueue || this._hqReviewQueue.workspaceID !== workspaceID) {
+      this._hqReviewQueue = { workspaceID, status: 'idle', count: 0 };
+    }
+    return this._hqReviewQueue;
+  }
+
+  // Read once per activation and again when the Memory panel closes; only the
+  // Personal HQ asks. No assistant or HQ (503) or a failed read means no
+  // review state: the rest of the badge stands.
+  requestHQReviewQueue(force = false) {
+    if (!this.isPersonalHQ()) return;
+    const data = this.hqReviewQueueData();
+    if (!data.workspaceID) return;
+    if (!force && data.status !== 'idle') return;
+    if (typeof fetch !== 'function') return;
+    if (data.status === 'idle') data.status = 'loading';
+    const requestID = (this._hqReviewQueueRequestID || 0) + 1;
+    this._hqReviewQueueRequestID = requestID;
+    const workspaceID = data.workspaceID;
+    const settle = count => {
+      if (this._hqReviewQueueRequestID !== requestID) return;
+      const latest = this.hqReviewQueueData();
+      if (latest.workspaceID !== workspaceID) return;
+      const before = this.memoryStationSignature();
+      latest.status = 'ready';
+      latest.count = count;
+      this.shareReviewQueueWithPanel();
+      if (this.memoryStationSignature() !== before) this.refreshMemoryStationSurface();
+    };
+    fetch('/api/personal-assistant/knowledge', { headers: { Accept: 'application/json' } })
+      .then(async response => {
+        if (!response || !response.ok) return settle(0);
+        const payload = await response.json();
+        return settle(groupReviewedKnowledge(payload && payload.items).queue.length);
+      })
+      .catch(() => settle(0));
+  }
+
+  // The panel links the waiting proposals above its sections.
+  shareReviewQueueWithPanel() {
+    const manager = this.page && this.page.memoryManager;
+    if (!manager || typeof manager.setReviewQueue !== 'function') return;
+    manager.setReviewQueue(this.isPersonalHQ() ? this.hqReviewQueueData().count : 0);
+  }
+
+  // One GET of the workspace's memory (FR6). It is asked for when the station
+  // first renders on an active view, again when the panel closes and when a
+  // task finishes, and never on a timer. A forced request supersedes one in
+  // flight; a response for another workspace or an older request is dropped.
+  // A failed read degrades the badge and never breaks the map.
+  requestMemoryStationData(force = false) {
+    const data = this.memoryStationData();
+    if (!data.workspaceID || data.absent) return;
+    if (!force && data.status !== 'idle' && data.status !== 'error') return;
+    if (typeof fetch !== 'function') {
+      data.status = 'error';
+      return;
+    }
+    if (data.status !== 'ready') data.status = 'loading';
+    const requestID = (this._memoryStationRequestID || 0) + 1;
+    this._memoryStationRequestID = requestID;
+    const workspaceID = data.workspaceID;
+    const settle = apply => {
+      if (this._memoryStationRequestID !== requestID) return;
+      const latest = this.memoryStationData();
+      if (latest.workspaceID !== workspaceID) return;
+      const before = this.memoryStationSignature();
+      apply(latest);
+      if (this.memoryStationSignature() !== before) this.refreshMemoryStationSurface();
+    };
+    fetch('/api/workspaces/' + encodeURIComponent(workspaceID) + '/memory', {
+      headers: { Accept: 'application/json' }
+    })
+      .then(async response => {
+        if (response && response.status === 404) {
+          settle(latest => {
+            latest.absent = true;
+            latest.status = 'ready';
+          });
+          return;
+        }
+        if (!response || !response.ok) throw new Error('memory request failed');
+        const payload = await response.json();
+        settle(latest => {
+          latest.status = 'ready';
+          latest.summary = memoryStationSummary(payload);
+        });
+      })
+      .catch(() =>
+        settle(latest => {
+          latest.status = 'error';
+        })
+      );
+  }
+
+  // What the station shows, so a settled request repaints only on a change.
+  memoryStationSignature() {
+    const data = this.memoryStationData();
+    if (data.absent) return 'absent';
+    const state = this.memoryStationBadge();
+    return [state.value, state.description, state.tone].join('|');
+  }
+
+  refreshMemoryStationSurface() {
+    // An open Memory panel owns the screen; the building repaints when it closes.
+    if (this.memoryPanelOpen()) return;
+    if (this.active) this.render();
+  }
+
+  memoryPanelOpen() {
+    return (
+      this.statModalSection === MEMORY_STATION &&
+      Boolean(this.statModalEl) &&
+      !this.statModalEl.hidden
+    );
+  }
+
+  // A finished task may have written memory; the badge re-reads (FR6).
+  noteMemoryStationActivity(event) {
+    const type = String((event && event.type) || '');
+    if (type === 'task.completed' || type === 'task.failed') this.requestMemoryStationData(true);
+  }
+
+  // The memory manager reports every authoritative payload it receives (a
+  // load, an add, an edit, a delete). That is the freshest source for the
+  // badge, and while the panel is open it is also what the user has seen.
+  noteMemoryStationPayload(payload) {
+    const data = this.memoryStationData();
+    if (!data.workspaceID) return;
+    const before = this.memoryStationSignature();
+    data.status = 'ready';
+    data.absent = false;
+    data.summary = memoryStationSummary(payload);
+    if (this.memoryPanelOpen()) {
+      writeMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID, data.summary);
+      this.paintMemoryPanelCount();
+      return;
+    }
+    if (this.active && this.memoryStationSignature() !== before) this.render();
+  }
+
+  paintMemoryPanelCount() {
+    const panel = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-panel');
+    const chip = panel && panel.querySelector('.ws-cmd-modal-count');
+    if (chip) chip.textContent = String(this.statModalCount(MEMORY_STATION));
+  }
+
+  // The manager belongs to the page; the station listens to it.
+  ensureMemoryManagerHook() {
+    const manager = this.page && this.page.memoryManager;
+    if (!manager) return;
+    if (!this._memoryPayloadHook) {
+      this._memoryPayloadHook = payload => this.noteMemoryStationPayload(payload);
+    }
+    manager.onPayload = this._memoryPayloadHook;
+  }
+
+  // Opening the panel is "looking": the current count becomes the baseline
+  // behind "+K new" (FR7). A direct link has no opener, so focus returns to
+  // the building itself when the panel closes.
+  openMemoryPanel(trigger) {
+    const data = this.memoryStationData();
+    if (data.summary) {
+      writeMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID, data.summary);
+    }
+    this.ensureMemoryManagerHook();
+    this.shareReviewQueueWithPanel();
+    const opener =
+      trigger ||
+      (this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-hq-station="' + MEMORY_STATION + '"]')
+        : null);
+    this.openStatModal(MEMORY_STATION, opener);
+  }
+
+  // "Stations" rail panel for Details mode (FR14): one row per registry entry
+  // (label + live state meta from the same state fn as the map structure).
+  // Rows carry data-cmd-hq-station so the rail click delegation dispatches
+  // through runHQStationAction — the same registry action() as the map
+  // surface. Every loaded workspace has at least its Memory station; one with
+  // no station at all renders nothing.
   renderStationsRailPanel() {
     const registry = this.mapStationRegistry();
     if (!registry.length) return '';
@@ -10711,7 +11045,7 @@ export class WorkspaceCommandView {
     const section = String(sectionKey || '').trim();
     if (section === 'systems') {
       this.setCommandViewMode('details', { focus: false });
-      this.openSystemTab(this.activeSystemTab || 'memory');
+      this.openSystemTab(this.activeSystemTab || 'triggers');
       return;
     }
     this.runRailPrimaryAction(section, triggerButton);
@@ -11611,14 +11945,9 @@ export class WorkspaceCommandView {
   systemTabs() {
     // Capability providers (MCP/Skills/Plugins) + Find Tools now live in the header Tools
     // stat-box manager; Manager Settings → entry-agent modal; Goal Settings → "Set Goal";
-    // Intent & Setup → header description edit. Systems keeps only workspace state/automation.
+    // Intent & Setup → header description edit; Memory → the Memory station. Systems
+    // keeps only workspace automation.
     return [
-      {
-        key: 'memory',
-        label: 'Memory',
-        tabId: 'workspace-detail-config-memory-tab',
-        host: 'config'
-      },
       {
         key: 'triggers',
         label: 'Triggers',
@@ -11687,6 +12016,8 @@ export class WorkspaceCommandView {
         return 'workspace-detail-config-intent-tab';
       case 'calendar':
         return 'workspace-detail-config-calendar-tab';
+      case MEMORY_STATION:
+        return 'workspace-detail-config-memory-tab';
       default:
         return '';
     }
@@ -12299,7 +12630,7 @@ export class WorkspaceCommandView {
     return this.systemTab(key).key;
   }
 
-  openSystemTab(key = 'memory') {
+  openSystemTab(key = 'triggers') {
     this.activeRailSection = 'systems';
     this.activeSystemTab = this.normalizeSystemTab(key);
     this.render();
@@ -12406,9 +12737,9 @@ export class WorkspaceCommandView {
     this.refreshConfigData(tab.key);
   }
 
-  // Re-run a config pane's data load. Shared by the Systems rail (Plugins/Memory/Triggers)
-  // and by the relocated surfaces that mount the same config node into a modal
-  // (mcp/skills stat boxes, entry-agent settings), so there is one source of truth.
+  // Re-run a config pane's data load. Shared by the Systems rail (Triggers) and by the
+  // relocated surfaces that mount the same config node into a modal (mcp/skills stat
+  // boxes, entry-agent settings, the Memory station), so there is one source of truth.
   refreshConfigData(key) {
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
     if (!page) return;

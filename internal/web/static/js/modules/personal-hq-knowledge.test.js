@@ -9,6 +9,7 @@ import {
   groupReviewedKnowledge,
   promotedFromWorkspace,
   reviewTextValid,
+  workspaceMemoryLink,
   workspaceProposalSource
 } from './personal-hq-knowledge.js';
 
@@ -16,7 +17,7 @@ test('the copy picker offers active workspaces only, never the Personal HQ', () 
   const targets = copyTargetWorkspaces({
     workspaces: [
       { id: 'hq', name: 'My HQ', designation: 'personal_hq', status: 'active' },
-      { id: 'b', name: 'Beta', status: 'active' },
+      { id: 'b', name: 'Beta', status: 'active', folder_slug: 'beta' },
       { id: 'a', name: 'Album 3' },
       { id: 'old', name: 'Finished', status: 'completed' },
       { id: '', name: 'Broken' },
@@ -24,10 +25,17 @@ test('the copy picker offers active workspaces only, never the Personal HQ', () 
     ]
   });
   assert.deepEqual(targets, [
-    { id: 'a', name: 'Album 3' },
-    { id: 'b', name: 'Beta' }
+    { id: 'a', name: 'Album 3', slug: '' },
+    { id: 'b', name: 'Beta', slug: 'beta' }
   ]);
   assert.deepEqual(copyTargetWorkspaces({}), []);
+});
+
+test('a copied fact links to the target workspace Memory station (FR26)', () => {
+  assert.equal(workspaceMemoryLink('album-3'), '/workspaces/album-3?station=memory');
+  assert.equal(workspaceMemoryLink(''), '');
+  assert.equal(workspaceMemoryLink('Album 3'), '');
+  assert.equal(workspaceMemoryLink(undefined), '');
 });
 
 test('the copies line names every workspace holding a copy', () => {
