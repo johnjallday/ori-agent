@@ -171,10 +171,17 @@ function setNote(message) {
   if (state.els?.note) state.els.note.textContent = String(message || '');
 }
 
+// The drawer can be addressed to a workspace's entry agent instead (the
+// recipient picker). This conversation is then neither shown nor loaded into
+// the shared thread, and nothing from it is attached to that agent's turns.
+function personalIsRecipient() {
+  return window.PersonalAssistantRecipient?.current?.()?.kind !== 'workspace_entry';
+}
+
 function render() {
   const els = state.els;
   if (!els) return;
-  els.bar.hidden = !state.available;
+  els.bar.hidden = !state.available || !personalIsRecipient();
   els.title.textContent = state.id ? state.title || 'Conversation' : 'New conversation';
   els.fresh.disabled =
     !state.id &&
@@ -422,13 +429,24 @@ function listItem(text) {
 
 /** After a reload in the same tab, show the thread the tab was in. */
 function hydrate() {
-  if (state.hydrated || !state.available) return;
+  if (state.hydrated || !state.available || !personalIsRecipient()) return;
   state.hydrated = true;
   const stored = readStoredId();
   if (!stored) return;
   state.id = stored;
   render();
   if (!hasRenderedMessages()) void resume(stored, { silent: true });
+}
+
+/** The drawer was addressed to the Personal Assistant again: show its thread. */
+function followRecipient() {
+  render();
+  if (!state.available || !personalIsRecipient()) return;
+  if (!state.hydrated) {
+    hydrate();
+    return;
+  }
+  if (state.id && !hasRenderedMessages()) void resume(state.id, { silent: true });
 }
 
 function applyStatus(detail) {
@@ -440,7 +458,7 @@ function applyStatus(detail) {
 
 /** Called by the Ask controller before a request leaves the panel. */
 function request(routeContext) {
-  if (!state.available || !isPanelRequest(routeContext)) return null;
+  if (!state.available || !isPanelRequest(routeContext) || !personalIsRecipient()) return null;
   return conversationRequest(state.id);
 }
 
@@ -542,6 +560,7 @@ function init() {
     state.els.resume.focus();
   });
   document.addEventListener('personal-assistant:status', event => applyStatus(event.detail));
+  document.addEventListener('personal-assistant:recipient', followRecipient);
   const current = window.PersonalAssistantPanel?._state;
   if (current?.view?.known) applyStatus({ view: current.view });
   setNote('');

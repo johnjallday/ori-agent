@@ -17,12 +17,120 @@ import {
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
+  entryAgentSendRecipient,
   personalAssistantPanelView,
+  recipientIdentityView,
   restoreAssistantPanelFocus,
   restoredDraft,
   safeTodayRoute,
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
+import { resolveRecipient } from './personal-assistant-recipient.js';
+
+const workspacePage = {
+  surface: 'workspace_detail',
+  workspaceId: 'ws-1',
+  workspaceName: 'test_reaper',
+  entry: { status: 'ready', name: 'REAPER Assistant', role: 'orchestrator' },
+  personal: { name: 'Mina', available: true }
+};
+
+test('the header, launcher and composer name the entry agent on a workspace page', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  const who = recipientIdentityView(view, resolveRecipient(workspacePage));
+  assert.equal(who.personal, false);
+  assert.equal(who.name, 'REAPER Assistant');
+  assert.equal(who.role, 'Commander · test_reaper');
+  assert.equal(who.subline, 'Commander · test_reaper');
+  assert.equal(
+    who.placeholder,
+    'Ask REAPER Assistant about this workspace… (/task creates a task)'
+  );
+  assert.equal(who.available, true);
+  assert.equal(who.launcherVisible, true);
+  // Never the hired assistant's name while a workspace agent is the target.
+  assert.notEqual(who.name, view.name);
+});
+
+test('the Personal Assistant identity is unchanged when it is the recipient', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  for (const resolution of [
+    resolveRecipient({ ...workspacePage, surface: 'home' }),
+    resolveRecipient({ ...workspacePage, pick: 'personal' }),
+    null
+  ]) {
+    const who = recipientIdentityView(view, resolution);
+    assert.equal(who.personal, true);
+    assert.equal(who.name, 'Mina');
+    assert.equal(who.role, 'Personal Assistant');
+    assert.equal(who.placeholder, view.placeholder);
+    assert.equal(who.available, true);
+  }
+});
+
+test('the launcher stays for a reachable entry agent when the assistant is not set up (FR6)', () => {
+  for (const state of ['needs_hire', 'needs_hq', 'provisioning_hq', 'repair_needed']) {
+    const view = personalAssistantPanelView({ state, display_name: 'Mina' });
+    const entry = recipientIdentityView(view, resolveRecipient(workspacePage));
+    assert.equal(entry.launcherVisible, true, state);
+    assert.equal(entry.available, true, state);
+    // Picking the unavailable assistant keeps the launcher and its setup copy.
+    const picked = recipientIdentityView(
+      view,
+      resolveRecipient({ ...workspacePage, pick: 'personal' })
+    );
+    assert.equal(picked.launcherVisible, true, state);
+    assert.equal(picked.available, false, state);
+    assert.equal(picked.placeholder, view.placeholder, state);
+  }
+  // With a vacant Commander only the assistant's own visibility counts.
+  const unhired = personalAssistantPanelView({ state: 'needs_hire' });
+  const vacant = recipientIdentityView(
+    unhired,
+    resolveRecipient({ ...workspacePage, entry: { status: 'vacant' } })
+  );
+  assert.equal(vacant.launcherVisible, false);
+});
+
+test('a loading Commander is named by role and cannot be sent to yet', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  const who = recipientIdentityView(
+    view,
+    resolveRecipient({ ...workspacePage, entry: { status: 'loading' } })
+  );
+  assert.equal(who.name, 'Commander');
+  assert.equal(who.available, false);
+  assert.equal(who.placeholder, 'Finding this workspace’s Commander…');
+});
+
+test('only a ready entry agent gives a send its recipient and current session', () => {
+  const resolution = resolveRecipient(workspacePage);
+  assert.deepEqual(entryAgentSendRecipient(resolution.current, 'sess-1'), {
+    kind: 'workspace_entry',
+    name: 'REAPER Assistant',
+    workspaceId: 'ws-1',
+    workspaceName: 'test_reaper',
+    appearance: null,
+    sessionId: 'sess-1'
+  });
+  assert.equal(entryAgentSendRecipient(resolution.current, '').sessionId, '');
+  assert.equal(entryAgentSendRecipient(resolution.options[1], 'sess-1'), null);
+  assert.equal(
+    entryAgentSendRecipient(
+      resolveRecipient({ ...workspacePage, entry: { status: 'loading' } }).current,
+      ''
+    ),
+    null
+  );
+});
+
+test('the launcher role line can be updated per recipient', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.match(markup, /id="personalAssistantLauncherRole"/);
+});
 
 test('only a focused control outside the scroll viewport needs reflow recovery', () => {
   const viewport = { top: 100, bottom: 500 };

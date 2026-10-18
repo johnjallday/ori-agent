@@ -418,6 +418,10 @@
     // True while the request in hand is a turn in the hired assistant's own
     // conversation, so its label is that assistant and not the page's agent.
     hiredAssistantTurn: false,
+    // The workspace entry agent's name while the drawer is addressed to it
+    // (the recipient picker), so activity is labelled with that agent and
+    // never with the hired assistant's name.
+    entryAgentTurn: '',
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: '',
     // The most recently rendered user message, so its row can be marked with
@@ -1384,6 +1388,7 @@
 
   function getHomeAssistantActivityLabel() {
     var els = getHomeAssistantElements();
+    if (homeAssistantState.entryAgentTurn) return homeAssistantState.entryAgentTurn;
     // A turn in the hired assistant's conversation is answered by that
     // assistant, whichever workspace page is open. The page's own agent is
     // named only for work that is actually sent to it.
@@ -1969,7 +1974,7 @@
     homeAssistantState.busy = Boolean(isBusy);
     var personalPending =
       Boolean(window.PersonalAssistantTranscript) &&
-      homeAssistantState.personalConversation &&
+      (homeAssistantState.personalConversation || Boolean(homeAssistantState.entryAgentTurn)) &&
       getHomeAssistantElements().thinkingModal?.dataset.homeAssistantPanelScope ===
         'personal-assistant';
     getHomeAssistantElements().thinkingModal?.classList.toggle(
@@ -13623,6 +13628,185 @@
     ]);
   }
 
+  // A drawer row written by a workspace agent carries that agent's name and
+  // avatar, so a reply is never mistaken for the hired assistant's.
+  function stampHomeAssistantMessageAuthor(row, author) {
+    var name = String((author && author.name) || '').trim();
+    var bubble = row && row.firstElementChild;
+    if (!bubble || !name) return row;
+    row.dataset.messageAuthor = name;
+    var line = document.createElement('p');
+    line.className = 'personal-assistant-message__author';
+    var avatar = document.createElement('span');
+    avatar.className = 'personal-assistant-message__author-avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    if (window.AgentAvatar && typeof window.AgentAvatar.markup === 'function') {
+      avatar.innerHTML = window.AgentAvatar.markup(
+        { name: name, appearance: (author && author.appearance) || {} },
+        { size: 20 }
+      );
+    }
+    var label = document.createElement('span');
+    label.textContent = name;
+    line.append(avatar, label);
+    bubble.prepend(line);
+    return row;
+  }
+
+  // The entry agent's chat session for this drawer turn: the one the drawer is
+  // already in, or a new workspace session bound to the agent. The panel keeps
+  // the id for the next turn, so a follow-up never opens a second session.
+  async function ensureEntryAgentPanelSession(recipient, text) {
+    var known = String(recipient.sessionId || '').trim();
+    if (known) {
+      return { id: known, agent_name: recipient.name, folder_id: recipient.workspaceId };
+    }
+    var created;
+    try {
+      created = await API.post('/api/sessions', {
+        folder_id: recipient.workspaceId,
+        agent_name: recipient.name,
+        title: truncateText(String(text || '').trim(), 50) || 'Workspace'
+      });
+    } catch (error) {
+      throw buildWorkspaceManagerError(error, {
+        stage: 'workspace_entry_session_create_failed',
+        message: 'Could not create a workspace manager session.'
+      });
+    }
+    var session = created && (created.session || created);
+    if (!session || !session.id) {
+      throw buildWorkspaceManagerError(new Error('No session was returned.'), {
+        stage: 'workspace_entry_session_create_failed',
+        message: 'Could not create a workspace manager session.'
+      });
+    }
+    window.PersonalAssistantRecipient?.rememberSession?.(recipient.workspaceId, session);
+    return session;
+  }
+
+  // A drawer turn addressed to the workspace's entry agent (the recipient
+  // picker). The text goes to that agent as typed, in a workspace chat session,
+  // and the reply renders in the drawer. Only /task, /note and /ask keep their
+  // local meaning; none of the hired assistant's routing, conversation, intent
+  // detection or specialist handoffs run, and the legacy chat panel stays shut.
+  async function runEntryAgentPanelTurn(text, routeContext, recipient) {
+    var name = String(recipient.name || '').trim();
+    homeAssistantState.hiredAssistantTurn = false;
+    homeAssistantState.personalConversation = false;
+    homeAssistantState.entryAgentTurn = name;
+    homeAssistantState.awaitingCreateConfirmation = false;
+    homeAssistantState.pendingPrompt = text;
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
+    setHomeAssistantMode('new_task');
+
+    var question = text;
+    var command = parseWorkspaceSlashCommand(text);
+    if (command && command.command === 'chat') {
+      question = command.content;
+      command = null;
+    } else if (command && command.command !== 'task' && command.command !== 'note') {
+      command = null;
+    }
+    appendHomeAssistantMessage('user', text);
+    if (command) {
+      await handleWorkspaceSlashCommand(command, routeContext, { inferred: false });
+      return;
+    }
+    if (!question) {
+      var usage = 'Usage: /ask <question>';
+      appendHomeAssistantMessage('assistant', usage);
+      setHomeAssistantRoutingSummary('Workspace Command', usage);
+      return;
+    }
+
+    var session = null;
+    setHomeAssistantBusy(true, 'Asking…');
+    renderHomeAssistantActions([]);
+    try {
+      session = await ensureEntryAgentPanelSession(recipient, question);
+      var data;
+      try {
+        data = await API.post(
+          '/api/chat',
+          {
+            question: question,
+            agent_name: name,
+            route_context: normalizeHomeRouteContext({
+              surface: routeContext && routeContext.surface,
+              page_path: routeContext && routeContext.page_path,
+              workspace_id: recipient.workspaceId,
+              session_id: session.id,
+              origin: routeContext && routeContext.origin
+            })
+          },
+          {
+            timeout: HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS,
+            headers: { 'Content-Type': 'application/json', 'X-Session-ID': String(session.id) }
+          }
+        );
+      } catch (error) {
+        throw buildWorkspaceManagerError(error, {
+          stage: 'inline_chat_failed',
+          message: 'The workspace manager session opened, but the inline request failed.',
+          requestUrl: '/api/chat'
+        });
+      }
+      var responseText = String((data && data.response) || '').trim();
+      if (isLikelyHomeAssistantRawToolPayload(responseText, data)) {
+        responseText =
+          name +
+          ' checked the workspace context but returned raw tool data instead of a reply. Please retry or open chat.';
+      }
+      if (!responseText) responseText = name + ' is ready for your next message.';
+      trackHomeAssistantSession(session, question, name);
+      setHomeAssistantRoutingSummary('', '');
+      var row = stampHomeAssistantMessageAuthor(
+        appendHomeAssistantMessage('assistant', responseText),
+        recipient
+      );
+      window.PersonalAssistantTranscript?.reply?.(row);
+    } catch (error) {
+      dashLog.debug('Entry agent turn failed', { error: (error && error.message) || error });
+      if (isLikelyHomeAssistantRequestTimeout(error)) {
+        // The agent may still finish and save its reply in the session, so the
+        // message is not put back: sending it again would ask twice.
+        setHomeAssistantRoutingSummary(
+          name + ' Delayed',
+          name +
+            ' is taking longer than the drawer waits. Its reply is saved in this conversation when it finishes.',
+          { state: 'timeout' }
+        );
+        var delayedSessionId = session && session.id;
+        renderHomeAssistantActions(
+          delayedSessionId
+            ? [
+                {
+                  label: 'Open in chat panel',
+                  variant: 'primary',
+                  onClick: function () {
+                    openTrackedSession(delayedSessionId);
+                  }
+                }
+              ]
+            : []
+        );
+      } else {
+        var failure = formatWorkspaceManagerFailure(error, name);
+        setHomeAssistantRoutingSummary(failure.title, failure.text, {
+          state: failure.state,
+          detail: failure.detail,
+          heading: failure.heading,
+          conversationSummary: failure.conversationSummary
+        });
+        restorePersonalAssistantDraft(text);
+      }
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   // Panel conversations validate routing before any legacy workspace-manager
   // or local creation shortcut. Non-inline specialist work retains its existing
   // reviewed handoff; ordinary workspace questions stay in the HQ conversation.
@@ -13694,6 +13878,18 @@
     if (!text) return;
     var folderRouteContext = normalizeHomeRouteContext(options && options.routeContext);
     var fromPanel = folderRouteContext.origin === 'personal_assistant_panel';
+    var recipient = options && options.recipient;
+    if (
+      fromPanel &&
+      recipient &&
+      recipient.kind === 'workspace_entry' &&
+      String(recipient.name || '').trim() &&
+      String(recipient.workspaceId || '').trim()
+    ) {
+      await runEntryAgentPanelTurn(text, folderRouteContext, recipient);
+      return;
+    }
+    if (fromPanel) homeAssistantState.entryAgentTurn = '';
     var folderRef =
       fromPanel &&
       window.PersonalAssistantFolderContext &&
@@ -14407,7 +14603,10 @@
       openHomeAssistantThinkingModal();
     }
 
-    await handleHomeAssistantPrompt(text, { routeContext: routeContext });
+    await handleHomeAssistantPrompt(text, {
+      routeContext: routeContext,
+      recipient: options && options.recipient
+    });
     return { handled: true, routeContext: routeContext };
   }
 
@@ -14442,8 +14641,18 @@
   // and clear the rendered thread. Clearing also drops any pending
   // confirmation, so one conversation's review never follows the user into
   // another. It refuses while a reply is in flight.
-  window.OriAskRouting.appendMessage = function (role, text) {
-    return appendHomeAssistantMessage(role === 'user' ? 'user' : 'assistant', text);
+  window.OriAskRouting.appendMessage = function (role, text, options) {
+    var row = appendHomeAssistantMessage(role === 'user' ? 'user' : 'assistant', text);
+    return role === 'user' ? row : stampHomeAssistantMessageAuthor(row, options && options.author);
+  };
+  // Who the drawer is addressed to. A workspace entry agent labels the
+  // activity heading and status from here on; the hired assistant's name is
+  // used again once the drawer is addressed to it.
+  window.OriAskRouting.setRecipient = function (recipient) {
+    homeAssistantState.entryAgentTurn =
+      recipient && recipient.kind === 'workspace_entry' ? String(recipient.name || '').trim() : '';
+    syncHomeAssistantModalHeading();
+    syncHomeAssistantLauncher();
   };
   window.OriAskRouting.appendContextEvent = function (row, beforeRow) {
     var conversation = getHomeAssistantElements().conversation;

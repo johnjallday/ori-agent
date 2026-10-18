@@ -721,6 +721,36 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   overflow-wrap: anywhere;
 }
 
+/* Who wrote a workspace agent's reply: its avatar and name above the text. */
+.personal-assistant-message__author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: var(--pa-ink-dim);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.personal-assistant-message__author-avatar {
+  display: inline-flex;
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+/* The shared renderer sizes a portrait from --aa-size, not from its box. */
+.personal-assistant-message__author-avatar .agent-avatar {
+  --aa-size: 20px;
+  border-radius: 6px;
+}
+
+.personal-assistant-message__author-avatar:empty {
+  display: none;
+}
+
 /* What a reply read: a compact disclosure under the answer, closed by default. */
 .personal-assistant-message__sources {
   margin: 6px 0 0;

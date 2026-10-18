@@ -2,6 +2,10 @@ import {
   collectCurrentWorkspaceContext,
   workspaceContextLabel
 } from './personal-assistant-workspace-context.js';
+import {
+  RECIPIENT_WORKSPACE_ENTRY,
+  entryAgentPlaceholder
+} from './personal-assistant-recipient.js';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
 const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
@@ -68,6 +72,45 @@ export function personalAssistantPanelView(personalAssistant) {
       : state === 'needs_hq' || state === 'provisioning_hq'
         ? `Build ${name}’s Personal HQ before sending work`
         : 'Finish personal assistant setup before sending work'
+  };
+}
+
+/**
+ * What the launcher, header and composer say for the drawer's current
+ * recipient. `view` is the hired assistant's (personalAssistantPanelView);
+ * `resolution` is the recipient resolver's answer for this page. The launcher
+ * stays visible while the workspace's entry agent can be addressed, even when
+ * the hired assistant is not set up.
+ */
+export function recipientIdentityView(view, resolution) {
+  const recipient = resolution?.current;
+  const entryOption = (resolution?.options || []).find(
+    option => option.kind === RECIPIENT_WORKSPACE_ENTRY
+  );
+  const entryReachable = Boolean(entryOption && !entryOption.disabled);
+  if (recipient?.kind === RECIPIENT_WORKSPACE_ENTRY) {
+    return {
+      personal: false,
+      kind: RECIPIENT_WORKSPACE_ENTRY,
+      name: recipient.name || 'Commander',
+      role: recipient.subline,
+      subline: recipient.subline,
+      placeholder: entryAgentPlaceholder(recipient),
+      available: recipient.available === true,
+      launcherVisible: true,
+      appearance: recipient.appearance || null
+    };
+  }
+  return {
+    personal: true,
+    kind: 'personal',
+    name: view.name,
+    role: 'Personal Assistant',
+    subline: '',
+    placeholder: view.placeholder,
+    available: view.available,
+    launcherVisible: view.visible || entryReachable,
+    appearance: null
   };
 }
 
@@ -282,25 +325,45 @@ function assistantAvatarMarkup(name, appearance) {
   return '<span class="agent-avatar agent-avatar--generated">P</span>';
 }
 
+function recipients() {
+  return window.PersonalAssistantRecipient || null;
+}
+
+/** Who the drawer is addressed to now, as the launcher and header show it. */
+function identity() {
+  return recipientIdentityView(state.view, recipients()?.resolution?.() || null);
+}
+
 function renderIdentity() {
   const { els, view, personalAssistant } = state;
   if (!els) return;
-  els.launcher.hidden = !view.visible;
-  els.launcherName.textContent = view.name;
-  els.title.textContent = state.workActivityOnly && !view.visible ? 'Work activity' : view.name;
-  els.input.placeholder = view.placeholder;
-  els.input.disabled = !view.available;
-  els.send.disabled = !view.available || state.pending;
+  const who = identity();
+  els.launcher.hidden = !who.launcherVisible;
+  els.launcherName.textContent = who.name;
+  if (els.launcherRole) els.launcherRole.textContent = who.role;
+  els.title.textContent =
+    state.workActivityOnly && !who.launcherVisible ? 'Work activity' : who.name;
+  els.input.placeholder = who.placeholder;
+  els.input.disabled = !who.available;
+  els.send.disabled = !who.available || state.pending;
   if (els.modelSetup)
     els.modelSetup.hidden = !(
-      view.available && personalAssistant?.availability?.model?.available === false
+      who.personal &&
+      view.available &&
+      personalAssistant?.availability?.model?.available === false
     );
-  const avatar = assistantAvatarMarkup(view.name, personalAssistant?.appearance);
+  const avatar = who.personal
+    ? assistantAvatarMarkup(view.name, personalAssistant?.appearance)
+    : assistantAvatarMarkup(who.name, who.appearance);
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
-  els.panelAvatar.hidden = !view.visible;
+  els.panelAvatar.hidden = !who.launcherVisible;
   els.panel.dataset.relationshipState = view.state;
+  els.panel.dataset.recipient = who.kind;
   renderChip();
+  renderCheckIn();
+  // The hired assistant's setup notices describe it, not a workspace agent.
+  if (!who.personal) return;
   // Home says these in the banner under the header. A page without that banner
   // says them here, above the composer, so they are never said twice.
   if (els.todayBanner) return;
@@ -319,7 +382,8 @@ function renderChip() {
   const els = state.els;
   if (!els?.chips || !els.folderChip) return;
   const chip = assistantChipView({
-    available: state.view.available,
+    // Folder context belongs to the hired assistant's conversation only.
+    available: state.view.available && identity().personal,
     folderBusy: state.folderBusy
   });
   els.chips.hidden = !chip.visible;
@@ -355,26 +419,39 @@ function setMenuLink(link, route) {
   if (route) link.href = route;
 }
 
+/**
+ * The line under the name: the entry agent's "Commander · workspace", or the
+ * hired assistant's next check-in.
+ */
+function renderCheckIn() {
+  const els = state.els;
+  if (!els?.checkIn) return;
+  const who = identity();
+  if (!who.personal) {
+    els.checkIn.replaceChildren(who.subline);
+    return;
+  }
+  const line = assistantCheckInLine(state.today);
+  els.checkIn.replaceChildren(line.text);
+  if (line.time) {
+    const date = new Date(line.time);
+    const time = document.createElement('time');
+    time.dateTime = line.time;
+    time.textContent = new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(date);
+    time.title = date.toLocaleString();
+    els.checkIn.append(time);
+  }
+}
+
 /** The header's check-in line and More links, from the Today the drawer has. */
 function renderHeader() {
   const els = state.els;
   if (!els) return;
-  if (els.checkIn) {
-    const line = assistantCheckInLine(state.today);
-    els.checkIn.replaceChildren(line.text);
-    if (line.time) {
-      const date = new Date(line.time);
-      const time = document.createElement('time');
-      time.dateTime = line.time;
-      time.textContent = new Intl.DateTimeFormat(undefined, {
-        weekday: 'short',
-        hour: 'numeric',
-        minute: '2-digit'
-      }).format(date);
-      time.title = date.toLocaleString();
-      els.checkIn.append(time);
-    }
-  }
+  renderCheckIn();
   const links = assistantMoreLinks(state.today);
   setMenuLink(els.links.personal_hq, links.personal_hq);
   setMenuLink(els.links.working_agreement, links.working_agreement);
@@ -436,6 +513,15 @@ function applyPersonalAssistant(personalAssistant) {
   state.relationshipSequence += 1;
   state.personalAssistant = personalAssistant || null;
   state.view = personalAssistantPanelView(personalAssistant);
+  // The recipient resolver needs the hired assistant's identity and its
+  // Personal HQ id (FR5 is decided by that id, never by a name).
+  recipients()?.setPersonal?.({
+    name: state.view.name,
+    available: state.view.available,
+    state: state.view.state,
+    appearance: personalAssistant?.appearance || null,
+    hqWorkspaceId: personalAssistant?.hq_workspace_id || ''
+  });
   if (window.OriGuide?.setHelpOnly) {
     window.OriGuide.setHelpOnly({
       available: state.view.available,
@@ -510,7 +596,8 @@ function firstControl() {
 }
 
 function focusOnOpen() {
-  if (assistantOpenFocusTarget(state.view) === 'composer') state.els.input.focus();
+  if (assistantOpenFocusTarget({ available: identity().available }) === 'composer')
+    state.els.input.focus();
   else firstControl()?.focus();
 }
 
@@ -519,7 +606,7 @@ function focusOnOpen() {
  * that is about to put focus somewhere of its own passes `{ focus: false }`.
  */
 function open(trigger, options = {}) {
-  if (!state.els || (!state.view.visible && options.workActivity !== true)) return false;
+  if (!state.els || (!identity().launcherVisible && options.workActivity !== true)) return false;
   state.workActivityOnly = options.workActivity === true;
   if (window.OriGuide?.close) window.OriGuide.close({ restoreFocus: false });
   renderIdentity();
@@ -533,8 +620,10 @@ function open(trigger, options = {}) {
   state.els.input.value = state.draft;
   if (options.focus !== false) focusOnOpen();
   // Rename/pause/repair changes are server-owned. Refresh on every open rather
-  // than trusting the hire-time name or local storage.
+  // than trusting the hire-time name or local storage. The workspace's
+  // Commander can change on the Roles view, so it is read again too.
   void refresh();
+  void recipients()?.refresh?.();
   void refreshWorkspaceContext();
   void readTodayForThisPage();
   try {
@@ -598,7 +687,7 @@ function suggestReply(text) {
     current: state.els.input.value,
     text,
     maxLength: state.els.input.maxLength > 0 ? state.els.input.maxLength : 2000,
-    available: state.view.available,
+    available: identity().available,
     pending: state.pending,
     busy: window.OriAskRouting?.getState?.().busy === true,
     loading: window.PersonalAssistantConversation?.isLoading?.() === true,
@@ -648,14 +737,14 @@ function recoverLegacyHandoff() {
 }
 
 function prefill(text) {
-  if (!state.view.available) return false;
+  if (!identity().available) return false;
   if (!open(state.els?.launcher)) return false;
   const bounded = boundedAssistantHandoff(text);
   state.draft = bounded;
   state.els.input.value = bounded;
   state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
   state.els.input.focus();
-  setStatus(`Review this request, then press Send to confirm it goes to ${state.view.name}.`);
+  setStatus(`Review this request, then press Send to confirm it goes to ${identity().name}.`);
   return true;
 }
 
@@ -712,48 +801,72 @@ function routeContext() {
   return collectCurrentWorkspaceContext();
 }
 
+/**
+ * What a send addressed to the workspace's entry agent carries to the work
+ * controller: who it is, and the session the drawer is already in with it.
+ * The hired assistant's sends carry no recipient and keep their own path.
+ */
+export function entryAgentSendRecipient(recipient, sessionId) {
+  if (recipient?.kind !== RECIPIENT_WORKSPACE_ENTRY || !recipient.available) return null;
+  return {
+    kind: RECIPIENT_WORKSPACE_ENTRY,
+    name: recipient.name,
+    workspaceId: recipient.workspaceId,
+    workspaceName: recipient.workspaceName,
+    appearance: recipient.appearance || null,
+    sessionId: String(sessionId || '')
+  };
+}
+
 function submit(event) {
   event?.preventDefault();
   moveSharedWorkActivity();
+  const who = identity();
+  const entry = entryAgentSendRecipient(recipients()?.current?.(), recipients()?.sessionId?.());
+  const typed = String(state.els?.input?.value || '').trim();
+  // An empty Send explores an attached folder or link only in the hired
+  // assistant's conversation; neither is attached to a workspace agent's turn.
   const text =
-    String(state.els?.input?.value || '').trim() ||
-    (window.PersonalAssistantFolderContext?.hasFolder?.()
+    typed ||
+    (who.personal && window.PersonalAssistantFolderContext?.hasFolder?.()
       ? 'Explore this folder'
-      : window.PersonalAssistantLink?.hasLink?.()
+      : who.personal && window.PersonalAssistantLink?.hasLink?.()
         ? window.PersonalAssistantLink.sendText()
         : '');
-  if (window.PersonalAssistantConversation?.isLoading?.()) {
+  if (who.personal && window.PersonalAssistantConversation?.isLoading?.()) {
     setStatus('Wait for the conversation to open before sending. Your draft is kept.');
     return false;
   }
-  if (window.PersonalAssistantLink?.isPending?.()) {
+  if (who.personal && window.PersonalAssistantLink?.isPending?.()) {
     setStatus('Wait for the link to be checked before sending. Your message is kept here.');
     return false;
   }
   // While a reply is in flight the text stays in the box: sending it now would
   // start a second turn before the first one has a conversation to join.
   const busy = window.OriAskRouting?.getState?.().busy === true;
-  if (window.PersonalAssistantFolderContext?.isPending?.()) {
+  if (who.personal && window.PersonalAssistantFolderContext?.isPending?.()) {
     setStatus('Wait for the local folder preview before sending. Your message is kept here.');
     return false;
   }
   if (busy && text) {
     setStatus(
-      `${state.view.name} is still replying. Your message is kept here; send it when the reply arrives.`
+      `${who.name} is still replying. Your message is kept here; send it when the reply arrives.`
     );
     announceWhenReplyArrives();
     return false;
   }
-  if (
-    !canSubmitAssistantWork({ available: state.view.available, pending: state.pending, busy, text })
-  ) {
+  if (!canSubmitAssistantWork({ available: who.available, pending: state.pending, busy, text })) {
     return false;
   }
+  if (!who.personal && !entry) return false;
   if (!window.OriAskRouting || typeof window.OriAskRouting.submit !== 'function') {
     setStatus('The work controller is unavailable on this page. Nothing was submitted.');
     return false;
   }
-  if (window.OriAskRouting.setPersonalAssistantIdentity) {
+  // Attribution is per turn: a workspace agent's turn never carries the hired
+  // assistant's name, and the hired assistant's never carries the agent's.
+  window.OriAskRouting.setRecipient?.(entry || { kind: 'personal' });
+  if (who.personal && window.OriAskRouting.setPersonalAssistantIdentity) {
     window.OriAskRouting.setPersonalAssistantIdentity(state.view.name);
   }
   window.PersonalAssistantTranscript?.send?.();
@@ -763,12 +876,13 @@ function submit(event) {
   // not lose the user's place in the drawer.
   const sendHadFocus = document.activeElement === state.els.send;
   state.els.send.disabled = true;
-  const sentStatus = `Sent to ${state.view.name}.`;
+  const sentStatus = `Sent to ${who.name}.`;
   setStatus(sentStatus);
   const operation = Promise.resolve(
     window.OriAskRouting.submit(text, {
       routeContext: routeContext(),
-      openThinkingModal: false
+      openThinkingModal: false,
+      ...(entry ? { recipient: entry } : {})
     })
   );
   state.draft = '';
@@ -842,6 +956,7 @@ function init() {
     panel,
     launcher,
     launcherName: document.getElementById('personalAssistantLauncherName'),
+    launcherRole: document.getElementById('personalAssistantLauncherRole'),
     launcherAvatar: document.getElementById('personalAssistantLauncherAvatar'),
     panelAvatar: document.getElementById('personalAssistantPanelAvatar'),
     title: document.getElementById('personalAssistantPanelTitle'),
@@ -896,6 +1011,16 @@ function init() {
   });
   document.addEventListener('ori:workspace-context', () => void refreshWorkspaceContext());
   window.addEventListener('popstate', () => void refreshWorkspaceContext());
+  // The recipient follows the page: the workspace's entry agent on a workspace
+  // page, the hired assistant elsewhere.
+  document.addEventListener('personal-assistant:recipient', event => {
+    const recipient = event.detail?.recipient;
+    window.OriAskRouting?.setRecipient?.(recipient);
+    renderIdentity();
+  });
+  document.addEventListener('ori:workspace-context', () => void recipients()?.refresh?.());
+  window.addEventListener('popstate', () => void recipients()?.refresh?.());
+  void recipients()?.refresh?.();
   window.addEventListener('beforeunload', () => {
     saveTabValue(PANEL_DRAFT_KEY, state.els.input.value);
     saveTabValue(PANEL_OPEN_KEY, state.open ? '1' : '');
@@ -988,7 +1113,7 @@ const api = {
     return open(trigger, { workActivity: true, focus: options.focus === true });
   },
   isOpen: () => state.open,
-  hasLauncher: () => state.view.visible,
+  hasLauncher: () => identity().launcherVisible,
   close,
   prefill,
   suggestReply,

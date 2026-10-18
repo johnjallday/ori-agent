@@ -152,6 +152,168 @@ test('explicit workspace creation uses Ask review rather than local create-by-na
   assert.equal(h.calls[1].payload.confirmed_action, undefined);
 });
 
+// The recipient picker: a drawer turn addressed to the workspace's entry agent
+// goes to it as typed, through a workspace chat session and /api/chat.
+function entryHarness(options = {}) {
+  const calls = [];
+  const remembered = [];
+  const restored = [];
+  const window = {
+    location: { pathname: '/workspaces/test-reaper' },
+    PersonalAssistantConversation: {
+      request: () => {
+        throw new Error('the personal conversation must not be consulted');
+      },
+      currentId: () => 'canonical-thread',
+      notify() {}
+    },
+    PersonalAssistantFolderContext: { request: () => ({ selection_id: 'stale-folder' }) },
+    PersonalAssistantRecipient: {
+      rememberSession: (workspaceId, session) => remembered.push({ workspaceId, id: session.id })
+    },
+    PersonalAssistantPanel: { restoreDraft: text => restored.push(text) }
+  };
+  const context = vm.createContext({
+    window,
+    document: {
+      addEventListener() {},
+      getElementById: () => null,
+      querySelector: () => null,
+      querySelectorAll: () => []
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    console: { debug() {}, warn() {}, error() {} },
+    setTimeout,
+    clearTimeout,
+    URL,
+    API: {
+      post: async (path, payload, config) => {
+        calls.push({ path, payload, config });
+        if (path === '/api/sessions') return { success: true, session: { id: 'sess-new' } };
+        if (path === '/api/chat') {
+          if (options.chatError) throw options.chatError;
+          return { response: 'Reverb bus added.' };
+        }
+        if (path === '/api/workspaces/ws-1/notes') return { success: true };
+        throw new Error(`Unexpected request ${path}`);
+      }
+    }
+  });
+  vm.runInContext(source, context, { filename: 'dashboard.js' });
+  return { window, calls, remembered, restored };
+}
+
+const entryRecipient = {
+  kind: 'workspace_entry',
+  name: 'REAPER Assistant',
+  workspaceId: 'ws-1',
+  workspaceName: 'test_reaper'
+};
+const workspacePanelContext = {
+  context_version: 1,
+  origin: 'personal_assistant_panel',
+  surface: 'workspace_detail',
+  page_path: '/workspaces/test-reaper',
+  workspace_id: 'ws-1',
+  workspace_slug: 'test-reaper'
+};
+
+test('an entry-agent turn creates its session and chats, never touching personal routing', async () => {
+  const h = entryHarness();
+  await h.window.OriAskRouting.submit('Create a workspace called Community', {
+    openThinkingModal: false,
+    routeContext: workspacePanelContext,
+    recipient: entryRecipient
+  });
+  assert.deepEqual(
+    h.calls.map(call => call.path),
+    ['/api/sessions', '/api/chat']
+  );
+  assert.equal(h.calls[0].payload.folder_id, 'ws-1');
+  assert.equal(h.calls[0].payload.agent_name, 'REAPER Assistant');
+  const chat = h.calls[1];
+  // As typed: no local create-by-name or dispatch rewrite.
+  assert.equal(chat.payload.question, 'Create a workspace called Community');
+  assert.equal(chat.payload.agent_name, 'REAPER Assistant');
+  assert.equal(chat.payload.conversation, undefined);
+  assert.equal(chat.payload.route_context.workspace_id, 'ws-1');
+  assert.equal(chat.config.headers['X-Session-ID'], 'sess-new');
+  assert.deepEqual(h.remembered, [{ workspaceId: 'ws-1', id: 'sess-new' }]);
+  assert.deepEqual(h.restored, []);
+});
+
+test('a follow-up reuses the current entry-agent session', async () => {
+  const h = entryHarness();
+  await h.window.OriAskRouting.submit('Route the vocal to it', {
+    openThinkingModal: false,
+    routeContext: workspacePanelContext,
+    recipient: { ...entryRecipient, sessionId: 'sess-7' }
+  });
+  assert.deepEqual(
+    h.calls.map(call => call.path),
+    ['/api/chat']
+  );
+  assert.equal(h.calls[0].config.headers['X-Session-ID'], 'sess-7');
+  assert.deepEqual(h.remembered, []);
+});
+
+test('/ask sends its text as a question and /note saves a workspace note', async () => {
+  const ask = entryHarness();
+  await ask.window.OriAskRouting.submit('/ask what tracks are armed?', {
+    openThinkingModal: false,
+    routeContext: workspacePanelContext,
+    recipient: { ...entryRecipient, sessionId: 'sess-7' }
+  });
+  assert.deepEqual(
+    ask.calls.map(call => call.path),
+    ['/api/chat']
+  );
+  assert.equal(ask.calls[0].payload.question, 'what tracks are armed?');
+
+  const note = entryHarness();
+  await note.window.OriAskRouting.submit('/note mix at -14 LUFS', {
+    openThinkingModal: false,
+    routeContext: workspacePanelContext,
+    recipient: entryRecipient
+  });
+  assert.deepEqual(
+    note.calls.map(call => call.path),
+    ['/api/workspaces/ws-1/notes']
+  );
+  assert.equal(note.calls[0].payload.content, 'mix at -14 LUFS');
+});
+
+test('a failed entry-agent turn keeps the message; a timed-out one does not resend it', async () => {
+  const failed = entryHarness({ chatError: Object.assign(new Error('boom'), { status: 500 }) });
+  await failed.window.OriAskRouting.submit('Add a reverb bus', {
+    openThinkingModal: false,
+    routeContext: workspacePanelContext,
+    recipient: entryRecipient
+  });
+  assert.deepEqual(failed.restored, ['Add a reverb bus']);
+
+  const delayed = entryHarness({ chatError: new Error('Request cancelled') });
+  await delayed.window.OriAskRouting.submit('Add a reverb bus', {
+    openThinkingModal: false,
+    routeContext: workspacePanelContext,
+    recipient: entryRecipient
+  });
+  assert.deepEqual(delayed.restored, []);
+});
+
+test('a recipient outside the drawer, or the Personal Assistant, keeps personal routing', async () => {
+  const h = harness({ route_mode: 'home_inline', intent: 'assistant_conversation' });
+  await h.window.OriAskRouting.submit('What did I leave unfinished?', {
+    openThinkingModal: false,
+    routeContext: { ...workspacePanelContext },
+    recipient: { kind: 'personal', name: 'Mina' }
+  });
+  assert.deepEqual(
+    h.calls.map(call => call.path),
+    ['/api/home-assistant/route', '/api/home-assistant/ask']
+  );
+});
+
 for (const options of [{ refused: true }, { changedThread: true }]) {
   test(`refused/stale routing never falls back to local execution: ${JSON.stringify(options)}`, async () => {
     const h = harness({ route_mode: 'home_inline', intent: 'assistant_conversation' }, options);
