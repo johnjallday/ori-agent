@@ -221,6 +221,10 @@ type providerToolLoopRun struct {
 	// FinalSystemPrompt is the system prompt for the last-resort synthesis
 	// request when the loop stops without a final answer.
 	FinalSystemPrompt string
+	// ReasoningEffort carries the agent's reasoning effort onto the follow-up
+	// and final-synthesis requests. The CLI providers read it; the others
+	// leave it empty.
+	ReasoningEffort string
 }
 
 // runProviderToolLoop drives the bounded tool loop for a generic
@@ -256,12 +260,13 @@ func (h *Handler) runProviderToolLoop(w http.ResponseWriter, ctx, baseCtx contex
 			},
 			RequestNextResponse: func() (string, []llm.ToolCall, error) {
 				resp, err := run.Provider.Chat(ctx, llm.ChatRequest{
-					Model:        ag.Settings.Model,
-					Messages:     messages,
-					SystemPrompt: run.FollowUpSystemPrompt,
-					Tools:        run.Tools,
-					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    defaultChatMaxTokens,
+					Model:           ag.Settings.Model,
+					Messages:        messages,
+					SystemPrompt:    run.FollowUpSystemPrompt,
+					Tools:           run.Tools,
+					Temperature:     ag.Settings.Temperature,
+					MaxTokens:       defaultChatMaxTokens,
+					ReasoningEffort: run.ReasoningEffort,
 				})
 				if err != nil {
 					return "", nil, err
@@ -274,11 +279,12 @@ func (h *Handler) runProviderToolLoop(w http.ResponseWriter, ctx, baseCtx contex
 			},
 			RequestFinalResponse: func() (string, error) {
 				resp, err := run.Provider.Chat(ctx, llm.ChatRequest{
-					Model:        ag.Settings.Model,
-					Messages:     messages,
-					SystemPrompt: run.FinalSystemPrompt,
-					Temperature:  ag.Settings.Temperature,
-					MaxTokens:    defaultChatMaxTokens,
+					Model:           ag.Settings.Model,
+					Messages:        messages,
+					SystemPrompt:    run.FinalSystemPrompt,
+					Temperature:     ag.Settings.Temperature,
+					MaxTokens:       defaultChatMaxTokens,
+					ReasoningEffort: run.ReasoningEffort,
 				})
 				if err != nil {
 					return "", err

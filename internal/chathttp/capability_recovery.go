@@ -135,7 +135,7 @@ func (h *Handler) buildCapabilityRecoverySnapshot(
 ) capabilityRecoverySnapshot {
 	snapshot := capabilityRecoverySnapshot{
 		HasDirectCommunicationTool: hasDirectCommunicationTool(tools),
-		ProviderSupportsTools:      agentProviderSupportsTools(ag),
+		ProviderSupportsTools:      h.agentProviderSupportsTools(agentName, ag),
 		HasBrowserTool:             hasBrowserLikeTool(tools),
 		OpenAppAvailable:           true,
 		ActiveMCPServers:           append([]string{}, ag.MCPServers...),
@@ -239,14 +239,23 @@ func hasBrowserLikeTool(tools []llm.Tool) bool {
 	return false
 }
 
-func agentProviderSupportsTools(ag *resolvedChatAgent) bool {
-	if ag == nil || ag.Agent == nil {
+// agentProviderSupportsTools asks the agent's provider whether it can call
+// tools. An agent whose provider cannot be resolved, or a handler without a
+// provider factory, is treated as tool-capable so recovery only intercepts
+// when a provider actually declares it cannot call tools.
+func (h *Handler) agentProviderSupportsTools(agentName string, ag *resolvedChatAgent) bool {
+	if h == nil || h.llmFactory == nil || ag == nil || ag.Agent == nil {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(ag.Settings.Provider), "claude_code") {
-		return false
+	providerName, err := resolveChatProviderName(agentName, ag, h.llmFactory)
+	if err != nil {
+		return true
 	}
-	return !isCodexProviderOrModel(ag.Settings.Provider, ag.Settings.Model)
+	provider, err := h.llmFactory.GetProvider(providerName)
+	if err != nil || provider == nil {
+		return true
+	}
+	return provider.Capabilities().SupportsTools
 }
 
 func filterCapabilityRecoverySkills(all []skills.Skill) []skills.Skill {

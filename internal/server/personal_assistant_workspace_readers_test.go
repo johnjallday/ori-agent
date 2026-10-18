@@ -16,7 +16,9 @@ import (
 
 // toolChatProvider can run Ori's brokered tools. It replays a script of tool
 // calls and answers, records each request, and can change host state between
-// rounds to stand in for something happening while the model works.
+// rounds to stand in for something happening while the model works. It is
+// registered as claude_code and reports that provider's real capabilities, so
+// the assistant's tool gates are checked against the shipped declaration.
 type toolChatProvider struct {
 	capturingChatProvider
 	script []llm.ChatResponse
@@ -24,7 +26,7 @@ type toolChatProvider struct {
 }
 
 func (p *toolChatProvider) Capabilities() llm.ProviderCapabilities {
-	return llm.ProviderCapabilities{SupportsSystemPrompt: true, SupportsTools: true}
+	return (&llm.ClaudeCodeProvider{}).Capabilities()
 }
 
 func (p *toolChatProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
