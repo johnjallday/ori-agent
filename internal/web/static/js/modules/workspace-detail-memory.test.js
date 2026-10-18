@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   WorkspaceMemoryManager,
   defaultPromoteCategory,
+  memoryBudgetMeter,
   memoryEntryKind
 } from './workspace-detail-memory.js';
 
@@ -305,6 +306,89 @@ test('focus stays in the pane when the list re-renders under it', () => {
   } finally {
     globalThis.document = originalDocument;
   }
+});
+
+// A meta element whose fill bar records the width the CSSOM sets.
+function makeMeterElement() {
+  const fill = { style: {} };
+  return {
+    fill,
+    innerHTML: '',
+    querySelector: selector => (selector === '.workspace-detail-memory-meter-fill' ? fill : null)
+  };
+}
+
+test('the budget meter says how much of what agents are shown the memory fills (FR15)', () => {
+  assert.deepEqual(memoryBudgetMeter({ rawSize: 2000, charBudget: 8000 }, []), {
+    available: true,
+    percent: 25,
+    overBudget: false,
+    dropped: 0
+  });
+  assert.equal(memoryBudgetMeter({ rawSize: 9600, charBudget: 8000 }, []).percent, 100);
+  assert.equal(memoryBudgetMeter({}, []).available, false);
+
+  const m = makeManager();
+  m.elements = { meta: makeMeterElement() };
+  m.meta = { rawSize: 2000, charBudget: 8000, overBudget: false };
+  m.entries = [{ type: 'fact', text: 'a', in_prompt: true }];
+  m.renderMeta();
+  const html = m.elements.meta.innerHTML;
+  assert.match(html, /role="meter"/);
+  assert.match(html, /aria-label="Share of the memory agents are shown"/);
+  assert.match(html, /aria-valuemin="0" aria-valuemax="100" aria-valuenow="25"/);
+  assert.match(html, /25% of what agents are shown/);
+  assert.doesNotMatch(html, /Over budget/);
+  assert.doesNotMatch(html, /style=/, 'no inline style attribute');
+  assert.equal(m.elements.meta.fill.style.width, '25%');
+});
+
+test('over budget, the meter is full and counts the entries agents are not shown (FR15)', () => {
+  const m = makeManager();
+  m.elements = { meta: makeMeterElement() };
+  m.meta = { rawSize: 9100, charBudget: 8000, overBudget: true };
+  m.entries = [
+    { type: 'watch', text: 'kept', in_prompt: true },
+    { type: 'fact', text: 'old one', in_prompt: false },
+    { type: 'fact', text: 'old two', in_prompt: false },
+    { type: 'fact', text: 'reviewed', provenance: 'ori-hq:item:r', managed: true, in_prompt: false }
+  ];
+  m.renderMeta();
+  const html = m.elements.meta.innerHTML;
+  assert.match(html, /workspace-detail-memory-meter is-over-budget/);
+  assert.match(html, /aria-valuenow="100"/);
+  assert.match(html, /100% of what agents are shown/);
+  assert.match(html, /Over budget: 2 entries are not shown to agents/);
+  assert.equal(m.elements.meta.fill.style.width, '100%');
+
+  m.entries = [{ type: 'fact', text: 'old', in_prompt: false }];
+  m.renderMeta();
+  assert.match(m.elements.meta.innerHTML, /Over budget: 1 entry is not shown to agents/);
+});
+
+test('an entry agents are not shown is marked in words and keeps its actions (FR17)', () => {
+  const m = makeManager();
+  m.globalMemory = { available: true };
+  const html = m.entryRowHtml(
+    { type: 'fact', date: '2026-01-02', provenance: 'user', text: 'old fact', in_prompt: false },
+    4
+  );
+  assert.match(html, /class="workspace-detail-memory-entry is-not-in-prompt"/);
+  assert.match(
+    html,
+    /<span class="workspace-detail-memory-dropped">not shown to agents<\/span> · user · 2026-01-02/
+  );
+  assert.match(html, /data-action="promote" data-index="4"/);
+  assert.match(html, /data-action="edit" data-index="4"/);
+  assert.match(html, /data-action="delete" data-index="4"/);
+
+  const shown = m.entryRowHtml(
+    { type: 'fact', provenance: 'user', text: 'new', in_prompt: true },
+    0
+  );
+  assert.doesNotMatch(shown, /is-not-in-prompt|not shown to agents/);
+  // Before in_prompt existed the field is absent: never read as dropped.
+  assert.doesNotMatch(m.entryRowHtml({ type: 'fact', text: 'legacy' }, 0), /not shown/);
 });
 
 test('a copied-from-global entry stays editable but cannot be promoted again', () => {

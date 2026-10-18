@@ -2220,7 +2220,7 @@ Each entry is one line: `- [<type>, <YYYY-MM-DD>, <provenance>] <text>`, where `
 ```json
 {
   "entries": [
-    { "index": 0, "type": "watch", "date": "2026-06-13", "provenance": "run:abc (Scout)", "text": "build baseline ~7 min; flag if >10" }
+    { "index": 0, "type": "watch", "date": "2026-06-13", "provenance": "run:abc (Scout)", "text": "build baseline ~7 min; flag if >10", "in_prompt": true }
   ],
   "unstructured": ["# Workspace Memory"],
   "raw_size": 149,
@@ -2232,6 +2232,8 @@ Each entry is one line: `- [<type>, <YYYY-MM-DD>, <provenance>] <text>`, where `
 ```
 
 `entries` are the structured lines (with their file-order `index`); `unstructured` holds non-entry lines (the header, hand-written prose) for display. An entry with `"managed": true` is a reviewed global-memory line (`ori-hq:` provenance, only in the Personal HQ); it changes only through review on the Profile page. An entry with `global:<item-id>` provenance was copied from global memory and is ordinary memory. `global_memory` says whether global memory exists (`available`), whether this workspace is the Personal HQ (`is_personal_hq`), and otherwise carries the shared `message` and a `setup_href`. `404` if the workspace doesn't exist; `503` if folder storage is unavailable.
+
+`in_prompt` (boolean, on every entry) says whether the entry is in the `## Workspace Memory` prompt section agents receive. It is computed with the same selection the prompt builder uses (watch and thread entries first, then newest first, within `char_budget`), so `false` marks exactly the entries the prompt drops when memory is over budget. A `"managed": true` line is always `false`: reviewed global-memory lines are never part of that section, and they do not count against its budget.
 
 ### Add Memory Entry
 

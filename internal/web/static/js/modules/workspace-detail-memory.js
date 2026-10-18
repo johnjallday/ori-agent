@@ -40,6 +40,24 @@ export function defaultPromoteCategory(type) {
   return type === 'feedback' ? 'how_you_work' : 'projects';
 }
 
+// memoryBudgetMeter is what the budget meter shows (PRD memory-station FR15):
+// how full the memory is against what agents are shown, capped at 100%, and
+// how many entries the prompt drops (`in_prompt: false`, the server's own
+// selection). Reviewed global-memory lines are never part of that section.
+export function memoryBudgetMeter(meta, entries) {
+  const rawSize = Number(meta?.rawSize) || 0;
+  const charBudget = Number(meta?.charBudget) || 0;
+  const list = Array.isArray(entries) ? entries : [];
+  return {
+    available: charBudget > 0,
+    percent: charBudget > 0 ? Math.min(100, Math.round((rawSize / charBudget) * 100)) : 0,
+    overBudget: Boolean(meta?.overBudget),
+    dropped: list.filter(
+      entry => memoryEntryKind(entry) !== 'managed' && entry?.in_prompt === false
+    ).length
+  };
+}
+
 // Only same-origin page links are rendered from server data.
 function safeLocalHref(href, fallback) {
   const value = String(href || '');
@@ -137,18 +155,36 @@ export class WorkspaceMemoryManager {
     this.renderList();
   }
 
+  // renderMeta draws the budget meter. The fill width is set through the
+  // CSSOM after the markup is in place: no inline style attribute (CSP).
   renderMeta() {
-    if (!this.elements.meta) return;
-    const { rawSize = 0, charBudget = 0, overBudget = false } = this.meta || {};
-    if (!charBudget) {
-      this.elements.meta.innerHTML = '';
+    const meta = this.elements.meta;
+    if (!meta) return;
+    const meter = memoryBudgetMeter(this.meta, this.entries);
+    if (!meter.available) {
+      meta.innerHTML = '';
       return;
     }
-    const cls = overBudget ? 'is-over-budget' : '';
-    const warn = overBudget
-      ? ' — over the injection budget; oldest non-watch/thread entries are dropped from prompts. Consider pruning.'
-      : '';
-    this.elements.meta.innerHTML = `<span class="workspace-detail-memory-size ${cls}">${rawSize} / ${charBudget} chars${this.esc(warn)}</span>`;
+    const shown = `${meter.percent}% of what agents are shown`;
+    let over = '';
+    if (meter.overBudget) {
+      over = meter.dropped
+        ? `Over budget: ${meter.dropped} ${meter.dropped === 1 ? 'entry is' : 'entries are'} not shown to agents`
+        : 'Over budget: every entry is still shown to agents, but the next ones may not be';
+    }
+    meta.innerHTML = `
+      <div class="workspace-detail-memory-meter${meter.overBudget ? ' is-over-budget' : ''}">
+        <div class="workspace-detail-memory-meter-bar" role="meter" aria-label="Share of the memory agents are shown" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${meter.percent}" aria-valuetext="${this.esc(shown)}">
+          <span class="workspace-detail-memory-meter-fill"></span>
+        </div>
+        <div class="workspace-detail-memory-meter-text">${this.esc(shown)}</div>
+        ${over ? `<div class="workspace-detail-memory-meter-over">${this.esc(over)}</div>` : ''}
+      </div>`;
+    const fill =
+      typeof meta.querySelector === 'function'
+        ? meta.querySelector('.workspace-detail-memory-meter-fill')
+        : null;
+    if (fill && fill.style) fill.style.width = `${meter.percent}%`;
   }
 
   renderList() {
@@ -298,14 +334,31 @@ export class WorkspaceMemoryManager {
       .filter(Boolean)
       .map(v => this.esc(v))
       .join(' · ');
+    // Dropped by the prompt budget (FR17): said in words, not only by the
+    // muted badge and rule; edit, delete and promote stay so it can be pruned.
+    const dropped = entry?.in_prompt === false;
+    const classes = [
+      'workspace-detail-memory-entry',
+      kind === 'global_copy' ? 'is-global-copy' : '',
+      dropped ? 'is-not-in-prompt' : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
     return `
-      <article class="workspace-detail-memory-entry${kind === 'global_copy' ? ' is-global-copy' : ''}" data-index="${index}">
+      <article class="${classes}" data-index="${index}">
         <div class="workspace-detail-memory-entry-main">
           <span class="workspace-detail-memory-badge workspace-detail-memory-badge-${type}">${type}</span>
           <span class="workspace-detail-memory-text">${this.esc(entry?.text || '')}</span>
         </div>
         <div class="workspace-detail-memory-entry-foot">
-          <span class="workspace-detail-memory-prov">${meta}</span>
+          <span class="workspace-detail-memory-prov">${[
+            dropped
+              ? '<span class="workspace-detail-memory-dropped">not shown to agents</span>'
+              : '',
+            meta
+          ]
+            .filter(Boolean)
+            .join(' · ')}</span>
           <span class="workspace-detail-memory-actions">
             ${kind === 'ordinary' ? this.promoteActionHtml(index) : ''}
             <button type="button" class="workspace-detail-memory-action" data-action="edit" data-index="${index}">Edit</button>

@@ -3474,9 +3474,52 @@
       margin: 0.6rem 0;
     }
 
-    .workspace-detail-memory-size.is-over-budget {
-      color: var(--warning-color, #f5a623);
+    /* Budget meter: how full the memory is against what agents are shown.
+       One bar; the attention colour only when over budget. */
+    .workspace-detail-memory-meter {
+      display: grid;
+      gap: 0.3rem;
+    }
+
+    .workspace-detail-memory-meter-bar {
+      height: 0.45rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--border-color) 70%, transparent);
+    }
+
+    .workspace-detail-memory-meter-fill {
+      display: block;
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-meter.is-over-budget .workspace-detail-memory-meter-fill {
+      background: var(--warning-color, #f5a623);
+    }
+
+    .workspace-detail-memory-meter-over {
+      color: var(--warning-color, #c77f12);
       font-weight: 600;
+    }
+
+    /* An entry the prompt budget drops: text and actions keep full contrast;
+       only its badge and a left rule are muted, and it says so in words. */
+    .workspace-detail-memory-entry.is-not-in-prompt {
+      border-left: 3px solid color-mix(in srgb, var(--text-secondary) 45%, transparent);
+    }
+
+    .workspace-detail-memory-entry.is-not-in-prompt .workspace-detail-memory-badge {
+      background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-dropped {
+      font-family: var(--font-sans, inherit);
+      font-weight: 600;
+      color: var(--text-secondary);
     }
 
     .workspace-detail-memory-add {
