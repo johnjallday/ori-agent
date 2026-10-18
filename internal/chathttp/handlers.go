@@ -1276,11 +1276,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if providerName == "codex" && h.llmFactory != nil {
-		runtimeSystemPrompt := ""
-		if !basePromptHasVars {
-			runtimeSystemPrompt = h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
-		}
-		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
+		h.handleCodexChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision, toolRuntimeSystemPrompt, normalizedRouteContext)
 		return
 	}
 

@@ -174,8 +174,50 @@ func TestMaybeHandleCapabilityRecovery_DoesNotInterceptWhenDirectToolExistsOnToo
 	}
 }
 
+func TestMaybeHandleCapabilityRecovery_DoesNotInterceptCLIAgentWhoseProviderCallsTools(t *testing.T) {
+	previousSearch := capabilityRecoveryMarketplaceSearchFn
+	capabilityRecoveryMarketplaceSearchFn = func(context.Context, string) ([]capabilityRecoveryMarketplaceSkill, error) {
+		return nil, nil
+	}
+	defer func() { capabilityRecoveryMarketplaceSearchFn = previousSearch }()
+
+	for _, providerName := range []string{"codex", "claude_code"} {
+		t.Run(providerName, func(t *testing.T) {
+			h := NewHandler(newPreflightStore("Ori", &agent.Agent{}), nil)
+			factory := llm.NewFactory()
+			factory.Register(providerName, &scriptedChatProvider{name: providerName, supportsTools: true})
+			h.SetLLMFactory(factory)
+			ag := &resolvedChatAgent{
+				Agent: &agent.Agent{
+					Settings: types.Settings{
+						Provider: providerName,
+						Model:    "cli-model",
+					},
+				},
+			}
+
+			handled := h.maybeHandleCapabilityRecovery(
+				httptest.NewRecorder(),
+				context.Background(),
+				ag,
+				"Ori",
+				"send this note to Lani",
+				"",
+				[]llm.Tool{{Name: "send_email"}},
+				nil,
+			)
+			if handled {
+				t.Fatal("expected a tool-capable provider with the tool to bypass capability recovery")
+			}
+		})
+	}
+}
+
 func TestMaybeHandleCapabilityRecovery_InterceptsWhenProviderCannotCallTools(t *testing.T) {
 	h := NewHandler(newPreflightStore("Ori", &agent.Agent{}), nil)
+	factory := llm.NewFactory()
+	factory.Register("codex", &scriptedChatProvider{name: "codex", supportsTools: false})
+	h.SetLLMFactory(factory)
 	ag := &resolvedChatAgent{
 		Agent: &agent.Agent{
 			Settings: types.Settings{

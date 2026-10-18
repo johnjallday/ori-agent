@@ -8,12 +8,14 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // handleCodexChat handles chat requests routed through the Codex CLI provider.
-// Codex provider currently does not support tool calling, so this path is request/response only.
-func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, agentName string, baseCtx context.Context, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string, routeCtx normalizedChatRouteContext) {
+// The provider brokers Ori's tools: a tool call comes back as one ToolCall,
+// which the shared provider tool loop executes and feeds into the next round.
+func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *resolvedChatAgent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []toolapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision, runtimeSystemPrompt string, routeCtx normalizedChatRouteContext) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -32,21 +34,46 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	systemPrompt := composeRuntimeSystemPrompt(
 		h.buildChatSystemPrompt(
 			ag, agentName,
-			nil,
+			tools,
 		),
 		runtimeSystemPrompt,
 	)
 	messages := buildLLMConversationMessages(ag.Messages, userMessage, images)
+	reasoningEffort := ag.Settings.EffectiveReasoningEffort("codex")
 
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
 		Model:           ag.Settings.Model,
 		Messages:        messages,
 		SystemPrompt:    systemPrompt,
-		ReasoningEffort: ag.Settings.EffectiveReasoningEffort("codex"),
+		Tools:           tools,
+		ReasoningEffort: reasoningEffort,
 	})
 	if err != nil {
 		writeErrorResponse(w, err.Error())
+		return
+	}
+
+	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
+
+	if len(resp.ToolCalls) > 0 {
+		logger.Info("Codex requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
+		h.runProviderToolLoop(w, ctx, baseCtx, providerToolLoopRun{
+			Agent:                ag,
+			AgentName:            agentName,
+			Messages:             messages,
+			InitialResponse:      resp,
+			Tools:                tools,
+			Files:                files,
+			Provider:             provider,
+			SessionID:            sessionID,
+			UserMessage:          userMessage,
+			PlannerDecision:      plannerDecision,
+			ProviderLabel:        "codex",
+			FollowUpSystemPrompt: systemPrompt + "\n\n" + getFollowUpSystemPrompt(),
+			FinalSystemPrompt:    systemPrompt + "\n\n" + getFinalToolLoopSynthesisPrompt(),
+			ReasoningEffort:      reasoningEffort,
+		})
 		return
 	}
 
@@ -56,7 +83,6 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	_ = h.persistAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
-	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)
 
 	payload := attachRouteMetadata(map[string]any{
 		"response": text,
