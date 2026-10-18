@@ -208,6 +208,31 @@ if caps.RequiresAPIKey {
 fmt.Printf("Max context window: %d tokens\n", caps.MaxContextWindow)
 ```
 
+### CLI providers: brokered tools
+
+The two CLI providers, `codex` (Codex CLI) and `claude_code` (Claude Code CLI),
+report `SupportsTools: true` and `SupportsNativeMCP: true`. They do not speak a
+tool-calling API, so Ori brokers its tools through one shared protocol in
+`brokered_tools.go`:
+
+1. When `ChatRequest.Tools` is set, the provider appends the protocol and the
+   tool definitions to the prompt and constrains the reply to an envelope
+   schema (`--output-schema` for Codex, `--json-schema` for Claude Code).
+2. The CLI answers with one JSON envelope: either a final answer or exactly one
+   tool call naming a listed tool.
+3. The provider decodes the envelope into `Content` or one `ToolCall` with
+   `FinishReasonToolCalls`. Unknown tools, a final answer that carries a tool
+   call, arguments that are not a JSON object, and trailing data are refused
+   with the provider name in the error.
+4. The caller executes the tool through Ori's normal authorization and sends
+   the result back as a tool message in the next request, which starts a new
+   CLI process.
+
+The CLI never executes an Ori tool itself. Its own native MCP servers (the
+workspace's bound servers under the two-level native-MCP opt-in) run alongside
+the brokered tools in the same request. A request without tools behaves as a
+plain text request.
+
 ## Listing Providers
 
 ```go

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -45,7 +44,10 @@ printf '%s' '{"kind":"tool_call","content":"","tool_name":"workspace_notes","arg
 	}
 }
 
-func TestAssistantWorkspaceProviderContract_ClaudeCodeSnapshotOnly(t *testing.T) {
+// Claude Code was snapshot-only until the cli-provider-ori-tools PRD gave it
+// the brokered protocol. It still gets no native authority from a broker call:
+// the text-only posture (--tools "" --permission-mode dontAsk) is unchanged.
+func TestAssistantWorkspaceProviderContract_ClaudeCodeBrokerWithoutNativeAuthority(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	script := `#!/bin/sh
@@ -58,26 +60,36 @@ case "$*" in
 esac
 previous=''
 found=''
+schema=''
+prompt=''
 for argument in "$@"; do
   if [ "$previous" = '--tools' ] && [ -z "$argument" ]; then found=yes; fi
+  if [ "$previous" = '--json-schema' ]; then schema=yes; fi
   previous="$argument"
+  prompt="$argument"
 done
 [ "$found" = yes ] || exit 93
-printf '%s' '{"result":"Validated snapshot only; deeper reads unavailable here."}'
+[ "$schema" = yes ] || exit 94
+case "$prompt" in
+  *workspace_notes*arguments_json*) ;;
+  *) exit 95 ;;
+esac
+printf '%s' '{"result":"","structured_output":{"kind":"tool_call","content":"","tool_name":"workspace_notes","arguments_json":"{}"}}'
 `
 	cli := filepath.Join(root, "controlled-claude")
 	if err := os.WriteFile(cli, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
 	provider := &ClaudeCodeProvider{cliPath: cli}
-	if provider.Capabilities().SupportsTools || !provider.Capabilities().SupportsNativeMCP {
-		t.Fatal("snapshot/native capability contract changed")
+	if !provider.Capabilities().SupportsTools || !provider.Capabilities().SupportsNativeMCP {
+		t.Fatal("broker/native capability contract changed")
 	}
 	response, err := provider.Chat(context.Background(), ChatRequest{
-		Model: "fixture", Messages: []Message{NewUserMessage("Discuss validated snapshot")},
+		Model: "fixture", Messages: []Message{NewUserMessage("List notes")},
+		Tools: []Tool{{Name: "workspace_notes", Parameters: map[string]any{"type": "object"}}},
 	})
-	if err != nil || response == nil || len(response.ToolCalls) != 0 || !strings.Contains(response.Content, "deeper reads unavailable") {
-		t.Fatalf("snapshot response: %+v %v", response, err)
+	if err != nil || response == nil || len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "workspace_notes" || response.ToolCalls[0].Arguments != "{}" {
+		t.Fatalf("broker response: %+v %v", response, err)
 	}
 }
 

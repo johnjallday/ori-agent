@@ -225,17 +225,7 @@ func buildCodexPrompt(systemPrompt string, messages []Message) string {
 		b.WriteString(role)
 		b.WriteString(":\n")
 		b.WriteString(msg.Content)
-		if len(msg.ToolCalls) > 0 {
-			encoded, err := json.Marshal(msg.ToolCalls)
-			if err == nil {
-				b.WriteString("\nBrokered tool request: ")
-				b.Write(encoded)
-			}
-		}
-		if strings.TrimSpace(msg.ToolCallID) != "" {
-			b.WriteString("\nBrokered tool call ID: ")
-			b.WriteString(msg.ToolCallID)
-		}
+		writeBrokeredToolTurn(&b, msg)
 		b.WriteString("\n\n")
 	}
 

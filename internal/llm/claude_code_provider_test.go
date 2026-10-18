@@ -1,11 +1,211 @@
 package llm
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// fakeClaudeCLI is a claude stand-in that records its argv in dir/args and
+// prints dir/reply.json as the CLI's --output-format json result.
+type fakeClaudeCLI struct {
+	t   *testing.T
+	dir string
+}
+
+func newFakeClaudeCLI(t *testing.T) (*fakeClaudeCLI, *ClaudeCodeProvider) {
+	t.Helper()
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\nprintf '%s\\0' \"$@\" > \"" + dir + "/args\"\ncat \"" + dir + "/reply.json\"\n"
+	if err := os.WriteFile(cliPath, []byte(script), 0700); err != nil {
+		t.Fatalf("write fake claude cli: %v", err)
+	}
+	provider := &ClaudeCodeProvider{cliPath: cliPath, mcpStore: newCLIMCPConfigStoreAt(t.TempDir(), t.TempDir())}
+	return &fakeClaudeCLI{t: t, dir: dir}, provider
+}
+
+// reply sets the next CLI result. A non-empty envelope is the structured
+// output; result is the plain result text.
+func (f *fakeClaudeCLI) reply(structuredOutput, result string) {
+	f.t.Helper()
+	payload := map[string]any{"is_error": false, "result": result}
+	if structuredOutput != "" {
+		payload["structured_output"] = json.RawMessage(structuredOutput)
+	}
+	encoded, _ := json.Marshal(payload)
+	if err := os.WriteFile(filepath.Join(f.dir, "reply.json"), encoded, 0600); err != nil {
+		f.t.Fatalf("write reply: %v", err)
+	}
+}
+
+// args returns the argv of the last run; the prompt is the last element.
+func (f *fakeClaudeCLI) args() []string {
+	f.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(f.dir, "args"))
+	if err != nil {
+		f.t.Fatalf("read args: %v", err)
+	}
+	return strings.Split(strings.TrimSuffix(string(raw), "\x00"), "\x00")
+}
+
+func argValue(args []string, flag string) (string, bool) {
+	for i := range args {
+		if args[i] == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+var claudeBrokeredTestTools = []Tool{{
+	Name: "memory_write", Description: "Write a workspace memory entry.",
+	Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+}}
+
+func TestClaudeCodeProviderCapabilitiesIncludeBrokeredTools(t *testing.T) {
+	capabilities := (&ClaudeCodeProvider{}).Capabilities()
+	if !capabilities.SupportsTools || !capabilities.SupportsNativeMCP {
+		t.Fatalf("claude_code capabilities = %+v", capabilities)
+	}
+}
+
+func TestClaudeCodeChat_WithToolsSendsSchemaAndProtocol(t *testing.T) {
+	cli, provider := newFakeClaudeCLI(t)
+	cli.reply(`{"kind":"tool_call","content":"","tool_name":"memory_write","arguments_json":"{\"text\":\"D minor\"}"}`, "")
+
+	resp, err := provider.Chat(context.Background(), ChatRequest{
+		Model:    "sonnet",
+		Messages: []Message{NewUserMessage("Remember the key")},
+		Tools:    claudeBrokeredTestTools,
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if resp.FinishReason != FinishReasonToolCalls || len(resp.ToolCalls) != 1 ||
+		resp.ToolCalls[0].Name != "memory_write" || resp.ToolCalls[0].Arguments != `{"text":"D minor"}` ||
+		!strings.HasPrefix(resp.ToolCalls[0].ID, "claude_code_tool_") {
+		t.Fatalf("tool response = %+v", resp)
+	}
+
+	args := cli.args()
+	schema, ok := argValue(args, "--json-schema")
+	wantSchema, _ := json.Marshal(brokeredToolResponseSchema())
+	if !ok || schema != string(wantSchema) {
+		t.Fatalf("--json-schema = %q (present %v), want %s", schema, ok, wantSchema)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--tools  --permission-mode dontAsk") {
+		t.Fatalf("text-only posture must keep its flags with tools: %q", joined)
+	}
+	prompt := args[len(args)-1]
+	definitions, _ := json.Marshal(claudeBrokeredTestTools)
+	for _, want := range []string{"User:\nRemember the key", string(definitions), "not Claude Code's own MCP servers", "Return exactly one JSON object with all four fields"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestClaudeCodeChat_WithoutToolsIsUnchanged(t *testing.T) {
+	cli, provider := newFakeClaudeCLI(t)
+	cli.reply("", "Plain answer.")
+
+	resp, err := provider.Chat(context.Background(), ChatRequest{
+		Model:    "sonnet",
+		Messages: []Message{NewUserMessage("hello")},
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if resp.Content != "Plain answer." || len(resp.ToolCalls) != 0 || resp.FinishReason != "" {
+		t.Fatalf("plain response = %+v", resp)
+	}
+	args := cli.args()
+	if _, ok := argValue(args, "--json-schema"); ok {
+		t.Fatalf("a request without tools must not pass --json-schema: %q", args)
+	}
+	if strings.Contains(args[len(args)-1], "Ori brokers") {
+		t.Fatalf("a request without tools must not carry the protocol: %q", args[len(args)-1])
+	}
+}
+
+func TestClaudeCodeChat_FinalEnvelopeBecomesContent(t *testing.T) {
+	cli, provider := newFakeClaudeCLI(t)
+	cli.reply(`{"kind":"final","content":"Saved it.","tool_name":"","arguments_json":"{}"}`, "")
+
+	resp, err := provider.Chat(context.Background(), ChatRequest{
+		Model:    "sonnet",
+		Messages: []Message{NewUserMessage("Remember the key")},
+		Tools:    claudeBrokeredTestTools,
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if resp.Content != "Saved it." || len(resp.ToolCalls) != 0 || resp.FinishReason != FinishReasonStop {
+		t.Fatalf("final response = %+v", resp)
+	}
+}
+
+func TestClaudeCodeChat_RejectsUntrustedEnvelope(t *testing.T) {
+	cases := map[string]struct{ structured, result string }{
+		"unknown tool":          {structured: `{"kind":"tool_call","content":"","tool_name":"Bash","arguments_json":"{}"}`},
+		"final smuggles a tool": {structured: `{"kind":"final","content":"done","tool_name":"memory_write","arguments_json":"{}"}`},
+		"invalid arguments":     {structured: `{"kind":"tool_call","content":"","tool_name":"memory_write","arguments_json":"not json"}`},
+		"trailing data":         {result: `{"kind":"final","content":"done","tool_name":"","arguments_json":"{}"} {}`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cli, provider := newFakeClaudeCLI(t)
+			cli.reply(tc.structured, tc.result)
+			_, err := provider.Chat(context.Background(), ChatRequest{
+				Model:    "sonnet",
+				Messages: []Message{NewUserMessage("Remember the key")},
+				Tools:    claudeBrokeredTestTools,
+			})
+			if err == nil || !strings.HasPrefix(err.Error(), "claude_code ") {
+				t.Fatalf("expected a claude_code-named refusal, got %v", err)
+			}
+		})
+	}
+}
+
+func TestClaudeCodeChat_NativePostureKeepsMCPConfigWithBrokeredTools(t *testing.T) {
+	cli, provider := newFakeClaudeCLI(t)
+	cli.reply(`{"kind":"final","content":"Done.","tool_name":"","arguments_json":"{}"}`, "")
+	workspaceDir := t.TempDir()
+
+	resp, err := provider.Chat(context.Background(), ChatRequest{
+		Model:        "sonnet",
+		Messages:     []Message{NewUserMessage("Remember the key")},
+		Tools:        claudeBrokeredTestTools,
+		WorkspaceID:  "ws-1",
+		WorkspaceDir: workspaceDir,
+		MCPServers:   []MCPServerSpec{{Name: "reaper", Command: "/usr/bin/true"}},
+	})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if resp.Content != "Done." {
+		t.Fatalf("native response = %+v", resp)
+	}
+	args := cli.args()
+	if _, ok := argValue(args, "--mcp-config"); !ok {
+		t.Fatalf("native posture must keep --mcp-config: %q", args)
+	}
+	if _, ok := argValue(args, "--json-schema"); !ok {
+		t.Fatalf("native posture must pass the envelope schema with tools: %q", args)
+	}
+	if mode, _ := argValue(args, "--permission-mode"); mode != "bypassPermissions" {
+		t.Fatalf("native posture flags changed: --permission-mode %q", mode)
+	}
+	if !strings.Contains(args[len(args)-1], "Available brokered tools") {
+		t.Fatalf("native posture prompt must carry the protocol: %q", args[len(args)-1])
+	}
+}
 
 func TestBuildClaudeArgs_TextOnlyUnchanged(t *testing.T) {
 	args, err := buildClaudeArgs("opus", "", "hi", nil, nil)

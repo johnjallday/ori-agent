@@ -50,6 +50,21 @@ Return exactly one JSON object with all four fields:
 arguments_json must itself be a JSON object encoded as a string. Never invent a tool name and never emit more than one tool call per response.`, nil
 }
 
+// writeBrokeredToolTurn adds a transcript message's brokered tool request or
+// tool call ID, so the next CLI round sees which tool ran with which arguments.
+func writeBrokeredToolTurn(b *strings.Builder, msg Message) {
+	if len(msg.ToolCalls) > 0 {
+		if encoded, err := json.Marshal(msg.ToolCalls); err == nil {
+			b.WriteString("\nBrokered tool request: ")
+			b.Write(encoded)
+		}
+	}
+	if strings.TrimSpace(msg.ToolCallID) != "" {
+		b.WriteString("\nBrokered tool call ID: ")
+		b.WriteString(msg.ToolCallID)
+	}
+}
+
 // brokeredToolResponseSchema is the JSON schema the CLI's reply must match.
 func brokeredToolResponseSchema() map[string]any {
 	return map[string]any{
