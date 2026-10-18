@@ -4,10 +4,19 @@
   'use strict';
   const ID = 'backup-recovery';
   const TABS = ['overview', 'history', 'recovery', 'settings'];
+  // The workspace command router normalizes its URL while our stored GETs
+  // are pending. Capture this console-owned intent synchronously, as Calendar
+  // Ops does; reading the address bar after those awaits can lose the link.
+  let initialDeepLink = (() => {
+    if (typeof window === 'undefined' || !window.location?.href) return null;
+    const params = new URL(window.location.href).searchParams;
+    return params.get('panel') === ID ? { tab: params.get('tab') } : null;
+  })();
   const state = {
     status: null,
     settings: null,
     guide: null,
+    recovery: null,
     history: [],
     cursor: 0,
     open: false,
@@ -32,7 +41,8 @@
     revokeConfirm: '',
     monitorDraft: null,
     monitorReview: null,
-    monitorDirty: false
+    monitorDirty: false,
+    reportDraft: null
   };
   let dialog = null;
   const messages = {
@@ -151,7 +161,11 @@
       if (epoch !== state.loadEpoch) return;
       state.status = payload.status;
       state.error = '';
-      const [settings, guide] = await Promise.allSettled([request('/settings'), request('/guide')]);
+      const [settings, guide, recovery] = await Promise.allSettled([
+        request('/settings'),
+        request('/guide'),
+        request('/recovery')
+      ]);
       if (epoch !== state.loadEpoch) return;
       if (settings.status === 'fulfilled') {
         const incoming = settings.value.settings;
@@ -172,6 +186,14 @@
         }
       }
       if (guide.status === 'fulfilled') state.guide = guide.value.guide;
+      state.recovery = recovery.status === 'fulfilled' ? recovery.value.recovery : null;
+      if (
+        state.reportDraft &&
+        (!state.recovery ||
+          state.reportDraft.generation !== state.recovery.generation ||
+          state.reportDraft.revision !== state.recovery.revision)
+      )
+        state.reportDraft = null;
     } catch (error) {
       if (epoch !== state.loadEpoch) return;
       state.error =
@@ -213,6 +235,7 @@
       state.review = null;
       state.monitorReview = null;
       if (command.path === '/monitoring') state.monitorDirty = false;
+      if (command.path === '/recovery-report') state.reportDraft = null;
       state.revokeConfirm = '';
       state.notice =
         payload.operation?.state === 'pending'
@@ -220,9 +243,11 @@
           : payload.operation?.outcome === 'read_ok'
             ? 'Metadata observed. This is not proof of complete backup or recovery.'
             : payload.operation?.outcome === 'applied'
-              ? command.path === '/monitoring'
-                ? 'Periodic metadata settings saved. External backup schedules are unchanged.'
-                : 'Ori access was fenced and owned work drained. External backups and schedules are unchanged.'
+              ? command.path === '/recovery-report'
+                ? 'User report saved. Ori did not perform or verify a restore.'
+                : command.path === '/monitoring'
+                  ? 'Periodic metadata settings saved. External backup schedules are unchanged.'
+                  : 'Ori access was fenced and owned work drained. External backups and schedules are unchanged.'
               : outcome(payload.operation?.outcome);
     } catch (error) {
       if (epoch !== state.actionEpoch) return;
@@ -545,22 +570,26 @@
     parent.appendChild(actions);
     paragraph(parent, 'External-drive-only backup is not off-site protection.', 'br-boundary');
   }
-  function renderGuide(parent) {
+  function renderGuide(
+    parent,
+    guide = state.guide,
+    title = 'External setup guide · no model required'
+  ) {
     const box = el('details', 'br-guide');
-    box.appendChild(el('summary', '', 'External setup guide · no model required'));
-    if (!state.guide)
+    box.appendChild(el('summary', '', title));
+    if (!guide)
       paragraph(
         box,
         'Install and configure the supported backup application outside Ori. Guidance is unavailable here; no connection or backup has been established.'
       );
     else {
-      paragraph(box, state.guide.boundary);
-      for (const prerequisite of state.guide.prerequisites || []) paragraph(box, prerequisite);
-      for (const step of state.guide.steps || []) {
+      paragraph(box, guide.boundary);
+      for (const prerequisite of guide.prerequisites || []) paragraph(box, prerequisite);
+      for (const step of guide.steps || []) {
         box.appendChild(el('h4', '', step.title));
         for (const instruction of step.instructions || []) paragraph(box, instruction);
       }
-      for (const link of state.guide.sources || []) {
+      for (const link of guide.sources || []) {
         if (
           !/^https:\/\/github\.com\/restic\/restic\/blob\/v0\.19\.1\/doc\/(020_installation|030_preparing_a_new_repo|040_backup|050_restore)\.rst$/.test(
             link.url || ''
@@ -1043,17 +1072,306 @@
     if (state.cursor)
       parent.appendChild(button('Load earlier checks', () => loadHistory(true), true));
   }
+  function reportResult(value) {
+    return (
+      { user_reported_passed: 'User reports passed', user_reported_failed: 'User reports failed' }[
+        value
+      ] || 'Not tested'
+    );
+  }
+  function validReportDraft(draft, view) {
+    if (
+      !draft ||
+      !view?.can_report ||
+      !['user_reported_passed', 'user_reported_failed'].includes(draft.result) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(draft.testedDate)
+    )
+      return false;
+    const date = new Date(draft.testedDate + 'T00:00:00Z');
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== draft.testedDate)
+      return false;
+    if (!view.note_choices?.some(note => note.code === draft.noteCode)) return false;
+    return (
+      draft.result !== 'user_reported_passed' || ['', 'sample_compared'].includes(draft.noteCode)
+    );
+  }
+  function reportSelect(parent, title, id, options, value, change) {
+    const label = el('label', 'br-field', title);
+    label.setAttribute('for', id);
+    const select = el('select', 'br-input');
+    select.id = id;
+    select.disabled = state.busy;
+    for (const [key, title] of options) {
+      const option = el('option', '', title);
+      option.value = key;
+      select.appendChild(option);
+    }
+    select.value = value;
+    select.addEventListener('change', () => {
+      change(select.value);
+      render();
+    });
+    label.appendChild(select);
+    parent.appendChild(label);
+    return select;
+  }
+  function renderRecoveryReports(parent, view) {
+    const box = el('section', 'br-reports');
+    box.appendChild(el('h4', '', 'Your dated recovery reports'));
+    const current = view?.reports?.find(report => !report.historical && !report.superseded);
+    paragraph(
+      box,
+      current
+        ? reportResult(current.result) + ' · tested ' + String(current.tested_at).slice(0, 10)
+        : 'Not tested — no current user-reported result.',
+      'br-value'
+    );
+    paragraph(
+      box,
+      'These are your assertions, not Ori or provider verification. Editing preserves the earlier version. Reconfiguration makes previous reports historical.'
+    );
+    const notes = new Map((view?.note_choices || []).map(note => [note.code, note.label]));
+    const list = el('ol', 'br-history');
+    for (const report of view?.reports || []) {
+      const item = el('li');
+      item.appendChild(el('strong', '', reportResult(report.result)));
+      paragraph(
+        item,
+        'Tested ' +
+          String(report.tested_at).slice(0, 10) +
+          ' · recorded ' +
+          time(report.reported_at) +
+          (report.historical ? ' · historical configuration' : '') +
+          (report.superseded ? ' · earlier version' : ''),
+        'br-small'
+      );
+      if (report.snapshot_id)
+        paragraph(item, 'Snapshot reference · ' + report.snapshot_id, 'br-path');
+      if (report.note_code && notes.has(report.note_code))
+        paragraph(item, notes.get(report.note_code));
+      if (view.can_report && !report.historical && !report.superseded) {
+        const edit = button(
+          'Edit report dated ' + String(report.tested_at).slice(0, 10),
+          () => {
+            state.reportDraft = {
+              generation: view.generation,
+              revision: view.revision,
+              editID: report.id,
+              snapshotID: report.snapshot_id || '',
+              testedDate: String(report.tested_at).slice(0, 10),
+              result: report.result,
+              noteCode: report.note_code || ''
+            };
+            render();
+          },
+          true
+        );
+        edit.disabled = state.busy;
+        item.appendChild(edit);
+      }
+      list.appendChild(item);
+    }
+    box.appendChild(list);
+    if (!view?.can_report) {
+      paragraph(
+        box,
+        'Save a local connection selection before associating a new report with this setup. Guidance remains available; reporting never grants metadata access.'
+      );
+      parent.appendChild(box);
+      return;
+    }
+    if (!state.reportDraft)
+      state.reportDraft = {
+        generation: view.generation,
+        revision: view.revision,
+        editID: '',
+        snapshotID: '',
+        testedDate: '',
+        result: '',
+        noteCode: ''
+      };
+    const draft = state.reportDraft;
+    box.appendChild(
+      el(
+        'h4',
+        '',
+        draft.editID
+          ? 'Edit your report · earlier version retained'
+          : 'Record your sample-test result'
+      )
+    );
+    const fields = el('div', 'br-policy-grid');
+    const date = input(
+      fields,
+      'Test date (UTC)',
+      draft.testedDate,
+      value => {
+        draft.testedDate = value;
+      },
+      'brReportDate'
+    );
+    date.type = 'date';
+    date.max = String(view.server_time).slice(0, 10);
+    reportSelect(
+      fields,
+      'Your reported result',
+      'brReportResult',
+      [
+        ['', 'Choose a result'],
+        ['user_reported_passed', 'User reports passed'],
+        ['user_reported_failed', 'User reports failed']
+      ],
+      draft.result,
+      value => {
+        draft.result = value;
+      }
+    );
+    const choices = [['', 'Snapshot not associated / unknown']];
+    for (const snapshot of view.snapshots || [])
+      if (snapshot.generation === view.generation && snapshot.evidence !== 'clock_suspect')
+        choices.push([snapshot.id, snapshot.id + ' · ' + snapshot.evidence]);
+    reportSelect(
+      fields,
+      'Snapshot association',
+      'brReportSnapshot',
+      choices,
+      draft.snapshotID,
+      value => {
+        draft.snapshotID = value;
+      }
+    );
+    reportSelect(
+      fields,
+      'Optional note — predefined choices only',
+      'brReportNote',
+      (view.note_choices || []).map(note => [note.code, note.label]),
+      draft.noteCode,
+      value => {
+        draft.noteCode = value;
+      }
+    );
+    box.appendChild(fields);
+    paragraph(
+      box,
+      'Do not enter passwords, recovery keys, file contents or executable commands. Notes are predefined to keep secrets out of this ledger. A passed sample does not prove every file is recoverable.'
+    );
+    const choice = el('label', 'br-choice');
+    const confirm = el('input');
+    confirm.type = 'checkbox';
+    confirm.id = 'brReportConsent';
+    confirm.disabled = state.busy;
+    choice.appendChild(confirm);
+    choice.appendChild(
+      el(
+        'span',
+        '',
+        'I am recording my own dated sample-test result. Ori has not performed or verified this recovery.'
+      )
+    );
+    const save = button(
+      draft.editID ? 'Save edited user report' : 'Record user-reported result',
+      () => {
+        if (!confirm.checked || !validReportDraft(draft, view)) return;
+        void mutate('/recovery-report', {
+          generation: draft.generation,
+          revision: draft.revision,
+          operation_id: window.crypto.randomUUID(),
+          edit_id: draft.editID,
+          snapshot_id: draft.snapshotID,
+          tested_at: draft.testedDate + 'T00:00:00Z',
+          result: draft.result,
+          note_code: draft.noteCode
+        });
+      }
+    );
+    save.disabled = true;
+    confirm.addEventListener('change', () => {
+      save.disabled = !confirm.checked || state.busy || !validReportDraft(draft, view);
+    });
+    box.appendChild(choice);
+    box.appendChild(save);
+    if (draft.editID)
+      box.appendChild(
+        button(
+          'Cancel report edit',
+          () => {
+            state.reportDraft = null;
+            render();
+          },
+          true
+        )
+      );
+    parent.appendChild(box);
+  }
   function renderRecovery(parent) {
     parent.appendChild(el('h3', 'br-heading', 'Recovery is a practice, not a promise.'));
     paragraph(
       parent,
-      'Not tested in Ori. Use the external application to restore a sample to a separate location. Never overwrite the working source as a test.'
+      'Use the external application to restore a sample to a separate location. Never overwrite the working source as a test. Ori never verifies the result.'
     );
     paragraph(
       parent,
       'Ori does not restore or inspect recovered contents. A dated user report is not Ori verification, and one sample cannot prove all files are recoverable.'
     );
-    renderGuide(parent);
+    const view = state.recovery;
+    renderRecoveryReports(parent, view);
+    if (view) {
+      paragraph(
+        parent,
+        'Stored observation: ' +
+          ({
+            current: 'within the freshness window',
+            stale: 'stale',
+            historical: 'historical',
+            clock_suspect: 'clock requires review',
+            never_observed: 'not observed'
+          }[view.observation] || 'unavailable') +
+          '. Opening this view does not check a drive.'
+      );
+      parent.appendChild(el('h4', '', 'Current intended sources · not proof of snapshot coverage'));
+      for (const path of view.source_paths || []) paragraph(parent, path, 'br-path');
+      if (!view.source_paths?.length) paragraph(parent, 'No current source intent is available.');
+      parent.appendChild(
+        el('h4', '', 'Stored snapshot references · confirm availability outside Ori')
+      );
+      if (!view.snapshots?.length)
+        paragraph(
+          parent,
+          'No stored snapshot references are available. This is not proof that no backups exist.'
+        );
+      for (const snapshot of view.snapshots || []) {
+        const item = el('section', 'br-evidence');
+        paragraph(item, snapshot.id, 'br-path');
+        paragraph(
+          item,
+          ({
+            stored: 'Stored metadata',
+            stale: 'Stale metadata',
+            historical: 'Historical configuration',
+            clock_suspect: 'Clock-suspect metadata'
+          }[snapshot.evidence] || 'Unavailable') +
+            ' · completion ' +
+            time(snapshot.completed_at)
+        );
+        paragraph(
+          item,
+          'Declared paths: ' +
+            snapshot.declared_path_count +
+            ' · exclusions: ' +
+            snapshot.exclusion_count +
+            '. Historical declaration, not exhaustive coverage.',
+          'br-small'
+        );
+        parent.appendChild(item);
+      }
+      renderGuide(parent, view.guide, 'External recovery guide · no model required');
+    } else {
+      paragraph(
+        parent,
+        'Stored recovery evidence is unavailable. Follow the external application documentation; no snapshot availability is established here.'
+      );
+      renderGuide(parent);
+    }
   }
   function syncURL() {
     const url = new URL(window.location.href);
@@ -1220,7 +1538,10 @@
     if (!window.WorkspaceCapabilities?.isInstalled(ID)) return;
     await loadStored();
     const url = new URL(window.location.href);
-    if (url.searchParams.get('panel') === ID) open({ tab: url.searchParams.get('tab') });
+    const captured = initialDeepLink;
+    initialDeepLink = null;
+    if (captured || url.searchParams.get('panel') === ID)
+      open({ tab: captured ? captured.tab : url.searchParams.get('tab') });
   }
   const controller = {
     init,
@@ -1237,6 +1558,7 @@
       reviewSelection,
       reviewMonitoring,
       validPolicy,
+      validReportDraft,
       selectTab,
       snapshotLabel,
       bytes,

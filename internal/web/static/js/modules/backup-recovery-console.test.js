@@ -81,7 +81,7 @@ class Element {
   }
   setSelectionRange() {}
 }
-function fixture(overrides = {}) {
+function fixture(overrides = {}, initialHref = 'http://localhost:8765/workspaces/owned-ws') {
   const document = { listeners: {}, activeElement: null };
   document.createElement = tag => new Element(tag, document);
   document.body = document.createElement('body');
@@ -131,7 +131,7 @@ function fixture(overrides = {}) {
     console,
     crypto: { randomUUID: () => 'invented-once-key' },
     currentWorkspaceId: 'owned-ws',
-    location: { href: 'http://localhost:8765/workspaces/owned-ws' },
+    location: { href: initialHref },
     history: {
       replaceState(_, __, value) {
         context.location.href = 'http://localhost:8765' + value;
@@ -172,6 +172,23 @@ function fixture(overrides = {}) {
     console: context.BackupRecoveryConsole
   };
 }
+test('console captures its deep link before the workspace router normalizes the URL', async () => {
+  const f = fixture(
+    {},
+    'http://localhost:8765/workspaces/owned-ws?panel=backup-recovery&tab=recovery'
+  );
+  f.context.WorkspaceCapabilities.load = async () => {
+    f.context.location.href = 'http://localhost:8765/workspaces/owned-ws';
+  };
+  await f.console.init();
+  assert.equal(f.console.isOpen(), true);
+  assert.equal(f.console.activeTab(), 'recovery');
+  assert.ok(f.calls.every(call => !call.options?.method || call.options.method === 'GET'));
+  f.console.close();
+  await f.console.init();
+  assert.equal(f.console.isOpen(), false, 'boot intent was replayed after closing');
+});
+
 const settle = () => new Promise(resolve => setImmediate(resolve));
 function findButton(doc, label) {
   return doc.body.all(node => node.tagName === 'button' && node.textContent === label)[0];
@@ -388,6 +405,192 @@ test('future completion is quarantined and freshness is not rendered as backup s
   assert.match(f.document.body.textContent, /future timestamp quarantined/);
   assert.match(f.document.body.textContent, /Stored evidence stale/);
   assert.doesNotMatch(f.document.body.textContent, /2099|backup succeeded|all files protected/);
+});
+
+test('recovery renders only labelled stored references and vetted guide links, with no action', async () => {
+  const f = fixture();
+  const original = f.context.fetch;
+  f.context.fetch = async (url, options) => {
+    if (url.endsWith('/recovery')) {
+      f.calls.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          recovery: {
+            observation: 'stale',
+            source_paths: ['<untrusted intended path>'],
+            snapshots: [
+              {
+                id: 'a'.repeat(64),
+                evidence: 'historical',
+                declared_path_count: 1,
+                exclusion_count: 2
+              }
+            ],
+            guide: {
+              boundary: 'External execution only.',
+              steps: [
+                { title: 'Restore outside Ori', instructions: ['Choose a separate empty target.'] }
+              ],
+              sources: [
+                { label: 'Untrusted link', url: 'javascript:evil()' },
+                {
+                  label: 'Pinned recovery',
+                  url: 'https://github.com/restic/restic/blob/v0.19.1/doc/050_restore.rst'
+                }
+              ]
+            }
+          }
+        })
+      };
+    }
+    return original(url, options);
+  };
+  f.console.open({ tab: 'recovery' });
+  await settle();
+  assert.match(f.document.body.textContent, /Historical configuration/);
+  assert.match(f.document.body.textContent, /<untrusted intended path>/);
+  assert.match(f.document.body.textContent, /separate empty target/);
+  assert.doesNotMatch(f.document.body.textContent, /Untrusted link/);
+  assert.ok(f.calls.every(call => call.options.method === 'GET'));
+  assert.equal(findButton(f.document, 'Restore'), undefined);
+});
+
+test('a dated user report requires an unchecked assertion and preserves earlier edit versions', async () => {
+  const f = fixture();
+  const original = f.context.fetch;
+  const writes = [];
+  let operation = 0;
+  f.context.crypto.randomUUID = () => 'invented-report-' + ++operation;
+  const view = {
+    generation: 'g1',
+    revision: 1,
+    server_time: '2026-01-02T03:04:05Z',
+    can_report: true,
+    source_paths: [],
+    snapshots: [],
+    reports: [],
+    note_choices: [
+      { code: '', label: 'No additional note' },
+      { code: 'sample_compared', label: 'Compared outside Ori' },
+      { code: 'sample_mismatch', label: 'Sample did not match' }
+    ],
+    guide: { steps: [], sources: [] }
+  };
+  f.context.fetch = async (url, options) => {
+    if (url.endsWith('/recovery')) {
+      f.calls.push({ url, options });
+      return { ok: true, json: async () => ({ success: true, recovery: view }) };
+    }
+    if (url.endsWith('/recovery-report')) {
+      const body = JSON.parse(options.body);
+      writes.push(body);
+      if (body.edit_id) view.reports.find(report => report.id === body.edit_id).superseded = true;
+      view.reports.unshift({
+        id: body.operation_id,
+        generation: body.generation,
+        tested_at: body.tested_at,
+        reported_at: view.server_time,
+        result: body.result,
+        note_code: body.note_code,
+        supersedes: body.edit_id
+      });
+      view.revision++;
+      f.status.revision++;
+      return {
+        ok: true,
+        json: async () => ({ success: true, operation: { state: 'complete', outcome: 'applied' } })
+      };
+    }
+    return original(url, options);
+  };
+  f.console.open({ tab: 'recovery' });
+  await settle();
+  assert.match(f.document.body.textContent, /Not tested — no current user-reported result/);
+  const field = async (id, value, event = 'change') => {
+    const element = f.document.getElementById(id);
+    element.value = value;
+    await element.fire(event);
+  };
+  await field('brReportDate', '2026-01-01', 'input');
+  await field('brReportResult', 'user_reported_passed');
+  await field('brReportNote', 'sample_compared');
+  assert.ok(!f.document.getElementById('brReportConsent').checked);
+  assert.equal(findButton(f.document, 'Record user-reported result').disabled, true);
+  let consent = f.document.getElementById('brReportConsent');
+  consent.checked = true;
+  await consent.fire('change');
+  await findButton(f.document, 'Record user-reported result').fire('click');
+  await settle();
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].tested_at, '2026-01-01T00:00:00Z');
+  assert.equal(writes[0].note_code, 'sample_compared');
+  assert.match(f.document.body.textContent, /User reports passed/);
+  await findButton(f.document, 'Edit report dated 2026-01-01').fire('click');
+  assert.ok(!f.document.getElementById('brReportConsent').checked);
+  await findButton(f.document, 'Cancel report edit').fire('click');
+  assert.equal(writes.length, 1);
+  await findButton(f.document, 'Edit report dated 2026-01-01').fire('click');
+  await field('brReportResult', 'user_reported_failed');
+  await field('brReportNote', 'sample_mismatch');
+  consent = f.document.getElementById('brReportConsent');
+  consent.checked = true;
+  await consent.fire('change');
+  await findButton(f.document, 'Save edited user report').fire('click');
+  await settle();
+  assert.equal(writes[1].edit_id, writes[0].operation_id);
+  assert.match(f.document.body.textContent, /User reports failed/);
+  assert.match(f.document.body.textContent, /earlier version/);
+  assert.ok(writes.every(body => !('verified_by_ori' in body) && !('note' in body)));
+});
+test('lost recovery-report response retries exactly and invalid note/date choices stay disabled', async () => {
+  const f = fixture();
+  await f.console._test.loadStored();
+  const original = f.context.fetch;
+  const writes = [];
+  f.context.fetch = async (url, options) => {
+    if (options.method !== 'GET') {
+      writes.push(options.body);
+      if (writes.length === 1) throw new Error('lost response');
+      return {
+        ok: true,
+        json: async () => ({ success: true, operation: { state: 'complete', outcome: 'applied' } })
+      };
+    }
+    return original(url, options);
+  };
+  const body = {
+    generation: 'g1',
+    revision: 1,
+    operation_id: 'one-report-key',
+    result: 'user_reported_failed',
+    tested_at: '2026-01-01T00:00:00Z',
+    note_code: 'restore_failed'
+  };
+  await f.console._test.mutate('/recovery-report', body);
+  await f.console._test.mutate('', null, 'POST', true);
+  assert.equal(writes[0], writes[1]);
+  const valid = f.console._test.validReportDraft;
+  const view = { can_report: true, note_choices: [{ code: 'sample_compared' }] };
+  assert.equal(
+    valid(
+      { testedDate: '2026-02-30', result: 'user_reported_passed', noteCode: 'sample_compared' },
+      view
+    ),
+    false
+  );
+  assert.equal(
+    valid({ testedDate: '2026-01-01', result: 'ori_verified', noteCode: 'sample_compared' }, view),
+    false
+  );
+  assert.equal(
+    valid(
+      { testedDate: '2026-01-01', result: 'user_reported_failed', noteCode: 'password=invented' },
+      view
+    ),
+    false
+  );
 });
 
 test('partial coverage and capacity remain point-in-time evidence, not protection', async () => {

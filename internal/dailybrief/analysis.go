@@ -39,11 +39,11 @@ func attentionRank(reason string) int {
 	switch reason {
 	case "failed":
 		return 5
-	case "timeout":
+	case "timeout", "backup_destination_identity_mismatch", "backup_removal_pending":
 		return 4
 	case "follow_up_stale":
 		return 4
-	case "waiting_for_choice":
+	case "waiting_for_choice", "backup_clock_suspect", "backup_user_reported_recovery_failed", "backup_policy_unavailable":
 		return 3
 	// An email thread awaiting the user's reply is a peer of a task waiting for a
 	// choice — both are "you need to act". Ties break by timestamp (below), so
@@ -67,6 +67,9 @@ func attentionRank(reason string) int {
 	case "meeting_needs_prep":
 		return 1
 	default:
+		if strings.HasPrefix(reason, "backup_") {
+			return 2
+		}
 		return 0
 	}
 }
@@ -133,6 +136,11 @@ func ComputeNeedsAttention(snap Snapshot) []AttentionItem {
 			items = append(items, AttentionItem{Ref: evt.Ref, Title: calendarDisplayTitle(evt), WorkspaceName: "Calendar", Reason: "calendar_conflict"})
 		case meetingNeedsPrep(evt):
 			items = append(items, AttentionItem{Ref: evt.Ref, Title: calendarDisplayTitle(evt), WorkspaceName: "Calendar", Reason: "meeting_needs_prep"})
+		}
+	}
+	for _, source := range snap.Backups {
+		if code, title, _ := BackupProblem(source); code != "" {
+			items = append(items, AttentionItem{Ref: source.Ref, Title: title, WorkspaceName: "Backup & Recovery", Reason: "backup_" + code})
 		}
 	}
 	sort.SliceStable(items, func(i, j int) bool {

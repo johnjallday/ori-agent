@@ -106,9 +106,14 @@ run outcomes. Sleep/restart coalesces missed checks rather than replaying a back
 
 Use vetted guidance in **Recovery** and the external application to restore a
 sample to a **separate location**. Do not overwrite your working source as a test.
-Ori does not restore or inspect recovered file contents. The planned reporting
-UI will label a dated result **User reports passed/failed**, never “Ori verified.”
-That UI is not yet available. A passed sample does not prove every file is recoverable.
+Ori does not restore or inspect recovered file contents. Recovery now offers
+an explicit dated **User reports passed/failed** form, never “Ori verified.”
+Choose a known snapshot reference or leave its association unknown. Notes are
+predefined choices—not free text—to keep passwords, recovery keys, commands and
+file contents out of the ledger. Confirm that you are recording your own result.
+Edits retain the earlier version, and reconfiguration makes old reports historical.
+The newest 20 versions are retained. A passed sample does not prove every file
+is recoverable.
 
 Revoke/remove stops or fences Ori's access and drains owned checks. Removing Ori
 configuration clears selected paths/credential references while retaining bounded,
@@ -120,6 +125,29 @@ local access consent.
 strategy outside this v1 integration. Ori does not repair/prune repositories,
 perform integrity scans, rotate keys, purchase software or execute backup/restore
 operations.
+
+## Today, Daily Brief and the advisor
+
+Today and Daily Brief use your **existing saved selected/all workspace scope**.
+They read stored evidence only: opening, repeating or generating a summary never
+checks a drive or creates a task. Today shows at most five primary concerns,
+one per configuration, linking to the owning console. Resolved concerns leave
+the projection. Paused Ori checks do not become failed backups; an externally
+overdue completion or your failed sample-test report can still need attention.
+Unreadable or omitted sources remain explicit gaps, not a healthy all-clear.
+
+Daily Brief includes at most 20 backup sources with observation dates, evidence
+age, completion recency and honestly labelled user reports. Backup information
+uses compiled, fact-only wording: when it is present or unavailable, the brief
+is rendered without an LLM. Other briefs retain their optional model path.
+A saved brief describes its generation time, not a new metadata check.
+
+The Personal Assistant readiness card only navigates to setup or an in-scope
+owning workspace. It cannot install, connect, enable monitoring or delegate.
+The Backup Advisor shares the same health/report projection in its exact
+workspace. Without an isolated model it still explains compiled stored facts;
+with one, the model may select an explanation topic only. Paths, passwords,
+raw provider labels and report notes never enter these summary payloads.
 
 ## Official version-pinned references
 

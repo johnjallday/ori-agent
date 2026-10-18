@@ -140,7 +140,7 @@ test('sanitizeWorkspaceURLState accepts panel=settings (the Plans page deep link
 // panel belongs to the capability console, which reads it itself; the page must
 // neither open a drawer for it nor toast that the link was out of date.
 test('sanitizeWorkspaceURLState leaves capability console panels alone without a stale notice', () => {
-  for (const panel of ['file-janitor', 'calendar']) {
+  for (const panel of ['file-janitor', 'calendar', 'backup-recovery']) {
     const { state, dropped } = sanitizeWorkspaceURLState({ panel }, {});
     assert.equal(state.panel, '', `${panel} opened a workspace drawer`);
     assert.deepEqual(dropped, [], `${panel} was reported as out of date`);

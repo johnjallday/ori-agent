@@ -194,6 +194,16 @@ export function assistantMoreLinks(today) {
 /** Where what needs the user is listed: Home, with the drawer open. */
 export const NEEDS_YOU_URL = '/?panel=today';
 
+// A console deep link owns its panel/focus. Restoring this drawer must neither
+// consume the other owner's query nor hide the requested backup console.
+export function assistantPanelOpenIntent(search, hasToday) {
+  const panel = new URLSearchParams(search).get('panel');
+  return {
+    requestedOpen: Boolean(hasToday) && panel === 'today',
+    restoreAllowed: panel !== 'backup-recovery'
+  };
+}
+
 /**
  * The one line a page other than Home shows for what needs the user: how many
  * things, linking to Home, where they are listed. Nothing is shown when nothing
@@ -206,6 +216,7 @@ export function assistantNeedsLine(today, { failed = false } = {}) {
   const needs = today.needs_you;
   if (String(needs?.health?.status || '') === 'unavailable') return unknown;
   const count = Array.isArray(needs?.items) ? needs.items.length : 0;
+  if (!count && needs?.health?.status === 'partial') return unknown;
   if (!count) return { visible: false, text: '' };
   return { visible: true, text: count === 1 ? '1 needs you' : `${count} need you` };
 }
@@ -958,14 +969,19 @@ function init() {
   // `/?panel=today` opens the drawer on Home. Wait for the server-owned
   // identity first; a query string must not make an unhired assistant appear
   // hired.
-  const requestedOpen =
-    Boolean(state.els.todayBanner) &&
-    new URLSearchParams(window.location.search).get('panel') === 'today';
+  const intent = assistantPanelOpenIntent(window.location.search, Boolean(state.els.todayBanner));
   void refresh().then(() => {
-    if (!(requestedOpen || tabValue(PANEL_OPEN_KEY) === '1') || !open(launcher)) return;
+    if (
+      !intent.restoreAllowed ||
+      !(intent.requestedOpen || tabValue(PANEL_OPEN_KEY) === '1') ||
+      !open(launcher)
+    )
+      return;
     const url = new URL(window.location.href);
-    url.searchParams.delete('panel');
-    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    if (intent.requestedOpen && url.searchParams.get('panel') === 'today') {
+      url.searchParams.delete('panel');
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
   });
 }
 

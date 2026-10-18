@@ -19,12 +19,14 @@ import (
 // visibly distinct fields so a rendering layer never has to guess which is
 // which (PRD FR82, task 6.10).
 type BriefContent struct {
-	OpeningSummary   string               `json:"opening_summary"`
-	NeedsAttention   []BriefAttentionItem `json:"needs_attention"`
-	SinceLastBrief   []BriefChangeItem    `json:"since_last_brief"`
-	TodaysPlan       []BriefPlanItem      `json:"todays_plan"`
-	Resume           []BriefResumeItem    `json:"resume"`
-	SuggestedActions []BriefActionItem    `json:"suggested_actions"`
+	OpeningSummary     string                `json:"opening_summary"`
+	BackupEvidence     []BriefBackupEvidence `json:"backup_evidence,omitempty"`
+	BackupHostRendered bool                  `json:"backup_host_rendered,omitempty"`
+	NeedsAttention     []BriefAttentionItem  `json:"needs_attention"`
+	SinceLastBrief     []BriefChangeItem     `json:"since_last_brief"`
+	TodaysPlan         []BriefPlanItem       `json:"todays_plan"`
+	Resume             []BriefResumeItem     `json:"resume"`
+	SuggestedActions   []BriefActionItem     `json:"suggested_actions"`
 	// TodaysMeetings is deterministic fact, rebuilt from the snapshot after
 	// synthesis; the model contributes only each meeting's WhyPrepare.
 	TodaysMeetings []BriefMeetingItem `json:"todays_meetings,omitempty"`
@@ -38,6 +40,12 @@ type BriefContent struct {
 	// unavailable, or its entire response failed to parse/validate) and
 	// this content is the fully deterministic rendering (PRD FR87).
 	Degraded bool `json:"degraded,omitempty"`
+}
+
+// BriefBackupEvidence is compiled from stored evidence, never model prose.
+type BriefBackupEvidence struct {
+	Ref     SourceRef `json:"ref"`
+	Summary string    `json:"summary"`
 }
 
 // BriefAttentionItem is a Needs Attention entry. A fact: title/reason
@@ -148,9 +156,15 @@ func (s *Synthesizer) Generate(ctx context.Context, req GenerationRequest, cfg C
 	deterministic := BuildDeterministicContent(snap, since, isFirstBrief)
 	deterministic.Degraded = true
 
-	if s.Chat == nil {
-		// No model configured: the deterministic fallback IS the brief.
-		return contentToResult(deterministic, GenerationSucceeded, since, snap.GeneratedAt)
+	if s.Chat == nil || len(snap.Backups) > 0 || snap.BackupIncomplete {
+		// Backup statements remain wholly host-owned. An allowlisted ID cannot
+		// validate model claims of success/recovery in free opening/item prose.
+		// Other briefs retain their existing optional model path.
+		status := GenerationSucceeded
+		if snap.BackupIncomplete {
+			status = GenerationPartial
+		}
+		return contentToResult(deterministic, status, since, snap.GeneratedAt)
 	}
 
 	modelContent, err := s.synthesizeWithModel(ctx, snap, deterministic, isFirstBrief)
@@ -209,6 +223,12 @@ func BuildDeterministicContent(snap Snapshot, since time.Time, isFirstBrief bool
 		DataGaps:          snap.Gaps,
 		CalendarConnected: snap.CalendarConnected,
 	}
+	content.BackupHostRendered = len(snap.Backups) > 0 || snap.BackupIncomplete
+	backupByRef := map[string]BackupSnapshot{}
+	for _, source := range snap.Backups {
+		backupByRef[source.Ref.Key()] = source
+	}
+	backupInAttention := map[string]bool{}
 	if snap.CalendarConnected {
 		content.OpeningSummary += " " + meetingsSummary(snap.CalendarMeetingCount, snap.CalendarOverlapCount)
 		content.TodaysMeetingsMore = max(0, snap.CalendarMeetingCount-len(meetings))
@@ -225,9 +245,19 @@ func BuildDeterministicContent(snap Snapshot, since time.Time, isFirstBrief bool
 		})
 	}
 	for _, a := range attention {
+		reason := a.Reason
+		if source, ok := backupByRef[a.Ref.Key()]; ok {
+			reason = BackupEvidenceLine(source)
+			backupInAttention[a.Ref.Key()] = true
+		}
 		content.NeedsAttention = append(content.NeedsAttention, BriefAttentionItem{
-			Ref: a.Ref, Title: a.Title, WorkspaceName: a.WorkspaceName, Reason: a.Reason,
+			Ref: a.Ref, Title: a.Title, WorkspaceName: a.WorkspaceName, Reason: reason,
 		})
+	}
+	for _, source := range snap.Backups {
+		if !backupInAttention[source.Ref.Key()] {
+			content.BackupEvidence = append(content.BackupEvidence, BriefBackupEvidence{Ref: source.Ref, Summary: BackupEvidenceLine(source)})
+		}
 	}
 	for _, c := range changes {
 		content.SinceLastBrief = append(content.SinceLastBrief, BriefChangeItem{
@@ -346,8 +376,11 @@ func mergeWhyPrepare(deterministic, model []BriefMeetingItem) []BriefMeetingItem
 // persisted (PRD FR86/task 6.12). Returns the filtered content and how many
 // items were dropped.
 func ValidateAgainstAllowlist(content BriefContent, allowed map[string]SourceRef) (BriefContent, int) {
-	dropped := 0
+	dropped := len(content.BackupEvidence)
 	canonical := func(ref SourceRef) (SourceRef, bool) {
+		if ref.EntityType == EntityBackupObservation {
+			return SourceRef{}, false
+		}
 		grounded, ok := allowed[ref.Key()]
 		return grounded, ok
 	}

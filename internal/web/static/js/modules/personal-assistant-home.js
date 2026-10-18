@@ -196,7 +196,7 @@ export function todaySectionRows(section) {
   }));
   if (health === 'partial' || health === 'unavailable') {
     return [
-      { kind: 'status', title: 'Some sources are unavailable — showing verified items only.' },
+      { kind: 'status', title: 'Some sources are unavailable — showing grounded items only.' },
       ...projected
     ];
   }

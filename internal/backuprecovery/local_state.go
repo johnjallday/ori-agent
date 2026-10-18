@@ -134,6 +134,7 @@ type localRestoreReport struct {
 	ID         string    `json:"id"`
 	Generation string    `json:"generation"`
 	SnapshotID string    `json:"snapshot_id,omitempty"`
+	Supersedes string    `json:"supersedes,omitempty"`
 	ReportedAt time.Time `json:"reported_at"`
 	TestedAt   time.Time `json:"tested_at"`
 	Result     string    `json:"result"`         // user_reported_passed / user_reported_failed
@@ -198,6 +199,9 @@ func (s localState) valid() bool {
 	}
 	seen := map[string]bool{}
 	for _, report := range s.Reports {
+		if report.Supersedes != "" && (!validStorageUUID(report.Supersedes) || report.Supersedes == report.ID) {
+			return false
+		}
 		if !validStorageUUID(report.ID) || seen[report.ID] || !validStorageUUID(report.Generation) || (report.SnapshotID != "" && !metadataID(report.SnapshotID)) || !localTime(report.ReportedAt) || !localTime(report.TestedAt) || !localText(report.Note, 512, true) ||
 			(report.Result != "user_reported_passed" && report.Result != "user_reported_failed") {
 			return false

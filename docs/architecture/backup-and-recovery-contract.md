@@ -609,7 +609,8 @@ disk or decrypt a backup password. Domain endpoints are:
 | POST `/monitoring/review` | Review cadence/freshness/expected-age/offline/space settings |
 | POST `/monitoring` | Consume exact reviewed settings token; explicit opt-in or pause |
 | POST `/revoke` | Fence/cancel/drain, discard local access receipt; retain labelled history |
-| POST `/recovery-report` | Revision/idempotency-bound user report only; no restore execution |
+| GET `/recovery` | Owner-only stored source intent, labelled snapshot references, compiled guide and user-report history |
+| POST `/recovery-report` | Generation/revision/UUID-bound user assertion; edits append a superseding version, never execute recovery |
 | DELETE `/` | Fence/cancel/drain then remove Ori configuration only |
 
 Use existing origin/host protection plus exact scheme/host/**port** same-origin
@@ -684,7 +685,7 @@ In addition to the decoder limits, enforce these bounds:
 | Low-space warning | 10% proposed; allowed 1–50%; unknown remains unknown |
 | Tolerated timestamp lead | 5 min; further-future facts are quarantined, not fresh |
 | Successful/failed attempt history | Newest 100 entries, deterministic sequence ordering |
-| Restore reports | Newest 20; at most 512 UTF-8 bytes per private note |
+| Restore reports | Newest 20 immutable versions; notes are closed compiled choices, each within the 512-byte private-note limit |
 | Request / settings / entire private state | 16 KiB / 128 KiB / 2 MiB |
 | Review token lifetime / outstanding reviews | 5 min / 4 per workspace |
 | Idempotency outcomes | 64 per workspace, expire after 24 h |
@@ -721,6 +722,36 @@ volume/repository IDs, raw output, vault references, freeform notes or untrusted
 provider labels. At most one current item per problem/config generation, max 20
 backup items per projection. A source failure is a named gap, not an empty healthy
 source. Asking a question cannot install, activate, schedule or refresh anything.
+
+The domain reader rechecks exact live SQL ownership/activity/installation and
+local authority in one transaction, capped at 32 eligible sources/failures. Its
+server bridge consumes the existing `WorkspaceScopeResult`, never an independent
+backup enumeration. The consumer bounds this to 20 unique configurations with
+an explicit incomplete gap, and regenerates console routes from the canonical
+saved-scope workspace slug. Stable UUID/generation refs—not slugs—own identity
+and deduplication; a UUID is not a workspace page route.
+`backup_observation` references identify workspace plus configuration generation;
+sequence changes do not create duplicate current alerts. Today selects at most
+five primary problems, independently of other source health, without writing
+work. Pausing suppresses Ori freshness/check nudges, not external completion or
+user-reported recovery concerns. Expected disconnection is not backup failure.
+
+Daily Brief analysis uses the same fixed problem policy. Each source appears
+once, either in Needs Attention with its full evidence line or in stored backup
+evidence. Data gaps name stale/unavailable evidence without source paths or raw
+errors. Whenever backup evidence or an incomplete backup read is present, the
+entire brief is host-rendered without calling a model: reference validation alone
+cannot validate free prose claiming a successful backup/restore. Other briefs
+retain their existing optional synthesis. Model-created backup refs/evidence are
+refused by reference validation. Historical brief facts remain dated; Today
+re-grounds backup refs against the latest authorized scope/generation and uses
+host-owned current wording, not persisted/model-authored assertions.
+
+Readiness is navigation-only and respects the same saved scope. The exact
+workspace advisor projects shared health and dated current-generation reports;
+future/clock-rollback report dates are review-required, never credited. Its
+isolated optional model can still select only a compiled explanation topic, not
+publish prose or obtain tools, filesystem roots, credentials or delegation.
 
 ## Current inert template integration
 
@@ -821,8 +852,13 @@ Freeze resolves design/feasibility, not all later implementation tests:
   or restore. The invented repository's file digest remained unchanged. Bounded
   clock-fixture screenshots are separate from this actual product/provider path.
   Full delivery CI, remaining recovery/summary groups and 5.3 are still required.
-- **4:** stored-only scoped Today/Brief/advisor projections and user-reported
-  recovery, with no provider calls or filesystem/secret authority in readers.
+- **4.1–4.6 implemented:** model-free recovery guidance, immutable dated user
+  assertions, scoped Today/Brief/readiness and exact-workspace advisor projections.
+  Readers have no provider/password callback or selected-folder authority.
+  The affected checkpoint and actual-product stored-fixture demo passed, with
+  explicitly invented encrypted stale/overdue metadata and an illustrative user
+  assertion. Both Today/Brief links returned to the owning console. No group-4
+  provider/drive/restore operation is claimed; full delivery remains separate.
 - **5.3:** full real-product live acceptance and a sample external restore.
   Connected identity/source independence and actual user-operated unplug/replug
   already have probe evidence, but a second physical same-name swap has **not**

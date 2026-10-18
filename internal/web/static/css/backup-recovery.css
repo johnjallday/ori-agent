@@ -254,7 +254,8 @@
   font-size: 0.95rem;
   margin: 0 0 0.5rem;
 }
-.br-monitoring {
+.br-monitoring,
+.br-reports {
   border-top: 1px solid var(--br-line);
   margin-top: 1.5rem;
   padding-top: 1.25rem;

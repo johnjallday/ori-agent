@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/backuprecovery"
@@ -20,10 +21,14 @@ import (
 type advisorFactsFixture struct {
 	calls      int
 	connection string
+	facts      *backuprecovery.AdvisorFacts
 }
 
 func (f *advisorFactsFixture) ReadBackupAdvisor(context.Context, string, string) (backuprecovery.AdvisorFacts, error) {
 	f.calls++
+	if f.facts != nil {
+		return *f.facts, nil
+	}
 	zero := 0
 	connection := f.connection
 	if connection == "" {
@@ -139,6 +144,21 @@ func TestBackupAdvisorFinalPublicationUsesLiveRoleAndStoredFacts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBackupAdvisorNoModelLabelsHealthAndUserReportWithoutVerification(t *testing.T) {
+	handler, reader := newAdvisorChatFixture(t, nil)
+	date := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	reader.facts = &backuprecovery.AdvisorFacts{Connection: "configured", EvidenceCurrent: true, Health: backuprecovery.EvidenceHealth{Observation: "stale", Recency: "overdue"}, RecoveryState: "user_reported_passed", RecoveryTestedAt: &date}
+	response := advisorChatRequest(t, handler, "are all my files safe?", "backup-ws")
+	for _, expected := range []string{"No isolated model", "stale stored observation", "overdue observed completion", "user reports sample recovery passed", "2026-10-18", "Ori did not perform or verify a restore"} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Fatal(expected, response.Body.String())
+		}
+	}
+	if reader.calls != 2 {
+		t.Fatal(reader.calls)
 	}
 }
 

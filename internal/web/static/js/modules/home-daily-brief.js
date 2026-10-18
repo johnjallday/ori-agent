@@ -39,6 +39,15 @@ export function hrefForRef(ref) {
   if (ref.entity_type === 'email_thread' && ref.entity_id) {
     return `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(ref.entity_id)}`;
   }
+  if (ref.entity_type === 'backup_observation') {
+    if (
+      !/^[A-Za-z0-9_-]{1,128}$/.test(String(ref.workspace_id || '')) ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(String(ref.entity_id || '')) ||
+      !/^[a-z0-9][a-z0-9-]{0,79}$/.test(String(ref.workspace_slug || ''))
+    )
+      return '#';
+    return `/workspaces/${encodeURIComponent(ref.workspace_slug)}?panel=backup-recovery&tab=overview`;
+  }
   if (ref.entity_type === 'follow_up') {
     const workspaceId = String(ref.workspace_id || '');
     const workspaceSlug = String(ref.workspace_slug || '');
@@ -217,6 +226,13 @@ export function computeBanner(revision, latestClaim) {
     };
   }
   const content = parseContent(revision);
+  if (content.backup_host_rendered) {
+    return {
+      kind: 'degraded',
+      text: 'Stored backup evidence uses host-owned, fact-only wording. Snapshots and user reports do not prove protection.',
+      showRetry: false
+    };
+  }
   if (content.degraded) {
     return {
       kind: 'degraded',
@@ -237,7 +253,8 @@ export function isQuietDay(content) {
     !(content.todays_plan && content.todays_plan.length) &&
     !(content.resume && content.resume.length) &&
     !(content.suggested_actions && content.suggested_actions.length) &&
-    !(content.todays_meetings && content.todays_meetings.length)
+    !(content.todays_meetings && content.todays_meetings.length) &&
+    !(content.backup_evidence && content.backup_evidence.length)
   );
 }
 
@@ -325,6 +342,14 @@ export function renderContent(content, options = {}) {
   }
   // Today's Meetings leads: it is the part of the day already fixed in time.
   parts.push(meetingsSection(content, options.timeZone));
+  parts.push(
+    listSection(
+      'Backup & Recovery · stored evidence',
+      content.backup_evidence,
+      item =>
+        `<li class="home-daily-brief-item"><a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">Open owning backup workspace</a><p class="home-daily-brief-item-fact">${escapeHtml(item.summary)}</p></li>`
+    )
+  );
   if (isQuietDay(content)) {
     parts.push(
       '<p class="home-daily-brief-quiet">Nothing else needs your attention right now.</p>'

@@ -25,6 +25,8 @@ const (
 type Domain interface {
 	GetStatus(context.Context, string, string) (backuprecovery.Status, error)
 	GetSettings(context.Context, string, string) (backuprecovery.Settings, error)
+	GetRecovery(context.Context, string, string) (backuprecovery.RecoveryView, error)
+	RecordRecoveryReport(context.Context, string, string, backuprecovery.RecoveryReportRequest) (backuprecovery.OperationResult, error)
 	GetHistory(context.Context, string, string, uint64) (backuprecovery.History, error)
 	Pick(context.Context, string, string, string) (string, error)
 	DescribeCredential(context.Context, string, string, string, string) (backuprecovery.CredentialReference, error)
@@ -49,7 +51,7 @@ func NewHandler(service Domain, users userprofile.UserProvider) *Handler {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	for suffix, method := range map[string]string{"": "GET", "/guide": "GET", "/settings": "GET", "/history": "GET", "/selection": "POST", "/credential": "POST", "/review": "POST", "/connect": "POST", "/refresh": "POST", "/revoke": "POST", "/monitoring/review": "POST", "/monitoring": "POST"} {
+	for suffix, method := range map[string]string{"": "GET", "/guide": "GET", "/recovery": "GET", "/settings": "GET", "/history": "GET", "/selection": "POST", "/credential": "POST", "/review": "POST", "/connect": "POST", "/refresh": "POST", "/revoke": "POST", "/monitoring/review": "POST", "/monitoring": "POST", "/recovery-report": "POST"} {
 		mux.HandleFunc(method+" "+APIPrefix+suffix, h.serve(suffix, method))
 	}
 	mux.HandleFunc("DELETE "+APIPrefix, h.serve("/delete", http.MethodDelete))
@@ -148,6 +150,9 @@ func (h *Handler) serve(action, method string) http.HandlerFunc {
 			_, err = h.service.GetStatus(r.Context(), owner, workspace) // scope check only; no provider read
 			key = "guide"
 			data = backuprecovery.ExternalSetupGuide()
+		case "/recovery":
+			key = "recovery"
+			data, err = h.service.GetRecovery(r.Context(), owner, workspace)
 		case "/settings":
 			key = "settings"
 			data, err = h.service.GetSettings(r.Context(), owner, workspace)
@@ -212,6 +217,13 @@ func (h *Handler) serve(action, method string) http.HandlerFunc {
 			}
 			key = "operation"
 			data, err = h.service.Refresh(r.Context(), owner, workspace, request)
+		case "/recovery-report":
+			var request backuprecovery.RecoveryReportRequest
+			if !parseBody(w, r, &request) {
+				return
+			}
+			key = "operation"
+			data, err = h.service.RecordRecoveryReport(r.Context(), owner, workspace, request)
 		case "/monitoring/review":
 			var request backuprecovery.MonitoringReviewRequest
 			if !parseBody(w, r, &request) {

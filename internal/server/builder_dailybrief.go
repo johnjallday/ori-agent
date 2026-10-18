@@ -179,6 +179,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			Mailbox:   b.dailyBriefMailbox,
 			FollowUps: b.followUpService,
 			Calendar:  briefCalendar,
+			Backups:   dailyBriefBackupSource{reader: b.backupRecoveryService},
 		}
 		snap := dailybrief.BuildSnapshot(ctx, sources, cfg, req.UserID, time.Now())
 		previous, err := store.GetCurrentRevision(ctx, cfg.WorkspaceID)
@@ -395,6 +396,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		emailCapability.emailOps = b.workspaceFileStore
 	}
 	capabilities := personalassistant.NewCapabilityService(b.personalAssistantService, b.workspaceStore, emailCapability)
+	capabilities.SetBackupReader(dailyBriefBackupSource{reader: b.backupRecoveryService}, workspaceSource)
 	b.personalAssistantHandler.SetCapabilityService(capabilities)
 	b.personalAssistantHandler.SetSpecialistOfferService(
 		personalassistant.NewSpecialistOfferService(b.personalAssistantStore),
@@ -412,6 +414,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		todayService.SetInterviewPreferences(interviewReader)
 	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
+	todayService.SetBackupReader(dailyBriefBackupSource{reader: b.backupRecoveryService})
 	// A workspace the assistant is still building asks to be finished.
 	if b.workspaceBuildStore != nil {
 		todayService.SetWorkspaceBuildReader(b.workspaceBuildStore)

@@ -453,6 +453,13 @@ func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Statu
 	if err != nil {
 		return Status{}, err
 	}
+	return s.storedStatus(record), nil
+}
+
+// storedStatus projects one already-authorized record, without another read or
+// a provider/password callback. Owning readers share the same time policy.
+func (s *Service) storedStatus(record localRecord) Status {
+	workspace := record.authority.Workspace
 	status := Status{StateVersion: revisionOf(record), WorkspaceID: workspace, ServerTime: s.clock().UTC(), Connection: "not_configured", RuntimeAvailable: s.provider != nil, Destination: "not_checked", Monitoring: "manual_only"}
 	s.mu.Lock()
 	monitoringBound := s.monitoringBound
@@ -462,7 +469,7 @@ func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Statu
 	s.mu.Unlock()
 	if record.state == nil {
 		status.Health = evaluateHealth(status, nil, status.ServerTime)
-		return status, nil
+		return status
 	}
 	state := record.state
 	status.RemovalPending = pendingRemoval(record)
@@ -533,7 +540,7 @@ func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Statu
 		}
 	}
 	status.Health = evaluateHealth(status, state, status.ServerTime)
-	return status, nil
+	return status
 }
 func (s *Service) GetSettings(ctx context.Context, owner, workspace string) (Settings, error) {
 	release, err := s.enter()

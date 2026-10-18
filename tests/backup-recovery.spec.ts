@@ -320,6 +320,101 @@ test('prototype clock fixtures: freshness, overdue completion and expected disco
   }
 });
 
+test('prototype: recovery reports require a dated user assertion and retain earlier edit history', async ({
+  page
+}) => {
+  await prototype(page, true);
+  const prefix = origin + '/api/workspaces/invented-workspace/backup-recovery';
+  const view = {
+    generation: 'invented-generation',
+    revision: 1,
+    server_time: '2026-10-18T00:00:00Z',
+    can_report: true,
+    observation: 'current',
+    source_paths: [],
+    snapshots: [],
+    reports: [] as Array<Record<string, unknown>>,
+    note_choices: [
+      { code: '', label: 'No additional note' },
+      { code: 'sample_compared', label: 'Sample compared outside Ori' },
+      { code: 'sample_mismatch', label: 'Sample did not match' }
+    ],
+    guide: { steps: [], sources: [] }
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route(prefix + '/recovery', route =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, recovery: view })
+    })
+  );
+  await page.route(prefix + '/recovery-report', async route => {
+    const body = route.request().postDataJSON();
+    writes.push(body);
+    if (body.edit_id) view.reports.find(report => report.id === body.edit_id)!.superseded = true;
+    view.reports.unshift({
+      id: body.operation_id,
+      generation: body.generation,
+      result: body.result,
+      tested_at: body.tested_at,
+      reported_at: view.server_time,
+      note_code: body.note_code,
+      supersedes: body.edit_id
+    });
+    view.revision++;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, operation: { state: 'complete', outcome: 'applied' } })
+    });
+  });
+  await page.getByRole('button', { name: 'Open backup evidence' }).click();
+  const dialog = page.locator('#backupRecoveryConsole');
+  await dialog.getByRole('tab', { name: 'Recovery', exact: true }).click();
+  await expect(dialog).toContainText('Not tested — no current user-reported result.');
+  await dialog.getByLabel('Test date (UTC)', { exact: true }).fill('2026-10-17');
+  await dialog
+    .getByRole('combobox', { name: 'Your reported result', exact: true })
+    .selectOption('user_reported_passed');
+  await dialog
+    .getByRole('combobox', { name: 'Optional note — predefined choices only', exact: true })
+    .selectOption('sample_compared');
+  const consent = dialog.locator('#brReportConsent');
+  await expect(consent).not.toBeChecked();
+  await expect(
+    dialog.getByRole('button', { name: 'Record user-reported result', exact: true })
+  ).toBeDisabled();
+  expect(writes).toHaveLength(0);
+  await consent.focus();
+  await page.keyboard.press('Space');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toContainText('User report saved. Ori did not perform or verify a restore.');
+  expect(writes).toHaveLength(1);
+  await dialog.getByRole('button', { name: 'Edit report dated 2026-10-17', exact: true }).click();
+  await expect(consent).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Cancel report edit', exact: true }).click();
+  expect(writes).toHaveLength(1);
+  await dialog.getByRole('button', { name: 'Edit report dated 2026-10-17', exact: true }).click();
+  await dialog
+    .getByRole('combobox', { name: 'Your reported result', exact: true })
+    .selectOption('user_reported_failed');
+  await dialog
+    .getByRole('combobox', { name: 'Optional note — predefined choices only', exact: true })
+    .selectOption('sample_mismatch');
+  await consent.check();
+  await dialog.getByRole('button', { name: 'Save edited user report', exact: true }).click();
+  await expect(dialog).toContainText('earlier version');
+  expect(writes).toHaveLength(2);
+  expect(writes[1].edit_id).toBe(writes[0].operation_id);
+  expect(
+    writes.every(body => !('verified_by_ori' in body) && !('note' in body) && !('command' in body))
+  ).toBeTruthy();
+  await expect(dialog.getByLabel('Test date (UTC)', { exact: true })).toBeEnabled();
+  await dialog
+    .locator('.br-reports')
+    .screenshot({ path: test.info().outputPath('prototype-user-reported-history.png') });
+});
+
 /** Real current server/creator/wizard/domain/console. Only CDN assets are served
  * locally; no product API is intercepted. Run on an isolated missing-tool demo.
  * Native choices and real provider acceptance are separately labelled in 2.11. */

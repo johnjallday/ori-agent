@@ -126,6 +126,12 @@ func (h *Handler) maybeHandleBackupAdvisor(w http.ResponseWriter, r *http.Reques
 	if facts.LastAttemptOutcome != "" {
 		answer += "Latest metadata-check outcome: " + adviceOutcome(facts.LastAttemptOutcome) + ". "
 	}
+	evidence := "historical or unavailable for the current configuration"
+	if facts.EvidenceCurrent {
+		evidence = "current configuration, still metadata only"
+	}
+	answer += "\nEvidence context: " + evidence + ". Freshness: " + mapValue(facts.Health.Observation, map[string]string{"current": "current stored observation", "stale": "stale stored observation", "historical": "historical observation", "clock_suspect": "clock-suspect observation", "never_observed": "never observed"}) + ". Completion recency: " + mapValue(facts.Health.Recency, map[string]string{"recent": "recent observed completion", "overdue": "overdue observed completion", "no_completed_snapshot": "no completed snapshot observed", "completion_unavailable": "completion time unavailable", "unknown": "unknown", "clock_suspect": "clock requires review"}) + ".\n"
+	answer += "Recovery: " + mapValue(facts.RecoveryState, map[string]string{"not_tested": "not tested", "user_reported_passed": "user reports sample recovery passed", "user_reported_failed": "user reports sample recovery failed", "review_required": "report needs local context review"}) + ". User-reported test date: " + adviceTime(facts.RecoveryTestedAt) + ". Ori did not perform or verify a restore."
 	answer += "\n\n" + adviceTopic(topic) + "\n\nLatest backup-attempt success, complete coverage and recoverability are not proven by snapshots. External-drive-only backup is not off-site protection."
 	respond(answer)
 	return true

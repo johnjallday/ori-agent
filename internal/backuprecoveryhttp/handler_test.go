@@ -26,6 +26,12 @@ func (s *domainSpy) called(owner, workspace string) error {
 func (s *domainSpy) GetStatus(_ context.Context, o, w string) (backuprecovery.Status, error) {
 	return backuprecovery.Status{}, s.called(o, w)
 }
+func (s *domainSpy) RecordRecoveryReport(_ context.Context, o, w string, _ backuprecovery.RecoveryReportRequest) (backuprecovery.OperationResult, error) {
+	return backuprecovery.OperationResult{}, s.called(o, w)
+}
+func (s *domainSpy) GetRecovery(_ context.Context, o, w string) (backuprecovery.RecoveryView, error) {
+	return backuprecovery.RecoveryView{}, s.called(o, w)
+}
 func (s *domainSpy) GetSettings(_ context.Context, o, w string) (backuprecovery.Settings, error) {
 	return backuprecovery.Settings{}, s.called(o, w)
 }
@@ -154,7 +160,7 @@ func TestBackupHTTPRejectsAmbiguousOrExecutablePayloadsBeforeDomain(t *testing.T
 	}
 }
 func TestBackupHTTPReadRoutesNeverDispatchAMutation(t *testing.T) {
-	for _, path := range []string{"", "/guide", "/settings", "/history?cursor=12"} {
+	for _, path := range []string{"", "/guide", "/recovery", "/settings", "/history?cursor=12"} {
 		spy := &domainSpy{}
 		response := httptest.NewRecorder()
 		request := backupRequest(http.MethodGet, path, "")
@@ -174,6 +180,17 @@ func TestBackupHTTPReadRoutesNeverDispatchAMutation(t *testing.T) {
 		}
 	}
 }
+func TestRecoveryGuidanceExposesNoExecutionRoute(t *testing.T) {
+	for _, path := range []string{"/recovery/restore", "/recovery/repair", "/recovery/prune"} {
+		spy := &domainSpy{}
+		response := httptest.NewRecorder()
+		backupMux(spy).ServeHTTP(response, backupRequest(http.MethodPost, path, `{}`))
+		if response.Code != http.StatusNotFound || spy.calls.Load() != 0 {
+			t.Fatal("execution route materialized", path, response.Code)
+		}
+	}
+}
+
 func TestBackupHTTPExactActorAndPrivateErrors(t *testing.T) {
 	for _, owner := range []string{"LOCAL", "", "other"} {
 		spy := &domainSpy{}

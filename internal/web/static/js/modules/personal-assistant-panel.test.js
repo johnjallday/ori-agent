@@ -13,6 +13,7 @@ import {
   assistantChipView,
   assistantMoreLinks,
   assistantNeedsLine,
+  assistantPanelOpenIntent,
   assistantOpenFocusTarget,
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
@@ -23,6 +24,22 @@ import {
   safeTodayRoute,
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
+
+test('backup-console navigation owns focus and Today consumes only its own query', () => {
+  assert.deepEqual(assistantPanelOpenIntent('?panel=backup-recovery&tab=overview', false), {
+    requestedOpen: false,
+    restoreAllowed: false
+  });
+  assert.deepEqual(assistantPanelOpenIntent('?panel=today', true), {
+    requestedOpen: true,
+    restoreAllowed: true
+  });
+  for (const query of ['', '?panel=calendar', '?panel=file-janitor'])
+    assert.deepEqual(assistantPanelOpenIntent(query, false), {
+      requestedOpen: false,
+      restoreAllowed: true
+    });
+});
 
 test('only a focused control outside the scroll viewport needs reflow recovery', () => {
   const viewport = { top: 100, bottom: 500 };
@@ -272,6 +289,20 @@ test('a page that is not Home says how much needs the user, in one line that goe
   // The number cannot be read. A missing line would read as "nothing needs
   // you", so the line stays and points at Home.
   const unknown = { visible: true, text: 'Open Home to see what needs you' };
+  assert.deepEqual(
+    assistantNeedsLine({
+      state: 'active',
+      needs_you: { health: { status: 'partial', reason: 'backup_source_unavailable' }, items: [] }
+    }),
+    unknown
+  );
+  assert.deepEqual(
+    assistantNeedsLine({
+      state: 'active',
+      needs_you: { health: { status: 'partial' }, items: [{ kind: 'backup_observation' }] }
+    }),
+    { visible: true, text: '1 needs you' }
+  );
   assert.deepEqual(assistantNeedsLine(null, { failed: true }), unknown);
   assert.deepEqual(assistantNeedsLine(today(2), { failed: true }), unknown);
   assert.deepEqual(assistantNeedsLine(null), unknown);

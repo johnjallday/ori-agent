@@ -52,6 +52,28 @@ test('partial assistant requests retain canonical identity and deduplicate only 
   );
 });
 
+test('backup needs-you stays one grounded link with an independent incomplete-source footer', () => {
+  const item = {
+    id: 'backup_observation:ws:gen',
+    kind: 'backup_observation',
+    title: 'Review stale stored backup evidence',
+    detail: 'Stored metadata, not proof of backup success or recovery.',
+    route: '/workspaces/ws?panel=backup-recovery&tab=overview',
+    ref: { workspace_id: 'ws', entity_type: 'backup_observation', entity_id: 'gen' }
+  };
+  const view = todayThreeSectionView({
+    needs_you: { health: { status: 'partial' }, items: [item, { ...item }] },
+    unavailable_sources: ['Backup & Recovery', 'Backup & Recovery']
+  });
+  assert.equal(view.needs.length, 1);
+  assert.equal(view.needs[0].route, item.route);
+  assert.equal(view.footer, "Couldn't read: Backup & Recovery.");
+  assert.ok(!('actions' in view.needs[0]));
+  const rows = todaySectionRows({ health: { status: 'partial' }, items: [item] });
+  assert.ok(rows[0].title.includes('grounded'));
+  assert.ok(!rows[0].title.includes('verified'));
+});
+
 test('an unfinished build keeps its id and only the controls Today knows', () => {
   const [build, other] = todaySectionItems({
     items: [
