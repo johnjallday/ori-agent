@@ -159,7 +159,7 @@ func (d MemoryDocument) Render() string {
 
 // Entries returns the structured entries in file order.
 func (d MemoryDocument) Entries() []MemoryEntry {
-	var entries []MemoryEntry
+	entries := make([]MemoryEntry, 0, len(d.lines))
 	for _, l := range d.lines {
 		if l.entry != nil {
 			entries = append(entries, *l.entry)
@@ -216,16 +216,9 @@ const memoryPromptGuidance = "Persistent knowledge accumulated for this workspac
 // pass true where those tools are available (mission/chat) and false for the
 // native-CLI path, which only reads memory as context.
 func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) string {
-	// A raw workspace document contains no lifecycle proof. A managed HQ
-	// marker is inert here even if its bytes appear to be a structured entry;
-	// only a separate, bound eligibility projection may render it.
-	entries := make([]MemoryEntry, 0)
-	for _, entry := range doc.Entries() {
-		if !IsHQManagedProvenance(entry.Provenance) {
-			entries = append(entries, entry)
-		}
-	}
-	if len(entries) == 0 && !includeToolGuidance {
+	entries := doc.Entries()
+	pick := selectMemoryPrompt(entries)
+	if pick.eligible == 0 && !includeToolGuidance {
 		return ""
 	}
 
@@ -235,26 +228,79 @@ func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) str
 		b.WriteString(memoryPromptGuidance)
 		b.WriteString("\n\n")
 	}
-	if len(entries) == 0 {
+	if pick.eligible == 0 {
 		b.WriteString("_(empty — nothing recorded yet)_\n")
 		return b.String()
 	}
 
-	kept, dropped := selectMemoryEntriesForBudget(entries, memoryPromptCharBudget)
-	for _, e := range kept {
-		b.WriteString(e.Render())
+	for _, index := range pick.keptIndexes {
+		b.WriteString(entries[index].Render())
 		b.WriteString("\n")
 	}
-	if dropped > 0 {
-		fmt.Fprintf(&b, "\n(memory truncated — %d entr%s not shown; consider pruning)\n", dropped, plural(dropped, "y", "ies"))
+	if pick.dropped > 0 {
+		fmt.Fprintf(&b, "\n(memory truncated — %d entr%s not shown; consider pruning)\n", pick.dropped, plural(pick.dropped, "y", "ies"))
 	}
 	return b.String()
+}
+
+// MemoryPromptSelection reports which of a document's entries (doc.Entries(),
+// in file order) RenderMemoryPromptSection puts in the prompt. The result is
+// aligned with entries: element i is for entry i, the same 0-based file-order
+// index the memory API returns and EditAt/DeleteAt address. HQ-managed markers
+// are always false (they are never in the workspace prompt section); an
+// ordinary entry is false only when the prompt budget drops it. It shares
+// selectMemoryPrompt with the renderer, so the two cannot disagree.
+func MemoryPromptSelection(entries []MemoryEntry) []bool {
+	inPrompt := make([]bool, len(entries))
+	for _, index := range selectMemoryPrompt(entries).keptIndexes {
+		inPrompt[index] = true
+	}
+	return inPrompt
+}
+
+// memoryPromptPick is the outcome of the one prompt selection path.
+type memoryPromptPick struct {
+	eligible    int   // entries considered: managed markers excluded
+	keptIndexes []int // index into the document's entries of each kept one, in file order
+	dropped     int   // eligible entries the budget left out
+}
+
+// selectMemoryPrompt excludes HQ-managed markers, then applies the prompt
+// budget. Both RenderMemoryPromptSection and MemoryPromptSelection use it.
+func selectMemoryPrompt(all []MemoryEntry) memoryPromptPick {
+	// A raw workspace document contains no lifecycle proof. A managed HQ
+	// marker is inert here even if its bytes appear to be a structured entry;
+	// only a separate, bound eligibility projection may render it.
+	eligible := make([]MemoryEntry, 0, len(all))
+	docIndexes := make([]int, 0, len(all))
+	for i, entry := range all {
+		if !IsHQManagedProvenance(entry.Provenance) {
+			eligible = append(eligible, entry)
+			docIndexes = append(docIndexes, i)
+		}
+	}
+	positions, dropped := selectMemoryEntriesForBudget(eligible, memoryPromptCharBudget)
+	keptIndexes := make([]int, len(positions))
+	for i, position := range positions {
+		keptIndexes[i] = docIndexes[position]
+	}
+	return memoryPromptPick{eligible: len(eligible), keptIndexes: keptIndexes, dropped: dropped}
 }
 
 // IsHQManagedProvenance reserves the Ori-managed HQ marker namespace. Other
 // memory entries remain ordinary workspace data and retain existing behavior.
 func IsHQManagedProvenance(provenance string) bool {
 	return strings.HasPrefix(strings.TrimSpace(provenance), "ori-hq:")
+}
+
+// GlobalCopyProvenancePrefix marks an ordinary workspace entry the user
+// copied from global memory: "global:<item-id>". The copy is ordinary data
+// that diverges on purpose; the prefix only records where it came from.
+const GlobalCopyProvenancePrefix = "global:"
+
+// IsGlobalCopyProvenance reports whether an entry was copied from global memory.
+func IsGlobalCopyProvenance(provenance string) bool {
+	return strings.HasPrefix(strings.TrimSpace(provenance), GlobalCopyProvenancePrefix)
 }
 
 func plural(n int, one, many string) string {
@@ -264,10 +310,11 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// selectMemoryEntriesForBudget chooses which entries survive the char budget,
-// then returns them in original file order along with the dropped count.
+// selectMemoryEntriesForBudget chooses which entries survive the char budget
+// and returns their positions in entries, ascending (original file order),
+// along with the dropped count.
 // Priority: watch/thread entries first, then others newest-first by date.
-func selectMemoryEntriesForBudget(entries []MemoryEntry, charBudget int) (kept []MemoryEntry, dropped int) {
+func selectMemoryEntriesForBudget(entries []MemoryEntry, charBudget int) (kept []int, dropped int) {
 	type indexed struct {
 		entry MemoryEntry
 		order int
@@ -306,9 +353,9 @@ func selectMemoryEntriesForBudget(entries []MemoryEntry, charBudget int) (kept [
 
 	// Restore original file order for readable output.
 	sort.Slice(selected, func(i, j int) bool { return selected[i].order < selected[j].order })
-	kept = make([]MemoryEntry, len(selected))
+	kept = make([]int, len(selected))
 	for i, it := range selected {
-		kept[i] = it.entry
+		kept[i] = it.order
 	}
 	return kept, dropped
 }

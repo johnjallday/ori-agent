@@ -135,6 +135,13 @@ func (a scopedKnowledgeAuthority) Revalidate(ctx context.Context, binding person
 			return nil
 		}
 		return errJanitorKnowledgeSourceUnavailable
+	case personalassistant.WorkspaceAgentSourceKind:
+		// A workspace agent's proposal is a statement about the user, and the
+		// user approved its exact wording on the Profile page. There is no live
+		// source to reread: the workspace that proposed it is history, and a
+		// fact about the user stays true when that workspace is archived or
+		// deleted (global-memory FR 13).
+		return nil
 	default:
 		return errJanitorKnowledgeSourceUnavailable
 	}

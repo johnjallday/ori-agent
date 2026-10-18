@@ -221,8 +221,10 @@ print_worktree
 section "branches carrying an Issue number"
 or_none "$(git branch -a --format='%(refname:short)' | grep -E '(^|/)[0-9]+-' | sort -u || true)"
 
-section "archived plans in the planning checkout's tasks/"
-or_none "$(find "$planning_root/tasks" -maxdepth 1 \( -name 'prd-*' -o -name 'tasks-*' \) -name '*(done*' 2>/dev/null | awk -F/ '{ print $NF }' | sort || true)"
+# `wt done` files them under tasks/archive/; archives from before that folder
+# existed sit in tasks/ itself under the same "(done #N)" label.
+section "archived plans in the planning checkout's tasks/archive/"
+or_none "$(find "$planning_root/tasks/archive" "$planning_root/tasks" -maxdepth 1 \( -name 'prd-*' -o -name 'tasks-*' \) -name '*(done*' 2>/dev/null | awk -F/ '{ print $NF }' | sort -u || true)"
 
 gh_section() {
 	local title="$1" out

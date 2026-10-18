@@ -5480,6 +5480,107 @@ test('an assistant patch fills the form through its setters and tags each field'
   );
 });
 
+test('an assistant goal fills the Goal field, is tagged, and stops mirroring there', async () => {
+  const { manager, nodes, allTags } = loadBuildWizard();
+  const goalInput = new BuildNode('textarea', 'folderGoalInput');
+  const goalLabel = new BuildNode('label', 'folderGoalLabel');
+  nodes.set('folderGoalInput', goalInput);
+  nodes.set('folderGoalLabel', goalLabel);
+  const applied = await manager.applyBuildPatchToWizard(
+    {
+      template_id: 'content-production',
+      description: 'Drafts the Monday newsletter',
+      mission: 'Keep the issues of acme/widgets triaged.'
+    },
+    'Luna',
+    { animate: false }
+  );
+  assert.deepEqual([...applied], ['blueprint', 'description', 'goal']);
+  assert.equal(goalInput.value, 'Keep the issues of acme/widgets triaged.');
+  assert.equal(goalInput.dataset.goalEdited, '1');
+  assert.ok(goalLabel.children.find(child => child.dataset.buildChosen === 'goal'));
+  // The field keeps the assistant's goal when the description changes later.
+  nodes.get('folderDescriptionInput').value = 'Something else';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goalInput.value, 'Keep the issues of acme/widgets triaged.');
+  assert.ok(allTags().some(tag => tag.dataset.buildChosen === 'goal'));
+});
+
+test('a draft goal equal to the mirror stays a mirror, untagged', async () => {
+  const { manager, nodes } = loadBuildWizard();
+  const goalInput = new BuildNode('textarea', 'folderGoalInput');
+  nodes.set('folderGoalInput', goalInput);
+  nodes.set('folderGoalLabel', new BuildNode('label', 'folderGoalLabel'));
+  nodes.get('folderDescriptionInput').value = 'Drafts the Monday newsletter';
+  const applied = await manager.applyBuildPatchToWizard(
+    { mission: 'Drafts the Monday newsletter' },
+    'Luna',
+    { animate: false }
+  );
+  assert.deepEqual([...applied], []);
+  assert.equal(goalInput.value, 'Drafts the Monday newsletter');
+  assert.equal(goalInput.dataset.goalEdited, undefined);
+  // It keeps following the description.
+  nodes.get('folderDescriptionInput').value = 'A new description';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goalInput.value, 'A new description');
+});
+
+test('Review states what Create does with an attached link, by blueprint', () => {
+  const { manager } = loadBuildWizard();
+  const repo = {
+    status: 'open',
+    link: {
+      observation: {
+        kind: 'github_repo',
+        title: 'acme/widgets',
+        host: 'github.com',
+        url: 'https://github.com/acme/widgets',
+        repo: { full_name: 'acme/widgets' }
+      }
+    }
+  };
+  const bound = manager.buildLinkReceiptView(repo, { id: 'github-ops' });
+  assert.equal(bound.binds, true);
+  assert.equal(bound.kind, 'GitHub repository');
+  assert.match(bound.note, /bind this workspace to acme\/widgets/);
+  // A namespaced id names the same blueprint.
+  assert.equal(manager.buildLinkReceiptView(repo, { id: 'starter:github-ops' }).binds, true);
+  // On a Code Project the repository is a source, never a binding.
+  const source = manager.buildLinkReceiptView(repo, { id: 'code-project' });
+  assert.equal(source.binds, false);
+  assert.match(source.note, /Sources note/);
+  const page = manager.buildLinkReceiptView(
+    {
+      status: 'open',
+      link: {
+        observation: {
+          kind: 'document',
+          host: 'arxiv.org',
+          title: 'attention.pdf',
+          url: 'https://arxiv.org/pdf/1706.03762.pdf'
+        }
+      }
+    },
+    { id: 'research-project' }
+  );
+  assert.equal(page.kind, 'Document');
+  assert.equal(page.name, 'attention.pdf');
+  assert.match(page.note, /Nothing behind the link has been read/);
+  assert.equal(manager.buildLinkReceiptView({ status: 'open' }, null), null);
+  assert.equal(manager.buildLinkReceiptView({ ...repo, status: 'created' }, null), null);
+  // The card renders the title, the URL and the note as text.
+  manager.workspaceBuild.session = {
+    ...repo,
+    link: {
+      observation: { ...repo.link.observation, title: '<img src=x onerror=alert(1)>' }
+    }
+  };
+  const html = manager.renderBuildLinkReceipt({ id: 'github-ops' });
+  assert.match(html, /data-build-link-receipt/);
+  assert.doesNotMatch(html, /<img/);
+});
+
 test('a parent the user cannot choose is left alone', async () => {
   const { manager, parentSelect } = loadBuildWizard();
   const applied = await manager.applyBuildPatchToWizard(

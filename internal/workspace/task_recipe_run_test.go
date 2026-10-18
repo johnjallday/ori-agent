@@ -108,7 +108,7 @@ func newRecipeRunFixture(t *testing.T, settings types.Settings) *recipeRunFixtur
 		agentStore: &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Robin": {Settings: settings}}},
 	}
 	f.handler.SetUtilityToolProvider(taskUtilityProviderStub{tools: map[string]toolapi.Tool{"web_search": f.search}})
-	f.handler.SetWorkspaceToolFactory(func(string, string) []toolapi.Tool {
+	f.handler.SetWorkspaceToolFactory(func(string, string, string) []toolapi.Tool {
 		f.factory++
 		return []toolapi.Tool{taskHandlerToolStub{name: "workspace_note_write"}}
 	})

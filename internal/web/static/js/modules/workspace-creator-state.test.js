@@ -307,6 +307,14 @@ test('a session patch carries only the fields the turn set, or the whole draft t
     { blank: true }
   );
   assert.deepEqual(asData(buildApi.buildPatchFromSession(null, ['name'])), {});
+  // The assistant's goal is the draft's mission, the key Create sends.
+  const withGoal = { draft: { mission: 'Keep the issues of acme/widgets triaged.' } };
+  assert.deepEqual(asData(buildApi.buildPatchFromSession(withGoal, ['goal'])), {
+    mission: 'Keep the issues of acme/widgets triaged.'
+  });
+  assert.deepEqual(asData(buildApi.buildPatchFromSession(withGoal)), {
+    mission: 'Keep the issues of acme/widgets triaged.'
+  });
 });
 
 test('a creator context carries the first sentence for a build, and no session yet', () => {

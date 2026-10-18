@@ -164,7 +164,9 @@ var (
 func normalizeFormDraft(draft personalassistant.BuildDraft, validation buildValidation) (personalassistant.BuildDraft, error) {
 	draft.Name = strings.TrimSpace(draft.Name)
 	draft.Description = strings.TrimSpace(draft.Description)
-	if utf8.RuneCountInString(draft.Name) > 200 || utf8.RuneCountInString(draft.Description) > personalassistant.WorkspaceBuildMaxText {
+	draft.Mission = strings.TrimSpace(draft.Mission)
+	if utf8.RuneCountInString(draft.Name) > 200 || utf8.RuneCountInString(draft.Description) > personalassistant.WorkspaceBuildMaxText ||
+		utf8.RuneCountInString(draft.Mission) > personalassistant.WorkspaceBuildMaxText {
 		return draft, errBuildDraftTooLong
 	}
 	if draft.TemplateID = strings.TrimSpace(draft.TemplateID); draft.TemplateID != "" {
@@ -205,6 +207,13 @@ func describeFormEdit(before, after personalassistant.BuildDraft, validation bui
 	}
 	if before.Description != after.Description {
 		lines = append(lines, "You edited the description")
+	}
+	// Until the user types in it, the form's Goal follows the blueprint's goal
+	// or the description; that following is not an edit of the goal.
+	blueprintChanged := before.Blank != after.Blank || before.TemplateID != after.TemplateID
+	mirrored := blueprintChanged || (before.Description != after.Description && after.Mission == after.Description)
+	if before.Mission != after.Mission && !mirrored {
+		lines = append(lines, "You edited the goal")
 	}
 	if before.ParentID != after.ParentID {
 		if after.ParentID == "" {

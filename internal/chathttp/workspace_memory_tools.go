@@ -3,10 +3,12 @@ package chathttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -144,6 +146,100 @@ func (p *WorkspaceToolProvider) memoryForgetTool() toolapi.Tool {
 			})
 		},
 	}
+}
+
+// --- memory_propose_global (review-only; allowed under every autonomy policy) ---
+
+func (p *WorkspaceToolProvider) memoryProposeGlobalTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{
+			Name:        workspace.MemoryProposeGlobalToolName,
+			Description: "Propose one durable fact about the USER (not about this workspace) for their global memory, which their personal assistant reads on every page. Nothing is saved until the user approves it on their Profile page. Use it for stable facts about the person: how they like to work, people they work with, their projects across workspaces, routines, sources they rely on. For facts specific to this workspace, use memory_write instead. Never propose guesses or secrets. One line, max 500 characters.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{
+						"type":        "string",
+						"description": "The fact about the user, as one self-contained line.",
+					},
+					"category": map[string]any{
+						"type":        "string",
+						"enum":        globalFactCategories,
+						"description": "how_you_work (working style, preferences, tools), people (who they work with), projects (their ongoing work), routines (schedules, habits), sources (references and services they rely on).",
+					},
+				},
+				"required": []string{"text", "category"},
+			},
+		},
+		call: func(ctx context.Context, args string) (string, error) {
+			// Only text and category come from the model. The workspace, agent
+			// and task are this provider's verified execution context.
+			var req struct {
+				Text     string `json:"text"`
+				Category string `json:"category"`
+			}
+			if err := json.Unmarshal([]byte(args), &req); err != nil {
+				return "", fmt.Errorf("invalid arguments: %w", err)
+			}
+			text, err := workspace.ValidateMemoryText(req.Text)
+			if err != nil {
+				return "", err
+			}
+			category := strings.TrimSpace(req.Category)
+			if !isGlobalFactCategory(category) {
+				return "", fmt.Errorf("category must be one of %s", strings.Join(globalFactCategories, ", "))
+			}
+			propose := p.hqVisibility.ProposeGlobal
+			if propose == nil {
+				return globalFactReply("unavailable", personalassistant.GlobalMemoryUnavailableMessage)
+			}
+			taskID := p.taskID
+			if taskID == "" {
+				taskID = p.runTaskID
+			}
+			result, err := propose(ctx, personalassistant.WorkspaceFactRequest{
+				WorkspaceID: p.workspaceID,
+				Agent:       p.executingAgent,
+				TaskID:      taskID,
+				Category:    category,
+				Text:        text,
+			})
+			switch {
+			case errors.Is(err, personalassistant.ErrGlobalMemoryUnavailable):
+				return globalFactReply("unavailable", personalassistant.GlobalMemoryUnavailableMessage+" Do not retry; use memory_write if the fact matters to this workspace.")
+			case errors.Is(err, personalassistant.ErrKnowledgeSuppressed):
+				return globalFactReply("refused", "The user rejected or forgot this fact. Do not propose it again.")
+			case errors.Is(err, personalassistant.ErrKnowledgeQuota):
+				return globalFactReply("refused", "The user's global-memory review queue is full for now. Do not retry; if the fact matters to this workspace, save it with memory_write instead.")
+			case errors.Is(err, personalassistant.ErrKnowledgePaused):
+				return globalFactReply("refused", "The user paused their assistant's suggestions, so global memory is not taking proposals. Do not retry; use memory_write if the fact matters to this workspace.")
+			case err != nil:
+				return "", err
+			}
+			switch result {
+			case personalassistant.WorkspaceFactAlreadyKnown:
+				return globalFactReply("already_known", "Already known globally: the user's global memory holds this fact. Do not propose it again.")
+			case personalassistant.WorkspaceFactAlreadyPending:
+				return globalFactReply("already_pending", "This fact is already waiting for the user's review. Do not propose it again.")
+			}
+			return globalFactReply("proposed", "Sent for the user's review on their Profile page. It is not active until they approve it. Keep using memory_write for facts specific to this workspace.")
+		},
+	}
+}
+
+var globalFactCategories = []string{"how_you_work", "people", "projects", "routines", "sources"}
+
+func isGlobalFactCategory(category string) bool {
+	for _, allowed := range globalFactCategories {
+		if category == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func globalFactReply(status, message string) (string, error) {
+	return marshalToolResponse(map[string]any{"status": status, "message": message})
 }
 
 // --- profile_set (user-scoped behavioral profile write) ---

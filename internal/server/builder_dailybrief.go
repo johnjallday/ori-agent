@@ -339,6 +339,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			learning.SetProfileCAS(cas)
 		}
 		b.personalAssistantHandler.SetKnowledgeReview(learning)
+		b.personalAssistantHandler.SetGlobalMemoryWorkspaces(builderWorkspaces{b: b})
 		b.personalAssistantHandler.SetKnowledgeSources(personalKnowledgeSources{
 			bindings: resolver, apps: b.onboardingMgr, janitor: janitorEvidence,
 		})

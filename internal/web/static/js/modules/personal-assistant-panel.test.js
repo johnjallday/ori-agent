@@ -345,8 +345,12 @@ test('Add folder sits inside the composer, on every page', () => {
   // The attachment row remains outside the scrolling region.
   assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
   assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
-  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 2);
+  // Add folder, Tree + Chat, and Add link.
+  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 3);
   assert.match(drawer, /id="personalAssistantExploreAttachedFolder"[^>]+hidden>Tree \+ Chat/);
+  const linkChip = drawer.indexOf('id="personalAssistantLinkChip"');
+  assert.ok(linkChip > chips && linkChip < drawer.indexOf('id="personalAssistantInput"'));
+  assert.match(drawer, /id="personalAssistantLinkChip"[^>]+hidden>[\s\S]{0,120}Add link/);
   assert.equal((drawer.match(/id="personalAssistantInput"/g) || []).length, 1);
   assert.equal((drawer.match(/id="personalAssistantForm"/g) || []).length, 1);
   assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,350}Add folder/);

@@ -6,7 +6,7 @@ source "${0:A:h}/lib/devtools-selector.sh" || exit 2
 source "${0:A:h}/lib/devtools-project.zsh" || exit 2
 root="$(ori_devtools_anchor "${0:A:h:h}")" || exit 2
 if [[ "${1:-}" != v1 ]]; then
-  print -u2 -- 'Usage: devtools-project.sh v1 provision|demo|pre-pr [arguments]'
+  print -u2 -- 'Usage: devtools-project.sh v1 provision|demo|pre-pr|demo-sandboxes [arguments]'
   exit 2
 fi
 action="${2:-}"
@@ -27,6 +27,10 @@ case "$action" in
   demo)
     (( $# <= 1 )) || exit 2
     ori_devtools_demo "$root" "${1:-8931}"
+    ;;
+  demo-sandboxes)
+    [[ $# == 1 && ( "$1" == list || "$1" == remove ) ]] || exit 2
+    ori_devtools_demo_sandboxes "$root" "$1"
     ;;
   pre-pr)
     (( $# == 0 )) || exit 2

@@ -295,6 +295,18 @@
         <div id="personalAssistantFolderChoices" class="personal-assistant-panel__chips"></div>
         <button type="button" id="personalAssistantFolderChooserCancel" class="personal-assistant-conversation__button">Cancel</button>
       </section>
+      <!-- Add link: one address, read once for what it says about itself. -->
+      <section id="personalAssistantLinkField" class="personal-assistant-folder-context personal-assistant-link-field" aria-labelledby="personalAssistantLinkFieldTitle" hidden>
+        <h3 id="personalAssistantLinkFieldTitle">Add a link</h3>
+        <p id="personalAssistantLinkDisclosure">Ori fetches the page’s title and description once, or a GitHub repository’s public details. Nothing else is read. Send shares that with your configured model.</p>
+        <div class="personal-assistant-link-field__row">
+          <label class="visually-hidden" for="personalAssistantLinkInput">Link to attach</label>
+          <input type="url" id="personalAssistantLinkInput" class="form-control form-control-sm" inputmode="url" placeholder="https://" maxlength="2000" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="personalAssistantLinkDisclosure personalAssistantLinkStatus">
+          <button type="button" id="personalAssistantLinkAttach" class="personal-assistant-conversation__button">Attach</button>
+          <button type="button" id="personalAssistantLinkCancel" class="personal-assistant-conversation__button">Cancel</button>
+        </div>
+        <p id="personalAssistantLinkStatus" class="personal-assistant-folder-context__note" role="status" aria-live="polite" hidden></p>
+      </section>
       <div id="personalAssistantContextProgress"></div>
       <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
         <div id="personalAssistantFolderSummary"></div>
@@ -360,6 +372,17 @@
         <button type="button" id="personalAssistantExploreAttachedFolder" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantFolderExplorer" hidden>Tree + Chat</button>
         <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
         <span id="personalAssistantFolderSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Explore this folder”</span>
+        <button type="button" id="personalAssistantLinkChip" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantLinkField" hidden>
+          <i class="bi bi-link-45deg" aria-hidden="true"></i>
+          <span>Add link</span>
+        </button>
+        <span id="personalAssistantActiveLink" class="personal-assistant-folder-context__chip personal-assistant-link-chip" hidden>
+          <i id="personalAssistantActiveLinkIcon" class="bi bi-link-45deg" aria-hidden="true"></i>
+          <span id="personalAssistantActiveLinkName"></span>
+          <span id="personalAssistantLinkSummary" class="visually-hidden" hidden></span>
+          <button type="button" id="personalAssistantRemoveLink" aria-label="Remove link">×</button>
+        </span>
+        <span id="personalAssistantLinkSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Tell me about this link”</span>
         <!-- Watch Ori is this tab's own choice. Shown only where the assistant
              can operate the app; it takes no row of its own. -->
         <label id="personalAssistantWatchRow" class="personal-assistant-panel__chip pa-operation__watch" for="personalAssistantWatch" hidden>

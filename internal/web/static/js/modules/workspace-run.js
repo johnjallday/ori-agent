@@ -1,4 +1,6 @@
 import { workspacePageURL } from './workspace-routes.js';
+import { MEMORY_STATION, memoryDiffCounts } from './memory-station.js';
+import { stationLink } from './workspace-station-link.js';
 
 const ACTIVE_STATUSES = new Set([
   'pending',
@@ -319,10 +321,7 @@ export class WorkspaceRunPage {
   // run wrote nothing to workspace memory.
   renderMemoryLearned() {
     if (!this.elements.memoryCard || !this.elements.memory) return;
-    const artifacts = Array.isArray(this.artifacts) ? this.artifacts : [];
-    const diff = artifacts.find(a => a?.metadata && a.metadata.role === 'memory_diff');
-    const added = Array.isArray(diff?.metadata?.added) ? diff.metadata.added : [];
-    const removed = Array.isArray(diff?.metadata?.removed) ? diff.metadata.removed : [];
+    const { added, removed } = memoryDiffCounts(this.artifacts);
 
     if (!added.length && !removed.length) {
       this.elements.memoryCard.hidden = true;
@@ -345,10 +344,18 @@ export class WorkspaceRunPage {
       `;
     };
 
+    // The workspace's Memory station holds what the run wrote; '' (no link)
+    // when the workspace has no usable address.
+    const memoryHref = stationLink(this.workspaceSlug, MEMORY_STATION);
+    const memoryLink = memoryHref
+      ? `<a class="workspace-run-memory-link" href="${escapeHtml(memoryHref)}">Open workspace memory</a>`
+      : '';
+
     this.elements.memoryCard.hidden = false;
     this.elements.memory.innerHTML =
       renderGroup(`Remembered (${added.length})`, added, 'is-added') +
-      renderGroup(`Forgotten (${removed.length})`, removed, 'is-removed');
+      renderGroup(`Forgotten (${removed.length})`, removed, 'is-removed') +
+      memoryLink;
   }
 
   renderHero() {

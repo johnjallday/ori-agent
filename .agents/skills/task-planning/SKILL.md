@@ -45,7 +45,7 @@ that intentionally skips planning starts with `wt new <name>`.
 
 An authorized builder handoff into an existing feature worktree, or the user's
 request to continue its approved implementation, starts this mode. The assignment
-is the whole approved scope through PR readiness, not only the next unchecked
+is the whole approved scope through an open PR, not only the next unchecked
 item. Do not repeat the planning `Go` gate or create another worktree.
 
 Mode comes from the current invocation, not historical planning notes copied into
@@ -140,14 +140,14 @@ After `Go`:
    sub-task. Follow _Validation cadence_ for early risk checks and delivery gates.
 7. For every user-visible group, place a `Demo:` item immediately before its
    commit. Scope it to the group's changed path, not a full feature tour.
-8. Include the following delivery checkpoints, with the PR approval gate separate
-   from the actions that follow it:
+8. Include the following delivery checkpoints, keeping the merge separate from
+   the actions that precede it:
    - `Permission sweep`
    - `Write manual test guide: tasks/test-guide-<feature>.md`
    - Complete required validation, demos, and milestone commits
    - Prepare the PR body with evidence and limitations
-   - `PR gate: verify readiness and wait for explicit PR approval`
-   - `After PR approval: Open PR → squash-merge to dev`
+   - `PR readiness: verify the gate, then open the PR with wt pr`
+   - `Merge: a person reviews the open PR and squash-merges it to dev`
    - `Run wt done <feature> after merge`
 9. List relevant implementation and test files.
 10. Replace the planning starter with the complete checklist. The final file must
@@ -223,8 +223,8 @@ Only when a companion is `required`; see _Cross-repository contract_.
   - [ ] 2.4 Complete required validation and demos
   - [ ] 2.5 Commit: "test(scope): verify the completed feature"
   - [ ] 2.6 Prepare PR body with evidence and limitations
-  - [ ] 2.7 PR gate: verify readiness and wait for explicit PR approval
-  - [ ] 2.8 After PR approval: Open PR → squash-merge to dev
+  - [ ] 2.7 PR readiness: verify the gate, then open the PR with `wt pr`
+  - [ ] 2.8 Merge: a person reviews the open PR and squash-merges it to `dev`
   - [ ] 2.9 Run `wt done <feature>` after merge
 ```
 
@@ -386,6 +386,12 @@ never reads again: screenshots, search results, and re-reads of planning
 documents. Each lane returns a short result and writes its full output to
 `tasks/evidence-<feature>/` or `tasks/findings-<feature>.md`.
 
+Scratch (probe scripts, CI logs, model transcripts, fixture dumps) goes to the
+session scratchpad, never `tasks/`. After the merge, `wt done` archives only the
+top-level planning markdown into `tasks/archive/` and drops
+`tasks/evidence-<feature>/` and everything else with the worktree, so anything
+worth keeping afterwards belongs in the PR body or the findings log.
+
 - **Demo verification:** every `Demo:` item. The lane drives the running demo
   server, captures and inspects the screenshots, and returns a verdict of at
   most 30 lines with evidence paths. Screenshots never enter the owner's
@@ -486,9 +492,11 @@ Before the PR gate:
 The default is one feature, one branch, and one PR targeting `dev`.
 
 - Commit once per completed parent group, not once per sub-task.
-- The final planned checklist pause is immediately before `wt pr` / PR creation,
-  after the PR readiness gate below is satisfied.
-- After approval, open the PR and squash-merge it to `dev`.
+- Once the PR readiness gate below passes, open the PR with `wt pr` without
+  asking. CI then runs while a person reviews the open PR.
+- The merge is the human gate. Never enable auto-merge, run `gh pr merge`, or
+  push to `dev`; a person reviews the PR and squash-merges it. Changes requested
+  on the PR are further commits on the same branch.
 
 For work too large for one reviewable PR, default to one long-lived
 `epic/<name>` branch with one final `epic → dev` PR. Merge `origin/dev` into the
@@ -521,7 +529,7 @@ unresolved decisions rather than whole parent groups whenever possible.
 There are exactly two planned pauses:
 
 1. After parent groups, waiting for `Go`
-2. Before opening the PR
+2. After the PR is open, waiting for a person to review and merge it
 
 In plan-and-deliver mode, create the worktree and then follow the same execution
 loop as implementation mode:
@@ -559,7 +567,7 @@ work. Do not cross the worktree boundary.
 
 ### PR readiness gate
 
-Before the final PR approval pause, verify all of the following:
+Before opening the PR, verify all of the following:
 
 - Required implementation and acceptance work is complete; no required dependency
   or acceptance check is silently skipped. Report NOT RUN checks as unresolved,
@@ -569,16 +577,19 @@ Before the final PR approval pause, verify all of the following:
 - Required milestone commits, the permission sweep, manual test guide, and PR body
   are complete, with real evidence paths and any limitations recorded.
 
-Then summarize readiness and request explicit approval before `wt pr`. The PR
-creation/merge and post-merge cleanup items remain unchecked at this pause.
-“Continue until PR” targets this gate; it does not itself authorize opening a PR,
-companion publication, installation, release/pin changes, or cleanup. Follow the
-separate approval and lifecycle rules for those actions.
+Then open the PR with `wt pr` and end the assigned work with one readiness
+summary and the PR URL. `wt pr` runs `make ci-local` first and pushes nothing
+on failure; a failed gate is a blocker to fix, never a reason for
+`--skip-checks`. The merge and post-merge cleanup items stay unchecked: a
+person reviews the PR on GitHub and squash-merges it, and `wt done` runs only
+after that. Opening the PR authorizes nothing else: no auto-merge, companion
+publication, installation, release/pin changes, or cleanup. Follow the separate
+approval and lifecycle rules for those actions.
 
 These are agent instructions, not a runtime supervisor. An optional harness guard
 must be explicitly armed for the authorized session/worktree/scope, preserve these
 stop conditions, and bound retries/no-progress/spending. Never auto-continue solely
-because a checklist contains unchecked PR, release, or cleanup items.
+because a checklist contains unchecked merge, release, or cleanup items.
 
 ## Ori bindings
 
@@ -591,6 +602,7 @@ because a checklist contains unchecked PR, release, or cleanup items.
 - Cleanup after merge: `wt done <feature>`
 - Epic CI: `.github/workflows/ci.yml` accepts `epic/**` as a PR base
 - Findings log: `tasks/findings-<feature>.md`; evidence: `tasks/evidence-<feature>/`
+- Archive after merge: `tasks/archive/` (planning markdown only, labelled `(done #N)`)
 - Claude lanes: the user-level `demo-verifier` and `task-scribe` agents (not
   tracked here) plus the built-in `Explore` agent. Codex and Pi run the lanes
   inline or through Herdr's tester and reviewer roles.

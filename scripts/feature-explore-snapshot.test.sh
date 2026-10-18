@@ -44,7 +44,10 @@ git -C "$repo" add -A
 git -C "$repo" commit -q -m "seed"
 git -C "$repo" update-ref refs/remotes/origin/dev HEAD
 printf -- '- [x] 1.1 done\n- [ ] 1.2 open\n' >"$repo/tasks/tasks-demo.md"
-printf '# shipped\n' >"$repo/tasks/prd-5-old (done #9).md"
+mkdir -p "$repo/tasks/archive"
+printf '# shipped\n' >"$repo/tasks/archive/prd-5-old (done #9).md"
+# Archived before tasks/archive/ existed: still history, still listed.
+printf '# shipped earlier\n' >"$repo/tasks/tasks-4-legacy (done #8).md"
 printf '# notes\n' >"$repo/tasks/findings-demo.md"
 printf 'package alpha // changed\n' >"$repo/internal/alpha/alpha.go"
 git -C "$repo" add -A
@@ -133,7 +136,9 @@ expect " ahead of dev"
 expect "branch=feature/gone  role=feature  MISSING"
 expect "feature/123-thing"
 expect "prd-5-old (done #9).md"
+expect "tasks-4-legacy (done #8).md"
 refute "tasks/prd-5-old"
+refute "tasks/tasks-4-legacy"
 expect "#9  feature/x"
 expect "#8  2026-10-02"
 expect "#123  [backlog]"
@@ -142,7 +147,7 @@ expect "internal/alpha"
 expect "--- #123 Stub issue ---"
 expect "complete: yes"
 sections="$(printf '%s\n' "$output" | grep '^== ' | tr '\n' '|')"
-expected_sections="== snapshot ==|== reports ==|== worktrees ==|== branches carrying an Issue number ==|== archived plans in the planning checkout's tasks/ ==|== open PRs to dev ==|== merged PRs to dev since 2026-01-01 ==|== open Issues ==|== commits on origin/dev since 2026-01-01 ==|== most-changed paths since 2026-01-01 ==|== longest-untouched internal packages ==|== open Issue bodies (800 characters each) ==|== status ==|"
+expected_sections="== snapshot ==|== reports ==|== worktrees ==|== branches carrying an Issue number ==|== archived plans in the planning checkout's tasks/archive/ ==|== open PRs to dev ==|== merged PRs to dev since 2026-01-01 ==|== open Issues ==|== commits on origin/dev since 2026-01-01 ==|== most-changed paths since 2026-01-01 ==|== longest-untouched internal packages ==|== open Issue bodies (800 characters each) ==|== status ==|"
 [[ "$sections" == "$expected_sections" ]] || fail "unexpected section order: $sections"
 
 # GitHub down: exit 1, every gh-backed line says so, the run is incomplete.

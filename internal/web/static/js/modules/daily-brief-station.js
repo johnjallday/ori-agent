@@ -5,38 +5,32 @@
 // daily-brief-station.test.js can exercise it under plain Node.
 
 import { localDateInZone } from './home-daily-brief.js';
+import {
+  isStationLink,
+  stationLink,
+  stationFromSearch as anyStationFromSearch
+} from './workspace-station-link.js';
 
 export const DAILY_BRIEF_STATION = 'daily-brief';
 
-const WORKSPACE_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const DAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 // dailyBriefStationLink is the one address that opens My HQ with the Daily
-// Brief panel already open. An unusable slug yields '' so a caller hides its
-// link rather than pointing somewhere else.
+// Brief panel already open; '' for an unusable slug (see stationLink).
 export function dailyBriefStationLink(slug) {
-  const value = String(slug || '').trim();
-  if (!WORKSPACE_SLUG.test(value)) return '';
-  return `/workspaces/${value}?station=${DAILY_BRIEF_STATION}`;
+  return stationLink(slug, DAILY_BRIEF_STATION);
 }
 
-// stationFromSearch reads `?station=` from a location.search string. Only a
-// station this page knows is returned; anything else is ''.
+// stationFromSearch reads a Daily Brief `?station=` from a location.search
+// string; any other station is ''. workspace-station-link.js reads them all.
 export function stationFromSearch(search) {
-  let value = '';
-  try {
-    value = new URLSearchParams(String(search || '')).get('station') || '';
-  } catch (_) {
-    return '';
-  }
-  return value === DAILY_BRIEF_STATION ? DAILY_BRIEF_STATION : '';
+  return anyStationFromSearch(search) === DAILY_BRIEF_STATION ? DAILY_BRIEF_STATION : '';
 }
 
 // isDailyBriefStationLink accepts exactly the shape dailyBriefStationLink
 // builds and nothing broader: one workspace segment, one parameter.
 export function isDailyBriefStationLink(href) {
-  const match = /^\/workspaces\/([^/?#]+)\?station=daily-brief$/.exec(String(href || ''));
-  return Boolean(match) && WORKSPACE_SLUG.test(match[1]);
+  return isStationLink(href, DAILY_BRIEF_STATION);
 }
 
 // A clock label never breaks between its digits and its AM/PM.

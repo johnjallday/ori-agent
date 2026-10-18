@@ -135,8 +135,10 @@ Issues, branches, worktrees or planning artifacts; choosing stays with a person.
 
 Planning artifacts belong in `ori-agent-dev/tasks/` (not absolute `/tasks/`).
 Finish planning there before `wt start`; it copies artifacts to the feature.
-`wt done` archives them back with `(done #N)` or `(done)` names; tooling skips
-those names. `tasks/` is ignored: inspect files directly to verify changes.
+`wt done` archives the planning markdown into `tasks/archive/` under `(done #N)`
+or `(done)` names and drops evidence folders and scratch with the worktree;
+tooling skips the archive. `tasks/` is ignored: inspect files directly to
+verify changes.
 A `wt plan` session is planning-only: no implementation, branch, worktree,
 feature binding or cleanup. A person/later handoff crosses the start boundary.
 

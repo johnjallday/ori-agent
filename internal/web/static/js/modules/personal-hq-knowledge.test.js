@@ -2,10 +2,125 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  approvedSourceChip,
+  copiesSummary,
+  copyTargetWorkspaces,
   dossierEmptyGuidance,
   groupReviewedKnowledge,
-  reviewTextValid
+  memoryStationHref,
+  promotedFromWorkspace,
+  reviewTextValid,
+  workspaceProposalSource
 } from './personal-hq-knowledge.js';
+
+test('the copy picker offers active workspaces only, never the Personal HQ', () => {
+  const targets = copyTargetWorkspaces({
+    workspaces: [
+      { id: 'hq', name: 'My HQ', designation: 'personal_hq', status: 'active' },
+      { id: 'b', name: 'Beta', status: 'active', folder_slug: 'beta' },
+      { id: 'a', name: 'Album 3' },
+      { id: 'old', name: 'Finished', status: 'completed' },
+      { id: '', name: 'Broken' },
+      null
+    ]
+  });
+  assert.deepEqual(targets, [
+    { id: 'a', name: 'Album 3' },
+    { id: 'b', name: 'Beta' }
+  ]);
+  assert.deepEqual(copyTargetWorkspaces({}), []);
+});
+
+test('a copied fact links to the target workspace Memory station the server names (FR26)', () => {
+  assert.equal(
+    memoryStationHref('/workspaces/album-3?station=memory'),
+    '/workspaces/album-3?station=memory'
+  );
+  assert.equal(memoryStationHref(''), '');
+  assert.equal(memoryStationHref(undefined), '');
+  assert.equal(memoryStationHref('/workspaces/album-3'), '', 'the station must be named');
+  assert.equal(memoryStationHref('/workspaces/album-3?station=daily-brief'), '', 'only Memory');
+  assert.equal(memoryStationHref('https://evil.example/workspaces/a?station=memory'), '');
+});
+
+test('the copies line names every workspace holding a copy', () => {
+  assert.match(copiesSummary([{ name: 'Album 3' }, { name: 'EP' }]), /^Copies in: Album 3, EP\./);
+  assert.match(copiesSummary([{ name: 'Album 3' }]), /does not change with this fact/);
+  assert.equal(copiesSummary([]), 'No workspace holds a copy of this fact.');
+});
+
+test('a fact promoted from a workspace names and links that workspace', () => {
+  assert.deepEqual(
+    promotedFromWorkspace({
+      source: {
+        kind: 'explicit',
+        workspace_id: 'album-3',
+        workspace_name: 'Album 3',
+        workspace_slug: 'album-3'
+      }
+    }),
+    { workspace: 'Album 3', href: '/workspaces/album-3' }
+  );
+  assert.deepEqual(promotedFromWorkspace({ source: { kind: 'explicit', workspace_id: 'gone' } }), {
+    workspace: 'a workspace',
+    href: ''
+  });
+  assert.equal(promotedFromWorkspace({ source: { kind: 'explicit' } }), null);
+  assert.equal(
+    promotedFromWorkspace({ source: { kind: 'workspace_agent', workspace_id: 'x' } }),
+    null
+  );
+});
+
+test('every approved global fact names its origin', () => {
+  const chip = kind => approvedSourceChip({ source: { kind } });
+  assert.equal(chip('explicit'), 'From you');
+  assert.equal(chip('interview'), 'From your interview');
+  assert.equal(chip('workspace_agent'), 'From a workspace');
+  assert.equal(chip('folder_scan'), 'From a folder scan');
+  assert.equal(chip('saved_app'), 'From saved apps');
+  assert.equal(chip('file_janitor'), 'From File Janitor');
+  // An older server without the source object still labels by source_kind.
+  assert.equal(approvedSourceChip({ source_kind: 'saved_app' }), 'From saved apps');
+  assert.equal(chip('something_new'), '');
+});
+
+test('a workspace proposal names its agent, workspace link and task or chat', () => {
+  const fromTask = workspaceProposalSource({
+    source: {
+      kind: 'workspace_agent',
+      workspace_id: 'album-3',
+      workspace_name: 'Album 3',
+      workspace_slug: 'album 3',
+      agent: 'Scout',
+      task_id: '8fffe1ea-5c66-402f-b6e2-90aa95e0bd0d',
+      observed_at: '2026-10-17T12:00:00Z'
+    }
+  });
+  assert.deepEqual(fromTask, {
+    agent: 'Scout',
+    workspace: 'Album 3',
+    href: '/workspaces/album%203',
+    task: '8fffe1ea',
+    taskHref: '/workspaces/album%203?panel=backlog&task=8fffe1ea-5c66-402f-b6e2-90aa95e0bd0d',
+    observedAt: '2026-10-17T12:00:00Z'
+  });
+  const fromChat = workspaceProposalSource({
+    source: { kind: 'workspace_agent', workspace_name: 'Album 3', agent: 'Scout' }
+  });
+  assert.equal(fromChat.task, '');
+  // A removed workspace keeps its recorded name and gets no link.
+  assert.equal(fromChat.href, '');
+  const removedWithTask = workspaceProposalSource({
+    source: { kind: 'workspace_agent', task_id: '8fffe1ea-5c66' }
+  });
+  assert.equal(removedWithTask.taskHref, '');
+  const anonymous = workspaceProposalSource({ source: { kind: 'workspace_agent' } });
+  assert.equal(anonymous.agent, 'An agent');
+  assert.equal(anonymous.workspace, 'a workspace');
+  assert.equal(workspaceProposalSource({ source: { kind: 'saved_app' } }), null);
+  assert.equal(workspaceProposalSource({}), null);
+});
 
 test('review ledger keeps pending and suspended separate from current canonical facts', () => {
   const { queue, approved } = groupReviewedKnowledge([

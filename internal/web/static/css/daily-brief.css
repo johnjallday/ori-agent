@@ -13,15 +13,10 @@
 
 /* ---- the panel shell ---------------------------------------------------------- */
 
-/* The panel is tall, so it is kept clear of the navbar, which sits above the
-   stat modal and grows to several rows on a narrow screen. */
-.ws-cmd-modal:has(> .ws-cmd-modal-panel.is-daily-brief) {
-  padding-top: calc(var(--navbar-offset, 76px) + 12px);
-}
-
-/* The stat modal's tactical frame gives way to the paper panel. */
+/* The station panel's width and navbar clearance come from .is-station
+   (workspace-command.css); here the stat modal's tactical frame gives way to
+   the paper panel. */
 .ws-cmd-modal-panel.is-daily-brief {
-  max-width: min(760px, 96vw);
   height: min(760px, calc(100dvh - var(--navbar-offset, 76px) - 36px));
   max-height: none;
   border: 0;
@@ -415,10 +410,6 @@
 /* ---- narrow layout ----------------------------------------------------------------- */
 
 @media (max-width: 760px) {
-  .ws-cmd-modal:has(> .ws-cmd-modal-panel.is-daily-brief) {
-    padding: calc(var(--navbar-offset, 76px) + 8px) 8px 8px;
-  }
-
   .ws-cmd-modal-panel.is-daily-brief {
     max-width: 100%;
     height: calc(100dvh - var(--navbar-offset, 76px) - 16px);
