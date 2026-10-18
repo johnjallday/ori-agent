@@ -150,8 +150,18 @@ export class WorkspaceMemoryManager {
     // strip); a token drops a slow response from an earlier opening.
     this.learnings = [];
     this.learningsRequest = 0;
+    // Personal HQ: proposals from other workspaces waiting on the Profile,
+    // counted by the Memory station from the Profile's own review queue.
+    this.reviewQueue = 0;
     // Set by the Command view's Memory station; called with every payload.
     this.onPayload = null;
+  }
+
+  setReviewQueue(count) {
+    const next = Math.max(0, Number(count) || 0);
+    if (next === this.reviewQueue) return;
+    this.reviewQueue = next;
+    if (this.loaded) this.renderList();
   }
 
   get workspaceSlug() {
@@ -355,7 +365,7 @@ export class WorkspaceMemoryManager {
     if (!list) return;
 
     if (!this.entries.length && !this.managedLearnings.length && !this.unstructured.length) {
-      list.innerHTML = `
+      list.innerHTML = `${this.reviewHtml()}
         <div class="workspace-detail-memory-empty">
           <p>No memory yet. As missions and chats run in this workspace, agents record durable facts here — or add one yourself.</p>
           <p class="workspace-detail-memory-empty-example">Example: <code>[watch] build baseline is ~7 min; flag if &gt;10</code></p>
@@ -411,7 +421,17 @@ export class WorkspaceMemoryManager {
         )
       : '';
 
-    list.innerHTML = this.noticeHtml() + sectionsHtml + managedHtml + unstructuredHtml;
+    list.innerHTML =
+      this.noticeHtml() + this.reviewHtml() + sectionsHtml + managedHtml + unstructuredHtml;
+  }
+
+  // reviewHtml sends the Personal HQ to the proposals waiting on the Profile
+  // (FR29), above the sections.
+  reviewHtml() {
+    const count = this.reviewQueue;
+    if (!count || !this.globalMemory?.is_personal_hq) return '';
+    const href = safeLocalHref(this.globalMemory.review_href, PROFILE_GLOBAL_MEMORY);
+    return `<a class="workspace-detail-memory-review" href="${this.esc(href)}">Review ${count} ${count === 1 ? 'proposal' : 'proposals'} on Profile</a>`;
   }
 
   // sectionHtml is one titled group of the panel: a real heading with its

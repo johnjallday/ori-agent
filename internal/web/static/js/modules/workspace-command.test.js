@@ -6425,6 +6425,133 @@ test('focus inside an open stat modal survives a full render', () => {
   }
 });
 
+test('?station=memory opens the Memory panel on an ordinary workspace, focus returning to the building (FR24)', () => {
+  const originalWindow = globalThis.window;
+  const replaced = [];
+  globalThis.window = {
+    location: { href: 'http://ori.local/workspaces/album-three?station=memory' },
+    history: { state: null, replaceState: (...args) => replaced.push(args) }
+  };
+  try {
+    const building = { id: 'memory-building' };
+    const plain = makeMemoryCommandView(
+      {},
+      {
+        container: {
+          querySelector: selector =>
+            selector === '[data-cmd-hq-station="memory"]' ? building : null
+        }
+      }
+    );
+    const opened = [];
+    plain.openStatModal = (section, trigger) => opened.push([section, trigger]);
+    plain._bootStation = 'memory';
+    plain.applyStationDeepLink();
+    assert.deepEqual(opened, [['memory', building]]);
+    assert.deepEqual(replaced, [[null, '', '/workspaces/album-three']]);
+    assert.equal(plain._bootStation, '');
+
+    // A station this workspace does not have opens nothing; the parameter
+    // still leaves the address bar.
+    replaced.length = 0;
+    globalThis.window.location.href = 'http://ori.local/workspaces/album-three?station=watchtower';
+    plain._bootStation = 'watchtower';
+    plain.applyStationDeepLink();
+    assert.equal(opened.length, 1);
+    assert.deepEqual(replaced, [[null, '', '/workspaces/album-three']]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the HQ Memory badge counts the Profile review queue; an ordinary workspace never asks (FR29)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  const calls = [];
+  const item = (id, state) => ({ id, version: 1, state, text: id });
+  let knowledge = {
+    status: 200,
+    body: {
+      items: [
+        item('a', 'candidate'),
+        item('b', 'needs_review'),
+        item('c', 'approved'),
+        item('d', 'rejected')
+      ]
+    }
+  };
+  globalThis.fetch = async url => {
+    calls.push(url);
+    if (url === '/api/personal-assistant/knowledge') {
+      return {
+        ok: knowledge.status < 300,
+        status: knowledge.status,
+        json: async () => knowledge.body
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ entries: [{ type: 'fact', text: 'x' }] })
+    };
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = true;
+    let renders = 0;
+    hq.render = () => {
+      renders += 1;
+    };
+    const shared = [];
+    hq.page.memoryManager = { setReviewQueue: count => shared.push(count) };
+    hq.memoryStationState();
+    await flush();
+    assert.ok(calls.includes('/api/personal-assistant/knowledge'));
+    assert.deepEqual(hq.memoryStationState(), {
+      value: '2 to review',
+      description: 'global memory, 2 to review, 2 proposals waiting on Profile',
+      tone: 'attention'
+    });
+    assert.deepEqual(shared, [2], 'the panel links the waiting proposals');
+    assert.ok(renders >= 1);
+
+    // Over budget still wins.
+    hq._memoryStation.summary = { ...hq._memoryStation.summary, overBudget: true, dropped: 1 };
+    assert.equal(hq.memoryStationBadge().value, 'Over budget');
+
+    // No assistant or HQ (503): no review state, the rest of the badge stands.
+    hq._memoryStation.summary = { ...hq._memoryStation.summary, overBudget: false, dropped: 0 };
+    knowledge = { status: 503, body: {} };
+    hq.requestHQReviewQueue(true);
+    await flush();
+    assert.equal(hq.memoryStationBadge().value, '1 entry');
+
+    // An ordinary workspace never requests the queue.
+    calls.length = 0;
+    const plain = makeMemoryCommandView({}, { active: true, render() {} });
+    plain.memoryStationState();
+    plain.requestHQReviewQueue(true);
+    await flush();
+    assert.equal(calls.includes('/api/personal-assistant/knowledge'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('?station= reads any station-shaped key at boot', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { search: '?mode=map&station=memory' } };
+  try {
+    assert.equal(new WorkspaceCommandView(null)._bootStation, 'memory');
+    globalThis.window.location.search = '?station=%3Cscript%3E';
+    assert.equal(new WorkspaceCommandView(null)._bootStation, '');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('a dragged Memory building keeps its saved, clamped position on an ordinary workspace (FR3)', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {};

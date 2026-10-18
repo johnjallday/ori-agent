@@ -40,9 +40,10 @@ import {
   briefPanelMeta,
   dailyBriefStationLink,
   dailyBriefStationState,
-  dailyBriefStatus,
-  stationFromSearch
+  dailyBriefStatus
 } from './daily-brief-station.js';
+import { stationFromSearch } from './workspace-station-link.js';
+import { groupReviewedKnowledge } from './personal-hq-knowledge.js';
 import {
   MEMORY_STATION,
   memoryStationState as memoryBadgeState,
@@ -948,10 +949,11 @@ export class WorkspaceCommandView {
    * Opens a station's panel when the URL carries `?station=<key>`, then takes
    * the parameter off the address bar so a reload does not reopen it.
    *
-   * The Daily Brief station exists only on the designated Personal HQ, and
-   * that is known only once the workspace has loaded, so this waits for it;
-   * refresh() calls again when the data arrives. On any other workspace the
-   * link is dropped without opening anything.
+   * Which stations a workspace has (the Daily Brief only on the designated
+   * Personal HQ, Memory on every workspace) is known only once the workspace
+   * has loaded, so this waits for it; refresh() calls again when the data
+   * arrives. A key this workspace has no station for is dropped without
+   * opening anything.
    */
   applyStationDeepLink() {
     if (!this._bootStation || typeof window === 'undefined') return;
@@ -968,7 +970,11 @@ export class WorkspaceCommandView {
     } catch {
       /* the panel still opens; only the address bar keeps the parameter */
     }
-    if (station === DAILY_BRIEF_STATION && this.isPersonalHQ()) this.openDailyBriefPanel(null);
+    // A direct link has no opener: each station's action falls back to its
+    // own building, so closing the panel lands there.
+    if (this.mapStationRegistry().some(entry => entry.key === station)) {
+      this.runHQStationAction(station, null);
+    }
   }
 
   applyBootURLState() {
@@ -2659,6 +2665,7 @@ export class WorkspaceCommandView {
     if (wasMemory) {
       if (this.active) this.render();
       this.requestMemoryStationData(true);
+      this.requestHQReviewQueue(true);
     }
     const opener = this.resolveStatModalTrigger(trigger);
     if (opener && typeof opener.focus === 'function') opener.focus();
@@ -8286,17 +8293,72 @@ export class WorkspaceCommandView {
   memoryStationState() {
     const data = this.memoryStationData();
     if (data.status === 'idle' && this.active) this.requestMemoryStationData();
+    if (this.isPersonalHQ() && this.hqReviewQueueData().status === 'idle' && this.active) {
+      this.requestHQReviewQueue();
+    }
     return this.memoryStationBadge();
   }
 
   memoryStationBadge() {
     const data = this.memoryStationData();
+    const personalHQ = this.isPersonalHQ();
     return memoryBadgeState({
       status: data.status,
       summary: data.summary,
       baseline: readMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID),
-      personalHQ: this.isPersonalHQ()
+      reviewCount: personalHQ ? this.hqReviewQueueData().count : 0,
+      personalHQ
     });
+  }
+
+  // In the Personal HQ, the Memory station also says when proposals from
+  // other workspaces wait for review (FR29). The count is the Profile's own
+  // review queue (groupReviewedKnowledge), so the two can never disagree.
+  hqReviewQueueData() {
+    const workspaceID = this.workspaceId();
+    if (!this._hqReviewQueue || this._hqReviewQueue.workspaceID !== workspaceID) {
+      this._hqReviewQueue = { workspaceID, status: 'idle', count: 0 };
+    }
+    return this._hqReviewQueue;
+  }
+
+  // Read once per activation and again when the Memory panel closes; only the
+  // Personal HQ asks. No assistant or HQ (503) or a failed read means no
+  // review state: the rest of the badge stands.
+  requestHQReviewQueue(force = false) {
+    if (!this.isPersonalHQ()) return;
+    const data = this.hqReviewQueueData();
+    if (!data.workspaceID) return;
+    if (!force && data.status !== 'idle') return;
+    if (typeof fetch !== 'function') return;
+    if (data.status === 'idle') data.status = 'loading';
+    const requestID = (this._hqReviewQueueRequestID || 0) + 1;
+    this._hqReviewQueueRequestID = requestID;
+    const workspaceID = data.workspaceID;
+    const settle = count => {
+      if (this._hqReviewQueueRequestID !== requestID) return;
+      const latest = this.hqReviewQueueData();
+      if (latest.workspaceID !== workspaceID) return;
+      const before = this.memoryStationSignature();
+      latest.status = 'ready';
+      latest.count = count;
+      this.shareReviewQueueWithPanel();
+      if (this.memoryStationSignature() !== before) this.refreshMemoryStationSurface();
+    };
+    fetch('/api/personal-assistant/knowledge', { headers: { Accept: 'application/json' } })
+      .then(async response => {
+        if (!response || !response.ok) return settle(0);
+        const payload = await response.json();
+        return settle(groupReviewedKnowledge(payload && payload.items).queue.length);
+      })
+      .catch(() => settle(0));
+  }
+
+  // The panel links the waiting proposals above its sections.
+  shareReviewQueueWithPanel() {
+    const manager = this.page && this.page.memoryManager;
+    if (!manager || typeof manager.setReviewQueue !== 'function') return;
+    manager.setReviewQueue(this.isPersonalHQ() ? this.hqReviewQueueData().count : 0);
   }
 
   // One GET of the workspace's memory (FR6). It is asked for when the station
@@ -8420,6 +8482,7 @@ export class WorkspaceCommandView {
       writeMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID, data.summary);
     }
     this.ensureMemoryManagerHook();
+    this.shareReviewQueueWithPanel();
     const opener =
       trigger ||
       (this.container && typeof this.container.querySelector === 'function'

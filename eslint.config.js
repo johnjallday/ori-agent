@@ -184,6 +184,7 @@ export default defineConfig([
       'internal/web/static/js/modules/home-daily-brief.js',
       'internal/web/static/js/modules/daily-brief-station.js',
       'internal/web/static/js/modules/memory-station.js',
+      'internal/web/static/js/modules/workspace-station-link.js',
       'internal/web/static/js/modules/home-library-badges.js',
       'internal/web/static/js/modules/home-plugin-updates.js',
       'internal/web/static/js/modules/home-tree-icons.js',

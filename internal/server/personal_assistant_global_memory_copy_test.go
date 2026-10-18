@@ -76,7 +76,7 @@ func TestCopyGlobalFactToAWorkspaceAndRemoveTheCopy(t *testing.T) {
 	first := call(http.MethodPost, base+"/copy", copyBody("album-3", fact.Version))
 	expect(first, http.StatusOK)
 	if err := json.Unmarshal(first.Body.Bytes(), &copied); err != nil || !copied.Created || copied.WorkspaceID != "album-3" ||
-		!strings.HasPrefix(copied.Href, "/workspaces/") || !strings.HasSuffix(copied.Href, "#memory") {
+		!strings.HasPrefix(copied.Href, "/workspaces/") || !strings.HasSuffix(copied.Href, "?station=memory") {
 		t.Fatalf("copy = %s", first.Body.String())
 	}
 	again := call(http.MethodPost, base+"/copy", copyBody("album-3", fact.Version))

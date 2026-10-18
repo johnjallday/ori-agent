@@ -35,6 +35,36 @@ test('workspace run keeps UUID APIs separate from slug task and run links', () =
   assert.match(page.workspaceId, /workspace-uuid/);
 });
 
+test('"What this run learned" links to the workspace Memory station (FR25)', () => {
+  const page = new WorkspaceRunPage('workspace-uuid', 'run-1', { workspaceSlug: 'album-three' });
+  page.elements = { memoryCard: { hidden: true }, memory: { innerHTML: '' } };
+  page.artifacts = [
+    {
+      metadata: { role: 'memory_diff', added: ['- [fact, 2026-10-18, run:run-1] stems at 48 kHz'] }
+    }
+  ];
+  page.renderMemoryLearned();
+  assert.equal(page.elements.memoryCard.hidden, false);
+  assert.match(page.elements.memory.innerHTML, /Remembered \(1\)/);
+  assert.match(
+    page.elements.memory.innerHTML,
+    /<a class="workspace-run-memory-link" href="\/workspaces\/album-three\?station=memory">Open workspace memory<\/a>/
+  );
+
+  // No usable workspace address: the learnings stand, the link is hidden.
+  const unusable = new WorkspaceRunPage('', 'run-1', { workspaceSlug: 'Album Three' });
+  unusable.elements = { memoryCard: { hidden: true }, memory: { innerHTML: '' } };
+  unusable.artifacts = page.artifacts;
+  unusable.renderMemoryLearned();
+  assert.match(unusable.elements.memory.innerHTML, /Remembered \(1\)/);
+  assert.doesNotMatch(unusable.elements.memory.innerHTML, /Open workspace memory/);
+
+  // A run that wrote nothing keeps the card hidden.
+  page.artifacts = [{ metadata: { role: 'memory_diff', added: [], removed: [] } }];
+  page.renderMemoryLearned();
+  assert.equal(page.elements.memoryCard.hidden, true);
+});
+
 test('workspace run overview and report render reference URL details', () => {
   const page = new WorkspaceRunPage('workspace-1', 'run-1');
   page.run = {

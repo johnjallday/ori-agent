@@ -65,11 +65,13 @@ func (h *Handler) liveWorkspace(workspaceID string) *workspace.Workspace {
 	return ws
 }
 
+// workspaceMemoryHref opens the workspace's Memory station, where a copied
+// fact lands (the same address the web UI's stationLink builds).
 func workspaceMemoryHref(ws *workspace.Workspace) string {
 	if ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
 		return ""
 	}
-	return "/workspaces/" + url.PathEscape(ws.FolderSlug) + "#memory"
+	return "/workspaces/" + url.PathEscape(ws.FolderSlug) + "?station=memory"
 }
 
 type globalFactCopyRequest struct {

@@ -517,6 +517,38 @@ test('adding puts the entry at the top of its section and updates the meter and 
   }
 });
 
+test('the Personal HQ panel links the proposals waiting on the Profile above the sections (FR29)', () => {
+  const m = makeManager();
+  m.loaded = true;
+  m.elements = { list: { innerHTML: '' } };
+  m.globalMemory = {
+    available: true,
+    is_personal_hq: true,
+    review_href: '/profile#personalHQKnowledge'
+  };
+  m.entries = [{ type: 'watch', date: '2026-10-18', provenance: 'user', text: 'w' }];
+  m.setReviewQueue(2);
+  const html = m.elements.list.innerHTML;
+  assert.match(
+    html,
+    /<a class="workspace-detail-memory-review" href="\/profile#personalHQKnowledge">Review 2 proposals on Profile<\/a>/
+  );
+  assert.ok(html.indexOf('Review 2 proposals') < html.indexOf('data-memory-section="watching"'));
+
+  m.setReviewQueue(1);
+  assert.match(m.elements.list.innerHTML, /Review 1 proposal on Profile/);
+  m.entries = [];
+  m.renderList();
+  assert.match(m.elements.list.innerHTML, /Review 1 proposal on Profile[^]*No memory yet/);
+  m.setReviewQueue(0);
+  assert.doesNotMatch(m.elements.list.innerHTML, /workspace-detail-memory-review/);
+
+  // Never outside the HQ.
+  m.globalMemory = { available: true };
+  m.setReviewQueue(3);
+  assert.doesNotMatch(m.elements.list.innerHTML, /workspace-detail-memory-review/);
+});
+
 test('the empty state says agents write here under every autonomy policy (FR22)', () => {
   const m = makeManager();
   m.elements = { list: { innerHTML: '' } };
