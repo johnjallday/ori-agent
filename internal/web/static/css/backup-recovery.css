@@ -60,7 +60,8 @@
   overflow: auto;
   border: 1px solid var(--br-line);
   border-radius: 18px;
-  z-index: 1060;
+  /* Body-mounted modals must cover shared nav/assistant furniture too. */
+  z-index: var(--app-modal-layer, 20200);
   box-shadow:
     0 18px 70px #0004,
     0 0 0 100vmax #0006;

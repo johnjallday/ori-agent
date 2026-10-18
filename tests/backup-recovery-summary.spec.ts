@@ -21,7 +21,10 @@ test('stored product fixture: user reports and scoped Today/Brief return to the 
   page.setDefaultTimeout(15000);
   const root = resolve(import.meta.dirname, '..');
   const file = resolve(process.env.ORI_BACKUP_STORED_DEMO_CONTROL!);
-  expect(dirname(file)).toBe(resolve(root, 'tasks/evidence-backup-and-recovery'));
+  expect([
+    resolve(root, 'tasks/evidence-backup-and-recovery'),
+    resolve(root, '.tmp/backup-recovery-delivery')
+  ]).toContain(dirname(file));
   expect(basename(file)).toMatch(/^backup-stored-demo-control-[0-9]+\.json$/);
   const data = JSON.parse(readFileSync(file, 'utf8'));
   expect(data.kind).toBe('invented stored metadata only');
@@ -72,6 +75,9 @@ test('stored product fixture: user reports and scoped Today/Brief return to the 
   await page.goto('/workspaces/' + data.slug + '?mode=details&panel=backup-recovery&tab=recovery');
   const dialog = page.locator('#backupRecoveryConsole');
   await expect(dialog).toBeVisible();
+  // Opening starts a fresh stored-only read. Its repaint deliberately resets
+  // unchecked assertion consent; do not race that initial read with an edit.
+  await expect(dialog).toHaveAttribute('aria-busy', 'false');
   await expect(dialog).toContainText('Stored observation: stale');
   await dialog.getByText('External recovery guide · no model required', { exact: true }).click();
   await expect(dialog).toContainText('separate empty recovery target');

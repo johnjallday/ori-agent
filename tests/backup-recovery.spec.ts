@@ -308,6 +308,7 @@ test('prototype clock fixtures: freshness, overdue completion and expected disco
     });
     await page.getByRole('button', { name: 'Open backup evidence' }).click();
     const dialog = page.locator('#backupRecoveryConsole');
+    await expect(dialog).toHaveAttribute('aria-busy', 'false');
     await expect(dialog).toContainText(scenario.expected);
     await expect(dialog).not.toContainText(scenario.absent);
     await expect(dialog).toContainText('not verified by Ori');

@@ -115,6 +115,7 @@ func searchDirectoryPath(file *os.File) (string, error) {
 	}
 	var buffer [1024]byte // Darwin MAXPATHLEN/PATH_MAX, including NUL terminator
 	// #nosec G103 -- F_GETPATH is a read-only query on the owned descriptor; the kernel's MAXPATHLEN output has this exact fixed capacity.
+	//nolint:staticcheck // SA1019: x/sys has no pointer-buffer F_GETPATH wrapper; the supported Darwin ABI and MAXPATHLEN are fixed here.
 	_, _, errno := unix.Syscall(unix.SYS_FCNTL, file.Fd(), unix.F_GETPATH, uintptr(unsafe.Pointer(&buffer[0])))
 	runtime.KeepAlive(&buffer)
 	path, ok := nativeCString(buffer[:])

@@ -36,9 +36,10 @@ func metadataAnchorFixture(t *testing.T) (string, *metadataAnchor) {
 	}
 	for _, entry := range inventedMetadataBundle().entries {
 		path := filepath.Join(root, "config")
-		if entry.kind == metadataKey {
+		switch entry.kind {
+		case metadataKey:
 			path = filepath.Join(root, "keys", entry.id)
-		} else if entry.kind == metadataSnapshot {
+		case metadataSnapshot:
 			path = filepath.Join(root, "snapshots", entry.id)
 		}
 		if err := os.WriteFile(path, entry.data, 0o600); err != nil {

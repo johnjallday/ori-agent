@@ -82,7 +82,7 @@ func (h *Handler) scope(w http.ResponseWriter, r *http.Request, mutating bool) (
 		return "", "", false
 	}
 	for _, c := range workspace {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 			respondError(w, backuprecovery.ErrWorkspaceUnavailable)
 			return "", "", false
 		}

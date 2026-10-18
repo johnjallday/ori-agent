@@ -22,15 +22,15 @@ func monitoringReviewFixture(t *testing.T, s *Service) MonitoringReview {
 	}
 	return review
 }
-func enableMonitoringFixture(t *testing.T, s *Service) (MonitoringChangeRequest, OperationResult) {
+func enableMonitoringFixture(t *testing.T, s *Service) MonitoringChangeRequest {
 	t.Helper()
 	review := monitoringReviewFixture(t, s)
 	request := MonitoringChangeRequest{review.Generation, review.Revision, review.MonitoringRevision, uuid.NewString(), "active", review.Token, true}
 	result, err := s.SetMonitoring(t.Context(), "local", localFixtureWorkspace, request)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || result.Outcome != "applied" {
+		t.Fatal("reviewed monitoring consent failed", result, err)
 	}
-	return request, result
+	return request
 }
 func TestMonitoringReviewAndConsentNeverProbeOrRepeatConnectionRead(t *testing.T) {
 	s, provider, credentials := newBackupServiceFixture(t)
@@ -86,7 +86,7 @@ func TestMonitoringReviewTokensCannotBeConnectionAuthorityAndPauseNeedsFreshResu
 	if _, err := s.Connect(t.Context(), "local", localFixtureWorkspace, ConnectRequest{review.Generation, review.Revision, uuid.NewString(), review.Token, true}); !errors.Is(err, ErrReviewExpired) {
 		t.Fatal("monitoring token became a connection review", err)
 	}
-	request, _ := enableMonitoringFixture(t, s)
+	request := enableMonitoringFixture(t, s)
 	settings, _ := s.GetSettings(t.Context(), "local", localFixtureWorkspace)
 	paused := MonitoringChangeRequest{settings.Generation, settings.Revision, settings.Monitoring.Revision, uuid.NewString(), "paused", "", false}
 	if _, err := s.SetMonitoring(t.Context(), "local", localFixtureWorkspace, paused); err != nil {

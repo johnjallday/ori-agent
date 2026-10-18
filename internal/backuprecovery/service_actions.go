@@ -94,7 +94,7 @@ func (s *Service) replay(ctx context.Context, record localRecord, slot *workspac
 		s.mu.Lock()
 		active := slot.active
 		s.mu.Unlock()
-		if active != nil && !(operation.Action == "monitoring" && record.state != nil && (active.monitoringRevision == 0 || active.monitoringRevision == record.state.Monitoring.Revision)) {
+		if active != nil && (operation.Action != "monitoring" || record.state == nil || (active.monitoringRevision != 0 && active.monitoringRevision != record.state.Monitoring.Revision)) {
 			return operationResult(operation), true, nil
 		}
 		// Restart/interruption is never permission to repeat the external read.
@@ -131,8 +131,7 @@ func (s *Service) Connect(ctx context.Context, owner, workspace string, request 
 		return OperationResult{}, err
 	}
 	defer release()
-	record, err := s.record(ctx, owner, workspace)
-	if err != nil {
+	if _, err := s.record(ctx, owner, workspace); err != nil {
 		return OperationResult{}, err
 	}
 	if !validOperationID(request.OperationID) || !request.AllowMetadataRead {
@@ -148,7 +147,7 @@ func (s *Service) Connect(ctx context.Context, owner, workspace string, request 
 			unlock()
 		}
 	}()
-	record, err = s.record(ctx, owner, workspace)
+	record, err := s.record(ctx, owner, workspace)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -208,8 +207,7 @@ func (s *Service) Refresh(ctx context.Context, owner, workspace string, request 
 		return OperationResult{}, err
 	}
 	defer release()
-	record, err := s.record(ctx, owner, workspace)
-	if err != nil {
+	if _, err := s.record(ctx, owner, workspace); err != nil {
 		return OperationResult{}, err
 	}
 	if !validOperationID(request.OperationID) || !request.AllowMetadataRead {
@@ -225,7 +223,7 @@ func (s *Service) Refresh(ctx context.Context, owner, workspace string, request 
 			unlock()
 		}
 	}()
-	record, err = s.record(ctx, owner, workspace)
+	record, err := s.record(ctx, owner, workspace)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -447,8 +445,7 @@ func (s *Service) Revoke(ctx context.Context, owner, workspace string, request C
 		return OperationResult{}, err
 	}
 	defer release()
-	record, err := s.record(ctx, owner, workspace)
-	if err != nil {
+	if _, err := s.record(ctx, owner, workspace); err != nil {
 		return OperationResult{}, err
 	}
 	if !validOperationID(request.OperationID) {
@@ -460,7 +457,7 @@ func (s *Service) Revoke(ctx context.Context, owner, workspace string, request C
 		return OperationResult{}, err
 	}
 	defer unlock()
-	record, err = s.record(ctx, owner, workspace)
+	record, err := s.record(ctx, owner, workspace)
 	if err != nil {
 		return OperationResult{}, err
 	}

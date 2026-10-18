@@ -34,6 +34,7 @@ func TestDiskMetadataDecoderKeepsOnlyBoundedPrivateEvidence(t *testing.T) {
 	if result.device != "disk900000s1" || result.volumeID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || result.partitionID != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" || result.internal || result.whole || !result.mounted || result.snapshot || result.mountPoint != "/Invented Mount" || len(result.physicalStores) != 1 || result.physicalStores[0] != "disk900001s2" {
 		t.Fatal("required metadata lost")
 	}
+	//nolint:staticcheck // SA9005: deliberately assert private disk evidence has no JSON-visible fields.
 	encoded, err := json.Marshal(result)
 	if err != nil || string(encoded) != "{}" {
 		t.Fatal("private OS metadata became serializable")

@@ -110,7 +110,7 @@ func openExecutableParent(path string) (*os.File, error) {
 		var info unix.Stat_t
 		if err := unix.Fstat(fd, &info); err != nil || info.Mode&unix.S_IFMT != unix.S_IFDIR ||
 			(info.Uid != 0 && int64(info.Uid) != int64(os.Geteuid())) ||
-			(info.Mode&0o022 != 0 && !(info.Uid == 0 && info.Mode&unix.S_ISVTX != 0)) {
+			(info.Mode&0o022 != 0 && (info.Uid != 0 || info.Mode&unix.S_ISVTX == 0)) {
 			_ = unix.Close(fd)
 			return nil, errTrustedExecutable
 		}

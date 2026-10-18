@@ -40,6 +40,7 @@ func processCodeIdentity(process *os.Process) ([20]byte, bool) {
 	var digest [20]byte
 	// #nosec G103 -- read-only csops operation; kernel output is exactly this
 	// fixed-size owned buffer. No caller-controlled pointer/operation/length.
+	//nolint:staticcheck // SA1019: x/sys has no libSystem csops wrapper; only this fixed read-only flavor on our owned child is accepted.
 	_, _, errno := unix.Syscall6(unix.SYS_CSOPS, uintptr(process.Pid), csOpsCDHash, uintptr(unsafe.Pointer(&digest[0])), uintptr(len(digest)), 0, 0)
 	runtime.KeepAlive(&digest)
 	if errno != 0 {
@@ -47,6 +48,7 @@ func processCodeIdentity(process *os.Process) ([20]byte, bool) {
 	}
 	var flags uint32
 	// #nosec G103 -- read-only signature-status query into a fixed uint32 buffer.
+	//nolint:staticcheck // SA1019: x/sys has no libSystem csops wrapper; the supported ABI writes exactly the fixed uint32 buffer.
 	_, _, errno = unix.Syscall6(unix.SYS_CSOPS, uintptr(process.Pid), csOpsStatus, uintptr(unsafe.Pointer(&flags)), 4, 0, 0)
 	runtime.KeepAlive(&flags)
 	return digest, errno == 0 && flags&csValid != 0

@@ -30,6 +30,7 @@ func TestNativeDiskQuerySpecHasOnlyOneFixedMetadataOperation(t *testing.T) {
 	if _, err := queryNativeDisk(ctx, "disk900000s1", "/must-not-be-inspected"); err != errStorageIdentity {
 		t.Fatal("cancelled query performed native I/O")
 	}
+	//nolint:staticcheck // SA1012: nil is the invalid input under test; it must refuse before native access.
 	if _, err := queryNativeDisk(nil, "disk900000s1", "/must-not-be-inspected"); err != errStorageIdentity {
 		t.Fatal("missing context admitted")
 	}

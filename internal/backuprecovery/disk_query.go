@@ -49,7 +49,7 @@ func readDiskIdentity(ctx context.Context, mount nativeMountEvidence, query scop
 		}
 		parent, err := query(ctx, store.parentWholeDisk)
 		if err != nil || ctx.Err() != nil || parent.device != store.parentWholeDisk || !parent.whole || parent.snapshot || parent.internal != volume.internal || parent.transport != volume.transport ||
-			(parent.physicalKind != "Physical" && !(volume.internal && parent.physicalKind == "Unknown")) {
+			(parent.physicalKind != "Physical" && (!volume.internal || parent.physicalKind != "Unknown")) {
 			return bad()
 		}
 		parents[parent.device] = parent

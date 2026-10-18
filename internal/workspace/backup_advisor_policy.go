@@ -11,6 +11,7 @@ import (
 // prompt match. It NARROWS execution; it cannot create backup-domain authority.
 const BackupAdvisorRoleID = "backup-advisor"
 
+//nolint:staticcheck // ST1005: Backup Advisor is the product role's proper name.
 var ErrBackupAdvisorRuntime = errors.New("Backup Advisor is available only through its isolated stored-facts conversation")
 
 // BackupAdvisorRuntimeRestricted rejects general execution of the role, plus

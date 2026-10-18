@@ -34,7 +34,7 @@ func (s *Service) GetHistory(ctx context.Context, owner, workspace string, curso
 			history.NextCursor = history.Items[len(history.Items)-1].Sequence
 			break
 		}
-		history.Items = append(history.Items, Attempt{attempt.Generation, attempt.Sequence, attempt.StartedAt, attempt.FinishedAt, attempt.Outcome})
+		history.Items = append(history.Items, Attempt(attempt))
 	}
 	return history, nil
 }

@@ -261,7 +261,7 @@ func metadataID(value any) bool {
 		return false
 	}
 	for _, char := range text {
-		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			return false
 		}
 	}

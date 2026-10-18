@@ -55,11 +55,12 @@ test('designated drive: real choices, cancellation, scoped reference failure and
     execFileSync('/bin/ps', ['-p', serverPID, '-o', 'comm='], { encoding: 'utf8' }).trim()
   ).toBe(resolve(root, 'bin/ori-agent'));
   expect(control.volume).toMatch(/^\/Volumes\/[^/\r\n]+$/);
-  expect(
-    control.source.startsWith(
-      resolve(root, 'tasks/evidence-backup-and-recovery/external-restic-probe/invented-')
-    )
-  ).toBeTruthy();
+  const sourceParent = resolve(control.source, '../..');
+  expect([
+    resolve(root, 'tasks/evidence-backup-and-recovery/external-restic-probe'),
+    resolve(root, '.tmp/backup-recovery-delivery/external-restic-probe')
+  ]).toContain(sourceParent);
+  expect(control.source.slice(sourceParent.length)).toMatch(/^\/invented-[a-z0-9_]+\/source$/);
   expect(control.repository.startsWith(control.volume + '/Ori Backup Test/invented-')).toBeTruthy();
   expect(control.repository.slice(control.volume.length)).toMatch(
     /^\/Ori Backup Test\/invented-[a-z0-9_]+\/repository$/
@@ -102,6 +103,7 @@ test('designated drive: real choices, cancellation, scoped reference failure and
   );
   const dialog = page.locator('#backupRecoveryConsole');
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-busy', 'false');
   const base = '/api/workspaces/' + control.workspace_id + '/backup-recovery';
   const getStatus = async () => {
     const response = await request.get(base);
@@ -206,4 +208,95 @@ test('designated drive: real choices, cancellation, scoped reference failure and
     }),
     contentType: 'application/json'
   });
+});
+
+/** The separate operator must have actually restored and byte-compared one
+ * invented sample first. This case records its explicitly user-reported result;
+ * the product/browser never runs restic or reads recovered contents. */
+test('external sample recovery: record a dated operator report without another metadata read', async ({
+  page,
+  request
+}, info) => {
+  test.skip(
+    !process.env.ORI_BACKUP_EXTERNAL_RECOVERY_DEMO,
+    'Needs a completed external sample recovery.'
+  );
+  const root = resolve(import.meta.dirname, '..');
+  const file = resolve(process.env.ORI_BACKUP_EXTERNAL_RECOVERY_DEMO!);
+  expect(resolve(file, '..')).toBe(resolve(root, '.tmp/backup-recovery-delivery'));
+  const control = JSON.parse(readFileSync(file, 'utf8'));
+  expect(control.recovery).toMatchObject({
+    executor: 'external_restic_operator',
+    invented_sample_compared: true,
+    separate_empty_target: true,
+    repository_unchanged: true,
+    source_unchanged: true
+  });
+  expect(control.recovery.snapshot_id).toMatch(/^[a-f0-9]{64}$/);
+  expect(control.workspace_id).toMatch(/^[a-f0-9-]{36}$/);
+  expect(control.slug).toMatch(/^[a-z0-9][a-z0-9-]{0,79}$/);
+  expect(new URL(info.project.use.baseURL as string).port).toBe(String(control.server_port));
+  const endpoint = '/api/workspaces/' + control.workspace_id + '/backup-recovery';
+  const getStatus = async () => {
+    const response = await request.get(endpoint);
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return (await response.json()).status;
+  };
+  const before = await getStatus();
+  expect(before).toMatchObject({
+    connection: 'configured',
+    runtime_available: true,
+    destination: 'present',
+    monitoring: 'manual_only',
+    snapshot_count: 1
+  });
+  const mutations: string[] = [];
+  page.on('request', r => {
+    if (r.method() !== 'GET' && new URL(r.url()).pathname.startsWith(endpoint))
+      mutations.push(new URL(r.url()).pathname);
+  });
+  await installLocalCdn(page);
+  await page.goto(
+    '/workspaces/' + control.slug + '?mode=details&panel=backup-recovery&tab=recovery'
+  );
+  const dialog = page.locator('#backupRecoveryConsole');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-busy', 'false');
+  await dialog.getByText('External recovery guide · no model required', { exact: true }).click();
+  await expect(dialog).toContainText('separate empty recovery target');
+  await expect(dialog.locator('#brReportConsent')).not.toBeChecked();
+  await dialog
+    .getByLabel('Test date (UTC)', { exact: true })
+    .fill(control.recovery.tested_at.slice(0, 10));
+  await dialog
+    .getByRole('combobox', { name: 'Your reported result', exact: true })
+    .selectOption('user_reported_passed');
+  await dialog
+    .getByRole('combobox', { name: 'Snapshot association', exact: true })
+    .selectOption(control.recovery.snapshot_id);
+  await dialog
+    .getByRole('combobox', { name: 'Optional note — predefined choices only', exact: true })
+    .selectOption('sample_compared');
+  await dialog.locator('#brReportConsent').check();
+  await dialog.getByRole('button', { name: 'Record user-reported result', exact: true }).click();
+  await expect(dialog).toContainText('User report saved. Ori did not perform or verify a restore.');
+  await expect(dialog.getByLabel('Test date (UTC)', { exact: true })).toBeEnabled();
+  await expect(dialog.locator('.br-reports')).toContainText('User reports passed');
+  await dialog
+    .locator('.br-reports')
+    .screenshot({ path: info.outputPath('actual-external-sample-user-report.png') });
+  const response = await request.get(endpoint + '/recovery');
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const recovery = (await response.json()).recovery;
+  expect(recovery.reports).toHaveLength(1);
+  expect(recovery.reports[0]).toMatchObject({
+    result: 'user_reported_passed',
+    snapshot_id: control.recovery.snapshot_id,
+    note_code: 'sample_compared'
+  });
+  const after = await getStatus();
+  expect(after.sequence).toBe(before.sequence);
+  expect(after.last_successful_read).toBe(before.last_successful_read);
+  expect(after.monitoring).toBe('manual_only');
+  expect(mutations).toEqual([endpoint + '/recovery-report']);
 });

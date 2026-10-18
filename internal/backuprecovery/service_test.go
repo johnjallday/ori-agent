@@ -119,7 +119,7 @@ func reviewBackupServiceFixture(t *testing.T, s *Service) Review {
 	}
 	return review
 }
-func connectBackupServiceFixture(t *testing.T, s *Service) (ConnectRequest, OperationResult) {
+func connectBackupServiceFixture(t *testing.T, s *Service) {
 	t.Helper()
 	review := reviewBackupServiceFixture(t, s)
 	request := ConnectRequest{Generation: review.Generation, Revision: review.Revision, OperationID: uuid.NewString(), ReviewToken: review.Token, AllowMetadataRead: true}
@@ -127,7 +127,6 @@ func connectBackupServiceFixture(t *testing.T, s *Service) (ConnectRequest, Oper
 	if err != nil || result.Outcome != "read_ok" {
 		t.Fatal("reviewed connect failed", result, err)
 	}
-	return request, result
 }
 func refreshBackupServiceFixture(t *testing.T, s *Service) RefreshRequest {
 	t.Helper()

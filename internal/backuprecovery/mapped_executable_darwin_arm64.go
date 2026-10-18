@@ -49,6 +49,7 @@ func mappedExecutableMatches(process *os.Process, expected unix.Stat_t) bool {
 		var record processRegionRecord
 		// #nosec G103 -- fixed read-only proc_pidinfo flavor on our owned child;
 		// exact SDK-sized record, never an API-selected PID/pointer/flavor.
+		//nolint:staticcheck // SA1019: x/sys has no libSystem proc_pidinfo wrapper; this supported arm64 ABI is SDK-size checked above.
 		n, _, errno := unix.Syscall6(unix.SYS_PROC_INFO, procInfoCallPIDInfo, uintptr(process.Pid), procPIDRegionPathInfo, uintptr(address), uintptr(unsafe.Pointer(&record)), unsafe.Sizeof(record))
 		runtime.KeepAlive(&record)
 		if errno != 0 || n != unsafe.Sizeof(record) {

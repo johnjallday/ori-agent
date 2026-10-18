@@ -16,6 +16,7 @@ class Element {
   }
   set textContent(value) {
     this._text = String(value);
+    for (const child of this.children) child.parentNode = null;
     this.children = [];
   }
   get textContent() {
@@ -64,6 +65,9 @@ class Element {
   }
   focus() {
     if (!this.disabled) this.doc.activeElement = this;
+  }
+  contains(node) {
+    return this.all(candidate => candidate === node).length > 0;
   }
   get isConnected() {
     let node = this;
@@ -189,10 +193,80 @@ test('console captures its deep link before the workspace router normalizes the 
   assert.equal(f.console.isOpen(), false, 'boot intent was replayed after closing');
 });
 
+test('Escape closes the coordinated dialog and restores the live opener without a check', async () => {
+  const f = fixture();
+  f.context.workspaceOverlayCoordinator = {
+    open() {},
+    close() {},
+    activeModal: () => ({ id: 'backup-recovery-console' })
+  };
+  await f.console.refresh();
+  const original = findButton(f.document, 'Open backup evidence');
+  f.console.open({ trigger: original });
+  await settle();
+  const dialog = f.document.getElementById('backupRecoveryConsole');
+  await dialog.fire('keydown', { key: 'Escape' });
+  assert.equal(f.console.isOpen(), false);
+  assert.equal(f.document.activeElement, findButton(f.document, 'Open backup evidence'));
+  assert.ok(f.calls.every(call => !call.options?.method || call.options.method === 'GET'));
+});
+
 const settle = () => new Promise(resolve => setImmediate(resolve));
 function findButton(doc, label) {
   return doc.body.all(node => node.tagName === 'button' && node.textContent === label)[0];
 }
+
+test('stored-read busy state settles without claiming a provider check', async () => {
+  const f = fixture();
+  f.console.open();
+  await settle();
+  const dialog = f.document.getElementById('backupRecoveryConsole');
+  let release;
+  const pending = new Promise(resolve => {
+    release = resolve;
+  });
+  const fetch = f.context.fetch;
+  f.context.fetch = async (url, options) => {
+    await pending;
+    return fetch(url, options);
+  };
+  const read = f.console.refresh();
+  assert.equal(dialog.getAttribute('aria-busy'), 'true');
+  release();
+  await read;
+  assert.equal(dialog.getAttribute('aria-busy'), 'false');
+  assert.ok(f.calls.every(call => call.options.method === 'GET'));
+});
+
+test('stored rerender retains modal focus when an unkeyed control is replaced', async () => {
+  const f = fixture();
+  f.settings.configured = true;
+  f.console.open({ tab: 'settings' });
+  await settle();
+  const control = findButton(f.document, 'Revoke metadata access');
+  control.focus();
+  const calls = f.calls.length;
+  f.console._test.render();
+  assert.equal(control.isConnected, false);
+  assert.equal(f.document.activeElement, f.document.getElementById('brTab-settings'));
+  assert.equal(f.calls.length, calls, 'focus restoration started IO');
+});
+
+test('changing saved selection retains the live checkbox focus without granting access', async () => {
+  const f = fixture();
+  f.settings.configured = true;
+  f.console.open({ tab: 'settings' });
+  await settle();
+  const saved = f.document.getElementById('brUseSavedSelection');
+  assert.ok(saved);
+  saved.focus();
+  saved.checked = false;
+  const calls = f.calls.length;
+  await saved.fire('change');
+  assert.equal(saved.isConnected, false);
+  assert.equal(f.document.activeElement, f.document.getElementById('brUseSavedSelection'));
+  assert.equal(f.calls.length, calls, 'selection-only change started IO');
+});
 
 test('opening and navigating loads stored facts only, with honest empty evidence', async () => {
   const f = fixture();

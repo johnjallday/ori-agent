@@ -186,6 +186,7 @@ func TestScopedDiskQueryStopsOnFailureAndCancellation(t *testing.T) {
 		})
 	}
 	mount, _ := diskQueryFixture()
+	//nolint:staticcheck // SA1012: nil is the invalid input under test; it must refuse before native access.
 	if _, err := readDiskIdentity(nil, mount, nil); err != errStorageIdentity {
 		t.Fatal("missing context admitted")
 	}

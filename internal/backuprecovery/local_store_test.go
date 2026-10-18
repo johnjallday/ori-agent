@@ -136,6 +136,7 @@ func TestLocalBackupStoreCreationIsInertAndEncrypted(t *testing.T) {
 	if err != nil || localDigest(loaded.state) != localDigest(record.state) {
 		t.Fatal("state did not round trip", err)
 	}
+	//nolint:staticcheck // SA9005: deliberately assert the private record cannot serialize authority or secrets.
 	encoded, err := json.Marshal(loaded)
 	if err != nil || string(encoded) != "{}" {
 		t.Fatal("owning record escaped as a public DTO")

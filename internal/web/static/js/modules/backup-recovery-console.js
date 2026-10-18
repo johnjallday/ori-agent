@@ -23,6 +23,7 @@
     tab: 'overview',
     trigger: null,
     busy: false,
+    storedLoading: false,
     error: '',
     notice: '',
     loadEpoch: 0,
@@ -156,6 +157,8 @@
   }
   async function loadStored() {
     const epoch = ++state.loadEpoch;
+    state.storedLoading = true;
+    dialog?.setAttribute('aria-busy', 'true');
     try {
       const payload = await request('');
       if (epoch !== state.loadEpoch) return;
@@ -200,7 +203,10 @@
         messages[error.code] ||
         'Stored backup state could not be loaded. Older evidence below has not been refreshed.';
     }
-    if (epoch === state.loadEpoch) render();
+    if (epoch === state.loadEpoch) {
+      state.storedLoading = false;
+      render();
+    }
   }
   function version() {
     return {
@@ -878,6 +884,7 @@
       const saved = el('label', 'br-choice');
       const checkbox = el('input');
       checkbox.type = 'checkbox';
+      checkbox.id = 'brUseSavedSelection';
       checkbox.disabled = state.busy;
       checkbox.checked = state.useSaved;
       checkbox.addEventListener('change', () => {
@@ -1394,7 +1401,9 @@
   function render() {
     renderCard();
     if (!state.open || !dialog) return;
+    dialog.setAttribute('aria-busy', String(state.busy || state.storedLoading));
     const focused = document.activeElement?.id;
+    const focusWasInside = dialog.contains(document.activeElement);
     dialog.textContent = '';
     const shell = el('div', 'br-shell');
     const head = el('header', 'br-head');
@@ -1477,7 +1486,13 @@
       'br-footer'
     );
     dialog.appendChild(shell);
-    if (focused && document.getElementById(focused)) document.getElementById(focused).focus();
+    if (focusWasInside) {
+      const retained = focused && document.getElementById(focused);
+      // A late stored read can replace an unkeyed button/summary while it has
+      // focus. Keep ownership in this modal instead of dropping focus to body.
+      if (retained && dialog.contains(retained)) retained.focus();
+      else dialog.querySelector('[data-br-tab="' + state.tab + '"]')?.focus();
+    }
   }
   function open(options = {}) {
     if (!ws() || !window.WorkspaceCapabilities?.isInstalled(ID)) return false;
@@ -1491,6 +1506,16 @@
       dialog.setAttribute('aria-modal', 'true');
       dialog.addEventListener('cancel', event => {
         event.preventDefault();
+        close();
+      });
+      // The shared coordinator uses a non-top-layer dialog, whose native
+      // cancel event does not fire on Escape. Only this active modal owns it.
+      dialog.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        const active = window.workspaceOverlayCoordinator?.activeModal?.();
+        if (active && active.id !== 'backup-recovery-console') return;
+        event.preventDefault();
+        event.stopPropagation?.();
         close();
       });
       document.body.appendChild(dialog);

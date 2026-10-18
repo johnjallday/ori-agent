@@ -473,12 +473,13 @@ func (s *Service) storedStatus(record localRecord) Status {
 	}
 	state := record.state
 	status.RemovalPending = pendingRemoval(record)
-	if state.Monitoring.Intent == "paused" {
+	switch state.Monitoring.Intent {
+	case "paused":
 		status.Monitoring = "paused"
 		if currentAttemptNeedsReview(state) {
 			status.Monitoring = "review_required"
 		}
-	} else if state.Monitoring.Intent == "active" {
+	case "active":
 		status.Monitoring = "review_required"
 		if periodicReadAdmissible(record) {
 			status.Monitoring = "unavailable"

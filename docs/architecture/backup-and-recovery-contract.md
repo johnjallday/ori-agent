@@ -1,12 +1,13 @@
 # Backup & Recovery — integration contract v1
 
-**Status: contract frozen; runtime NOT activated or ready for delivery.** The
-selected metadata interface has software and designated physical-USB probe
-evidence. Pure identity/metadata tests, native descriptor/broker-transport tests,
-bounded child-process tests and scoped Vault resolver tests pin its foundations.
-The compiled read adapter now has end-to-end fixture evidence. This still does
-not establish domain admission, local activation, monitoring or finished UI. The implementation/acceptance
-gates at the end remain mandatory.
+**Status: contract frozen; implementation groups 1–4 complete; delivery acceptance
+in progress.** The selected metadata interface has designated physical-USB probe
+and actual product read/periodic-monitoring evidence. Domain consent, lifecycle
+fences and advisor isolation are implemented. Model-free recovery/user-report and
+scoped-summary UI have actual-product evidence over explicitly invented stored
+metadata, not a real sample restore. No installation or wizard completion opts a
+workspace into access. The remaining live recovery/hardware and full current
+repository/browser gates at the end remain mandatory; this is not PR readiness.
 
 ## Authority and evidence
 
@@ -78,8 +79,8 @@ Apple marks `sandbox-exec` deprecated. V1 deliberately requires this measured
 containment on the tested macOS/architecture only, with the fixed launcher and
 negative controls described below. Other environments remain unavailable; there
 is no unsandboxed fallback. The compiled read composition now has bounded fixture controls and a designated
-external-fixture acceptance read. Domain consent/lifecycle integration remains a
-separate activation gate.
+external-fixture acceptance read. Provider availability is not consent: domain
+admission/lifecycle authority and separate periodic approval still govern reads.
 
 The test password was generated in memory, delivered over a pipe, and never
 written to evidence or passed as an argument/environment variable. Production
@@ -851,7 +852,7 @@ Freeze resolves design/feasibility, not all later implementation tests:
   data in the approved disposable external namespace; Ori did not execute a backup
   or restore. The invented repository's file digest remained unchanged. Bounded
   clock-fixture screenshots are separate from this actual product/provider path.
-  Full delivery CI, remaining recovery/summary groups and 5.3 are still required.
+  Full delivery CI and remaining 5.3 acceptance are still required.
 - **4.1–4.6 implemented:** model-free recovery guidance, immutable dated user
   assertions, scoped Today/Brief/readiness and exact-workspace advisor projections.
   Readers have no provider/password callback or selected-folder authority.
@@ -859,14 +860,19 @@ Freeze resolves design/feasibility, not all later implementation tests:
   explicitly invented encrypted stale/overdue metadata and an illustrative user
   assertion. Both Today/Brief links returned to the owning console. No group-4
   provider/drive/restore operation is claimed; full delivery remains separate.
-- **5.3:** full real-product live acceptance and a sample external restore.
-  Connected identity/source independence and actual user-operated unplug/replug
-  already have probe evidence, but a second physical same-name swap has **not**
-  been performed. Wrong-identity and ordinary-directory fixtures are controls,
-  not substitute hardware/product acceptance. Record remaining hardware cases
-  separately and obtain any additional device permission when needed.
+- **5.3 partially exercised:** a separate external restic operator restored one
+  invented sample to a new empty target and byte-compared it. The current product
+  made one approved metadata read and recorded the explicitly user-reported
+  result; Ori did not restore or inspect recovered contents. Source/repository
+  contents and checked identity/mode/timestamp metadata remained unchanged.
+  Connected identity/source independence and user-operated unplug/replug already
+  have probe evidence, but a second physical same-name swap has **not** been
+  performed. Wrong-identity and ordinary-directory fixtures are controls, not
+  substitute hardware/product acceptance. Remaining hardware cases still require
+  evidence and any additional device permission.
 - **5.8–5.12:** full repository/browser/security gates, manual guide, final demo
-  and explicit PR approval. No current result is a delivery-readiness claim.
+  and PR readiness. Open the PR after the canonical gate passes; a person owns
+  review and merge. No partial result is a delivery-readiness claim.
 
 Ordinary unit CI requires neither restic nor an attached drive. The software
 probe is not a restore test or full repository validation; the physical probe is

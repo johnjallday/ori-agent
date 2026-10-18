@@ -56,6 +56,7 @@ func TestResticMetadataSeparatesPublicationFromSuccessAndCoverage(t *testing.T) 
 	if got := reflect.TypeFor[resticSnapshotMetadata]().NumField(); got != 7 {
 		t.Fatalf("private evidence field set changed: got %d", got)
 	}
+	//nolint:staticcheck // SA9005: deliberately assert private snapshot evidence cannot become an API or model payload.
 	wire, err := json.Marshal(row)
 	if err != nil || string(wire) != "{}" {
 		t.Fatal("private provider evidence must not accidentally serialize into an API/assistant response")
@@ -72,6 +73,10 @@ func TestResticMetadataEmptyIsDifferentFromUnavailable(t *testing.T) {
 			rows, err := decodeResticSnapshots([]byte("[]"), nil, code)
 			if rows != nil || !errors.Is(err, errMetadataRead) {
 				t.Fatal("a failed read must not become healthy-empty")
+			}
+			config, err := decodeResticConfig(metadataFixture(t, "config.json"), nil, code)
+			if config.id != "" || !errors.Is(err, errMetadataRead) {
+				t.Fatal("a failed config command must not publish a repository identity")
 			}
 		})
 	}
