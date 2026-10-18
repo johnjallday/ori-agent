@@ -96,27 +96,29 @@ func (releases *homeReleases) updates() *reviewedIntegrationUpdates {
 }
 
 func TestReviewedHomeProviderUpdatesFollowItsPublishedReleases(t *testing.T) {
-	releases := newHomeReleases(t, "0.3.0", "0.2.0", "0.1.0")
+	// Versions sit at and above the reviewed floor (0.3.0): releases below it
+	// are never candidates.
+	releases := newHomeReleases(t, "0.5.0", "0.4.0", "0.3.0")
 	releases.newerHost[releases.candidates[0].Source] = true
 	updates := releases.updates()
 	provider := releases.provider
 	pinned := plugin.InstalledPlugin{
-		Name: provider.PluginID, Version: "0.1.0", Format: provider.SourceFormat,
+		Name: provider.PluginID, Version: "0.3.0", Format: provider.SourceFormat,
 		Source: provider.ReleaseEntry().PinnedSource(provider.FallbackCommit),
 	}
 
-	// 0.3.0 needs a newer host, so the newest release this build can load is
+	// 0.5.0 needs a newer host, so the newest release this build can load is
 	// offered instead — never the one it would refuse to install.
 	result, handled, err := updates.availability(pinned)
-	if err != nil || !handled || !result.Available || !result.ReviewedRelease || result.AvailableVersion != "0.2.0" {
+	if err != nil || !handled || !result.Available || !result.ReviewedRelease || result.AvailableVersion != "0.4.0" {
 		t.Fatalf("availability = %#v handled=%v err=%v", result, handled, err)
 	}
 	if replacement := updates.replacement(context.Background(), pinned); replacement.Source != releases.candidates[1].Source {
-		t.Fatalf("replacement = %#v, want the 0.2.0 commit", replacement)
+		t.Fatalf("replacement = %#v, want the 0.4.0 commit", replacement)
 	}
 
 	current := pinned
-	current.Version = "0.2.0"
+	current.Version = "0.4.0"
 	if result, handled, err := updates.availability(current); err != nil || !handled || result.Available {
 		t.Fatalf("an up-to-date Home provider was offered an update: %#v %v %v", result, handled, err)
 	}
@@ -176,7 +178,7 @@ func installedPluginNames(t *testing.T, s *Server) []string {
 }
 
 func TestHomeProviderRecoveryPreviewDisclosesTheReviewedRelease(t *testing.T) {
-	releases := newHomeReleases(t, "0.2.0", "0.1.0")
+	releases := newHomeReleases(t, "0.4.0", "0.3.0")
 	s, blueprintID := homeRecoveryServer(t, releases)
 
 	w, resp := postRecovery(t, s, blueprintID,
@@ -184,7 +186,7 @@ func TestHomeProviderRecoveryPreviewDisclosesTheReviewedRelease(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("preview = %d: %s", w.Code, w.Body.String())
 	}
-	if resp["trust"] == nil || resp["source"] != releases.candidates[0].Source || resp["release"] != "0.2.0" {
+	if resp["trust"] == nil || resp["source"] != releases.candidates[0].Source || resp["release"] != "0.4.0" {
 		t.Fatalf("preview did not disclose the newest reviewed release: %v", resp)
 	}
 	readiness, _ := resp["readiness"].(map[string]any)
@@ -199,11 +201,11 @@ func TestHomeProviderRecoveryPreviewDisclosesTheReviewedRelease(t *testing.T) {
 }
 
 func TestHomeProviderRecoveryRefusesAConfirmationForAnotherRelease(t *testing.T) {
-	releases := newHomeReleases(t, "0.2.0", "0.1.0")
+	releases := newHomeReleases(t, "0.4.0", "0.3.0")
 	s, blueprintID := homeRecoveryServer(t, releases)
 
 	for _, body := range []string{
-		`{"action":"install_plugin","plugin":"music-project-management","confirm":true,"release":"0.1.0"}`,
+		`{"action":"install_plugin","plugin":"music-project-management","confirm":true,"release":"0.3.0"}`,
 		`{"action":"install_plugin","plugin":"music-project-management","confirm":true}`,
 	} {
 		w, resp := postRecovery(t, s, blueprintID, body)
@@ -224,7 +226,7 @@ func TestHomeProviderRecoveryRefusesAConfirmationForAnotherRelease(t *testing.T)
 }
 
 func TestHomeProviderRecoveryWithoutAVerifiableReleaseInstallsNothing(t *testing.T) {
-	releases := newHomeReleases(t, "0.2.0")
+	releases := newHomeReleases(t, "0.3.0")
 	releases.impostor[releases.candidates[0].Source] = true
 	s, blueprintID := homeRecoveryServer(t, releases)
 	unwired, unwiredID := homeRecoveryServer(t, nil)
@@ -257,7 +259,7 @@ func TestHomeProviderRecoveryWithoutAVerifiableReleaseInstallsNothing(t *testing
 }
 
 func TestBlueprintRecoveryAcceptsOnlyThisBlueprintsHomeProvider(t *testing.T) {
-	releases := newHomeReleases(t, "0.2.0")
+	releases := newHomeReleases(t, "0.3.0")
 	s, blueprintID := homeRecoveryServer(t, releases)
 
 	// Another blueprint's Home provider, or any other reviewed plugin, is not

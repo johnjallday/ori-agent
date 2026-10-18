@@ -568,8 +568,13 @@ supports prompt/skill changes. Exact-candidate setup, empty-Home 0.2.0/0.1.1
 upgrades, both REAPER installation orders and restart have disposable browser
 coverage; populated arrangement preservation and broader lifecycle acceptance
 remain separate gates. Music source, disposable staging, immutable release and Ori's
-reviewed floor are four distinct states. No pin/release is authorized here.
-REAPER/SDK/devtools changes are not required by the effects above.
+reviewed floor are four distinct states. The candidate was published as Music
+Project Management `v0.3.0` (commit `2d5f01e6daa24c77327a84376d8feb75b965d575`,
+tree identical to the tested candidate) on 2026-10-18 by the owner's release
+dispatch, and Ori's reviewed Home provider floor moved to `0.3.0` with that
+commit as its fallback (`internal/reviewedintegration/entries.go`; evidence in
+`docs/architecture/independent-program-homes.md`). REAPER/SDK/devtools changes
+are not required by the effects above and the REAPER pin is unchanged.
 
 Run `./scripts/e2e-pa-arrangement.sh music --source /absolute/clean/candidate`
 for exact-candidate planning, revision, correction, collection-only review/apply,
