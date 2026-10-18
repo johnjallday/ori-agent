@@ -51,6 +51,13 @@ func (s *domainSpy) Revoke(_ context.Context, o, w string, _ backuprecovery.Cont
 	return backuprecovery.OperationResult{}, s.called(o, w)
 }
 
+func (s *domainSpy) ReviewMonitoring(_ context.Context, o, w string, _ backuprecovery.MonitoringReviewRequest) (backuprecovery.MonitoringReview, error) {
+	return backuprecovery.MonitoringReview{}, s.called(o, w)
+}
+func (s *domainSpy) SetMonitoring(_ context.Context, o, w string, _ backuprecovery.MonitoringChangeRequest) (backuprecovery.OperationResult, error) {
+	return backuprecovery.OperationResult{}, s.called(o, w)
+}
+
 type ownerProvider string
 
 func (p ownerProvider) CurrentUserID(context.Context) (string, error) { return string(p), nil }

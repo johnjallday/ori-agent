@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
@@ -87,6 +86,7 @@ type Status struct {
 	IntendedSourceCount int               `json:"intended_source_count"`
 	Capacity            *CapacityEvidence `json:"capacity,omitempty"`
 	Coverage            *CoverageEvidence `json:"coverage,omitempty"`
+	Health              EvidenceHealth    `json:"health"`
 }
 type Attempt struct {
 	Generation string    `json:"generation"`
@@ -103,6 +103,7 @@ type Settings struct {
 	RepositoryPath  string               `json:"repository_path,omitempty"`
 	Credential      *CredentialReference `json:"credential,omitempty"`
 	PickerAvailable bool                 `json:"picker_available"`
+	Monitoring      MonitoringSettings   `json:"monitoring"`
 }
 type ReviewRequest struct {
 	Generation          string              `json:"generation"`
@@ -125,9 +126,11 @@ type Review struct {
 	MonitoringEnabled bool                `json:"monitoring_enabled"` // always false: separate consent
 }
 type pendingReview struct {
-	expected      localRevision
-	configuration localConfiguration
-	expires       time.Time
+	expected           localRevision
+	configuration      localConfiguration
+	monitoring         *monitoringPolicy
+	monitoringRevision uint64
+	expires            time.Time
 }
 type workspaceOperationSlot struct {
 	serial chan struct{}
@@ -154,6 +157,9 @@ type Service struct {
 	capacity         chan struct{}
 	operations       sync.WaitGroup
 	closeDone        chan struct{}
+	monitoringBound  bool
+	monitorCursor    string
+	monitorJobs      chan struct{}
 }
 
 func NewService(options ServiceOptions) (*Service, error) { return newService(options, nil, time.Now) }
@@ -175,7 +181,7 @@ func newService(options ServiceOptions, provider localMetadataProvider, clock fu
 		return nil, ErrUnavailable
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	service := &Service{store: store, work: options.WorkGate, credentials: options.Credentials, selections: options.Selections, picker: options.Picker, provider: provider, clock: clock, ctx: ctx, cancel: cancel, releaseLifetime: release, reviews: map[string]pendingReview{}, slots: map[string]*workspaceOperationSlot{}, capacity: make(chan struct{}, 2), closeDone: make(chan struct{})}
+	service := &Service{store: store, work: options.WorkGate, credentials: options.Credentials, selections: options.Selections, picker: options.Picker, provider: provider, clock: clock, ctx: ctx, cancel: cancel, releaseLifetime: release, reviews: map[string]pendingReview{}, slots: map[string]*workspaceOperationSlot{}, capacity: make(chan struct{}, 2), closeDone: make(chan struct{}), monitorJobs: make(chan struct{}, 2)}
 	if service.provider == nil && options.ExecutablePath != "" {
 		constructionCtx, stop := context.WithTimeout(ctx, 10*time.Second)
 		service.provider, _ = newPlatformProvider(constructionCtx, options.ExecutablePath, options.DataDir)
@@ -426,25 +432,10 @@ func (s *Service) Review(ctx context.Context, owner, workspace string, request R
 		return Review{}, err
 	}
 	now := s.clock().UTC()
-	token := uuid.NewString()
-	expires := now.Add(5 * time.Minute)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closing {
-		return Review{}, ErrUnavailable
+	token, expires, err := s.addReview(workspace, pendingReview{expected: record.expected(), configuration: configuration, expires: now.Add(5 * time.Minute)}, now)
+	if err != nil {
+		return Review{}, err
 	}
-	count := 0
-	for key, value := range s.reviews {
-		if !value.expires.After(now) {
-			delete(s.reviews, key)
-		} else if value.expected.authority.Workspace == workspace {
-			count++
-		}
-	}
-	if count >= 4 || len(s.reviews) >= 128 {
-		return Review{}, ErrBusy
-	}
-	s.reviews[token] = pendingReview{record.expected(), configuration, expires}
 	paths := make([]string, 0, len(configuration.Sources))
 	for _, source := range configuration.Sources {
 		paths = append(paths, source.Path)
@@ -464,23 +455,31 @@ func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Statu
 	}
 	status := Status{StateVersion: revisionOf(record), WorkspaceID: workspace, ServerTime: s.clock().UTC(), Connection: "not_configured", RuntimeAvailable: s.provider != nil, Destination: "not_checked", Monitoring: "manual_only"}
 	s.mu.Lock()
+	monitoringBound := s.monitoringBound
 	if slot := s.slots[workspace]; slot != nil {
 		status.InProgress = slot.active != nil
 	}
 	s.mu.Unlock()
 	if record.state == nil {
+		status.Health = evaluateHealth(status, nil, status.ServerTime)
 		return status, nil
 	}
 	state := record.state
 	status.RemovalPending = pendingRemoval(record)
 	if state.Monitoring.Intent == "paused" {
 		status.Monitoring = "paused"
+		if currentAttemptNeedsReview(state) {
+			status.Monitoring = "review_required"
+		}
 	} else if state.Monitoring.Intent == "active" {
 		status.Monitoring = "review_required"
-		if validLocalReceipt(record) && record.receipt.MonitoringDigest != "" && record.automatic {
+		if periodicReadAdmissible(record) {
 			status.Monitoring = "unavailable"
+			if monitoringBound && s.provider != nil {
+				status.Monitoring = "active"
+			}
 		}
-	} // no scheduler is bound yet
+	}
 	if state.Configuration != nil {
 		status.Connection = "review_required"
 		status.IntendedSourceCount = len(state.Configuration.Sources)
@@ -533,6 +532,7 @@ func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Statu
 			}
 		}
 	}
+	status.Health = evaluateHealth(status, state, status.ServerTime)
 	return status, nil
 }
 func (s *Service) GetSettings(ctx context.Context, owner, workspace string) (Settings, error) {
@@ -545,7 +545,7 @@ func (s *Service) GetSettings(ctx context.Context, owner, workspace string) (Set
 	if err != nil {
 		return Settings{}, err
 	}
-	settings := Settings{StateVersion: revisionOf(record), SourcePaths: []string{}, PickerAvailable: s.picker != nil && s.picker.Available()}
+	settings := Settings{StateVersion: revisionOf(record), SourcePaths: []string{}, PickerAvailable: s.picker != nil && s.picker.Available(), Monitoring: storedMonitoring(record)}
 	if record.state != nil && record.state.Configuration != nil {
 		configuration := record.state.Configuration
 		settings.Configured = true

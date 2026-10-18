@@ -802,15 +802,25 @@ Freeze resolves design/feasibility, not all later implementation tests:
   revoke/removal/shutdown admission. Focused tests include the actual server's
   ordinary creator, inert install, missing tool, stored guide, versioned removal
   and retryable shutdown. They do not constitute browser/provider acceptance.
-- **2.10:** affected-package/frontend validation is in progress; full delivery
-  CI remains a separate gate.
+- **2.10 exercised:** affected-package/frontend validation passed with documented
+  fixture corrections and a bounded server-only rerun; full delivery CI is separate.
 - **2.11 exercised:** real no-model UI creator, stored missing-tool wizard/guide,
   native picker cancellation/choices, unavailable selected reference, cancelled
   review and an explicitly approved first product read of a newly prepared
   disposable external snapshot. This does not establish periodic monitoring,
   a sample restore, another physical same-name swap or full 5.3 acceptance.
-- **3–3.5:** periodic consent/scheduling, pause, lifecycle/ownership races and
-  monitor/reset integration remain separate gates. No scheduler is bound.
+- **3.1–3.5 implemented:** separate versioned periodic consent, bounded/coalescing
+  scheduling, pure stored health and lifecycle/reset ownership. Permission,
+  cancellation/drain, late-publication, import/copy, same-name replacement and
+  reset race checks preceded explicit server binding of the one tracked loop.
+  Constructors/readers/wizards/models do not register it or enable consent.
+- **3.6–3.8 exercised:** initially unchecked periodic consent, actual scheduled
+  reads/history, pause/fresh resume, normal restart without duplicate read, and
+  revocation across a subsequent poll. The isolated operator prepared only invented
+  data in the approved disposable external namespace; Ori did not execute a backup
+  or restore. The invented repository's file digest remained unchanged. Bounded
+  clock-fixture screenshots are separate from this actual product/provider path.
+  Full delivery CI, remaining recovery/summary groups and 5.3 are still required.
 - **4:** stored-only scoped Today/Brief/advisor projections and user-reported
   recovery, with no provider calls or filesystem/secret authority in readers.
 - **5.3:** full real-product live acceptance and a sample external restore.

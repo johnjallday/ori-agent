@@ -2,7 +2,9 @@
 
 **Status:** implementation in progress. Manual setup and a first real observation
 have been exercised through the product on an approved disposable USB fixture.
-Periodic monitoring, recovery reports and full delivery acceptance remain incomplete.
+Separate periodic opt-in, checks, pause/resume, restart and revocation have also
+been exercised against an invented external backup. Recovery reports and full
+delivery acceptance remain incomplete.
 
 Ori observes explicitly approved backup metadata and guides recovery. The external
 application performs backups and restores. Completing setup, choosing folders or
@@ -67,15 +69,38 @@ rich connection controls live in Settings, not the generic setup wizard.
    observed**. Intended scope remains distinct from provider-declared historical
    paths. Latest-attempt success, exhaustive coverage and recoverability remain
    unavailable rather than guessed.
-5. The current build is **manual-only**. Periodic consent, cadence and health
-   policy controls remain planned; installation/connect cannot enable them.
-   Ori cannot promise checks while the server/Mac is off. Disconnection is not
-   automatically a failed backup. Unknown capacity remains unknown.
+5. Manual-only use remains valid. Installation/connect does not enable periodic
+   checks. See the separate policy review below. Disconnection is not automatically
+   a failed backup; unknown capacity remains unknown.
 
 Opening setup, pressing Done, viewing status/history or asking the advisor a
 question does not start a provider read, decrypt a backup password or enable
 monitoring. A missing tool/permission stays unavailable; older successful evidence
 retains its original timestamp through later failures.
+
+## Optional periodic metadata checks
+
+In Settings, **Ori metadata checks** proposes a cadence, expected completed-snapshot
+age, observation freshness, disconnected grace and low-space warning threshold.
+Review the exact saved connection and policy, then make the separate initially
+unchecked periodic-consent choice. Defaults and review alone enable nothing.
+Cadences are 15 minutes, 1 hour, 6 hours or 24 hours; freshness cannot be shorter
+than cadence. A low-space warning is point-in-time evidence, not a fit prediction.
+
+**Pause periodic checks** cancels/fences the old periodic read and drains owned
+work before completing. An ambiguous drain remains fenced and retryable. This does
+not revoke independent manual one-read access or stop external backups. Resume
+requires a fresh policy review and explicit consent. **Keep manual-only checks**
+clears periodic consent. Changed scope/identity/credentials require local review;
+copied/imported settings cannot start checks. Normal restart resumes only still-valid
+local consent. There is no OS daemon and no promise of checks while Ori/the Mac is off.
+
+Freshness, observed-completion recency, last-check result and destination presence
+are independent. Stale/overdue status is recomputed from stored time without a new
+read. Manual-only freshness uses 24 hours; a periodic/paused policy uses its reviewed
+freshness window. Future timestamps are quarantined, not credited as protection.
+History retains at most 100 metadata attempts, with 25 per page; these are not backup
+run outcomes. Sleep/restart coalesces missed checks rather than replaying a backlog.
 
 ## Recovery and removal
 

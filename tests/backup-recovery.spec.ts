@@ -8,7 +8,7 @@ import { installLocalCdn } from './helpers/offline-cdn';
  * These do NOT replace creator/domain/live-provider acceptance (2.11/5.3). */
 const origin = 'http://127.0.0.1:8931';
 const root = resolve(import.meta.dirname, '..');
-async function prototype(page: Page, configured = false) {
+async function prototype(page: Page, configured = false, evidence: Record<string, unknown> = {}) {
   const mutations: Array<{ path: string; body: Record<string, unknown> }> = [];
   const status = {
     generation: configured ? 'invented-generation' : '',
@@ -22,6 +22,15 @@ async function prototype(page: Page, configured = false) {
     snapshot_count: configured ? 0 : null,
     last_successful_read: configured ? '2026-10-17T00:00:00Z' : null
   };
+  const policy = {
+    cadence_seconds: 3600,
+    expected_age_seconds: 172800,
+    freshness_seconds: 10800,
+    disconnected_grace_seconds: 86400,
+    low_space_percent: 10
+  };
+  const monitoring = { intent: 'manual_only', monitoring_revision: 0, policy };
+  let reviewedPolicy = { ...policy };
   await page.route(origin + '/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/fixture')
@@ -53,7 +62,9 @@ async function prototype(page: Page, configured = false) {
           revision: status.revision,
           configured: status.connection === 'configured',
           picker_available: true,
-          source_paths: configured ? ['/Invented/Project'] : []
+          source_paths: configured ? ['/Invented/Project'] : [],
+          repository_path: '/Volumes/Invented/Repository',
+          monitoring
         }
       };
     else if (path === '/guide')
@@ -88,7 +99,26 @@ async function prototype(page: Page, configured = false) {
           repository_path: '/Volumes/Invented/Repository'
         }
       };
-    else if (path === '/connect') {
+    else if (path === '/monitoring/review') {
+      reviewedPolicy = { ...(body.policy as typeof policy) };
+      data = {
+        review: {
+          generation: status.generation,
+          revision: status.revision,
+          monitoring_revision: monitoring.monitoring_revision,
+          policy: body.policy,
+          review_token: 'invented-policy-review',
+          expires_at: '2026-10-17T00:05:00Z'
+        }
+      };
+    } else if (path === '/monitoring') {
+      monitoring.intent = body.intent as string;
+      if (monitoring.intent === 'active') monitoring.policy = { ...reviewedPolicy };
+      monitoring.monitoring_revision++;
+      status.revision++;
+      status.monitoring = monitoring.intent === 'active' ? 'active' : monitoring.intent;
+      data = { operation: { state: 'complete', outcome: 'applied' } };
+    } else if (path === '/connect') {
       status.connection = 'configured';
       status.generation = 'invented-generation';
       status.revision = 1;
@@ -102,7 +132,7 @@ async function prototype(page: Page, configured = false) {
           outcome: 'read_ok'
         }
       };
-    } else data = { status };
+    } else data = { status: { ...status, ...evidence } };
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ success: true, ...data })
@@ -184,6 +214,110 @@ test('prototype: narrow dark view keeps tabs and paths reachable without horizon
     path: test.info().outputPath('prototype-backup-narrow-dark.png'),
     fullPage: true
   });
+});
+
+test('prototype: keyboard periodic review stays inert until separate consent; pause preserves the connection', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mutations = await prototype(page, true);
+  await page.getByRole('button', { name: 'Open backup evidence' }).click();
+  const dialog = page.locator('#backupRecoveryConsole');
+  await dialog.getByRole('tab', { name: 'Settings', exact: true }).click();
+  expect(mutations).toHaveLength(0);
+  await dialog.getByLabel('Observation freshness (hours)', { exact: true }).fill('4');
+  await expect(dialog.getByLabel('Observation freshness (hours)', { exact: true })).toHaveValue(
+    '4'
+  );
+  await dialog
+    .getByRole('button', { name: 'Review periodic metadata policy', exact: true })
+    .click();
+  const consent = dialog.locator('#brPeriodicConsent');
+  await expect(consent).not.toBeChecked();
+  expect(mutations.filter(item => item.path === '/monitoring')).toHaveLength(0);
+  await consent.focus();
+  await page.keyboard.press('Space');
+  await page.keyboard.press('Tab');
+  await expect(
+    dialog.getByRole('button', { name: 'Enable periodic metadata checks' })
+  ).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toContainText('Periodic checks active');
+  expect(mutations.filter(item => item.path === '/monitoring')).toHaveLength(1);
+  expect(mutations.find(item => item.path === '/monitoring/review')?.body.policy).toMatchObject({
+    freshness_seconds: 14400
+  });
+  await dialog.getByRole('button', { name: 'Pause periodic checks', exact: true }).click();
+  await expect(dialog).toContainText('Periodic checks paused');
+  await expect(dialog.getByLabel('Observation freshness (hours)', { exact: true })).toHaveValue(
+    '4'
+  );
+  await expect(dialog).toContainText('backup application');
+  expect(
+    mutations.filter(item => item.path === '/connect' || item.path === '/refresh')
+  ).toHaveLength(0);
+  expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth)).toBeTruthy();
+  await page.screenshot({
+    path: test.info().outputPath('prototype-periodic-paused-narrow.png'),
+    fullPage: true
+  });
+});
+
+test('prototype clock fixtures: freshness, overdue completion and expected disconnect remain distinct', async ({
+  page
+}) => {
+  const scenarios = [
+    {
+      name: 'stale',
+      destination: 'present',
+      health: { observation: 'stale', recency: 'recent' },
+      read: '2026-10-20T00:00:00Z',
+      complete: '2026-10-20T00:00:00Z',
+      expected: 'Stored evidence stale',
+      absent: 'Observed completion overdue'
+    },
+    {
+      name: 'overdue',
+      destination: 'present',
+      health: { observation: 'current', recency: 'overdue' },
+      read: '2026-10-20T11:59:00Z',
+      complete: '2026-10-17T00:00:00Z',
+      expected: 'Observed completion overdue',
+      absent: 'Stored evidence stale'
+    },
+    {
+      name: 'disconnected-within-grace',
+      destination: 'absent',
+      health: { observation: 'current', recency: 'recent', disconnection: 'within_grace' },
+      read: '2026-10-20T09:30:00Z',
+      complete: '2026-10-19T00:00:00Z',
+      expected: 'within the reviewed disconnect grace',
+      absent: 'Observed completion overdue'
+    }
+  ];
+  for (const scenario of scenarios) {
+    const mutations = await prototype(page, true, {
+      snapshot_count: 1,
+      intended_source_count: 1,
+      server_time: '2026-10-20T12:00:00Z',
+      monitoring: 'active',
+      destination: scenario.destination,
+      last_successful_read: scenario.read,
+      last_completed_at: scenario.complete,
+      health: scenario.health
+    });
+    await page.getByRole('button', { name: 'Open backup evidence' }).click();
+    const dialog = page.locator('#backupRecoveryConsole');
+    await expect(dialog).toContainText(scenario.expected);
+    await expect(dialog).not.toContainText(scenario.absent);
+    await expect(dialog).toContainText('not verified by Ori');
+    expect(mutations).toHaveLength(0);
+    await dialog.getByText(scenario.expected, { exact: false }).scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: test.info().outputPath('invented-clock-' + scenario.name + '.png'),
+      fullPage: true
+    });
+  }
 });
 
 /** Real current server/creator/wizard/domain/console. Only CDN assets are served

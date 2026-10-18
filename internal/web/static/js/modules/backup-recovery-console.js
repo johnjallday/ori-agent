@@ -1,5 +1,5 @@
 // One owner-scoped recovery ledger. GETs only on open/load; every metadata
-// check requires a user control. No model-selected operation or filesystem tool.
+// check requires user control or separately approved periodic consent. No model filesystem tool.
 (function () {
   'use strict';
   const ID = 'backup-recovery';
@@ -29,11 +29,15 @@
     useSaved: false,
     vault: '',
     record: '',
-    revokeConfirm: ''
+    revokeConfirm: '',
+    monitorDraft: null,
+    monitorReview: null,
+    monitorDirty: false
   };
   let dialog = null;
   const messages = {
     configuration_changed: 'Settings changed. Reload the saved selections and review again.',
+    invalid_request: 'These settings are outside the supported limits. Review them again.',
     review_expired: 'This approval expired. Review the selections again.',
     check_in_progress: 'An owned check is still draining. No additional check was started.',
     removal_pending:
@@ -108,6 +112,8 @@
   }
   function snapshotLabel(status = state.status) {
     if (status?.snapshot_count === 0) return 'No completed backup observed';
+    if (status?.health?.recency === 'clock_suspect')
+      return 'Completion unavailable — future timestamp quarantined';
     if (!status?.last_completed_at) return 'No completion time observed';
     return 'Last observed completion: ' + time(status.last_completed_at);
   }
@@ -148,7 +154,16 @@
       const [settings, guide] = await Promise.allSettled([request('/settings'), request('/guide')]);
       if (epoch !== state.loadEpoch) return;
       if (settings.status === 'fulfilled') {
-        state.settings = settings.value.settings;
+        const incoming = settings.value.settings;
+        const monitoringScopeChanged =
+          state.settings?.generation !== incoming.generation ||
+          state.settings?.revision !== incoming.revision;
+        if (!state.monitorDirty || monitoringScopeChanged) {
+          state.monitorDraft = { ...(incoming.monitoring?.policy || proposedPolicy()) };
+          if (monitoringScopeChanged) state.monitorReview = null;
+          state.monitorDirty = false;
+        }
+        state.settings = incoming;
         if (!state.review && !state.sources.length && !state.credential) {
           state.useSaved = !!state.settings.configured;
           state.vault = state.settings.credential?.vault_id || '';
@@ -196,6 +211,8 @@
       if (epoch !== state.actionEpoch) return;
       state.retry = null;
       state.review = null;
+      state.monitorReview = null;
+      if (command.path === '/monitoring') state.monitorDirty = false;
       state.revokeConfirm = '';
       state.notice =
         payload.operation?.state === 'pending'
@@ -203,7 +220,9 @@
           : payload.operation?.outcome === 'read_ok'
             ? 'Metadata observed. This is not proof of complete backup or recovery.'
             : payload.operation?.outcome === 'applied'
-              ? 'Ori access was fenced and owned work drained. External backups and schedules are unchanged.'
+              ? command.path === '/monitoring'
+                ? 'Periodic metadata settings saved. External backup schedules are unchanged.'
+                : 'Ori access was fenced and owned work drained. External backups and schedules are unchanged.'
               : outcome(payload.operation?.outcome);
     } catch (error) {
       if (epoch !== state.actionEpoch) return;
@@ -232,6 +251,7 @@
   function invalidateDraft() {
     ++state.draftEpoch;
     state.review = null;
+    state.monitorReview = null;
     state.retry = null;
   }
   async function pick(kind) {
@@ -383,7 +403,9 @@
     fact(
       ledger,
       'Last successful read',
-      time(status?.last_successful_read),
+      status?.health?.observation === 'clock_suspect'
+        ? 'Unavailable — clock requires review'
+        : time(status?.last_successful_read),
       state.error
         ? 'Older stored evidence; not refreshed'
         : 'This time changes only after a successful check'
@@ -391,7 +413,11 @@
     fact(
       ledger,
       'Observed completion',
-      status?.snapshot_count === 0 ? 'None observed' : time(status?.last_completed_at),
+      status?.health?.recency === 'clock_suspect'
+        ? 'Unavailable — future timestamp quarantined'
+        : status?.snapshot_count === 0
+          ? 'None observed'
+          : time(status?.last_completed_at),
       'A snapshot is not the latest attempted-run outcome'
     );
     fact(
@@ -425,7 +451,44 @@
         : 'Not configured',
       'Intent is separate from provider-declared coverage'
     );
+    if (status?.health) {
+      fact(
+        ledger,
+        'Observation freshness',
+        {
+          current: 'Within the freshness window',
+          stale: 'Stored evidence stale',
+          historical: 'Historical configuration',
+          clock_suspect: 'Clock requires review',
+          never_observed: 'Not observed'
+        }[status.health.observation] || 'Unavailable',
+        'Evaluated from stored time. Not a new check.'
+      );
+      fact(
+        ledger,
+        'Backup recency',
+        {
+          recent: 'Within expected completion age',
+          overdue: 'Observed completion overdue',
+          no_completed_snapshot: 'No completed snapshot observed',
+          completion_unavailable: 'Completion time unavailable',
+          clock_suspect: 'Future timestamp quarantined'
+        }[status.health.recency] || 'Unavailable',
+        'This is not the latest backup-attempt result or verified recovery.'
+      );
+    }
     const details = el('div', 'br-evidence');
+    if (status?.health?.capacity === 'low')
+      paragraph(
+        details,
+        'Point-in-time low-space warning. Check storage in the external application; Ori does not predict backup fit.',
+        'br-boundary'
+      );
+    if (status?.health?.disconnection === 'within_grace')
+      paragraph(
+        details,
+        'Destination was absent at the last check, within the reviewed disconnect grace. This is not a failed-backup claim.'
+      );
     if (status?.last_attempt)
       paragraph(
         details,
@@ -527,11 +590,245 @@
       change(field.value);
       render();
       const replacement = document.getElementById(id);
-      replacement?.setSelectionRange?.(cursor, cursor);
+      if (replacement?.type === 'text') replacement?.setSelectionRange?.(cursor, cursor);
     });
     wrapper.appendChild(field);
     parent.appendChild(wrapper);
     return field;
+  }
+  function proposedPolicy() {
+    return {
+      cadence_seconds: 3600,
+      expected_age_seconds: 172800,
+      freshness_seconds: 10800,
+      disconnected_grace_seconds: 86400,
+      low_space_percent: 10
+    };
+  }
+  function validPolicy(policy) {
+    return (
+      !!policy &&
+      [900, 3600, 21600, 86400].includes(policy.cadence_seconds) &&
+      Number.isSafeInteger(policy.expected_age_seconds) &&
+      policy.expected_age_seconds >= 3600 &&
+      policy.expected_age_seconds <= 2592000 &&
+      Number.isSafeInteger(policy.freshness_seconds) &&
+      policy.freshness_seconds >= policy.cadence_seconds &&
+      policy.freshness_seconds <= 604800 &&
+      Number.isSafeInteger(policy.disconnected_grace_seconds) &&
+      policy.disconnected_grace_seconds >= 0 &&
+      policy.disconnected_grace_seconds <= 2592000 &&
+      Number.isSafeInteger(policy.low_space_percent) &&
+      policy.low_space_percent >= 1 &&
+      policy.low_space_percent <= 50
+    );
+  }
+  async function reviewMonitoring() {
+    if (state.busy || !validPolicy(state.monitorDraft)) return;
+    const epoch = ++state.draftEpoch;
+    state.busy = true;
+    state.error = '';
+    state.review = null;
+    state.monitorReview = null;
+    render();
+    try {
+      const payload = await request('/monitoring/review', {
+        method: 'POST',
+        body: {
+          ...version(),
+          monitoring_revision: state.settings.monitoring.monitoring_revision,
+          policy: state.monitorDraft
+        }
+      });
+      if (epoch === state.draftEpoch) state.monitorReview = payload.review;
+    } catch (error) {
+      if (epoch !== state.draftEpoch) return;
+      state.error =
+        messages[error.code] || 'Periodic policy could not be reviewed. Nothing was enabled.';
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+  function renderMonitoring(parent) {
+    const box = el('section', 'br-monitoring');
+    box.appendChild(el('h4', '', 'Ori metadata checks'));
+    const monitoring = state.settings?.monitoring;
+    const mode =
+      {
+        active: 'Periodic checks active',
+        paused: 'Periodic checks paused',
+        manual_only: 'Manual only',
+        review_required: 'Periodic access needs review',
+        unavailable: 'Periodic checking unavailable'
+      }[state.status?.monitoring] || 'Manual only';
+    paragraph(box, mode, 'br-value');
+    paragraph(
+      box,
+      'These are read-only metadata checks, not a backup schedule. No checks are promised while Ori or the Mac is off. Pausing here never pauses your external backup application.'
+    );
+    if (!state.monitorDraft) state.monitorDraft = { ...(monitoring?.policy || proposedPolicy()) };
+    const draft = state.monitorDraft;
+    const grid = el('div', 'br-policy-grid');
+    const label = el('label', 'br-field', 'Check cadence');
+    const cadence = el('select', 'br-input');
+    cadence.id = 'brCadence';
+    cadence.disabled = state.busy;
+    for (const [seconds, title] of [
+      [900, 'Every 15 minutes'],
+      [3600, 'Every hour'],
+      [21600, 'Every 6 hours'],
+      [86400, 'Every 24 hours']
+    ]) {
+      const option = el('option', '', title);
+      option.value = String(seconds);
+      cadence.appendChild(option);
+    }
+    cadence.value = String(draft.cadence_seconds);
+    cadence.addEventListener('change', () => {
+      state.monitorDirty = true;
+      state.monitorReview = null;
+      draft.cadence_seconds = Number(cadence.value);
+      render();
+    });
+    label.appendChild(cadence);
+    grid.appendChild(label);
+    for (const [key, title, scale, min, max] of [
+      ['expected_age_seconds', 'Expected completed snapshot age (hours)', 3600, 1, 720],
+      ['freshness_seconds', 'Observation freshness (hours)', 3600, 0.25, 168],
+      ['disconnected_grace_seconds', 'Disconnected grace (hours)', 3600, 0, 720],
+      ['low_space_percent', 'Low-space warning (percent)', 1, 1, 50]
+    ]) {
+      const field = input(
+        grid,
+        title,
+        draft[key] == null ? '' : draft[key] / scale,
+        value => {
+          state.monitorDirty = true;
+          state.monitorReview = null;
+          draft[key] = value.trim() === '' ? null : Number(value) * scale;
+        },
+        'brPolicy-' + key
+      );
+      field.type = 'number';
+      field.min = String(min);
+      field.max = String(max);
+      field.step = scale === 3600 ? '0.25' : '1';
+    }
+    box.appendChild(grid);
+    paragraph(
+      box,
+      'Defaults are proposals, not permission. Freshness cannot be shorter than cadence. Unknown capacity remains unknown; a warning does not predict whether a backup will fit.',
+      'br-small'
+    );
+    const review = button('Review periodic metadata policy', reviewMonitoring, true);
+    review.disabled =
+      state.busy ||
+      !monitoring ||
+      state.status?.connection !== 'configured' ||
+      !state.status?.runtime_available ||
+      !validPolicy(draft);
+    box.appendChild(review);
+    if (monitoring && state.settings?.configured) {
+      for (const [title, intent] of [
+        ['Pause periodic checks', 'paused'],
+        ['Keep manual-only checks', 'manual_only']
+      ]) {
+        const control = button(
+          title,
+          () =>
+            mutate('/monitoring', {
+              ...version(),
+              monitoring_revision: monitoring.monitoring_revision,
+              operation_id: window.crypto.randomUUID(),
+              intent,
+              review_token: '',
+              allow_periodic_metadata: false
+            }),
+          true
+        );
+        control.disabled = state.busy || monitoring.intent === intent;
+        box.appendChild(control);
+      }
+    }
+    if (state.monitorReview) {
+      const reviewed = state.monitorReview;
+      const receipt = el('section', 'br-review');
+      receipt.appendChild(el('h4', '', 'Review periodic metadata access'));
+      paragraph(
+        receipt,
+        'Cadence: ' +
+          reviewed.policy.cadence_seconds / 60 +
+          ' minutes · expected completion age: ' +
+          reviewed.policy.expected_age_seconds / 3600 +
+          ' hours · freshness: ' +
+          reviewed.policy.freshness_seconds / 3600 +
+          ' hours · disconnected grace: ' +
+          reviewed.policy.disconnected_grace_seconds / 3600 +
+          ' hours · low-space warning: ' +
+          reviewed.policy.low_space_percent +
+          '%.'
+      );
+      for (const path of state.settings?.source_paths || [])
+        paragraph(receipt, 'Saved source · ' + path, 'br-path');
+      paragraph(
+        receipt,
+        'Saved repository · ' + (state.settings?.repository_path || 'Unavailable'),
+        'br-path'
+      );
+      paragraph(
+        receipt,
+        'This policy applies to the saved connection above, not uncommitted folder choices.'
+      );
+      paragraph(
+        receipt,
+        'Approval expires ' +
+          time(reviewed.expires_at) +
+          '. External backup execution, schedules and recovery remain outside Ori.'
+      );
+      const choice = el('label', 'br-choice');
+      const consent = el('input');
+      consent.type = 'checkbox';
+      consent.id = 'brPeriodicConsent';
+      choice.appendChild(consent);
+      choice.appendChild(
+        el(
+          'span',
+          '',
+          'Allow periodic bounded metadata reads of this existing connection under this exact policy.'
+        )
+      );
+      const enable = button('Enable periodic metadata checks', () => {
+        if (consent.checked)
+          void mutate('/monitoring', {
+            generation: reviewed.generation,
+            revision: reviewed.revision,
+            monitoring_revision: reviewed.monitoring_revision,
+            operation_id: window.crypto.randomUUID(),
+            intent: 'active',
+            review_token: reviewed.review_token,
+            allow_periodic_metadata: true
+          });
+      });
+      enable.disabled = true;
+      consent.addEventListener('change', () => {
+        enable.disabled = !consent.checked || state.busy;
+      });
+      receipt.appendChild(choice);
+      receipt.appendChild(enable);
+      receipt.appendChild(
+        button(
+          'Cancel periodic review',
+          () => {
+            state.monitorReview = null;
+            render();
+          },
+          true
+        )
+      );
+      box.appendChild(receipt);
+    }
+    parent.appendChild(box);
   }
   function renderSettings(parent) {
     parent.appendChild(el('h3', 'br-heading', 'A connection is a separate decision.'));
@@ -687,6 +984,7 @@
       );
       parent.appendChild(receipt);
     }
+    renderMonitoring(parent);
     if (state.settings?.configured) {
       const removal = el('section', 'br-removal');
       removal.appendChild(el('h4', '', 'Stop Ori access, not your backups'));
@@ -903,6 +1201,7 @@
     if (!state.open) return;
     state.open = false;
     state.review = null;
+    state.monitorReview = null;
     ++state.draftEpoch;
     if (viaCoordinator !== true)
       window.workspaceOverlayCoordinator?.close?.('backup-recovery-console');
@@ -936,6 +1235,8 @@
       loadStored,
       mutate,
       reviewSelection,
+      reviewMonitoring,
+      validPolicy,
       selectTab,
       snapshotLabel,
       bytes,

@@ -106,6 +106,23 @@ function fixture(overrides = {}) {
     evidence_current_generation: true,
     ...overrides
   };
+  const settings = {
+    configured: false,
+    picker_available: true,
+    source_paths: [],
+    monitoring: {
+      intent: 'manual_only',
+      monitoring_revision: 0,
+      consent_valid: false,
+      policy: {
+        cadence_seconds: 3600,
+        expected_age_seconds: 172800,
+        freshness_seconds: 10800,
+        disconnected_grace_seconds: 86400,
+        low_space_percent: 10
+      }
+    }
+  };
   const calls = [];
   const context = {
     document,
@@ -132,9 +149,7 @@ function fixture(overrides = {}) {
             settings: {
               generation: status.generation,
               revision: status.revision,
-              configured: false,
-              picker_available: true,
-              source_paths: []
+              ...settings
             }
           }
         : url.endsWith('/guide')
@@ -147,7 +162,15 @@ function fixture(overrides = {}) {
   };
   context.window = context;
   vm.runInNewContext(source, context);
-  return { context, document, mount, calls, status, console: context.BackupRecoveryConsole };
+  return {
+    context,
+    document,
+    mount,
+    calls,
+    status,
+    settings,
+    console: context.BackupRecoveryConsole
+  };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 function findButton(doc, label) {
@@ -271,6 +294,102 @@ test('known zero capacity differs from unavailable; hidden characters are visibl
   assert.equal(f.console._test.bytes(undefined), 'Unavailable');
   assert.equal(f.console._test.text('x\u202ey'), 'x[U+202E]y');
 });
+test('periodic review is not consent and enabling requires a separate unchecked choice', async () => {
+  const f = fixture();
+  f.settings.configured = true;
+  f.settings.source_paths = ['/Invented saved project'];
+  f.settings.repository_path = '/Invented saved repository';
+  const original = f.context.fetch;
+  const writes = [];
+  f.context.fetch = async (url, options) => {
+    if (options.method !== 'GET') {
+      const body = JSON.parse(options.body);
+      writes.push({ url, body });
+      if (url.endsWith('/monitoring/review'))
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            review: { ...body, review_token: 'periodic-review', expires_at: '2026-01-02T03:09:05Z' }
+          })
+        };
+      f.status.monitoring = 'active';
+      f.status.revision++;
+      f.settings.monitoring.intent = 'active';
+      f.settings.monitoring.monitoring_revision++;
+      return {
+        ok: true,
+        json: async () => ({ success: true, operation: { state: 'complete', outcome: 'applied' } })
+      };
+    }
+    return original(url, options);
+  };
+  f.console.open({ tab: 'settings' });
+  await settle();
+  assert.ok(f.calls.every(call => call.options.method === 'GET'));
+  await findButton(f.document, 'Review periodic metadata policy').fire('click');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].body.allow_periodic_metadata, undefined);
+  assert.match(f.document.body.textContent, /Saved source · \/Invented saved project/);
+  let consent = f.document.getElementById('brPeriodicConsent');
+  assert.ok(!consent.checked);
+  assert.equal(findButton(f.document, 'Enable periodic metadata checks').disabled, true);
+  await findButton(f.document, 'Enable periodic metadata checks').fire('click');
+  assert.equal(writes.length, 1);
+  await findButton(f.document, 'Cancel periodic review').fire('click');
+  assert.equal(writes.length, 1);
+  await findButton(f.document, 'Review periodic metadata policy').fire('click');
+  consent = f.document.getElementById('brPeriodicConsent');
+  consent.checked = true;
+  await consent.fire('change');
+  await findButton(f.document, 'Enable periodic metadata checks').fire('click');
+  await settle();
+  assert.equal(writes.length, 3);
+  assert.equal(writes[2].body.allow_periodic_metadata, true);
+  assert.equal(writes[2].body.review_token, 'periodic-review');
+  assert.equal(writes[2].body.monitoring_revision, 0);
+  assert.match(f.document.body.textContent, /Periodic checks active/);
+  assert.equal(f.console._test.state.status.last_successful_read, '2026-01-02T03:00:00Z');
+});
+test('late periodic review is discarded on close and unsupported policy stays inert', async () => {
+  const f = fixture();
+  f.console.open({ tab: 'settings' });
+  await settle();
+  const valid = f.console._test.validPolicy;
+  const policy = f.console._test.state.monitorDraft;
+  assert.equal(valid({ ...policy, freshness_seconds: 900 }), false);
+  assert.equal(valid({ ...policy, low_space_percent: null }), false);
+  assert.equal(valid({ ...policy, cadence_seconds: 60 }), false);
+  let release;
+  f.context.fetch = async () => {
+    await new Promise(resolve => {
+      release = resolve;
+    });
+    return {
+      ok: true,
+      json: async () => ({ success: true, review: { review_token: 'obsolete' } })
+    };
+  };
+  const pending = f.console._test.reviewMonitoring();
+  await settle();
+  f.console.close();
+  release();
+  await pending;
+  assert.equal(f.console._test.state.monitorReview, null);
+});
+test('future completion is quarantined and freshness is not rendered as backup success', async () => {
+  const f = fixture({
+    snapshot_count: 1,
+    last_completed_at: '2099-01-01T00:00:00Z',
+    health: { observation: 'stale', recency: 'clock_suspect', capacity: 'low' }
+  });
+  f.console.open();
+  await settle();
+  assert.match(f.document.body.textContent, /future timestamp quarantined/);
+  assert.match(f.document.body.textContent, /Stored evidence stale/);
+  assert.doesNotMatch(f.document.body.textContent, /2099|backup succeeded|all files protected/);
+});
+
 test('partial coverage and capacity remain point-in-time evidence, not protection', async () => {
   const f = fixture({
     snapshot_count: 1,

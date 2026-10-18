@@ -32,6 +32,8 @@ type Domain interface {
 	Connect(context.Context, string, string, backuprecovery.ConnectRequest) (backuprecovery.OperationResult, error)
 	Refresh(context.Context, string, string, backuprecovery.RefreshRequest) (backuprecovery.OperationResult, error)
 	Revoke(context.Context, string, string, backuprecovery.ControlRequest, bool) (backuprecovery.OperationResult, error)
+	ReviewMonitoring(context.Context, string, string, backuprecovery.MonitoringReviewRequest) (backuprecovery.MonitoringReview, error)
+	SetMonitoring(context.Context, string, string, backuprecovery.MonitoringChangeRequest) (backuprecovery.OperationResult, error)
 }
 type Handler struct {
 	service Domain
@@ -47,7 +49,7 @@ func NewHandler(service Domain, users userprofile.UserProvider) *Handler {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	for suffix, method := range map[string]string{"": "GET", "/guide": "GET", "/settings": "GET", "/history": "GET", "/selection": "POST", "/credential": "POST", "/review": "POST", "/connect": "POST", "/refresh": "POST", "/revoke": "POST"} {
+	for suffix, method := range map[string]string{"": "GET", "/guide": "GET", "/settings": "GET", "/history": "GET", "/selection": "POST", "/credential": "POST", "/review": "POST", "/connect": "POST", "/refresh": "POST", "/revoke": "POST", "/monitoring/review": "POST", "/monitoring": "POST"} {
 		mux.HandleFunc(method+" "+APIPrefix+suffix, h.serve(suffix, method))
 	}
 	mux.HandleFunc("DELETE "+APIPrefix, h.serve("/delete", http.MethodDelete))
@@ -210,6 +212,20 @@ func (h *Handler) serve(action, method string) http.HandlerFunc {
 			}
 			key = "operation"
 			data, err = h.service.Refresh(r.Context(), owner, workspace, request)
+		case "/monitoring/review":
+			var request backuprecovery.MonitoringReviewRequest
+			if !parseBody(w, r, &request) {
+				return
+			}
+			key = "review"
+			data, err = h.service.ReviewMonitoring(r.Context(), owner, workspace, request)
+		case "/monitoring":
+			var request backuprecovery.MonitoringChangeRequest
+			if !parseBody(w, r, &request) {
+				return
+			}
+			key = "operation"
+			data, err = h.service.SetMonitoring(r.Context(), owner, workspace, request)
 		case "/revoke", "/delete":
 			var request backuprecovery.ControlRequest
 			if !parseBody(w, r, &request) {

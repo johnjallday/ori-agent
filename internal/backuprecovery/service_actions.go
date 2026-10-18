@@ -37,9 +37,10 @@ type OperationResult struct {
 	Outcome     string `json:"outcome,omitempty"`
 }
 type activeMetadataOperation struct {
-	id, digest string
-	cancel     context.CancelFunc
-	done       chan struct{}
+	id, digest         string
+	monitoringRevision uint64
+	cancel             context.CancelFunc
+	done               chan struct{}
 }
 
 func operationResult(operation localOperation) OperationResult {
@@ -93,12 +94,12 @@ func (s *Service) replay(ctx context.Context, record localRecord, slot *workspac
 		s.mu.Lock()
 		active := slot.active
 		s.mu.Unlock()
-		if active != nil {
+		if active != nil && !(operation.Action == "monitoring" && record.state != nil && (active.monitoringRevision == 0 || active.monitoringRevision == record.state.Monitoring.Revision)) {
 			return operationResult(operation), true, nil
 		}
 		// Restart/interruption is never permission to repeat the external read.
 		updated, err := s.store.update(ctx, record.authority.Owner, record.authority.Workspace, record.expected(), changeJournal, func(current *localRecord) error {
-			if operation.Action == "revoke" || operation.Action == "delete" {
+			if operation.Action == "revoke" || operation.Action == "delete" || operation.Action == "monitoring" {
 				return completeOperation(current.state, id, "complete", "applied")
 			}
 			return completeOperation(current.state, id, "interrupted", "cancelled")
@@ -167,7 +168,7 @@ func (s *Service) Connect(ctx context.Context, owner, workspace string, request 
 		delete(s.reviews, request.ReviewToken)
 	}
 	s.mu.Unlock()
-	if !found || !review.expires.After(s.clock().UTC()) || review.expected != record.expected() {
+	if !found || review.monitoring != nil || !review.expires.After(s.clock().UTC()) || review.expected != record.expected() {
 		return OperationResult{}, ErrReviewExpired
 	}
 	now := s.clock().UTC()
@@ -194,7 +195,7 @@ func (s *Service) Connect(ctx context.Context, owner, workspace string, request 
 			return OperationResult{}, err
 		}
 	}
-	return s.runMetadata(ctx, prepared, slot, request.OperationID, digest, true, func() { unlock(); unlock = nil })
+	return s.runMetadata(ctx, prepared, slot, request.OperationID, digest, true, 0, func() { unlock(); unlock = nil })
 }
 
 // Refresh uses receipt authority plus an explicit user-control request. Reserve
@@ -258,24 +259,24 @@ func (s *Service) Refresh(ctx context.Context, owner, workspace string, request 
 	if err != nil {
 		return OperationResult{}, err
 	}
-	return s.runMetadata(ctx, prepared, slot, request.OperationID, digest, false, func() { unlock(); unlock = nil })
+	return s.runMetadata(ctx, prepared, slot, request.OperationID, digest, false, 0, func() { unlock(); unlock = nil })
 }
 
-func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *workspaceOperationSlot, id, digest string, activate bool, unlock func()) (OperationResult, error) {
+func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *workspaceOperationSlot, id, digest string, activate bool, monitoringRevision uint64, unlock func()) (OperationResult, error) {
 	started := s.clock().UTC()
 	if s.provider == nil {
 		unlock()
-		return s.publishRead(record, id, started, providerReadResult{}, errProviderUnavailable, activate)
+		return s.publishRead(record, id, started, providerReadResult{}, errProviderUnavailable, activate, monitoringRevision)
 	}
 	select {
 	case s.capacity <- struct{}{}:
 	default:
 		unlock()
-		return s.publishRead(record, id, started, providerReadResult{}, errReadProcess, activate)
+		return s.publishRead(record, id, started, providerReadResult{}, errReadProcess, activate, monitoringRevision)
 	}
 	readCtx, cancel := context.WithTimeout(s.ctx, completeReadLimit)
 	stopRequest := context.AfterFunc(ctx, cancel)
-	operation := &activeMetadataOperation{id: id, digest: digest, cancel: cancel, done: make(chan struct{})}
+	operation := &activeMetadataOperation{id: id, digest: digest, monitoringRevision: monitoringRevision, cancel: cancel, done: make(chan struct{})}
 	s.mu.Lock()
 	if s.closing || slot.active != nil {
 		s.mu.Unlock()
@@ -283,7 +284,7 @@ func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *wor
 		cancel()
 		<-s.capacity
 		unlock()
-		return s.publishRead(record, id, started, providerReadResult{}, context.Canceled, activate)
+		return s.publishRead(record, id, started, providerReadResult{}, context.Canceled, activate, monitoringRevision)
 	}
 	slot.active = operation
 	s.mu.Unlock()
@@ -309,7 +310,7 @@ func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *wor
 			case <-readCtx.Done():
 				return
 			case <-ticker.C:
-				if s.authorize(readCtx, record.expected(), false) != nil {
+				if s.authorizeMetadata(readCtx, record, monitoringRevision) != nil {
 					cancel()
 					return
 				}
@@ -317,22 +318,26 @@ func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *wor
 		}
 	}()
 	configuration := *record.state.Configuration
-	result, readErr := s.provider.read(readCtx, configuration, func(secretCtx context.Context, use func([]byte) error) error {
-		if s.credentials == nil || secretCtx == nil || secretCtx.Err() != nil || readCtx.Err() != nil {
-			return errCredentialUnavailable
-		}
-		ref := vault.BackupSecretReference{VaultID: configuration.Credential.VaultID, RecordID: configuration.Credential.RecordID, WorkspaceID: record.authority.Workspace, Revision: configuration.Credential.Revision}
-		if err := s.credentials.UseBackupSecret(secretCtx, ref, func(authCtx context.Context) error { return s.authorize(authCtx, record.expected(), false) }, use); err != nil {
-			return errCredentialUnavailable
-		}
-		return nil
-	})
+	var result providerReadResult
+	readErr := s.authorizeMetadata(readCtx, record, monitoringRevision)
+	if readErr == nil {
+		result, readErr = s.provider.read(readCtx, configuration, func(secretCtx context.Context, use func([]byte) error) error {
+			if s.credentials == nil || secretCtx == nil || secretCtx.Err() != nil || readCtx.Err() != nil {
+				return errCredentialUnavailable
+			}
+			ref := vault.BackupSecretReference{VaultID: configuration.Credential.VaultID, RecordID: configuration.Credential.RecordID, WorkspaceID: record.authority.Workspace, Revision: configuration.Credential.Revision}
+			if err := s.credentials.UseBackupSecret(secretCtx, ref, func(authCtx context.Context) error { return s.authorizeMetadata(authCtx, record, monitoringRevision) }, use); err != nil {
+				return errCredentialUnavailable
+			}
+			return nil
+		})
+	}
 	if readCtx.Err() != nil || ctx.Err() != nil {
 		readErr = context.Canceled
 	}
 	cancel()
 	<-watchDone
-	return s.publishRead(record, id, started, result, readErr, activate)
+	return s.publishRead(record, id, started, result, readErr, activate, monitoringRevision)
 }
 func (s *Service) waitDrain(ctx context.Context, done <-chan struct{}) error {
 	timer := time.NewTimer(2 * childDrainLimit)
@@ -368,7 +373,7 @@ func outcomeForReadError(err error) string {
 		return "read_unavailable"
 	}
 }
-func (s *Service) publishRead(scope localRecord, id string, started time.Time, result providerReadResult, readErr error, activate bool) (OperationResult, error) {
+func (s *Service) publishRead(scope localRecord, id string, started time.Time, result providerReadResult, readErr error, activate bool, monitoringRevision uint64) (OperationResult, error) {
 	// Final bookkeeping survives a disconnected HTTP client, but remains inside
 	// this operation's WorkGate/lifetime ownership until publication or rollback.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 2*time.Second)
@@ -393,12 +398,18 @@ func (s *Service) publishRead(scope localRecord, id string, started time.Time, r
 		if current.authority != scope.authority || current.state == nil || current.state.Generation != scope.state.Generation || configurationIntentDigest(current.state.Configuration) != configurationIntentDigest(scope.state.Configuration) {
 			return OperationResult{}, ErrConfigurationChanged
 		}
+		if monitoringRevision != 0 && (!monitoringConsentValid(current) || current.state.Monitoring.Revision != monitoringRevision) {
+			return OperationResult{}, ErrConfigurationChanged
+		}
 		kind := changeObservation
 		if activate && readErr == nil {
 			kind = changeActivation
 		}
 		updated, err := s.store.update(ctx, current.authority.Owner, current.authority.Workspace, current.expected(), kind, func(record *localRecord) error {
 			state := record.state
+			if monitoringRevision != 0 && (!monitoringConsentValid(*record) || state.Monitoring.Revision != monitoringRevision) {
+				return ErrConfigurationChanged
+			}
 			attempt := localAttempt{Generation: state.Generation, Sequence: state.Sequence, StartedAt: started, FinishedAt: finished, Outcome: outcome}
 			retained := state.Attempts
 			if len(retained) >= maxAttemptHistory {

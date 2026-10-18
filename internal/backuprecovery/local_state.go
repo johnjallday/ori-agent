@@ -214,7 +214,7 @@ func (s localState) valid() bool {
 		}
 		seen[operation.ID] = true
 		switch operation.Action {
-		case "connect", "refresh", "monitoring", "revoke", "delete", "uninstall", "recovery_report":
+		case "connect", "refresh", "monitor", "monitoring", "revoke", "delete", "uninstall", "recovery_report":
 		default:
 			return false
 		}

@@ -12,6 +12,27 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestCapabilityStatusReflectsStoredMonitoringAndAttentionWithoutReadingProvider(t *testing.T) {
+	for _, check := range []struct {
+		monitoring string
+		problems   []string
+		want       string
+	}{
+		{"manual_only", nil, "ready"}, {"active", nil, "monitoring"}, {"paused", nil, "paused"}, {"unavailable", nil, "unavailable"}, {"review_required", nil, "needs_attention"}, {"active", []string{"backup_completion_overdue"}, "needs_attention"},
+	} {
+		status := Status{RuntimeAvailable: true, Connection: "configured", Monitoring: check.monitoring, Health: EvidenceHealth{Problems: check.problems}}
+		if got := backupCapabilityStatus(status); string(got.State) != check.want || !got.Configured {
+			t.Fatal(check, got)
+		}
+	}
+	s, provider, credentials := newBackupServiceFixture(t)
+	connectBackupServiceFixture(t, s)
+	got, err := NewCapabilityRuntime(s).CapabilityStatus(localFixtureWorkspace)
+	if err != nil || string(got.State) != "needs_attention" || provider.calls.Load() != 1 || credentials.uses.Load() != 1 {
+		t.Fatal("empty stored evidence was called ready or status probed", got, err)
+	}
+}
+
 func TestCapabilityRemovalFencesAdmissionAcrossDrainAndInstallRecordWrite(t *testing.T) {
 	s, provider, credentials := newBackupServiceFixture(t)
 	connectBackupServiceFixture(t, s)

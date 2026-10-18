@@ -24,16 +24,32 @@ func (r *CapabilityRuntime) CapabilityStatus(workspaceID string) (workspacecapab
 	if err != nil {
 		return unavailable, nil
 	}
+	return backupCapabilityStatus(status), nil
+}
+
+func backupCapabilityStatus(status Status) workspacecapability.Status {
 	if status.RemovalPending {
-		return workspacecapability.Status{State: workspacecapability.StatusNeedsAttention, Detail: "Finish removing this capability. Metadata access is fenced."}, nil
+		return workspacecapability.Status{State: workspacecapability.StatusNeedsAttention, Detail: "Finish removing this capability. Metadata access is fenced."}
 	}
 	if !status.RuntimeAvailable {
-		return unavailable, nil
+		return workspacecapability.Status{State: workspacecapability.StatusUnavailable, Detail: "Backup metadata is unavailable."}
 	}
 	if status.Connection != "configured" {
-		return workspacecapability.Status{State: workspacecapability.StatusSetupNeeded, Detail: "Review external setup and local metadata access."}, nil
+		return workspacecapability.Status{State: workspacecapability.StatusSetupNeeded, Detail: "Review external setup and local metadata access."}
 	}
-	return workspacecapability.Status{State: workspacecapability.StatusReady, Configured: true, Detail: "Metadata connection observed; backup success and recovery are not proven."}, nil
+	if len(status.Health.Problems) > 0 || status.Monitoring == "review_required" {
+		return workspacecapability.Status{State: workspacecapability.StatusNeedsAttention, Configured: true, Detail: "Stored metadata evidence needs review. Backup success and recovery are not proven."}
+	}
+	if status.Monitoring == "active" {
+		return workspacecapability.Status{State: workspacecapability.StatusMonitoring, Configured: true, Detail: "Periodic metadata checks enabled while Ori is running; not proof of protection."}
+	}
+	if status.Monitoring == "paused" {
+		return workspacecapability.Status{State: workspacecapability.StatusPaused, Configured: true, Detail: "Ori periodic checks paused. External backup schedules are unchanged."}
+	}
+	if status.Monitoring == "unavailable" {
+		return workspacecapability.Status{State: workspacecapability.StatusUnavailable, Configured: true, Detail: "Periodic metadata checks are unavailable."}
+	}
+	return workspacecapability.Status{State: workspacecapability.StatusReady, Configured: true, Detail: "Metadata connection observed; backup success and recovery are not proven."}
 }
 func (r *CapabilityRuntime) OnCapabilityRemove(workspaceID string) error {
 	if r == nil || r.service == nil {

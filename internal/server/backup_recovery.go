@@ -35,6 +35,11 @@ func (b *ServerBuilder) wireBackupRecovery() {
 	if b.chatHandler != nil {
 		b.chatHandler.SetBackupAdvisorReader(service)
 	}
+	// One tracked server loop. It reads only current, locally activated periodic
+	// consent; construction/installation/manual connect never opts a workspace in.
+	if err := service.StartMonitoring(); err != nil && os.Getenv("ORI_BACKUP_RESTIC_EXECUTABLE") != "" {
+		logger.Warn("Backup metadata monitoring is unavailable", logger.Fields{})
+	}
 }
 func registerBackupRecoveryRoutes(mux *http.ServeMux, s *Server) {
 	if s == nil || s.Handlers == nil || s.Handlers.BackupRecovery == nil {
