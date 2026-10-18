@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { clearBlockingModals, skipOnboarding } from './helpers/onboarding';
 
 // The Memory station: every workspace's MEMORY.md as a building on the Map,
 // whose badge reads the memory's state and whose panel is the memory manager
@@ -12,31 +13,6 @@ test.describe.serial('Memory station', () => {
   const agentName = 'Scout';
   const building = '.ws-cmd-map-hq-station[data-cmd-hq-station="memory"]';
   const panel = '.ws-cmd-modal-panel.is-memory';
-
-  async function skipOnboarding(page: Page) {
-    await page.route('**/api/onboarding/status', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ needs_onboarding: false, completed: true })
-      })
-    );
-  }
-
-  // A brand-new workspace may ask for a Commander or confirm a first task;
-  // clear both the way a user would (see tests/global-memory.spec.ts).
-  async function clearBlockingModals(page: Page) {
-    const nudge = page.getByRole('button', { name: 'Create Commander' });
-    if (await nudge.isVisible().catch(() => false)) {
-      await nudge.click();
-      await expect(nudge).toBeHidden({ timeout: 15000 });
-    }
-    const gate = page.locator('#workspace-detail-task-confirm-modal');
-    if (await gate.isVisible().catch(() => false)) {
-      await page.locator('#workspace-detail-task-confirm-close').click();
-      await expect(gate).toBeHidden({ timeout: 15000 });
-    }
-  }
 
   async function albumWorkspace(page: Page) {
     const listed = (await (await page.request.get('/api/workspaces')).json()).workspaces as Array<{

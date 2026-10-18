@@ -4,10 +4,10 @@ import {
   WorkspaceMemoryManager,
   defaultPromoteCategory,
   memoryBudgetMeter,
-  memoryEntryKind,
   memorySections,
   recentMemoryLearnings
 } from './workspace-detail-memory.js';
+import { memoryEntryKind } from './memory-station.js';
 
 // Minimal host: escapeHtml mirrors the page helper closely enough for assertions.
 function makeManager() {

@@ -5578,19 +5578,22 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-modal-panel.is-config {
   max-width: min(1000px, 94vw);
 }
-/* The Memory station's panel is a reading surface: the Daily Brief's width,
-   not the wide config width it would otherwise inherit from is-config. Like
-   the Daily Brief it is tall, so it keeps its header (title, close) clear of
-   the navbar, which grows to several rows on a narrow screen. */
-.ws-cmd-modal:has(> .ws-cmd-modal-panel.is-memory) {
+/* A station's panel (Daily Brief, Memory) is a tall reading surface: the
+   reading width, not the wide config width a config-surface panel would
+   otherwise take, and its header (title, close) kept clear of the navbar,
+   which sits above the stat modal and grows to several rows on a narrow
+   screen. daily-brief.css adds the brief's paper look on top. */
+.ws-cmd-modal:has(> .ws-cmd-modal-panel.is-station) {
   padding-top: calc(var(--navbar-offset, 76px) + 12px);
 }
-.ws-cmd-modal-panel.is-config.is-memory {
+.ws-cmd-modal-panel.is-station {
   max-width: min(760px, 96vw);
+}
+.ws-cmd-modal-panel.is-config.is-station {
   max-height: min(82vh, calc(100dvh - var(--navbar-offset, 76px) - 36px));
 }
 @media (max-width: 760px) {
-  .ws-cmd-modal:has(> .ws-cmd-modal-panel.is-memory) {
+  .ws-cmd-modal:has(> .ws-cmd-modal-panel.is-station) {
     padding: calc(var(--navbar-offset, 76px) + 8px) 8px 8px;
   }
 }

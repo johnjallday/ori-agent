@@ -159,7 +159,7 @@ func (d MemoryDocument) Render() string {
 
 // Entries returns the structured entries in file order.
 func (d MemoryDocument) Entries() []MemoryEntry {
-	var entries []MemoryEntry
+	entries := make([]MemoryEntry, 0, len(d.lines))
 	for _, l := range d.lines {
 		if l.entry != nil {
 			entries = append(entries, *l.entry)
@@ -216,7 +216,8 @@ const memoryPromptGuidance = "Persistent knowledge accumulated for this workspac
 // pass true where those tools are available (mission/chat) and false for the
 // native-CLI path, which only reads memory as context.
 func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) string {
-	pick := selectMemoryPrompt(doc)
+	entries := doc.Entries()
+	pick := selectMemoryPrompt(entries)
 	if pick.eligible == 0 && !includeToolGuidance {
 		return ""
 	}
@@ -232,8 +233,8 @@ func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) str
 		return b.String()
 	}
 
-	for _, e := range pick.kept {
-		b.WriteString(e.Render())
+	for _, index := range pick.keptIndexes {
+		b.WriteString(entries[index].Render())
 		b.WriteString("\n")
 	}
 	if pick.dropped > 0 {
@@ -242,17 +243,16 @@ func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) str
 	return b.String()
 }
 
-// MemoryPromptSelection reports which entries RenderMemoryPromptSection puts
-// in the prompt. The result is aligned with doc.Entries(): element i is for
-// entry i, the same 0-based file-order index the memory API returns and
-// EditAt/DeleteAt address. HQ-managed markers are always false (they are never
-// in the workspace prompt section); an ordinary entry is false only when the
-// prompt budget drops it. It shares selectMemoryPrompt with the renderer, so
-// the two cannot disagree.
-func MemoryPromptSelection(doc MemoryDocument) []bool {
-	pick := selectMemoryPrompt(doc)
-	inPrompt := make([]bool, pick.total)
-	for _, index := range pick.keptIndexes {
+// MemoryPromptSelection reports which of a document's entries (doc.Entries(),
+// in file order) RenderMemoryPromptSection puts in the prompt. The result is
+// aligned with entries: element i is for entry i, the same 0-based file-order
+// index the memory API returns and EditAt/DeleteAt address. HQ-managed markers
+// are always false (they are never in the workspace prompt section); an
+// ordinary entry is false only when the prompt budget drops it. It shares
+// selectMemoryPrompt with the renderer, so the two cannot disagree.
+func MemoryPromptSelection(entries []MemoryEntry) []bool {
+	inPrompt := make([]bool, len(entries))
+	for _, index := range selectMemoryPrompt(entries).keptIndexes {
 		inPrompt[index] = true
 	}
 	return inPrompt
@@ -260,41 +260,31 @@ func MemoryPromptSelection(doc MemoryDocument) []bool {
 
 // memoryPromptPick is the outcome of the one prompt selection path.
 type memoryPromptPick struct {
-	total       int           // len(doc.Entries()), managed markers included
-	eligible    int           // entries considered: managed markers excluded
-	kept        []MemoryEntry // surviving entries, in file order
-	keptIndexes []int         // doc.Entries() index of each kept entry
-	dropped     int           // eligible entries the budget left out
+	eligible    int   // entries considered: managed markers excluded
+	keptIndexes []int // index into the document's entries of each kept one, in file order
+	dropped     int   // eligible entries the budget left out
 }
 
 // selectMemoryPrompt excludes HQ-managed markers, then applies the prompt
 // budget. Both RenderMemoryPromptSection and MemoryPromptSelection use it.
-func selectMemoryPrompt(doc MemoryDocument) memoryPromptPick {
+func selectMemoryPrompt(all []MemoryEntry) memoryPromptPick {
 	// A raw workspace document contains no lifecycle proof. A managed HQ
 	// marker is inert here even if its bytes appear to be a structured entry;
 	// only a separate, bound eligibility projection may render it.
-	all := doc.Entries()
-	entries := make([]MemoryEntry, 0, len(all))
+	eligible := make([]MemoryEntry, 0, len(all))
 	docIndexes := make([]int, 0, len(all))
 	for i, entry := range all {
 		if !IsHQManagedProvenance(entry.Provenance) {
-			entries = append(entries, entry)
+			eligible = append(eligible, entry)
 			docIndexes = append(docIndexes, i)
 		}
 	}
-	positions, dropped := selectMemoryEntriesForBudget(entries, memoryPromptCharBudget)
-	pick := memoryPromptPick{
-		total:       len(all),
-		eligible:    len(entries),
-		kept:        make([]MemoryEntry, len(positions)),
-		keptIndexes: make([]int, len(positions)),
-		dropped:     dropped,
-	}
+	positions, dropped := selectMemoryEntriesForBudget(eligible, memoryPromptCharBudget)
+	keptIndexes := make([]int, len(positions))
 	for i, position := range positions {
-		pick.kept[i] = entries[position]
-		pick.keptIndexes[i] = docIndexes[position]
+		keptIndexes[i] = docIndexes[position]
 	}
-	return pick
+	return memoryPromptPick{eligible: len(eligible), keptIndexes: keptIndexes, dropped: dropped}
 }
 
 // IsHQManagedProvenance reserves the Ori-managed HQ marker namespace. Other

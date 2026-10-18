@@ -971,10 +971,9 @@ export class WorkspaceCommandView {
       /* the panel still opens; only the address bar keeps the parameter */
     }
     // A direct link has no opener: each station's action falls back to its
-    // own building, so closing the panel lands there.
-    if (this.mapStationRegistry().some(entry => entry.key === station)) {
-      this.runHQStationAction(station, null);
-    }
+    // own building, so closing the panel lands there. A key this workspace
+    // has no station for dispatches nothing.
+    this.runHQStationAction(station, null);
   }
 
   applyBootURLState() {
@@ -2635,10 +2634,10 @@ export class WorkspaceCommandView {
 
   closeStatModal() {
     const trigger = this.statModalTrigger;
+    const wasSection = this.statModalSection;
     const wasBoard = this.taskModalBoardMode;
-    const wasConfig = this.sectionUsesConfigSurface(this.statModalSection);
-    const wasTools = this.statModalSection === 'tools';
-    const wasMemory = this.statModalSection === MEMORY_STATION;
+    const wasConfig = this.sectionUsesConfigSurface(wasSection);
+    const wasTools = wasSection === 'tools';
     this.statModalSection = '';
     this.statModalTrigger = null;
     this.taskModalBoardMode = false;
@@ -2656,17 +2655,14 @@ export class WorkspaceCommandView {
     if (wasTools) {
       this.releaseToolsModalSurface();
     }
-    if (this._dailyBriefPanel) this._dailyBriefPanel.brief.setOnScreen(false);
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
-    // The building behind the panel still says what it said before the panel
-    // opened ("+3 new"): repaint it from what was just seen, then re-read
-    // (FR6). The repaint comes first so focus returns to the new building.
-    if (wasMemory) {
-      if (this.active) this.render();
-      this.requestMemoryStationData(true);
-      this.requestHQReviewQueue(true);
-    }
+    // A station's registry entry says what its panel's closing means (the
+    // Daily Brief stops polling; Memory repaints its building and re-reads).
+    // It runs after the modal is hidden and before focus returns, so a
+    // repaint lands focus on the new building.
+    const station = this.mapStationRegistry().find(entry => entry.key === wasSection);
+    if (station && typeof station.onPanelClosed === 'function') station.onPanelClosed();
     const opener = this.resolveStatModalTrigger(trigger);
     if (opener && typeof opener.focus === 'function') opener.focus();
   }
@@ -2830,13 +2826,19 @@ export class WorkspaceCommandView {
     // Config-surface and Tools modals get the wide panel treatment.
     const isConfig = this.statModalHoldsSharedSurface();
     if (panel.classList) panel.classList.toggle('is-config', isConfig);
-    // The Daily Brief panel is live DOM with its own controller, so it is
-    // attached rather than re-serialized on every repaint.
+    // A station's panel (Daily Brief, Memory) is a tall reading surface with
+    // its own width (FR10); the Daily Brief panel is also live DOM with its
+    // own controller, so it is attached rather than re-serialized on every
+    // repaint.
     const isBrief = this.statModalSection === DAILY_BRIEF_STATION;
-    if (panel.classList) panel.classList.toggle('is-daily-brief', isBrief);
-    // Memory is a reading surface: it takes its own width (FR10).
-    if (panel.classList)
+    if (panel.classList) {
+      panel.classList.toggle(
+        'is-station',
+        this.mapStationRegistry().some(entry => entry.key === this.statModalSection)
+      );
+      panel.classList.toggle('is-daily-brief', isBrief);
       panel.classList.toggle('is-memory', this.statModalSection === MEMORY_STATION);
+    }
     if (isBrief) this.mountDailyBriefPanel(panel);
     else panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
@@ -7256,7 +7258,10 @@ export class WorkspaceCommandView {
         icon: 'bi-newspaper',
         visualVariant: 'briefing',
         state: () => this.hqDailyBriefStationState(),
-        action: trigger => this.openDailyBriefPanel(trigger)
+        action: trigger => this.openDailyBriefPanel(trigger),
+        onPanelClosed: () => {
+          if (this._dailyBriefPanel) this._dailyBriefPanel.brief.setOnScreen(false);
+        }
       }
     ];
   }
@@ -7697,21 +7702,13 @@ export class WorkspaceCommandView {
     data.status = 'loading';
     const requestID = (this._dailyBriefStationRequestID || 0) + 1;
     this._dailyBriefStationRequestID = requestID;
-    const getJSON = async (url, optional = false) => {
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!response || !response.ok) {
-        if (optional) return null;
-        throw new Error('Daily Brief request failed' + (response ? ': ' + response.status : ''));
-      }
-      return response.json();
-    };
 
     Promise.all([
-      getJSON('/api/personal-hq/brief/status'),
-      getJSON('/api/personal-hq/brief/current'),
-      getJSON('/api/personal-hq/brief/config'),
+      this.stationJSON('/api/personal-hq/brief/status'),
+      this.stationJSON('/api/personal-hq/brief/current'),
+      this.stationJSON('/api/personal-hq/brief/config'),
       // Only "check-ins paused" comes from here; the brief stands without it.
-      getJSON('/api/personal-assistant', true).catch(() => null)
+      this.stationJSON('/api/personal-assistant', true).catch(() => null)
     ])
       .then(([generation, current, config, assistant]) => {
         if (this._dailyBriefStationRequestID !== requestID) return;
@@ -7732,6 +7729,29 @@ export class WorkspaceCommandView {
         latest.status = 'error';
         this.refreshDailyBriefStationSurface();
       });
+  }
+
+  // One JSON read for a station's badge. A response that is not OK rejects
+  // with an Error carrying the HTTP status, or resolves null when the read is
+  // optional; a response for another workspace is the caller's to drop.
+  async stationJSON(url, optional = false) {
+    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!response || !response.ok) {
+      if (optional) return null;
+      const error = new Error('station request failed' + (response ? ': ' + response.status : ''));
+      error.status = response ? response.status : 0;
+      throw error;
+    }
+    return response.json();
+  }
+
+  // A direct link has no opener; the station's own building stands in, so
+  // closing the panel lands there rather than nowhere.
+  stationOpener(key, trigger) {
+    if (trigger) return trigger;
+    return this.container && typeof this.container.querySelector === 'function'
+      ? this.container.querySelector('[data-cmd-hq-station="' + key + '"]')
+      : null;
   }
 
   refreshDailyBriefStationSurface() {
@@ -7758,14 +7778,7 @@ export class WorkspaceCommandView {
     if (data.status === 'idle' || data.status === 'error') {
       this.requestDailyBriefStationData(true);
     }
-    // A direct link has no opener; closing the panel then lands on the
-    // station itself rather than nowhere.
-    const opener =
-      trigger ||
-      (this.container && typeof this.container.querySelector === 'function'
-        ? this.container.querySelector('[data-cmd-hq-station="' + DAILY_BRIEF_STATION + '"]')
-        : null);
-    this.openStatModal(DAILY_BRIEF_STATION, opener);
+    this.openStatModal(DAILY_BRIEF_STATION, this.stationOpener(DAILY_BRIEF_STATION, trigger));
     const view = this._dailyBriefPanel;
     if (!view) return;
     view.brief.setOnScreen(true);
@@ -7888,33 +7901,25 @@ export class WorkspaceCommandView {
   }
 
   // render() rebuilds the container, which detaches the stat modal for a
-  // moment. Someone reading the brief would lose their place and their focus,
-  // so both are carried across.
+  // moment. Someone reading the brief would lose their place, so the scroll
+  // positions are carried across; focus is carried for every stat modal by
+  // captureStatModalFocus / restoreStatModalFocus.
   captureDailyBriefPanelView() {
     this._dailyBriefPanelView = null;
     const view = this._dailyBriefPanel;
     if (!view || this.statModalSection !== DAILY_BRIEF_STATION) return;
-    if (typeof document === 'undefined') return;
-    const focused = document.activeElement;
-    this._dailyBriefPanelView = {
-      scrolled: Array.from(view.root.querySelectorAll('[data-brief-scroll]')).map(el => [
-        el,
-        el.scrollTop
-      ]),
-      focused: focused && view.root.contains(focused) ? focused : null
-    };
+    this._dailyBriefPanelView = Array.from(view.root.querySelectorAll('[data-brief-scroll]')).map(
+      el => [el, el.scrollTop]
+    );
   }
 
   restoreDailyBriefPanelView() {
-    const kept = this._dailyBriefPanelView;
+    const scrolled = this._dailyBriefPanelView;
     this._dailyBriefPanelView = null;
-    if (!kept) return;
-    kept.scrolled.forEach(([el, top]) => {
+    if (!scrolled) return;
+    scrolled.forEach(([el, top]) => {
       el.scrollTop = top;
     });
-    if (kept.focused && kept.focused.isConnected && typeof kept.focused.focus === 'function') {
-      kept.focused.focus({ preventScroll: true });
-    }
   }
 
   // Routes the "no Calendar Ops workspace yet" CTA into the existing
@@ -8259,43 +8264,43 @@ export class WorkspaceCommandView {
   // all (the endpoint answers 404) has none (FR1).
   memoryStation() {
     const data = this.memoryStationData();
-    if (!data.workspaceID || data.absent) return null;
+    if (!data.workspaceID || data.status === 'absent') return null;
     return {
       key: MEMORY_STATION,
       label: 'Memory',
       icon: 'bi-journal-bookmark',
       visualVariant: 'archive',
       state: () => this.memoryStationState(),
-      action: trigger => this.openMemoryPanel(trigger)
+      action: trigger => this.openMemoryPanel(trigger),
+      // The building behind the panel still says what it said before the
+      // panel opened ("+3 new"): repaint it from what was just seen, then
+      // re-read (FR6).
+      onPanelClosed: () => {
+        if (this.active) this.render();
+        this.requestMemoryStationData(true);
+        this.requestHQReviewQueue(true);
+      }
     };
   }
 
   // The badge's data, cached per workspace like the Daily Brief's so a
-  // workspace switch never shows another workspace's memory.
+  // workspace switch never shows another workspace's memory. status is
+  // 'idle' | 'loading' | 'ready' | 'error' | 'absent' (the endpoint answered
+  // 404: this workspace has no Memory station).
   memoryStationData() {
     const workspaceID = this.workspaceId();
     if (!this._memoryStation || this._memoryStation.workspaceID !== workspaceID) {
-      this._memoryStation = { workspaceID, status: 'idle', summary: null, absent: false };
+      this._memoryStation = { workspaceID, status: 'idle', summary: null };
     }
     return this._memoryStation;
   }
 
-  memoryStationStorage() {
-    try {
-      return typeof localStorage === 'undefined' ? null : localStorage;
-    } catch {
-      return null;
-    }
-  }
-
   // The station's state function: the first render on an active view asks
-  // for the data.
+  // for the data (the review queue only in the Personal HQ, and only once).
   memoryStationState() {
     const data = this.memoryStationData();
     if (data.status === 'idle' && this.active) this.requestMemoryStationData();
-    if (this.isPersonalHQ() && this.hqReviewQueueData().status === 'idle' && this.active) {
-      this.requestHQReviewQueue();
-    }
+    if (this.active) this.requestHQReviewQueue();
     return this.memoryStationBadge();
   }
 
@@ -8305,7 +8310,7 @@ export class WorkspaceCommandView {
     return memoryBadgeState({
       status: data.status,
       summary: data.summary,
-      baseline: readMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID),
+      baseline: readMemoryStationBaseline(this.railStorage(), data.workspaceID),
       reviewCount: personalHQ ? this.hqReviewQueueData().count : 0,
       personalHQ
     });
@@ -8345,12 +8350,8 @@ export class WorkspaceCommandView {
       this.shareReviewQueueWithPanel();
       if (this.memoryStationSignature() !== before) this.refreshMemoryStationSurface();
     };
-    fetch('/api/personal-assistant/knowledge', { headers: { Accept: 'application/json' } })
-      .then(async response => {
-        if (!response || !response.ok) return settle(0);
-        const payload = await response.json();
-        return settle(groupReviewedKnowledge(payload && payload.items).queue.length);
-      })
+    this.stationJSON('/api/personal-assistant/knowledge', true)
+      .then(payload => settle(payload ? groupReviewedKnowledge(payload.items).queue.length : 0))
       .catch(() => settle(0));
   }
 
@@ -8368,7 +8369,7 @@ export class WorkspaceCommandView {
   // A failed read degrades the badge and never breaks the map.
   requestMemoryStationData(force = false) {
     const data = this.memoryStationData();
-    if (!data.workspaceID || data.absent) return;
+    if (!data.workspaceID || data.status === 'absent') return;
     if (!force && data.status !== 'idle' && data.status !== 'error') return;
     if (typeof fetch !== 'function') {
       data.status = 'error';
@@ -8386,27 +8387,16 @@ export class WorkspaceCommandView {
       apply(latest);
       if (this.memoryStationSignature() !== before) this.refreshMemoryStationSurface();
     };
-    fetch('/api/workspaces/' + encodeURIComponent(workspaceID) + '/memory', {
-      headers: { Accept: 'application/json' }
-    })
-      .then(async response => {
-        if (response && response.status === 404) {
-          settle(latest => {
-            latest.absent = true;
-            latest.status = 'ready';
-          });
-          return;
-        }
-        if (!response || !response.ok) throw new Error('memory request failed');
-        const payload = await response.json();
+    this.stationJSON('/api/workspaces/' + encodeURIComponent(workspaceID) + '/memory')
+      .then(payload =>
         settle(latest => {
           latest.status = 'ready';
           latest.summary = memoryStationSummary(payload);
-        });
-      })
-      .catch(() =>
+        })
+      )
+      .catch(error =>
         settle(latest => {
-          latest.status = 'error';
+          latest.status = error && error.status === 404 ? 'absent' : 'error';
         })
       );
   }
@@ -8414,7 +8404,7 @@ export class WorkspaceCommandView {
   // What the station shows, so a settled request repaints only on a change.
   memoryStationSignature() {
     const data = this.memoryStationData();
-    if (data.absent) return 'absent';
+    if (data.status === 'absent') return 'absent';
     const state = this.memoryStationBadge();
     return [state.value, state.description, state.tone].join('|');
   }
@@ -8447,19 +8437,18 @@ export class WorkspaceCommandView {
     if (!data.workspaceID) return;
     const before = this.memoryStationSignature();
     data.status = 'ready';
-    data.absent = false;
     data.summary = memoryStationSummary(payload);
     if (this.memoryPanelOpen()) {
-      writeMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID, data.summary);
+      writeMemoryStationBaseline(this.railStorage(), data.workspaceID, data.summary);
       this.paintMemoryPanelCount();
       return;
     }
-    if (this.active && this.memoryStationSignature() !== before) this.render();
+    if (this.memoryStationSignature() !== before) this.refreshMemoryStationSurface();
   }
 
+  // The open panel's count chip follows the payload without a repaint.
   paintMemoryPanelCount() {
-    const panel = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-panel');
-    const chip = panel && panel.querySelector('.ws-cmd-modal-count');
+    const chip = this.statModalEl && this.statModalEl.querySelector('.ws-cmd-modal-count');
     if (chip) chip.textContent = String(this.statModalCount(MEMORY_STATION));
   }
 
@@ -8474,21 +8463,15 @@ export class WorkspaceCommandView {
   }
 
   // Opening the panel is "looking": the current count becomes the baseline
-  // behind "+K new" (FR7). A direct link has no opener, so focus returns to
-  // the building itself when the panel closes.
+  // behind "+K new" (FR7).
   openMemoryPanel(trigger) {
     const data = this.memoryStationData();
     if (data.summary) {
-      writeMemoryStationBaseline(this.memoryStationStorage(), data.workspaceID, data.summary);
+      writeMemoryStationBaseline(this.railStorage(), data.workspaceID, data.summary);
     }
     this.ensureMemoryManagerHook();
     this.shareReviewQueueWithPanel();
-    const opener =
-      trigger ||
-      (this.container && typeof this.container.querySelector === 'function'
-        ? this.container.querySelector('[data-cmd-hq-station="' + MEMORY_STATION + '"]')
-        : null);
-    this.openStatModal(MEMORY_STATION, opener);
+    this.openStatModal(MEMORY_STATION, this.stationOpener(MEMORY_STATION, trigger));
   }
 
   // "Stations" rail panel for Details mode (FR14): one row per registry entry

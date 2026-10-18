@@ -136,7 +136,7 @@ func renderedPromptLines(section string) map[string]bool {
 func TestMemoryPromptSelection_MatchesRendererOverBudget(t *testing.T) {
 	doc := ParseMemoryDocument(overBudgetPromptFixture())
 	entries := doc.Entries()
-	inPrompt := MemoryPromptSelection(doc)
+	inPrompt := MemoryPromptSelection(entries)
 	if len(inPrompt) != len(entries) {
 		t.Fatalf("selection has %d slots for %d entries", len(inPrompt), len(entries))
 	}
@@ -159,9 +159,8 @@ func TestMemoryPromptSelection_MatchesRendererOverBudget(t *testing.T) {
 }
 
 func TestMemoryPromptSelection_UnderBudgetEveryOrdinaryEntryIsIn(t *testing.T) {
-	doc := ParseMemoryDocument(underBudgetPromptFixture)
-	entries := doc.Entries()
-	inPrompt := MemoryPromptSelection(doc)
+	entries := ParseMemoryDocument(underBudgetPromptFixture).Entries()
+	inPrompt := MemoryPromptSelection(entries)
 	if len(inPrompt) != len(entries) || len(entries) != 8 {
 		t.Fatalf("selection has %d slots for %d entries", len(inPrompt), len(entries))
 	}
@@ -174,10 +173,10 @@ func TestMemoryPromptSelection_UnderBudgetEveryOrdinaryEntryIsIn(t *testing.T) {
 }
 
 func TestMemoryPromptSelection_EmptyAndManagedOnly(t *testing.T) {
-	if got := MemoryPromptSelection(ParseMemoryDocument("")); len(got) != 0 {
+	if got := MemoryPromptSelection(ParseMemoryDocument("").Entries()); len(got) != 0 {
 		t.Errorf("empty memory selection = %v", got)
 	}
-	got := MemoryPromptSelection(ParseMemoryDocument("- [fact, 2026-06-08, ori-hq:item-9:rev-1] managed only\n"))
+	got := MemoryPromptSelection(ParseMemoryDocument("- [fact, 2026-06-08, ori-hq:item-9:rev-1] managed only\n").Entries())
 	if len(got) != 1 || got[0] {
 		t.Errorf("managed-only selection = %v, want [false]", got)
 	}

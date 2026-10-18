@@ -206,7 +206,7 @@ test('terminology: the Memory station is named "Memory" on the map, in the rail,
       workspaceID: 'ws-1',
       status: 'ready',
       absent: false,
-      summary: { count: 14, watching: 2, dropped: 0, rawSize: 0, overBudget: false }
+      summary: { count: 14, watching: 2, dropped: 0, overBudget: false }
     }
   });
   const station = view.mapStationRegistry().find(entry => entry.key === 'memory');

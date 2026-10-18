@@ -1924,7 +1924,7 @@ Native CLI runs cannot call Ori tools, so they cannot propose. Workspace chat wi
 Appends one ordinary entry `- [fact, <today>, global:<item-id>] <text>` to that workspace's `MEMORY.md`, with the text read from the canonical HQ line. `if_version` must be the version of the approved fact the user is looking at. Repeating the copy changes nothing. The copy is ordinary workspace memory from then on: editable, deletable, and never updated or removed when the global fact changes.
 
 ```json
-{ "created": true, "workspace_id": "album-3", "href": "/workspaces/album-3#memory" }
+{ "created": true, "workspace_id": "album-3", "href": "/workspaces/album-3?station=memory" }
 ```
 
 `400` for the Personal HQ itself or a malformed request, `404` for an unknown or unavailable workspace or fact, `409` when the fact is not approved or its version changed, and `409` with the shared message when there is no Personal HQ.
@@ -1934,7 +1934,7 @@ Appends one ordinary entry `- [fact, <today>, global:<item-id>] <text>` to that 
 **Endpoint:** `GET /api/personal-assistant/knowledge/{item_id}/copies`
 
 ```json
-{ "copies": [{ "workspace_id": "album-3", "name": "Album 3", "slug": "album-3", "href": "/workspaces/album-3#memory" }] }
+{ "copies": [{ "workspace_id": "album-3", "name": "Album 3", "slug": "album-3", "href": "/workspaces/album-3?station=memory" }] }
 ```
 
 Scans active workspaces' `MEMORY.md` files for `global:<item-id>` provenance, on demand and read-only. It also works after the fact is forgotten, so the Profile page can show where copies live on.
