@@ -386,6 +386,12 @@ never reads again: screenshots, search results, and re-reads of planning
 documents. Each lane returns a short result and writes its full output to
 `tasks/evidence-<feature>/` or `tasks/findings-<feature>.md`.
 
+Scratch (probe scripts, CI logs, model transcripts, fixture dumps) goes to the
+session scratchpad, never `tasks/`. After the merge, `wt done` archives only the
+top-level planning markdown into `tasks/archive/` and drops
+`tasks/evidence-<feature>/` and everything else with the worktree, so anything
+worth keeping afterwards belongs in the PR body or the findings log.
+
 - **Demo verification:** every `Demo:` item. The lane drives the running demo
   server, captures and inspects the screenshots, and returns a verdict of at
   most 30 lines with evidence paths. Screenshots never enter the owner's
@@ -596,6 +602,7 @@ because a checklist contains unchecked merge, release, or cleanup items.
 - Cleanup after merge: `wt done <feature>`
 - Epic CI: `.github/workflows/ci.yml` accepts `epic/**` as a PR base
 - Findings log: `tasks/findings-<feature>.md`; evidence: `tasks/evidence-<feature>/`
+- Archive after merge: `tasks/archive/` (planning markdown only, labelled `(done #N)`)
 - Claude lanes: the user-level `demo-verifier` and `task-scribe` agents (not
   tracked here) plus the built-in `Explore` agent. Codex and Pi run the lanes
   inline or through Herdr's tester and reviewer roles.
