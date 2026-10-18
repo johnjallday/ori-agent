@@ -2,15 +2,11 @@ package workspace
 
 import (
 	"context"
-	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,9 +27,7 @@ const (
 var (
 	ErrLocalConfigUnavailable = errors.New("workspace local configuration is unavailable")
 	ErrLocalConfigInvalid     = errors.New("workspace local configuration is invalid")
-	// The installation lease excludes other processes; this lock also prevents
-	// two in-process owners from racing to create different encryption keys.
-	localConfigKeyMu     sync.Mutex
+	// The key creation lock is shared across local-state owners in vault.
 	localConfigFileLocks LockTable
 )
 
@@ -131,36 +125,12 @@ func (s *LocalConfigStore) aead(create bool) (cipher.AEAD, error) {
 	if s == nil || s.db == nil || s.secrets == nil {
 		return nil, ErrLocalConfigUnavailable
 	}
-	localConfigKeyMu.Lock()
-	defer localConfigKeyMu.Unlock()
-	encoded, err := s.secrets.Get(vault.SecretKeyWorkspaceConfigDEK)
-	if errors.Is(err, vault.ErrSecretNotFound) && create {
-		key := make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			return nil, ErrLocalConfigUnavailable
-		}
-		encoded = base64.StdEncoding.EncodeToString(key)
-		err = s.secrets.Set(vault.SecretKeyWorkspaceConfigDEK, encoded)
+	aead, err := vault.WorkspaceConfigCipher(s.secrets, create)
+	if errors.Is(err, vault.ErrWorkspaceConfigKeyInvalid) {
+		return nil, ErrLocalConfigInvalid
 	}
 	if err != nil {
-		// Backend errors can contain command output or paths. Do not propagate
-		// them into HTTP errors, preparation reports or telemetry.
 		return nil, ErrLocalConfigUnavailable
-	}
-	if len(encoded) != base64.StdEncoding.EncodedLen(32) {
-		return nil, ErrLocalConfigInvalid
-	}
-	key, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(key) != 32 {
-		return nil, ErrLocalConfigInvalid
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, ErrLocalConfigInvalid
-	}
-	aead, err := cipher.NewGCMWithRandomNonce(block)
-	if err != nil {
-		return nil, ErrLocalConfigInvalid
 	}
 	return aead, nil
 }

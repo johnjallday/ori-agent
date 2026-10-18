@@ -32,7 +32,7 @@ const (
 type SourceRef struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	WorkspaceSlug string    `json:"workspace_slug,omitempty"`
-	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread | follow_up | calendar_event
+	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread | follow_up | calendar_event | backup_observation
 	EntityID      string    `json:"entity_id"`
 	Timestamp     time.Time `json:"timestamp"`
 	// AccountID is set only for email_thread refs: the connected mailbox account
@@ -136,8 +136,10 @@ type EmailThreadSnapshot struct {
 // Snapshot is the bounded, read-only, authorized cross-workspace projection
 // Daily Brief synthesis works from.
 type Snapshot struct {
-	GeneratedAt time.Time
-	Workspaces  []WorkspaceSnapshot
+	GeneratedAt      time.Time
+	Backups          []BackupSnapshot
+	BackupIncomplete bool
+	Workspaces       []WorkspaceSnapshot
 	// EmailThreads is the bounded email attention projection for the designated
 	// Personal HQ (empty when no HQ, no connected account, or a healthy-empty
 	// inbox — distinct from an unreadable source, which appends a Gap).
@@ -188,6 +190,9 @@ func (s Snapshot) AllRefs() map[string]SourceRef {
 	}
 	for _, evt := range s.CalendarEvents {
 		out[evt.Ref.Key()] = evt.Ref
+	}
+	for _, source := range s.Backups {
+		out[source.Ref.Key()] = source.Ref
 	}
 	return out
 }
@@ -257,6 +262,7 @@ type SnapshotSources struct {
 	// Calendar is optional; nil means no calendar integration is wired (no
 	// calendar section, no gap, no call). Only Daily Brief generation sets it.
 	Calendar CalendarSource
+	Backups  BackupSource
 }
 
 func isGroupWorkspace(ws *workspace.Workspace) bool {
@@ -383,6 +389,10 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 	// plus a partial read (calendar.go). A calendar failure degrades only
 	// this source.
 	collectCalendar(ctx, sources.Calendar, cfg, userID, &snap)
+	backups := ReadBackups(ctx, sources.Backups, userID, scope)
+	snap.Backups = backups.Sources
+	snap.BackupIncomplete = !backups.Complete
+	snap.Gaps = append(snap.Gaps, backups.Gaps...)
 	return snap
 }
 

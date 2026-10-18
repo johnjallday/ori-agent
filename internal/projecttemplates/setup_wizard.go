@@ -50,6 +50,7 @@ type SetupWizardStep = workspace.SetupWizardStep
 // names the canonical `file_janitor`. One compiled adapter serves both — see
 // filejanitor.SetupAdapter.Aliases.
 var ValidSetupWizardAdapters = []string{
+	"backup_recovery",
 	"blueprint_intake",
 	"downloads_janitor",
 	"file_janitor",

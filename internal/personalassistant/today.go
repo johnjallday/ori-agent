@@ -193,6 +193,7 @@ type TodayProjection struct {
 	// Meetings is present only when a meeting reader is wired and there is
 	// something honest to say (see TodayMeetingsProjection).
 	Meetings    *TodayMeetingsProjection `json:"meetings,omitempty"`
+	Backups     TodaySection             `json:"backups"`
 	NextCheckIn *time.Time               `json:"next_check_in,omitempty"`
 	Links       TodayLinks               `json:"links"`
 	GeneratedAt time.Time                `json:"generated_at"`
@@ -270,6 +271,7 @@ type TodayService struct {
 	folderDigest       FolderDigestReader
 	workspaceBuilds    WorkspaceBuildReader
 	meetings           TodayMeetingReader
+	backups            dailybrief.BackupSource
 	remembered         interface {
 		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
 	}
@@ -356,6 +358,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		Brief:     TodayBriefProjection{Health: todayUnavailable("not_loaded"), Items: []TodayItem{}},
 		Decisions: emptyTodaySection(), Priorities: emptyTodaySection(), Remembered: emptyTodaySection(),
 		FollowUps: emptyTodaySection(), Results: emptyTodaySection(),
+		Backups:            TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
 		WorkingOn:          TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
 		NeedsYou:           TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
 		Done:               TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
@@ -430,7 +433,8 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	janitorRows := s.loadJanitorResults(ctx, userID, now, out)
 	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
 	meetingsByRef := s.loadMeetings(ctx, userID, relationship, now, out)
-	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, meetingsByRef, out)
+	backupsByRef := s.loadBackups(ctx, userID, relationship, now, out)
+	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, meetingsByRef, backupsByRef, out)
 	out.Decisions = decisionsFromFollowUps(followUpsByRef, out.FollowUps.Health, now)
 	s.loadRemembered(ctx, userID, relationship.State, out)
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
@@ -1057,7 +1061,7 @@ func followUpTodayItem(grounded groundedFollowUp) TodayItem {
 	}
 }
 
-func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp, meetings map[string]TodayItem, out *TodayProjection) {
+func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp, meetings map[string]TodayItem, backups map[string]TodayItem, out *TodayProjection) {
 	out.Brief = TodayBriefProjection{Health: todayUnavailable("service_unavailable"), Items: []TodayItem{}}
 	if s.briefs == nil {
 		return
@@ -1082,8 +1086,20 @@ func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route
 	}
 	items := make([]TodayItem, 0, todayBriefCap)
 	referenced, dropped := 0, 0
+	seenBackups := map[string]bool{}
 	appendRef := func(title, detail string, ref dailybrief.SourceRef) {
 		if len(items) >= todayBriefCap || strings.TrimSpace(title) == "" {
+			return
+		}
+		if ref.EntityType == dailybrief.EntityBackupObservation {
+			if seenBackups[ref.Key()] {
+				return
+			}
+			seenBackups[ref.Key()] = true
+			if item, ok := backups[ref.Key()]; ok {
+				referenced++
+				items = append(items, item)
+			}
 			return
 		}
 		if ref.EntityType == dailybrief.EntityCalendarEvent {
@@ -1114,8 +1130,14 @@ func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route
 	for _, item := range content.SinceLastBrief {
 		appendRef(item.Title, item.Summary, item.Ref)
 	}
+	for _, source := range content.BackupEvidence {
+		appendRef("Stored Backup & Recovery evidence", "", source.Ref)
+	}
 	health := TodaySourceHealth{Status: TodaySectionAvailable, UpdatedAt: revision.GeneratedAt}
 	opening := truncateRunes(content.OpeningSummary, 500)
+	if content.BackupHostRendered {
+		opening = "This brief records stored backup observations from its generation time. Open the owning workspace for current evidence; snapshots and user reports are not proof of protection."
+	}
 	gaps := boundedTodayGaps(content.DataGaps)
 	if dropped > 0 {
 		health = TodaySourceHealth{Status: TodaySectionUnavailable, Reason: "stale_references", UpdatedAt: revision.GeneratedAt}

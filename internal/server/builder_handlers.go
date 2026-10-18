@@ -15,6 +15,7 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakewizard"
@@ -959,6 +960,11 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 		b.fileJanitorCapabilityRuntime = runtime
 	}
 
+	if b.backupRecoveryService != nil {
+		if err := registry.BindRuntime(workspace.CapabilityBackupRecovery, backuprecovery.NewCapabilityRuntime(b.backupRecoveryService)); err != nil {
+			logger.Warn("Backup & Recovery capability runtime unavailable", logger.Fields{})
+		}
+	}
 	service := workspacecapability.NewService(registry, b.workspaceStore)
 	if b.pluginHandler != nil {
 		service.SetPluginComponentReconciler(pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore))
@@ -1246,6 +1252,11 @@ func (b *ServerBuilder) wireSetupWizard() {
 		if err := registry.Register(adapter); err != nil {
 			logger.Warn("File Janitor setup adapter not registered", logger.Fields{"error": err})
 		}
+	}
+	// This bridge resolves the canonical actor itself and reads stored facts
+	// only. Neither Evaluate nor Confirm can grant access or run a check.
+	if err := registry.Register(backuprecovery.NewSetupAdapter(backuprecovery.NewSetupReader(b.backupRecoveryService, b.userProvider))); err != nil {
+		logger.Warn("Backup & Recovery setup adapter not registered", logger.Fields{"error": err})
 	}
 	service := setupwizard.NewService(folders, registry)
 	service.SetRuntimeService(b.runtimeCapabilityService)

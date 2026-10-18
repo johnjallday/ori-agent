@@ -14,9 +14,9 @@
 #   vet         go vet on the packages this branch changed
 #   wails-modes make check-wails-modes, as CI's Lint
 #   lint-new    make lint-new: golangci-lint ratcheted against the base, as CI's Lint
-#   unit-tests  the unit suite exactly as CI's Unit Tests job runs it: go test
-#               -short -race over scripts/list-unit-packages.sh (not make test,
-#               which also runs suites CI does not gate on); --quick runs make
+#   unit-tests  CI's canonical scripts/run-unit-tests.sh, with the full package
+#               scope, race detector and atomic coverage (not make test, which
+#               also runs suites CI does not gate on); --quick runs make
 #               test-unit (the same packages without -race) instead
 #   devtools    make test-devtools (fake-tool wrappers and Ori-owned adapters)
 #   test-js     make test-js (npm run test:modules), as CI's Frontend Lint
@@ -285,18 +285,9 @@ ci_local_run_gate() {
       make lint-new
       ;;
     unit-tests)
-      # CI's command (minus -v and the coverage profile): the unit packages,
-      # -short, under the race detector, with CI's per-package timeout.
-      local -a unit_packages
-      unit_packages=()
-      while IFS= read -r line; do
-        [[ -n "$line" ]] && unit_packages+=("$line")
-      done < <(./scripts/list-unit-packages.sh)
-      (( ${#unit_packages[@]} )) || {
-        echo "scripts/list-unit-packages.sh listed no packages" >&2
-        return 1
-      }
-      ./scripts/run-test-command.sh go test -short -race -timeout 30m "${unit_packages[@]}"
+      # Keep coverage/count/timeout flags and reporting in CI's one runner.
+      # A caller's hosted-runner scope or shard must not narrow the local gate.
+      RUNNER_OS= ORI_UNIT_SHARD= ORI_UNIT_SHARD_COUNT= ./scripts/run-unit-tests.sh
       ;;
     test-unit)
       make test-unit

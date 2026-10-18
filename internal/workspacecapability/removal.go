@@ -279,6 +279,14 @@ func (s *Service) Remove(workspaceID, capabilityID string, opts RemoveOptions) (
 
 	// 4. Drop the record last.
 	if err := s.store.Update(workspaceID, func(current *workspace.Workspace) error {
+		if !current.HasInstalledCapability(record.ID) {
+			return nil
+		}
+		if fence, ok := runtime.(RemovalFence); ok {
+			if err := fence.ValidateCapabilityRemoval(workspaceID); err != nil {
+				return err
+			}
+		}
 		if !current.RemoveInstalledCapability(record.ID) {
 			return nil
 		}

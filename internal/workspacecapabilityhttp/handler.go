@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
+	"github.com/johnjallday/ori-agent/internal/backuprecoveryhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -99,10 +101,12 @@ func (h *Handler) InstallCapability(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Source string `json:"source,omitempty"`
 	}
-	if r.Body != nil && r.ContentLength != 0 {
-		if !orihttp.ParseJSONBody(w, r, &req) {
+	if workspace.NormalizeCapabilityID(capabilityID) == workspace.CapabilityBackupRecovery {
+		if !backuprecoveryhttp.ParseUserControlBody(w, r, &req) {
 			return
 		}
+	} else if r.Body != nil && r.ContentLength != 0 && !orihttp.ParseJSONBody(w, r, &req) {
+		return
 	}
 
 	result, err := h.service.Install(workspacecapability.InstallRequest{
@@ -202,14 +206,42 @@ func (h *Handler) RemoveCapability(w http.ResponseWriter, r *http.Request) {
 	// caller must set. Defaulting it to false means an uninstall never deletes
 	// an agent the user did not ask it to (FR-27).
 	var req struct {
-		RemoveCompanion bool `json:"remove_companion,omitempty"`
+		RemoveCompanion bool   `json:"remove_companion,omitempty"`
+		Generation      string `json:"generation,omitempty"`
+		Revision        uint64 `json:"revision,omitempty"`
+		OperationID     string `json:"operation_id,omitempty"`
 	}
-	if r.Body != nil && r.ContentLength != 0 {
-		if !orihttp.ParseJSONBody(w, r, &req) {
+	if workspace.NormalizeCapabilityID(capabilityID) == workspace.CapabilityBackupRecovery {
+		if !backuprecoveryhttp.ParseUserControlBody(w, r, &req) {
+			return
+		}
+	} else if r.Body != nil && r.ContentLength != 0 && !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if workspace.NormalizeCapabilityID(capabilityID) == workspace.CapabilityBackupRecovery {
+		if req.RemoveCompanion {
+			backuprecoveryhttp.RespondUserControlError(w, backuprecovery.ErrInvalidRequest)
+			return
+		}
+		runtime, _ := h.service.Registry().Runtime(workspace.CapabilityBackupRecovery)
+		controlled, ok := runtime.(interface {
+			PrepareCapabilityRemoval(context.Context, string, string, backuprecovery.ControlRequest) error
+		})
+		if !ok {
+			backuprecoveryhttp.RespondUserControlError(w, backuprecovery.ErrUnavailable)
+			return
+		}
+		owner, err := h.provider.CurrentUserID(r.Context())
+		if err != nil {
+			backuprecoveryhttp.RespondUserControlError(w, backuprecovery.ErrWorkspaceUnavailable)
+			return
+		}
+		if err := controlled.PrepareCapabilityRemoval(r.Context(), owner, workspaceID, backuprecovery.ControlRequest{Generation: req.Generation, Revision: req.Revision, OperationID: req.OperationID}); err != nil {
+			backuprecoveryhttp.RespondUserControlError(w, err)
 			return
 		}
 	}
-
 	result, err := h.service.Remove(workspaceID, capabilityID,
 		workspacecapability.RemoveOptions{RemoveCompanion: req.RemoveCompanion})
 	if err != nil {
@@ -251,7 +283,20 @@ func (h *Handler) resolveWorkspace(w http.ResponseWriter, r *http.Request) (stri
 		_ = orihttp.RespondNotFound(w, "workspace not found")
 		return "", false
 	}
-	if !h.ownedByCurrentUser(r.Context(), ws) {
+	backupTarget := workspace.NormalizeCapabilityID(r.PathValue("capabilityID")) == workspace.CapabilityBackupRecovery
+	if backupTarget || ws.HasInstalledCapability(workspace.CapabilityBackupRecovery) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		owner, err := h.provider.CurrentUserID(r.Context())
+		if err != nil || owner != "local" || ws.OwnerUserID != owner {
+			_ = orihttp.RespondNotFound(w, "workspace not found")
+			return "", false
+		}
+		if !backuprecoveryhttp.LocalRequestAllowed(r, backupTarget && r.Method != http.MethodGet) {
+			_ = orihttp.RespondForbidden(w, "This request must come from Ori's local page.")
+			return "", false
+		}
+	} else if !h.ownedByCurrentUser(r.Context(), ws) {
 		_ = orihttp.RespondNotFound(w, "workspace not found")
 		return "", false
 	}

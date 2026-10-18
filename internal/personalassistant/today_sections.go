@@ -138,6 +138,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 	// decision subset from the follow-up pass so each actionable item appears
 	// only once, with one primary action (its link).
 	needs = append(needs, hqInputItems(hq, hqRoute)...)
+	needs = append(needs, out.Backups.Items...)
 	needs = append(needs, s.followUpItemsByStatus(ctx, userID, relationship, now, followup.StatusCandidate, out)...)
 	needs = append(needs, out.Decisions.Items...)
 	decisionIDs := map[todayItemIdentity]bool{}
@@ -181,7 +182,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 	}
 	out.WorkingOn = TodaySection{Items: working, Health: combinedTodayHealth(working, out.Brief.Health, meetingsHealth(out.Meetings), setupHealth(out.SpecialistSetup))}
 	needs = uniqueTodayItems(needs)
-	out.NeedsYou = TodaySection{Items: needs, Health: combinedTodayHealth(needs, out.Priorities.Health, out.FollowUps.Health, out.Decisions.Health)}
+	out.NeedsYou = TodaySection{Items: needs, Health: combinedTodayHealth(needs, out.Priorities.Health, out.FollowUps.Health, out.Decisions.Health, out.Backups.Health)}
 	out.Done = TodaySection{Items: done, Health: combinedTodayHealth(done, out.Results.Health, studioHealth(out.Studio))}
 	for _, src := range []struct {
 		name   string
@@ -191,7 +192,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		{"priorities", out.Priorities.Health}, {"follow-ups", out.FollowUps.Health},
 		{"decisions", out.Decisions.Health}, {"results", out.Results.Health},
 		{"memory", out.Remembered.Health}, {"specialist setup", setupHealth(out.SpecialistSetup)},
-		{"studio", studioHealth(out.Studio)},
+		{"studio", studioHealth(out.Studio)}, {"Backup & Recovery", out.Backups.Health},
 	} {
 		if src.health.Status == TodaySectionUnavailable || src.health.Status == TodaySectionPartial {
 			out.UnavailableSources = appendSource(out.UnavailableSources, src.name)

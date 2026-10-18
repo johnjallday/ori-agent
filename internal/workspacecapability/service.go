@@ -143,13 +143,21 @@ func (s *Service) Catalog(workspaceID string) ([]CatalogItem, error) {
 	items := make([]CatalogItem, 0, len(installed)+1)
 	for _, def := range s.registry.Definitions() {
 		item := CatalogItem{Definition: def, Available: true}
+		if def.Requirements.OrdinaryWorkspaceOnly && !isOrdinaryCapabilityWorkspace(ws) {
+			item.Available = false
+			item.Unavailable = ordinaryCapabilityWorkspaceMessage
+		}
 		if record, ok := byID[def.ID]; ok {
 			delete(byID, def.ID)
 			item.Installed = true
 			recordCopy := record
 			item.Record = &recordCopy
 			item.NeedsMigration = record.Version != def.Version
-			item.Status = s.statusFor(record, workspaceID)
+			if item.Available {
+				item.Status = s.statusFor(record, workspaceID)
+			} else {
+				item.Status = &Status{State: StatusUnavailable, Detail: item.Unavailable}
+			}
 		}
 		items = append(items, item)
 	}
@@ -234,6 +242,23 @@ func assistantProgramHomeOffersCapability(ws *workspace.Workspace, capabilityID 
 	return false
 }
 
+const ordinaryCapabilityWorkspaceMessage = "This capability requires an active ordinary workspace, not an Assistant Home or group."
+
+func isOrdinaryCapabilityWorkspace(ws *workspace.Workspace) bool {
+	if ws == nil || ws.GetStatus() != workspace.StatusActive || ws.GetAssistantProgramState() != nil {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(ws.Kind))
+	return kind == "" || kind == "workspace"
+}
+
+func enforceOrdinaryCapabilityWorkspace(ws *workspace.Workspace, def Definition) error {
+	if def.Requirements.OrdinaryWorkspaceOnly && !isOrdinaryCapabilityWorkspace(ws) {
+		return &Error{Code: CodeCapabilityUnavailable, Message: ordinaryCapabilityWorkspaceMessage}
+	}
+	return nil
+}
+
 func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr error) {
 	defer func() {
 		count := 0
@@ -250,6 +275,9 @@ func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr e
 
 	ws, err := s.loadWorkspace(req.WorkspaceID)
 	if err != nil {
+		return InstallResult{}, err
+	}
+	if err := enforceOrdinaryCapabilityWorkspace(ws, def); err != nil {
 		return InstallResult{}, err
 	}
 	if def.Requirements.AssistantProgramHomeOnly && !assistantProgramHomeOffersCapability(ws, def.ID) {
@@ -302,6 +330,9 @@ func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr e
 
 	alreadyInstalled := false
 	updateErr := s.store.Update(req.WorkspaceID, func(w *workspace.Workspace) error {
+		if err := enforceOrdinaryCapabilityWorkspace(w, def); err != nil {
+			return err
+		}
 		if existing, ok := w.GetInstalledCapability(def.ID); ok {
 			alreadyInstalled = true
 			record = existing

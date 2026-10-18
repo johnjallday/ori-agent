@@ -113,6 +113,7 @@ func TestRegistry_RejectsMalformedAndDuplicateDefinitions(t *testing.T) {
 		{"zero version", []Definition{{ID: "x", Display: Display{Name: "X"}}}, "version must be positive"},
 		{"no display name", []Definition{{ID: "x", Version: 1}}, "display name is required"},
 		{"duplicate id", []Definition{valid, valid}, "registered twice"},
+		{"conflicting workspace scopes", []Definition{{ID: "x", Version: 1, Display: Display{Name: "X"}, Requirements: Requirements{AssistantProgramHomeOnly: true, OrdinaryWorkspaceOnly: true}}}, "incompatible workspace requirements"},
 		{
 			"default tab outside allowlist",
 			[]Definition{{ID: "x", Version: 1, Display: Display{Name: "X"}, Console: ConsoleDescriptor{Tabs: []string{"review"}, DefaultTab: "nope"}}},

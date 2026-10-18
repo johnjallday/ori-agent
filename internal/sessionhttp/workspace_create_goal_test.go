@@ -224,8 +224,8 @@ func TestCreateWorkspaceInheritsEveryActiveStockGoalWithoutRunning(t *testing.T)
 			}
 		})
 	}
-	if count != 11 {
-		t.Fatalf("created %d active stock templates, want 11", count)
+	if count != 12 {
+		t.Fatalf("created %d active stock templates, want 12", count)
 	}
 }
 

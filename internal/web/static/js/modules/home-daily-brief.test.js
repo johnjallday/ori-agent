@@ -589,6 +589,34 @@ test('prepareTodaysBrief asks the server for today’s brief when there is none,
   }
 });
 
+test('backup evidence uses safe owning-console routes, escaped host facts and no success badge', () => {
+  const ref = {
+    entity_type: 'backup_observation',
+    workspace_id: 'ws-1',
+    entity_id: 'gen-1',
+    workspace_slug: 'canonical-backup'
+  };
+  assert.equal(hrefForRef(ref), '/workspaces/canonical-backup?panel=backup-recovery&tab=overview');
+  assert.equal(hrefForRef({ ...ref, workspace_slug: '../../ignored' }), '#');
+  assert.equal(hrefForRef({ ...ref, workspace_id: '../bad' }), '#');
+  assert.equal(hrefForRef({ ...ref, entity_id: 'bad" onfocus="alert(1)' }), '#');
+  const content = {
+    backup_host_rendered: true,
+    backup_evidence: [
+      { ref, summary: 'User reports sample recovery passed. <script>not verified</script>' }
+    ]
+  };
+  assert.equal(isQuietDay(content), false);
+  const html = renderContent(content);
+  assert.ok(html.includes('Backup &amp; Recovery · stored evidence'));
+  assert.ok(html.includes('&lt;script&gt;'));
+  assert.ok(!html.includes('<script>'));
+  assert.ok(html.includes('panel=backup-recovery'));
+  const banner = computeBanner({ content_json: JSON.stringify(content) }, null);
+  assert.ok(banner.text.includes('do not prove protection'));
+  assert.equal(banner.showRetry, false);
+});
+
 test('prepareTodaysBrief carries a failed attempt so the failure survives a reload', async () => {
   const originalFetch = globalThis.fetch;
   const today = localDateInZone('UTC');
