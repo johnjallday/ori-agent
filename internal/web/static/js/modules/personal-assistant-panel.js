@@ -4,7 +4,8 @@ import {
 } from './personal-assistant-workspace-context.js';
 import {
   RECIPIENT_WORKSPACE_ENTRY,
-  entryAgentPlaceholder
+  entryAgentPlaceholder,
+  entrySessionRows
 } from './personal-assistant-recipient.js';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
@@ -113,6 +114,20 @@ export function recipientIdentityView(view, resolution) {
     appearance: null
   };
 }
+
+/** The strip above the entry agent's conversation: its session, and New. */
+export function entrySessionStripView({ recipient, session, hasMessages } = {}) {
+  const id = String(session?.id || '');
+  return {
+    visible: recipient?.kind === RECIPIENT_WORKSPACE_ENTRY,
+    title: id ? String(session?.title || '').trim() || 'Conversation' : 'New conversation',
+    // A new conversation that has nothing in it yet has nothing to leave.
+    newDisabled: !id && hasMessages !== true
+  };
+}
+
+export const ENTRY_HYDRATION_FAILED =
+  'Could not load this conversation. Your next message starts where the server left off.';
 
 export function boundedAssistantHandoff(value) {
   return Array.from(String(value || '').trim())
@@ -329,6 +344,101 @@ function recipients() {
   return window.PersonalAssistantRecipient || null;
 }
 
+function renderEntrySessionBar() {
+  const els = state.els;
+  if (!els?.entrySessionBar) return;
+  const view = entrySessionStripView({
+    recipient: recipients()?.current?.(),
+    session: recipients()?.session?.(),
+    hasMessages: window.OriAskRouting?.getState?.().hasConversation === true
+  });
+  els.entrySessionBar.hidden = !view.visible;
+  if (els.entrySessionTitle) els.entrySessionTitle.textContent = view.title;
+  if (els.entrySessionNew) els.entrySessionNew.disabled = view.newDisabled;
+}
+
+// Which entry agent the thread was last loaded for, and a ticket so a slow
+// load never lands after the user switched recipient or workspace.
+const entryHydration = { sequence: 0, target: '' };
+
+function entryTarget(recipient) {
+  return `${recipient?.workspaceId || ''}\n${recipient?.name || ''}`;
+}
+
+/**
+ * Loads the entry agent's current session into the drawer (FR21): user and
+ * assistant rows, oldest first, scrolled to the latest. Once per entry agent,
+ * unless `force` (opening the drawer, switching to it). A failure leaves one
+ * status line and never blocks sending.
+ */
+async function hydrateEntryConversation({ force = false } = {}) {
+  const ctl = recipients();
+  const current = ctl?.current?.();
+  if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || !current.available) {
+    entryHydration.target = '';
+    return false;
+  }
+  const target = entryTarget(current);
+  if (!force && target === entryHydration.target) return false;
+  // A reply in flight owns the thread; its own rows are already the latest.
+  if (window.OriAskRouting?.getState?.().busy === true) return false;
+  entryHydration.target = target;
+  const ticket = ++entryHydration.sequence;
+  let loaded;
+  try {
+    loaded = await ctl.loadSession();
+  } catch (_) {
+    loaded = { session: null, error: true };
+  }
+  const now = ctl.current?.();
+  if (
+    ticket !== entryHydration.sequence ||
+    loaded.stale ||
+    now?.kind !== RECIPIENT_WORKSPACE_ENTRY ||
+    entryTarget(now) !== target
+  )
+    return false;
+  if (loaded.error) {
+    setStatus(ENTRY_HYDRATION_FAILED);
+    renderEntrySessionBar();
+    return false;
+  }
+  if (!window.OriAskRouting?.resetConversation?.()) return false;
+  const transcript = window.PersonalAssistantTranscript;
+  transcript?.beginHydration?.();
+  try {
+    for (const row of entrySessionRows(loaded.session)) {
+      window.OriAskRouting.appendMessage(
+        row.role,
+        row.content,
+        row.role === 'assistant'
+          ? { author: { name: now.name, appearance: now.appearance } }
+          : undefined
+      );
+    }
+  } finally {
+    transcript?.endHydration?.();
+  }
+  if (state.els?.status?.textContent === ENTRY_HYDRATION_FAILED) setStatus('');
+  renderEntrySessionBar();
+  return true;
+}
+
+/** New, with the entry agent selected: forget this tab's session (FR22). */
+function startNewEntryConversation() {
+  const who = identity();
+  if (who.personal) return false;
+  if (!window.OriAskRouting?.resetConversation?.()) {
+    setStatus(`Wait for ${who.name} to reply before starting a new conversation.`);
+    return false;
+  }
+  recipients()?.forgetSession?.();
+  setStatus('');
+  renderEntrySessionBar();
+  state.els?.input?.focus();
+  return true;
+}
+
 /** Who the drawer is addressed to now, as the launcher and header show it. */
 function identity() {
   return recipientIdentityView(state.view, recipients()?.resolution?.() || null);
@@ -362,6 +472,7 @@ function renderIdentity() {
   els.panel.dataset.recipient = who.kind;
   renderChip();
   renderCheckIn();
+  renderEntrySessionBar();
   // The hired assistant's setup notices describe it, not a workspace agent.
   if (!who.personal) return;
   // Home says these in the banner under the header. A page without that banner
@@ -624,6 +735,7 @@ function open(trigger, options = {}) {
   // Commander can change on the Roles view, so it is read again too.
   void refresh();
   void recipients()?.refresh?.();
+  void hydrateEntryConversation({ force: true });
   void refreshWorkspaceContext();
   void readTodayForThisPage();
   try {
@@ -957,6 +1069,9 @@ function init() {
     launcher,
     launcherName: document.getElementById('personalAssistantLauncherName'),
     launcherRole: document.getElementById('personalAssistantLauncherRole'),
+    entrySessionBar: document.getElementById('personalAssistantEntrySessionBar'),
+    entrySessionTitle: document.getElementById('personalAssistantEntrySessionTitle'),
+    entrySessionNew: document.getElementById('personalAssistantEntrySessionNew'),
     launcherAvatar: document.getElementById('personalAssistantLauncherAvatar'),
     panelAvatar: document.getElementById('personalAssistantPanelAvatar'),
     title: document.getElementById('personalAssistantPanelTitle'),
@@ -1017,7 +1132,10 @@ function init() {
     const recipient = event.detail?.recipient;
     window.OriAskRouting?.setRecipient?.(recipient);
     renderIdentity();
+    void hydrateEntryConversation();
   });
+  document.addEventListener('personal-assistant:entry-session', renderEntrySessionBar);
+  state.els.entrySessionNew?.addEventListener('click', startNewEntryConversation);
   document.addEventListener('ori:workspace-context', () => void recipients()?.refresh?.());
   window.addEventListener('popstate', () => void recipients()?.refresh?.());
   void recipients()?.refresh?.();

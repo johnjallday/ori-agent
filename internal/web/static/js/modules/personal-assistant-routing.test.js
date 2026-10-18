@@ -299,6 +299,11 @@ test('a failed entry-agent turn keeps the message; a timed-out one does not rese
     recipient: entryRecipient
   });
   assert.deepEqual(delayed.restored, []);
+  // The delay is said honestly, under the entry agent's name.
+  const summary = delayed.window.OriAskRouting.getState().routingSummary;
+  assert.equal(summary.title, 'REAPER Assistant Delayed');
+  assert.equal(summary.state, 'timeout');
+  assert.match(summary.text, /reply is saved in this conversation/);
 });
 
 test('a recipient outside the drawer, or the Personal Assistant, keeps personal routing', async () => {

@@ -17,7 +17,9 @@ import {
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
+  ENTRY_HYDRATION_FAILED,
   entryAgentSendRecipient,
+  entrySessionStripView,
   personalAssistantPanelView,
   recipientIdentityView,
   restoreAssistantPanelFocus,
@@ -130,6 +132,45 @@ test('the launcher role line can be updated per recipient', () => {
     'utf8'
   );
   assert.match(markup, /id="personalAssistantLauncherRole"/);
+  // The entry agent's session strip is its own, never the personal one's.
+  assert.match(markup, /id="personalAssistantEntrySessionBar"[^>]*hidden/);
+  assert.match(markup, /id="personalAssistantEntrySessionTitle"[^>]*>New conversation</);
+  assert.match(markup, /id="personalAssistantEntrySessionNew"/);
+});
+
+test('the session strip names the entry agent session or a new conversation (FR22)', () => {
+  const entry = resolveRecipient(workspacePage).current;
+  assert.deepEqual(
+    entrySessionStripView({ recipient: entry, session: { id: 's1', title: 'Add a reverb bus' } }),
+    { visible: true, title: 'Add a reverb bus', newDisabled: false }
+  );
+  assert.equal(
+    entrySessionStripView({ recipient: entry, session: { id: 's1' } }).title,
+    'Conversation'
+  );
+  assert.deepEqual(entrySessionStripView({ recipient: entry, session: { id: '' } }), {
+    visible: true,
+    title: 'New conversation',
+    newDisabled: true
+  });
+  // Unsaved rows (a turn that failed before a session existed) can be cleared.
+  assert.equal(
+    entrySessionStripView({ recipient: entry, session: { id: '' }, hasMessages: true }).newDisabled,
+    false
+  );
+  const personal = resolveRecipient({ ...workspacePage, pick: 'personal' }).current;
+  assert.equal(
+    entrySessionStripView({ recipient: personal, session: { id: 's1' } }).visible,
+    false
+  );
+  assert.equal(entrySessionStripView({}).visible, false);
+});
+
+test('a failed hydration says what happens next and does not block sending (FR21)', () => {
+  assert.equal(
+    ENTRY_HYDRATION_FAILED,
+    'Could not load this conversation. Your next message starts where the server left off.'
+  );
 });
 
 test('only a focused control outside the scroll viewport needs reflow recovery', () => {

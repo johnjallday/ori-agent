@@ -199,6 +199,20 @@
           </div>
         </div>
       </div>
+      <!-- With the workspace's entry agent selected, its conversation is a
+           workspace chat session (also listed in the Sessions station). New
+           starts another one with the next message; nothing is created here. -->
+      <div id="personalAssistantEntrySessionBar" class="personal-assistant-conversation" hidden>
+        <div class="personal-assistant-conversation__head">
+          <p class="personal-assistant-conversation__current">
+            <span id="personalAssistantEntrySessionTitle" class="personal-assistant-conversation__title">New conversation</span>
+          </p>
+          <div class="personal-assistant-conversation__actions">
+            <button type="button" id="personalAssistantEntrySessionNew"
+                    class="personal-assistant-conversation__button" aria-label="New conversation">New</button>
+          </div>
+        </div>
+      </div>
       <!-- Save to HQ backlog: the review of one reply before it is saved. It is
            its own form, so Enter here can never send the composer. Opening it
            writes nothing; only Save to backlog does. -->

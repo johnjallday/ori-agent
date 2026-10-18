@@ -15,6 +15,10 @@ const WORKSPACE_SURFACES = new Set(['workspace_detail', 'workspace_canvas', 'wor
 
 export const PICK_KEY_PREFIX = 'ori.personalAssistant.recipient.';
 export const SESSION_KEY_PREFIX = 'ori.personalAssistant.recipientSession.';
+// Stored in place of a session id after New: this tab chose a new
+// conversation, so the most recent session is not offered again until the
+// next message creates one (FR22).
+export const NEW_CONVERSATION_MARK = '-';
 
 // The map's command node label: "Commander" for an orchestrator, "Acting
 // Commander" for any other agent holding the slot (workspace-command.js).
@@ -273,6 +277,63 @@ export async function loadEntryAgent(workspaceId, { fetchImpl, loadedWorkspace }
   return { workspaceName, entry: { status: 'ready', name, role: '', appearance: null } };
 }
 
+/** The conversation rows of one workspace chat session, oldest first. */
+export function entrySessionRows(session) {
+  const messages = Array.isArray(session?.messages) ? session.messages : [];
+  return messages
+    .filter(message => ['user', 'assistant'].includes(message?.role))
+    .map(message => ({ role: message.role, content: String(message.content ?? '') }))
+    .filter(row => row.content.trim());
+}
+
+/**
+ * The entry agent's current session for this tab (FR20): the one the tab is
+ * already in, else the most recently updated session in this workspace with
+ * that agent, else none. A remembered session that is gone or belongs to
+ * another agent is forgotten. Returns { session, stored, error } where
+ * `session` is the full session with its messages, or null for a new
+ * conversation; `error` means the server could not be read, and the
+ * remembered id (if any) is kept.
+ */
+export async function loadEntrySession({ fetchImpl, workspaceId, agentName, storedId }) {
+  const id = text(workspaceId);
+  const agent = text(agentName);
+  const read = async sessionId => {
+    const result = await getJSON(fetchImpl, `/api/sessions/${encodeURIComponent(sessionId)}`);
+    if (result.ok && result.body?.id) return { session: result.body };
+    return { gone: result.status === 404, failed: result.status !== 404 };
+  };
+  if (text(storedId) === NEW_CONVERSATION_MARK) {
+    return { session: null, stored: true, fresh: true, error: false };
+  }
+  try {
+    if (text(storedId)) {
+      const stored = await read(text(storedId));
+      if (stored.session && sameName(stored.session.agent_name, agent)) {
+        return { session: stored.session, stored: true, error: false };
+      }
+      if (stored.failed) return { session: null, stored: true, error: true };
+    }
+    const query = new URLSearchParams({
+      folder_id: id,
+      agent_name: agent,
+      sort: 'updated_desc',
+      limit: '1'
+    });
+    const list = await getJSON(fetchImpl, `/api/sessions?${query}`);
+    if (!list.ok) return { session: null, stored: false, error: true };
+    const latest = (Array.isArray(list.body?.sessions) ? list.body.sessions : []).find(
+      item => item?.id && sameName(item.agent_name, agent)
+    );
+    if (!latest) return { session: null, stored: false, error: false };
+    const full = await read(String(latest.id));
+    if (full.session) return { session: full.session, stored: false, error: false };
+    return { session: null, stored: false, error: full.failed === true };
+  } catch (_) {
+    return { session: null, stored: Boolean(text(storedId)), error: true };
+  }
+}
+
 /**
  * The drawer's recipient for this tab. Pure decisions come from
  * resolveRecipient; this keeps the facts it needs (page, entry agent, hired
@@ -292,6 +353,27 @@ export function createRecipientController({
   let sequence = 0;
   let resolution = resolveRecipient({});
   const listeners = new Set();
+  // The title of the entry agent's current session, for the session strip.
+  let session = { workspaceId: '', id: '', title: '' };
+  const sessionListeners = new Set();
+
+  function sessionId() {
+    const stored = readEntrySession(page.workspaceId, storage);
+    return stored === NEW_CONVERSATION_MARK ? '' : stored;
+  }
+
+  function setSession(workspaceId, id, title) {
+    writeEntrySession(workspaceId, id, storage);
+    const real = text(id) && text(id) !== NEW_CONVERSATION_MARK ? text(id) : '';
+    session = { workspaceId: text(workspaceId), id: real, title: real ? text(title) : '' };
+    for (const listener of sessionListeners) {
+      try {
+        listener({ ...session });
+      } catch (_) {
+        // A strip that fails to render never stops the conversation.
+      }
+    }
+  }
 
   function recompute() {
     const previous = resolution;
@@ -361,14 +443,44 @@ export function createRecipientController({
       writePick(page.workspaceId, kind, storage);
       return recompute();
     },
-    sessionId: () => readEntrySession(page.workspaceId, storage),
-    rememberSession(workspaceId, session) {
-      const id = text(session?.id ?? session);
-      if (!text(workspaceId) || !id) return;
-      writeEntrySession(workspaceId, id, storage);
+    sessionId,
+    session: () => ({
+      workspaceId: page.workspaceId,
+      id: sessionId(),
+      title: session.workspaceId === page.workspaceId ? session.title : ''
+    }),
+    /** The entry agent's current session, with its messages (FR20). */
+    async loadSession() {
+      const current = resolution.current;
+      const workspaceId = page.workspaceId;
+      if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || !current.available || !fetchImpl) {
+        return { session: null, error: false };
+      }
+      const loaded = await loadEntrySession({
+        fetchImpl,
+        workspaceId,
+        agentName: current.name,
+        storedId: readEntrySession(workspaceId, storage)
+      });
+      // The tab moved on while the server answered; that answer is not ours.
+      if (page.workspaceId !== workspaceId) return { session: null, error: false, stale: true };
+      if (loaded.session) setSession(workspaceId, loaded.session.id, loaded.session.title);
+      else if (!loaded.error && !loaded.fresh) setSession(workspaceId, '', '');
+      return loaded;
     },
+    rememberSession(workspaceId, next) {
+      const id = text(next?.id ?? next);
+      if (!text(workspaceId) || !id) return;
+      setSession(workspaceId, id, next?.title);
+    },
+    /** New: this tab starts a new conversation with the next message. */
     forgetSession() {
-      writeEntrySession(page.workspaceId, '', storage);
+      setSession(page.workspaceId, NEW_CONVERSATION_MARK, '');
+    },
+    onSession(listener) {
+      if (typeof listener !== 'function') return () => {};
+      sessionListeners.add(listener);
+      return () => sessionListeners.delete(listener);
     },
     onChange(listener) {
       if (typeof listener !== 'function') return () => {};
@@ -394,6 +506,15 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       );
     } catch (_) {
       // The event is a coordination seam; rendering never depends on it.
+    }
+  });
+  controller.onSession(session => {
+    try {
+      document.dispatchEvent(
+        new CustomEvent('personal-assistant:entry-session', { detail: { session } })
+      );
+    } catch (_) {
+      // As above: only the session strip listens.
     }
   });
   window.PersonalAssistantRecipient = controller;

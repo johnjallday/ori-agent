@@ -9,8 +9,11 @@ import {
   clearOtherPicks,
   commanderLabel,
   createRecipientController,
+  NEW_CONVERSATION_MARK,
   entryAgentPlaceholder,
+  entrySessionRows,
   loadEntryAgent,
+  loadEntrySession,
   readEntrySession,
   readPick,
   resolveRecipient,
@@ -410,4 +413,173 @@ test('the Personal HQ id reaches the resolver through the hired assistant', asyn
   await controller.refresh();
   assert.equal(controller.resolution().pickerVisible, false);
   assert.equal(controller.current().name, 'Mina');
+});
+
+test('session messages map to user and assistant rows in order', () => {
+  assert.deepEqual(
+    entrySessionRows({
+      messages: [
+        { role: 'user', content: 'Add a reverb bus' },
+        { role: 'tool', content: '{"ok":true}' },
+        { role: 'assistant', content: 'Done.' },
+        { role: 'system', content: 'hidden' },
+        { role: 'assistant', content: '   ' },
+        { role: 'user', content: 'Route the vocal' }
+      ]
+    }),
+    [
+      { role: 'user', content: 'Add a reverb bus' },
+      { role: 'assistant', content: 'Done.' },
+      { role: 'user', content: 'Route the vocal' }
+    ]
+  );
+  assert.deepEqual(entrySessionRows(null), []);
+  assert.deepEqual(entrySessionRows({}), []);
+});
+
+const latestRoute =
+  '/api/sessions?folder_id=ws-1&agent_name=REAPER+Assistant&sort=updated_desc&limit=1';
+const mira = name => ({
+  id: name,
+  agent_name: 'REAPER Assistant',
+  title: 't-' + name,
+  messages: []
+});
+
+test('the stored session wins over the latest one (FR20)', async () => {
+  const fetchImpl = fakeFetch({
+    '/api/sessions/sess-stored': { body: mira('sess-stored') },
+    [latestRoute]: { body: { sessions: [{ id: 'sess-latest', agent_name: 'REAPER Assistant' }] } }
+  });
+  const out = await loadEntrySession({
+    fetchImpl,
+    workspaceId: 'ws-1',
+    agentName: 'REAPER Assistant',
+    storedId: 'sess-stored'
+  });
+  assert.equal(out.session.id, 'sess-stored');
+  assert.deepEqual(fetchImpl.seen, ['/api/sessions/sess-stored']);
+});
+
+test('without a stored session the latest one with the entry agent is used', async () => {
+  const fetchImpl = fakeFetch({
+    [latestRoute]: { body: { sessions: [{ id: 'sess-latest', agent_name: 'REAPER Assistant' }] } },
+    '/api/sessions/sess-latest': { body: mira('sess-latest') }
+  });
+  const out = await loadEntrySession({
+    fetchImpl,
+    workspaceId: 'ws-1',
+    agentName: 'REAPER Assistant',
+    storedId: ''
+  });
+  assert.equal(out.session.id, 'sess-latest');
+  assert.equal(out.stored, false);
+  assert.deepEqual(fetchImpl.seen, [latestRoute, '/api/sessions/sess-latest']);
+});
+
+test('none is a new conversation; a gone or reassigned stored session falls back', async () => {
+  const none = fakeFetch({ [latestRoute]: { body: { sessions: [] } } });
+  assert.deepEqual(
+    await loadEntrySession({
+      fetchImpl: none,
+      workspaceId: 'ws-1',
+      agentName: 'REAPER Assistant',
+      storedId: ''
+    }),
+    { session: null, stored: false, error: false }
+  );
+  const reassigned = fakeFetch({
+    '/api/sessions/sess-old': { body: { id: 'sess-old', agent_name: 'Old Commander' } },
+    [latestRoute]: { body: { sessions: [] } }
+  });
+  const out = await loadEntrySession({
+    fetchImpl: reassigned,
+    workspaceId: 'ws-1',
+    agentName: 'REAPER Assistant',
+    storedId: 'sess-old'
+  });
+  assert.equal(out.session, null);
+  assert.equal(out.error, false);
+  const gone = fakeFetch({ [latestRoute]: { body: { sessions: [] } } });
+  const goneOut = await loadEntrySession({
+    fetchImpl: gone,
+    workspaceId: 'ws-1',
+    agentName: 'REAPER Assistant',
+    storedId: 'sess-deleted'
+  });
+  assert.equal(goneOut.error, false);
+});
+
+test('a server failure is an error that keeps the stored session', async () => {
+  const down = fakeFetch({ '/api/sessions/sess-1': { status: 500, body: {} } });
+  const out = await loadEntrySession({
+    fetchImpl: down,
+    workspaceId: 'ws-1',
+    agentName: 'REAPER Assistant',
+    storedId: 'sess-1'
+  });
+  assert.deepEqual(out, { session: null, stored: true, error: true });
+  const offline = fakeFetch({ [latestRoute]: new Error('offline') });
+  assert.equal(
+    (
+      await loadEntrySession({
+        fetchImpl: offline,
+        workspaceId: 'ws-1',
+        agentName: 'REAPER Assistant',
+        storedId: ''
+      })
+    ).error,
+    true
+  );
+});
+
+test('after New the latest session is not offered again until a message creates one', async () => {
+  const fetchImpl = fakeFetch({
+    ...reaperRoutes,
+    [latestRoute]: { body: { sessions: [{ id: 'sess-latest', agent_name: 'REAPER Assistant' }] } },
+    '/api/sessions/sess-latest': { body: mira('sess-latest') }
+  });
+  const storage = memoryStorage();
+  const controller = createRecipientController({
+    fetchImpl,
+    storage,
+    pageContext: () => ({ surface: 'workspace_detail', workspace_id: 'ws-1' })
+  });
+  const sessions = [];
+  controller.onSession(session => sessions.push(session));
+  await controller.refresh();
+  const first = await controller.loadSession();
+  assert.equal(first.session.id, 'sess-latest');
+  assert.deepEqual(controller.session(), {
+    workspaceId: 'ws-1',
+    id: 'sess-latest',
+    title: 't-sess-latest'
+  });
+  assert.equal(controller.sessionId(), 'sess-latest');
+
+  controller.forgetSession();
+  assert.equal(storage.getItem(SESSION_KEY_PREFIX + 'ws-1'), NEW_CONVERSATION_MARK);
+  assert.equal(controller.sessionId(), '');
+  const seenBefore = fetchImpl.seen.length;
+  const fresh = await controller.loadSession();
+  assert.equal(fresh.session, null);
+  assert.equal(fresh.fresh, true);
+  // No server read at all, and the mark is kept.
+  assert.equal(fetchImpl.seen.length, seenBefore);
+  assert.equal(storage.getItem(SESSION_KEY_PREFIX + 'ws-1'), NEW_CONVERSATION_MARK);
+
+  controller.rememberSession('ws-1', { id: 'sess-new', title: 'Route the vocal' });
+  assert.equal(controller.sessionId(), 'sess-new');
+  assert.equal(controller.session().title, 'Route the vocal');
+  assert.deepEqual(
+    sessions.map(session => session.id),
+    ['sess-latest', '', 'sess-new']
+  );
+});
+
+test('loading a session is a no-op unless the entry agent is the ready recipient', async () => {
+  const { controller, fetchImpl } = controllerFor({ surface: 'home', workspace_id: '' }, {});
+  await controller.refresh();
+  assert.deepEqual(await controller.loadSession(), { session: null, error: false });
+  assert.deepEqual(fetchImpl.seen, []);
 });
