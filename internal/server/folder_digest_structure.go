@@ -57,7 +57,7 @@ func (h *folderSetupHost) structurePlan(_ context.Context, req personalassistant
 		GroupName: name, GroupType: personalassistant.FolderGroupPlain,
 		Manager: roster.Manager, ManagerReused: roster.Action == "reuse", RosterRevision: roster.PlanRevision,
 		RootKey: req.Offer.FolderKey, RootIdentity: req.Offer.RootIdentity,
-		Unavailable: structure.AvailabilityNotes(),
+		Unavailable: structure.AvailabilityNotes(), Arrangement: structure.Arrangement,
 	}
 	for _, member := range members {
 		facts.Members = append(facts.Members, foldersetup.StructureMember{

@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 )
 
 const homeMaxToolRounds = 4
@@ -103,8 +104,9 @@ type HomeAssistantAskRequest struct {
 	ConfirmedAction *HomeAction                `json:"confirmed_action,omitempty"`
 	// Conversation asks for the turn to be part of a hired-assistant
 	// conversation. Its ID is opaque; the server derives the owner.
-	Conversation  *HomeAssistantConversationRef `json:"conversation,omitempty"`
-	FolderContext *HomeAssistantFolderRef       `json:"folder_context,omitempty"`
+	Conversation  *HomeAssistantConversationRef    `json:"conversation,omitempty"`
+	FolderContext *HomeAssistantFolderRef          `json:"folder_context,omitempty"`
+	Arrangement   *HomeAssistantArrangementRequest `json:"arrangement,omitempty"`
 	// LinkContext names a link the composer attached; the server holds what it
 	// observed and the turn uses that, never anything the browser sends.
 	LinkContext *HomeAssistantLinkRef `json:"link_context,omitempty"`
@@ -137,6 +139,8 @@ type HomeAssistantAskResponse struct {
 	// Conversation is set only for a hired-assistant conversation turn.
 	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
 	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
+	Arrangement           *HomeAssistantArrangementSummary        `json:"arrangement,omitempty"`
+	ArrangementError      *ArrangementFailure                     `json:"arrangement_error,omitempty"`
 	LinkContext           *PersonalAssistantLinkState             `json:"link_context,omitempty"`
 	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
 	// FolderReviewContext is the canonical review summary given to the model for
@@ -247,6 +251,7 @@ type HomeAssistantAskHandler struct {
 	// conversations; nil keeps every turn stateless.
 	Conversations      PersonalAssistantConversationStore
 	FolderObservations PersonalAssistantFolderObservations
+	ArrangementPlanner *workspacearrangement.Planner
 	FolderSetups       PersonalAssistantFolderSetups
 	folderRequests     folderRequestGate
 	// Links observes a link the composer attaches; nil leaves Add link off.
@@ -275,6 +280,7 @@ func NewHomeAssistantAskHandler(sources HomeSnapshotSources, factory *llm.Factor
 	}
 	handler := &HomeAssistantAskHandler{Sources: sources, LLMFactory: factory, SystemModel: systemModel, now: now}
 	handler.ResearchReviews = handler.NewResearchReviewGate()
+	handler.ArrangementPlanner = &workspacearrangement.Planner{}
 	return handler
 }
 
@@ -430,6 +436,12 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 				conversation.owner = scope.saveOwner()
 			}
 		}
+	}
+
+	// This branch advertises only arrangement tools. It precedes path-resolving
+	// folder preparation, research, memory actions and the general tool loop.
+	if req.Arrangement != nil {
+		return h.answerArrangementTurn(ctx, req, prompt, identity, workContext, conversation)
 	}
 
 	var research *assistantResearchTurn

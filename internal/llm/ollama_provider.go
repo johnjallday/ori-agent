@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,6 +36,13 @@ type OllamaProvider struct {
 	modelCacheMu      sync.Mutex
 	modelCache        []string
 	modelCacheExpires time.Time
+
+	// toolCallSeq numbers the tool-call IDs this provider synthesizes. Ollama
+	// returns tool calls without IDs; a per-response counter would reuse
+	// "call_0" on every round, and tool loops that key results and replay
+	// protection by ID (the arrangement planner refuses a reused ID) then fail
+	// on the second call of a turn.
+	toolCallSeq atomic.Uint64
 }
 
 // NewOllamaProvider creates a new Ollama provider
@@ -319,6 +327,7 @@ type ollamaResponse struct {
 	CreatedAt       string        `json:"created_at"`
 	Message         ollamaMessage `json:"message"`
 	Done            bool          `json:"done"`
+	DoneReason      string        `json:"done_reason"`
 	PromptEvalCount int           `json:"prompt_eval_count"`
 	EvalCount       int           `json:"eval_count"`
 }
@@ -330,6 +339,28 @@ func (r ollamaResponse) usage() Usage {
 		CompletionTokens: r.EvalCount,
 		TotalTokens:      r.PromptEvalCount + r.EvalCount,
 	}
+}
+
+// finishReason maps Ollama's done_reason onto the unified finish reasons. A
+// reply cut off at num_predict ("length") must be visible to callers: a
+// reasoning model that spends its whole output budget thinking returns empty
+// content, which otherwise reads as an empty answer rather than a truncation.
+// Unknown or absent reasons stay empty rather than claiming a natural stop.
+func (r ollamaResponse) finishReason() string {
+	switch {
+	case len(r.Message.ToolCalls) > 0:
+		return FinishReasonToolCalls
+	case r.DoneReason == "length":
+		return FinishReasonLength
+	case r.DoneReason == "stop":
+		return FinishReasonStop
+	}
+	return ""
+}
+
+// nextToolCallID returns a tool-call ID unique for this provider instance.
+func (p *OllamaProvider) nextToolCallID() string {
+	return fmt.Sprintf("call_%d", p.toolCallSeq.Add(1))
 }
 
 // toOllamaMessages converts unified messages (plus an optional system prompt)
@@ -462,18 +493,20 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	// Convert to common format
 	chatResp := &ChatResponse{
-		Content:  ollamaResp.Message.Content,
-		Model:    ollamaResp.Model,
-		Provider: p.Name(),
-		Usage:    ollamaResp.usage(),
+		Content:      ollamaResp.Message.Content,
+		Model:        ollamaResp.Model,
+		Provider:     p.Name(),
+		Usage:        ollamaResp.usage(),
+		FinishReason: ollamaResp.finishReason(),
 	}
 
-	// Convert tool calls if present
+	// Convert tool calls if present. Ollama sends no IDs; synthesize ones that
+	// stay unique across the rounds of a tool loop.
 	if len(ollamaResp.Message.ToolCalls) > 0 {
 		chatResp.ToolCalls = make([]ToolCall, len(ollamaResp.Message.ToolCalls))
 		for i, tc := range ollamaResp.Message.ToolCalls {
 			chatResp.ToolCalls[i] = ToolCall{
-				ID:        fmt.Sprintf("call_%d", i), // Generate ID
+				ID:        p.nextToolCallID(),
 				Name:      tc.Function.Name,
 				Arguments: string(tc.Function.Arguments),
 			}
@@ -521,8 +554,9 @@ func (p *OllamaProvider) postChat(ctx context.Context, ollamaReq ollamaRequest) 
 
 // ollamaStreamReader implements StreamReader for Ollama streaming responses
 type ollamaStreamReader struct {
-	scanner *bufio.Scanner
-	resp    *http.Response
+	scanner  *bufio.Scanner
+	resp     *http.Response
+	provider *OllamaProvider
 }
 
 // Next reads the next chunk from the stream
@@ -557,7 +591,7 @@ func (r *ollamaStreamReader) Next() (*StreamChunk, error) {
 		// For now, just handle the first tool call
 		tc := chunk.Message.ToolCalls[0]
 		streamChunk.ToolCall = &ToolCall{
-			ID:        "call_0",
+			ID:        r.provider.nextToolCallID(),
 			Name:      tc.Function.Name,
 			Arguments: string(tc.Function.Arguments),
 		}
@@ -614,7 +648,8 @@ func (p *OllamaProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 	}
 
 	return &ollamaStreamReader{
-		scanner: bufio.NewScanner(resp.Body),
-		resp:    resp,
+		scanner:  bufio.NewScanner(resp.Body),
+		resp:     resp,
+		provider: p,
 	}, nil
 }

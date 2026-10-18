@@ -68,6 +68,7 @@ import (
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacearrangement"
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
@@ -82,6 +83,8 @@ type CoreSystemFacade struct {
 	ConfigManager *config.Manager
 	CostTracker   *llm.CostTracker
 	Gateway       *gateway.Service
+	// Share leases across every arrangement entry point, not per HTTP request.
+	ArrangementPlanner *workspacearrangement.Planner
 }
 
 // StorageSystemFacade manages all storage and state dependencies
@@ -257,11 +260,12 @@ func NewCoreSystemFacade(
 	gw *gateway.Service,
 ) *CoreSystemFacade {
 	return &CoreSystemFacade{
-		ClientFactory: clientFactory,
-		LLMFactory:    llmFactory,
-		ConfigManager: configManager,
-		CostTracker:   costTracker,
-		Gateway:       gw,
+		ClientFactory:      clientFactory,
+		LLMFactory:         llmFactory,
+		ConfigManager:      configManager,
+		CostTracker:        costTracker,
+		Gateway:            gw,
+		ArrangementPlanner: &workspacearrangement.Planner{},
 	}
 }
 

@@ -61,7 +61,7 @@ func TestQuestHomeProviderSourceMatchesTheCreateWorkspaceCard(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !state.Reviewed || state.DisplayName != "Music Project Management" || state.MinimumVersion != "0.1.0" {
+			if !state.Reviewed || state.DisplayName != "Music Project Management" || state.MinimumVersion != "0.3.0" {
 				t.Fatalf("reviewed provider = %q %v", state.DisplayName, state.Reviewed)
 			}
 			// The summaries are the Create Workspace card's own copy for the same

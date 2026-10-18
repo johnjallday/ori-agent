@@ -148,7 +148,8 @@ const albums = (extra = {}, group = {}) => ({
 test('a folder of several projects is one proposed group with its member workspaces', () => {
   const view = proposalView(structureOption(albums()), { name: 'ignored', root: true });
   assert.equal(view.kind, 'structure');
-  assert.equal(view.label, 'Proposed workspace group');
+  assert.equal(view.label, 'Rule-based setup option');
+  assert.match(view.description, /Not an agent assessment/);
   assert.equal(view.subject, 'Albums');
   assert.equal(view.scope, '6 workspaces');
   assert.equal(view.art, 'district');

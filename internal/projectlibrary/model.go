@@ -17,16 +17,17 @@ import (
 )
 
 const (
-	SchemaVersion    = 1
-	maxDocumentBytes = 8 << 20
-	maxRoots         = 64
-	maxEntries       = 5000
-	maxScans         = 512
-	maxKnownScopes   = 1024
-	maxSessions      = 4096
-	maxProposals     = 256  // Agent suggestions are bounded; expired entries are pruned only on a later proposal.
-	maxReviews       = 4096 // Keep consumed reviews for replay; bounded by the 8-MiB Home record.
-	maxOperations    = 8192 // Never evict a retryable consequence to make a replay unsafe.
+	SchemaVersion            = 1 // New libraries stay v1 until an explicit arrangement/collection write.
+	ArrangementSchemaVersion = 2
+	maxDocumentBytes         = 8 << 20
+	maxRoots                 = 64
+	maxEntries               = 5000
+	maxScans                 = 512
+	maxKnownScopes           = 1024
+	maxSessions              = 4096
+	maxProposals             = 256  // Agent suggestions are bounded; expired entries are pruned only on a later proposal.
+	maxReviews               = 4096 // Keep consumed reviews for replay; bounded by the 8-MiB Home record.
+	maxOperations            = 8192 // Never evict a retryable consequence to make a replay unsafe.
 )
 
 var (
@@ -114,7 +115,9 @@ type Document struct {
 	Operations    []OperationReceipt       `json:"operations,omitempty"`
 	// CollectionBrief is the Manager's description of the library after the
 	// latest scan whose turn wrote one (Homes that read song facts only).
-	CollectionBrief *CollectionBrief `json:"collection_brief,omitempty"`
+	CollectionBrief *CollectionBrief    `json:"collection_brief,omitempty"`
+	Arrangements    []Arrangement       `json:"arrangements,omitempty"`
+	Collections     []LogicalCollection `json:"collections,omitempty"`
 }
 
 type Root struct {
@@ -309,19 +312,20 @@ func (b ActivationBinding) valid() bool {
 }
 
 type ReviewReceipt struct {
-	Activation       *ActivationBinding     `json:"activation,omitempty"`
-	Token            string                 `json:"token"`
-	Action           string                 `json:"action"`
-	Digest           string                 `json:"digest"`
-	Revision         int64                  `json:"revision"`
-	TargetID         string                 `json:"target_id,omitempty"`
-	FieldsRevision   int64                  `json:"fields_revision,omitempty"`
-	EntryRevision    int64                  `json:"entry_revision,omitempty"`
-	ProviderRevision int64                  `json:"provider_revision,omitempty"`
-	SharedFrom       *ExactLink             `json:"shared_from_project,omitempty"` // Pinned, reviewed user disclosure; not a project read grant.
-	Handoff          *ManagerHandoffReceipt `json:"handoff_citation,omitempty"`
-	ExpiresAt        time.Time              `json:"expires_at"`
-	ConsumedAt       *time.Time             `json:"consumed_at,omitempty"`
+	Collection       *CollectionReviewWitness `json:"collection,omitempty"`
+	Activation       *ActivationBinding       `json:"activation,omitempty"`
+	Token            string                   `json:"token"`
+	Action           string                   `json:"action"`
+	Digest           string                   `json:"digest"`
+	Revision         int64                    `json:"revision"`
+	TargetID         string                   `json:"target_id,omitempty"`
+	FieldsRevision   int64                    `json:"fields_revision,omitempty"`
+	EntryRevision    int64                    `json:"entry_revision,omitempty"`
+	ProviderRevision int64                    `json:"provider_revision,omitempty"`
+	SharedFrom       *ExactLink               `json:"shared_from_project,omitempty"` // Pinned, reviewed user disclosure; not a project read grant.
+	Handoff          *ManagerHandoffReceipt   `json:"handoff_citation,omitempty"`
+	ExpiresAt        time.Time                `json:"expires_at"`
+	ConsumedAt       *time.Time               `json:"consumed_at,omitempty"`
 }
 
 type OperationReceipt struct {
@@ -420,7 +424,7 @@ func (f Fields) valid() bool {
 }
 
 func (d Document) valid(scope Scope) bool {
-	if !scope.valid() || d.SchemaVersion != SchemaVersion || d.Revision < 1 ||
+	if !scope.valid() || (d.SchemaVersion != SchemaVersion && d.SchemaVersion != ArrangementSchemaVersion) || d.Revision < 1 ||
 		d.OwnerUserID != scope.OwnerUserID || d.HomeID != scope.HomeID ||
 		d.ProviderID != scope.ProviderID || d.ProgramID != scope.ProgramID ||
 		len(d.Roots) > maxRoots || len(d.Entries) > maxEntries || len(d.Scans) > maxScans ||
@@ -556,7 +560,7 @@ func (d Document) valid(scope Scope) bool {
 		}
 		sessions[session.ID] = true
 	}
-	if d.Queue != nil && !d.Queue.valid() {
+	if d.Queue != nil && (!d.Queue.valid() || (d.SchemaVersion == SchemaVersion && len(d.Queue.IDs) < 2)) {
 		return false
 	}
 	queueIDs := map[string]bool{}
@@ -564,7 +568,7 @@ func (d Document) valid(scope Scope) bool {
 		queueIDs[d.Queue.ID] = true
 	}
 	for _, outcome := range d.QueueHistory {
-		if !outcome.valid() || queueIDs[outcome.ID] {
+		if !outcome.valid() || queueIDs[outcome.ID] || (d.SchemaVersion == SchemaVersion && outcome.SelectedCount < 2) {
 			return false
 		}
 		queueIDs[outcome.ID] = true
@@ -622,7 +626,7 @@ func (d Document) valid(scope Scope) bool {
 	}
 	used := map[string]bool{}
 	for _, review := range d.Reviews {
-		if review.Token == "" || used[review.Token] || review.Action == "" || review.Digest == "" ||
+		if !validCollectionReview(review, d.SchemaVersion) || review.Token == "" || used[review.Token] || review.Action == "" || review.Digest == "" ||
 			review.Revision < 0 || review.FieldsRevision < 0 || review.EntryRevision < 0 || review.ProviderRevision < 0 ||
 			(review.Action == "edit_fields" && review.TargetID == "") || review.ExpiresAt.IsZero() ||
 			(review.Action == "activate_project" && (review.Activation == nil || !review.Activation.valid() || review.TargetID == "")) ||
@@ -641,7 +645,7 @@ func (d Document) valid(scope Scope) bool {
 		}
 		used[op.Key] = true
 	}
-	return true
+	return d.validArrangements()
 }
 
 // The canonical workspace envelope persists raw JSON, so re-decoding here
@@ -655,6 +659,17 @@ func decodeDocument(raw json.RawMessage, scope Scope) (Document, error) {
 	var doc Document
 	if err := decoder.Decode(&doc); err != nil || !doc.valid(scope) {
 		return Document{}, ErrCorrupt
+	}
+	if doc.SchemaVersion == SchemaVersion {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			return Document{}, ErrCorrupt
+		}
+		for name := range fields {
+			if strings.EqualFold(name, "arrangements") || strings.EqualFold(name, "collections") {
+				return Document{}, ErrCorrupt
+			}
+		}
 	}
 	var tail any
 	if err := decoder.Decode(&tail); !errors.Is(err, io.EOF) {

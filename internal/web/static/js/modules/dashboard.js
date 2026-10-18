@@ -10496,16 +10496,23 @@
         var drafts = window.PersonalAssistantDrafts;
         var draftRef =
           drafts && typeof drafts.workingRef === 'function' ? drafts.workingRef() : null;
-        if (draftRef && !confirmedAction) {
+        if (draftRef && !confirmedAction && !options.arrangement) {
           payload.draft = draftRef;
         }
         // Which tab is asking and whether it chose to watch. This scopes the
         // delivery of an operation the turn may request; it grants nothing.
         var operations = window.PersonalAssistantOperations;
-        if (!confirmedAction && operations && typeof operations.askRef === 'function') {
+        if (
+          !confirmedAction &&
+          !options.arrangement &&
+          operations &&
+          typeof operations.askRef === 'function'
+        ) {
           payload.operation = operations.askRef();
         }
       }
+
+      if (options.arrangement && !confirmedAction) payload.arrangement = options.arrangement;
 
       // One reply can be several model calls. Wait for it as long as the
       // drawer says it will, not the request helper's general 30 seconds.
@@ -10516,6 +10523,12 @@
       if (conversationRef && conversations.currentId() !== String(conversationRef.id || '')) {
         conversations.notify(
           'That reply belongs to the earlier conversation. Reopen it to see its saved history.'
+        );
+        return;
+      }
+      if (options.arrangementIsCurrent && !options.arrangementIsCurrent()) {
+        conversations.notify(
+          'That planning reply belongs to an earlier context. Reopen saved history to check it.'
         );
         return;
       }
@@ -10557,6 +10570,9 @@
       ) {
         restorePersonalAssistantDraft(text);
       }
+      // Arrangement replies are inert, canonical discussion only. Never feed
+      // them into legacy setup suggestions, research or operation execution.
+      if (options.arrangement) return data;
       if (assistantRow && window.PersonalAssistantResearch) {
         var researchRefs = data.research_context || normalizedContext;
         var researchFolder = data.research_folder_context;
@@ -14430,6 +14446,36 @@
     if (modal && typeof modal.hide === 'function') modal.hide();
   };
   window.OriAskRouting.submit = submitPromptViaAskOri;
+  window.OriAskRouting.submitArrangement = async function (request, refs, isCurrent) {
+    if (
+      homeAssistantState.busy ||
+      !isCurrent() ||
+      !refs.conversation ||
+      !refs.folder ||
+      request.arrangement?.share_held_metadata !== true
+    )
+      throw new Error('Planning context unavailable');
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
+    homeAssistantState.awaitingCreateConfirmation = false;
+    homeAssistantState.personalConversation = true;
+    window.PersonalAssistantTranscript?.send?.();
+    appendHomeAssistantMessage('user', request.prompt);
+    var result = await runHomeAssistantInline(
+      request.prompt,
+      refs.context,
+      'assistant_conversation',
+      {
+        conversationRef: refs.conversation,
+        folderRef: refs.folder,
+        arrangement: request.arrangement,
+        arrangementIsCurrent: isCurrent
+      }
+    );
+    if (!result?.conversation?.stored || result.arrangement_error)
+      throw new Error('Planning save unconfirmed');
+    return result;
+  };
   window.OriAskRouting.buildRouteContext = normalizeHomeRouteContext;
   window.OriAskRouting.refreshWorkspaceIdentity = refreshHomeAssistantWorkspaceIdentity;
   window.OriAskRouting.setMode = setHomeAssistantWorkspacePromptMode;

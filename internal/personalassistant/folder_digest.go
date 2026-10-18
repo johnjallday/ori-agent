@@ -1279,6 +1279,12 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 			return view, ErrFolderPlanChanged
 		}
 	}
+	// A saved arrangement's review is closed with Keep chatting or with the
+	// arrangement's own Decline. It is never put off to return on its own, and
+	// never turned into a folder decline that would outlive the arrangement.
+	if offer.Status == FolderOfferPending && offer.Structure.Arranged() && input.Decision != FolderDecisionYes {
+		return FolderOfferView{}, fmt.Errorf("%w: decision", ErrValidation)
+	}
 	if input.Decision == FolderDecisionYes {
 		// A proposed group is set up through its own reviewed plan (Set up). A
 		// bare yes on its review would make one workspace out of the whole folder.

@@ -111,6 +111,8 @@ func TestHomePackageUpgradeThroughTheRealManagerAndGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	assertArrangementsPreserved := prepareUpgradeArrangements(t, store, manager, home.ID)
+
 	writeHomePackage(t, root, "0.1.1", "Coordinate reviewed Home work and the approved project library.")
 	if _, err := manager.Update(installed.Name, confirm); err == nil || !strings.Contains(err.Error(), "reviewed Home/child upgrade") {
 		t.Fatalf("the Plugins page update stranded the Home: %v", err)
@@ -141,6 +143,8 @@ func TestHomePackageUpgradeThroughTheRealManagerAndGuard(t *testing.T) {
 		state.Declaration.Roles[0].SystemPrompt != "Coordinate reviewed Home work and the approved project library." {
 		t.Fatalf("after upgrade: installed %s, Home %#v", records[0].Version, state)
 	}
+
+	assertArrangementsPreserved()
 
 	writeHomePackage(t, root, "0.1.2", "A later change.")
 	if _, err := manager.Update(installed.Name, confirm); err == nil {

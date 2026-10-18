@@ -150,7 +150,12 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 		// explicit pick can recover a confirmed setup, never adopt a replacement dir.
 		for i := range doc.Offers {
 			prior := &doc.Offers[i]
-			if prior.ConversationReview == nil || prior.ConversationReview.Target != target {
+			// A saved arrangement's review belongs to that arrangement: a manual
+			// review never adopts, refreshes or re-targets it. Only its confirmed,
+			// unfinished run is recovered here, like any confirmed run, when its
+			// folder is picked again after the held folder was lost.
+			if prior.ConversationReview == nil || prior.ConversationReview.Target != target ||
+				(prior.Structure.Arranged() && prior.Status != FolderOfferAwaitingOutcome) {
 				continue
 			}
 			if prior.FolderKey == offer.FolderKey && prior.Subject.Key == offer.Subject.Key &&
@@ -176,7 +181,9 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 			}
 		}
 		if pending := doc.Pending(); pending != nil {
-			if pending.ConversationReview == nil || pending.ConversationReview.Target != target {
+			// An open arrangement review is closed explicitly (Keep chatting), never
+			// silently retired by an unrelated manual review.
+			if pending.ConversationReview == nil || pending.ConversationReview.Target != target || pending.Structure.Arranged() {
 				return ErrFolderReviewPending
 			}
 			// Retirement is not a decline, tombstone or memory preference.

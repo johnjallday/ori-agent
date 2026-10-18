@@ -17,7 +17,8 @@ func TestHomeDevelopmentPreview_ExactProcessSourceOnlyAndNoReleaseClaim(t *testi
 		t.Fatal(err)
 	}
 	source := t.TempDir()
-	entry := plugin.InstalledPlugin{Name: provider.PluginID, Version: "0.1.1", Format: provider.SourceFormat, Source: source, Enabled: true, Generation: 2, ComponentFingerprint: strings.Repeat("a", 64), WorkspaceSurfaces: &plugin.SurfaceContribution{AssistantProgramHomes: []projecttemplates.AssistantProgramHome{home}}}
+	// A development candidate must sit at or above the reviewed floor (0.3.0).
+	entry := plugin.InstalledPlugin{Name: provider.PluginID, Version: "0.3.0", Format: provider.SourceFormat, Source: source, Enabled: true, Generation: 2, ComponentFingerprint: strings.Repeat("a", 64), WorkspaceSurfaces: &plugin.SurfaceContribution{AssistantProgramHomes: []projecttemplates.AssistantProgramHome{home}}}
 	if !folderHomeDevelopmentReady(entry, provider, source) {
 		t.Fatal("exact canonical candidate refused")
 	}
