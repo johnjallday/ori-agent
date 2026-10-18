@@ -4,7 +4,8 @@
   "icon": "🐙",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
+  "builtin_version": 3,
+  "goal": "Surface issues needing attention and prepare evidence-backed triage changes for approval.",
   "tags": [
     "github",
     "development"

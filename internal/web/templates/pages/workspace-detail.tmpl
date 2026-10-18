@@ -1044,46 +1044,19 @@
                         <div class="row g-2">
                           <div class="col-md-6">
                             <label class="workspace-detail-settings-summary-card" style="cursor: pointer; display: block; margin: 0; padding: 0.75rem;">
-                              <input type="radio" name="workspace-detail-mission-autonomy" value="watch" style="margin-right: 0.5rem;">
+                              <input type="radio" name="workspace-detail-mission-autonomy" value="watch" checked style="margin-right: 0.5rem;">
                               <strong>Watch</strong>
-                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Analyze and report findings. Makes no changes — except recording what it learns to workspace memory.</div>
+                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Reads this workspace and suggests work. Makes no changes — except recording what it learns to workspace memory.</div>
                             </label>
                           </div>
                           <div class="col-md-6">
                             <label class="workspace-detail-settings-summary-card" style="cursor: pointer; display: block; margin: 0; padding: 0.75rem;">
-                              <input type="radio" name="workspace-detail-mission-autonomy" value="propose" checked style="margin-right: 0.5rem;">
+                              <input type="radio" name="workspace-detail-mission-autonomy" value="propose" style="margin-right: 0.5rem;">
                               <strong>Propose</strong>
-                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Analyze and may draft artifacts inside the workspace. No external changes.</div>
+                              <div class="workspace-detail-settings-field-hint" style="margin: 0.25rem 0 0 1.5rem;">Reads this workspace and suggests work. During a run the agent may also write notes and drafts inside this workspace. No external changes.</div>
                             </label>
                           </div>
                         </div>
-                      </div>
-
-                      <div class="col-12">
-                        <details class="workspace-detail-settings-advanced">
-                          <summary class="workspace-detail-settings-advanced-title">Advanced: notification policy</summary>
-                          <div class="row g-3 mt-2">
-                            <div class="col-md-6">
-                              <label for="workspace-detail-mission-notif-priority" class="form-label">Minimum priority for Action Center</label>
-                              <select id="workspace-detail-mission-notif-priority" class="form-select">
-                                <option value="">Default (medium+)</option>
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
-                              </select>
-                            </div>
-                            <div class="col-md-6">
-                              <label for="workspace-detail-mission-notif-onfindings" class="form-label">When to notify</label>
-                              <select id="workspace-detail-mission-notif-onfindings" class="form-select">
-                                <option value="">Default (if findings)</option>
-                                <option value="always">Always (even on no-findings runs)</option>
-                                <option value="if_any">Only when findings exist</option>
-                                <option value="never">Never</option>
-                              </select>
-                            </div>
-                          </div>
-                        </details>
                       </div>
 
                       <div class="col-12">
@@ -1163,10 +1136,9 @@
                   <div class="workspace-detail-config-pane-head">
                     <div class="workspace-detail-config-pane-title">Workspace Memory</div>
                     <div class="workspace-detail-config-pane-subtitle">
-                      Durable knowledge agents accumulate across runs and chats in this workspace — facts, decisions, dead ends, and watch-state. It's injected into every mission run and workspace chat. Edit or remove anything that's wrong; never store secrets here (use the Vault).
+                      Durable knowledge agents accumulate across runs and chats in this workspace — facts, decisions, dead ends, and watch-state. It's injected into every mission run and workspace chat. Edit or remove anything that's wrong; never store secrets here (use the Vault). Promote an entry to global memory to share it with your assistant everywhere.
                     </div>
                   </div>
-                  <div id="workspace-detail-memory-meta" class="workspace-detail-memory-meta" aria-live="polite"></div>
                   <form id="workspace-detail-memory-add-form" class="workspace-detail-memory-add" autocomplete="off">
                     <select id="workspace-detail-memory-add-type" class="form-select workspace-detail-memory-type" aria-label="Memory entry type">
                       <option value="fact">fact</option>
@@ -1179,7 +1151,10 @@
                     <input type="text" id="workspace-detail-memory-add-text" class="form-control workspace-detail-memory-input" maxlength="500" placeholder="Add a memory entry (one line)…" aria-label="New memory entry text">
                     <button type="submit" class="btn btn-primary" id="workspace-detail-memory-add-btn">Add</button>
                   </form>
+                  <div id="workspace-detail-memory-meta" class="workspace-detail-memory-meta" aria-live="polite"></div>
+                  <section id="workspace-detail-memory-learnings" class="workspace-detail-memory-learnings" hidden></section>
                   <div id="workspace-detail-memory-list" class="workspace-detail-memory-list"></div>
+                  <div id="workspace-detail-memory-global" class="workspace-detail-memory-global" hidden></div>
                 </div>
                 <div
                   class="tab-pane fade workspace-detail-config-pane"
@@ -3127,6 +3102,76 @@
       color: var(--text-secondary);
     }
 
+    /* Goal Settings run history (workspace-mission.js runHistoryHTML). */
+    .workspace-mission-history {
+      margin-top: 0.75rem;
+    }
+
+    .workspace-mission-history-title {
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    .workspace-mission-runs {
+      display: grid;
+      gap: 0.45rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .workspace-mission-run {
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      font-size: 0.8rem;
+    }
+
+    .workspace-mission-run.is-failed {
+      border-color: var(--danger-color, #c0392b);
+    }
+
+    .workspace-mission-run-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: baseline;
+    }
+
+    .workspace-mission-run-head span,
+    .workspace-mission-run-counts,
+    .workspace-mission-runs-empty {
+      color: var(--text-secondary);
+    }
+
+    .workspace-mission-run-error {
+      margin-top: 0.2rem;
+      color: var(--danger-color, #c0392b);
+      overflow-wrap: anywhere;
+    }
+
+    .workspace-mission-run-output summary {
+      cursor: pointer;
+      width: fit-content;
+      margin-top: 0.25rem;
+    }
+
+    .workspace-mission-run-output pre {
+      max-height: 16rem;
+      margin: 0.3rem 0 0;
+      padding: 0.5rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      /* Neutral tint + inherited text color: readable on the dark Command
+         view panel and on the light settings pane alike. */
+      color: inherit;
+      background: rgba(127, 127, 127, 0.14);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 0.75rem;
+    }
+
     .workspace-detail-goal-meta {
       display: flex;
       flex-wrap: wrap;
@@ -3431,9 +3476,52 @@
       margin: 0.6rem 0;
     }
 
-    .workspace-detail-memory-size.is-over-budget {
-      color: var(--warning-color, #f5a623);
+    /* Budget meter: how full the memory is against what agents are shown.
+       One bar; the attention colour only when over budget. */
+    .workspace-detail-memory-meter {
+      display: grid;
+      gap: 0.3rem;
+    }
+
+    .workspace-detail-memory-meter-bar {
+      height: 0.45rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--border-color) 70%, transparent);
+    }
+
+    .workspace-detail-memory-meter-fill {
+      display: block;
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-meter.is-over-budget .workspace-detail-memory-meter-fill {
+      background: var(--warning-color, #f5a623);
+    }
+
+    .workspace-detail-memory-meter-over {
+      color: var(--warning-color, #c77f12);
       font-weight: 600;
+    }
+
+    /* An entry the prompt budget drops: text and actions keep full contrast;
+       only its badge and a left rule are muted, and it says so in words. */
+    .workspace-detail-memory-entry.is-not-in-prompt {
+      border-left: 3px solid color-mix(in srgb, var(--text-secondary) 45%, transparent);
+    }
+
+    .workspace-detail-memory-entry.is-not-in-prompt .workspace-detail-memory-badge {
+      background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-dropped {
+      font-family: var(--font-sans, inherit);
+      font-weight: 600;
+      color: var(--text-secondary);
     }
 
     .workspace-detail-memory-add {
@@ -3446,6 +3534,12 @@
     .workspace-detail-memory-type {
       max-width: 9rem;
       flex: 0 0 auto;
+    }
+
+    /* Category names ("How you work") are longer than entry types. */
+    .workspace-detail-memory-type.is-category {
+      max-width: 13rem;
+      min-width: 10.5rem;
     }
 
     .workspace-detail-memory-input {
@@ -3532,6 +3626,45 @@
       color: var(--danger, #c62828);
     }
 
+    /* Promote is unavailable without an assistant and a Personal HQ; the
+       button stays focusable so its explanation can be read and opened. */
+    .workspace-detail-memory-action.is-unavailable {
+      color: var(--text-secondary);
+      opacity: 0.75;
+    }
+
+    a.workspace-detail-memory-action {
+      text-decoration: none;
+    }
+
+    /* A reviewed global-memory line: read-only here, changed on the Profile. */
+    .workspace-detail-memory-entry.is-global {
+      border-left: 3px solid var(--accent-color, #4a7dff);
+    }
+
+    /* Copied from global memory: ordinary and editable, marked by origin. */
+    .workspace-detail-memory-entry.is-global-copy {
+      border-left: 3px dashed color-mix(in srgb, var(--accent-color, #4a7dff) 60%, transparent);
+    }
+
+    .workspace-detail-memory-promote-note,
+    .workspace-detail-memory-notice {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-notice {
+      padding: 0.55rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--accent-color, #4a7dff) 35%, transparent);
+      background: color-mix(in srgb, var(--accent-color, #4a7dff) 8%, transparent);
+    }
+
+    .workspace-detail-memory-notice a {
+      color: var(--accent-color, #4a7dff);
+      font-weight: 600;
+    }
+
     .workspace-detail-memory-edit {
       display: flex;
       gap: 0.5rem;
@@ -3552,16 +3685,105 @@
       opacity: 0.85;
     }
 
-    .workspace-detail-memory-unstructured {
+    .workspace-detail-memory-empty-note {
+      margin: 0.4rem 0 0;
+      font-size: 0.8rem;
+    }
+
+    /* Sections by kind (Watching, Decisions and dead ends, ...): a real
+       heading with its count above the rows. */
+    .workspace-detail-memory-section {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .workspace-detail-memory-section + .workspace-detail-memory-section {
+      margin-top: 0.6rem;
+    }
+
+    .workspace-detail-memory-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      margin: 0;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--text-primary);
+    }
+
+    .workspace-detail-memory-heading-count {
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .workspace-detail-memory-section-note {
+      margin: 0;
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+    }
+
+    /* What recent runs learned: one line per run that wrote to memory. */
+    .workspace-detail-memory-learnings {
+      display: grid;
+      gap: 0.4rem;
+      margin: 0 0 0.85rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+    }
+
+    .workspace-detail-memory-learnings[hidden] {
+      display: none;
+    }
+
+    .workspace-detail-memory-learnings-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .workspace-detail-memory-learning {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      font-size: 0.8rem;
+    }
+
+    .workspace-detail-memory-learning-link {
+      font-weight: 600;
+      color: var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-learning-counts {
+      color: var(--text-secondary);
+    }
+
+    /* Personal HQ: the proposals waiting on the Profile, above the sections. */
+    .workspace-detail-memory-review {
+      justify-self: start;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--accent-color, #4a7dff);
+    }
+
+    .workspace-detail-memory-global {
       margin-top: 0.85rem;
       padding-top: 0.6rem;
       border-top: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
     }
 
-    .workspace-detail-memory-unstructured-label {
-      font-size: 0.74rem;
+    .workspace-detail-memory-global-text {
+      margin: 0;
+      font-size: 0.8rem;
       color: var(--text-secondary);
-      margin-bottom: 0.35rem;
+    }
+
+    .workspace-detail-memory-global-text a {
+      color: var(--accent-color, #4a7dff);
+      font-weight: 600;
     }
 
     .workspace-detail-memory-unstructured-list {

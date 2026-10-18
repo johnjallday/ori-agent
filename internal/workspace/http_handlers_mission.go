@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -36,7 +37,24 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	running, inFlight := h.scheduler.MissionRunning(workspaceID)
+	needsAttention := goalRunAttention(ws, inFlight)
+	consentRequired := GoalRequiresReadConsent(ws)
+	if h.scheduler != nil {
+		if canonical, err := h.scheduler.missionWorkspace(workspaceID); err == nil && canonical != nil {
+			consentRequired = GoalRequiresReadConsent(canonical)
+		}
+	}
+
 	resp := map[string]any{
+		// Goal-run progress (FR26, FR27): whether a run is executing now, and
+		// why the last attempt to start one could not (e.g. no model).
+		"run_in_flight":             inFlight,
+		"run_in_flight_detail":      running,
+		"needs_attention":           needsAttention,
+		"first_run_pending":         ws.GoalFirstRunPending && ws.GoalFirstRunState == "",
+		"first_run_state":           ws.GoalFirstRunState,
+		"read_consent_required":     consentRequired,
 		"mission":                   ws.Mission,
 		"cadence":                   ws.Cadence,
 		"autonomy_policy":           ws.AutonomyPolicy,
@@ -47,6 +65,7 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 		"next_mission_run_at":       ws.NextMissionRunAt,
 		"mission_execution_count":   ws.MissionExecutionCount,
 		"mission_failure_count":     ws.MissionFailureCount,
+		"mission_runs":              missionRunsOrEmpty(ws.MissionRuns),
 		"open_findings_count":       openFindings,
 		"unclassified_mcp_ids":      mcpUnclassified,
 		"unclassified_skill_ids":    skillUnclassified,
@@ -56,6 +75,14 @@ func (h *HTTPHandler) GetMission(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Error("encode mission response", logger.Fields{"error": err})
 	}
+}
+
+// missionRunsOrEmpty keeps the run history a JSON array even before any run.
+func missionRunsOrEmpty(runs []MissionRunRecord) []MissionRunRecord {
+	if runs == nil {
+		return []MissionRunRecord{}
+	}
+	return runs
 }
 
 // UpdateMissionRequest is the body for PUT /api/workspaces/{workspaceID}/mission.
@@ -128,12 +155,19 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 
 	enablingNow := req.MissionEnabled != nil && *req.MissionEnabled
 
+	firstGoal := false
 	updateErr := h.store.Update(workspaceID, func(ws *Workspace) error {
 		if enablingNow && !MissionBindingsReady(ws) {
 			return ErrMissionBindingsUnclassified
 		}
 		if req.Mission != nil {
+			wasEmpty := strings.TrimSpace(ws.Mission) == ""
 			ws.Mission = *req.Mission
+			if strings.TrimSpace(ws.Mission) == "" {
+				cancelDeferredGoalRun(ws)
+			} else if wasEmpty {
+				firstGoal = ArmFirstGoalRun(ws)
+			}
 		}
 		if req.CadenceSet {
 			ws.Cadence = req.Cadence
@@ -171,20 +205,104 @@ func (h *HTTPHandler) UpdateMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The first goal starts one run once the save has succeeded, whatever
+	// MissionEnabled says; a run that cannot start records why on the goal.
+	var firstRun map[string]any
+	if firstGoal {
+		firstRun = h.startGoalRun(workspaceID, MissionOriginFirstGoal)
+	}
+
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to reload workspace: %v", err))
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	resp := map[string]any{
 		"message":             "Mission updated successfully",
 		"workspace":           workspaceID,
 		"mission_enabled":     ws.MissionEnabled,
 		"next_mission_run_at": ws.NextMissionRunAt,
-	}); err != nil {
+	}
+	if firstRun != nil {
+		resp["first_run"] = firstRun
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logger.Error("encode update mission response", logger.Fields{"error": err})
 	}
+}
+
+// startGoalRun starts a goal run in the background and describes the outcome
+// for a response body: started with a run id, or not started and why.
+func (h *HTTPHandler) startGoalRun(workspaceID, origin string) map[string]any {
+	if h.scheduler == nil {
+		return map[string]any{"started": false, "reason": ErrMissionTriggerNotConfigured.Error()}
+	}
+	runID, err := h.scheduler.StartMissionRun(workspaceID, origin)
+	if err != nil {
+		outcome := map[string]any{"started": false, "reason": err.Error()}
+		if errors.Is(err, ErrMissionFirstRunHandled) {
+			outcome["handled"] = true
+		}
+		if errors.Is(err, ErrMissionRunInFlight) {
+			outcome["in_flight"] = true
+		}
+		var blocked *MissionBlockedError
+		if errors.As(err, &blocked) {
+			outcome["code"] = blocked.Code
+		}
+		return outcome
+	}
+	return map[string]any{"started": true, "run_id": runID}
+}
+
+// GoalFirstOpen handles POST /api/workspaces/{workspaceID}/mission/first-open.
+// A workspace created with a goal does not run at creation; its first goal
+// run is attempted on first open. The scheduler durably claims that attempt
+// under the shared run slot. Blockers require explicit Run now, not a reload.
+func (h *HTTPHandler) GoalFirstOpen(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
+		return
+	}
+	firstRun := h.startGoalRun(workspaceID, MissionOriginFirstGoal)
+	resp := map[string]any{
+		"pending":   firstRun["handled"] != true && firstRun["in_flight"] != true,
+		"first_run": firstRun,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logger.Error("encode goal first-open response", logger.Fields{"error": err})
+	}
+}
+
+// writeMissionTriggerError writes the response for a refused or failed manual
+// goal run and reports whether it wrote one. nil writes nothing.
+func writeMissionTriggerError(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, ErrMissionTriggerNotConfigured):
+		orihttp.ServiceUnavailable(w, err.Error())
+	case errors.Is(err, ErrMissionRunInFlight):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("goal_run_in_progress", err.Error()))
+	case errors.As(err, new(*MissionBlockedError)):
+		var blocked *MissionBlockedError
+		errors.As(err, &blocked)
+		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
+			orihttp.NewAPIError(blocked.Code, blocked.Reason))
+	case errors.Is(err, ErrMissionGoalRequired):
+		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
+			orihttp.NewAPIError("goal_required", err.Error()))
+	case errors.Is(err, ErrMissionBindingsUnclassified):
+		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
+			orihttp.NewAPIError("mission_bindings_unclassified", err.Error()))
+	default:
+		orihttp.InternalError(w, fmt.Sprintf("Failed to trigger mission: %v", err))
+	}
+	return true
 }
 
 // TriggerMission handles POST /api/workspaces/{workspaceID}/mission/trigger.
@@ -200,25 +318,19 @@ func (h *HTTPHandler) TriggerMission(w http.ResponseWriter, r *http.Request) {
 		orihttp.ServiceUnavailable(w, "scheduler is not configured")
 		return
 	}
-	runID, err := h.scheduler.TriggerMissionManually(r.Context(), workspaceID)
-	if errors.Is(err, ErrMissionTriggerNotConfigured) {
-		orihttp.ServiceUnavailable(w, err.Error())
-		return
-	}
-	if errors.Is(err, ErrMissionBindingsUnclassified) {
-		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
-			orihttp.NewAPIError("mission_bindings_unclassified", err.Error()))
-		return
-	}
-	if err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to trigger mission: %v", err))
+	// The run executes in the background, detached from this request; the
+	// client polls GET .../mission until run_in_flight clears (FR26).
+	runID, err := h.scheduler.StartMissionRun(workspaceID, MissionOriginManual)
+	if writeMissionTriggerError(w, err) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(map[string]any{
-		"message":      "Mission run triggered",
+		"message":      "Mission run started",
 		"workspace":    workspaceID,
 		"run_id":       runID,
+		"status":       "running",
 		"triggered_at": time.Now().UTC(),
 	}); err != nil {
 		logger.Error("encode trigger mission response", logger.Fields{"error": err})
@@ -246,25 +358,17 @@ func (h *HTTPHandler) RunBaselineNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wasBaseline := ws.MissionExecutionCount == 0
-	runID, err := h.scheduler.TriggerMissionManually(r.Context(), workspaceID)
-	if errors.Is(err, ErrMissionTriggerNotConfigured) {
-		orihttp.ServiceUnavailable(w, err.Error())
-		return
-	}
-	if errors.Is(err, ErrMissionBindingsUnclassified) {
-		_ = orihttp.RespondAPIError(w, http.StatusPreconditionFailed,
-			orihttp.NewAPIError("mission_bindings_unclassified", err.Error()))
-		return
-	}
-	if err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to trigger mission: %v", err))
+	runID, err := h.scheduler.StartMissionRun(workspaceID, MissionOriginManual)
+	if writeMissionTriggerError(w, err) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(map[string]any{
-		"message":      "Baseline mission run triggered",
+		"message":      "Baseline mission run started",
 		"workspace":    workspaceID,
 		"run_id":       runID,
+		"status":       "running",
 		"is_baseline":  wasBaseline,
 		"triggered_at": time.Now().UTC(),
 	}); err != nil {

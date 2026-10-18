@@ -4,7 +4,8 @@
   "icon": "📬",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 5,
+  "builtin_version": 7,
+  "goal": "Identify messages needing replies, track outstanding follow-ups, and prepare responses for review without sending them.",
   "setup_quest": "email_ops_setup",
   "tags": [
     "email",

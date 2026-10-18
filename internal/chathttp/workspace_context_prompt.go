@@ -36,14 +36,13 @@ const (
 	workspaceSnapshotResultLimit    = 600
 )
 
+// buildRuntimeSystemPrompt builds the runtime context for a chat turn. Every
+// chat provider path can call tools (the CLI providers through the brokered
+// protocol), so the prompt is always the tool-callable one.
 func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normalizedChatRouteContext) string {
-	return h.buildRuntimeSystemPromptForToolCapability(ctx, routeCtx, true)
-}
-
-func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context, routeCtx normalizedChatRouteContext, toolCallable bool) string {
-	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
+	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, true)
 	profile := h.buildUserProfilePrompt(ctx, routeCtx)
-	memory := h.buildWorkspaceMemoryPrompt(ctx, routeCtx, toolCallable)
+	memory := h.buildWorkspaceMemoryPrompt(ctx, routeCtx, true)
 	managedLearning := h.buildAssistantManagedLearningPrompt(routeCtx)
 	refinement := h.buildAgentRefinementPrompt(routeCtx)
 
@@ -389,6 +388,11 @@ func buildWorkspaceSnapshotPromptForToolCapability(
 		fmt.Sprintf("- Name: %q", sanitizeWorkspaceSnapshotText(ws.Name, workspaceSnapshotTextLimit)),
 	}
 
+	// The goal is what the user wants this workspace to achieve; suggestions
+	// and "what should I work on?" answers start from it.
+	if goal := sanitizeWorkspaceSnapshotText(ws.Mission, workspace.WorkspaceGoalPromptLimit); goal != "" {
+		lines = append(lines, fmt.Sprintf("- Goal: %q", goal))
+	}
 	if description := sanitizeWorkspaceSnapshotText(ws.Description, workspaceSnapshotPreviewLimit); description != "" {
 		lines = append(lines, fmt.Sprintf("- Description: %q", description))
 	}

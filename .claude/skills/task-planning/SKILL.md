@@ -12,5 +12,6 @@ The canonical skill is:
 ```
 
 Resolve that path from this directory, read the canonical file completely, and
-follow it. This Claude-specific entry point intentionally contains no workflow
-rules so the protocol cannot drift between harnesses.
+follow it, including its validation cadence and demo scope. Claude uses the same
+protocol as the other harnesses. This Claude-specific entry point intentionally
+contains no workflow rules so the protocol cannot drift between harnesses.

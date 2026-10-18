@@ -51,11 +51,19 @@ type TaskScheduler struct {
 	missionInFlight    map[string]bool
 	reflectionMu       sync.Mutex
 	reflectionInFlight map[string]bool
+	// missionRunning describes the manual and first-goal runs started through
+	// StartMissionRun while they execute, for the UI's in-flight state.
+	missionRunning map[string]MissionRunInFlight
 
 	// Optional per-agent inputs for the Goal toolbox preflight that runs before
 	// a cadence-driven run (see preflightGoalToolbox). Nil is safe.
 	toolboxSkills   ToolboxMigrationSkillSource
 	toolboxCapacity ToolboxMigrationCapacitySource
+
+	// missionModelCheck reports whether a workspace's goal runs have a model
+	// to run on. Optional: nil skips the check.
+	missionModelCheck     MissionModelCheck
+	missionReadinessCheck MissionReadinessCheck
 }
 
 // WakeCandidate describes the next task run that may need a macOS wake event.
@@ -255,18 +263,14 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 		// it inline would stall every later workspace's scheduled-task and wake
 		// checks for the duration. The in-flight claim prevents the next tick
 		// from launching a second run before this one advances NextMissionRunAt.
-		if ts.missionDue(ws, now) && ts.claimMission(ws.ID) {
-			finishMission, err := ts.admissionGate.Enter()
-			if err != nil {
-				ts.releaseMission(ws.ID)
-				return
+		if ts.missionDue(ws, now) {
+			if finishMission, err := ts.acquireMissionRun(ws.ID); err == nil {
+				missionWS, missionNow := ws, now
+				ts.wg.Go(func() {
+					defer finishMission()
+					ts.checkAdmittedMissionCadence(missionWS, missionNow)
+				})
 			}
-			missionWS, missionNow := ws, now
-			ts.wg.Go(func() {
-				defer finishMission()
-				defer ts.releaseMission(missionWS.ID)
-				ts.checkMissionCadence(missionWS, missionNow)
-			})
 		}
 		if ts.assistantReflectionDue(ws, now) && ts.claimAssistantReflection(ws.ID) {
 			finishReflection, err := ts.admissionGate.Enter()

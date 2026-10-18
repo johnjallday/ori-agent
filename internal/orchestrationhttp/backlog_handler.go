@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -155,6 +156,9 @@ func (bh *BacklogHandler) BacklogItemPathHandler(w http.ResponseWriter, r *http.
 	case strings.HasSuffix(path, "/promote"):
 		bh.handlePromote(w, r, strings.TrimSuffix(path, "/promote"))
 		return
+	case strings.HasSuffix(path, "/not-useful"):
+		bh.handleNotUseful(w, r, strings.TrimSuffix(path, "/not-useful"))
+		return
 	case strings.HasSuffix(path, "/resolve-conflict"):
 		bh.handleResolveConflict(w, r, strings.TrimSuffix(path, "/resolve-conflict"))
 		return
@@ -255,6 +259,36 @@ func (bh *BacklogHandler) handlePromote(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	orihttp.WriteJSON(w, map[string]any{"success": true, "item": bh.itemResponse(task)})
+}
+
+// handleNotUseful serves POST /api/orchestration/backlog/{id}/not-useful
+// ?workspace_id=…: removes a goal-run suggestion and remembers it, with an
+// optional one-line reason, so it is never suggested again.
+func (bh *BacklogHandler) handleNotUseful(w http.ResponseWriter, r *http.Request, taskID string) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength > 0 && !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if err := bh.service.DismissSuggestion(workspaceID, taskID, req.Reason); err != nil {
+		if errors.Is(err, workspace.ErrNotASuggestion) {
+			_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("not_a_suggestion", err.Error()))
+			return
+		}
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true})
 }
 
 func (bh *BacklogHandler) handleReorder(w http.ResponseWriter, r *http.Request) {

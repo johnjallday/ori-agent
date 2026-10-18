@@ -765,6 +765,9 @@ test.describe('after the server was restarted', () => {
     await page.waitForTimeout(3000);
     expect(writes).toEqual([]);
     expect(provider.calls).toHaveLength(0);
+    const goalBefore = await ok(await request.get(`/api/workspaces/${before.workspace}/mission`));
+    expect(goalBefore.mission_runs).toHaveLength(0);
+    await card(page).screenshot({ path: join(sandbox, 'first-assessment-needs-click.png') });
 
     // The first reply asks to run a command. Nothing is run; the reply is thrown
     // away, and the run did not finish.
@@ -814,6 +817,12 @@ test.describe('after the server was restarted', () => {
     expect(done.task_id).toBe(before.task);
     expect(provider.calls).toHaveLength(2);
     expect(await taskIDs(request, before.workspace!)).toEqual(tasks);
+    const goalAfter = await ok(await request.get(`/api/workspaces/${before.workspace}/mission`));
+    expect(goalAfter.mission_runs).toHaveLength(0);
+    expect(goalAfter.mission).toBe(goalBefore.mission);
+    expect(writes.some(write => /\/mission\/(first-open|trigger|baseline)$/.test(write))).toBe(
+      false
+    );
     expect(
       writes.filter(write => /folder-first-task\/start$|\/tasks\/execute$/.test(write))
     ).toEqual([
@@ -834,6 +843,7 @@ test.describe('after the server was restarted', () => {
     await expect(result).toContainText('Add a health check endpoint to the service.');
     expect(done.next_request).toBe('Add a health check endpoint to the service.');
     expect(done.report_route).toBe(`/workspaces/widget/task/${before.task}`);
+    await card(page).screenshot({ path: join(sandbox, 'separate-assessment-finished.png') });
 
     // Phone width: the result and its three actions wrap instead of scrolling
     // sideways, and each action can be reached from the keyboard.

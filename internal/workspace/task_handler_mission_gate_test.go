@@ -182,7 +182,10 @@ func TestResolveMissionToolSideEffect_IgnoresDisabledBindings(t *testing.T) {
 	}
 }
 
-func TestEvaluateMissionGate_BlocksMissingPolicy(t *testing.T) {
+// A goal run whose workspace never chose a level runs under Watch: reads go
+// through, workspace writes do not (workspace-goal-suggestions 3.1 decision 4;
+// it used to block every tool, memory included).
+func TestEvaluateMissionGate_MissingPolicyMeansWatch(t *testing.T) {
 	h := &LLMTaskHandler{workspaceStore: NewInMemoryStore()}
 	task := Task{
 		Context: map[string]any{
@@ -190,12 +193,15 @@ func TestEvaluateMissionGate_BlocksMissingPolicy(t *testing.T) {
 			// MissionTaskContextPolicyKey deliberately omitted
 		},
 	}
-	err := h.evaluateMissionGate(task, "read_file")
-	if err == nil {
-		t.Fatal("expected denial when policy missing from context")
+	if err := h.evaluateMissionGate(task, "workspace_notes"); err != nil {
+		t.Fatalf("a read must pass under the Watch default: %v", err)
 	}
-	if !strings.Contains(err.Error(), "policy") {
-		t.Errorf("error should mention missing policy: %v", err)
+	if err := h.evaluateMissionGate(task, MemoryWriteToolName); err != nil {
+		t.Fatalf("memory stays allowed under Watch: %v", err)
+	}
+	err := h.evaluateMissionGate(task, "workspace_save_note")
+	if err == nil || !strings.Contains(err.Error(), "watch policy denies write") {
+		t.Fatalf("a workspace write must be denied under the Watch default, got %v", err)
 	}
 }
 

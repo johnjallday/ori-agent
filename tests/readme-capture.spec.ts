@@ -432,6 +432,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { specialists: [] });
       return;
     }
+    // The drawer asks whether Add link is on. The accepted README pictures
+    // predate it, and a feature branch cannot re-accept them, so the scenes
+    // keep it off until the next README refresh shows it.
+    if (url.pathname === '/api/home-assistant/link-context/availability') {
+      await json(route, { available: false });
+      return;
+    }
     if (url.pathname === '/api/onboarding/detect') {
       await json(route, { specialist: null });
       return;
@@ -700,6 +707,17 @@ async function installFixtureRoutes(page: Page) {
     // with no mailbox linked answers linked=false and the panel stays hidden.
     if (/^\/api\/workspaces\/[^/]+\/email\/needs-you$/.test(url.pathname)) {
       await json(route, { linked: false });
+      return;
+    }
+    // Every workspace's Memory station reads its memory once for its badge.
+    if (/^\/api\/workspaces\/[^/]+\/memory$/.test(url.pathname)) {
+      await json(route, {
+        entries: [],
+        unstructured: [],
+        raw_size: 0,
+        char_budget: 8000,
+        over_budget: false
+      });
       return;
     }
     if (

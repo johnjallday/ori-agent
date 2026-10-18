@@ -195,7 +195,9 @@ function loadPane() {
     'workspace-build-action',
     'workspace-build-folder-open',
     'workspace-build-folder',
-    'workspace-build-folder-remove'
+    'workspace-build-folder-remove',
+    'workspace-build-link',
+    'workspace-build-link-remove'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -658,4 +660,209 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
   assert.equal(controls.hint.hidden, true);
+});
+
+// ----- Add link -----
+
+function linkControls(root) {
+  const buttons = root.querySelectorAll('button');
+  const byControl = kind => buttons.find(button => button.dataset.buildControl === kind);
+  const spans = root.querySelectorAll('span');
+  return {
+    add: byControl('add-link'),
+    remove: byControl('remove-link'),
+    attach: byControl('link-attach'),
+    cancel: byControl('link-cancel'),
+    field: root.querySelectorAll('section').find(node => node.id === 'workspaceBuildLinkField'),
+    input: root.querySelectorAll('input').find(node => node.id === 'workspaceBuildLinkInput'),
+    status: root.querySelectorAll('p').find(node => node.id === 'workspaceBuildLinkStatus'),
+    disclosure: root.querySelectorAll('p').find(node => node.id === 'workspaceBuildLinkDisclosure'),
+    chip: spans.find(node => node.id === 'workspaceBuildLink'),
+    name: spans.find(node => node.id === 'workspaceBuildLinkName'),
+    summary: root.querySelectorAll('p').find(node => node.id === 'workspaceBuildLinkSummary'),
+    hints: spans.filter(node => node.classList.contains('workspace-build-folder__hint'))
+  };
+}
+
+const repoLink = {
+  id: 'link-1',
+  url: 'https://github.com/acme/widgets',
+  host: 'github.com',
+  kind: 'github_repo',
+  title: 'acme/widgets',
+  readable: true,
+  repo: { full_name: 'acme/widgets', language: 'Go', open_issues: 12, reachable: 'yes' }
+};
+
+test('the link summary says what the link is and what Ori could see of it', () => {
+  const { pane } = loadPane();
+  assert.equal(pane.linkSummaryText(repoLink), 'GitHub repository · Go · 12 open issues');
+  assert.equal(
+    pane.linkSummaryText({
+      ...repoLink,
+      repo: { ...repoLink.repo, open_issues: 1, archived: true }
+    }),
+    'GitHub repository · Go · 1 open issue · archived'
+  );
+  assert.equal(
+    pane.linkSummaryText({ ...repoLink, repo: { ...repoLink.repo, reachable: 'no' } }),
+    'GitHub repository · not verified'
+  );
+  assert.equal(
+    pane.linkSummaryText({ kind: 'page', host: 'example.com', readable: true }),
+    'Page · example.com'
+  );
+  assert.equal(
+    pane.linkSummaryText({ ...repoLink, repo: { ...repoLink.repo, open_issues: 10354 } }),
+    'GitHub repository · Go · 10,354 open issues'
+  );
+  // A document is never opened: it reads the same whether or not the address
+  // said anything about it.
+  for (const readable of [true, false]) {
+    assert.equal(
+      pane.linkSummaryText({ kind: 'document', host: 'arxiv.org', readable }),
+      'Document · arxiv.org · not read'
+    );
+  }
+  assert.equal(
+    pane.linkSummaryText({ kind: 'page', host: 'paywall.example', readable: false }),
+    'Could only read the address · paywall.example'
+  );
+  assert.equal(pane.linkSummaryText(null), '');
+});
+
+test('Add link is offered only when the server wires it, and the field sends one address', () => {
+  const first = loadPane();
+  first.pane.mount({ assistant, folders: true });
+  assert.equal(linkControls(first.root).add.hidden, true);
+
+  const { pane, root, events, document } = loadPane();
+  pane.mount({ assistant, folders: true, links: true });
+  const controls = linkControls(root);
+  assert.equal(controls.add.hidden, false);
+  assert.equal(controls.field.hidden, true);
+  assert.match(controls.disclosure.textContent, /title and description once/);
+  assert.equal(
+    controls.input.getAttribute('aria-describedby'),
+    'workspaceBuildLinkDisclosure workspaceBuildLinkStatus'
+  );
+
+  controls.add.click();
+  assert.equal(pane.linkFieldOpen(), true);
+  assert.equal(controls.field.hidden, false);
+  assert.equal(controls.add.getAttribute('aria-expanded'), 'true');
+  assert.equal(document.activeElement, controls.input);
+
+  // An empty address is refused in place; nothing is sent.
+  const before = events.length;
+  controls.attach.click();
+  assert.equal(events.length, before);
+  assert.equal(controls.status.textContent, 'Paste a link first.');
+  assert.equal(controls.status.classList.contains('is-error'), true);
+
+  // Typing clears the refusal; Enter attaches and never submits the reply.
+  controls.input.value = ' https://github.com/acme/widgets ';
+  controls.input.dispatchEvent(new FakeEvent('input'));
+  assert.equal(controls.status.hidden, true);
+  controls.input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-link',
+    detail: { url: 'https://github.com/acme/widgets' }
+  });
+  assert.equal(
+    events.some(event => event.type === 'workspace-build-turn'),
+    false
+  );
+
+  // Escape closes only the field and gives focus back to Add link.
+  controls.input.dispatchEvent(new FakeEvent('keydown', { key: 'Escape' }));
+  assert.equal(pane.linkFieldOpen(), false);
+  assert.equal(controls.field.hidden, true);
+  assert.equal(document.activeElement, controls.add);
+
+  // Opening Add folder closes the link field: one control open at a time.
+  controls.add.click();
+  linkControls(root);
+  folderControls(root).add.click();
+  assert.equal(pane.linkFieldOpen(), false);
+  assert.equal(events.at(-1).type, 'workspace-build-folder-open');
+});
+
+test('an attach in flight locks the field and the attachments, and a refusal keeps the address', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true, links: true });
+  const controls = linkControls(root);
+  controls.add.click();
+  controls.input.value = 'http://127.0.0.1/admin';
+  controls.attach.click();
+  const sent = events.length;
+
+  pane.setLinkBusy(true);
+  pane.linkFieldStatus('Checking…');
+  assert.equal(controls.input.disabled, true);
+  assert.equal(controls.attach.disabled, true);
+  assert.equal(controls.attach.textContent, 'Checking…');
+  assert.equal(controls.add.disabled, true);
+  assert.equal(folderControls(root).add.disabled, true);
+  controls.attach.click();
+  assert.equal(events.length, sent);
+
+  pane.setLinkBusy(false);
+  pane.linkFieldStatus('That address can’t be used here.', true);
+  assert.equal(pane.linkFieldOpen(), true);
+  assert.equal(controls.input.value, 'http://127.0.0.1/admin');
+  assert.equal(controls.input.disabled, false);
+  assert.equal(controls.attach.textContent, 'Attach');
+  assert.equal(controls.status.textContent, 'That address can’t be used here.');
+
+  // Success clears and closes the field.
+  pane.linkAttachedDone();
+  assert.equal(pane.linkFieldOpen(), false);
+  assert.equal(controls.input.value, '');
+});
+
+test('the attached link comes from the session: chip, summary, empty Send, and remove', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true, links: true });
+  const controls = linkControls(root);
+  const folder = folderControls(root);
+  const input = root.querySelectorAll('textarea')[0];
+  assert.equal(controls.chip.hidden, true);
+
+  pane.applySession({ transcript: [], link: { observation: repoLink } });
+  assert.equal(controls.chip.hidden, false);
+  assert.equal(controls.name.textContent, 'acme/widgets');
+  assert.equal(controls.remove.getAttribute('aria-label'), 'Remove link acme/widgets');
+  assert.equal(controls.summary.textContent, 'GitHub repository · Go · 12 open issues');
+  const [, linkHint] = controls.hints;
+  assert.equal(linkHint.hidden, false);
+  assert.equal(linkHint.textContent, 'Empty Send: “Set it up from the attached link”');
+
+  input.value = '';
+  input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-turn',
+    detail: { text: 'Set it up from the attached link.' }
+  });
+
+  // With a folder too, one hint and one sentence speak for both.
+  pane.applySession({ transcript: [], link: { observation: repoLink }, folder: { observation } });
+  assert.equal(folder.hint.hidden, true);
+  assert.equal(linkHint.hidden, false);
+  assert.equal(linkHint.textContent, 'Empty Send: “Set it up from what I attached”');
+  input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-turn',
+    detail: { text: 'Set it up from what I attached.' }
+  });
+
+  controls.remove.click();
+  assert.equal(events.at(-1).type, 'workspace-build-link-remove');
+
+  // No link: the folder's own hint is back, and the link's chip is gone.
+  pane.applySession({ transcript: [], folder: { observation } });
+  assert.equal(controls.chip.hidden, true);
+  assert.equal(controls.summary.hidden, true);
+  assert.equal(linkHint.hidden, true);
+  assert.equal(folder.hint.hidden, false);
 });

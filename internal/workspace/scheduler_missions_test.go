@@ -50,6 +50,16 @@ func newSchedulerWithStub(t *testing.T) (*TaskScheduler, *InMemoryStore, *stubMi
 	return ts, store, trig
 }
 
+func readyCadenceWorkspace(t *testing.T) *Workspace {
+	t.Helper()
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand", Agents: []string{"Writer"}})
+	ws.Mission = "Keep the brand voice consistent"
+	if err := ws.SetEntryAgentName("Writer"); err != nil {
+		t.Fatal(err)
+	}
+	return ws
+}
+
 func TestCheckMissionCadence_SkipsDisabled(t *testing.T) {
 	ts, _, trig := newSchedulerWithStub(t)
 	past := time.Now().Add(-time.Hour)
@@ -93,7 +103,7 @@ func TestCheckMissionCadence_FiresAndPassesCycleOrdinal(t *testing.T) {
 	ts, store, trig := newSchedulerWithStub(t)
 	now := time.Now()
 	past := now.Add(-time.Hour)
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand"})
+	ws := readyCadenceWorkspace(t)
 	ws.MissionEnabled = true
 	ws.MissionExecutionCount = 4 // next run is #5
 	ws.NextMissionRunAt = &past
@@ -129,7 +139,7 @@ func TestCheckMissionCadence_FailureAdvancesStateToPreventStorm(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-time.Hour)
 
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand"})
+	ws := readyCadenceWorkspace(t)
 	ws.MissionEnabled = true
 	ws.NextMissionRunAt = &past
 	ws.Cadence = &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "09:00"}
@@ -156,7 +166,7 @@ func TestCheckMissionCadence_FailureDoesNotDoubleCountWhenTriggerRecorded(t *tes
 	now := time.Now()
 	past := now.Add(-time.Hour)
 
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand"})
+	ws := readyCadenceWorkspace(t)
 	ws.MissionEnabled = true
 	ws.NextMissionRunAt = &past
 	ws.Cadence = &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "09:00"}
@@ -202,7 +212,7 @@ func TestCheckScheduledTasks_MissionDoesNotDoubleFireWhileInFlight(t *testing.T)
 
 	now := time.Now()
 	past := now.Add(-time.Hour)
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "Brand"})
+	ws := readyCadenceWorkspace(t)
 	ws.MissionEnabled = true
 	ws.NextMissionRunAt = &past
 	ws.Cadence = &ScheduleConfig{Type: ScheduleDaily, TimeOfDay: "09:00"}
@@ -240,6 +250,7 @@ func TestTriggerMissionManually_NoTriggerConfigured(t *testing.T) {
 func TestTriggerMissionManually_RejectsUnclassifiedBindings(t *testing.T) {
 	ts, store, _ := newSchedulerWithStub(t)
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	ws.Mission = "Keep the brand voice consistent"
 	ws.MCPBindings = []MCPBinding{
 		{ID: "b-unclassified", Enabled: true}, // no DefaultSideEffect
 	}
@@ -253,7 +264,8 @@ func TestTriggerMissionManually_RejectsUnclassifiedBindings(t *testing.T) {
 
 func TestTriggerMissionManually_FiresWithCorrectOrdinal(t *testing.T) {
 	ts, store, trig := newSchedulerWithStub(t)
-	ws := NewWorkspace(CreateWorkspaceParams{Name: "X"})
+	ws := readyCadenceWorkspace(t)
+	ws.Mission = "Keep the brand voice consistent"
 	ws.MissionExecutionCount = 2
 	ws.MCPBindings = []MCPBinding{
 		{ID: "b-1", Enabled: true, DefaultSideEffect: SideEffectRead},

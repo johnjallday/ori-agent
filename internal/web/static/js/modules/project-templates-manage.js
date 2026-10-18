@@ -392,6 +392,8 @@ function ptcElements() {
     briefing: document.getElementById('templateBriefing'),
     briefingDefault: document.getElementById('templateBriefingDefault'),
     briefingDeploys: document.getElementById('templateBriefingDeploys'),
+    briefingGoalRow: document.getElementById('templateBriefingGoalRow'),
+    briefingGoalValue: document.getElementById('templateBriefingGoalValue'),
     briefingAgentsRow: document.getElementById('templateBriefingAgentsRow'),
     briefingAgentsValue: document.getElementById('templateBriefingAgentsValue'),
     briefingGroupRow: document.getElementById('templateBriefingGroupRow'),
@@ -710,6 +712,9 @@ function ptcRenderBriefing(els, importMode, templatePath) {
     els.description.hidden = !description;
   }
   if (els.briefingDefault) els.briefingDefault.hidden = showBriefing;
+  const goal = showBriefing ? String(template.goal || '').trim() : '';
+  if (els.briefingGoalRow) els.briefingGoalRow.hidden = !goal;
+  if (els.briefingGoalValue) els.briefingGoalValue.textContent = goal;
 
   const agentSpecs = showBriefing && Array.isArray(template.agents) ? template.agents : [];
   const briefingAgents = agentSpecs
@@ -790,7 +795,13 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   }
 
   if (els.briefingDeploys) {
-    els.briefingDeploys.hidden = !(showAgents || groupDependencyCopy || showScaffold || showAddons);
+    els.briefingDeploys.hidden = !(
+      goal ||
+      showAgents ||
+      groupDependencyCopy ||
+      showScaffold ||
+      showAddons
+    );
   }
 
   ptcRenderReadiness(els, showBriefing ? template : null);

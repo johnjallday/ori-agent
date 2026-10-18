@@ -2237,8 +2237,8 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(beltLabelGeometry).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          ariaLabel: 'Workspace Mission',
-          labelText: 'Workspace Mission'
+          ariaLabel: 'Workspace Goal',
+          labelText: 'Workspace Goal'
         })
       ])
     );

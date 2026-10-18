@@ -71,10 +71,10 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
-	// Isolate ORI_DATA_DIR so this full Build() never touches a real user's
+	// Isolate the data dir so this full Build() never touches a real user's
 	// actual Ori data, and so config.DefaultDataDir() below resolves to a
 	// known, verifiable path rather than whatever happens to be on the host.
-	t.Setenv("ORI_DATA_DIR", t.TempDir())
+	isolateServerBuildEnv(t)
 
 	builder, err := NewServerBuilder()
 	if err != nil {
@@ -90,6 +90,7 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 		t.Fatal("Expected server to be non-nil")
 		return
 	}
+	closeInjectionTestServer(t, server)
 
 	// Verify key dependencies were initialized
 	if server.Core.ConfigManager == nil {
@@ -205,13 +206,16 @@ func TestSetupWizardRegistry_MatchesTheAuthorableAdapters(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	isolateServerBuildEnv(t)
 	builder, err := NewServerBuilder()
 	if err != nil {
 		t.Fatalf("NewServerBuilder failed: %v", err)
 	}
-	if _, err := builder.Build(); err != nil {
+	srv, err := builder.Build()
+	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
+	closeInjectionTestServer(t, srv)
 	if builder.setupWizardRegistry == nil {
 		t.Fatal("Setup Wizard registry not wired")
 	}
@@ -259,6 +263,7 @@ func TestNew_UsesBuilder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	isolateServerBuildEnv(t)
 
 	server, err := New()
 	if err != nil {
@@ -269,6 +274,7 @@ func TestNew_UsesBuilder(t *testing.T) {
 		t.Fatal("Expected server to be non-nil")
 		return
 	}
+	closeInjectionTestServer(t, server)
 
 	// Verify key components initialized
 	if server.Core.ConfigManager == nil {

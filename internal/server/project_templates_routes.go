@@ -680,6 +680,7 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 	var req struct {
 		Name                   string                                    `json:"name"`
 		Description            string                                    `json:"description"`
+		Goal                   *string                                   `json:"goal"`
 		Tags                   *[]string                                 `json:"tags"`
 		Icon                   *string                                   `json:"icon"`
 		BehaviorProfile        *string                                   `json:"behavior_profile"`
@@ -713,6 +714,7 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 	}
 
 	edit := &projecttemplates.ManifestEdit{
+		Goal:                   req.Goal,
 		Icon:                   req.Icon,
 		BehaviorProfile:        req.BehaviorProfile,
 		StarterTasks:           req.StarterTasks,

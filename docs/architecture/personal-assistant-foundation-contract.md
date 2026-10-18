@@ -212,6 +212,7 @@ stable. A mismatch never falls back to a name search.
 | Daily routine/schedule and generated brief content | Daily Brief config/revision tables |
 | User-wide identity and preferences | `userprofile` |
 | HQ working agreement and operational facts | designated HQ `MEMORY.md` |
+| Global memory (facts about the user that the assistant knows everywhere) | the same designated HQ `MEMORY.md` plus its reviewed-knowledge sidecar `.ori/personal-assistant-knowledge.json`; no other store. Read only by the personal assistant (Home, HQ, workspace-page drawer), never injected into workspace agents. Agents in any workspace propose through `memory_propose_global` (review candidate, source `workspace_agent`); a user Promote saves an approved explicit fact. A copy into a workspace (`global:<item-id>` provenance) is that workspace's ordinary memory and diverges on purpose. |
 | Project work | target workspace Tickets |
 | Commitments/dependencies | Follow-Ups user-scoped and operationally owned by `FollowUp.WorkspaceID`; direct first-assignment rows use Personal HQ, while Email Ops capture uses the resolved built-in Email Ops workspace. Ticket links and source provenance do not change that owner. |
 | Agent runtime/profile configuration | existing global agent store plus stable HQ agent instance |

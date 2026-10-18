@@ -30,6 +30,8 @@ export const CONVERSATION_ERRORS = {
     'This conversation’s folder context changed. Reopen it before sending; your draft is kept.',
   folder_context_unavailable:
     'That folder selection is unavailable. Reopen this conversation to discuss its saved observations, or pick again. Your draft is kept.',
+  link_context_unavailable:
+    'The attached link was let go after 30 minutes unused. Nothing was sent; attach it again. Your message is back in the box.',
   context_save_failed:
     'This reply was not saved with its workspace context. Your draft is kept; reopen the conversation before retrying.',
   folder_context_save_failed:
@@ -323,6 +325,7 @@ function startNew() {
   closeList();
   setCurrent('', '');
   window.PersonalAssistantFolderContext?.reset?.();
+  window.PersonalAssistantLink?.reset?.();
   setNote('');
   document.getElementById('personalAssistantInput')?.focus();
   return true;
@@ -425,6 +428,8 @@ async function resume(id, options = {}) {
       conversation.id,
       result.body.folder_context || {}
     );
+    // An attached link belongs to the conversation that attached it.
+    window.PersonalAssistantLink?.refresh?.();
     window.PersonalAssistantFolderSetup?.hydrate?.(
       conversation.id,
       result.body.folder_reviews || {},
@@ -562,6 +567,7 @@ function applyReply(data, rows = {}) {
   }
   const reply = data?.conversation;
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };
+  if (reply.error === 'link_context_unavailable') window.PersonalAssistantLink?.lost?.();
   const nextId = nextConversationId(state.id, reply);
   let arrangementMount = null;
   if (reply.stored) {
@@ -590,6 +596,10 @@ function applyReply(data, rows = {}) {
     data.arrangement?.proposed_operations?.some(op => op?.kind === 'create_group')
   )
     arrangementMount.querySelector('button')?.click();
+  // A link attached in a new draft stays with the conversation that draft
+  // started; on any other conversation it is not shown or sent.
+  if (reply.stored) window.PersonalAssistantLink?.adopt?.(nextId);
+  window.PersonalAssistantLink?.refresh?.();
   if (reply.stored && data.folder_context) {
     window.PersonalAssistantFolderContext?.renderEvent?.(
       data.folder_context.revision,

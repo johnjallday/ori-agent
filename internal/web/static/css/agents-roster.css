@@ -226,6 +226,53 @@ body.agents-roster-page {
   color: var(--text-primary, #111827);
 }
 
+/* Subscription pills use the same quiet surface as the health summary. */
+.roster-limits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.roster-limits[hidden] {
+  display: none;
+}
+
+.roster-limit {
+  min-height: 40px;
+  max-width: 100%;
+  padding: 8px 14px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.roster-limit:hover {
+  border-color: var(--primary-color);
+}
+
+.roster-limit:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.roster-limit--warn {
+  border-color: var(--warning-color);
+  background: color-mix(in srgb, var(--warning-color) 10%, var(--card-soft));
+}
+
+.roster-limit--exhausted {
+  border-color: var(--danger-color);
+  background: color-mix(in srgb, var(--danger-color) 10%, var(--card-soft));
+  font-weight: 600;
+}
+
 /* ---- Collection shell ----------------------------------------------------- */
 
 /* The Inspector is a sibling column that can collapse to zero, so closing it

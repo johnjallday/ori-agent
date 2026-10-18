@@ -333,6 +333,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// list and open those conversations; both validate the relationship first.
 	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
 	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
+	homeAssistantRouteHandler.LinkConversation = homeAssistantAskHandler.LinkConversationRoute
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
 	homeAssistantRouteHandler.ConversationRoute = homeAssistantAskHandler.ValidateRouteConversation
 	homeAssistantRouteHandler.OperationRequest = homeAssistantAskHandler.OperationRequestSupported
@@ -362,6 +363,10 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/home-assistant/folder-context/detach", homeAssistantAskHandler.DetachFolderContextHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/review", homeAssistantAskHandler.ReviewFolderSetupHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/review/close", homeAssistantAskHandler.CloseFolderReviewHandler)
+	// The composer's Add link: observe one address and hold it for the turn.
+	mux.HandleFunc("GET /api/home-assistant/link-context/availability", homeAssistantAskHandler.LinkAvailabilityHandler)
+	mux.HandleFunc("POST /api/home-assistant/link-context/select", homeAssistantAskHandler.SelectLinkContextHandler)
+	mux.HandleFunc("POST /api/home-assistant/link-context/detach", homeAssistantAskHandler.DetachLinkContextHandler)
 	// Saving a conversation draft to the HQ backlog: review (no write), then save.
 	mux.HandleFunc("POST /api/home-assistant/drafts/review", homeAssistantAskHandler.DraftReviewHandler)
 	mux.HandleFunc("POST /api/home-assistant/drafts/save", homeAssistantAskHandler.DraftSaveHandler)
@@ -557,6 +562,8 @@ func registerUsageRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/usage/summary", s.Handlers.Usage.GetSummary)
 	mux.HandleFunc("/api/usage/utility", s.Handlers.Usage.GetUtilityMetrics)
 	mux.HandleFunc("/api/usage/pricing", s.Handlers.Usage.GetPricingModels)
+	mux.HandleFunc("/api/usage/limits", s.Handlers.Usage.GetLimits)
+	mux.HandleFunc("/api/usage/limits/claude-mirror", s.Handlers.Usage.ClaudeMirror)
 }
 
 // registerModelCategoryRoutes registers model category and auto-categorize endpoints.
@@ -1195,6 +1202,10 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/check-janitor", s.Handlers.PersonalAssistant.CheckJanitorSuggestions)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-forget", s.Handlers.PersonalAssistant.ResumeKnowledgeForget)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-operation", s.Handlers.PersonalAssistant.ResumeKnowledgeOperation)
+		// Global memory: copy a fact into a workspace and track the copies.
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/copy", s.Handlers.PersonalAssistant.CopyGlobalFact)
+		mux.HandleFunc("GET /api/personal-assistant/knowledge/{item_id}/copies", s.Handlers.PersonalAssistant.GetGlobalFactCopies)
+		mux.HandleFunc("DELETE /api/personal-assistant/knowledge/{item_id}/copies/{workspace_id}", s.Handlers.PersonalAssistant.RemoveGlobalFactCopy)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/{action}", s.Handlers.PersonalAssistant.MutateKnowledgeReview)
 		// Show me a folder: chips and offer identifiers only, never a path.
 		const folderDigest = "/api/personal-assistant/folder-digest"
@@ -1406,6 +1417,7 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries", s.Handlers.WorkspaceMemory.AddEntry)
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries/{index}/promote", s.Handlers.WorkspaceMemory.PromoteEntry)
 	}
 }
 
@@ -1660,6 +1672,7 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", s.Handlers.Workspace.TriggerMission)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", s.Handlers.Workspace.RunBaselineNow)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/first-open", s.Handlers.Workspace.GoalFirstOpen)
 
 	// Native-MCP CLI tooling opt-in (workspace + per-agent). Gates whether a
 	// CLI-provider agent may run workspace MCP/built-in tools natively. See

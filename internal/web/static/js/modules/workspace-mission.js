@@ -43,8 +43,6 @@
     cadenceDomWrap: '#workspace-detail-mission-cadence-dom-wrap',
     cadenceIntervalWrap: '#workspace-detail-mission-cadence-interval-wrap',
     enabledHint: '#workspace-detail-mission-enabled-hint',
-    notifPriority: '#workspace-detail-mission-notif-priority',
-    notifOnFindings: '#workspace-detail-mission-notif-onfindings',
     goalCard: '#workspace-detail-goal-card',
     goalStatus: '#workspace-detail-goal-status',
     goalTitle: '#workspace-detail-goal-title',
@@ -91,21 +89,49 @@
     commandFindingsBtn: '#workspace-command-mission-findings'
   };
 
+  // A goal run applies Propose only when the user chose it and Watch otherwise,
+  // including a workspace that never set a level (workspace.EffectiveAutonomyPolicy).
+  function effectiveAutonomy(policy) {
+    return policy === 'propose' ? 'propose' : 'watch';
+  }
+
   // Plain-language summary of each autonomy policy. The quick-edit modal only
   // displays the current value (read-only) — it's changed in Advanced settings.
   const AUTONOMY_LABELS = {
-    watch: { label: 'Watch', desc: 'reports findings only, makes no changes' },
-    propose: { label: 'Propose', desc: 'may draft inside the workspace, no external changes' }
+    watch: { label: 'Watch', desc: 'reads the workspace and suggests work, makes no changes' },
+    propose: {
+      label: 'Propose',
+      desc: 'during a run the agent may also write notes and drafts inside this workspace'
+    }
   };
+
+  // The goal leads every goal card: the heading is the goal text itself, and
+  // the line under it appears only when there is no goal yet (FR8).
+  const EMPTY_GOAL_TITLE = 'No goal yet';
+  const EMPTY_GOAL_PROMPT = 'Set a goal so your agents can suggest work';
+
+  function goalCardCopy(mission) {
+    const goal = String(mission || '').trim();
+    return goal ? { title: goal, text: '' } : { title: EMPTY_GOAL_TITLE, text: EMPTY_GOAL_PROMPT };
+  }
 
   let latestState = null;
 
   // Guards against overlapping runs and keeps the goal card's Run button
   // disabled while a run is in flight (see renderGoalCard).
   let runInProgress = false;
+  // Set before POST, including failed/ambiguous requests. Reload and polling
+  // may follow a run, but only an explicit Run now may retry admission.
+  let deferredFirstRunAttempted = false;
   let lastRunOutcome = null;
+  // The last run's result line ("Run complete — 3 tasks suggested…"). It stays
+  // under the goal until the next run starts or the goal state reloads, so a
+  // re-render of the card (e.g. after the Backlog refreshes) cannot clear it.
+  let lastRunReport = null;
   const RUN_POLL_INTERVAL_MS = 2000;
-  const RUN_POLL_TIMEOUT_MS = 120000;
+  // A goal run is bounded server-side at 15 minutes; follow it a little longer.
+  const RUN_POLL_TIMEOUT_MS = 16 * 60 * 1000;
+  const RUN_IN_FLIGHT_COPY = 'Looking for things to work on…';
 
   // Cadence intervals come back from the API as Go durations in nanoseconds.
   const NS_PER_HOUR = 3.6e12;
@@ -334,8 +360,8 @@
   function renderGoalModalAutonomy(state) {
     const el = $(SELECTORS.goalModalAutonomy);
     if (!el) return;
-    const policy = (state && state.autonomy_policy) || 'propose';
-    const info = AUTONOMY_LABELS[policy] || AUTONOMY_LABELS.propose;
+    const policy = effectiveAutonomy(state && state.autonomy_policy);
+    const info = AUTONOMY_LABELS[policy];
     el.innerHTML = `Autonomy: <strong>${info.label}</strong> — ${info.desc}. Adjust in Advanced settings.`;
   }
 
@@ -388,36 +414,64 @@
     };
   }
 
+  // A goal run is in flight when this page started or is following one, or
+  // when the server says one is executing (a first run, a cadence run, a run
+  // started in another tab).
+  function runIsInFlight(state) {
+    return runInProgress || !!(state && state.run_in_flight);
+  }
+
+  // The line under the goal while nothing is being reported: the run in
+  // flight, why a run could not start (e.g. no model), or unclassified bindings.
+  function goalStatusLine(state, mission) {
+    if (runIsInFlight(state)) return { text: RUN_IN_FLIGHT_COPY, kind: null };
+    if (mission && lastRunReport) return lastRunReport;
+    const reason = String((state && state.needs_attention) || '').trim();
+    if (mission && reason) return { text: reason, kind: 'error' };
+    if (mission && state && state.read_consent_required) {
+      return {
+        text: 'Run now reads authorized project context for goal suggestions. Start first look runs only the separate assessment. Saving or opening this goal starts neither.',
+        kind: null
+      };
+    }
+    const mcp = Array.isArray(state && state.unclassified_mcp_ids)
+      ? state.unclassified_mcp_ids
+      : [];
+    const skills = Array.isArray(state && state.unclassified_skill_ids)
+      ? state.unclassified_skill_ids
+      : [];
+    if (mission && mcp.length + skills.length > 0) {
+      return { text: 'Classify MCP or skill bindings before scheduled runs.', kind: 'error' };
+    }
+    return { text: '', kind: null };
+  }
+
   function commandSummary(state) {
     const current = state || latestState || {};
     const mission = String(current.mission || '').trim();
-    const status = runInProgress
+    const running = runIsInFlight(current);
+    const status = running
       ? { label: 'Running', className: 'is-running' }
       : mission && lastRunOutcome
         ? lastRunOutcome
         : missionStatus(current);
     const findings = buildFindingsMeta(current);
-    const mcp = Array.isArray(current.unclassified_mcp_ids) ? current.unclassified_mcp_ids : [];
-    const skills = Array.isArray(current.unclassified_skill_ids)
-      ? current.unclassified_skill_ids
-      : [];
-    const actionStatus =
-      mission && mcp.length + skills.length > 0
-        ? 'Classify MCP or skill bindings before scheduled runs.'
-        : '';
+    const statusLine = goalStatusLine(current, mission);
+    const actionStatus = statusLine.text;
+    const copy = goalCardCopy(mission);
     return {
       mission,
       label: status.label,
       className: status.className,
-      title: mission ? 'Current goal' : 'No goal set',
-      text: mission || 'No workspace goal yet.',
+      title: copy.title,
+      text: copy.text,
       cadenceLabel: `Cadence: ${cadenceLabel(current.cadence)}`,
       nextLabel: `Next: ${fmtNextRun(current.next_mission_run_at)}`,
       lastLabel: `Last: ${fmtLastRun(current.last_mission_run_at)}`,
       nextTitle: current.next_mission_run_at ? fmtTime(current.next_mission_run_at) : '',
       lastTitle: current.last_mission_run_at ? fmtTime(current.last_mission_run_at) : '',
-      canRun: !!mission && !runInProgress,
-      runTitle: runInProgress
+      canRun: !!mission && !running,
+      runTitle: running
         ? 'A goal run is already in progress'
         : mission
           ? 'Run this goal check now'
@@ -425,7 +479,9 @@
       findingsHref: findings.href,
       findingsLabel: findings.label,
       hasFindings: findings.hasFindings,
-      actionStatus
+      running,
+      actionStatus,
+      actionStatusKind: statusLine.kind
     };
   }
 
@@ -434,7 +490,7 @@
     if (!el) return;
     const workflow = String(el.getAttribute('data-workflow-label') || '').trim();
     const summary = commandSummary(state);
-    const missionPart = summary.label ? `Mission · ${summary.label}` : '';
+    const missionPart = summary.label ? `Goal · ${summary.label}` : '';
     const text = [workflow, missionPart].filter(Boolean).join(' · ');
     el.textContent = text;
     el.hidden = !text;
@@ -460,9 +516,13 @@
       statusEl.textContent = summary.label;
       statusEl.className = `ws-cmd-mission-status ${summary.className}`;
     }
-    if (titleEl) titleEl.textContent = summary.title;
+    if (titleEl) {
+      titleEl.textContent = summary.title;
+      titleEl.classList.toggle('is-goal', !!summary.mission);
+    }
     if (textEl) {
       textEl.textContent = summary.text;
+      textEl.hidden = !summary.text;
       textEl.classList.toggle('is-empty', !summary.mission);
     }
     if (cadenceEl) cadenceEl.textContent = summary.cadenceLabel;
@@ -484,8 +544,7 @@
       findingsBtn.textContent = summary.findingsLabel;
       findingsBtn.classList.toggle('has-findings', summary.hasFindings);
     }
-    if (!runInProgress)
-      setCommandActionStatus(summary.actionStatus, summary.actionStatus ? 'error' : null);
+    if (!runInProgress) setCommandActionStatus(summary.actionStatus, summary.actionStatusKind);
     renderCommandSubtitle(state);
   }
 
@@ -506,9 +565,11 @@
       statusEl.textContent = status.label;
       statusEl.className = `workspace-detail-goal-status ${status.className}`;
     }
-    if (titleEl) titleEl.textContent = mission ? 'Current goal' : 'No goal set';
+    const copy = goalCardCopy(mission);
+    if (titleEl) titleEl.textContent = copy.title;
     if (textEl) {
-      textEl.textContent = mission || 'No workspace goal yet.';
+      textEl.textContent = copy.text;
+      textEl.hidden = !copy.text;
       textEl.classList.toggle('is-empty', !mission);
     }
     if (cadenceEl) cadenceEl.textContent = `Cadence: ${cadenceLabel(state.cadence)}`;
@@ -522,7 +583,7 @@
     }
     if (editBtn) editBtn.textContent = mission ? 'Edit goal' : 'Set goal';
     if (runBtn) {
-      runBtn.disabled = !mission || runInProgress;
+      runBtn.disabled = !mission || runIsInFlight(state);
       runBtn.title = mission ? 'Run this goal check now' : 'Set a goal before running';
     }
 
@@ -540,15 +601,8 @@
     // Don't touch the action-status line mid-run — handleRunClick owns it then
     // (the live "Running…" / result message must not be cleared by a poll).
     if (!runInProgress) {
-      const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
-      const skills = Array.isArray(state.unclassified_skill_ids)
-        ? state.unclassified_skill_ids
-        : [];
-      if (mission && mcp.length + skills.length > 0) {
-        setGoalActionStatus('Classify MCP or skill bindings before scheduled runs.', 'error');
-      } else {
-        setGoalActionStatus('');
-      }
+      const line = goalStatusLine(state, mission);
+      setGoalActionStatus(line.text, line.kind);
     }
   }
 
@@ -604,6 +658,59 @@
     setCommandActionStatus(message || 'Could not load workspace goal.', 'error');
   }
 
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  const RUN_ORIGIN_LABELS = {
+    cadence: 'Scheduled',
+    manual: 'Run now',
+    first_goal: 'First goal',
+    event: 'Event trigger'
+  };
+
+  function plural(count, one, many) {
+    return `${count} ${count === 1 ? one : many}`;
+  }
+
+  // One line per recent goal run: what it created, skipped and dropped (FR21).
+  // A run whose answer could not be read keeps the end of that answer behind
+  // "Show output", so the user can see what the model actually said.
+  function runHistoryHTML(runs) {
+    const list = Array.isArray(runs) ? runs : [];
+    if (!list.length) return '<p class="workspace-mission-runs-empty">No goal runs yet.</p>';
+    const items = list
+      .map(run => {
+        const when = run.finished_at || run.started_at;
+        const origin = RUN_ORIGIN_LABELS[run.origin] || 'Run';
+        const outcome = run.succeeded ? 'Completed' : 'Failed';
+        const error =
+          !run.succeeded && run.error
+            ? `<div class="workspace-mission-run-error">${escapeHtml(run.error)}</div>`
+            : '';
+        const output = run.output_tail
+          ? `<details class="workspace-mission-run-output"><summary>Show output</summary><pre>${escapeHtml(run.output_tail)}</pre></details>`
+          : '';
+        return `
+          <li class="workspace-mission-run ${run.succeeded ? 'is-succeeded' : 'is-failed'}">
+            <div class="workspace-mission-run-head">
+              <strong>${outcome}</strong>
+              <span>${escapeHtml(origin)}</span>
+              <span title="${escapeHtml(when ? fmtTime(when) : '')}">${escapeHtml(when ? fmtRelative(when) : '')}</span>
+            </div>
+            <div class="workspace-mission-run-counts">${escapeHtml(runCountsText(run))}</div>
+            ${error}${output}
+          </li>`;
+      })
+      .join('');
+    return `<ul class="workspace-mission-runs">${items}</ul>`;
+  }
+
   function renderStatus(state) {
     const body = $(SELECTORS.statusBody);
     if (!body) return;
@@ -618,6 +725,10 @@
         <div><strong>Next run:</strong> ${nextRun}</div>
         <div><strong>Last run:</strong> ${lastRun}</div>
         <div><strong>Runs:</strong> ${runs} <span style="color: var(--muted-color);">(${failures} failed)</span></div>
+      </div>
+      <div class="workspace-mission-history">
+        <div class="workspace-mission-history-title">Run history</div>
+        ${runHistoryHTML(state.mission_runs)}
       </div>
     `;
   }
@@ -674,17 +785,12 @@
 
     // Autonomy
     const radios = document.querySelectorAll(SELECTORS.autonomyRadios);
-    const policy = state.autonomy_policy || 'propose';
+    const policy = effectiveAutonomy(state.autonomy_policy);
     radios.forEach(r => {
       r.checked = r.value === policy;
     });
 
     populateCadenceFields(CADENCE_SURFACES.form, state.cadence);
-
-    // Notification policy
-    const notif = state.notification_policy || {};
-    $(SELECTORS.notifPriority).value = notif.min_priority || '';
-    $(SELECTORS.notifOnFindings).value = notif.on_findings || '';
 
     // Starter hint placeholder based on workspace name in the page header.
     applyStarterHint();
@@ -717,21 +823,13 @@
     );
     const cadence = readCadenceFields(CADENCE_SURFACES.form);
 
-    const minPriority = $(SELECTORS.notifPriority).value;
-    const onFindings = $(SELECTORS.notifOnFindings).value;
-    let notification_policy = null;
-    if (minPriority || onFindings) {
-      notification_policy = {};
-      if (minPriority) notification_policy.min_priority = minPriority;
-      if (onFindings) notification_policy.on_findings = onFindings;
-    }
-
+    // notification_policy is not sent: notifications are a separate feature,
+    // and an absent field keeps whatever the workspace already stored.
     const heartbeatEl = $(SELECTORS.heartbeat);
     return {
       mission: $(SELECTORS.text).value,
-      autonomy_policy: policy ? policy.value : 'propose',
+      autonomy_policy: effectiveAutonomy(policy ? policy.value : ''),
       cadence,
-      notification_policy,
       mission_enabled: $(SELECTORS.enabled).checked,
       mission_cadence_heartbeat: heartbeatEl ? heartbeatEl.checked : false
     };
@@ -782,14 +880,68 @@
       const state = await fetchMissionState();
       latestState = state;
       lastRunOutcome = null;
+      lastRunReport = null;
       renderReadOnly(state);
       populateFormFromState(state);
       populateGoalModalFromState(state);
       setStatusText('');
+      afterStateLoaded(state);
     } catch (e) {
       renderGoalCardError(`Failed to load goal: ${e.message}`);
       setStatusText(`Failed to load goal settings: ${e.message}`, 'error');
     }
+  }
+
+  // A workspace created with a goal starts its first goal run the first time
+  // it is opened (FR25); a run already executing — started on the first goal
+  // save, by the cadence or in another tab — is followed until it ends (FR27).
+  function afterStateLoaded(state) {
+    if (runInProgress || !state) return;
+    if (state.run_in_flight) {
+      const detail = state.run_in_flight_detail || {};
+      followRun(detail.run_id || '', reportToCards);
+      return;
+    }
+    if (state.first_run_pending && !state.first_run_state && String(state.mission || '').trim()) {
+      startDeferredFirstRun();
+    }
+  }
+
+  async function startDeferredFirstRun() {
+    const wsId = getWorkspaceId();
+    if (!wsId || deferredFirstRunAttempted) return;
+    deferredFirstRunAttempted = true;
+    try {
+      const resp = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/mission/first-open`, {
+        method: 'POST'
+      });
+      if (!resp.ok) throw new Error(`status ${resp.status}`);
+      const body = await resp.json();
+      const firstRun = body.first_run || {};
+      if (firstRun.started) {
+        followRun(firstRun.run_id || '', reportToCards);
+      } else {
+        // Follow another tab's run or show the durable blocker. The attempt
+        // latch prevents pending → reload → pending from POSTing recursively.
+        await reload();
+        if (!runIsInFlight(latestState) && firstRun.reason && !firstRun.handled) {
+          lastRunReport = { text: firstRun.reason, kind: 'error' };
+          if (latestState) renderReadOnly(latestState);
+        }
+      }
+    } catch (e) {
+      lastRunReport = {
+        text: `The goal start could not be confirmed (${e.message}). Review run history, then choose Run now to retry.`,
+        kind: 'error'
+      };
+      if (latestState) renderReadOnly(latestState);
+    }
+  }
+
+  // Report a run's progress on both goal cards (Details and Command view).
+  function reportToCards(msg, kind) {
+    setGoalActionStatus(msg, kind);
+    setCommandActionStatus(msg, kind);
   }
 
   function openGoalSettings() {
@@ -865,23 +1017,28 @@
     for (const [btn, visible] of buttons) {
       if (!btn) continue;
       btn.style.display = visible ? '' : 'none';
-      btn.disabled = noGoal || runInProgress;
+      btn.disabled = noGoal || runIsInFlight(state);
       btn.title = noGoal ? 'Set a goal before running' : '';
     }
   }
 
-  // Trigger a goal run and wait for it to actually finish. The execution
-  // counter always advances on completion (success or failure), so poll
-  // GetMission until it moves past the pre-run value. Returns
-  // {done, failed, runId}; done=false means it's still running at the timeout.
-  async function executeRun(endpoint, onProgress) {
-    const before = latestState || {};
-    const beforeRuns = before.mission_execution_count || 0;
-    const beforeFailures = before.mission_failure_count || 0;
+  // "3 tasks suggested · 2 findings · 1 duplicate skipped" for a run record.
+  function runCountsText(run) {
+    const counts = [
+      plural(run.tasks_created || 0, 'task suggested', 'tasks suggested'),
+      plural(run.findings_created || 0, 'finding', 'findings')
+    ];
+    if (run.duplicates_skipped)
+      counts.push(plural(run.duplicates_skipped, 'duplicate skipped', 'duplicates skipped'));
+    if (run.dropped_by_cap) counts.push(`${run.dropped_by_cap} over the limit`);
+    if (run.items_rejected)
+      counts.push(plural(run.items_rejected, 'item unreadable', 'items unreadable'));
+    return counts.join(' · ');
+  }
 
-    const r = await triggerMission(endpoint);
-    if (onProgress) onProgress(`Run started (${r.run_id || 'no id'}) — working…`);
-
+  // Poll the goal state until no run is in flight. Returns {done, failed,
+  // record, runId}; done=false means it was still running at the deadline.
+  async function waitForRunToEnd(runId) {
     const deadline = Date.now() + RUN_POLL_TIMEOUT_MS;
     while (Date.now() < deadline) {
       await sleep(RUN_POLL_INTERVAL_MS);
@@ -893,59 +1050,133 @@
       }
       latestState = state;
       renderReadOnly(state);
-      if ((state.mission_execution_count || 0) > beforeRuns) {
-        return {
-          done: true,
-          failed: (state.mission_failure_count || 0) > beforeFailures,
-          runId: r.run_id
-        };
+      if (!state.run_in_flight) {
+        const runs = Array.isArray(state.mission_runs) ? state.mission_runs : [];
+        const record = (runId && runs.find(run => run.run_id === runId)) || runs[0] || null;
+        return { done: true, failed: !!record && !record.succeeded, record, runId };
       }
     }
-    return { done: false, runId: r.run_id };
+    return { done: false, runId };
+  }
+
+  // Start a goal run: the server answers 202 at once and runs it in the
+  // background (FR26); a run already in flight (409) is followed instead.
+  async function executeRun(endpoint, onProgress) {
+    let runId = '';
+    try {
+      const started = await triggerMission(endpoint);
+      runId = (started && started.run_id) || '';
+    } catch (e) {
+      if (e.status !== 409) throw e;
+      if (onProgress) onProgress('A goal run is already in progress — following it.');
+    }
+    if (onProgress) onProgress(RUN_IN_FLIGHT_COPY);
+    return waitForRunToEnd(runId);
+  }
+
+  // Turn a finished (or abandoned) run into the card's outcome and message.
+  function settleRun(result) {
+    if (!result.done) {
+      lastRunOutcome = { label: 'Running', className: 'is-running' };
+      return rememberRunReport(
+        'Still running — this is taking a while. Use Refresh to check status.',
+        'error'
+      );
+    }
+    const record = result.record;
+    if (result.failed) {
+      lastRunOutcome = { label: 'Failed', className: 'is-failed' };
+      const error = String((record && record.error) || '')
+        .trim()
+        .replace(/[.!?]+$/, '');
+      const why = error ? `: ${error}.` : '.';
+      return rememberRunReport(`Run failed${why} See Goal Settings for details.`, 'error');
+    }
+    lastRunOutcome = { label: 'Completed', className: 'is-completed' };
+    return rememberRunReport(
+      record ? `Run complete — ${runCountsText(record)}.` : 'Run complete.',
+      null
+    );
+  }
+
+  function rememberRunReport(message, kind) {
+    lastRunReport = { text: message, kind: kind || null };
+    return { message, kind: kind || null };
+  }
+
+  // A run ended: show its suggestions wherever they appear (FR27).
+  function onRunEnded() {
+    const page = typeof window !== 'undefined' ? window.workspaceDetail : null;
+    if (page && typeof page.loadBacklog === 'function') {
+      Promise.resolve(page.loadBacklog()).catch(() => {});
+    }
+    repaintBacklogDrawer();
+  }
+
+  // The Backlog drawer says "Looking for things to work on…" while a run is in
+  // flight; repaint it when that changes.
+  function repaintBacklogDrawer() {
+    const view = typeof window !== 'undefined' ? window.workspaceCommand : null;
+    if (view && typeof view.renderBacklogDrawerBody === 'function') view.renderBacklogDrawerBody();
+  }
+
+  // Follow a run this page did not start (first goal save, first open, a run
+  // already executing when the page loaded) until it ends.
+  async function followRun(runId, report) {
+    if (runInProgress) return;
+    runInProgress = true;
+    lastRunOutcome = null;
+    lastRunReport = null;
+    renderReadOnly(latestState || {});
+    repaintBacklogDrawer();
+    report(RUN_IN_FLIGHT_COPY);
+    const outcome = settleRun(await waitForRunToEnd(runId));
+    runInProgress = false;
+    renderReadOnly(latestState || {});
+    onRunEnded();
+    report(outcome.message, outcome.kind);
   }
 
   // Shared handler for every run button (card "Run now", advanced "Run now"
-  // and baseline). Disables the button with a live "Running…" label, polls for
-  // completion, then reports the real outcome instead of just "started".
+  // and baseline). Disables the button with a live "Running…" label, follows
+  // the run until it ends, then reports the real outcome.
   async function handleRunClick(endpoint, button, report) {
     if (runInProgress) return;
     runInProgress = true;
     lastRunOutcome = null;
+    lastRunReport = null;
     let originalLabel;
     if (button) {
       button.disabled = true;
       originalLabel = button.textContent;
       button.textContent = 'Running…';
     }
+    repaintBacklogDrawer();
     report('Starting run…');
 
-    let message = 'Run complete.';
-    let kind = null;
+    let message;
+    let kind;
     try {
-      const result = await executeRun(endpoint, msg => report(msg));
-      if (!result.done) {
-        message = 'Still running — this is taking a while. Use Refresh to check status.';
-        kind = 'error';
-        lastRunOutcome = { label: 'Running', className: 'is-running' };
-      } else if (result.failed) {
-        message = 'Run finished with an error. Check the Action Center or server logs.';
-        kind = 'error';
-        lastRunOutcome = { label: 'Failed', className: 'is-failed' };
-      } else {
-        lastRunOutcome = { label: 'Completed', className: 'is-completed' };
-      }
+      ({ message, kind } = settleRun(await executeRun(endpoint, msg => report(msg))));
     } catch (e) {
       kind = 'error';
-      if (e.status === 412) {
+      if (e.status === 412 && e.code === 'goal_required') {
+        message = 'Set a goal before running.';
+      } else if (e.status === 412 && e.code === 'mission_bindings_unclassified') {
         message = 'Classify workspace bindings before running.';
-        lastRunOutcome = { label: 'Blocked', className: 'is-blocked' };
+      } else if (e.status === 412) {
+        // No agent, no model or an unusable toolbox: the server says which.
+        message = e.message || 'This goal cannot run yet.';
       } else if (e.status === 503) {
         message = 'Goal runner is not configured on this server.';
-        lastRunOutcome = { label: 'Failed', className: 'is-failed' };
       } else {
         message = `Run failed: ${e.message}`;
-        lastRunOutcome = { label: 'Failed', className: 'is-failed' };
       }
+      lastRunOutcome =
+        e.status === 412
+          ? { label: 'Blocked', className: 'is-blocked' }
+          : { label: 'Failed', className: 'is-failed' };
+      rememberRunReport(message, kind);
     }
 
     runInProgress = false;
@@ -956,6 +1187,7 @@
     // which may have swapped baseline->run after a first run), then set the
     // result message last so the render pass doesn't overwrite it.
     renderReadOnly(latestState || {});
+    onRunEnded();
     report(message, kind);
   }
 
@@ -994,9 +1226,10 @@
         try {
           await saveMission(payload);
           lastRunOutcome = null;
+          // A first goal starts a run server-side; reload() follows it.
           await reload();
           hideGoalModal();
-          setGoalActionStatus('Goal saved.');
+          if (!runInProgress) setGoalActionStatus('Goal saved.');
         } catch (e) {
           if (e.status === 412) {
             setGoalModalStatus('Classify workspace bindings before enabling automation.', 'error');
@@ -1034,7 +1267,7 @@
           lastRunOutcome = null;
           setStatusText('Goal settings saved.');
           await reload();
-          setGoalActionStatus('Goal saved.');
+          if (!runInProgress) setGoalActionStatus('Goal saved.');
         } catch (e) {
           if (e.status === 412) {
             setStatusText(
@@ -1087,10 +1320,7 @@
   }
 
   function runNowFromCommand(button) {
-    handleRunClick('trigger', button || $(SELECTORS.commandRunBtn), (msg, kind) => {
-      setGoalActionStatus(msg, kind);
-      setCommandActionStatus(msg, kind);
-    });
+    handleRunClick('trigger', button || $(SELECTORS.commandRunBtn), reportToCards);
   }
 
   function exposeAPI() {
@@ -1098,6 +1328,14 @@
     window.workspaceMission = Object.assign(window.workspaceMission || {}, {
       getState: () => latestState,
       getSummary: () => (latestState ? commandSummary(latestState) : {}),
+      // Pure renderers of a given state, for module tests.
+      summarize: state => commandSummary(state || {}),
+      runHistoryHTML,
+      effectiveAutonomy,
+      runCountsText,
+      settleRun,
+      // Whether a goal run is executing, for the Backlog drawer (FR27).
+      isRunning: () => runIsInFlight(latestState),
       renderCommandSurfaces: () => {
         if (latestState) renderCommandPanel(latestState);
       },

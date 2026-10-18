@@ -4,7 +4,8 @@
   "icon": "\ud83d\udcda",
   "behavior_profile": "research",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 4,
+  "goal": "Maintain a cited synthesis answering the research question, with explicit uncertainties and next research steps.",
   "tags": [
     "research"
   ],

@@ -441,17 +441,14 @@ func TestSaveLayoutHandlerPreservesStationPositions(t *testing.T) {
 	}
 }
 
-// TestSaveStationLayoutHandlerPreservesDesignation guards against a
-// designation-clobber: workspaceStore.Get is SQLite-primary and never carries
-// Designation (no SQLite column), so saving the workspace back would write an
-// empty designation into its folder-store projection — silently
-// un-designating the Personal HQ and making its stations vanish on reload.
-// The handler must re-hydrate designation from the folder store before Save.
-func TestSaveStationLayoutHandlerPreservesDesignation(t *testing.T) {
+// newLayoutHandler builds a workspace handler over the two stores a layout
+// save touches: a primary (SQLite-style) store that never carries a
+// designation, and a folder store whose copy of the same workspace does.
+func newLayoutHandler(t *testing.T, id, name, designation string) (*WorkspaceHandler, workspace.Store) {
+	t.Helper()
 	store := workspace.NewInMemoryStore()
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
-	ws.ID = "hq-workspace"
-	// Primary/SQLite-style store carries no designation.
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: name})
+	ws.ID = id
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("Save workspace: %v", err)
 	}
@@ -460,15 +457,26 @@ func TestSaveStationLayoutHandlerPreservesDesignation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	folderWS := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
-	folderWS.ID = "hq-workspace"
-	folderWS.Designation = "personal_hq"
+	folderWS := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: name})
+	folderWS.ID = id
+	folderWS.Designation = designation
 	if err := folderStore.Save(folderWS); err != nil {
 		t.Fatalf("Save folder workspace: %v", err)
 	}
 
 	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
 	handler.SetFolderStore(folderStore)
+	return handler, store
+}
+
+// TestSaveStationLayoutHandlerPreservesDesignation guards against a
+// designation-clobber: workspaceStore.Get is SQLite-primary and never carries
+// Designation (no SQLite column), so saving the workspace back would write an
+// empty designation into its folder-store projection — silently
+// un-designating the Personal HQ and making its stations vanish on reload.
+// The handler must re-hydrate designation from the folder store before Save.
+func TestSaveStationLayoutHandlerPreservesDesignation(t *testing.T) {
+	handler, store := newLayoutHandler(t, "hq-workspace", "HQ Workspace", "personal_hq")
 
 	body := `{"workspace_id":"hq-workspace","station_positions":{"email":{"x":0.5,"y":0.5}}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/station-layout", strings.NewReader(body))
@@ -487,29 +495,58 @@ func TestSaveStationLayoutHandlerPreservesDesignation(t *testing.T) {
 	}
 }
 
+// TestSaveStationLayoutHandlerOrdinaryWorkspaceMemoryStation covers the Memory
+// station (PRD memory-station FR3): every workspace has one, so a drag on an
+// ordinary, non-HQ workspace must persist under the `memory` key next to any
+// capability station and read back from the orchestration workspace GET with
+// the folder-store designation unchanged (still not the Personal HQ).
+func TestSaveStationLayoutHandlerOrdinaryWorkspaceMemoryStation(t *testing.T) {
+	handler, _ := newLayoutHandler(t, "research-workspace", "Research", "")
+
+	body := `{"workspace_id":"research-workspace","station_positions":{"file-janitor":{"x":0.9,"y":0.2},"memory":{"x":0.7,"y":0.4}}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/station-layout", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.SaveStationLayoutHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/workspace?id=research-workspace", nil)
+	getW := httptest.NewRecorder()
+	handler.WorkspaceHandler(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(getW.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["designation"] != "" {
+		t.Fatalf("expected an ordinary workspace to stay undesignated, got %#v", response["designation"])
+	}
+	layout, ok := response["layout"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected layout object in response, got %#v", response["layout"])
+	}
+	stationPositions, ok := layout["station_positions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected station_positions in layout, got %#v", layout["station_positions"])
+	}
+	memory, ok := stationPositions["memory"].(map[string]any)
+	if !ok || memory["x"] != 0.7 || memory["y"] != 0.4 {
+		t.Fatalf("expected memory station position {0.7, 0.4}, got %#v", stationPositions["memory"])
+	}
+	janitor, ok := stationPositions["file-janitor"].(map[string]any)
+	if !ok || janitor["x"] != 0.9 || janitor["y"] != 0.2 {
+		t.Fatalf("expected file-janitor station position {0.9, 0.2}, got %#v", stationPositions["file-janitor"])
+	}
+}
+
 // TestSaveLayoutHandlerPreservesDesignation is the same clobber guard for the
 // canvas layout save path.
 func TestSaveLayoutHandlerPreservesDesignation(t *testing.T) {
-	store := workspace.NewInMemoryStore()
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
-	ws.ID = "hq-workspace"
-	if err := store.Save(ws); err != nil {
-		t.Fatalf("Save workspace: %v", err)
-	}
-
-	folderStore, err := workspace.NewFileStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewFileStore: %v", err)
-	}
-	folderWS := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
-	folderWS.ID = "hq-workspace"
-	folderWS.Designation = "personal_hq"
-	if err := folderStore.Save(folderWS); err != nil {
-		t.Fatalf("Save folder workspace: %v", err)
-	}
-
-	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
-	handler.SetFolderStore(folderStore)
+	handler, store := newLayoutHandler(t, "hq-workspace", "HQ Workspace", "personal_hq")
 
 	body := `{"workspace_id":"hq-workspace","task_positions":{"task-1":{"x":10,"y":20}}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/layout", strings.NewReader(body))

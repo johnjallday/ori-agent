@@ -253,6 +253,7 @@ var validTicketSources = map[string]struct{}{
 	TicketSourceNote:             {},
 	TicketSourceBlueprintIntake:  {},
 	TicketSourceMigration:        {},
+	TicketSourceGoalSuggestion:   {},
 }
 
 // NormalizeTicketSource validates provenance, defaulting empty to manual.

@@ -36,9 +36,35 @@ permissions:
 # whose only job is skipped would still enter a workflow-level group and cancel
 # the scheduled evaluation queued behind a promotion waiting for approval.
 jobs:
+  # A merge shortly before the evaluation leaves ci.yml running for the exact
+  # commit, and evaluate would HOLD until the next day. This job only waits
+  # (up to RELEASE_CI_WAIT_SECONDS) and decides nothing. It holds no lifecycle
+  # lock, so the react and promotion jobs are never queued behind it.
+  await-ci:
+    name: Wait for CI on the candidate commit
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_run'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Wait for ci.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: python3 scripts/release-candidate.py await-ci --candidate "$CANDIDATE"
+
   evaluate:
     name: Evaluate candidate readiness
-    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_run'
+    needs: await-ci
+    # Evaluate even when the wait failed for an infrastructure reason: it is the
+    # gate, and it re-reads CI itself.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'workflow_run' }}
     runs-on: ubuntu-24.04
     concurrency:
       group: release-lifecycle

@@ -310,7 +310,7 @@ test('command subtitle includes mission automation state when mission state is l
       commandView.computeStats()
     );
 
-    assert.match(html, /Workflow · Guided · Mission · Enabled/);
+    assert.match(html, /Workflow · Guided · Goal · Enabled/);
     assert.match(html, /id="workspace-command-subtitle"/);
   } finally {
     globalThis.window = originalWindow;
@@ -378,8 +378,8 @@ test('mission panel renders loaded goal state and findings link', () => {
         mission: 'Keep launch readiness current.',
         label: 'Enabled',
         className: 'is-enabled',
-        title: 'Current goal',
-        text: 'Keep launch readiness current.',
+        title: 'Keep launch readiness current.',
+        text: '',
         cadenceLabel: 'Cadence: Daily at 09:00',
         nextLabel: 'Next: in 2h',
         lastLabel: 'Last: 1h ago',
@@ -399,7 +399,13 @@ test('mission panel renders loaded goal state and findings link', () => {
   try {
     const html = commandView.renderMissionPanel();
 
-    assert.match(html, /Keep launch readiness current\./);
+    // The goal text is the card's heading, ahead of status and cadence (FR8).
+    assert.match(
+      html,
+      /<h3 id="workspace-command-mission-title" class="ws-cmd-mission-title is-goal">Keep launch readiness current\.<\/h3>/
+    );
+    assert.match(html, /<span class="ws-cmd-mission-kicker">Goal<\/span>/);
+    assert.match(html, /id="workspace-command-mission-text" class="ws-cmd-mission-text" hidden>/);
     assert.match(html, /ws-cmd-mission-status is-enabled/);
     assert.match(html, /Cadence: Daily at 09:00/);
     assert.match(html, /href="\/action-center\?workspace=workspace-1"/);
@@ -419,8 +425,8 @@ test('mission panel disables Run Now when no saved goal is runnable', () => {
         mission: '',
         label: 'Not set',
         className: 'is-empty',
-        title: 'No goal set',
-        text: 'No workspace goal yet.',
+        title: 'No goal yet',
+        text: 'Set a goal so your agents can suggest work',
         cadenceLabel: 'Cadence: Manual only',
         nextLabel: 'Next: not scheduled',
         lastLabel: 'Last: never',
@@ -437,7 +443,7 @@ test('mission panel disables Run Now when no saved goal is runnable', () => {
   try {
     const html = commandView.renderMissionPanel();
 
-    assert.match(html, /No workspace goal yet\./);
+    assert.match(html, /Set a goal so your agents can suggest work/);
     assert.match(html, />Set Goal<\/button>/);
     assert.match(html, /id="workspace-command-mission-run"[^>]* disabled/);
     assert.match(html, /title="Set a goal before running"/);
@@ -1098,6 +1104,8 @@ test('systems rail panel renders Command-native tabs and a shared host', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     activeRailSection: 'systems',
+    // A stale "memory" selection from before Memory became a station falls back
+    // to the default tab rather than selecting a missing one (FR12).
     activeSystemTab: 'memory'
   });
 
@@ -1105,9 +1113,10 @@ test('systems rail panel renders Command-native tabs and a shared host', () => {
 
   // The wide layout keys off is-managing on this section.
   assert.match(html, /<section class="ws-cmd-panel ws-cmd-systems-panel is-managing">/);
-  // Systems keeps only workspace state/automation now.
-  assert.match(html, /data-cmd-system-tab="memory" aria-selected="true"/);
-  assert.match(html, /data-cmd-system-tab="triggers"/);
+  // Systems keeps only workspace automation now; Memory is a station.
+  assert.doesNotMatch(html, /data-cmd-system-tab="memory"/);
+  assert.match(html, /data-cmd-system-tab="triggers" aria-selected="true"/);
+  assert.match(html, /data-cmd-system-tab="capabilities"/);
   assert.match(html, /data-cmd-system-host/);
   // Capability providers + Find Tools moved to the header Tools stat-box modal.
   assert.doesNotMatch(html, /data-cmd-system-tab="mcp"/);
@@ -1144,7 +1153,7 @@ test('systems shared surface mounts config without cloning persistence logic', (
   Object.assign(commandView, {
     active: true,
     activeRailSection: 'systems',
-    activeSystemTab: 'memory',
+    activeSystemTab: 'triggers',
     statModalSection: '',
     statModalEl: null,
     container: { querySelector: selector => (selector === '[data-cmd-system-host]' ? host : null) },
@@ -1172,10 +1181,35 @@ test('systems shared surface mounts config without cloning persistence logic', (
     ['restore', 'tools'],
     ['restore', 'capabilities'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
-    ['tab', 'memory'],
-    ['refresh', 'memory'],
+    ['tab', 'triggers'],
+    ['refresh', 'triggers'],
     ['expand', 'config'],
     ['restore', 'members']
+  ]);
+});
+
+test('Systems has no Memory tab and opens on Triggers by default (FR12)', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  assert.deepEqual(
+    commandView.systemTabs().map(tab => tab.key),
+    ['triggers', 'capabilities']
+  );
+  assert.equal(commandView.systemTab('memory').key, 'triggers');
+  assert.equal(commandView.systemTab('').key, 'triggers');
+  assert.equal(new WorkspaceCommandView(null).activeSystemTab, 'triggers');
+
+  const renders = [];
+  Object.assign(commandView, {
+    activeRailSection: '',
+    render() {
+      renders.push([this.activeRailSection, this.activeSystemTab]);
+    }
+  });
+  commandView.openSystemTab();
+  commandView.openSystemTab('memory');
+  assert.deepEqual(renders, [
+    ['systems', 'triggers'],
+    ['systems', 'triggers']
   ]);
 });
 
@@ -1695,8 +1729,8 @@ test('presentRailSections lists the rows renderRail draws, in order, with the sa
     assert.deepEqual(plain.presentRailSections(), drawn(plain.renderRail()));
     assert.deepEqual(
       plain.presentRailSections().map(section => section.key),
-      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems'],
-      'no Detachment outside a group and no Stations outside the HQ'
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems', 'stations'],
+      'no Detachment outside a group; every workspace has its Memory station'
     );
 
     const group = makeRailView({
@@ -1707,7 +1741,17 @@ test('presentRailSections lists the rows renderRail draws, in order, with the sa
     assert.deepEqual(group.presentRailSections(), drawn(group.renderRail()));
     assert.deepEqual(
       group.presentRailSections().map(section => section.key),
-      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'members', 'files', 'systems']
+      [
+        'backlog',
+        'notes',
+        'schedules',
+        'sessions',
+        'folders',
+        'members',
+        'files',
+        'systems',
+        'stations'
+      ]
     );
 
     const hq = makeRailView({ ...content, workspace: { id: 'hq-1', designation: 'personal_hq' } });
@@ -3163,8 +3207,8 @@ test('Operations Map inventory derives counts from existing page data', () => {
   assert.equal(counts.sessions, 1);
   assert.equal(counts.folders, 1);
   assert.equal(counts.files, 1);
-  // Memory, Triggers, Capabilities.
-  assert.equal(counts.systems, 3);
+  // Triggers, Capabilities (Memory is a station).
+  assert.equal(counts.systems, 2);
 });
 
 // Plans must be REACHABLE from the workspace, not just routable.
@@ -5597,8 +5641,13 @@ test('renderOperationsMap adds is-hq to the map shell only for the designated HQ
   };
   const plainHTML = commandView.renderOperationsMap();
   assert.doesNotMatch(plainHTML, /is-hq/);
-  // Non-HQ map surface is unchanged: no station structures (FR16).
-  assert.doesNotMatch(plainHTML, /ws-cmd-map-hq-station/);
+  // A non-HQ map gets no HQ stations (FR16), only its own Memory station.
+  assert.deepEqual(
+    [
+      ...plainHTML.matchAll(/class="ws-cmd-map-hq-station[^"]*" data-cmd-hq-station="([^"]+)"/g)
+    ].map(match => match[1]),
+    ['memory']
+  );
 });
 
 test('commandBarHTML shows the Personal HQ badge in both Command modes', () => {
@@ -5712,7 +5761,8 @@ test('renderStationsRailPanel renders one row per station only for HQ payloads',
     // first station's row is gone.
     assert.equal((panel.match(/data-cmd-hq-station="watchtower"/g) || []).length, 1);
 
-    // Non-HQ workspaces render nothing (FR16).
+    // A workspace with no station at all renders nothing: not yet loaded, it
+    // has no id and so no Memory station either.
     const plain = Object.create(WorkspaceCommandView.prototype);
     Object.assign(plain, { page: { workspace: {} } });
     assert.equal(plain.renderStationsRailPanel(), '');
@@ -5747,6 +5797,767 @@ test('the rail click delegation dispatches HQ station rows through the registry 
     });
 
     assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// ---------- Memory station (PRD memory-station) ----------
+
+function makeMemoryCommandView(workspaceOverrides, extra) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [], ...workspaceOverrides },
+      tasks: [],
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      files: [],
+      buildAgentGroups: () => []
+    },
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    mapInventorySection: '',
+    activeSystemTab: 'triggers',
+    ...extra
+  });
+  return commandView;
+}
+
+function readyMemory(commandView, summary) {
+  commandView._memoryStation = {
+    workspaceID: commandView.workspaceId(),
+    status: 'ready',
+    summary: { count: 0, watching: 0, dropped: 0, overBudget: false, ...summary }
+  };
+}
+
+const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('every workspace ends its station registry with Memory; the HQ four keep their slots', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const plain = makeMemoryCommandView();
+    assert.deepEqual(
+      plain.mapStationRegistry().map(station => station.key),
+      ['memory']
+    );
+    assert.deepEqual(plain.hqStationPosition('memory'), plain.hqStationDefaultPosition(0));
+
+    const group = makeMemoryCommandView({ id: 'grp-1', kind: 'group' });
+    assert.deepEqual(
+      group.mapStationRegistry().map(station => station.key),
+      ['memory']
+    );
+
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    assert.deepEqual(
+      hq.mapStationRegistry().map(station => station.key),
+      ['watchtower', 'email', 'calendar-ops', 'daily-brief', 'memory']
+    );
+    ['watchtower', 'email', 'calendar-ops', 'daily-brief'].forEach((key, slot) => {
+      assert.deepEqual(hq.hqStationPosition(key), hq.hqStationDefaultPosition(slot));
+    });
+    const memory = hq.hqStationPosition('memory');
+    assert.equal(memory.x, 0.9);
+    assert.ok(Math.abs(memory.y - 0.9) < 1e-9, 'Memory takes the fifth slot');
+    assert.equal(hq.hqStationRegistry().length, 4, 'Memory is not an HQ-only station');
+
+    // A capability station keeps its slot; Memory follows it.
+    installJanitorStationAdapter(globalThis.window);
+    globalThis.window.WorkspaceCapabilities = {
+      find: () => installedFileJanitor({ state: 'idle', detail: 'Tidy' })
+    };
+    assert.deepEqual(
+      plain.mapStationRegistry().map(station => station.key),
+      ['file-janitor', 'memory']
+    );
+    assert.deepEqual(plain.hqStationPosition('memory'), plain.hqStationDefaultPosition(1));
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Memory building draws the archive art and reads its badge once', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceBuildingArt: {
+      svgForVariant: (variant, options) =>
+        '<svg data-building-variant="' + variant + '" data-context="' + options.context + '"></svg>'
+    }
+  };
+  try {
+    const plain = makeMemoryCommandView();
+    readyMemory(plain, { count: 14, watching: 2 });
+    const html = plain.renderMapHQStations();
+    assert.match(html, /data-cmd-hq-station="memory" data-station-visual="archive"/);
+    assert.match(html, /data-building-variant="archive" data-context="station"/);
+    assert.match(html, /aria-label="Memory station, 14 entries, 2 watching"/);
+    assert.match(html, /ws-cmd-map-hq-station-label">Memory</);
+    assert.match(html, /ws-cmd-map-hq-station-state">14 entries</);
+
+    readyMemory(plain, { count: 5, overBudget: true, dropped: 2 });
+    const over = plain.renderMapHQStations();
+    assert.match(over, /class="ws-cmd-map-hq-station has-visual is-attention"/);
+    assert.match(
+      over,
+      /aria-label="Memory station, Over budget, 2 entries are not shown to agents"/
+    );
+
+    // Without the art module the building falls back to its icon.
+    globalThis.window = {};
+    assert.match(plain.renderMapHQStations(), /bi-journal-bookmark/);
+
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    readyMemory(hq, { count: 3 });
+    assert.match(hq.renderMapHQStations(), /aria-label="Memory station, global memory, 3 entries"/);
+
+    // Every HQ state leads with "global memory" (FR28), and nothing is heard
+    // twice: not a "—" placeholder, not the station's own name.
+    const memoryLabel = view =>
+      /data-cmd-hq-station="memory"[^>]*aria-label="([^"]*)"/.exec(view.renderMapHQStations())[1];
+    readyMemory(hq, { count: 0 });
+    assert.equal(memoryLabel(hq), 'Memory station, global memory, Empty, nothing recorded yet');
+    hq._memoryStation.status = 'loading';
+    assert.equal(memoryLabel(hq), 'Memory station, global memory, loading memory');
+    hq._memoryStation.status = 'error';
+    assert.equal(memoryLabel(hq), 'Memory station, global memory, status unavailable');
+    plain._memoryStation.status = 'loading';
+    assert.equal(memoryLabel(plain), 'Memory station, loading memory');
+    plain._memoryStation.status = 'error';
+    assert.equal(memoryLabel(plain), 'Memory station, status unavailable');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Stations rail shows the Memory row on an ordinary workspace', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const plain = makeMemoryCommandView({}, { activeRailSection: 'stations' });
+    readyMemory(plain, { count: 2 });
+    const panel = plain.renderStationsRailPanel();
+    assert.match(panel, /<section class="ws-cmd-panel is-hq-stations is-managing">/);
+    assert.match(
+      panel,
+      /data-cmd-hq-station="memory" aria-label="Memory station, 2 entries"><span class="ws-cmd-rail-t">Memory<\/span><span class="ws-cmd-rail-m">2 entries</
+    );
+    // Stations opens by itself only in an HQ (rail default-open rule unchanged).
+    assert.equal(
+      resolveRailSectionForTest(plain),
+      '',
+      'an ordinary workspace with nothing else opens nothing'
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+function resolveRailSectionForTest(commandView) {
+  let resolved = null;
+  withRailStorage({}, () => {
+    Object.assign(commandView, {
+      active: true,
+      viewMode: 'details',
+      activeRailSection: '',
+      railSectionSettled: false
+    });
+    commandView.page = { ...commandView.page, initialListsLoaded: true, backlogItems: [] };
+    commandView.settleRailSection();
+    resolved = commandView.activeRailSection;
+  });
+  return resolved;
+}
+
+test('the Memory station reads GET /memory once and drops a response for another workspace', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  const calls = [];
+  const pending = [];
+  globalThis.fetch = url => {
+    calls.push(url);
+    return new Promise(resolve => pending.push(resolve));
+  };
+  const respond = (index, body, status = 200) =>
+    pending[index]({ ok: status < 300, status, json: async () => body });
+  try {
+    const plain = makeMemoryCommandView();
+    plain.active = true;
+    let renders = 0;
+    plain.render = () => {
+      renders += 1;
+    };
+    assert.equal(plain.memoryStationState().value, '—');
+    assert.equal(plain.memoryStationData().status, 'loading');
+    plain.memoryStationState();
+    assert.deepEqual(calls, ['/api/workspaces/ws-1/memory'], 'one request while loading');
+
+    respond(0, {
+      entries: [
+        { type: 'watch', text: 'a' },
+        { type: 'fact', text: 'b' }
+      ]
+    });
+    await flush();
+    assert.equal(renders, 1);
+    assert.equal(plain.memoryStationState().value, '2 entries');
+    assert.equal(plain.memoryStationState().description, '2 entries, 1 watching');
+    plain.memoryStationState();
+    assert.equal(calls.length, 1, 'a ready badge is not re-read on render');
+
+    // A forced re-read supersedes; the workspace then changes before it lands.
+    plain.requestMemoryStationData(true);
+    assert.equal(plain.memoryStationData().status, 'ready', 'the old badge stands meanwhile');
+    plain.page.workspace = { id: 'ws-2' };
+    respond(1, { entries: [] });
+    await flush();
+    assert.equal(plain.memoryStationData().workspaceID, 'ws-2');
+    assert.equal(plain.memoryStationData().status, 'idle');
+    assert.equal(renders, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a 404 removes the Memory station and a failed read degrades it', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    const folderless = makeMemoryCommandView();
+    folderless.active = true;
+    folderless.render = () => {};
+    folderless.memoryStationState();
+    await flush();
+    assert.equal(folderless.memoryStationData().status, 'absent');
+    assert.deepEqual(folderless.mapStationRegistry(), []);
+    assert.equal(folderless.renderMapHQStations(), '');
+
+    globalThis.fetch = async () => ({ ok: false, status: 500 });
+    const failed = makeMemoryCommandView();
+    failed.active = true;
+    failed.render = () => {};
+    failed.memoryStationState();
+    await flush();
+    assert.deepEqual(failed.memoryStationState(), {
+      value: 'Memory',
+      description: 'status unavailable',
+      tone: 'degraded'
+    });
+    assert.equal(failed.mapStationRegistry().length, 1, 'a failed read never hides the station');
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('closing the Memory panel and a finished task re-read the memory (FR6)', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const plain = makeMemoryCommandView();
+    readyMemory(plain, { count: 1 });
+    const requests = [];
+    plain.requestMemoryStationData = force => requests.push(force);
+    let renders = 0;
+    Object.assign(plain, {
+      active: true,
+      render() {
+        renders += 1;
+      },
+      statModalSection: 'memory',
+      statModalTrigger: null,
+      statModalEl: { hidden: false },
+      releaseConfigModalSurface() {},
+      sharedSurfaceAnchors: {}
+    });
+    plain.closeStatModal();
+    assert.equal(plain.statModalEl.hidden, true);
+    assert.deepEqual(requests, [true]);
+    assert.equal(renders, 1, 'the building repaints from what was just seen');
+
+    plain.noteMemoryStationActivity({ type: 'task.progress' });
+    plain.noteMemoryStationActivity({ type: 'task.completed' });
+    plain.noteMemoryStationActivity({ type: 'task.failed' });
+    assert.deepEqual(requests, [true, true, true]);
+
+    // A group forwards no map activity, but its memory still refreshes.
+    const group = makeMemoryCommandView({ kind: 'group' });
+    const groupRequests = [];
+    group.requestMemoryStationData = force => groupRequests.push(force);
+    assert.equal(group.handleActivityEvent({ type: 'task.completed' }), false);
+    assert.deepEqual(groupRequests, [true]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('opening the Memory station records what was seen and opens the memory modal', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    withRailStorage({}, values => {
+      const building = { id: 'memory-building' };
+      const manager = { load() {} };
+      const plain = makeMemoryCommandView(
+        {},
+        {
+          container: {
+            querySelector: selector =>
+              selector === '[data-cmd-hq-station="memory"]' ? building : null
+          }
+        }
+      );
+      plain.page.memoryManager = manager;
+      readyMemory(plain, { count: 3 });
+      const opened = [];
+      plain.openStatModal = (section, trigger) => opened.push([section, trigger]);
+
+      const trigger = { id: 'rail-row' };
+      plain.runHQStationAction('memory', trigger);
+      assert.deepEqual(opened, [['memory', trigger]]);
+      assert.equal(values.get('ori:memory-station-seen:ws-1'), JSON.stringify({ count: 3 }));
+      assert.equal(typeof manager.onPayload, 'function', 'the station follows the manager');
+
+      // A direct link has no opener: focus returns to the building.
+      plain.openMemoryPanel(null);
+      assert.deepEqual(opened[1], ['memory', building]);
+
+      // The baseline makes later entries read as new until the panel opens.
+      readyMemory(plain, { count: 5 });
+      assert.equal(plain.memoryStationBadge().value, '+2 new');
+      plain.openMemoryPanel(trigger);
+      assert.equal(plain.memoryStationBadge().value, '5 entries');
+    });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the manager payload repaints the badge, and while the panel is open it is what was seen', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    withRailStorage({}, values => {
+      const chip = { textContent: '' };
+      const plain = makeMemoryCommandView();
+      let renders = 0;
+      Object.assign(plain, {
+        active: true,
+        render() {
+          renders += 1;
+        },
+        statModalSection: 'memory',
+        statModalEl: {
+          hidden: false,
+          querySelector: selector => (selector === '.ws-cmd-modal-count' ? chip : null)
+        }
+      });
+      plain.noteMemoryStationPayload({ entries: [{ type: 'fact' }, { type: 'watch' }] });
+      assert.equal(chip.textContent, '2');
+      assert.equal(values.get('ori:memory-station-seen:ws-1'), JSON.stringify({ count: 2 }));
+      assert.equal(renders, 0, 'the open panel owns the screen');
+
+      plain.statModalSection = '';
+      plain.statModalEl.hidden = true;
+      plain.noteMemoryStationPayload({ entries: [{ type: 'fact' }, { type: 'watch' }] });
+      assert.equal(renders, 0, 'nothing changed, nothing repaints');
+      plain.noteMemoryStationPayload({ entries: [{ type: 'fact' }] });
+      assert.equal(renders, 1);
+    });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the memory modal mounts the existing pane through the config surface (FR10, FR11)', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const plain = makeMemoryCommandView();
+    readyMemory(plain, { count: 7 });
+    assert.deepEqual(plain.statSectionMeta('memory'), { title: 'Memory', addLabel: '' });
+    assert.equal(plain.sectionUsesConfigSurface('memory'), true);
+    assert.equal(plain.configTabIdFor('memory'), 'workspace-detail-config-memory-tab');
+    const html = plain.statModalHTML('memory');
+    assert.match(html, /<h3 class="ws-cmd-modal-title">Memory<\/h3>/);
+    assert.match(html, /<span class="ws-cmd-modal-count">7<\/span>/);
+    assert.match(html, /data-cmd-config-host/);
+
+    // Mounting runs the pane's own load, not only Bootstrap's lazy tab event.
+    const calls = [];
+    const host = { innerHTML: '' };
+    const config = { classList: { add: name => calls.push(['class', name]) } };
+    plain.page.memoryManager = { load: () => calls.push(['load']) };
+    Object.assign(plain, {
+      statModalSection: 'memory',
+      statModalEl: {
+        hidden: false,
+        querySelector: selector => (selector === '[data-cmd-config-host]' ? host : null)
+      },
+      mountSharedSurface(key, selector, target) {
+        calls.push(['mount', key, target === host ? 'modal' : '?']);
+        return config;
+      },
+      showConfigTab(tab) {
+        calls.push(['tab', tab.tabId]);
+      },
+      expandMountedConfig() {
+        calls.push(['expand']);
+      }
+    });
+    plain.syncConfigModalSurface();
+    assert.deepEqual(calls, [
+      ['mount', 'config', 'modal'],
+      ['class', 'is-command-modal'],
+      ['tab', 'workspace-detail-config-memory-tab'],
+      ['load'],
+      ['expand']
+    ]);
+
+    // The panel takes its own width class, and only for Memory.
+    const toggles = {};
+    const panel = {
+      classList: { toggle: (name, on) => (toggles[name] = on) },
+      setAttribute() {},
+      set innerHTML(value) {
+        this.html = value;
+      },
+      querySelector: () => null
+    };
+    Object.assign(plain, {
+      statModalEl: {
+        hidden: false,
+        querySelector: selector => (selector === '.ws-cmd-modal-panel' ? panel : null)
+      },
+      syncConfigModalSurface() {},
+      syncToolsModalSurface() {},
+      syncBoardSurface() {},
+      mountTaskFilterBar() {}
+    });
+    plain.renderStatModalBody();
+    assert.equal(toggles['is-memory'], true);
+    assert.equal(toggles['is-config'], true);
+    plain.statModalSection = 'mcp';
+    plain.renderStatModalBody();
+    assert.equal(toggles['is-memory'], false);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('closing the Memory modal hands the config surface back to Systems on Triggers (FR13)', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const calls = [];
+    const railHost = { name: 'rail', innerHTML: '' };
+    const modalHost = { name: 'modal', innerHTML: '' };
+    const configNode = { classList: { add() {}, remove() {} } };
+    const plain = makeMemoryCommandView(
+      {},
+      {
+        active: true,
+        activeRailSection: 'systems',
+        activeSystemTab: 'triggers',
+        statModalSection: '',
+        statModalTrigger: null,
+        statModalEl: null,
+        sharedSurfaceAnchors: { config: { node: configNode } },
+        container: {
+          querySelector: selector => (selector === '[data-cmd-system-host]' ? railHost : null)
+        },
+        render() {},
+        requestMemoryStationData() {},
+        mountSharedSurface(key, selector, target) {
+          calls.push(['mount', key, target.name]);
+          return configNode;
+        },
+        restoreSharedSurface(key) {
+          calls.push(['restore', key]);
+        },
+        showConfigTab(tab) {
+          calls.push(['tab', tab.tabId]);
+        },
+        refreshConfigData(key) {
+          calls.push(['refresh', key]);
+        },
+        expandMountedConfig() {}
+      }
+    );
+
+    // Systems is expanded on Triggers.
+    plain.syncSystemsSurface();
+    assert.deepEqual(calls.slice(-3), [
+      ['mount', 'config', 'rail'],
+      ['tab', 'workspace-detail-config-triggers-tab'],
+      ['refresh', 'triggers']
+    ]);
+
+    // The Memory modal borrows the one config node; a background re-render
+    // of the rail does not steal it back.
+    calls.length = 0;
+    plain.statModalSection = 'memory';
+    plain.statModalEl = {
+      hidden: false,
+      querySelector: selector => (selector === '[data-cmd-config-host]' ? modalHost : null)
+    };
+    plain.syncConfigModalSurface();
+    plain.syncSystemsSurface();
+    assert.deepEqual(calls, [
+      ['mount', 'config', 'modal'],
+      ['tab', 'workspace-detail-config-memory-tab'],
+      ['refresh', 'memory']
+    ]);
+
+    // Closing re-offers it to the rail, still on Triggers.
+    calls.length = 0;
+    plain.closeStatModal();
+    const lastMount = calls.filter(call => call[0] === 'mount').pop();
+    const lastTab = calls.filter(call => call[0] === 'tab').pop();
+    assert.deepEqual(lastMount, ['mount', 'config', 'rail']);
+    assert.deepEqual(lastTab, ['tab', 'workspace-detail-config-triggers-tab']);
+    assert.equal(plain.activeSystemTab, 'triggers');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a background repaint re-mounts the open Memory panel without reloading it', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const plain = makeMemoryCommandView();
+    let loads = 0;
+    plain.page.memoryManager = { load: () => (loads += 1) };
+    const host = { innerHTML: '' };
+    Object.assign(plain, {
+      statModalSection: 'memory',
+      statModalEl: {
+        hidden: false,
+        querySelector: selector => (selector === '[data-cmd-config-host]' ? host : null)
+      },
+      mountSharedSurface: () => ({ classList: { add() {} } }),
+      showConfigTab() {},
+      expandMountedConfig() {}
+    });
+    plain.syncConfigModalSurface();
+    plain.syncConfigModalSurface();
+    plain.syncConfigModalSurface();
+    assert.equal(loads, 1, 'an inline edit survives a task event repainting the view');
+
+    // Opening the panel again loads it again.
+    plain.ensureStatModal = () => plain.statModalEl;
+    plain.renderStatModalBody = () => plain.syncConfigModalSurface();
+    plain.setCommandBackgroundInert = () => {};
+    plain.statModalEl.querySelector = selector =>
+      selector === '[data-cmd-config-host]' ? host : null;
+    plain.openStatModal('memory', null);
+    assert.equal(loads, 2);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('focus inside an open stat modal survives a full render', () => {
+  const originalDocument = globalThis.document;
+  const body = { id: 'body' };
+  const calls = [];
+  const input = {
+    isConnected: true,
+    selectionStart: 3,
+    selectionEnd: 5,
+    focus: () => calls.push('input'),
+    setSelectionRange: (start, end) => calls.push(['caret', start, end])
+  };
+  const panel = { focus: () => calls.push('panel') };
+  globalThis.document = { getElementById: () => null, body, activeElement: input };
+  try {
+    const commandView = makeMemoryCommandView(
+      {},
+      {
+        statModalSection: 'memory',
+        statModalEl: {
+          contains: el => el === input,
+          querySelector: selector => (selector === '.ws-cmd-modal-panel' ? panel : null)
+        }
+      }
+    );
+    commandView.captureStatModalFocus();
+    globalThis.document.activeElement = body; // the re-render moved the node
+    commandView.restoreStatModalFocus();
+    assert.deepEqual(calls, ['input', ['caret', 3, 5]]);
+
+    // A control that was rebuilt hands focus to the panel, never to <body>.
+    calls.length = 0;
+    globalThis.document.activeElement = input;
+    commandView.captureStatModalFocus();
+    input.isConnected = false;
+    globalThis.document.activeElement = body;
+    commandView.restoreStatModalFocus();
+    assert.deepEqual(calls, ['panel']);
+
+    // Focus outside the modal is not the modal's to restore.
+    calls.length = 0;
+    globalThis.document.activeElement = { id: 'elsewhere' };
+    commandView.captureStatModalFocus();
+    commandView.restoreStatModalFocus();
+    assert.deepEqual(calls, []);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('?station=memory opens the Memory panel on an ordinary workspace, focus returning to the building (FR24)', () => {
+  const originalWindow = globalThis.window;
+  const replaced = [];
+  globalThis.window = {
+    location: { href: 'http://ori.local/workspaces/album-three?station=memory' },
+    history: { state: null, replaceState: (...args) => replaced.push(args) }
+  };
+  try {
+    const building = { id: 'memory-building' };
+    const plain = makeMemoryCommandView(
+      {},
+      {
+        container: {
+          querySelector: selector =>
+            selector === '[data-cmd-hq-station="memory"]' ? building : null
+        }
+      }
+    );
+    const opened = [];
+    plain.openStatModal = (section, trigger) => opened.push([section, trigger]);
+    plain._bootStation = 'memory';
+    plain.applyStationDeepLink();
+    assert.deepEqual(opened, [['memory', building]]);
+    assert.deepEqual(replaced, [[null, '', '/workspaces/album-three']]);
+    assert.equal(plain._bootStation, '');
+
+    // A station this workspace does not have opens nothing; the parameter
+    // still leaves the address bar.
+    replaced.length = 0;
+    globalThis.window.location.href = 'http://ori.local/workspaces/album-three?station=watchtower';
+    plain._bootStation = 'watchtower';
+    plain.applyStationDeepLink();
+    assert.equal(opened.length, 1);
+    assert.deepEqual(replaced, [[null, '', '/workspaces/album-three']]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the HQ Memory badge counts the Profile review queue; an ordinary workspace never asks (FR29)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  const calls = [];
+  const item = (id, state) => ({ id, version: 1, state, text: id });
+  let knowledge = {
+    status: 200,
+    body: {
+      items: [
+        item('a', 'candidate'),
+        item('b', 'needs_review'),
+        item('c', 'approved'),
+        item('d', 'rejected')
+      ]
+    }
+  };
+  globalThis.fetch = async url => {
+    calls.push(url);
+    if (url === '/api/personal-assistant/knowledge') {
+      return {
+        ok: knowledge.status < 300,
+        status: knowledge.status,
+        json: async () => knowledge.body
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ entries: [{ type: 'fact', text: 'x' }] })
+    };
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = true;
+    let renders = 0;
+    hq.render = () => {
+      renders += 1;
+    };
+    const shared = [];
+    hq.page.memoryManager = { setReviewQueue: count => shared.push(count) };
+    hq.memoryStationState();
+    await flush();
+    assert.ok(calls.includes('/api/personal-assistant/knowledge'));
+    assert.deepEqual(hq.memoryStationState(), {
+      value: '2 to review',
+      description: 'global memory, 2 to review, 2 proposals waiting on Profile',
+      tone: 'attention'
+    });
+    assert.deepEqual(shared, [2], 'the panel links the waiting proposals');
+    assert.ok(renders >= 1);
+
+    // Over budget still wins.
+    hq._memoryStation.summary = { ...hq._memoryStation.summary, overBudget: true, dropped: 1 };
+    assert.equal(hq.memoryStationBadge().value, 'Over budget');
+
+    // No assistant or HQ (503): no review state, the rest of the badge stands.
+    hq._memoryStation.summary = { ...hq._memoryStation.summary, overBudget: false, dropped: 0 };
+    knowledge = { status: 503, body: {} };
+    hq.requestHQReviewQueue(true);
+    await flush();
+    assert.equal(hq.memoryStationBadge().value, '1 entry');
+
+    // An ordinary workspace never requests the queue.
+    calls.length = 0;
+    const plain = makeMemoryCommandView({}, { active: true, render() {} });
+    plain.memoryStationState();
+    plain.requestHQReviewQueue(true);
+    await flush();
+    assert.equal(calls.includes('/api/personal-assistant/knowledge'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('?station= reads any station-shaped key at boot', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { search: '?mode=map&station=memory' } };
+  try {
+    assert.equal(new WorkspaceCommandView(null)._bootStation, 'memory');
+    globalThis.window.location.search = '?station=%3Cscript%3E';
+    assert.equal(new WorkspaceCommandView(null)._bootStation, '');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a dragged Memory building keeps its saved, clamped position on an ordinary workspace (FR3)', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const saved = makeMemoryCommandView({
+      layout: { station_positions: { memory: { x: 0.4, y: 0.55 } } }
+    });
+    assert.deepEqual(saved.hqStationPosition('memory'), { x: 0.4, y: 0.55 });
+    const oob = makeMemoryCommandView({
+      layout: { station_positions: { memory: { x: 1.4, y: -2 } } }
+    });
+    assert.deepEqual(oob.hqStationPosition('memory'), { x: 1, y: 0 });
+    const corrupt = makeMemoryCommandView({
+      layout: { station_positions: { memory: { x: 'left', y: 0.2 } } }
+    });
+    assert.deepEqual(corrupt.hqStationPosition('memory'), corrupt.hqStationDefaultPosition(0));
   } finally {
     globalThis.window = originalWindow;
   }
@@ -5885,8 +6696,9 @@ test('a workspace without the capability installed gets no station', () => {
       available: true
     });
     const html = commandView.renderOperationsMap();
-    assert.doesNotMatch(html, /ws-cmd-map-hq-station/);
     assert.doesNotMatch(html, /file-janitor/);
+    // The only building is the Memory station every workspace has.
+    assert.match(html, /data-cmd-hq-station="memory"/);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -5904,7 +6716,7 @@ test('an install this build cannot resolve renders no station', () => {
       unavailable: 'not available in this version'
     });
     const html = commandView.renderOperationsMap();
-    assert.doesNotMatch(html, /ws-cmd-map-hq-station/);
+    assert.doesNotMatch(html, /data-cmd-hq-station="file-janitor"/);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -6826,4 +7638,19 @@ test('How this was set up shows the assistant, the request, and each reason, esc
   assert.match(html, /a newsletter &lt;b&gt;every&lt;\/b&gt; monday/);
   assert.equal((html.match(/<li>/g) || []).length, 2, 'blank reasons are left out');
   assert.match(html, /<strong>Blueprint<\/strong> It already has a drafting flow\./);
+  // What Create did with an attached folder or link is labelled too.
+  const attached = view.buildSummaryHTML({
+    build_summary: {
+      assistant_name: 'Luna',
+      decisions: [
+        { section: 'folder', text: 'Linked the folder “Elite School” you attached.' },
+        {
+          section: 'link',
+          text: 'Bound this workspace to acme/widgets, the repository you attached.'
+        }
+      ]
+    }
+  });
+  assert.match(attached, /<strong>Folder<\/strong> Linked the folder/);
+  assert.match(attached, /<strong>Link<\/strong> Bound this workspace to acme\/widgets/);
 });

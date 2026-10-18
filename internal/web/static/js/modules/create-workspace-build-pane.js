@@ -69,8 +69,46 @@
     folderSend: 'Set it up from the attached folder.',
     folderSendHint: 'Empty Send: “Set it up from the attached folder”',
     folderSummary: (files, partial) =>
-      `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`
+      `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`,
+    // Add link: one address, read for what it says about itself.
+    addLink: 'Add link',
+    removeLink: 'Remove link',
+    linkLabel: 'Link to attach',
+    linkPlaceholder: 'https://',
+    linkAttach: 'Attach',
+    linkChecking: 'Checking…',
+    linkCancel: 'Cancel',
+    linkEmpty: 'Paste a link first.',
+    linkDisclosure:
+      'Ori fetches the page’s title and description once, or a GitHub repository’s public details. Nothing else is read. Send shares that with your configured model.',
+    linkAttached:
+      'Link attached — I can see what it says about itself, not the page. Tell me what this workspace should do, or just press Send.',
+    linkSend: 'Set it up from the attached link.',
+    linkSendHint: 'Empty Send: “Set it up from the attached link”',
+    bothSend: 'Set it up from what I attached.',
+    bothSendHint: 'Empty Send: “Set it up from what I attached”'
   };
+
+  // linkSummaryText is the one line under an attached link: what kind of
+  // thing it is and what Ori could see of it.
+  function linkSummaryText(observation) {
+    if (!observation || typeof observation !== 'object') return '';
+    const host = text(observation.host);
+    const repo = observation.repo && typeof observation.repo === 'object' ? observation.repo : null;
+    if (observation.kind === 'github_repo' && repo) {
+      if (repo.reachable !== 'yes') return 'GitHub repository · not verified';
+      const parts = ['GitHub repository'];
+      if (text(repo.language)) parts.push(text(repo.language));
+      const issues = Math.max(0, Number(repo.open_issues) || 0);
+      parts.push(`${issues.toLocaleString('en-US')} open ${issues === 1 ? 'issue' : 'issues'}`);
+      if (repo.archived === true) parts.push('archived');
+      return parts.join(' · ');
+    }
+    // A document is never opened, so it is known by its address either way.
+    if (observation.kind === 'document') return `Document · ${host} · not read`;
+    if (observation.readable !== true) return `Could only read the address · ${host}`;
+    return `Page · ${host}`;
+  }
 
   // A reason code ("desktop_off") is for code, never for the user; a note
   // that is a single identifier is treated as no note at all.
@@ -241,6 +279,12 @@
     folderBusy: false,
     folderNote: '',
     chooserOpen: false,
+    // Add link: whether the server offers it, whether an attach or removal is
+    // in flight, the note under the chip, and whether the field is open.
+    links: false,
+    linkBusy: false,
+    linkNote: '',
+    linkFieldOpen: false,
     listeners: [],
     els: {}
   };
@@ -355,14 +399,66 @@
     return observation && typeof observation === 'object' ? observation : null;
   }
 
+  function attachedLink() {
+    const observation = state.session?.link?.observation;
+    return observation && typeof observation === 'object' ? observation : null;
+  }
+
+  // attachmentsLocked is true while a turn, a folder request, or a link
+  // request is in flight: one request at a time moves the session's version.
+  function attachmentsLocked(view) {
+    return Boolean(view?.busy) || state.folderBusy || state.linkBusy;
+  }
+
+  // emptySendText is what an empty Send asks for, from what is attached.
+  function emptySendText() {
+    const folder = attachedFolder();
+    const link = attachedLink();
+    if (folder && link) return COPY.bothSend;
+    if (link) return COPY.linkSend;
+    if (folder) return COPY.folderSend;
+    return '';
+  }
+
+  // renderLink draws the link half of the attachments: the Add link button
+  // when the server offers it, the attached link's chip and summary, and the
+  // empty-Send hint the link owns (alone, or with a folder).
+  function renderLink(view) {
+    const { els } = state;
+    if (!els.addLink) return;
+    const link = attachedLink();
+    const locked = attachmentsLocked(view);
+    els.addLink.hidden = !state.links;
+    els.addLink.disabled = locked;
+    els.linkChip.hidden = !link;
+    const name = text(link?.title) || text(link?.repo?.full_name) || text(link?.host);
+    els.linkName.textContent = name;
+    els.linkIcon.className = link?.kind === 'github_repo' ? 'bi bi-github' : 'bi bi-link-45deg';
+    els.linkRemove.disabled = locked;
+    els.linkRemove.setAttribute(
+      'aria-label',
+      name ? `${COPY.removeLink} ${name}` : COPY.removeLink
+    );
+    const summary = state.linkNote || linkSummaryText(link);
+    if (els.linkSummary.textContent !== summary) els.linkSummary.textContent = summary;
+    els.linkSummary.hidden = !summary;
+    const empty = !text(els.input?.value);
+    els.linkHint.textContent = attachedFolder() ? COPY.bothSendHint : COPY.linkSendHint;
+    els.linkHint.hidden = !link || !empty;
+    els.linkInput.disabled = state.linkBusy;
+    els.linkAttach.disabled = state.linkBusy;
+    els.linkAttach.textContent = state.linkBusy ? COPY.linkChecking : COPY.linkAttach;
+  }
+
   // renderFolder draws the composer's attachments from the session: the Add
   // folder button when the server offers it, the attached folder's chip and
   // summary, and the empty-Send hint while the reply box is empty.
   function renderFolder(view) {
+    renderLink(view);
     const { els } = state;
     if (!els.addFolder) return;
     const folder = attachedFolder();
-    const locked = Boolean(view?.busy) || state.folderBusy;
+    const locked = attachmentsLocked(view);
     els.addFolder.hidden = !state.folders;
     els.addFolder.disabled = locked;
     els.folderChip.hidden = !folder;
@@ -385,7 +481,8 @@
     // the reply box never re-announces the folder.
     if (els.folderSummary.textContent !== summary) els.folderSummary.textContent = summary;
     els.folderSummary.hidden = !summary;
-    els.folderHint.hidden = !folder || Boolean(text(els.input?.value));
+    // With a link attached too, the link's hint speaks for both.
+    els.folderHint.hidden = !folder || Boolean(attachedLink()) || Boolean(text(els.input?.value));
   }
 
   // setFolderPathBusy locks the path field while the controller has the
@@ -401,18 +498,30 @@
   }
 
   function submitComposer() {
-    if (state.busy || state.folderBusy) return;
+    if (state.busy || state.folderBusy || state.linkBusy) return;
     const value = String(state.els.input?.value || '')
       .slice(0, MAX_MESSAGE_LENGTH)
       .trim();
     if (!value) {
-      // An empty Send with a folder attached asks for the folder itself.
-      if (!attachedFolder()) return;
-      emit('workspace-build-turn', { text: COPY.folderSend });
+      // An empty Send with something attached asks for that, in words.
+      const fallback = emptySendText();
+      if (!fallback) return;
+      emit('workspace-build-turn', { text: fallback });
       return;
     }
     state.els.input.value = '';
     emit('workspace-build-turn', { text: value });
+  }
+
+  function submitLink() {
+    if (state.busy || state.folderBusy || state.linkBusy || state.els.linkAttach?.disabled) return;
+    const url = text(state.els.linkInput?.value);
+    if (!url) {
+      linkFieldStatus(COPY.linkEmpty, true);
+      state.els.linkInput?.focus?.();
+      return;
+    }
+    emit('workspace-build-link', { url });
   }
 
   function submitFolderPath() {
@@ -492,6 +601,10 @@
     state.folderBusy = false;
     state.folderNote = '';
     state.chooserOpen = false;
+    state.links = options.links === true;
+    state.linkBusy = false;
+    state.linkNote = '';
+    state.linkFieldOpen = false;
 
     root.textContent = '';
     root.appendChild(renderHeader());
@@ -548,13 +661,20 @@
           state.expanded = true;
           render();
         } else if (kind === 'add-folder') {
-          if (!state.busy && !state.folderBusy && !control.disabled)
+          if (!attachmentsLocked(state) && !control.disabled) {
+            closeLinkField({ focus: false });
             emit('workspace-build-folder-open');
+          }
         } else if (kind === 'remove-folder') {
-          if (!state.busy && !state.folderBusy && !control.disabled)
-            emit('workspace-build-folder-remove');
+          if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-folder-remove');
         } else if (kind === 'folder-cancel') closeFolderChooser();
         else if (kind === 'folder-path') submitFolderPath();
+        else if (kind === 'add-link') {
+          if (!attachmentsLocked(state) && !control.disabled) openLinkField();
+        } else if (kind === 'remove-link') {
+          if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-link-remove');
+        } else if (kind === 'link-cancel') closeLinkField();
+        else if (kind === 'link-attach') submitLink();
         return;
       }
       const folderChoice = event.target?.closest?.('[data-build-folder-mode]');
@@ -589,6 +709,21 @@
       event.stopPropagation?.();
       closeFolderChooser();
     });
+    // Enter in the link field attaches; it must never submit the reply form
+    // around it. Escape closes only the field.
+    listen(folderEls.linkInput, 'keydown', event => {
+      if (event.isComposing) return;
+      if (event.key === 'Enter') {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        submitLink();
+      } else if (event.key === 'Escape') {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        closeLinkField();
+      }
+    });
+    listen(folderEls.linkInput, 'input', () => linkFieldStatus(''));
     listen(state.buildWithButton, 'click', () => emit('workspace-build-expand'));
 
     if (options.opening !== false) showLine(COPY.opening);
@@ -629,6 +764,7 @@
     attachments.appendChild(addFolder);
     attachments.appendChild(folderChip);
     attachments.appendChild(folderHint);
+    const linkEls = renderLinkAttachment(attachments);
     const folderSummary = createElement('p', 'workspace-build-folder__summary');
     folderSummary.id = 'workspaceBuildFolderSummary';
     folderSummary.setAttribute('role', 'status');
@@ -695,8 +831,11 @@
 
     composer.appendChild(attachments);
     composer.appendChild(folderSummary);
+    composer.appendChild(linkEls.linkSummary);
     composer.appendChild(chooser);
+    composer.appendChild(linkEls.linkField);
     return {
+      ...linkEls,
       addFolder,
       folderChip,
       folderName,
@@ -711,6 +850,158 @@
       folderPathUse,
       folderPathStatus
     };
+  }
+
+  // renderLinkAttachment adds the Add link button, the attached link's chip,
+  // and its hint to the attachments row, and builds the summary line and the
+  // inline link field the caller places. Every id is build-scoped.
+  function renderLinkAttachment(attachments) {
+    const addLink = createElement('button', 'workspace-build-pane__chip');
+    addLink.type = 'button';
+    addLink.dataset.buildControl = 'add-link';
+    addLink.setAttribute('aria-expanded', 'false');
+    addLink.setAttribute('aria-controls', 'workspaceBuildLinkField');
+    addLink.hidden = true;
+    const addIcon = createElement('i', 'bi bi-link-45deg');
+    addIcon.setAttribute('aria-hidden', 'true');
+    addLink.appendChild(addIcon);
+    addLink.appendChild(createElement('span', '', COPY.addLink));
+    const linkChip = createElement('span', 'workspace-build-folder workspace-build-link');
+    linkChip.id = 'workspaceBuildLink';
+    linkChip.hidden = true;
+    const linkIcon = createElement('i', 'bi bi-link-45deg');
+    linkIcon.setAttribute('aria-hidden', 'true');
+    const linkName = createElement('span', 'workspace-build-folder__name');
+    linkName.id = 'workspaceBuildLinkName';
+    const linkRemove = createElement('button', 'workspace-build-folder__remove', '×');
+    linkRemove.type = 'button';
+    linkRemove.dataset.buildControl = 'remove-link';
+    linkRemove.setAttribute('aria-label', COPY.removeLink);
+    linkChip.appendChild(linkIcon);
+    linkChip.appendChild(linkName);
+    linkChip.appendChild(linkRemove);
+    const linkHint = createElement('span', 'workspace-build-folder__hint', COPY.linkSendHint);
+    linkHint.hidden = true;
+    attachments.appendChild(addLink);
+    attachments.appendChild(linkChip);
+    attachments.appendChild(linkHint);
+
+    const linkSummary = createElement('p', 'workspace-build-folder__summary');
+    linkSummary.id = 'workspaceBuildLinkSummary';
+    linkSummary.setAttribute('role', 'status');
+    linkSummary.setAttribute('aria-live', 'polite');
+    linkSummary.hidden = true;
+
+    const linkField = createElement('section', 'workspace-build-link-field');
+    linkField.id = 'workspaceBuildLinkField';
+    linkField.hidden = true;
+    const fieldLabel = createElement('label', 'folder-path-entry__label', COPY.linkLabel);
+    fieldLabel.setAttribute('for', 'workspaceBuildLinkInput');
+    const fieldRow = createElement('div', 'folder-path-entry__row');
+    const linkInput = createElement('input', 'modern-input folder-path-entry__input');
+    linkInput.id = 'workspaceBuildLinkInput';
+    linkInput.type = 'url';
+    linkInput.placeholder = COPY.linkPlaceholder;
+    linkInput.maxLength = 2000;
+    linkInput.setAttribute('inputmode', 'url');
+    linkInput.setAttribute('autocomplete', 'off');
+    linkInput.setAttribute('autocapitalize', 'off');
+    linkInput.setAttribute('spellcheck', 'false');
+    const linkAttach = createElement(
+      'button',
+      'modern-btn modern-btn-secondary folder-path-entry__use',
+      COPY.linkAttach
+    );
+    linkAttach.type = 'button';
+    linkAttach.dataset.buildControl = 'link-attach';
+    const linkCancel = createElement('button', 'modern-btn modern-btn-secondary', COPY.linkCancel);
+    linkCancel.type = 'button';
+    linkCancel.dataset.buildControl = 'link-cancel';
+    fieldRow.appendChild(linkInput);
+    fieldRow.appendChild(linkAttach);
+    fieldRow.appendChild(linkCancel);
+    const linkStatus = createElement('p', 'folder-path-entry__status');
+    linkStatus.id = 'workspaceBuildLinkStatus';
+    linkStatus.setAttribute('role', 'status');
+    linkStatus.setAttribute('aria-live', 'polite');
+    linkStatus.hidden = true;
+    const linkDisclosure = createElement(
+      'p',
+      'workspace-build-folder-chooser__disclosure',
+      COPY.linkDisclosure
+    );
+    linkDisclosure.id = 'workspaceBuildLinkDisclosure';
+    linkInput.setAttribute('aria-describedby', `${linkDisclosure.id} ${linkStatus.id}`);
+    linkField.appendChild(fieldLabel);
+    linkField.appendChild(fieldRow);
+    linkField.appendChild(linkStatus);
+    linkField.appendChild(linkDisclosure);
+    return {
+      addLink,
+      linkChip,
+      linkIcon,
+      linkName,
+      linkRemove,
+      linkHint,
+      linkSummary,
+      linkField,
+      linkInput,
+      linkAttach,
+      linkCancel,
+      linkStatus
+    };
+  }
+
+  // openLinkField shows the inline link field with focus in it. It closes the
+  // Add folder sheet: one attachment control is open at a time.
+  function openLinkField() {
+    const { els } = state;
+    if (!els.linkField || attachmentsLocked(state)) return false;
+    closeFolderChooser({ focus: false });
+    state.linkFieldOpen = true;
+    els.linkField.hidden = false;
+    els.addLink.setAttribute('aria-expanded', 'true');
+    linkFieldStatus('');
+    els.linkInput.focus?.();
+    return true;
+  }
+
+  function closeLinkField({ focus = true } = {}) {
+    const { els } = state;
+    const wasOpen = state.linkFieldOpen;
+    state.linkFieldOpen = false;
+    if (!els.linkField) return;
+    els.linkField.hidden = true;
+    els.addLink.setAttribute('aria-expanded', 'false');
+    linkFieldStatus('');
+    if (focus && wasOpen) els.addLink.focus?.();
+  }
+
+  // linkFieldStatus is the link field's own line: why an address was refused,
+  // or nothing. The typed address stays so it can be fixed.
+  function linkFieldStatus(message, failed = false) {
+    const status = state.els.linkStatus;
+    if (!status) return;
+    const body = text(message);
+    status.textContent = body;
+    status.hidden = !body;
+    status.classList.toggle('is-error', Boolean(failed && body));
+  }
+
+  // setLinkBusy locks the attachments and the field while an attach or a
+  // removal is in flight. The field stays open, so a refusal is read where the
+  // address was typed.
+  function setLinkBusy(busy, note = '') {
+    state.linkBusy = Boolean(busy);
+    state.linkNote = text(note);
+    render();
+  }
+
+  // linkAttachedDone closes the field and clears it once the session holds
+  // the link.
+  function linkAttachedDone() {
+    if (state.els.linkInput) state.els.linkInput.value = '';
+    closeLinkField({ focus: false });
   }
 
   // openFolderChooser shows the Add folder sheet. Without a payload it shows
@@ -780,11 +1071,13 @@
   // stored transcript is the authority; pane-only lines keep their place.
   function applySession(session) {
     const before = attachedFolder()?.id || '';
+    const linkBefore = attachedLink()?.id || '';
     state.session = session && typeof session === 'object' ? session : null;
     if (state.session?.assistant) state.assistant = state.session.assistant;
-    // A note is about the folder it was written under; a new folder, or none,
-    // starts clean.
+    // A note is about the attachment it was written under; a new one, or
+    // none, starts clean.
     if ((attachedFolder()?.id || '') !== before) state.folderNote = '';
+    if ((attachedLink()?.id || '') !== linkBefore) state.linkNote = '';
     render();
   }
 
@@ -878,6 +1171,10 @@
     state.folderBusy = false;
     state.folderNote = '';
     state.chooserOpen = false;
+    state.links = false;
+    state.linkBusy = false;
+    state.linkNote = '';
+    state.linkFieldOpen = false;
   }
 
   window.WorkspaceBuildPane = {
@@ -898,10 +1195,17 @@
     folderChooserStatus,
     setFolderBusy,
     setFolderPathBusy,
+    openLinkField,
+    closeLinkField,
+    linkFieldOpen: () => Boolean(state.root && state.linkFieldOpen),
+    linkFieldStatus,
+    setLinkBusy,
+    linkAttachedDone,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),
     paneView,
-    folderChooserView
+    folderChooserView,
+    linkSummaryText
   };
 })();

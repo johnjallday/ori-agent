@@ -182,6 +182,7 @@ test-devtools: ## Test workflow wrappers and Ori project adapters offline
 	@python3 scripts/devtools-project.test.py
 	@zsh scripts/wt-demo-codex.test.sh
 	@bash scripts/devops-release-candidate.test.sh
+	@bash scripts/feature-explore-snapshot.test.sh
 	@zsh scripts/check-backlog-docs.sh
 
 test-release: ## Test RC lifecycle and installer probes offline (temporary Git remotes only)

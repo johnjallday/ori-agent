@@ -47,6 +47,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/homeupgrade"
 	"github.com/johnjallday/ori-agent/internal/integrationrelease"
+	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
@@ -368,7 +369,10 @@ type ServerBuilder struct {
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
 	// workspaceBuildStore holds "Build with your assistant" sessions over the
 	// same HQ sidecar directory.
-	workspaceBuildStore      *personalassistant.WorkspaceBuildStore
+	workspaceBuildStore *personalassistant.WorkspaceBuildStore
+	// linkObserver reads what an attached link says about itself; the build
+	// pane and the assistant's composer share it.
+	linkObserver             *linkcontext.Observer
 	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler
 	assistantSetupStore      *assistantsetup.SQLiteStore
@@ -791,6 +795,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	}
 	if b.workspaceFileStore != nil {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
+		handlers.WorkspaceMemory.SetGlobalMemory(builderGlobalMemory{b: b})
 	}
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices

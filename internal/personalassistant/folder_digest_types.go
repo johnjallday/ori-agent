@@ -407,8 +407,10 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			if len(offer.Outcome.Receipt) > 32 {
 				return fmt.Errorf("%w: receipt rows", errFolderDigestInvalid)
 			}
+			// A finished one-card run's receipt is copied here whole, so every
+			// kind its host writes must be listed, or the run cannot resolve.
 			for _, row := range offer.Outcome.Receipt {
-				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|home|library|assistant|", "|"+row.Kind+"|") ||
+				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|home|library|assistant|profile|", "|"+row.Kind+"|") ||
 					row.Kind == "" || len(row.Name) > 512 || len(row.Detail) > 512 || len(row.Route) > 1024 ||
 					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {
 					return fmt.Errorf("%w: receipt row", errFolderDigestInvalid)

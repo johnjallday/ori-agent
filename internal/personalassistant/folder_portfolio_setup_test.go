@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,12 +20,26 @@ func portfolioSetupLines() []FolderPlanLine {
 	}
 }
 
-// portfolioReceipt is what a finished collection run reads back.
+// portfolioReceipt is what a finished collection run reads back, with every
+// kind of row the host writes: the Home, its agents, the listing, the project
+// assistant and, when a DAW was found, the Home's profile.
 func portfolioReceipt() []FolderReceiptRow {
 	return []FolderReceiptRow{
 		{Kind: "home", Name: "Music Production Home", Detail: "created", Route: "/workspaces/music-home/assistant#projectLibraryPanel"},
+		{Kind: "agent", Name: "Portfolio Manager", Detail: "added"},
 		{Kind: "library", Name: "Listed 5 music projects in Songs", Detail: "names and project files only"},
+		{Kind: "assistant", Name: "Project Assistant", Detail: "joins each song you open"},
+		{Kind: FolderPlanProfile, Name: "Your studio", Detail: "REAPER · your main DAW", Route: "/workspaces/music-home/assistant#homeProfilePanel"},
 	}
+}
+
+// receiptKinds lists a receipt's row kinds in order.
+func receiptKinds(rows []FolderReceiptRow) string {
+	kinds := make([]string, 0, len(rows))
+	for _, row := range rows {
+		kinds = append(kinds, row.Kind)
+	}
+	return strings.Join(kinds, " ")
 }
 
 type portfolioSetupFixture struct {
@@ -114,11 +129,21 @@ func TestPortfolioSetup_SetUpBuildsTheHomeAndResolvesWithTheReceipt(t *testing.T
 	if stored.Outcome == nil || stored.Outcome.Kind != FolderChoiceHome || stored.Outcome.WorkspaceID != "new-home" || stored.Outcome.Existing {
 		t.Fatalf("outcome = %+v", stored.Outcome)
 	}
-	if len(stored.Outcome.Receipt) != 2 || stored.Outcome.Receipt[0].Kind != "home" || stored.Outcome.Receipt[1].Kind != "library" {
-		t.Fatalf("the run's receipt must reach the outcome: %+v", stored.Outcome.Receipt)
+	if got := receiptKinds(stored.Outcome.Receipt); got != "home agent library assistant profile" {
+		t.Fatalf("the run's receipt must reach the outcome: %s", got)
 	}
 	if stored.Decision != FolderDecisionYes || stored.Setup == nil || stored.Setup.HomeID != "new-home" {
 		t.Fatalf("stored = %+v", stored)
+	}
+	// The outcome still refuses a row of a kind no host writes.
+	doc, err := f.store.Read(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := doc.Offer(f.offer.ID).Outcome
+	outcome.Receipt = append(outcome.Receipt, FolderReceiptRow{Kind: "payment", Name: "Charged"})
+	if err := validateFolderDigest(doc); !errors.Is(err, errFolderDigestInvalid) {
+		t.Fatalf("an unknown receipt kind was stored: %v", err)
 	}
 }
 
@@ -131,7 +156,8 @@ func TestPortfolioSetup_AnExistingHomeResolvesToThatHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "the collection to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
-	if outcome := f.stored(t).Outcome; outcome == nil || outcome.WorkspaceID != "music-home" || !outcome.Existing || len(outcome.Receipt) != 2 {
+	if outcome := f.stored(t).Outcome; outcome == nil || outcome.WorkspaceID != "music-home" || !outcome.Existing ||
+		receiptKinds(outcome.Receipt) != "home agent library assistant profile" {
 		t.Fatalf("outcome = %+v", outcome)
 	}
 }

@@ -232,7 +232,7 @@ func scoreHomeAssistantWorkspace(prompt string, ws *workspace.Workspace) homeAss
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace slug", ws.FolderSlug, promptTokens, 3, 2)
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace project path", ws.ProjectPath, promptTokens, 3, 2)
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace description", ws.Description, promptTokens, 2, 2)
-	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace goal", workspaceSharedString(ws, "goal"), promptTokens, 3, 2)
+	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace goal", ws.Mission, promptTokens, 3, 2)
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace systems", workspaceSharedString(ws, "systems"), promptTokens, 3, 3)
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace capabilities", workspaceSharedString(ws, "capabilities"), promptTokens, 2, 2)
 	addWorkspaceFieldScore(&score, normalizedPrompt, "workspace context", workspaceSharedString(ws, "context"), promptTokens, 2, 2)

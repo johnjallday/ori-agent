@@ -280,7 +280,7 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 	if contents && !h.workspaceFilesReadable(conversation.turn) {
 		answer = folderContentsRefusal
 	} else {
-		user := buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft + contextText
+		user := buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft + contextText + linkTurnFrom(ctx).prompt()
 		if contents {
 			user += folderContentsAuthority
 		}

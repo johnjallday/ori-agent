@@ -91,6 +91,21 @@ export function assistantLearningSources(workspaces) {
   );
 }
 
+// workspaceMemoryOrigin labels where an overview entry came from. A copy of a
+// global fact is ordinary workspace memory that says so; it no longer follows
+// the global fact.
+export function workspaceMemoryOrigin(entry) {
+  return cleanText(entry?.provenance).toLowerCase().startsWith('global:')
+    ? 'Copied from global memory'
+    : 'Existing workspace memory · origin unverified';
+}
+
+// workspaceMemoryMeta is an overview entry's origin and recorded date.
+export function workspaceMemoryMeta(entry) {
+  const date = cleanText(entry?.date);
+  return `${workspaceMemoryOrigin(entry)} · ${/^\d{4}-\d{2}-\d{2}$/.test(date) ? `recorded entry date ${date}` : 'entry date unavailable'}`;
+}
+
 function normalizeMemoryEntries(payload) {
   return (
     (Array.isArray(payload?.entries) ? payload.entries : [])
@@ -431,11 +446,7 @@ export class UserKnowledgeManager {
         row.append(
           makeElement('span', 'user-knowledge-memory-type', entry.type),
           makeElement('span', 'user-knowledge-memory-text', entry.text),
-          makeElement(
-            'span',
-            'user-knowledge-source-meta',
-            `Existing workspace memory · origin unverified · ${/^\\d{4}-\\d{2}-\\d{2}$/.test(entry.date) ? `recorded entry date ${entry.date}` : 'entry date unavailable'}`
-          )
+          makeElement('span', 'user-knowledge-source-meta', workspaceMemoryMeta(entry))
         );
         list.append(row);
       }

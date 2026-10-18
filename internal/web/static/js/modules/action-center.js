@@ -92,6 +92,48 @@
     return `<div style="font-size: 0.75rem; color: var(--text-secondary, #777); margin-top: 0.35rem;"><strong>Assistant suggestion</strong>${label}${confidence}${evidence}${sourceLink}</div>`;
   }
 
+  // A goal run's summary row ("N suggested tasks in <workspace>") points at the
+  // workspace's Backlog drawer, where the suggested tickets live. Only exactly
+  // that address gets a link; triaging the row never touches the tickets.
+  const GOAL_SUGGESTIONS_BACKLOG_LINK = /^\/workspaces\/[a-z0-9][a-z0-9-]{0,79}\?panel=backlog$/;
+
+  function isGoalSuggestionsRow(item) {
+    return item.source_type === 'goal_suggestions';
+  }
+
+  function goalSuggestionsHTML(item) {
+    if (!isGoalSuggestionsRow(item)) return '';
+    const sourceURL = String(item.source_url || '').trim();
+    const link = GOAL_SUGGESTIONS_BACKLOG_LINK.test(sourceURL)
+      ? `<a href="${escapeHtml(sourceURL)}" class="action-center-goal-backlog-link">Open Backlog</a>`
+      : '';
+    const titles = item.evidence
+      ? `<details class="action-center-details"><summary>Suggested tasks</summary><div class="action-center-details-body">${escapeHtml(item.evidence)}</div></details>`
+      : '';
+    return `<div class="action-center-goal-suggestions">${titles}${link}</div>`;
+  }
+
+  // Goal-run findings (and other non-assistant findings) store evidence and a
+  // recommended action; show both behind one expander (FR16, FR29).
+  function findingDetailsHTML(item) {
+    if (item.source_type === 'assistant_suggestion' || isGoalSuggestionsRow(item)) return '';
+    const evidence = String(item.evidence || '').trim();
+    const action = String(item.recommended_action || '').trim();
+    if (!evidence && !action) return '';
+    const parts = [];
+    if (evidence) {
+      parts.push(
+        `<div class="action-center-details-label">Evidence</div><div class="action-center-details-body">${escapeHtml(evidence)}</div>`
+      );
+    }
+    if (action) {
+      parts.push(
+        `<div class="action-center-details-label">Recommended action</div><div class="action-center-details-body">${escapeHtml(action)}</div>`
+      );
+    }
+    return `<details class="action-center-details"><summary>Evidence and recommended action</summary>${parts.join('')}</details>`;
+  }
+
   // A "Daily Brief ready" item links to the Daily Brief station in My HQ, where
   // the brief is read. The link is rendered only for exactly the station
   // address (/workspaces/<slug>?station=daily-brief, the shape
@@ -106,6 +148,9 @@
   }
 
   function backlogActionHTML(item) {
+    // A goal run's summary row already points at Backlog tickets; adding it to
+    // the Backlog would only file a ticket about tickets.
+    if (isGoalSuggestionsRow(item)) return '';
     // A planned finding already has a linked Backlog item — offer a direct
     // deep link to it (Group 5's ?panel=backlog&task= contract) instead of
     // re-showing the capture action; the endpoint is idempotent either way,
@@ -140,6 +185,8 @@
           </div>
           <div style="font-size: 0.85rem; color: var(--text-secondary, #555); margin-top: 0.25rem;">${escapeHtml(item.summary || '')}</div>
           ${assistantSourceHTML(item)}
+          ${findingDetailsHTML(item)}
+          ${goalSuggestionsHTML(item)}
           ${dailyBriefLinkHTML(item)}
           <div style="font-size: 0.75rem; color: var(--text-secondary, #888); margin-top: 0.4rem;">
             ${opened ? `<a href="${opened}" style="color: inherit; text-decoration: underline;">${workspaceName}</a>` : `<span>${workspaceName} · Workspace unavailable</span>`}
@@ -616,6 +663,8 @@
     priorityChip,
     backlogActionHTML,
     assistantSourceHTML,
+    findingDetailsHTML,
+    goalSuggestionsHTML,
     dailyBriefLinkHTML,
     handleAddToBacklog,
     escapeHtml,

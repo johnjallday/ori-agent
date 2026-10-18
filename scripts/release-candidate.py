@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 from rc_test_report import add_report_links, build_report, report_links
 
@@ -238,6 +239,52 @@ def landed(since, sha):
     # was used; a merged branch's commits sit behind the second parent.
     subjects = git("log", "--first-parent", f"{since}..{sha}", "--format=%s").splitlines()
     return subjects, [subject for subject in subjects if landed_pr(subject)]
+
+
+def await_ci(repo, candidate="", sleep=time.sleep, clock=time.monotonic):
+    """Wait for CI on the commit evaluate is about to judge, without deciding anything.
+
+    A merge a few minutes before the scheduled evaluation leaves ci.yml still
+    running for that exact commit, and evaluate would HOLD until the next day.
+    This only waits; evaluate stays the one place that decides, so a timeout,
+    a hold or an unreadable repository simply falls through to it. It runs in a
+    job without the lifecycle lock so the react and promotion jobs are not
+    queued behind it.
+    """
+    if os.environ.get("AUTO_RELEASE_HOLD", "").lower() in HOLD:
+        return
+    wait = int(os.environ.get("RELEASE_CI_WAIT_SECONDS", "1800"))
+    interval = max(int(os.environ.get("RELEASE_CI_POLL_SECONDS", "30")), 1)
+    # A push run can lag the push by a minute or two before it exists at all.
+    appear = min(wait, 300)
+    if candidate:
+        if not STABLE.fullmatch(candidate):
+            return
+        branch = f"release/{candidate}"
+    else:
+        if repo.active():
+            return
+        branch = "dev"
+    sha = repo.branches.get(branch)
+    if not sha:
+        return
+    started = clock()
+    while True:
+        state = repo.workflow_state("ci.yml", sha, branch)
+        waited = clock() - started
+        if state is None:
+            if waited >= appear:
+                return
+            reason = "has no run yet"
+        elif state["status"] in PENDING:
+            if waited >= wait:
+                summary(f"ci.yml is still running for {branch}@{sha[:7]} after {int(waited)}s: {state['url']}")
+                return
+            reason = f"is {state['status']}"
+        else:
+            return
+        summary(f"Waiting: ci.yml {reason} for {branch}@{sha[:7]}")
+        sleep(interval)
 
 
 def evaluate(repo, candidate=""):
@@ -691,6 +738,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--candidate", default="")
+    await_parser = commands.add_parser("await-ci")
+    await_parser.add_argument("--candidate", default="")
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--version", required=True)
     prepare_parser.add_argument("--sha", required=True)
@@ -716,6 +765,12 @@ def main():
         repo = Repository()
         if args.command == "evaluate":
             evaluate(repo, args.candidate)
+        elif args.command == "await-ci":
+            try:
+                await_ci(repo, args.candidate)
+            except (Refusal, ValueError, KeyError) as error:
+                # Never fail the run here: evaluate decides, and reports the same fault.
+                summary(f"Not waiting for CI — {error}")
         elif args.command == "prepare":
             prepare(repo, args.version, args.sha)
         elif args.command == "check-promotion":

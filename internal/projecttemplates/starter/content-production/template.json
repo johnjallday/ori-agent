@@ -4,7 +4,8 @@
   "icon": "\u270f",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 4,
+  "goal": "Maintain a review-ready queue of on-brand content and identify gaps in the agreed publishing schedule.",
   "tags": [
     "content"
   ],

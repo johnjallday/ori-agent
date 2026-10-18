@@ -420,6 +420,8 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			handler.SetPersonalAssistantMemoryWriter(s.Storage.PersonalAssistantMemory)
 		}
 		handler.FolderObservations = s.Storage.PersonalAssistantFolderObservations
+		// The composer's Add link shares the build pane's observer.
+		handler.Links = sharedLinkObserver()
 		// Hired-assistant conversations are canonical Sessions in Personal HQ.
 		if s.Storage.SessionStore != nil {
 			handler.SetConversationStore(personalAssistantConversationAdapter{store: s.Storage.SessionStore})

@@ -56,6 +56,7 @@ var buildColors = map[string]bool{
 const (
 	buildMaxName        = 80
 	buildMaxDescription = 1000
+	buildMaxGoal        = 300
 	buildMaxTags        = 8
 	buildMaxTag         = 32
 	buildMaxAgentName   = 100
@@ -235,6 +236,19 @@ func applyBuildReply(session *personalassistant.WorkspaceBuildSession, patch bui
 		} else {
 			draft.Description = description
 			result.applied = append(result.applied, "description")
+		}
+	}
+
+	if patch.sets(buildFieldGoal) {
+		goal := strings.Join(strings.Fields(patch.Goal), " ")
+		switch {
+		case goal == "":
+			result.reject(buildFieldGoal, buildReasonEmpty)
+		case utf8.RuneCountInString(goal) > buildMaxGoal:
+			result.reject(buildFieldGoal, buildReasonTooLong)
+		default:
+			draft.Mission = goal
+			result.applied = append(result.applied, "goal")
 		}
 	}
 

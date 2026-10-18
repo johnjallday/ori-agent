@@ -1,8 +1,9 @@
 package workspace
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -72,7 +73,85 @@ type MissionPromptInputs struct {
 	// (webhook or file watch) rather than cadence. Rendered as its own prompt
 	// section so the agent knows why it was woken. nil for cadence/manual runs.
 	TriggeringEvent *TriggerEventContext
+	// AutonomyPolicy decides what the run may do with its workspace tools
+	// while it looks; it never changes how suggestions are stored.
+	AutonomyPolicy AutonomyPolicy
+	// AgentNames are the workspace's agents, the candidates for a
+	// suggestion's suggested_agent.
+	AgentNames []string
+	// OpenWork are the workspace's unfinished tickets (Backlog, Ready and
+	// active), listed with their state so the model does not suggest them
+	// again and can see what is already planned (FR12, FR18).
+	OpenWork []MissionWorkItem
+	// RecentlyCompleted are the last few finished tasks with a one-line
+	// result, so suggestions build on what was done (FR12).
+	RecentlyCompleted []MissionWorkItem
+	// DismissedTitles are suggestions the user marked Not useful (FR20).
+	DismissedTitles []string
 }
+
+// MissionWorkItem is one ticket as a goal run sees it.
+type MissionWorkItem struct {
+	Title     string
+	State     string
+	Suggested bool
+	Result    string
+}
+
+// missionRecentlyCompletedLimit is how many finished tasks a goal run sees.
+const missionRecentlyCompletedLimit = 5
+
+// missionResultLineLimit bounds a finished task's one-line result.
+const missionResultLineLimit = 160
+
+// MissionWorkSnapshot lists a workspace's unfinished top-level tickets and its
+// most recently finished tasks for the goal-run prompt.
+func MissionWorkSnapshot(ws *Workspace) (open, completed []MissionWorkItem) {
+	if ws == nil {
+		return nil, nil
+	}
+	ws.mu.RLock()
+	defer ws.mu.RUnlock()
+	var done []Task
+	for _, task := range ws.Tasks {
+		if task.ParentTaskID != "" {
+			continue
+		}
+		state := task.CanonicalState()
+		switch state {
+		case TicketStateCancelled:
+			continue
+		case TicketStateDone:
+			done = append(done, task)
+			continue
+		}
+		open = append(open, MissionWorkItem{
+			Title: task.Description, State: string(state),
+			Suggested: task.SourceType == TicketSourceGoalSuggestion,
+		})
+	}
+	sort.SliceStable(done, func(i, j int) bool { return missionFinishedAt(done[i]).After(missionFinishedAt(done[j])) })
+	if len(done) > missionRecentlyCompletedLimit {
+		done = done[:missionRecentlyCompletedLimit]
+	}
+	for _, task := range done {
+		completed = append(completed, MissionWorkItem{
+			Title: task.Description, State: string(TicketStateDone),
+			Result: sanitizeTaskPromptText(task.Result, missionResultLineLimit),
+		})
+	}
+	return open, completed
+}
+
+func missionFinishedAt(task Task) time.Time {
+	if task.CompletedAt != nil {
+		return *task.CompletedAt
+	}
+	return task.UpdatedAt
+}
+
+// missionPromptListLimit bounds each title list in the mission prompt.
+const missionPromptListLimit = 50
 
 // TriggerEventContext describes the external event that started a mission run.
 // Lives in this package (not internal/trigger) because BuildMissionSystemPrompt
@@ -104,16 +183,34 @@ type MissionRunOptions struct {
 	// HoldCadence, when true, prevents the run outcome from advancing
 	// NextMissionRunAt (the workspace's cadence-heartbeat setting).
 	HoldCadence bool
+	// Origin names what started the run for its run record (MissionOrigin*).
+	// Empty means cadence, or event when Event is set.
+	Origin string
 }
 
-// BuildMissionSystemPrompt composes the system prompt for a mission run.
+// Goal-run origins recorded on MissionRunRecord.Origin.
+const (
+	MissionOriginCadence   = "cadence"
+	MissionOriginManual    = "manual"
+	MissionOriginFirstGoal = "first_goal"
+	MissionOriginEvent     = "event"
+)
+
+// MissionOptionsTrigger is a MissionTrigger that also takes run options. The
+// scheduler uses it, when available, to label manual runs in run history.
+type MissionOptionsTrigger interface {
+	TriggerMissionRunOpts(ctx context.Context, workspaceID string, cycleOrdinal int, opts MissionRunOptions) (string, error)
+}
+
+// BuildMissionSystemPrompt composes the prompt for a goal (mission) run.
 //
 // The composition layers:
 //  1. The Workspace Manager's existing system prompt (its personality + rules).
-//  2. Mission framing — what the agent is responsible for, what the cadence is.
-//  3. Cycle-mode framing — baseline (first run) vs. recurring review.
-//  4. The structured-output contract — what JSON shape findings must take.
-//  5. The current opportunity backlog so the agent can update instead of duplicate.
+//  2. The goal, and the run's framing — first run vs. a later review.
+//  3. What the run may do while it looks, by autonomy level (FR19).
+//  4. Work that already exists or was dismissed, so it is not suggested again.
+//  5. Open findings, so recurring ones merge instead of duplicating.
+//  6. The output contract: {"items": [...]} of tasks and findings (FR14).
 //
 // Layering rather than replacing keeps interactive chat with the same manager
 // unaffected — that path doesn't call this function.
@@ -126,15 +223,60 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 
 	b.WriteString("--- MISSION CONTEXT ---\n\n")
 	if strings.TrimSpace(in.Mission) != "" {
-		b.WriteString("Mission: ")
+		b.WriteString("Goal: ")
 		b.WriteString(strings.TrimSpace(in.Mission))
 		b.WriteString("\n\n")
 	}
 
 	if in.CycleOrdinal <= 1 {
-		b.WriteString("This is the BASELINE run for this mission. Produce a concise current-state assessment of the workspace and identify the most impactful 1-5 opportunities to address. Do NOT take action on them — only report.\n\n")
+		b.WriteString("This is the first goal run for this workspace (the BASELINE run). Look at what the workspace holds, then suggest the few pieces of work that would move the goal forward most, and note anything the user should know.\n\n")
 	} else {
-		b.WriteString(fmt.Sprintf("This is recurring mission run #%d. Compare current workspace state against the prior opportunity backlog. Update existing opportunities when the same issue persists, mark resolved when fixed, and add new ones only when they are genuinely new findings. Do NOT take action — only report.\n\n", in.CycleOrdinal))
+		fmt.Fprintf(&b, "This is goal run #%d. Compare the workspace with the goal and with the work and findings listed below; suggest only work that is genuinely new, and keep a recurring finding's title so it merges.\n\n", in.CycleOrdinal)
+	}
+
+	switch in.AutonomyPolicy {
+	case AutonomyPropose:
+		b.WriteString("While you look you may read this workspace and write notes or drafts inside it with your workspace tools. Do not change anything outside this workspace, and do not start, assign or complete any task: your suggestions reach the user's Backlog after you answer.\n\n")
+	default:
+		b.WriteString("While you look you may read this workspace with your tools, but do not change anything: no notes, drafts, tasks or files. Your suggestions reach the user's Backlog after you answer.\n\n")
+	}
+
+	if names := missionPromptList(in.AgentNames); len(names) > 0 {
+		b.WriteString("Agents in this workspace (use one of these names for suggested_agent, or leave it empty): ")
+		b.WriteString(strings.Join(names, ", "))
+		b.WriteString("\n\n")
+	}
+	if len(in.OpenWork) > 0 {
+		b.WriteString("Work that already exists in this workspace (do not suggest it again):\n")
+		for i, item := range in.OpenWork {
+			if i >= missionPromptListLimit {
+				break
+			}
+			marker := ""
+			if item.Suggested {
+				marker = ", suggested"
+			}
+			fmt.Fprintf(&b, "  - [%s%s] %s\n", item.State, marker, missionPromptLine(item.Title))
+		}
+		b.WriteString("\n")
+	}
+	if len(in.RecentlyCompleted) > 0 {
+		b.WriteString("Recently finished work (build on it; do not repeat it):\n")
+		for _, item := range in.RecentlyCompleted {
+			line := "  - " + missionPromptLine(item.Title)
+			if item.Result != "" {
+				line += " — " + item.Result
+			}
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if titles := missionPromptList(in.DismissedTitles); len(titles) > 0 {
+		b.WriteString("Suggestions the user dismissed as not useful (never suggest them again):\n")
+		for _, title := range titles {
+			b.WriteString("  - " + title + "\n")
+		}
+		b.WriteString("\n")
 	}
 
 	if ev := in.TriggeringEvent; ev != nil {
@@ -158,7 +300,7 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	}
 
 	if len(in.OpenOpportunities) > 0 {
-		b.WriteString("Existing open opportunities (use these titles verbatim when the same issue recurs so they merge correctly):\n")
+		b.WriteString("Open findings (use these titles verbatim when the same issue recurs so they merge correctly):\n")
 		for _, o := range in.OpenOpportunities {
 			if !o.IsOpen() {
 				continue
@@ -168,11 +310,39 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("Return a JSON object with this shape:\n")
-	b.WriteString(`  {"findings": [{"title": string, "summary": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "recommended_action": string}]}` + "\n")
-	b.WriteString("If you have no findings, return {\"findings\": []}.\n")
+	b.WriteString("--- OUTPUT ---\n\n")
+	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
+	b.WriteString(`  {"items": [ ... ]}` + "\n")
+	b.WriteString("Every item has a \"kind\":\n")
+	b.WriteString("- \"task\": work that moves the goal forward and that an agent in this workspace could do.\n")
+	b.WriteString(`    {"kind": "task", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "effort": "small"|"medium"|"large", "suggested_agent": string, "first_step": string}` + "\n")
+	b.WriteString("- \"finding\": something the user should know that is not itself a task, such as a risk, an anomaly or a decision to make.\n")
+	b.WriteString(`    {"kind": "finding", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "recommended_action": string}` + "\n")
+	fmt.Fprintf(&b, "Suggest at most %d tasks and %d findings. Ground each item in evidence from this workspace and give a short title that says what to do.\n", MissionMaxTaskSuggestions, MissionMaxFindings)
+	b.WriteString("If nothing is worth suggesting, answer {\"items\": []}.\n")
 
 	return b.String()
+}
+
+// missionPromptLine flattens a title to one line.
+func missionPromptLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+// missionPromptList trims, drops empties and bounds a title list.
+func missionPromptList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.Join(strings.Fields(value), " ")
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+		if len(out) >= missionPromptListLimit {
+			break
+		}
+	}
+	return out
 }
 
 // RunPolicyHints describes how an AutonomyPolicy translates into the
@@ -204,100 +374,6 @@ func AutonomyPolicyRunHints(p AutonomyPolicy) RunPolicyHints {
 		return RunPolicyHints{Mutation: "allowed", Approval: "none", ExternalEffects: "denied"}
 	}
 	return RunPolicyHints{Mutation: "denied", Approval: "none", ExternalEffects: "denied"}
-}
-
-// missionFindings is the expected JSON shape returned by the agent during a
-// mission run (see BuildMissionSystemPrompt). Kept private so callers can
-// only get at the parsed Opportunity slice via ParseMissionOutput.
-type missionFindings struct {
-	Findings []missionFinding `json:"findings"`
-}
-
-type missionFinding struct {
-	Title             string `json:"title"`
-	Summary           string `json:"summary,omitempty"`
-	Evidence          string `json:"evidence,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	Confidence        string `json:"confidence,omitempty"`
-	RecommendedAction string `json:"recommended_action,omitempty"`
-}
-
-// ParseMissionOutput extracts findings from a mission run's structured output
-// and converts them into Opportunity records. The caller is expected to feed
-// these through OpportunityStore.Upsert so dedup-key merging is applied;
-// this function does NOT touch persistence.
-//
-// raw is permissive — it accepts either the strict object form or a single
-// JSON array of findings. Anything outside that contract is reported as an
-// error so the run can be marked failed with a clear message.
-func ParseMissionOutput(workspaceID, sourceRunID, raw string) ([]Opportunity, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil, nil
-	}
-	// Some models wrap JSON in fenced code blocks; strip a single fence pair
-	// if present so we don't have to instruct the agent twice about format.
-	trimmed = stripJSONFence(trimmed)
-
-	var findings []missionFinding
-	if strings.HasPrefix(trimmed, "[") {
-		if err := json.Unmarshal([]byte(trimmed), &findings); err != nil {
-			return nil, fmt.Errorf("mission output: failed to parse findings array: %w", err)
-		}
-	} else {
-		var wrapper missionFindings
-		if err := json.Unmarshal([]byte(trimmed), &wrapper); err != nil {
-			return nil, fmt.Errorf("mission output: failed to parse findings object: %w", err)
-		}
-		findings = wrapper.Findings
-	}
-
-	now := time.Now()
-	opps := make([]Opportunity, 0, len(findings))
-	for _, f := range findings {
-		title := strings.TrimSpace(f.Title)
-		if title == "" {
-			// A finding without a title can't be deduped — skip rather than
-			// flood the backlog with anonymous rows.
-			continue
-		}
-		opps = append(opps, Opportunity{
-			WorkspaceID:       workspaceID,
-			SourceRunID:       sourceRunID,
-			Title:             title,
-			Summary:           strings.TrimSpace(f.Summary),
-			Evidence:          strings.TrimSpace(f.Evidence),
-			Priority:          strings.ToLower(strings.TrimSpace(f.Priority)),
-			Confidence:        strings.ToLower(strings.TrimSpace(f.Confidence)),
-			Status:            OpportunityNew,
-			RecommendedAction: strings.TrimSpace(f.RecommendedAction),
-			CreatedAt:         now,
-			UpdatedAt:         now,
-		})
-	}
-	return opps, nil
-}
-
-// stripJSONFence removes a leading and trailing ``` fence (optionally
-// followed by "json") if present. Only strips one pair — if the agent
-// returns a nested fence the inner one stays and parsing will surface
-// the issue clearly.
-func stripJSONFence(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	// Drop the opening fence line.
-	if newlineIdx := strings.Index(s, "\n"); newlineIdx != -1 {
-		s = s[newlineIdx+1:]
-	} else {
-		// No newline after opening fence — malformed; return as-is.
-		return s
-	}
-	// Drop a trailing fence.
-	s = strings.TrimRight(s, " \n\t")
-	s = strings.TrimSuffix(s, "```")
-	return strings.TrimSpace(s)
 }
 
 // MissionRunOutcome describes how a single mission run completed, used by
@@ -370,6 +446,9 @@ func EvaluateMissionToolCall(policy AutonomyPolicy, defaultSE SideEffect, overri
 		return GateDecision{Allowed: true, Classification: SideEffectWrite, Policy: policy, ToolName: toolName}
 	}
 	resolved := ResolveSideEffect(defaultSE, overrides, toolName)
+	if native, ok := NativeToolSideEffect(toolName); ok {
+		resolved = native
+	}
 	dec := GateDecision{
 		Classification: resolved,
 		Policy:         policy,

@@ -245,8 +245,24 @@ type Workspace struct {
 	// counters) but leave NextMissionRunAt untouched, so the cadence acts as a
 	// hard heartbeat regardless of event activity. Default false = an
 	// event-fired run pushes the next cadence run back, like any other run.
-	MissionCadenceHeartbeat bool          `json:"mission_cadence_heartbeat,omitempty"`
-	Opportunities           []Opportunity `json:"opportunities,omitempty"`
+	MissionCadenceHeartbeat bool `json:"mission_cadence_heartbeat,omitempty"`
+	// GoalFirstRunPending marks a workspace created with a goal whose first
+	// goal run waits for the first time it is opened (FR25). Consumed once by
+	// POST .../mission/first-open; the startup backfill never sets it.
+	GoalFirstRunPending bool `json:"goal_first_run_pending,omitempty"`
+	// GoalFirstRunState records a spent first-start attempt. A blocker or an
+	// interrupted admission needs an explicit retry, never a reload-driven run.
+	// It is inert lifecycle metadata, not installation-local execution authority.
+	GoalFirstRunState string `json:"goal_first_run_state,omitempty"`
+	// MissionRuns is the recent goal-run history, newest first and capped at
+	// MissionRunHistoryLimit: what each run created, skipped and dropped, and
+	// for an unreadable answer the raw tail (FR21). Persisted with the Goal.
+	MissionRuns []MissionRunRecord `json:"mission_runs,omitempty"`
+	// DismissedSuggestions is the ledger of goal-run suggestions the user
+	// removed (Not useful or deleted), newest first; goal runs never suggest
+	// them again (FR18, FR20). Persisted with the Goal.
+	DismissedSuggestions []DismissedSuggestion `json:"dismissed_suggestions,omitempty"`
+	Opportunities        []Opportunity         `json:"opportunities,omitempty"`
 	// GoalBrief is the structured, user-accepted statement of what this
 	// workspace's Goal needs — output, sources, semantic operations, autonomy
 	// ceiling, mandatory capabilities (see toolbox_goal_brief.go). Nil until a

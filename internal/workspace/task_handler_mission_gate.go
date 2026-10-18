@@ -22,10 +22,10 @@ import "fmt"
 //     write is what the SideEffectExternal classification is for; that's why
 //     external defaults to deny under both Watch and Propose.
 func (h *LLMTaskHandler) evaluateMissionGate(task Task, toolName string) error {
-	policy := MissionAutonomyFromContext(task.Context)
-	if policy == "" {
-		return fmt.Errorf("mission gate: workspace autonomy policy missing from task context")
-	}
+	// A goal run whose workspace never chose a level runs under Watch, the
+	// same reading the prompt and the run policy give it; it is never a
+	// reason to block every tool.
+	policy := EffectiveAutonomyPolicy(MissionAutonomyFromContext(task.Context))
 
 	classification := h.resolveMissionToolSideEffect(task.WorkspaceID, toolName)
 	dec := EvaluateMissionToolCallDecision(policy, classification, toolName)
@@ -93,6 +93,11 @@ func (h *LLMTaskHandler) resolveMissionToolSideEffect(workspaceID, toolName stri
 	if IsWorkspaceMemoryTool(toolName) {
 		return SideEffectWrite
 	}
+	// Ori's own workspace tools belong to no binding: their fixed
+	// classification wins over every binding override and default.
+	if se, ok := NativeToolSideEffect(toolName); ok {
+		return se
+	}
 	if h.workspaceStore == nil {
 		return SuggestSideEffect(toolName)
 	}
@@ -106,8 +111,8 @@ func (h *LLMTaskHandler) resolveMissionToolSideEffect(workspaceID, toolName stri
 		if !b.Enabled {
 			continue
 		}
-		if se, ok := b.ToolOverrides[toolName]; ok && se != "" {
-			return se
+		if _, overrides := EffectiveMCPBindingClassification(b); overrides[toolName] != "" {
+			return overrides[toolName]
 		}
 	}
 	for _, b := range ws.SkillBindings {
@@ -162,7 +167,8 @@ func missionDefaultSideEffect(ws *Workspace) SideEffect {
 	}
 	for _, b := range ws.MCPBindings {
 		if b.Enabled {
-			consider(b.DefaultSideEffect)
+			defaultSE, _ := EffectiveMCPBindingClassification(b)
+			consider(defaultSE)
 		}
 	}
 	for _, b := range ws.SkillBindings {

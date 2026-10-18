@@ -387,8 +387,13 @@ const sessionManager = {
         // The context fields live inside Advanced, so its collapsed summary
         // says when either holds something.
         if (fieldID !== 'folderDescriptionInput') this.updateBehaviorHint();
+        else this.syncWorkspaceGoalMirror();
       });
     }
+    // Typing in the Goal field ends mirroring for this open of the modal.
+    document.getElementById('folderGoalInput')?.addEventListener('input', event => {
+      if (event?.target?.dataset) event.target.dataset.goalEdited = '1';
+    });
     workspaceNameInput?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
@@ -3680,10 +3685,55 @@ const sessionManager = {
     }
   },
 
+  // The Goal field shows the selected blueprint's goal, else the description,
+  // until the user types in it; from then on it keeps what they typed, even
+  // when that is empty (workspace-goal-suggestions FR2).
+  mirroredWorkspaceGoal({
+    edited = false,
+    current = '',
+    description = '',
+    templateGoal = ''
+  } = {}) {
+    if (edited) return String(current || '');
+    return String(templateGoal || '').trim() || String(description || '').trim();
+  },
+
+  selectedTemplateGoal() {
+    const template = window.ProjectTemplateCard?.getSelectedTemplate?.() || null;
+    if (!template || template.blank) return '';
+    return String(template.goal || '').trim();
+  },
+
+  syncWorkspaceGoalMirror() {
+    const input = document.getElementById('folderGoalInput');
+    if (!input) return;
+    input.value = this.mirroredWorkspaceGoal({
+      edited: input.dataset?.goalEdited === '1',
+      current: input.value,
+      description: document.getElementById('folderDescriptionInput')?.value || '',
+      templateGoal: this.selectedTemplateGoal()
+    });
+  },
+
+  // The goal Create sends as `mission`. Without the field (older markup) the
+  // mirror rule alone decides it.
+  currentWorkspaceGoal() {
+    const input = document.getElementById('folderGoalInput');
+    if (input) {
+      this.syncWorkspaceGoalMirror();
+      return String(input.value || '').trim();
+    }
+    return this.mirroredWorkspaceGoal({
+      description: document.getElementById('folderDescriptionInput')?.value || '',
+      templateGoal: this.selectedTemplateGoal()
+    });
+  },
+
   getWorkspaceBootstrapFromModal() {
     const description = String(
       document.getElementById('folderDescriptionInput')?.value || ''
     ).trim();
+    const goal = this.currentWorkspaceGoal();
     const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
     const context = String(document.getElementById('folderContextInput')?.value || '').trim();
     const systemsList = systems
@@ -3694,9 +3744,9 @@ const sessionManager = {
       : [];
 
     return {
-      hasAny: Boolean(description || systems || context),
+      hasAny: Boolean(goal || systems || context),
       description,
-      goal: description,
+      goal,
       capabilities: '',
       systems,
       systemsList,
@@ -4357,6 +4407,11 @@ const sessionManager = {
       if (descriptionInput) descriptionInput.value = '';
       if (descriptionInput) descriptionInput.dataset.autofillDescription = '';
       if (primaryGoalInput) primaryGoalInput.value = '';
+      const goalInput = document.getElementById('folderGoalInput');
+      if (goalInput) {
+        goalInput.value = '';
+        if (goalInput.dataset) delete goalInput.dataset.goalEdited;
+      }
       if (systemsInput) systemsInput.value = '';
       if (contextInput) contextInput.value = '';
     }
@@ -8390,6 +8445,7 @@ const sessionManager = {
       details +
       this.renderBlueprintInputsReceipt() +
       this.renderBuildFolderReceipt() +
+      this.renderBuildLinkReceipt(selectedTemplate) +
       this.renderExistingProjectReceipt(selectedTemplate) +
       this.renderWorkspaceGroupRequirementReceipt(selectedTemplate) +
       this.renderWorkspaceReceiptTeam(view)
@@ -9537,6 +9593,9 @@ const sessionManager = {
         : 'What this workspace is for and what Ori should help with';
     }
     if (bootstrapFields) bootstrapFields.hidden = ordinaryGroup;
+    // Groups have no goal of their own; their member workspaces do.
+    const goalField = document.getElementById('workspaceGoalField');
+    if (goalField) goalField.hidden = ordinaryGroup;
     // Color used to sit inside the destination card, so it vanished whenever a
     // blueprint fixed the placement. It stands on its own now and is hidden only
     // where no color is sent: import, guided group setup, and a managed Group
@@ -9650,6 +9709,7 @@ const sessionManager = {
         // blockers remain exactly as before.
         createBtn.disabled =
           Boolean(this.workspaceBuild?.busy) ||
+          this.workspaceBuildAttachmentPending() ||
           (importMode &&
             this.importContinuityStatus !== '' &&
             this.importContinuityStatus !== 'legacy' &&
@@ -10389,6 +10449,7 @@ const sessionManager = {
       profile.blank ? '' : String(template?.description || ''),
       'autofillDescription'
     );
+    this.syncWorkspaceGoalMirror();
     this.syncWorkspaceDescriptionHelp();
     this.updateWorkspaceNameHint();
     this.applyTemplateBehavior(template);
@@ -11585,7 +11646,9 @@ const sessionManager = {
       abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {}),
       folderChoices: () => call('GET', `${base}/folder-choices`),
       folder: (id, body) => call('POST', sessionURL(id, 'folder'), body),
-      detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body)
+      detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
+      link: (id, body) => call('POST', sessionURL(id, 'link'), body),
+      detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body)
     };
   },
 
@@ -11623,6 +11686,12 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-folder-remove', () => {
       void this.detachWorkspaceBuildFolder();
+    });
+    modal.addEventListener('workspace-build-link', event => {
+      void this.attachWorkspaceBuildLink(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-link-remove', () => {
+      void this.detachWorkspaceBuildLink();
     });
     // Bootstrap focuses the dialog once it is shown; in build mode the
     // conversation is where the user starts, so focus moves to the composer.
@@ -11727,7 +11796,10 @@ const sessionManager = {
       // folder chooser for builds.
       folders: availability?.folders === true,
       folderPending: false,
-      folderGeneration: 0
+      folderGeneration: 0,
+      // Add link likewise, when the server wires the link observer.
+      links: availability?.links === true,
+      linkPending: false
     };
     this.mountWorkspaceBuildPane();
     // A slow availability read must not replace the wizard the user is already using.
@@ -11743,7 +11815,7 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
-    pane.mount({ assistant: build.assistant, folders: build.folders });
+    pane.mount({ assistant: build.assistant, folders: build.folders, links: build.links });
     this.syncWorkspaceBuildPresentation();
   },
 
@@ -11782,6 +11854,9 @@ const sessionManager = {
     // the user makes by hand to the paused build.
     if (result.body.resumed && !fresh && build.context.buildResume) {
       await this.applyWorkspaceBuildSession(session, { resume: true, revision });
+      if (this.workspaceBuild === build && build.context.buildNote) {
+        pane.showLine(build.context.buildNote);
+      }
       return;
     }
     if (result.body.resumed && !fresh) {
@@ -11921,6 +11996,7 @@ const sessionManager = {
       build.busy ||
       build.turnPending ||
       build.folderPending ||
+      build.linkPending ||
       !this.workspaceBuildAssisted()
     )
       return;
@@ -12209,7 +12285,11 @@ const sessionManager = {
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
       const folder = String(this.workspaceBuild?.session?.folder?.observation?.folder || '').trim();
-      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}`;
+      const linkObservation = this.workspaceBuild?.session?.link?.observation;
+      const link = String(
+        linkObservation?.title || linkObservation?.repo?.full_name || linkObservation?.host || ''
+      ).trim();
+      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}${link ? ` · Link: ${link}` : ''}`;
     }
   },
 
@@ -12312,6 +12392,12 @@ const sessionManager = {
         field: document.getElementById('folderDescriptionInput')
       };
     }
+    if (key === 'goal') {
+      return {
+        anchor: document.getElementById('folderGoalLabel'),
+        field: document.getElementById('folderGoalInput')
+      };
+    }
     if (key === 'parent') {
       return {
         anchor: document.getElementById('folderParentLabel'),
@@ -12395,6 +12481,7 @@ const sessionManager = {
     const id = String(target.id || '');
     if (id === 'folderNameInput') return 'name';
     if (id === 'folderDescriptionInput') return 'description';
+    if (id === 'folderGoalInput') return 'goal';
     if (id === 'folderParentSelect') return 'parent';
     if (target.closest?.('.folder-color-btn')) return 'color';
     const inputID = target.closest?.('[data-input-id]')?.dataset?.inputId;
@@ -12501,6 +12588,26 @@ const sessionManager = {
           if (input.dataset) input.dataset.autofillDescription = '';
           applied.push('description');
           this.markWorkspaceBuildChosen('description', name, { animate });
+        }
+      }
+      if (has('mission')) {
+        // The Goal field mirrors the blueprint's goal or the description until
+        // someone writes in it. A goal equal to that mirror is the mirror (a
+        // resumed draft records it too); any other is the assistant's, and it
+        // stays put like a typed one.
+        const input = document.getElementById('folderGoalInput');
+        const goal = String(value.mission || '');
+        const mirror = this.mirroredWorkspaceGoal({
+          description: document.getElementById('folderDescriptionInput')?.value || '',
+          templateGoal: this.selectedTemplateGoal()
+        });
+        if (input && goal.trim() && goal.trim() !== mirror.trim()) {
+          input.value = goal;
+          if (input.dataset) input.dataset.goalEdited = '1';
+          applied.push('goal');
+          this.markWorkspaceBuildChosen('goal', name, { animate });
+        } else if (input) {
+          this.syncWorkspaceGoalMirror();
         }
       }
       if (value.blueprint_inputs && typeof value.blueprint_inputs === 'object') {
@@ -12714,6 +12821,7 @@ const sessionManager = {
     'blank',
     'name',
     'description',
+    'mission',
     'blueprint_inputs',
     'parent_id',
     'color',
@@ -12833,7 +12941,12 @@ const sessionManager = {
       // assistant re-staffs it without being asked (FR17), after the turn in
       // flight if there is one.
       if (result.body.blueprint_changed) {
-        if (build.busy || !this.workspaceBuildAssisted()) build.restaffPending = true;
+        if (
+          build.busy ||
+          this.workspaceBuildAttachmentPending(build) ||
+          !this.workspaceBuildAssisted()
+        )
+          build.restaffPending = true;
         else void this.sendWorkspaceBuildRestaff(build);
       }
     };
@@ -12900,16 +13013,48 @@ const sessionManager = {
   // could ever stop the key itself.
   consumeWorkspaceBuildEscape() {
     const pane = this.workspaceBuildPane();
-    if (!this.workspaceBuild || !pane?.folderChooserOpen?.()) return false;
-    pane.closeFolderChooser();
-    return true;
+    if (!this.workspaceBuild || !pane) return false;
+    if (pane.folderChooserOpen?.()) {
+      pane.closeFolderChooser();
+      return true;
+    }
+    if (pane.linkFieldOpen?.()) {
+      pane.closeLinkField();
+      return true;
+    }
+    return false;
   },
 
-  // A folder request never overlaps a turn, the draft flush before a turn, or
-  // another folder request: each would move the session's version under the
-  // other, and the loser's 409 would cost the user what they typed.
+  // A folder or link request never overlaps a turn, the draft flush before a
+  // turn, or another attachment request: each would move the session's
+  // version under the other, and the loser's 409 would cost the user what
+  // they typed.
   workspaceBuildFolderLocked(build) {
-    return Boolean(build.busy || build.turnPending || build.folderPending);
+    return Boolean(build.busy || build.turnPending || build.folderPending || build.linkPending);
+  },
+
+  // Whether a folder or link request is in flight. Create waits for it: a
+  // create that closed the build first would lose the attachment.
+  workspaceBuildAttachmentPending(build = this.workspaceBuild) {
+    return Boolean(build?.folderPending || build?.linkPending);
+  },
+
+  // setWorkspaceBuildAttachmentPending marks a folder or link request as in
+  // flight or done. The Create button follows it, and a re-staff the user's
+  // blueprint switch asked for while it was in flight is sent once it ends.
+  setWorkspaceBuildAttachmentPending(build, flag, pending) {
+    if (!build) return;
+    build[flag] = Boolean(pending);
+    this.refreshWizardChrome?.();
+    if (
+      !pending &&
+      this.workspaceBuild === build &&
+      build.restaffPending &&
+      !build.busy &&
+      !this.workspaceBuildAttachmentPending(build)
+    ) {
+      void this.sendWorkspaceBuildRestaff(build);
+    }
   },
 
   async openWorkspaceBuildFolderChooser() {
@@ -12965,7 +13110,7 @@ const sessionManager = {
     }
     // One pick at a time from here: a second Use this path, or a chip while
     // a path is still being checked, is ignored rather than sent.
-    build.folderPending = true;
+    this.setWorkspaceBuildAttachmentPending(build, 'folderPending', true);
     let attaching = false;
     let note = '';
     try {
@@ -13020,7 +13165,7 @@ const sessionManager = {
       pane.showLine(pane.COPY.folderAttached);
     } finally {
       if (this.workspaceBuild === build) {
-        build.folderPending = false;
+        this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
         if (attaching) {
           pane.setFolderBusy(false, note);
           pane.focusComposer?.();
@@ -13066,7 +13211,7 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build?.session?.folder || !pane || this.workspaceBuildFolderLocked(build)) return;
     if (!this.workspaceBuildAssisted()) return;
-    build.folderPending = true;
+    this.setWorkspaceBuildAttachmentPending(build, 'folderPending', true);
     pane.setFolderBusy(true);
     try {
       await this.flushWorkspaceBuildDraft();
@@ -13092,8 +13237,116 @@ const sessionManager = {
       this.adoptWorkspaceBuildSession(session);
     } finally {
       if (this.workspaceBuild === build) {
-        build.folderPending = false;
+        this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
         pane.setFolderBusy(false);
+        pane.focusComposer?.();
+      }
+    }
+  },
+
+  // ----- Add link (the pane's own) -----
+  //
+  // One link per build. The server reads what the address says about itself
+  // (a page's title and description, or a GitHub repository's public facts),
+  // keeps that on the session for the model, and attaching another replaces
+  // it. A refused address is said under the field, which stays open with the
+  // typed address so it can be fixed.
+
+  async attachWorkspaceBuildLink(detail = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    const url = String(detail.url || '').trim();
+    if (!url) {
+      pane.linkFieldStatus(pane.COPY.linkEmpty, true);
+      return;
+    }
+    this.setWorkspaceBuildAttachmentPending(build, 'linkPending', true);
+    pane.setLinkBusy(true);
+    pane.linkFieldStatus(pane.COPY.linkChecking);
+    let attached = false;
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      let result;
+      try {
+        result = await this.workspaceBuildApi().link(build.session.id, {
+          url,
+          version: Number(build.session.version) || 0
+        });
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+        if (this.workspaceBuild === build) {
+          pane.linkFieldStatus('The build moved on in another tab. Attach the link again.', true);
+        }
+        return;
+      }
+      if (result?.status === 409 && result.body?.code === 'unavailable') {
+        this.failWorkspaceBuild();
+        return;
+      }
+      const session = result?.body?.session || null;
+      if (!result?.ok || !session) {
+        pane.linkFieldStatus(
+          String(result?.body?.error || '').trim() ||
+            'That link could not be used. Your draft is unchanged.',
+          true
+        );
+        return;
+      }
+      this.adoptWorkspaceBuildSession(session);
+      attached = true;
+    } finally {
+      if (this.workspaceBuild === build) {
+        this.setWorkspaceBuildAttachmentPending(build, 'linkPending', false);
+        pane.setLinkBusy(false);
+        if (attached) {
+          pane.linkAttachedDone();
+          pane.showLine(pane.COPY.linkAttached);
+          pane.focusComposer?.();
+        }
+      }
+    }
+  },
+
+  async detachWorkspaceBuildLink() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session?.link || !pane || this.workspaceBuildFolderLocked(build)) return;
+    if (!this.workspaceBuildAssisted()) return;
+    this.setWorkspaceBuildAttachmentPending(build, 'linkPending', true);
+    pane.setLinkBusy(true);
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      let result;
+      try {
+        result = await this.workspaceBuildApi().detachLink(build.session.id, {
+          version: Number(build.session.version) || 0
+        });
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+        return;
+      }
+      const session = result?.body?.session || null;
+      if (!result?.ok || !session) {
+        pane.showLine('The link could not be removed. Try again.');
+        return;
+      }
+      this.adoptWorkspaceBuildSession(session);
+    } finally {
+      if (this.workspaceBuild === build) {
+        this.setWorkspaceBuildAttachmentPending(build, 'linkPending', false);
+        pane.setLinkBusy(false);
         pane.focusComposer?.();
       }
     }
@@ -13129,6 +13382,50 @@ const sessionManager = {
           <span class="workspace-review-card-label">Attached folder</span>
           <span class="workspace-review-card-meta">${this.escapeHtml(name)} · ${files} ${files === 1 ? 'file' : 'files'} observed</span>
           <span class="workspace-review-card-note">Ori will link this folder to the workspace. Nothing in it is moved or changed; its contents have not been read.</span>
+        </div>
+      </div>`;
+  },
+
+  // buildLinkReceiptView is Review's statement of the link attached in the
+  // conversation, and what Create does with it for the chosen blueprint: a
+  // repository is bound to a GitHub Ops workspace; any other pairing makes the
+  // link the workspace's starting source. null when there is nothing to say.
+  buildLinkReceiptView(session, template) {
+    const observation = session?.link?.observation;
+    if (!observation || session.status !== 'open') return null;
+    const repo = observation.repo && typeof observation.repo === 'object' ? observation.repo : null;
+    const name = String(observation.title || repo?.full_name || observation.host || 'Link').trim();
+    const kind =
+      observation.kind === 'github_repo'
+        ? 'GitHub repository'
+        : observation.kind === 'document'
+          ? 'Document'
+          : 'Page';
+    const templateId = String(template?.id || '')
+      .split(':')
+      .pop();
+    const binds = observation.kind === 'github_repo' && templateId === 'github-ops' && repo;
+    const note = binds
+      ? `Ori will bind this workspace to ${repo.full_name}. If GitHub isn’t connected yet, its setup asks you to connect it first.`
+      : 'Ori will add this link to the workspace’s Sources note and keep it in “How this was set up”. Nothing behind the link has been read.';
+    return { name, kind, url: String(observation.url || ''), note, binds: Boolean(binds) };
+  },
+
+  renderBuildLinkReceipt(selectedTemplate) {
+    const view = this.buildLinkReceiptView(this.workspaceBuild?.session, selectedTemplate);
+    if (!view) return '';
+    // A link's title is whatever a web page said about itself, so it is
+    // escaped here unconditionally rather than through escapeHtml, which
+    // passes text through unchanged when the note editor is not loaded.
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => entities[ch]);
+    return `
+      <div class="workspace-review-card" data-build-link-receipt>
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Attached link</span>
+          <span class="workspace-review-card-meta">${escape(view.name)} · ${escape(view.kind)}</span>
+          <span class="workspace-review-card-meta workspace-review-card-url">${escape(view.url)}</span>
+          <span class="workspace-review-card-note">${escape(view.note)}</span>
         </div>
       </div>`;
   },
@@ -13169,6 +13466,12 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build || !pane || this.isCreatingFolder || !this.workspaceBuildCanApply(build, revision))
       return;
+    if (this.workspaceBuildAttachmentPending(build)) {
+      pane.showLine(
+        'Not yet — wait for the attached link or folder to finish, then say “create it”.'
+      );
+      return;
+    }
     const problem = this.workspaceBuildGateProblem();
     if (problem) {
       pane.showLine(`${pane.COPY.gateFailurePrefix}${problem}`);
@@ -13244,11 +13547,14 @@ const sessionManager = {
         };
     if (!ordinaryGroup && workspaceBootstrap.hasAny) {
       payload.workspace_bootstrap = {
-        goal: workspaceBootstrap.description || workspaceBootstrap.goal,
+        goal: workspaceBootstrap.goal,
         systems: workspaceBootstrap.systems,
         context: workspaceBootstrap.context
       };
     }
+    // The goal travels as its own field: the server stores it as the
+    // workspace's Mission, the one goal every workspace prompt reads.
+    if (!ordinaryGroup) payload.mission = String(workspaceBootstrap.goal || '').trim();
     // Agent behavior profile (mapped from the Starting point or manually
     // overridden). Sent for both create and import; the backend maps it via
     // workspacesettings.ProfileDefaults.
@@ -13353,6 +13659,10 @@ const sessionManager = {
   // Create folder
   async createFolder(options = {}) {
     if (this.isCreatingFolder) return;
+    // A folder or link still being attached would be lost by a create that
+    // closes the build first; the button is disabled meanwhile, and this
+    // covers any other path that submits.
+    if (this.workspaceBuildAttachmentPending()) return;
     const placement = options.placement || null;
 
     const nameInput = document.getElementById('folderNameInput');

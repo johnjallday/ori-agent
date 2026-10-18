@@ -3887,6 +3887,127 @@ test('an empty description is never sent as a goal (FR 16)', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Goal field (workspace-goal-suggestions FR2).
+// ---------------------------------------------------------------------------
+
+test('the Goal field mirrors the blueprint goal, else the description, until edited', () => {
+  const manager = loadSessionManager();
+  const mirror = args => manager.mirroredWorkspaceGoal(args);
+  assert.equal(
+    mirror({ description: '  Keep the brand voice consistent ' }),
+    'Keep the brand voice consistent'
+  );
+  assert.equal(
+    mirror({ description: 'Brand assets', templateGoal: 'Publish on-brand content weekly.' }),
+    'Publish on-brand content weekly.'
+  );
+  assert.equal(
+    mirror({ edited: true, current: 'My own goal', description: 'Brand assets' }),
+    'My own goal'
+  );
+  assert.equal(mirror({ edited: true, current: '', description: 'Brand assets' }), '');
+});
+
+test('typing a description updates an untouched Goal field and stops once the goal is typed', () => {
+  const listeners = new Map();
+  const element = (id, value = '') => ({
+    id,
+    value,
+    dataset: {},
+    addEventListener(type, handler) {
+      listeners.set(`${id}:${type}`, handler);
+    }
+  });
+  const elements = new Map(
+    ['folderNameInput', 'folderDescriptionInput', 'folderGoalInput'].map(id => [id, element(id)])
+  );
+  const manager = loadSessionManager(
+    undefined,
+    { ProjectTemplateCard: { getSelectedTemplate: () => null } },
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.invalidateGroupRequirementReview = () => {};
+  manager.syncWorkspaceGoalMirror();
+  const description = elements.get('folderDescriptionInput');
+  const goal = elements.get('folderGoalInput');
+
+  description.value = 'Keep the brand voice consistent';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goal.value, 'Keep the brand voice consistent');
+
+  goal.value = 'Grow the newsletter';
+  goal.dataset.goalEdited = '1';
+  description.value = 'Brand assets and newsletter';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goal.value, 'Grow the newsletter');
+  assert.equal(manager.currentWorkspaceGoal(), 'Grow the newsletter');
+});
+
+test('template switches and asynchronous refreshes preserve custom and deliberately empty workspace goals', async () => {
+  for (const typed of ['My outcome 日本語 <b>literal</b>', '']) {
+    const { manager, elements } = nameAndDescriptionManager();
+    elements.folderGoalInput = { value: '', dataset: {} };
+    let selected = { ...catalogTemplate, goal: 'First default' };
+    manager.selectedTemplateGoal = () => selected?.goal || '';
+    manager.handleWorkspaceTemplateSelected(selected);
+    assert.equal(elements.folderGoalInput.value, 'First default');
+    elements.folderGoalInput.value = typed;
+    elements.folderGoalInput.dataset.goalEdited = '1';
+    for (const template of [
+      { id: 'second', goal: 'Second default' },
+      null,
+      { ...catalogTemplate, goal: 'Refreshed default' }
+    ]) {
+      selected = template;
+      await Promise.resolve();
+      manager.handleWorkspaceTemplateSelected(selected);
+      assert.equal(manager.currentWorkspaceGoal(), typed);
+    }
+  }
+});
+
+test('removing a template default retains description fallback until the workspace goal is explicitly cleared', () => {
+  const { manager, elements } = nameAndDescriptionManager();
+  elements.folderGoalInput = { value: '', dataset: {} };
+  let selected = { ...catalogTemplate, goal: 'Default' };
+  manager.selectedTemplateGoal = () => selected.goal;
+  manager.handleWorkspaceTemplateSelected(selected);
+  selected = { ...catalogTemplate, goal: '' };
+  manager.handleWorkspaceTemplateSelected(selected);
+  assert.equal(elements.folderGoalInput.value, catalogTemplate.description);
+  elements.folderGoalInput.value = '';
+  elements.folderGoalInput.dataset.goalEdited = '1';
+  assert.equal(manager.currentWorkspaceGoal(), '');
+});
+
+test('Create sends the goal as mission and as the bootstrap goal (SM2)', async () => {
+  const mirrored = await runDetailsCreate({ description: 'Keep the brand voice consistent' });
+  assert.equal(mirrored.mission, 'Keep the brand voice consistent');
+  assert.equal(mirrored.workspace_bootstrap.goal, 'Keep the brand voice consistent');
+
+  const typed = await runDetailsCreate({
+    description: 'Brand assets',
+    configure: manager => {
+      manager.currentWorkspaceGoal = () => 'Grow the newsletter';
+    }
+  });
+  assert.equal(typed.mission, 'Grow the newsletter');
+  assert.equal(typed.workspace_bootstrap.goal, 'Grow the newsletter');
+  assert.equal(typed.description, 'Brand assets');
+
+  const empty = await runDetailsCreate({ description: '' });
+  assert.equal(empty.mission, '');
+  const cleared = await runDetailsCreate({
+    description: 'A nonempty description',
+    configure: manager => {
+      manager.currentWorkspaceGoal = () => '';
+    }
+  });
+  assert.equal(cleared.mission, '');
+  assert.equal(cleared.workspace_bootstrap?.goal || '', '');
+});
+
+// ---------------------------------------------------------------------------
 // Attach an existing project (Create Workspace Slice B, FR 20–21).
 // ---------------------------------------------------------------------------
 
@@ -5151,6 +5272,7 @@ function loadPayloadFixtureManager(requests) {
   manager.getWorkspaceBootstrapFromModal = () => ({
     hasAny: true,
     description: 'Drafts the Monday newsletter',
+    goal: 'Drafts the Monday newsletter',
     systems: 'Mail',
     context: 'research notes'
   });
@@ -5188,6 +5310,7 @@ const expectedFixturePayload = {
     systems: 'Mail',
     context: 'research notes'
   },
+  mission: 'Drafts the Monday newsletter',
   workspace_preset: 'research',
   entry_point: 'folder_digest',
   folder_offer_id: 'offer-9',
@@ -5355,6 +5478,107 @@ test('an assistant patch fills the form through its setters and tags each field'
       .sort(),
     ['description', 'name', 'parent']
   );
+});
+
+test('an assistant goal fills the Goal field, is tagged, and stops mirroring there', async () => {
+  const { manager, nodes, allTags } = loadBuildWizard();
+  const goalInput = new BuildNode('textarea', 'folderGoalInput');
+  const goalLabel = new BuildNode('label', 'folderGoalLabel');
+  nodes.set('folderGoalInput', goalInput);
+  nodes.set('folderGoalLabel', goalLabel);
+  const applied = await manager.applyBuildPatchToWizard(
+    {
+      template_id: 'content-production',
+      description: 'Drafts the Monday newsletter',
+      mission: 'Keep the issues of acme/widgets triaged.'
+    },
+    'Luna',
+    { animate: false }
+  );
+  assert.deepEqual([...applied], ['blueprint', 'description', 'goal']);
+  assert.equal(goalInput.value, 'Keep the issues of acme/widgets triaged.');
+  assert.equal(goalInput.dataset.goalEdited, '1');
+  assert.ok(goalLabel.children.find(child => child.dataset.buildChosen === 'goal'));
+  // The field keeps the assistant's goal when the description changes later.
+  nodes.get('folderDescriptionInput').value = 'Something else';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goalInput.value, 'Keep the issues of acme/widgets triaged.');
+  assert.ok(allTags().some(tag => tag.dataset.buildChosen === 'goal'));
+});
+
+test('a draft goal equal to the mirror stays a mirror, untagged', async () => {
+  const { manager, nodes } = loadBuildWizard();
+  const goalInput = new BuildNode('textarea', 'folderGoalInput');
+  nodes.set('folderGoalInput', goalInput);
+  nodes.set('folderGoalLabel', new BuildNode('label', 'folderGoalLabel'));
+  nodes.get('folderDescriptionInput').value = 'Drafts the Monday newsletter';
+  const applied = await manager.applyBuildPatchToWizard(
+    { mission: 'Drafts the Monday newsletter' },
+    'Luna',
+    { animate: false }
+  );
+  assert.deepEqual([...applied], []);
+  assert.equal(goalInput.value, 'Drafts the Monday newsletter');
+  assert.equal(goalInput.dataset.goalEdited, undefined);
+  // It keeps following the description.
+  nodes.get('folderDescriptionInput').value = 'A new description';
+  manager.syncWorkspaceGoalMirror();
+  assert.equal(goalInput.value, 'A new description');
+});
+
+test('Review states what Create does with an attached link, by blueprint', () => {
+  const { manager } = loadBuildWizard();
+  const repo = {
+    status: 'open',
+    link: {
+      observation: {
+        kind: 'github_repo',
+        title: 'acme/widgets',
+        host: 'github.com',
+        url: 'https://github.com/acme/widgets',
+        repo: { full_name: 'acme/widgets' }
+      }
+    }
+  };
+  const bound = manager.buildLinkReceiptView(repo, { id: 'github-ops' });
+  assert.equal(bound.binds, true);
+  assert.equal(bound.kind, 'GitHub repository');
+  assert.match(bound.note, /bind this workspace to acme\/widgets/);
+  // A namespaced id names the same blueprint.
+  assert.equal(manager.buildLinkReceiptView(repo, { id: 'starter:github-ops' }).binds, true);
+  // On a Code Project the repository is a source, never a binding.
+  const source = manager.buildLinkReceiptView(repo, { id: 'code-project' });
+  assert.equal(source.binds, false);
+  assert.match(source.note, /Sources note/);
+  const page = manager.buildLinkReceiptView(
+    {
+      status: 'open',
+      link: {
+        observation: {
+          kind: 'document',
+          host: 'arxiv.org',
+          title: 'attention.pdf',
+          url: 'https://arxiv.org/pdf/1706.03762.pdf'
+        }
+      }
+    },
+    { id: 'research-project' }
+  );
+  assert.equal(page.kind, 'Document');
+  assert.equal(page.name, 'attention.pdf');
+  assert.match(page.note, /Nothing behind the link has been read/);
+  assert.equal(manager.buildLinkReceiptView({ status: 'open' }, null), null);
+  assert.equal(manager.buildLinkReceiptView({ ...repo, status: 'created' }, null), null);
+  // The card renders the title, the URL and the note as text.
+  manager.workspaceBuild.session = {
+    ...repo,
+    link: {
+      observation: { ...repo.link.observation, title: '<img src=x onerror=alert(1)>' }
+    }
+  };
+  const html = manager.renderBuildLinkReceipt({ id: 'github-ops' });
+  assert.match(html, /data-build-link-receipt/);
+  assert.doesNotMatch(html, /<img/);
 });
 
 test('a parent the user cannot choose is left alone', async () => {

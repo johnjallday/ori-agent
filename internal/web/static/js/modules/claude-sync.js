@@ -43,13 +43,14 @@
     const actions = `
       <div class="claude-sync-actions">
         <button type="button" class="modern-btn modern-btn-secondary claude-sync-refresh">Refresh from ~/.claude</button>
-        <span class="claude-sync-readonly">Read-only mirror of your Claude Code setup</span>
+        <span class="claude-sync-readonly">Synced Claude Code settings</span>
       </div>`;
 
     if (!sync) {
       return `
         <div class="claude-sync">
           ${actions}
+          <div class="claude-sync-card provider-limits-card" data-provider-limits hidden></div>
           <div class="claude-sync-card">
             <span class="claude-sync-label">Claude Code sync</span>
             <div class="claude-sync-value claude-sync-empty">Not available. Enable Claude Code agents in Settings, or install the Claude Code CLI — synced details from ~/.claude will appear here.</div>
@@ -69,6 +70,7 @@
     return `
       <div class="claude-sync">
         ${actions}
+        <div class="claude-sync-card provider-limits-card" data-provider-limits hidden></div>
         <div class="claude-sync-card">
           <span class="claude-sync-label">Model &amp; Settings</span>
           <div class="claude-sync-value">
@@ -116,6 +118,9 @@
     if (!root) {
       return;
     }
+    const refreshLimits = window.ProviderLimitsUI
+      ? window.ProviderLimitsUI.mountDetail(root, 'claude_code')
+      : async () => {};
     const btn = root.querySelector('.claude-sync-refresh');
     if (!btn) {
       return;
@@ -127,6 +132,7 @@
       btn.textContent = 'Refreshing…';
 
       try {
+        await refreshLimits(true);
         const resp = await fetch('/api/external-agents/refresh', { method: 'POST' });
         if (!resp.ok) {
           throw new Error(`Refresh failed (${resp.status})`);

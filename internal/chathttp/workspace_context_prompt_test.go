@@ -152,6 +152,37 @@ func TestBuildWorkspaceSnapshotPrompt_PopulatedWorkspace(t *testing.T) {
 	}
 }
 
+// SM1: the workspace chat prompt carries the goal, ahead of the description,
+// and leaves the line out when there is no goal.
+func TestBuildWorkspaceSnapshotPrompt_IncludesTheWorkspaceGoal(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Brand Desk", Description: "Brand assets and posts"})
+	ws.Mission = "Keep the brand voice\nconsistent"
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	route := normalizedChatRouteContext{Surface: "workspace_detail", PagePath: "/workspaces/" + ws.ID, WorkspaceID: ws.ID}
+
+	prompt := buildWorkspaceSnapshotPrompt(context.Background(), route, wsStore, &mockWorkspaceSnapshotSessionStore{})
+	goalAt := strings.Index(prompt, `- Goal: "Keep the brand voice consistent"`)
+	if goalAt < 0 {
+		t.Fatalf("expected the goal line, got %q", prompt)
+	}
+	if descriptionAt := strings.Index(prompt, `- Description: "Brand assets and posts"`); descriptionAt < goalAt {
+		t.Fatalf("expected the goal before the description, got %q", prompt)
+	}
+
+	if err := wsStore.Update(ws.ID, func(w *workspace.Workspace) error {
+		w.Mission = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if prompt := buildWorkspaceSnapshotPrompt(context.Background(), route, wsStore, &mockWorkspaceSnapshotSessionStore{}); strings.Contains(prompt, "- Goal:") {
+		t.Fatalf("a workspace without a goal must not carry a goal line: %q", prompt)
+	}
+}
+
 func TestBuildWorkspaceSnapshotPrompt_IncludesTrustedAssistantProjectAndStage(t *testing.T) {
 	wsStore := workspace.NewInMemoryStore()
 	project := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Neon Song"})

@@ -52,6 +52,7 @@ type Session = {
   furthest_step: number;
   turn_count: number;
   folder?: { observation: Record<string, unknown> } | null;
+  link?: { observation: Record<string, unknown> } | null;
 };
 
 type RequestBody = Record<string, any>;
@@ -63,6 +64,21 @@ type FakeBuild = {
   drafts: RequestBody[];
   abandons: RequestBody[];
   folders: RequestBody[];
+  links: RequestBody[];
+};
+
+// What the fake "reads" for any public address: a page's own title and
+// description, as the server's observer would return them.
+const FAKE_LINK = {
+  version: 1,
+  id: 'spec-link-1',
+  url: 'https://arxiv.org/abs/1706.03762',
+  host: 'arxiv.org',
+  kind: 'page',
+  title: 'Attention Is All You Need',
+  description: 'Abstract page for arXiv paper 1706.03762',
+  readable: true,
+  fetched_at: '2026-10-17T09:00:00Z'
 };
 
 // The folder the fake "scans" for any choice: the composer's path-free
@@ -95,6 +111,7 @@ const FIELD_OF: Record<string, string> = {
   blank: 'blueprint',
   name: 'name',
   description: 'description',
+  mission: 'goal',
   blueprint_inputs: 'inputs',
   parent_id: 'parent',
   color: 'color',
@@ -118,7 +135,8 @@ async function fakeBuildServer(
     turns: [],
     drafts: [],
     abandons: [],
-    folders: []
+    folders: [],
+    links: []
   };
   let sequence = 0;
   const respond = (route: Route, status: number, body: unknown) =>
@@ -167,7 +185,7 @@ async function fakeBuildServer(
         200,
         options.available === false
           ? { available: false, reason: 'no_model' }
-          : { available: true, folders: true }
+          : { available: true, folders: true, links: true }
       );
     }
     if (method === 'GET' && path === '/folder-choices') {
@@ -208,7 +226,9 @@ async function fakeBuildServer(
       if (body.first_message) runTurn(session, String(body.first_message));
       return respond(route, 201, { session });
     }
-    const match = path.match(/^\/([^/]+)\/(turns|draft|abandon|folder|folder\/detach)$/);
+    const match = path.match(
+      /^\/([^/]+)\/(turns|draft|abandon|folder|folder\/detach|link|link\/detach)$/
+    );
     const session = fake.session;
     if (!match || !session || decodeURIComponent(match[1]) !== session.id) {
       return respond(route, 404, { error: 'Build session not found.', code: 'not_found' });
@@ -241,6 +261,34 @@ async function fakeBuildServer(
       if (session.folder) {
         session.folder = null;
         session.transcript.push({ role: 'form', text: 'You removed the attached folder.' });
+        session.version += 1;
+      }
+      return respond(route, 200, { session });
+    }
+    // Add link: one address, refused in the user's words when it is not
+    // public; a refusal changes nothing on the build.
+    if (match[2] === 'link') {
+      fake.links.push(body);
+      if (String(body.url || '').includes('127.0.0.1')) {
+        return respond(route, 422, {
+          error:
+            'That address can’t be used here. Only public http or https links without a token or key in them are accepted.',
+          code: 'link'
+        });
+      }
+      session.link = { observation: { ...FAKE_LINK } };
+      session.transcript.push({
+        role: 'form',
+        text: 'You attached a link to arxiv.org.'
+      });
+      session.applied = [];
+      session.version += 1;
+      return respond(route, 200, { session });
+    }
+    if (match[2] === 'link/detach') {
+      if (session.link) {
+        session.link = null;
+        session.transcript.push({ role: 'form', text: 'You removed the attached link.' });
         session.version += 1;
       }
       return respond(route, 200, { session });
@@ -561,6 +609,94 @@ test('a folder attached in the pane shows on the chip, the draft line, the turn,
   await expect(page.locator('#workspaceBuildDraftText')).not.toContainText('Folder:');
   await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(0);
   await expect(composer(page)).toBeFocused();
+});
+
+test('a link attached in the pane shows on the chip, the draft line, the turn, the goal, and Review', async ({
+  page
+}) => {
+  const goal = 'Maintain a cited synthesis of Attention Is All You Need.';
+  const fake = await fakeBuildServer(page, [
+    {
+      text: 'This is a paper. I picked Research Project and named it Attention Notes.',
+      set: {
+        template_id: 'research-project',
+        name: 'Attention Notes',
+        description: 'Reads and summarizes the attention paper.',
+        mission: goal
+      }
+    }
+  ]);
+  await openFromHome(page);
+  await expect(pane(page)).toBeVisible();
+  const addLink = pane(page).getByRole('button', { name: 'Add link' });
+  const field = page.locator('#workspaceBuildLinkField');
+  const input = page.locator('#workspaceBuildLinkInput');
+  await expect(page.locator('#workspaceBuildLink')).toBeHidden();
+
+  await addLink.click();
+  await expect(field).toBeVisible();
+  await expect(field).toContainText('title and description once');
+  await expect(input).toBeFocused();
+  // Escape closes only the field: the dialog stays, and focus returns to Add link.
+  await page.keyboard.press('Escape');
+  await expect(field).toBeHidden();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(addLink).toBeFocused();
+
+  // A refused address is said under the field, which keeps what was typed.
+  await addLink.click();
+  await input.fill('http://127.0.0.1:8931/');
+  await input.press('Enter');
+  await expect(page.locator('#workspaceBuildLinkStatus')).toContainText(
+    'Only public http or https links'
+  );
+  await expect(input).toHaveValue('http://127.0.0.1:8931/');
+  await expect(page.locator('#workspaceBuildLink')).toBeHidden();
+
+  const attached = page.waitForResponse(
+    response =>
+      /\/api\/workspaces\/build-sessions\/[^/]+\/link$/.test(new URL(response.url()).pathname) &&
+      response.status() === 200
+  );
+  await input.fill('https://arxiv.org/abs/1706.03762');
+  await page.locator('#workspaceBuildLinkField').getByRole('button', { name: 'Attach' }).click();
+  await attached;
+  await expect(field).toBeHidden();
+  await expect(page.locator('#workspaceBuildLinkName')).toHaveText('Attention Is All You Need');
+  await expect(page.locator('#workspaceBuildLinkSummary')).toHaveText('Page · arxiv.org');
+  await expect(page.locator('#workspaceBuildDraftText')).toContainText(
+    'Link: Attention Is All You Need'
+  );
+  await expect(pane(page)).toContainText('Link attached');
+  expect(fake.links.map(body => body.url)).toEqual([
+    'http://127.0.0.1:8931/',
+    'https://arxiv.org/abs/1706.03762'
+  ]);
+
+  // An empty Send asks for the link itself; the reply fills the form and its goal.
+  await expect(composer(page)).toBeEnabled();
+  const turn = page.waitForResponse(response => isTurn(response.url()));
+  await composer(page).press('Enter');
+  await settle(page, turn);
+  expect(fake.turns.at(-1)?.text).toBe('Set it up from the attached link.');
+  await expect(page.locator('#folderNameInput')).toHaveValue('Attention Notes');
+  await expect(page.locator('#folderGoalInput')).toHaveValue(goal);
+
+  // Review says what Create will do with the link.
+  await expect(page.locator('[data-build-link-receipt]')).toHaveCount(1);
+  await expect(page.locator('[data-build-link-receipt]')).toContainText(
+    'Attention Is All You Need · Page'
+  );
+  await expect(page.locator('[data-build-link-receipt]')).toContainText('Sources note');
+
+  const detached = page.waitForResponse(response =>
+    /\/link\/detach$/.test(new URL(response.url()).pathname)
+  );
+  await page.locator('#workspaceBuildLink').getByRole('button', { name: /Remove link/ }).click();
+  await detached;
+  await expect(page.locator('#workspaceBuildLink')).toBeHidden();
+  await expect(page.locator('#workspaceBuildDraftText')).not.toContainText('Link:');
+  await expect(page.locator('[data-build-link-receipt]')).toHaveCount(0);
 });
 
 test('a blueprint switched on the form is said back and the assistant re-staffs', async ({

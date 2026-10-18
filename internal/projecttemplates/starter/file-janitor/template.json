@@ -5,7 +5,8 @@
   "tagline": "Review and file one intake folder safely.",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 4,
+  "goal": "Prepare reviewable filing batches for the approved folder, explain uncertain classifications, and require approval before moving anything.",
   "tags": [
     "files",
     "local-first",

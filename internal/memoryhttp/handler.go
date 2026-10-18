@@ -27,6 +27,7 @@ type Handler struct {
 	lookup    workspaceLookup
 	memory    *workspace.MemoryStore
 	learnings *workspace.AssistantLearningStore
+	global    GlobalMemory
 }
 
 // NewHandler builds the memory handler over a folder-backed store. Both
@@ -47,6 +48,13 @@ type entryDTO struct {
 	Date       string `json:"date"`
 	Provenance string `json:"provenance"`
 	Text       string `json:"text"`
+	// Managed marks a reviewed global-memory line (ori-hq:). It changes only
+	// through review on the Profile page, never through this API.
+	Managed bool `json:"managed,omitempty"`
+	// InPrompt reports whether the workspace prompt section includes this
+	// entry, from workspace.MemoryPromptSelection (the renderer's own
+	// selection). Always false for a Managed line: it is never in that section.
+	InPrompt bool `json:"in_prompt"`
 }
 
 type managedLearningDTO struct {
@@ -66,6 +74,7 @@ type memoryResponse struct {
 	CharBudget       int                  `json:"char_budget"`
 	TokenBudget      int                  `json:"token_budget"`
 	OverBudget       bool                 `json:"over_budget"`
+	GlobalMemory     globalMemoryDTO      `json:"global_memory"`
 }
 
 type writeRequest struct {
@@ -79,7 +88,7 @@ func (h *Handler) GetMemory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.writeMemoryResponse(w, workspaceID)
+	h.writeMemoryResponse(w, r, workspaceID)
 }
 
 // AddEntry handles POST /api/workspaces/{workspaceID}/memory/entries.
@@ -107,7 +116,7 @@ func (h *Handler) AddEntry(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondInternalError(w, "Failed to save memory entry: "+err.Error())
 		return
 	}
-	h.writeMemoryResponse(w, workspaceID)
+	h.writeMemoryResponse(w, r, workspaceID)
 }
 
 // UpdateEntry handles PUT /api/workspaces/{workspaceID}/memory/entries/{index}.
@@ -139,7 +148,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, err)
 		return
 	}
-	h.writeMemoryResponse(w, workspaceID)
+	h.writeMemoryResponse(w, r, workspaceID)
 }
 
 // DeleteEntry handles DELETE /api/workspaces/{workspaceID}/memory/entries/{index}.
@@ -156,7 +165,7 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, err)
 		return
 	}
-	h.writeMemoryResponse(w, workspaceID)
+	h.writeMemoryResponse(w, r, workspaceID)
 }
 
 // resolveWorkspace validates the store is wired and the workspace exists,
@@ -197,10 +206,15 @@ func (h *Handler) writeMutationError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondNotFound(w, err.Error())
 		return
 	}
+	if errors.Is(err, workspace.ErrMemoryManaged) {
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("memory_entry_managed",
+			"This line is reviewed global memory. Edit or forget it on your Profile page."))
+		return
+	}
 	_ = orihttp.RespondInternalError(w, "Failed to update memory: "+err.Error())
 }
 
-func (h *Handler) writeMemoryResponse(w http.ResponseWriter, workspaceID string) {
+func (h *Handler) writeMemoryResponse(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	raw, err := h.memory.ReadRaw(workspaceID)
 	if err != nil {
 		_ = orihttp.RespondInternalError(w, "Failed to read memory: "+err.Error())
@@ -208,6 +222,7 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, workspaceID string)
 	}
 	doc := workspace.ParseMemoryDocument(raw)
 	entries := doc.Entries()
+	inPrompt := workspace.MemoryPromptSelection(entries)
 	dtos := make([]entryDTO, len(entries))
 	for i, e := range entries {
 		dtos[i] = entryDTO{
@@ -216,6 +231,8 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, workspaceID string)
 			Date:       e.Date,
 			Provenance: e.Provenance,
 			Text:       e.Text,
+			Managed:    workspace.IsHQManagedProvenance(e.Provenance),
+			InPrompt:   inPrompt[i],
 		}
 	}
 	unstructured := doc.UnstructuredLines()
@@ -257,6 +274,7 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, workspaceID string)
 		CharBudget:       workspace.MemoryPromptTokenBudget * 4,
 		TokenBudget:      workspace.MemoryPromptTokenBudget,
 		OverBudget:       len(raw) > workspace.MemoryPromptTokenBudget*4,
+		GlobalMemory:     h.globalMemoryStatus(r.Context(), workspaceID),
 	}
 	if err := orihttp.RespondJSON(w, http.StatusOK, resp); err != nil {
 		logger.Debug("Failed to write memory response", logger.Fields{"workspace_id": workspaceID, "error": err})

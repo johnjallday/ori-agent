@@ -4,7 +4,8 @@
   "icon": "🗓",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 6,
+  "builtin_version": 8,
+  "goal": "Keep priorities and follow-ups visible through a daily overview of authorized workspace information, without duplicating its ownership.",
   "tags": [
     "personal"
   ],

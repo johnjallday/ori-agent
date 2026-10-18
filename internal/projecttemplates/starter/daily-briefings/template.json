@@ -4,7 +4,8 @@
   "icon": "📊",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 3,
+  "builtin_version": 5,
+  "goal": "Summarize selected feeds with source links, highlight significant changes, and flag missing or stale information.",
   "tags": [
     "briefing"
   ],

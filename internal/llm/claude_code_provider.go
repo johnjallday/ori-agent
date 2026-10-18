@@ -40,7 +40,7 @@ func (p *ClaudeCodeProvider) Type() ProviderType {
 // Capabilities returns Claude Code CLI capabilities.
 func (p *ClaudeCodeProvider) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
-		SupportsTools:          false,
+		SupportsTools:          true,
 		SupportsNativeMCP:      true,
 		SupportsStreaming:      false,
 		SupportsSystemPrompt:   true,
@@ -75,19 +75,36 @@ func (p *ClaudeCodeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRe
 		return nil, fmt.Errorf("%w: the Claude Code CLI has no verified tool-free posture", ErrIsolationUnsupported)
 	}
 	prompt := buildClaudeCodePrompt(req.SystemPrompt, req.Messages)
+	// Ori's tools are brokered the same way in both postures: the reply is
+	// constrained to the envelope schema and Ori runs the named tool itself.
+	// The native posture keeps the CLI's own toolset and MCP servers alongside.
+	var schema any
+	if len(req.Tools) > 0 {
+		var err error
+		prompt, err = appendBrokeredToolProtocol(prompt, req.Tools, "Claude Code")
+		if err != nil {
+			return nil, err
+		}
+		schema = brokeredToolResponseSchema()
+	}
 	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir, req.ExecutionScope)
 	if err != nil {
 		return nil, err
 	}
-	content, err := p.runClaudeExec(ctx, req.Model, req.ReasoningEffort, prompt, nil, nat)
+	content, err := p.runClaudeExec(ctx, req.Model, req.ReasoningEffort, prompt, schema, nat)
 	if err != nil {
 		return nil, err
 	}
-	return &ChatResponse{
+	response := &ChatResponse{
 		Content:  content,
 		Model:    req.Model,
 		Provider: p.Name(),
-	}, nil
+	}
+	if len(req.Tools) == 0 {
+		return response, nil
+	}
+	response.FinishReason = FinishReasonStop
+	return decodeBrokeredToolResponse(p.Name(), content, req.Tools, response)
 }
 
 // StreamChat streams a chat completion response (not yet implemented).
@@ -185,6 +202,7 @@ func buildClaudeCodePrompt(systemPrompt string, messages []Message) string {
 		b.WriteString(role)
 		b.WriteString(":\n")
 		b.WriteString(msg.Content)
+		writeBrokeredToolTurn(&b, msg)
 		b.WriteString("\n\n")
 	}
 

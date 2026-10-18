@@ -5,7 +5,8 @@
   "tagline": "Your calendar command center.",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 4,
+  "goal": "Surface scheduling conflicts and preparation gaps, and propose calendar changes for approval.",
   "tags": [
     "calendar",
     "personal"

@@ -35,7 +35,7 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	// project: metadata only, no scaffold to supersede, and exactly one
 	// development assistant as its entry agent.
 	code := byID["code-project"]
-	if !code.Builtin || code.HasSkeleton || len(code.Tags) != 1 || code.Tags[0] != "code" || code.Icon == "" || code.BuiltinVersion != 2 {
+	if !code.Builtin || code.HasSkeleton || len(code.Tags) != 1 || code.Tags[0] != "code" || code.Icon == "" || code.BuiltinVersion != 3 {
 		t.Errorf("code-project: %+v", code)
 	}
 	if len(code.Agents) != 1 || code.Agents[0].Name != "Development Assistant" || code.Agents[0].Role != "general" ||
@@ -201,7 +201,7 @@ func TestEnsureLibraryUpgradesAnOlderCodeProjectAndNothingElse(t *testing.T) {
 		t.Fatalf("EnsureLibrary (upgrade): %v", err)
 	}
 	upgraded, err := FindLibraryTemplate(dir, "code-project")
-	if err != nil || upgraded.BuiltinVersion != 2 || len(upgraded.Agents) != 1 || upgraded.Agents[0].Name != "Development Assistant" {
+	if err != nil || upgraded.BuiltinVersion != 3 || len(upgraded.Agents) != 1 || upgraded.Agents[0].Name != "Development Assistant" {
 		t.Fatalf("code-project after upgrade: %+v %v", upgraded, err)
 	}
 	if data, err := os.ReadFile(notes); err != nil || string(data) != "kept by the user" {

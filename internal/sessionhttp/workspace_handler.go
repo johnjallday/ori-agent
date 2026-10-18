@@ -348,6 +348,46 @@ type createWorkspaceRequest struct {
 	// the workspace exists the session is marked created and its summary is
 	// recorded on the workspace.
 	BuildSessionID string `json:"build_session_id,omitempty"`
+	// Mission is the workspace goal typed in the create modal. When present,
+	// even empty, it wins over the template's default goal; when absent the
+	// template's goal (if any) applies.
+	Mission *string `json:"mission,omitempty"`
+}
+
+// createWorkspaceGoal resolves the goal a new workspace starts with: the
+// caller's explicit goal, else the template's default goal, else the goal a
+// legacy caller put in workspace_bootstrap. Groups have no goal.
+func createWorkspaceGoal(req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool) string {
+	if kind == session.WorkspaceKindGroup {
+		return ""
+	}
+	if req.Mission != nil {
+		return strings.TrimSpace(*req.Mission)
+	}
+	if templateResolved {
+		if goal := strings.TrimSpace(tmpl.Goal); goal != "" {
+			return goal
+		}
+	}
+	if req.WorkspaceBootstrap != nil {
+		return strings.TrimSpace(req.WorkspaceBootstrap.Goal)
+	}
+	return ""
+}
+
+// bootstrapWithGoal returns a copy of the bootstrap input whose goal is the
+// workspace goal, so the legacy workspace_bootstrap.goal never disagrees with
+// Workspace.Mission. A nil input gains a bootstrap only when there is a goal.
+func bootstrapWithGoal(input *workspaceBootstrapRequest, goal string) *workspaceBootstrapRequest {
+	if input == nil {
+		if goal == "" {
+			return nil
+		}
+		return &workspaceBootstrapRequest{Goal: goal}
+	}
+	out := *input
+	out.Goal = goal
+	return &out
 }
 
 // folderDigestEntryPoint is the EntryPoint a "show me a folder" create sends.
@@ -884,6 +924,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, starterTemplate)
 	}
+	h.applyCreateWorkspaceGoal(ws.ID, createWorkspaceGoal(req, kind, resolvedTemplate, templateResolved))
 
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.
@@ -1099,7 +1140,7 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 		}
 		ws.SharedData = workspacesettings.Store(ws.SharedData, workspacesettings.ProfileDefaults(preset))
 	}
-	if bootstrapData := normalizeWorkspaceBootstrap(req.WorkspaceBootstrap); bootstrapData != nil {
+	if bootstrapData := normalizeWorkspaceBootstrap(bootstrapWithGoal(req.WorkspaceBootstrap, createWorkspaceGoal(req, kind, tmpl, templateResolved))); bootstrapData != nil {
 		if ws.SharedData == nil {
 			ws.SharedData = make(map[string]any)
 		}
@@ -1698,7 +1739,7 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 	}
 	provenance := &agentworkspace.TemplateProvenance{
 		TemplateID: tmpl.ID, TemplateName: tmpl.Name, Builtin: tmpl.Builtin, Version: version,
-		AppliedAt: time.Now(), PluginOwner: tmpl.PluginOwner,
+		AppliedAt: time.Now(), PluginOwner: tmpl.PluginOwner, BehaviorProfile: tmpl.BehaviorProfile,
 		// Setup requirements stay unresolved: this snapshot chooses no path,
 		// registers no watcher, enables no schedule, and grants no capability.
 		DirectoryRequirements:  tmpl.DirectoryRequirements,
@@ -1877,13 +1918,8 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 	if req.Description != nil {
 		workspace.Description = *req.Description
 	}
-	if req.Description != nil || req.WorkspaceBootstrap != nil {
-		bootstrapData := mergeWorkspaceBootstrapForUpdate(
-			workspace.SharedData,
-			workspace.Description,
-			req.Description != nil,
-			req.WorkspaceBootstrap,
-		)
+	if req.WorkspaceBootstrap != nil {
+		bootstrapData := mergeWorkspaceBootstrapForUpdate(workspace.SharedData, req.WorkspaceBootstrap)
 		if bootstrapData != nil {
 			if workspace.SharedData == nil {
 				workspace.SharedData = make(map[string]any)
@@ -2603,6 +2639,21 @@ type createWorkspaceImportRequest struct {
 	// AdoptAssistant is the user's explicit choice, for an older Personal HQ
 	// folder, to continue with the assistant that folder proves (FR-29).
 	AdoptAssistant bool `json:"adopt_assistant,omitempty"`
+	// Mission is the workspace goal typed in the create modal; absent falls
+	// back to the legacy workspace_bootstrap goal.
+	Mission *string `json:"mission,omitempty"`
+}
+
+// importGoal resolves the goal a freshly imported folder workspace starts
+// with. A restored export keeps the goal saved in its own workspace.json.
+func (req createWorkspaceImportRequest) importGoal() string {
+	if req.Mission != nil {
+		return strings.TrimSpace(*req.Mission)
+	}
+	if req.WorkspaceBootstrap != nil {
+		return strings.TrimSpace(req.WorkspaceBootstrap.Goal)
+	}
+	return ""
 }
 
 type workspaceImportDuplicate struct {

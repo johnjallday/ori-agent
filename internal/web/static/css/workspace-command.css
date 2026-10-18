@@ -2805,6 +2805,14 @@ button.ws-cmd-rpg-class-card:focus-visible {
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
+/* The goal sentence itself is the heading: sentence case, readable length. */
+.ws-cmd-mission-title.is-goal {
+  max-width: 88ch;
+  font-size: 15px;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .ws-cmd-mission-text {
   max-width: 88ch;
   margin: 0;
@@ -5570,6 +5578,25 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-modal-panel.is-config {
   max-width: min(1000px, 94vw);
 }
+/* A station's panel (Daily Brief, Memory) is a tall reading surface: the
+   reading width, not the wide config width a config-surface panel would
+   otherwise take, and its header (title, close) kept clear of the navbar,
+   which sits above the stat modal and grows to several rows on a narrow
+   screen. daily-brief.css adds the brief's paper look on top. */
+.ws-cmd-modal:has(> .ws-cmd-modal-panel.is-station) {
+  padding-top: calc(var(--navbar-offset, 76px) + 12px);
+}
+.ws-cmd-modal-panel.is-station {
+  max-width: min(760px, 96vw);
+}
+.ws-cmd-modal-panel.is-config.is-station {
+  max-height: min(82vh, calc(100dvh - var(--navbar-offset, 76px) - 36px));
+}
+@media (max-width: 760px) {
+  .ws-cmd-modal:has(> .ws-cmd-modal-panel.is-station) {
+    padding: calc(var(--navbar-offset, 76px) + 8px) 8px 8px;
+  }
+}
 .ws-cmd-modal-config-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -6977,6 +7004,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-cmd-drawer-preview-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-top: 10px;
@@ -7130,6 +7158,82 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-drawer-row-owner-link {
   font-size: 11px;
   color: var(--ws-idle);
+}
+
+/* Goal-run suggestions in the Backlog drawer (workspace-goal-suggestions FR20). */
+.ws-cmd-drawer-row-suggested {
+  align-self: flex-start;
+  font-size: 9px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--ws-ink);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.ws-cmd-drawer-row-why {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ws-ink-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+.ws-cmd-suggestion-details {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-suggestion-details summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--ws-ink);
+}
+.ws-cmd-suggestion-details p {
+  margin: 6px 0 0;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-drawer-goal-run {
+  margin: 8px 16px 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--ws-ink);
+  background: var(--ws-panel-2);
+  border: 1px dashed var(--ws-line-bright);
+  border-radius: var(--ws-clip-sm);
+}
+/* Rows keep their height in the scrolling list; a two-line suggestion row
+   must not be squeezed into its neighbour. */
+.ws-cmd-drawer-list > .ws-cmd-drawer-row {
+  flex-shrink: 0;
+}
+.ws-cmd-backlog-not-useful {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  /* Its own line, below the other actions, at every width. */
+  flex: 1 0 100%;
+  order: 99;
+  box-sizing: border-box;
+  padding: 10px;
+  background: var(--ws-panel-2);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip-sm);
+}
+.ws-cmd-backlog-not-useful-label {
+  flex: 1 0 100%;
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-backlog-not-useful input {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 
 .ws-cmd-backlog-promote-confirm {

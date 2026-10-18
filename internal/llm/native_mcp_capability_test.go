@@ -3,10 +3,10 @@ package llm
 import "testing"
 
 // TestProviderNativeMCPCapabilities locks the capability matrix: both CLI
-// providers run their own MCP loop. Codex also supports Ori's schema-constrained
-// brokered tool protocol so capability-scoped in-process tools stay behind the
-// host authorization gate; Claude Code remains native-MCP-only. Capabilities()
-// is called on zero-value structs so the test does not require the CLIs on PATH.
+// providers run their own MCP loop, and both also support Ori's
+// schema-constrained brokered tool protocol so in-process tools stay behind the
+// host authorization gate. Capabilities() is called on zero-value structs so
+// the test does not require the CLIs on PATH.
 func TestProviderNativeMCPCapabilities(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -15,7 +15,7 @@ func TestProviderNativeMCPCapabilities(t *testing.T) {
 		wantTools  bool
 	}{
 		{"codex", (&CodexProvider{}).Capabilities(), true, true},
-		{"claude_code", (&ClaudeCodeProvider{}).Capabilities(), true, false},
+		{"claude_code", (&ClaudeCodeProvider{}).Capabilities(), true, true},
 		{"openai", (&OpenAIProvider{}).Capabilities(), false, true},
 		{"claude", (&ClaudeProvider{}).Capabilities(), false, true},
 	}

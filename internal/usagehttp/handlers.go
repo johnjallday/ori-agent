@@ -1,11 +1,13 @@
 package usagehttp
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/usagelimits"
 	"github.com/johnjallday/ori-agent/internal/utilitytelemetry"
 )
 
@@ -13,6 +15,40 @@ import (
 type Handler struct {
 	costTracker      *llm.CostTracker
 	utilityTelemetry *utilitytelemetry.Tracker
+	limits           limitsService
+	mirror           mirrorInstaller
+}
+
+type limitsService interface {
+	Snapshot(context.Context, bool) usagelimits.Snapshot
+}
+
+// SetLimitsService configures the on-demand subscription usage reader.
+func (h *Handler) SetLimitsService(service limitsService) {
+	h.limits = service
+}
+
+// GetLimits returns cached or explicitly refreshed subscription usage windows.
+// GET /api/usage/limits?refresh=1
+func (h *Handler) GetLimits(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethods(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if h.limits == nil {
+		orihttp.WriteJSON(w, usagelimits.Snapshot{GeneratedAt: time.Now().UTC(), Providers: []usagelimits.Provider{}})
+		return
+	}
+	snapshot := h.limits.Snapshot(r.Context(), r.URL.Query().Get("refresh") == "1")
+	if h.mirror != nil {
+		status := h.mirror.Status()
+		for i := range snapshot.Providers {
+			if snapshot.Providers[i].Provider == "claude_code" {
+				snapshot.Providers[i].Mirror = &status
+			}
+		}
+	}
+	orihttp.WriteJSON(w, snapshot)
 }
 
 // NewHandler creates a new usage HTTP handler

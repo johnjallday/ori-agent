@@ -93,6 +93,72 @@ test('rowHTML marks assistant suggestions with escaped provenance, confidence, e
   assert.ok(!html.includes('<script>'));
 });
 
+// FR16/FR29: a goal-run finding shows its evidence and recommended action,
+// escaped, behind one expander; the priority chip is unchanged.
+test('rowHTML shows a mission finding evidence and recommended action expander', () => {
+  const { api } = loadActionCenter();
+  const html = api.rowHTML({
+    id: 'o-mission',
+    workspace_id: 'ws-1',
+    workspace_slug: 'brand-desk',
+    title: 'Brand voice drift',
+    summary: '3 posts diverge',
+    evidence: 'posts/<launch>.md',
+    recommended_action: 'Review the last three posts',
+    priority: 'high',
+    status: 'new'
+  });
+  assert.match(html, /<summary>Evidence and recommended action<\/summary>/);
+  assert.match(html, /posts\/&lt;launch&gt;\.md/);
+  assert.match(html, /Review the last three posts/);
+  assert.match(html, />HIGH</);
+  assert.match(html, /data-action="add-to-backlog"/);
+
+  assert.equal(api.findingDetailsHTML({ title: 'Bare', status: 'new' }), '');
+  assert.equal(
+    api.findingDetailsHTML({ source_type: 'assistant_suggestion', evidence: 'x' }),
+    '',
+    'assistant suggestions keep their own evidence block'
+  );
+});
+
+// FR22: the summary row links to that workspace's Backlog drawer, lists the
+// suggested titles, and offers no Add to Backlog; triage buttons stay.
+test('rowHTML renders a goal run summary row with a Backlog link', () => {
+  const { api } = loadActionCenter();
+  const html = api.rowHTML({
+    id: 'o-summary',
+    workspace_id: 'ws-1',
+    workspace_slug: 'brand-desk',
+    workspace_name: 'Brand Desk',
+    source_type: 'goal_suggestions',
+    source_url: '/workspaces/brand-desk?panel=backlog',
+    title: '3 suggested tasks in Brand Desk',
+    evidence: '- Draft a brand voice guide\n- Plan next week’s posts',
+    priority: 'low',
+    status: 'new'
+  });
+  assert.match(
+    html,
+    /<a href="\/workspaces\/brand-desk\?panel=backlog" class="action-center-goal-backlog-link">Open Backlog<\/a>/
+  );
+  assert.match(html, /<summary>Suggested tasks<\/summary>/);
+  assert.match(html, /Draft a brand voice guide/);
+  assert.ok(
+    !html.includes('data-action="add-to-backlog"'),
+    'a pointer to tickets is not itself filed'
+  );
+  assert.match(html, /data-action="dismiss"/);
+  assert.match(html, /data-action="resolve"/);
+  assert.ok(!html.includes('Evidence and recommended action'));
+
+  const forged = api.goalSuggestionsHTML({
+    source_type: 'goal_suggestions',
+    source_url: 'https://example.com/?panel=backlog'
+  });
+  assert.ok(!forged.includes('<a '), 'only the workspace Backlog address is linked');
+});
+
 test('assistantSourceHTML refuses client-forged external source URLs', () => {
   const { api } = loadActionCenter();
   const html = api.assistantSourceHTML({
