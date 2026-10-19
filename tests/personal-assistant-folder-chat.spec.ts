@@ -1213,8 +1213,8 @@ for (const theme of ['light', 'dark']) {
     await choose(page, 'Desktop');
     const smallAll = selectAll;
     const beforeAll = fixture.requests.length;
-    await expect(smallAll).not.toBeChecked();
     await focusOn();
+    await expect(smallAll).not.toBeChecked();
     await smallAll.focus();
     await page.keyboard.press('Space');
     await expect(checkedEntries).toHaveCount(3);

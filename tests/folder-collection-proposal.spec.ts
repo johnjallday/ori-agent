@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -21,7 +22,7 @@ import { join, relative } from 'node:path';
 const sandbox = process.env.ORI_COLLECTION_SANDBOX || '';
 const phase = process.env.ORI_COLLECTION_PHASE || '';
 test.skip(
-  !sandbox || !['composer', 'home'].includes(phase),
+  !sandbox || !['composer', 'home', 'declined', 'model-down'].includes(phase),
   'requires the sandbox and phase that scripts/e2e-folder-collection.sh provides'
 );
 test.describe.configure({ mode: 'serial' });
@@ -143,6 +144,29 @@ function expectLinked(children: Listed[], root: string) {
   expect(linked).toEqual(members.map(name => join(realpathSync(root), name)).sort());
 }
 
+// attachFolder opens the drawer and attaches a folder from the composer's
+// chooser, returning the attach response.
+async function attachFolder(page: Page, name: string) {
+  await page.goto('/');
+  await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
+  await page.locator('#personalAssistantFolderChip').click();
+  const attached = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' &&
+      /\/api\/home-assistant\/folder-context\/select$/.test(response.url()),
+    { timeout: 60_000 }
+  );
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name, exact: true })
+    .click();
+  const response = await attached;
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+}
+
 const card = (page: Page) => page.locator('#personalAssistantFolderOffer');
 const planLines = async (page: Page) =>
   (await card(page).innerText()).split('\n').map(line => line.trim());
@@ -151,26 +175,7 @@ test.describe('a folder of projects attached in the assistant', () => {
   test.skip(phase !== 'composer', 'runs in the composer phase');
   const root = join(sandbox, 'Downloads');
 
-  async function attach(page: Page) {
-    await page.goto('/');
-    await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
-    if (!(await page.locator('#personalAssistantPanel').isVisible()))
-      await page.locator('#personalAssistantLauncher').click();
-    await page.locator('#personalAssistantFolderChip').click();
-    const attached = page.waitForResponse(
-      response =>
-        response.request().method() === 'POST' &&
-        /\/api\/home-assistant\/folder-context\/select$/.test(response.url()),
-      { timeout: 60_000 }
-    );
-    await page
-      .locator('#personalAssistantFolderChoices')
-      .getByRole('button', { name: 'Downloads', exact: true })
-      .click();
-    const response = await attached;
-    expect(response.ok()).toBeTruthy();
-    return response.json();
-  }
+  const attach = (page: Page) => attachFolder(page, 'Downloads');
 
   test('is proposed as a group at once, and one confirmation creates it', async ({
     page,
@@ -185,14 +190,24 @@ test.describe('a folder of projects attached in the assistant', () => {
     expect(selected.structure?.members?.length).toBe(6);
     const proposal = page.locator('#personalAssistantFolderStructure');
     await expect(proposal).toBeVisible({ timeout: 30_000 });
-    await expect(proposal).toContainText('Rule-based setup option');
+    // One question and one line; three members shown, the rest behind Show all.
+    await expect(proposal).toContainText('Set up Downloads as a group?');
+    await expect(proposal).toContainText(
+      '6 workspaces, one per folder · linked to their folders · nothing is moved'
+    );
+    await expect(proposal.getByRole('button', { name: 'Show all 6' })).toBeVisible();
     for (const name of members) await expect(proposal).toContainText(name);
-    // Neither capability is installed here, and both say so instead of vanishing.
-    await expect(proposal).toContainText('is not installed');
+    // REAPER is not installed: a short note per member, never a sentence.
+    await expect(proposal).toContainText('plain for now');
+    await expect(proposal).not.toContainText('is not installed');
+    await expect(page.locator('#personalAssistantInput')).toHaveAttribute(
+      'placeholder',
+      'Propose workspaces for Downloads'
+    );
 
-    await page.getByRole('button', { name: 'Review group setup' }).first().click();
+    await proposal.getByRole('button', { name: 'Set up', exact: true }).click();
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
-    await expect(card(page)).toContainText('Set up a group with 6 workspaces?');
+    await expect(card(page)).toContainText('Set up Downloads as a group?');
     const lines = await planLines(page);
     expect(lines).toContain('Creates group Downloads');
     expect(lines).toContain('Creates 6 workspaces, each linked to its own folder');
@@ -258,7 +273,7 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
     const selected = await (await scanned).json();
     expect(selected.structure?.members?.length).toBe(6);
     await expect(page.locator('#personalAssistantFolderStructure')).toContainText(
-      'Rule-based setup option'
+      'Set up Music as a group?'
     );
     await page.getByRole('button', { name: 'Suggest arrangement', exact: true }).click();
     const planning = page.locator('#personalAssistantArrangement');
@@ -268,7 +283,10 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
     await expect(planning.getByRole('button', { name: 'Send organizing goal' })).toBeDisabled();
     await page.screenshot({ path: info.outputPath('explore-no-model-manual.png'), fullPage: true });
     await page.getByRole('button', { name: 'Suggest arrangement', exact: true }).click();
-    await page.getByRole('button', { name: 'Review group setup' }).first().click();
+    await page
+      .locator('#personalAssistantFolderStructure')
+      .getByRole('button', { name: 'Set up', exact: true })
+      .click();
 
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
     await card(page).scrollIntoViewIfNeeded();
@@ -276,7 +294,7 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
       'Music has 5'
     );
     await expect(page.locator('#personalAssistantFolderOfferQuestion')).toContainText(
-      'Set up a group with 6 workspaces?'
+      'Set up Music as a group?'
     );
     expect(
       await card(page)
@@ -286,30 +304,20 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
     ).toEqual(['Set up', 'Adjust…', 'Keep chatting']);
     expect(await planLines(page)).toContain('Creates group Music');
 
-    // Listing the folder in its Home is one choice in Adjust: the earlier
-    // collection card, from which the group is one click back.
+    // Listing the folder in its Home is the other choice in Adjust. With the
+    // Home's plugin not installed it is listed, unavailable, with why: it is
+    // never the dead end of a review that cannot proceed.
     await card(page).getByRole('button', { name: 'Adjust…', exact: true }).click();
     const types = card(page).locator('[data-folder-adjust]').first();
-    await types.locator('input[type=radio][value=library]').check();
-    await types.getByRole('button', { name: 'Done', exact: true }).click();
-    await expect(page.locator('#personalAssistantFolderOfferHeadline')).toContainText(
-      'Music has 5 music projects.'
-    );
-    // Conversation-bound reviews must not bypass unavailable Home provenance.
-    // The explicit fallback requests a fresh plain-group review, never setup.
-    await expect(card(page)).toContainText('The reviewed destination is unavailable');
-    await card(page)
-      .getByRole('button', { name: 'Review plain group instead…', exact: true })
-      .click();
-    await card(page)
-      .locator('[data-folder-adjust]')
-      .first()
-      .getByRole('button', { name: 'Done', exact: true })
-      .click();
+    await expect(types).toContainText('Add to Music Production Home instead');
+    await expect(types).toContainText('Music Production Home is not installed.');
+    await expect(types.locator('input[type=radio][value=library]')).toBeDisabled();
+    await expect(types.locator('input[type=radio][value=group]')).toBeChecked();
+    await types.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page.locator('#personalAssistantFolderOfferQuestion')).toContainText(
-      'Set up a group with 6 workspaces?'
+      'Set up Music as a group?'
     );
-    expect((await workspaces(request)).length, 'choosing a group type created a workspace').toBe(
+    expect((await workspaces(request)).length, 'opening Adjust created a workspace').toBe(
       before.workspaces
     );
 
@@ -345,6 +353,127 @@ test.describe("a folder of projects explored from Home's Explore a folder", () =
 
     expect(hashFolder(root), 'the explored folder changed').toBe(before.hash);
     expect(seen.asks, 'a model was asked').toEqual([]);
+    expect(seen.errors).toEqual([]);
+  });
+});
+
+test.describe('a folder of projects the user once said No thanks to', () => {
+  test.skip(phase !== 'declined', 'runs in the declined phase');
+  const root = join(sandbox, 'Downloads');
+
+  test('is still proposed, says when, and Ask again brings Set up back', async ({
+    page,
+    request
+  }) => {
+    await hireAssistant(request);
+    // The HQ's folder digest exists once its first-folder prompt is recorded;
+    // the seed then writes the old No thanks into it, as one sat in a real HQ.
+    await ok(await request.post('/api/personal-assistant/folder-digest/prompted'));
+    execFileSync(join(process.cwd(), 'scripts', 'folder-collection-seed.sh'), [
+      '--tombstone',
+      sandbox,
+      'Downloads'
+    ]);
+    const before = { hash: hashFolder(root), workspaces: (await workspaces(request)).length };
+    const seen = watch(page);
+
+    const selected = await attachFolder(page, 'Downloads');
+    expect(selected.structure?.members?.length).toBe(6);
+    expect(selected.declined?.name).toBe('Downloads');
+    const proposal = page.locator('#personalAssistantFolderStructure');
+    await expect(proposal).toContainText('Set up Downloads as a group?');
+    // The No thanks stands where Set up would, with when.
+    const askAgain = proposal.getByRole('button', {
+      name: 'You said no to Downloads on Oct 6 · Ask again',
+      exact: true
+    });
+    await expect(askAgain).toBeVisible();
+    await expect(proposal.getByRole('button', { name: 'Set up', exact: true })).toHaveCount(0);
+
+    const forgot = page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' &&
+        /\/api\/personal-assistant\/folder-digest\/forget$/.test(response.url())
+    );
+    await askAgain.click();
+    const forget = await forgot;
+    expect(forget.ok()).toBeTruthy();
+    expect(Object.keys(forget.request().postDataJSON())).toEqual(['folder_key']);
+    const setUp = proposal.getByRole('button', { name: 'Set up', exact: true });
+    await expect(setUp).toBeEnabled();
+
+    await setUp.click();
+    await expect(card(page)).toContainText('Set up Downloads as a group?', { timeout: 30_000 });
+    await card(page).getByRole('button', { name: 'Set up', exact: true }).click();
+    const done = page.locator('.modal.show').first();
+    await expect(done).toContainText('Workspace · Downloads (group)', { timeout: 90_000 });
+    const made = await groupOf(request, 'Downloads', 6);
+    expectLinked(made.children, root);
+    expect((await workspaces(request)).length).toBe(before.workspaces + 7);
+
+    expect(hashFolder(root), 'the attached folder changed').toBe(before.hash);
+    expect(seen.asks, 'a model was asked').toEqual([]);
+    expect(seen.errors).toEqual([]);
+  });
+});
+
+test.describe('a folder of projects attached while the model cannot answer', () => {
+  test.skip(phase !== 'model-down', 'runs in the model-down phase');
+
+  test('keeps its card, says so in one line, and Retry sends the same turn again', async ({
+    page,
+    request
+  }) => {
+    await hireAssistant(request);
+    // This phase's server has Ollama pointed at a closed port: every turn fails.
+    await ok(
+      await request.post('/api/settings/system-model', {
+        data: { provider: 'ollama', model: 'ori-e2e-unreachable' }
+      })
+    );
+    const seen = watch(page);
+    const asked: { prompt: string; folder_context: unknown }[] = [];
+    page.on('request', item => {
+      if (/\/api\/home-assistant\/ask$/.test(new URL(item.url()).pathname))
+        asked.push(item.postDataJSON());
+    });
+
+    await attachFolder(page, 'Downloads');
+    const proposal = page.locator('#personalAssistantFolderStructure');
+    await expect(proposal).toContainText('Set up Downloads as a group?');
+    const panel = page.locator('#personalAssistantPanel');
+    // The line shares its message row with the turn's own status ("App-wide").
+    const failure = panel.getByText(
+      'Assistant could not answer (the model is unavailable). Your draft is kept.'
+    );
+    const settled = () =>
+      page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy, null, {
+        timeout: 60_000
+      });
+
+    // An empty Send asks for the proposal.
+    await page.locator('#personalAssistantSend').click();
+    await expect.poll(() => asked.length, { timeout: 60_000 }).toBe(1);
+    await settled();
+    await expect(failure).toHaveCount(1);
+    await expect(panel).not.toContainText(/not completed/i);
+    await expect(panel).not.toContainText('System conversation model');
+    await expect(panel.getByRole('button', { name: 'Open workspace form manually' })).toHaveCount(
+      0
+    );
+    // The card never depended on the model: it is still there, with Set up.
+    await expect(proposal).toContainText('Set up Downloads as a group?');
+    await expect(proposal.getByRole('button', { name: 'Set up', exact: true })).toBeVisible();
+
+    await panel.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect.poll(() => asked.length, { timeout: 60_000 }).toBe(2);
+    await settled();
+    // The retried turn replaces the failed line; it is never stacked.
+    await expect(failure).toHaveCount(1);
+    expect(asked[0].prompt).toBe('Propose workspaces for this folder');
+    expect(asked[1].prompt).toBe(asked[0].prompt);
+    expect(asked[1].folder_context).toEqual(asked[0].folder_context);
+    expect(seen.asks).toHaveLength(2);
     expect(seen.errors).toEqual([]);
   });
 });

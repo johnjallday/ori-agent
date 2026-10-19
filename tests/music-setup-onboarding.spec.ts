@@ -106,7 +106,7 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
   // With the provider not installed yet the folder is first proposed as a plain
   // group; listing it in the Home is the Adjust choice this journey takes.
   const proposed = page.locator('#personalAssistantFolderOffer');
-  await expect(proposed).toContainText('Set up a group with 6 workspaces?');
+  await expect(proposed).toContainText('Set up Documents as a group?');
   await proposed.getByRole('button', { name: 'Adjust…', exact: true }).click();
   const sheet = proposed.locator('[data-folder-adjust]').first();
   await sheet.locator('input[type=radio][value=library]').check();

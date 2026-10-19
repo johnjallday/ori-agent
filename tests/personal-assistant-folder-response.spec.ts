@@ -97,8 +97,17 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: chip, exact: true })
       .click();
-    const observation = (await (await selected).json()).observation;
+    const attached = await (await selected).json();
+    const observation = attached.observation;
     const explorer = page.locator('#personalAssistantFolderExplorer');
+    // A folder of several projects is proposed as a group on attach and stays on
+    // the chat side with its card; its tree is one press away (Tree + Chat).
+    if (attached.structure) {
+      await expect(page.locator('#personalAssistantFolderStructure')).toContainText(
+        `Set up ${chip} as a group?`
+      );
+      await page.locator('#personalAssistantExploreAttachedFolder').click();
+    }
     await expect(explorer).toBeVisible();
     await expect(page.locator('#personalAssistantPanel')).toHaveClass(/--exploring/);
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
