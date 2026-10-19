@@ -159,12 +159,15 @@ func TestFolderDigest_AProposedGroupIsNamedAroundWhatAlreadyExists(t *testing.T)
 	}
 }
 
-func TestFolderDigest_NoThanksOnAGroupIsAboutThatFolderOnly(t *testing.T) {
+func TestFolderDigest_NoThanksOnAGroupIsShownWhenTheFolderIsShownAgain(t *testing.T) {
 	ctx := context.Background()
 	f, _ := homeCollectionFixture(t)
 	offer, err := f.service.ScanChip(ctx, "local", "music")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if offer.Declined != nil {
+		t.Fatalf("a folder never declined says it was: %+v", offer.Declined)
 	}
 	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "no-1"}); err != nil {
 		t.Fatal(err)
@@ -173,18 +176,42 @@ func TestFolderDigest_NoThanksOnAGroupIsAboutThatFolderOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The folder is not asked about again; no kind of work was declined.
-	if !doc.Tombstoned(doc.Offer(offer.ID).Subject.Key) || len(doc.DomainDeclines) != 0 {
+	// The No thanks is about this folder only; no kind of work was declined.
+	key := doc.Offer(offer.ID).Subject.Key
+	if !doc.Tombstoned(key) || len(doc.DomainDeclines) != 0 {
 		t.Fatalf("after No thanks: tombstones %+v, declines %+v", doc.Tombstones, doc.DomainDeclines)
 	}
-	// Shown again, the folder is not proposed as a group; its projects can
-	// still be offered one by one, as before.
+	// Shown again, the folder is still proposed as its group, and the card says
+	// when the user said no so it can be asked about again.
 	again, err := f.service.ScanChip(ctx, "local", "music")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Structure != nil || again.Subject.IsRoot {
-		t.Fatalf("a declined folder was proposed as a group again: %+v", again)
+	if again.Structure == nil || !again.Structure.ProposesWorkspaces() || !again.Subject.IsRoot || len(again.Structure.Included()) != 6 ||
+		again.Declined == nil || again.Declined.FolderKey != key || again.Declined.Name != "Music" || !again.Declined.At.Equal(f.now) {
+		t.Fatalf("a declined folder was not proposed as its group: %+v / %+v", again, again.Declined)
+	}
+	stored, err := f.store.Read(ctx, "local")
+	if err != nil || stored.Offer(again.ID).Declined == nil {
+		t.Fatalf("the decline was not kept on the stored offer: %v", err)
+	}
+}
+
+func TestFolderDigest_AReadyHomeIsAChoiceNotTheDefault(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	offer, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offer.Structure == nil || offer.Structure.Group.Type != FolderGroupPlain || offer.Structure.Group.Name != "Music" ||
+		!offer.Structure.Group.HomeAvailable || offer.Structure.Group.Availability != "" || offer.Portfolio == nil {
+		t.Fatalf("Home offer with the Home ready: %+v", offer.Structure)
+	}
+	listed, err := f.service.AdjustStructure(ctx, "local", offer.ID, FolderStructureAdjustment{GroupType: FolderGroupLibrary})
+	if err != nil || listed.Structure.Group.Type != FolderGroupLibrary || listed.Structure.Group.Name != "Music Production Home" {
+		t.Fatalf("Adjust → the Home: %+v, %v", listed.Structure, err)
 	}
 }
 

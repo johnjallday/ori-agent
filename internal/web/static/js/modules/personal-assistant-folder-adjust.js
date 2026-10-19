@@ -15,6 +15,8 @@ export function adjustModel(structure) {
     groupType: group.type === 'library' ? 'library' : 'group',
     homeName: text(group.home_name),
     homeAvailable: group.home_available === true,
+    // Why the Home is not in place now, when the host says (an availability code).
+    homeReason: text(group.availability),
     members: (Array.isArray(structure?.members) ? structure.members : []).map(member => ({
       id: text(member.candidate_id),
       folder: text(member.folder) || text(member.name),
@@ -26,12 +28,21 @@ export function adjustModel(structure) {
   };
 }
 
+// What keeps the shape's Home from being chosen, as the host names it.
+const HOME_UNAVAILABLE = {
+  provider_not_installed: name => `${name} is not installed.`,
+  provider_unverified: name => `${name} could not be verified right now.`
+};
+
 // groupTypeChoices are the group types the sheet offers. A folder with no Home
 // to offer has only the plain group, and the sheet then shows no choice at all.
-// A Home is offered as a place to list the folders: it makes each project's
-// workspace itself, when that project is opened there.
+// The plain group is always the default; the Home is the other choice, a place
+// to list the folders that makes each project's workspace itself, when that
+// project is opened there. It is listed even when it cannot be used, with why.
 export function groupTypeChoices(model) {
   if (!model.homeName) return [];
+  const blocked = HOME_UNAVAILABLE[model.homeReason];
+  const usable = model.homeAvailable && !blocked;
   return [
     {
       value: 'group',
@@ -41,11 +52,13 @@ export function groupTypeChoices(model) {
     },
     {
       value: 'library',
-      label: `List them in ${model.homeName}`,
-      hint: model.homeAvailable
+      label: `Add to ${model.homeName} instead`,
+      hint: usable
         ? 'A project gets its workspace the first time you open it there.'
-        : `${model.homeName} is not available right now.`,
-      disabled: !model.homeAvailable
+        : blocked
+          ? blocked(model.homeName)
+          : `${model.homeName} is not available right now.`,
+      disabled: !usable
     }
   ];
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 var ErrFolderReviewPending = errors.New("another folder setup review is pending; finish or close that review first")
@@ -235,7 +236,13 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 	if err != nil {
 		return FolderOffer{}, err
 	}
-	if doc.Tombstoned(offer.Subject.Key) {
+	// A folder that holds several projects makes its own group, or joins the
+	// shape's Home. The page on screen is not where it goes.
+	collection := candidate.IsRoot && placement.Operation != FolderOperationSupport && folderdigest.IsCollection(held.result, now)
+	// A No thanks on a single folder still ends its question. On a collection's
+	// root it is shown on the proposal, which can be asked about again.
+	tombstone := doc.Tombstone(offer.Subject.Key)
+	if tombstone != nil && !collection {
 		return FolderOffer{}, ErrFolderOfferDecided
 	}
 	// Only the root option can describe a collection. Review still requires
@@ -264,9 +271,6 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		}
 	}
 	offer.CapabilitySuppressed = offer.CapabilitySuppressed || legacyDeclined || doc.DeclineFor(domain) != nil
-	// A folder that holds several projects makes its own group, or joins the
-	// shape's Home. The page on screen is not where it goes.
-	collection := candidate.IsRoot && placement.Operation != FolderOperationSupport && folderdigest.IsCollection(held.result, now)
 	if collection {
 		offer.ConversationReview.DestinationID = ""
 	}
@@ -296,6 +300,13 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 			return FolderOffer{}, err
 		}
 		offer.ConversationReview.Structure = adjustment.clone()
+	}
+	if tombstone != nil {
+		// A declined root with no group left to propose has no question left.
+		if offer.Structure == nil {
+			return FolderOffer{}, ErrFolderOfferDecided
+		}
+		offer.Declined = &FolderRootDecline{FolderKey: tombstone.Key, Name: tombstone.Name, At: tombstone.CreatedAt}
 	}
 	if offer.Structure != nil && offer.Structure.Group.Type == FolderGroupPlain {
 		// A plain group is created by the setup itself: there is no Home to
@@ -337,6 +348,8 @@ type FolderReviewOption struct {
 	// same record the attach response and the offer carry, so every surface
 	// shows and adjusts one thing.
 	Structure *FolderStructure `json:"structure,omitempty"`
+	// Declined is the earlier No thanks on that collection's root.
+	Declined *FolderRootDecline `json:"declined,omitempty"`
 }
 
 // ReviewOptions reads the same candidate and setup availability as Review. It
@@ -352,8 +365,9 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 	}
 	var options []FolderReviewOption
 	for _, project := range held.observation.Projects {
-		// A folder that was lost, or one the user said never to ask about again,
-		// has nothing to describe. A supporting link is not a new setup.
+		// A folder that was lost, or a single folder the user said never to ask
+		// about again, has nothing to describe; a collection's root still has its
+		// group. A supporting link is not a new setup.
 		offer, err := s.prepareReviewOffer(ctx, held, target, project.ID)
 		if err != nil || offer.ConversationReview.Operation == FolderOperationSupport {
 			continue
@@ -379,6 +393,7 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 			// A structure never waits on a plugin, only on a host that can set
 			// one up at all.
 			option.WorkspaceType = offer.Structure.summary()
+			option.Declined = offer.Declined.clone()
 			if view.Plan == nil {
 				unavailable(view.Availability)
 			} else {
@@ -413,26 +428,53 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 // candidate.
 const folderRootCandidateID = "candidate-0"
 
+// Why a collection's card cannot be shown when it is attached. The composer
+// says the reason in one line instead of showing nothing.
+const (
+	FolderStructureReviewPending    = "review_pending"
+	FolderStructureSetupUnavailable = "setup_unavailable"
+)
+
+// FolderStructureProposal is what attaching a folder that holds several
+// projects shows: the proposed group and the earlier No thanks on it, or why
+// no card can be shown. It is empty for any other folder.
+type FolderStructureProposal struct {
+	Structure   *FolderStructure
+	Declined    *FolderRootDecline
+	Unavailable string
+}
+
 // Structure describes an attached folder that holds several projects as one
 // group with a workspace per subfolder, for the card shown as soon as the folder
 // is attached. Like ReviewOptions it reads only: no scan, no offer, no model.
-// It returns nil for a single project, for a folder the user declined, while
-// another setup review is pending, and on a host that cannot set a group up.
-func (s *FolderObservationService) Structure(ctx context.Context, target foldercontext.Target, observationID string) *FolderStructure {
+// Neither an earlier No thanks nor a Home in place keeps the card away; only
+// another pending setup review and a host that cannot set a group up do, and
+// each says so. A collection whose folders are all workspaces already has no
+// card and no reason.
+func (s *FolderObservationService) Structure(ctx context.Context, target foldercontext.Target, observationID string) FolderStructureProposal {
 	held, _, err := s.resolve(ctx, target, observationID)
-	if err != nil || s.digest.deps.Setup == nil {
-		return nil
+	if err != nil || !folderdigest.IsCollection(held.result, s.digest.now()) {
+		return FolderStructureProposal{}
+	}
+	unavailable := func(reason string) FolderStructureProposal {
+		logger.Info("Folder structure card not shown", logger.Fields{"reason": reason})
+		return FolderStructureProposal{Unavailable: reason}
+	}
+	if s.digest.deps.Setup == nil {
+		return unavailable(FolderStructureSetupUnavailable)
 	}
 	doc, err := s.digest.store.Read(ctx, target.UserID)
-	if err != nil || doc.Pending() != nil {
-		return nil
+	if err != nil {
+		return FolderStructureProposal{}
+	}
+	if doc.Pending() != nil {
+		return unavailable(FolderStructureReviewPending)
 	}
 	offer, err := s.prepareReviewOffer(ctx, held, target, folderRootCandidateID)
 	if err != nil || !offer.Structure.ProposesWorkspaces() {
-		// A collection whose Home is in place is listed there, as before.
-		return nil
+		return FolderStructureProposal{}
 	}
-	return offer.Structure.view()
+	return FolderStructureProposal{Structure: offer.Structure.view(), Declined: offer.Declined.clone()}
 }
 
 // folderOfferCapabilityWorkspace names the workspace a recognized offer's

@@ -1975,10 +1975,7 @@ test('Home proposes a folder of several projects as one group, with its own four
     view.headline.map(part => part.text),
     ['Albums', ' has 2 Session folders and 1 other folder.']
   );
-  assert.equal(
-    view.question,
-    'Set up a group with 3 workspaces? Here is everything Set up will do:'
-  );
+  assert.equal(view.question, 'Set up Albums as a group? Here is everything Set up will do:');
   assert.deepEqual(
     view.actions.map(action => action.label),
     ['Set up', 'Adjust…', 'No thanks', 'Later']

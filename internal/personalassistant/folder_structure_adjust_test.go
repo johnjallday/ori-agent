@@ -138,6 +138,14 @@ func TestFolderStructureAdjustment_ChoosingTheHomeBringsADeclinedSetupBack(t *te
 	if err != nil || declined.Group.Type != FolderGroupPlain || declined.Group.Availability != FolderAvailabilityDeclinedEarlier || !declined.Group.HomeAvailable {
 		t.Fatalf("declined proposal: %+v, %v", declined, err)
 	}
+	// A Home that is not installed says so, whatever was declined: that is what
+	// keeps it from being chosen.
+	ready := f.service.deps.Setup
+	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}, home: FolderAvailabilityProviderNotInstalled}
+	if missing, err := rootStructure(t, service, observation.ID, nil); err != nil || missing.Group.Availability != FolderAvailabilityProviderNotInstalled {
+		t.Fatalf("declined and not installed: %+v, %v", missing, err)
+	}
+	f.service.deps.Setup = ready
 	// Choosing to list the collection in the Home is an explicit yes to it.
 	library, err := rootStructure(t, service, observation.ID, &FolderStructureAdjustment{GroupType: FolderGroupLibrary})
 	if err != nil || library.Validate() != nil || library.Group.Type != FolderGroupLibrary ||

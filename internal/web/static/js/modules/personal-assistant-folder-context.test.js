@@ -5,6 +5,8 @@ import {
   createFolderContextController,
   discussionChips,
   folderContextChoices,
+  folderDecline,
+  structureCardView,
   FOLDER_DISCLOSURE,
   observationSummary,
   coverageSummary
@@ -375,6 +377,68 @@ test('an attached collection keeps its proposed group as a local preview until S
   await f.controller.select('chip', 'downloads');
   f.controller.accepted('chat', { observation: observation('d'), revision: 'r1' });
   assert.equal(f.controller.state.structure, null);
+});
+
+test('the attach card is the proposal with Set up, Adjust and Not now, or one line', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  const declined = { folder_key: 'a'.repeat(64), name: 'Albums', at: '2026-10-06T08:02:00Z' };
+  let reply = { observation: observation('a'), revision: '', structure };
+  const f = fixture(async () => reply);
+  await f.controller.select('chip', 'downloads');
+  let view = structureCardView(f.controller.state);
+  assert.equal(view.kind, 'proposal');
+  assert.deepEqual(
+    view.actions.map(action => [action.label, action.disabled]),
+    [
+      ['Set up', false],
+      ['Adjust…', false],
+      ['Not now', false]
+    ]
+  );
+  // Not now keeps this folder's card away; the next attach is a new folder.
+  assert.equal(structureCardView(f.controller.state, 'a').kind, 'none');
+  assert.equal(structureCardView(f.controller.state, 'other').kind, 'proposal');
+
+  // An earlier No thanks keeps the card, with Set up held back.
+  reply = { observation: observation('b'), revision: '', structure, declined };
+  await f.controller.select('chip', 'downloads');
+  assert.deepEqual(f.controller.state.declined, declined);
+  view = structureCardView(f.controller.state);
+  assert.equal(view.kind, 'proposal');
+  assert.equal(view.actions[0].disabled, true);
+  assert.equal(view.actions[1].disabled, false);
+  // A decline with no usable key is not shown as one.
+  reply = { observation: observation('c'), revision: '', structure, declined: { name: 'Albums' } };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(f.controller.state.declined, null);
+
+  // No card: the reason in one line, never a code.
+  for (const [reason, line] of [
+    [
+      'review_pending',
+      'Another setup review is open. Finish or close it to see the proposal for this folder.'
+    ],
+    ['setup_unavailable', 'Setting up workspaces is not available here.']
+  ]) {
+    reply = { observation: observation(reason), revision: '', structure_unavailable: reason };
+    await f.controller.select('chip', 'downloads');
+    view = structureCardView(f.controller.state);
+    assert.equal(view.kind, 'unavailable');
+    assert.equal(view.line, line);
+  }
+  reply = { observation: observation('e'), revision: '', structure_unavailable: 'surprise' };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(structureCardView(f.controller.state).kind, 'none');
+  // A single folder has neither.
+  reply = { observation: observation('f'), revision: '' };
+  await f.controller.select('chip', 'desktop');
+  assert.equal(structureCardView(f.controller.state).kind, 'none');
+  assert.equal(folderDecline({ ...declined, folder_key: '../etc' }), null);
 });
 
 test('a proposed group replaces the discussion shortcuts with its own three controls', () => {

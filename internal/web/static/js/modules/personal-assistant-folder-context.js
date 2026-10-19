@@ -37,6 +37,9 @@ export function createFolderContextController({
     // attach response described it. A local preview only: after Send the
     // reply's own suggestion carries the proposal.
     structure: null,
+    // The earlier No thanks on that folder, and why no card could be shown.
+    declined: null,
+    structureUnavailable: '',
     focusIDs: [],
     accepted: null,
     offerId: '',
@@ -66,6 +69,8 @@ export function createFolderContextController({
       revision: saved.revision || '',
       observation: saved.observation || null,
       structure: null,
+      declined: null,
+      structureUnavailable: '',
       focusIDs: [],
       accepted: saved.observation || null,
       offerId: saved.offer_id || '',
@@ -105,6 +110,10 @@ export function createFolderContextController({
       }
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
+      state.declined = state.structure ? folderDecline(result.declined) : null;
+      state.structureUnavailable = state.structure
+        ? ''
+        : String(result.structure_unavailable || '');
       state.focusIDs = [];
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
@@ -151,6 +160,8 @@ export function createFolderContextController({
       }
       state.observation = null;
       state.structure = null;
+      state.declined = null;
+      state.structureUnavailable = '';
       state.focusIDs = [];
       state.accepted = null;
       state.offerId = '';
@@ -397,48 +408,115 @@ export function discussionChips({
   return chips;
 }
 
+// folderDecline is the host's record of an earlier No thanks on a folder, or
+// null. Only its closed fields are kept: the folder's key (never a path), its
+// name and when.
+export function folderDecline(value) {
+  const key = String(value?.folder_key || '');
+  const at = new Date(String(value?.at || ''));
+  if (
+    !/^[0-9a-f]{64}$/.test(key) ||
+    !String(value?.name || '').trim() ||
+    Number.isNaN(at.getTime())
+  )
+    return null;
+  return { folder_key: key, name: String(value.name).trim(), at: value.at };
+}
+
+// Why no card could be shown for an attached collection, in one line.
+const STRUCTURE_UNAVAILABLE = {
+  review_pending:
+    'Another setup review is open. Finish or close it to see the proposal for this folder.',
+  setup_unavailable: 'Setting up workspaces is not available here.'
+};
+
+// structureCardView is the whole decision for the card shown as soon as a
+// collection is attached, before Send: the proposal and its three controls, the
+// one line that says why there is none, or nothing. parkedId is the folder the
+// user said Not now to in this conversation.
+export function structureCardView(state, parkedId = '') {
+  const live = Boolean(state?.preview && !state.authority && state.observation);
+  const id = String(state?.observation?.id || '');
+  if (!live) return { kind: 'none', key: '' };
+  if (state.structure) {
+    if (parkedId && parkedId === id) return { kind: 'none', key: '' };
+    const declined = Boolean(state.declined);
+    return {
+      kind: 'proposal',
+      key: `${id}:${declined ? 'declined' : 'open'}`,
+      actions: [
+        {
+          id: 'setup',
+          label: 'Set up',
+          style: 'btn btn-sm btn-primary',
+          disabled: Boolean(state.pending) || declined
+        },
+        {
+          id: 'adjust',
+          label: 'Adjust…',
+          style: 'btn btn-sm btn-outline-secondary',
+          disabled: Boolean(state.pending)
+        },
+        { id: 'later', label: 'Not now', style: 'btn btn-sm btn-link', disabled: false }
+      ]
+    };
+  }
+  const line = STRUCTURE_UNAVAILABLE[state.structureUnavailable] || '';
+  return line ? { kind: 'unavailable', key: `${id}:unavailable`, line } : { kind: 'none', key: '' };
+}
+
+// The folder the user said Not now to: its card stays away for this
+// conversation, and nothing is written.
+let parkedStructure = '';
+
 // The proposal card shown as soon as a collection is attached, before Send.
 // It is drawn from the attach response alone; pressing a control is what
-// starts a request, and "Just discuss" starts none.
+// starts a request, and Not now starts none.
 function renderStructure(state) {
   const host = elements?.structure;
   if (!host) return;
-  const structure = state.preview && !state.authority ? state.structure : null;
-  const key = structure ? String(state.observation?.id || '') : '';
-  if (host.dataset.structureKey === key) {
-    for (const button of host.querySelectorAll('[data-structure-action]'))
-      button.disabled = state.pending;
+  const view = structureCardView(state, parkedStructure);
+  if (host.dataset.structureKey === view.key) {
+    for (const action of view.actions || []) {
+      const button = host.querySelector(`[data-structure-action="${action.id}"]`);
+      if (button) button.disabled = action.disabled;
+    }
     return;
   }
-  host.dataset.structureKey = key;
+  host.dataset.structureKey = view.key;
   host.replaceChildren();
-  host.hidden = !structure;
-  if (!structure) return;
+  host.hidden = view.kind === 'none';
+  if (view.kind === 'unavailable') {
+    host.append(node('p', view.line, 'personal-assistant-structure__unavailable'));
+    return;
+  }
+  if (view.kind !== 'proposal') return;
   host.append(
     renderProposal(
-      proposalView(structureOption(structure)),
+      proposalView(structureOption(state.structure)),
       document,
       window.OriWorkspaceBuildingArt
     )
   );
   const actions = node('div', '', 'personal-assistant-structure__actions');
-  const control = (id, label, className, run) => {
-    const button = node('button', label, className);
-    button.type = 'button';
-    button.dataset.structureAction = id;
-    button.disabled = state.pending;
-    button.addEventListener('click', () => run(button));
-    actions.append(button);
+  const runs = {
+    setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
+    adjust: button =>
+      window.PersonalAssistantFolderSetup?.adjustStructure?.(button, controller.state.structure),
+    later: () => {
+      parkedStructure = String(controller.state.observation?.id || '');
+      renderStructure(controller.state);
+      document.getElementById('personalAssistantInput')?.focus();
+    }
   };
-  control('review', 'Review group setup', 'btn btn-sm btn-primary', button =>
-    window.PersonalAssistantFolderSetup?.reviewStructure?.(button)
-  );
-  control('adjust', 'Adjust…', 'btn btn-sm btn-outline-secondary', button =>
-    window.PersonalAssistantFolderSetup?.adjustStructure?.(button, controller.state.structure)
-  );
-  control('discuss', 'Just discuss', 'btn btn-sm btn-link', () =>
-    document.getElementById('personalAssistantInput')?.focus()
-  );
+  for (const action of view.actions) {
+    const button = node('button', action.label, action.style);
+    button.type = 'button';
+    button.dataset.structureAction = action.id;
+    button.disabled = action.disabled;
+    button.addEventListener('click', () => runs[action.id](button));
+    actions.append(button);
+  }
   host.append(actions);
 }
 

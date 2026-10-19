@@ -171,6 +171,9 @@ type FolderOffer struct {
 	// group and a workspace per subfolder. It is set only on an offer whose
 	// subject is the root, and holds no path.
 	Structure *FolderStructure `json:"structure,omitempty"`
+	// Declined is the earlier No thanks on a collection's root. The group is
+	// still proposed; the card says when the user said no and offers Ask again.
+	Declined *FolderRootDecline `json:"declined,omitempty"`
 	// NeedsCandidate says the folder holds several software projects and the
 	// user has not said which one this offer is about. Nothing can be set up
 	// until they choose; the subject is only the first of them.
@@ -201,6 +204,23 @@ type FolderOffer struct {
 	DecidedAt  *time.Time      `json:"decided_at,omitempty"`
 	LaterUntil *time.Time      `json:"later_until,omitempty"`
 	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+}
+
+// FolderRootDecline is a folder's tombstone as its proposal shows it: the
+// folder's key (what Ask again sends back, never a path), its base name, and
+// when the user said no.
+type FolderRootDecline struct {
+	FolderKey string    `json:"folder_key"`
+	Name      string    `json:"name"`
+	At        time.Time `json:"at"`
+}
+
+func (d *FolderRootDecline) clone() *FolderRootDecline {
+	if d == nil {
+		return nil
+	}
+	copied := *d
+	return &copied
 }
 
 // FolderEnclosingHint names the repository a subject sits inside: how many
@@ -307,12 +327,17 @@ func (d *FolderDigestDocument) Offer(id string) *FolderOffer {
 
 // Tombstoned reports whether a candidate key was declined before.
 func (d *FolderDigestDocument) Tombstoned(key string) bool {
-	for _, t := range d.Tombstones {
-		if t.Key == key {
-			return true
+	return d.Tombstone(key) != nil
+}
+
+// Tombstone finds a candidate key's earlier No thanks.
+func (d *FolderDigestDocument) Tombstone(key string) *FolderTombstone {
+	for i := range d.Tombstones {
+		if d.Tombstones[i].Key == key {
+			return &d.Tombstones[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // DeclineFor finds this domain's saved no, including a migrated app-card no.
@@ -444,6 +469,13 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			}
 			if err := offer.Structure.Validate(); err != nil {
 				return err
+			}
+		}
+		// Only a collection's own proposal carries its root's No thanks.
+		if declined := offer.Declined; declined != nil {
+			if offer.Structure == nil || !offer.Subject.IsRoot || declined.FolderKey != offer.Subject.Key ||
+				validateFolderName(declined.Name) != nil || declined.At.IsZero() {
+				return fmt.Errorf("%w: declined", errFolderDigestInvalid)
 			}
 		}
 		if len(offer.Queue) > folderDigestMaxQueue {

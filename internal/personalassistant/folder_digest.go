@@ -608,9 +608,12 @@ type FolderOfferView struct {
 	Portfolio      *FolderPortfolioEvidence `json:"portfolio,omitempty"`
 	// Structure is the proposed group and its member workspaces, on an offer
 	// about a folder that holds several projects.
-	Structure  *FolderStructure `json:"structure,omitempty"`
-	LooseFiles int              `json:"loose_files,omitempty"`
-	LooseKinds int              `json:"loose_kinds,omitempty"`
+	Structure *FolderStructure `json:"structure,omitempty"`
+	// Declined is the earlier No thanks on the collection's root, shown on the
+	// card with Ask again in place of Set up.
+	Declined   *FolderRootDecline `json:"declined,omitempty"`
+	LooseFiles int                `json:"loose_files,omitempty"`
+	LooseKinds int                `json:"loose_kinds,omitempty"`
 	// Remember says whether the card may promise "I will also remember"
 	// (FR22, FR39, FR52).
 	Remember bool `json:"remember"`
@@ -1057,10 +1060,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	// A whole collection is one Home question, not the first of seven
 	// per-project questions. An unreadable Home suppresses it. An existing Home
 	// turns it into "add this collection to your Home", never a second Home.
-	// A root the user said no to as a group is not asked about again as a
-	// collection either: what is left are its projects, one by one.
-	declinedGroup := s.deps.Setup != nil && doc.Tombstoned(FolderKey(root)) && folderdigest.IsCollection(result, now)
-	if pickedFile == "" && verdict.Portfolio != nil && !declinedGroup {
+	if pickedFile == "" && verdict.Portfolio != nil {
 		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
 		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" && s.deps.HomeExists != nil {
 			exists, homeErr := s.deps.HomeExists(ctx, userID, row.Offer.HomeProviderKey)
@@ -1115,11 +1115,11 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		}
 	}
 	// A folder that holds several projects is proposed as one group with a
-	// workspace per folder, on Home as in the composer. Two folders keep the
-	// question they had: a landing zone full of loose files (a project, or a
-	// tidy), and a root the user already said no to (its projects, one by one).
-	// A host with no setup runner cannot make a group at all, and offers none.
-	if pickedFile == "" && s.deps.Setup != nil && !verdict.RootDump && !doc.Tombstoned(FolderKey(root)) && folderdigest.IsCollection(result, now) {
+	// workspace per folder, on Home as in the composer, even after a No thanks:
+	// the card then says so and can be asked about again. A landing zone full of
+	// loose files keeps the question it had (a project, or a tidy). A host with
+	// no setup runner cannot make a group at all, and offers none.
+	if pickedFile == "" && s.deps.Setup != nil && !verdict.RootDump && folderdigest.IsCollection(result, now) {
 		collection := offer
 		if collection.Portfolio == nil {
 			collection = buildCollectionOffer(offer, verdict, result, now)
@@ -1145,6 +1145,9 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 			// per-project questions follows it.
 			offer = collection
 			offer.Structure = structure
+			if tombstone := doc.Tombstone(offer.Subject.Key); tombstone != nil {
+				offer.Declined = &FolderRootDecline{FolderKey: tombstone.Key, Name: tombstone.Name, At: tombstone.CreatedAt}
+			}
 			offer.Enclosing, offer.SubjectIdentity, offer.SoftwareReview = nil, "", nil
 			afterIdentity, identityErr := portfolioDirectoryIdentity(root)
 			if (identityErr != nil && !errors.Is(identityErr, projectlibrary.ErrUnavailable)) ||
@@ -2286,6 +2289,7 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		},
 		ProjectsCount: offer.ProjectsCount, Portfolio: offer.Portfolio, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
 		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome, Structure: offer.Structure.view(),
+		Declined: offer.Declined.clone(),
 	}
 	if offer.ConversationReview != nil {
 		v.ConversationID = offer.ConversationReview.Target.ConversationID

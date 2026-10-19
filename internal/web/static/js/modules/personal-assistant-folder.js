@@ -682,13 +682,14 @@ function structureOfferView(offer, base, subject) {
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const arranged = Boolean(arrangedStructure(offer));
+  const folder = String(structure.folder || subject).trim();
   let question = arranged
     ? `Set up the group ${group} with ${count} plain workspace${count === 1 ? '' : 's'} from your saved arrangement?`
     : structure.group.destination_state === 'existing'
       ? `Add ${workspaces} to your ${group}?`
       : structure.group.type === 'home'
         ? `Set up ${group} with ${workspaces}?`
-        : `Set up a group with ${workspaces}?`;
+        : `Set up ${folder} as a group?`;
   if (hasPlan) question += ' Here is everything Set up will do:';
   if (run) question = run.question;
   let actions = [];
@@ -737,7 +738,13 @@ function structureOfferView(offer, base, subject) {
     structured: true,
     // The plan names the group, every workspace and what is unavailable, so
     // with a plan (or a run of it) the proposal card would only repeat it.
-    structure: hasPlan || run || base.decided ? null : proposal
+    // Under the card's question it does not ask that question again.
+    structure:
+      hasPlan || run || base.decided
+        ? null
+        : arranged
+          ? proposal
+          : { ...proposal, ariaLabel: proposal.label, label: '' }
   };
 }
 
