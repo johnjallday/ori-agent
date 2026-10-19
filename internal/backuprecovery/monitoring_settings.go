@@ -91,7 +91,7 @@ func (s *Service) ReviewMonitoring(ctx context.Context, owner, workspace string,
 	if currentAttemptNeedsReview(record.state) {
 		return MonitoringReview{}, ErrLocalReviewRequired
 	}
-	if s.provider == nil {
+	if s.providerFor(recordProvider(record)) == nil {
 		return MonitoringReview{}, ErrUnavailable
 	}
 	now := s.clock().UTC()
@@ -152,7 +152,7 @@ func (s *Service) SetMonitoring(ctx context.Context, owner, workspace string, re
 	}
 	policy := record.state.Monitoring.Policy
 	if request.Intent == "active" {
-		if s.provider == nil {
+		if s.providerFor(recordProvider(record)) == nil {
 			return OperationResult{}, ErrUnavailable
 		}
 		if !validLocalReceipt(record) || !record.automatic || currentAttemptNeedsReview(record.state) {

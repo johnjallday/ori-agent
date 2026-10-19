@@ -255,6 +255,78 @@
   font-size: 0.95rem;
   margin: 0 0 0.5rem;
 }
+/* "Protect your folders" on Home: two cards, stacked on narrow screens. */
+.br-chooser-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.br-chooser-card {
+  border: 1px solid var(--br-line);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  background: var(--br-paper);
+}
+.br-chooser-card h4 {
+  margin: 0.9rem 0 0.3rem;
+  font-size: 0.85rem;
+}
+.br-chooser-card p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+/* Provider choice, Time Machine states and the per-folder coverage list. */
+.br-provider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.75rem 0 1rem;
+}
+.br-note {
+  flex-basis: 100%;
+  margin: 0.2rem 0;
+  font-size: 0.75rem;
+  color: var(--br-muted);
+}
+.br-needs {
+  margin: 0.25rem 0 1rem;
+  padding-left: 1.25rem;
+  font-size: 0.8rem;
+  line-height: 1.8;
+}
+.br-tm-state h4,
+.br-coverage h4 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+}
+.br-link {
+  display: inline-block;
+  margin: 0.3rem 0.75rem 0.3rem 0;
+  font-size: 0.8rem;
+  color: var(--br-accent);
+  text-underline-offset: 0.2em;
+}
+.br-coverage {
+  border-top: 1px solid var(--br-line);
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+}
+.br-coverage ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.br-coverage-state {
+  font-family: inherit;
+  font-weight: 600;
+}
+.br-coverage:focus-visible {
+  outline: 2px solid var(--br-accent);
+  outline-offset: 3px;
+}
 .br-monitoring,
 .br-reports {
   border-top: 1px solid var(--br-line);

@@ -78,6 +78,7 @@ type Handler struct {
 	toolCallStore          session.ToolCallStore
 	calendarOpsPreference  chatCalendarOpsPreference
 	backupAdvisorReader    backupAdvisorReader
+	workspaceProtection    workspaceProtectionReader
 	// planOpener starts a durable Plan for chat requests that need one. It is
 	// deliberately one method wide: chat may open a plan and link to it, never
 	// edit, review, or approve one (FR-19, FR-149).

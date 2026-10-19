@@ -21,7 +21,7 @@ func (s *Service) StartMonitoring() error {
 		return err
 	}
 	defer release()
-	if s.provider == nil {
+	if s.provider == nil && s.timeMachine == nil {
 		return ErrUnavailable
 	}
 	s.mu.Lock()
@@ -151,12 +151,15 @@ func (s *Service) monitorWorkspace(ctx context.Context, workspace string) (Opera
 	return s.monitorWorkspaceEntered(ctx, workspace)
 }
 func (s *Service) monitorWorkspaceEntered(ctx context.Context, workspace string) (OperationResult, error) {
-	if s.provider == nil {
+	if s.provider == nil && s.timeMachine == nil {
 		return OperationResult{}, ErrUnavailable
 	}
 	record, err := s.record(ctx, "local", workspace)
 	if err != nil {
 		return OperationResult{}, err
+	}
+	if s.providerFor(recordProvider(record)) == nil {
+		return OperationResult{}, ErrUnavailable
 	}
 	if !periodicReadAdmissible(record) {
 		return OperationResult{}, ErrLocalReviewRequired

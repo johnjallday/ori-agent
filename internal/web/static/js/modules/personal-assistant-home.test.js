@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  backupCoverageControls,
+  declineBackupCoverage,
   MEETING_BADGES,
   meetingsSectionView,
   needsHireBanner,
@@ -90,6 +92,57 @@ test('an unfinished build keeps its id and only the controls Today knows', () =>
   assert.deepEqual(build.actions, ['resume', 'discard']);
   assert.equal('actions' in other, false, 'other rows stay links');
   assert.equal(other.id, 'o1');
+});
+
+test('the protection line offers Check protection and a quiet Not now, nothing else', () => {
+  const [line] = todaySectionItems({
+    items: [
+      {
+        id: 'backup-coverage',
+        kind: 'backup_coverage',
+        title: '1 project folder has no backup Ori can see',
+        detail: 'Song 1',
+        attribution: 'Backup & Recovery',
+        route: '/?create=1&blueprint=backup-and-recovery',
+        actions: ['not_now', 'start_backup'],
+        ref: { workspace_id: 'hq', entity_type: 'backup_coverage', entity_id: 'adopted_folders' }
+      }
+    ]
+  });
+  assert.deepEqual(line.actions, ['not_now']);
+  assert.equal(line.attribution, 'Backup & Recovery');
+  assert.deepEqual(backupCoverageControls(line), [
+    {
+      kind: 'link',
+      label: 'Check protection',
+      href: '/?create=1&blueprint=backup-and-recovery',
+      primary: true
+    },
+    { kind: 'button', label: 'Not now', action: 'not_now', primary: false }
+  ]);
+  const [unsafe] = todaySectionItems({
+    items: [{ kind: 'backup_coverage', title: 'x', route: 'https://elsewhere.example' }]
+  });
+  assert.deepEqual(backupCoverageControls(unsafe), [], 'no foreign route and no unlisted control');
+});
+
+test('Not now posts no data and reports only success', async () => {
+  const calls = [];
+  const ok = await declineBackupCoverage(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true };
+  });
+  assert.equal(ok, true);
+  assert.equal(calls[0].url, '/api/personal-assistant/today/backup-coverage/decline');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.body, '{}');
+  assert.equal(await declineBackupCoverage(async () => ({ ok: false })), false);
+  assert.equal(
+    await declineBackupCoverage(async () => {
+      throw new Error('offline');
+    }),
+    false
+  );
 });
 
 test('Resume opens the dialog in build mode, or goes Home where the dialog is', () => {

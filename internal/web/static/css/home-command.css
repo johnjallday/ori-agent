@@ -946,6 +946,19 @@ body.home-command-page .home-command-bridge * {
   font-weight: 650;
 }
 
+/* The protection line: "Check protection" is a link styled as the primary
+   action, and "Not now" stays quiet beside it. */
+a.personal-assistant-today__action {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.personal-assistant-today__action--quiet {
+  border-color: transparent;
+  opacity: 0.8;
+}
+
 .home-command-strip,
 .home-section,
 .quest-log,

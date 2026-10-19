@@ -31,6 +31,7 @@ import {
   groupTemplateTeamFact
 } from './group-template-status.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
+import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
 import { OperationsMapActivity } from './operations-map-activity.js';
 import { mountDailyBrief } from './home-daily-brief.js';
@@ -450,7 +451,47 @@ export class WorkspaceCommandView {
     this.ensureSurfaceStations();
     this.ensureRoleRoster();
     this.ensureGroupTemplateStatus();
+    this.ensureWorkspaceProtection();
     this.applyBootURLState();
+  }
+
+  // The linked folder's Protection fact is stored evidence the server reads;
+  // it is shown, never acted on, here (folder protection FR11).
+  ensureWorkspaceProtection() {
+    const workspaceId = this.workspaceId();
+    if (!workspaceId) return Promise.resolve(null);
+    const token = (this.workspaceProtectionToken || 0) + 1;
+    this.workspaceProtectionToken = token;
+    return fetchWorkspaceProtection(workspaceId).then(fact => {
+      if (this.workspaceProtectionToken !== token || this.workspaceId() !== workspaceId)
+        return null;
+      this.workspaceProtection = fact;
+      if (this.active) this.render();
+      return fact;
+    });
+  }
+
+  protectionFactHTML() {
+    const view = protectionFactView(this.workspaceProtection);
+    if (!view) return '';
+    const link = view.route
+      ? ' <a class="ws-cmd-protection-link" href="' +
+        escapeHtml(view.route) +
+        '">' +
+        escapeHtml(view.routeLabel) +
+        '</a>'
+      : '';
+    return (
+      '<p class="ws-cmd-protection-fact is-' +
+      escapeHtml(view.state.replace('_', '-')) +
+      '" data-cmd-protection="' +
+      escapeHtml(view.state) +
+      '"><i class="bi bi-life-preserver" aria-hidden="true"></i> <span>' +
+      escapeHtml(view.sentence) +
+      '</span>' +
+      link +
+      '</p>'
+    );
   }
 
   // A group's template type, provider, staffing, and integration are three
@@ -11831,7 +11872,9 @@ export class WorkspaceCommandView {
         escapeHtml(role.label) +
         '</span></span>' +
         (path ? '<span class="ws-cmd-rail-m">' + escapeHtml(path) + '</span>' : '');
-      const projectActions = role.className === 'is-project' ? this.projectEntryActionsHTML() : '';
+      const isProject = role.className === 'is-project';
+      const projectActions = isProject ? this.projectEntryActionsHTML() : '';
+      const protection = isProject ? this.protectionFactHTML() : '';
       let folderRow;
       if (dir.isProjectPathOnly) {
         folderRow = '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
@@ -11845,8 +11888,12 @@ export class WorkspaceCommandView {
           inner +
           '</button>';
       }
-      return projectActions
-        ? '<div class="ws-cmd-project-entry-row">' + folderRow + projectActions + '</div>'
+      return projectActions || protection
+        ? '<div class="ws-cmd-project-entry-row">' +
+            folderRow +
+            protection +
+            projectActions +
+            '</div>'
         : folderRow;
     });
   }

@@ -20,6 +20,8 @@ func RunHelperProcess(arguments []string) (handled bool, exitCode int) {
 		return true, runCompiledBackupHelper("broker-v1")
 	case backupHelperPrefix + "reader-v1":
 		return true, runCompiledBackupHelper("reader-v1")
+	case backupHelperPrefix + "timemachine-v1":
+		return true, runCompiledBackupHelper("timemachine-v1")
 	default:
 		return true, 2
 	}

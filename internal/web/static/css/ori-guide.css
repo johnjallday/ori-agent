@@ -1748,6 +1748,19 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: #fff;
 }
 
+.personal-assistant-panel a.personal-assistant-today__action {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__action--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--pa-ink-dim);
+  font-weight: 600;
+}
+
 .personal-assistant-panel .personal-assistant-today__queue {
   margin: 0;
   padding-top: 8px;

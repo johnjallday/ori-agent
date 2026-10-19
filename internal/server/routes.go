@@ -1193,6 +1193,10 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 	if s != nil && s.Handlers != nil && s.Handlers.PersonalAssistant != nil {
 		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
 		mux.HandleFunc("GET /api/personal-assistant/today", s.Handlers.PersonalAssistant.GetToday)
+		mux.HandleFunc("POST /api/personal-assistant/today/backup-coverage/decline", s.Handlers.PersonalAssistant.DeclineBackupCoverage)
+		mux.HandleFunc("GET /api/personal-assistant/protection-options", s.Handlers.PersonalAssistant.GetProtectionOptions)
+		// A workspace's read-only Protection fact, from the same stored reader.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/protection", s.Handlers.PersonalAssistant.GetWorkspaceProtection)
 		mux.HandleFunc("GET /api/personal-assistant/capabilities", s.Handlers.PersonalAssistant.GetCapabilities)
 		mux.HandleFunc("GET /api/personal-assistant/knowledge", s.Handlers.PersonalAssistant.GetKnowledgeReview)
 		mux.HandleFunc("GET /api/personal-assistant/knowledge/interview", s.Handlers.PersonalAssistant.GetKnowledgeInterview)

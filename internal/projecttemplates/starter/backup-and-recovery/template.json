@@ -1,6 +1,6 @@
 {
   "name": "Backup & Recovery",
-  "description": "An ordinary workspace for observing a selected-folder backup on one supported Mac and one independent external drive. Set up restic 0.19.1 outside Ori, then explicitly connect its metadata. Ori can show stored evidence, optionally check it while Ori is running, and guide a sample recovery test. It never installs backup software, runs backups or restores, or changes a drive. A published snapshot is not proof of a fully successful backup or recoverability, and an external-drive-only backup is not off-site protection.",
+  "description": "An ordinary workspace for observing a selected-folder backup on one supported Mac: Time Machine, built into macOS, or restic 0.19.1 on one independent external drive. Set up the backup outside Ori, then explicitly approve one metadata read. Ori can show stored evidence, optionally check it while Ori is running, and guide a sample recovery test. It never installs backup software, runs backups or restores, or changes a drive. A published snapshot is not proof of a fully successful backup or recoverability, and an external-drive-only backup is not off-site protection.",
   "icon": "🛟",
   "tagline": "Observe backup evidence. Practice recovery.",
   "behavior_profile": "general",

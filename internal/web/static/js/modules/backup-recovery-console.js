@@ -10,8 +10,26 @@
   let initialDeepLink = (() => {
     if (typeof window === 'undefined' || !window.location?.href) return null;
     const params = new URL(window.location.href).searchParams;
-    return params.get('panel') === ID ? { tab: params.get('tab') } : null;
+    return params.get('panel') === ID
+      ? { tab: params.get('tab'), section: params.get('section'), provider: params.get('provider') }
+      : null;
   })();
+  const TIME_MACHINE = 'time_machine';
+  // What the restic path needs from the user before anything is created.
+  const RESTIC_NEEDS = [
+    'An external drive with free space',
+    'restic 0.19.1, installed by you',
+    'An encrypted repository you prepare on that drive',
+    'A Vault secret that holds its password',
+    'About 30 minutes'
+  ];
+  const TIME_MACHINE_SETTINGS =
+    'x-apple.systempreferences:com.apple.Time-Machine-Settings.extension';
+  const FULL_DISK_ACCESS_SETTINGS =
+    'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles';
+  // Apple's official restore guide; the console links it and runs nothing.
+  const TIME_MACHINE_RESTORE_GUIDE =
+    'https://support.apple.com/guide/mac-help/restore-items-backed-up-with-time-machine-mh11422/mac';
   const state = {
     status: null,
     settings: null,
@@ -37,6 +55,9 @@
     volume: '',
     repository: '',
     useSaved: false,
+    provider: '',
+    providerChosen: false,
+    focusSection: '',
     vault: '',
     record: '',
     revokeConfirm: '',
@@ -181,8 +202,12 @@
           state.monitorDirty = false;
         }
         state.settings = incoming;
-        if (!state.review && !state.sources.length && !state.credential) {
-          state.useSaved = !!state.settings.configured;
+        if (!state.review && !state.sources.length && !state.credential && !state.providerChosen) {
+          state.provider = defaultProvider(
+            state.settings,
+            initialDeepLink?.provider || takeChooserPreselect(state.settings)
+          );
+          state.useSaved = !!state.settings.configured && savedProvider() === state.provider;
           state.vault = state.settings.credential?.vault_id || '';
           state.record = state.settings.credential?.record_id || '';
           state.credential = state.settings.credential || null;
@@ -207,6 +232,46 @@
       state.storedLoading = false;
       render();
     }
+  }
+  // Home's "Protect your folders" chooser leaves a one-time preselect for the
+  // workspace it created. It is used once, only before anything is saved, and
+  // a blocked store simply means no preselect.
+  function takeChooserPreselect(settings) {
+    if (settings?.configured) return '';
+    try {
+      const value = window.sessionStorage?.getItem('ori.backupRecovery.preselect') || '';
+      window.sessionStorage?.removeItem('ori.backupRecovery.preselect');
+      return value === TIME_MACHINE ? value : '';
+    } catch (_) {
+      return '';
+    }
+  }
+  // The saved provider wins; then a chooser's preselect, when this server can
+  // read it; otherwise restic, as before Time Machine existed. Time Machine
+  // leads in the chooser, which is where a new user picks it. Nothing here
+  // connects.
+  function defaultProvider(settings, preselect) {
+    if (settings?.configured && settings.provider) return settings.provider;
+    const readable = (settings?.providers || []).filter(option => option.available);
+    if (preselect && readable.some(option => option.id === preselect)) return preselect;
+    return 'restic';
+  }
+  function savedProvider() {
+    return state.settings?.provider || 'restic';
+  }
+  function activeProvider() {
+    return state.provider || 'restic';
+  }
+  function chooseProvider(id) {
+    if (state.busy || id === activeProvider()) return;
+    invalidateDraft();
+    state.provider = id;
+    state.providerChosen = true;
+    state.sources = [];
+    state.volume = '';
+    state.repository = '';
+    state.useSaved = !!state.settings?.configured && savedProvider() === id;
+    render();
   }
   function version() {
     return {
@@ -330,23 +395,31 @@
     }
   }
   async function reviewSelection() {
-    if (state.busy || !state.credential) return;
+    const timeMachine = activeProvider() === TIME_MACHINE;
+    if (state.busy || (!timeMachine && !state.credential)) return;
     const epoch = ++state.draftEpoch;
     state.busy = true;
     state.error = '';
     render();
     try {
-      const payload = await request('/review', {
-        method: 'POST',
-        body: {
-          ...version(),
-          source_selections: state.useSaved ? [] : state.sources,
-          volume_selection: state.useSaved ? '' : state.volume,
-          repository_selection: state.useSaved ? '' : state.repository,
-          use_saved_selection: state.useSaved,
-          credential: state.credential
-        }
-      });
+      // Time Machine has no credential, volume or repository: none is sent.
+      const body = timeMachine
+        ? {
+            ...version(),
+            provider: TIME_MACHINE,
+            source_selections: state.useSaved ? [] : state.sources,
+            use_saved_selection: state.useSaved
+          }
+        : {
+            ...version(),
+            provider: 'restic',
+            source_selections: state.useSaved ? [] : state.sources,
+            volume_selection: state.useSaved ? '' : state.volume,
+            repository_selection: state.useSaved ? '' : state.repository,
+            use_saved_selection: state.useSaved,
+            credential: state.credential
+          };
+      const payload = await request('/review', { method: 'POST', body });
       if (epoch === state.draftEpoch) state.review = payload.review;
     } catch (error) {
       state.error =
@@ -401,8 +474,90 @@
     if (note) paragraph(item, note, 'br-small');
     parent.appendChild(item);
   }
+  function settingsLink(parent, label, href) {
+    const link = el('a', 'br-link', label);
+    link.href = href;
+    link.rel = 'noopener';
+    parent.appendChild(link);
+  }
+  // A read found no destination, or could not see completed backups. Ori opens
+  // nothing on the user's behalf: these are links the user follows.
+  function renderTimeMachineState(parent, status) {
+    const tm = status?.time_machine;
+    if (status?.provider !== TIME_MACHINE || !tm || !status.evidence_current_generation) return;
+    if (tm.permission_required) {
+      const box = el('section', 'br-boundary br-tm-state');
+      box.appendChild(el('h4', '', 'Time Machine needs Full Disk Access'));
+      paragraph(
+        box,
+        (tm.destinations
+          ? 'Ori saw a Time Machine destination but not its completed backups. '
+          : 'Ori could not read Time Machine settings. ') +
+          'In System Settings → Privacy & Security → Full Disk Access, turn on the app that runs Ori, then check again. Ori never runs anything unsandboxed to get around it.'
+      );
+      settingsLink(box, 'Open Full Disk Access settings', FULL_DISK_ACCESS_SETTINGS);
+      parent.appendChild(box);
+      return;
+    }
+    if (tm.destinations === 0) {
+      const box = el('section', 'br-boundary br-tm-state');
+      box.appendChild(el('h4', '', 'Time Machine is not set up on this Mac'));
+      paragraph(
+        box,
+        'Ori found no Time Machine destination. Set one up in System Settings, or use a restic repository instead. Ori created nothing on any drive.'
+      );
+      settingsLink(box, 'Open Time Machine settings', TIME_MACHINE_SETTINGS);
+      box.appendChild(
+        button(
+          'Use a restic repository instead',
+          () => {
+            chooseProvider('restic');
+            selectTab('settings');
+          },
+          true
+        )
+      );
+      renderNeeds(box);
+      parent.appendChild(box);
+    }
+  }
+  function renderCoverage(parent, status) {
+    const tm = status?.time_machine;
+    const paths = state.settings?.source_paths || [];
+    if (
+      status?.provider !== TIME_MACHINE ||
+      !tm?.source_states ||
+      tm.source_states.length !== paths.length
+    )
+      return;
+    const section = el('section', 'br-coverage');
+    section.id = 'brCoverage';
+    section.tabIndex = -1;
+    section.appendChild(el('h4', '', 'Folders Ori checks'));
+    const list = el('ul');
+    paths.forEach((path, index) => {
+      const label =
+        {
+          included: tm.permission_required
+            ? 'Inclusion unknown without Full Disk Access'
+            : 'Included in Time Machine',
+          source_excluded: 'Excluded from Time Machine',
+          unknown: 'Inclusion unknown'
+        }[tm.source_states[index]] || 'Inclusion unknown';
+      const item = el('li', 'br-path', path);
+      item.appendChild(el('span', 'br-coverage-state', ' · ' + label));
+      list.appendChild(item);
+    });
+    section.appendChild(list);
+    paragraph(
+      section,
+      'Included means Time Machine does not exclude the folder. It is not proof of a recoverable copy.'
+    );
+    parent.appendChild(section);
+  }
   function renderOverview(parent) {
     const status = state.status;
+    const timeMachine = status?.provider === TIME_MACHINE;
     if (status?.removal_pending)
       paragraph(
         parent,
@@ -420,8 +575,11 @@
     );
     paragraph(
       parent,
-      'Your external application owns backup execution and recovery. Ori records what it can actually observe, not a protection check mark.'
+      timeMachine
+        ? 'Time Machine owns backups and recovery on this Mac. Ori records what it can actually observe, not a protection check mark.'
+        : 'Your external application owns backup execution and recovery. Ori records what it can actually observe, not a protection check mark.'
     );
+    renderTimeMachineState(parent, status);
     const ledger = el('dl', 'br-ledger');
     fact(
       ledger,
@@ -446,9 +604,13 @@
       'Observed completion',
       status?.health?.recency === 'clock_suspect'
         ? 'Unavailable — future timestamp quarantined'
-        : status?.snapshot_count === 0
-          ? 'None observed'
-          : time(status?.last_completed_at),
+        : status?.time_machine?.permission_required
+          ? 'Unknown — Full Disk Access is needed'
+          : status?.snapshot_count === 0
+            ? timeMachine
+              ? 'No completed backup observed'
+              : 'None observed'
+            : time(status?.last_completed_at),
       'A snapshot is not the latest attempted-run outcome'
     );
     fact(
@@ -468,9 +630,10 @@
       'Destination',
       {
         present: 'Present at the last check',
-        absent: 'Disconnected',
+        absent: timeMachine ? 'Not connected — Ori does not mount it' : 'Disconnected',
         identity_mismatch: 'Identity mismatch',
-        unavailable: 'Unavailable'
+        unavailable: 'Unavailable',
+        not_configured: 'No Time Machine destination'
       }[status?.destination] || 'Not checked',
       'A disconnected drive is not automatically a failed backup'
     );
@@ -528,16 +691,17 @@
           ' · ' +
           time(status.last_attempt.finished_at)
       );
-    paragraph(
-      details,
-      status?.coverage
-        ? 'Latest snapshot declares ' +
-            status.coverage.declared_path_count +
-            ' paths and ' +
-            status.coverage.exclusion_count +
-            ' exclusions. Historical declaration, not exhaustive coverage.'
-        : 'Provider coverage: unavailable. Intended folders are not proof of observed coverage.'
-    );
+    if (!timeMachine)
+      paragraph(
+        details,
+        status?.coverage
+          ? 'Latest snapshot declares ' +
+              status.coverage.declared_path_count +
+              ' paths and ' +
+              status.coverage.exclusion_count +
+              ' exclusions. Historical declaration, not exhaustive coverage.'
+          : 'Provider coverage: unavailable. Intended folders are not proof of observed coverage.'
+      );
     paragraph(
       details,
       status?.capacity
@@ -555,8 +719,10 @@
       'Latest backup attempt success: unavailable. Recovery: not verified by Ori.'
     );
     parent.appendChild(details);
+    renderCoverage(parent, status);
     const actions = el('div', 'br-actions');
-    const check = button(state.busy ? 'Checking metadata…' : 'Check metadata now', () =>
+    const checkLabel = timeMachine ? 'Check Time Machine now' : 'Check metadata now';
+    const check = button(state.busy ? 'Checking metadata…' : checkLabel, () =>
       mutate('/refresh', {
         ...version(),
         sequence: state.status.sequence,
@@ -865,9 +1031,54 @@
     }
     parent.appendChild(box);
   }
+  function renderNeeds(parent) {
+    const list = el('ul', 'br-needs');
+    list.setAttribute('aria-label', "What you'll need for restic");
+    for (const need of RESTIC_NEEDS) list.appendChild(el('li', '', need));
+    parent.appendChild(el('h4', '', "What you'll need"));
+    parent.appendChild(list);
+  }
+  function renderProviderChoice(parent) {
+    const options = state.settings?.providers || [];
+    if (!options.length) return;
+    const group = el('div', 'br-provider');
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'Backup provider');
+    for (const option of options) {
+      const chosen = option.id === activeProvider();
+      const choice = button(option.label || option.id, () => chooseProvider(option.id), !chosen);
+      choice.id = 'brProvider-' + option.id;
+      choice.setAttribute('role', 'radio');
+      choice.setAttribute('aria-checked', String(chosen));
+      // Only a platform without the provider rules it out. A missing reader
+      // still lets the user see and prepare its setup; the read is refused.
+      choice.disabled = state.busy || (option.reason === 'platform_unsupported' && !chosen);
+      group.appendChild(choice);
+      if (!option.available)
+        paragraph(
+          group,
+          option.label +
+            (option.reason === 'platform_unsupported'
+              ? ' is unavailable: it is only on macOS.'
+              : "'s metadata reader is not available on this server yet. You can prepare its setup; Ori cannot read it until the reader is available."),
+          'br-note'
+        );
+    }
+    parent.appendChild(group);
+  }
   function renderSettings(parent) {
+    const timeMachine = activeProvider() === TIME_MACHINE;
     parent.appendChild(el('h3', 'br-heading', 'A connection is a separate decision.'));
-    renderGuide(parent);
+    renderProviderChoice(parent);
+    if (timeMachine)
+      paragraph(
+        parent,
+        'Time Machine is built into this Mac. Ori checks its status only after you approve one read here, and never changes Time Machine settings or starts a backup. Ori needs Full Disk Access to see completed backups; without it Ori can still see whether a destination exists.'
+      );
+    else {
+      renderGuide(parent);
+      renderNeeds(parent);
+    }
     if (state.status?.removal_pending) {
       paragraph(
         parent,
@@ -878,9 +1089,11 @@
     }
     paragraph(
       parent,
-      'Choose folders, review the exact scope, then approve one metadata read. No backup, restore, directory grant or periodic monitoring is enabled by selection.'
+      timeMachine
+        ? 'Choose the folders Ori should check, review them, then approve one read. Selecting a folder grants no access and starts nothing.'
+        : 'Choose folders, review the exact scope, then approve one metadata read. No backup, restore, directory grant or periodic monitoring is enabled by selection.'
     );
-    if (state.settings?.configured) {
+    if (state.settings?.configured && savedProvider() === activeProvider()) {
       const saved = el('label', 'br-choice');
       const checkbox = el('input');
       checkbox.type = 'checkbox';
@@ -900,11 +1113,26 @@
       if (state.useSaved) {
         for (const path of state.settings.source_paths || [])
           paragraph(parent, 'Source · ' + path, 'br-path');
-        paragraph(parent, 'Volume · ' + state.settings.volume_path, 'br-path');
-        paragraph(parent, 'Repository · ' + state.settings.repository_path, 'br-path');
+        if (!timeMachine) {
+          paragraph(parent, 'Volume · ' + state.settings.volume_path, 'br-path');
+          paragraph(parent, 'Repository · ' + state.settings.repository_path, 'br-path');
+        }
       }
     }
-    if (!state.useSaved) {
+    if (!state.useSaved && timeMachine) {
+      const choices = el('div', 'br-actions');
+      const choose = button('Choose a folder to check', () => pick('source'), true);
+      choose.disabled =
+        state.busy || !state.settings?.picker_available || state.sources.length >= 16;
+      choices.appendChild(choose);
+      parent.appendChild(choices);
+      paragraph(
+        parent,
+        state.sources.length +
+          ' folder selections. Exact folder paths appear in the review before you approve the read.'
+      );
+    }
+    if (!state.useSaved && !timeMachine) {
       const choices = el('div', 'br-actions');
       for (const [kind, label] of [
         ['source', 'Choose source folder'],
@@ -932,48 +1160,59 @@
         'For a changed selection, choose all three roles again. Exact folder paths appear in the review before you approve any read.'
       );
     }
-    input(
-      parent,
-      'Selected Vault ID — not a password',
-      state.vault,
-      value => {
-        invalidateDraft();
-        state.vault = value;
-        state.credential = null;
-      },
-      'brVaultID'
+    // Time Machine has no Vault secret or repository: those controls are
+    // hidden for it, not merely disabled.
+    if (!timeMachine) {
+      input(
+        parent,
+        'Selected Vault ID — not a password',
+        state.vault,
+        value => {
+          invalidateDraft();
+          state.vault = value;
+          state.credential = null;
+        },
+        'brVaultID'
+      );
+      input(
+        parent,
+        'Selected workspace secret record ID',
+        state.record,
+        value => {
+          invalidateDraft();
+          state.record = value;
+          state.credential = null;
+        },
+        'brRecordID'
+      );
+      paragraph(
+        parent,
+        'Use an explicitly selected existing workspace-scoped secret from Vault. Unlock its Vault there if necessary; never paste its value here.'
+      );
+      const resolve = button('Describe selected reference', resolveCredential, true);
+      resolve.disabled = state.busy || !state.vault || !state.record;
+      parent.appendChild(resolve);
+    }
+    const review = button(
+      timeMachine ? 'Review Time Machine check' : 'Review metadata access',
+      reviewSelection
     );
-    input(
-      parent,
-      'Selected workspace secret record ID',
-      state.record,
-      value => {
-        invalidateDraft();
-        state.record = value;
-        state.credential = null;
-      },
-      'brRecordID'
-    );
-    paragraph(
-      parent,
-      'Use an explicitly selected existing workspace-scoped secret from Vault. Unlock its Vault there if necessary; never paste its value here.'
-    );
-    const resolve = button('Describe selected reference', resolveCredential, true);
-    resolve.disabled = state.busy || !state.vault || !state.record;
-    parent.appendChild(resolve);
-    const review = button('Review metadata access', reviewSelection);
-    review.disabled =
-      state.busy ||
-      !state.credential ||
-      (!state.useSaved && (!state.sources.length || !state.volume || !state.repository));
+    review.disabled = timeMachine
+      ? state.busy || (!state.useSaved && !state.sources.length)
+      : state.busy ||
+        !state.credential ||
+        (!state.useSaved && (!state.sources.length || !state.volume || !state.repository));
     parent.appendChild(review);
     if (state.review) {
+      const reviewedTimeMachine = state.review.provider === TIME_MACHINE;
       const receipt = el('section', 'br-review');
       receipt.appendChild(el('h4', '', 'Review the exact scope'));
       for (const path of state.review.source_paths || [])
-        paragraph(receipt, 'Source · ' + path, 'br-path');
-      paragraph(receipt, 'External volume · ' + state.review.volume_path, 'br-path');
-      paragraph(receipt, 'Repository · ' + state.review.repository_path, 'br-path');
+        paragraph(receipt, (reviewedTimeMachine ? 'Folder · ' : 'Source · ') + path, 'br-path');
+      if (!reviewedTimeMachine) {
+        paragraph(receipt, 'External volume · ' + state.review.volume_path, 'br-path');
+        paragraph(receipt, 'Repository · ' + state.review.repository_path, 'br-path');
+      }
       paragraph(
         receipt,
         'Review expires ' +
@@ -989,19 +1228,24 @@
         el(
           'span',
           '',
-          'Allow one bounded metadata read of this exact selection. Do not run a backup or restore.'
+          reviewedTimeMachine
+            ? "Allow one read of Time Machine's destinations, status and completed backup dates for these folders. Do not start, stop or change a backup."
+            : 'Allow one bounded metadata read of this exact selection. Do not run a backup or restore.'
         )
       );
-      const confirm = button('Approve one metadata read', () => {
-        if (!allow.checked) return;
-        mutate('/connect', {
-          generation: state.review.generation,
-          revision: state.review.revision,
-          operation_id: window.crypto.randomUUID(),
-          review_token: state.review.review_token,
-          allow_metadata_read: true
-        });
-      });
+      const confirm = button(
+        reviewedTimeMachine ? 'Check Time Machine once' : 'Approve one metadata read',
+        () => {
+          if (!allow.checked) return;
+          mutate('/connect', {
+            generation: state.review.generation,
+            revision: state.review.revision,
+            operation_id: window.crypto.randomUUID(),
+            review_token: state.review.review_token,
+            allow_metadata_read: true
+          });
+        }
+      );
       confirm.disabled = true;
       allow.addEventListener('change', () => {
         confirm.disabled = !allow.checked || state.busy;
@@ -1316,6 +1560,17 @@
       parent,
       'Use the external application to restore a sample to a separate location. Never overwrite the working source as a test. Ori never verifies the result.'
     );
+    if (savedProvider() === TIME_MACHINE) {
+      paragraph(
+        parent,
+        "For Time Machine, follow Apple's own guide to restore a sample. Ori opens nothing and restores nothing."
+      );
+      settingsLink(
+        parent,
+        'Restore items backed up with Time Machine (Apple)',
+        TIME_MACHINE_RESTORE_GUIDE
+      );
+    }
     paragraph(
       parent,
       'Ori does not restore or inspect recovered contents. A dated user report is not Ori verification, and one sample cannot prove all files are recoverable.'
@@ -1493,12 +1748,22 @@
       if (retained && dialog.contains(retained)) retained.focus();
       else dialog.querySelector('[data-br-tab="' + state.tab + '"]')?.focus();
     }
+    // A coverage link opens the Overview at its coverage section once it exists.
+    const section =
+      state.focusSection && state.tab === 'overview' && document.getElementById('brCoverage');
+    if (section && dialog.contains(section)) {
+      state.focusSection = '';
+      section.scrollIntoView?.({ block: 'start' });
+      section.focus();
+    }
   }
   function open(options = {}) {
     if (!ws() || !window.WorkspaceCapabilities?.isInstalled(ID)) return false;
     state.trigger = options.trigger || document.activeElement;
     state.open = true;
     state.tab = TABS.includes(options.tab) ? options.tab : 'overview';
+    state.focusSection = options.section === 'coverage' ? 'coverage' : '';
+    const wantsSection = !!state.focusSection;
     if (!dialog) {
       dialog = el('dialog', 'br-dialog');
       dialog.id = 'backupRecoveryConsole';
@@ -1534,7 +1799,10 @@
         }
       });
     } else if (!dialog.open) dialog.showModal();
-    document.getElementById('brClose')?.focus();
+    // A coverage link keeps focus on its section rather than on Close.
+    const section = wantsSection && document.getElementById('brCoverage');
+    if (section) section.focus();
+    else document.getElementById('brClose')?.focus();
     syncURL();
     void loadStored();
     if (state.tab === 'history') void loadHistory();
@@ -1566,7 +1834,10 @@
     const captured = initialDeepLink;
     initialDeepLink = null;
     if (captured || url.searchParams.get('panel') === ID)
-      open({ tab: captured ? captured.tab : url.searchParams.get('tab') });
+      open({
+        tab: captured ? captured.tab : url.searchParams.get('tab'),
+        section: captured ? captured.section : url.searchParams.get('section')
+      });
   }
   const controller = {
     init,
@@ -1585,6 +1856,8 @@
       validPolicy,
       validReportDraft,
       selectTab,
+      chooseProvider,
+      defaultProvider,
       snapshotLabel,
       bytes,
       text,

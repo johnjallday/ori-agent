@@ -7,11 +7,34 @@ been exercised against an invented external backup. Recovery reports and full
 delivery acceptance remain incomplete.
 
 Ori observes explicitly approved backup metadata and guides recovery. The external
-application performs backups and restores. Completing setup, choosing folders or
+application (Time Machine or restic) performs backups and restores. Completing setup, choosing folders or
 connecting metadata is **not proof that your files are protected**. Core guidance
 and status do not require a model.
 
-## Supported first integration
+## Supported integrations
+
+Two observe-only providers, chosen in the console's **Settings**: **Time
+Machine**, built into macOS (listed first on a Mac that can read it), and a
+**restic** repository on an external drive. Neither lets Ori run, schedule,
+pause or restore a backup. Other providers (cloud, NAS, Carbon Copy Cloner,
+iCloud Drive) are not supported.
+
+### Time Machine
+
+- Apple Silicon, validated host macOS **26.3.1**, product build **25D771280a**;
+  other builds and platforms show Time Machine as unavailable
+  (`platform_unsupported` off Apple-silicon macOS).
+- No credential, repository or extra software. Ori runs only the system
+  `/usr/bin/tmutil` read verbs `destinationinfo` and `status`, sandboxed, and
+  reads Time Machine's preferences as data. It never mounts a destination,
+  changes settings or exclusions, or starts, stops or restores a backup.
+- **Full Disk Access** for the app that runs Ori is needed to see completed
+  backups, capacity and exclusion lists. Without it Ori still sees whether a
+  destination exists and each folder's own exclusion mark, and says
+  "Time Machine needs Full Disk Access" — never "not set up" and never a
+  failed backup.
+
+### restic
 
 - Official **restic 0.19.1**, Apple Silicon, repository format **2**.
 - Validated host: macOS **26.3.1**, product build **25D771280a**. Other builds,
@@ -25,7 +48,53 @@ and status do not require a model.
   from workspace/template/model text. Missing containment never permits an
   unsandboxed fallback.
 
-## Set up outside Ori
+## Protect your folders: where to start
+
+When a folder you showed Ori (the folder a workspace was created from or
+connected to, or an active library root of a Home) has no backup Ori can see,
+Today shows **one** line, for example "3 project folders have no backup Ori can
+see", naming up to three workspaces. **Check protection** opens the **Protect
+your folders** chooser when no Backup & Recovery workspace exists, otherwise
+the owning console's Overview at its coverage section. **Not now** hides the
+line; it returns once, when five project folders are uncovered, and a second
+"Not now" is final. Downloads, File Janitor folders, a workspace's own Ori
+folder and folders Ori only scanned never count.
+
+The chooser lists **Time Machine (built into this Mac)** first on a Mac, then
+**A restic repository on an external drive** with what you'll need: an external
+drive with free space, restic 0.19.1 installed by you, an encrypted repository
+you prepare, a Vault secret for its password, and about 30 minutes. Opening it
+reads nothing and lists no drives; nothing is created until you choose. Either
+choice opens the usual Backup & Recovery create flow (Time Machine arrives
+preselected in Settings). The assistant's readiness card opens the same chooser.
+
+Each folder-backed workspace also shows a read-only **Protection** line under
+its Project Folder: "Protected by Time Machine in Backup & Recovery, last
+completed backup 14 h ago", "Not in any backup Ori observes", or "Protection
+unknown: backup evidence is unavailable". Its entry agent can state the same
+stored fact ("Protection is set up in the Backup & Recovery workspace.") but
+gains no tool for backups. A decline never hides this line. Covered means a
+configured source contains the folder and a completed backup was observed; it
+is computed from stored evidence only and never checks a drive.
+
+## Set up Time Machine in Ori
+
+1. Turn on Time Machine with a backup disk in **System Settings → General →
+   Time Machine** yourself. Ori does not choose, mount or format a disk.
+2. To let Ori see completed backups, turn on **Full Disk Access** for the app
+   that runs Ori in **System Settings → Privacy & Security → Full Disk Access**.
+3. In the Backup & Recovery console, **Settings → Time Machine**, choose the
+   folders Ori should check, review them, and approve **Check Time Machine
+   once**. There is no Vault secret or repository to select.
+4. The Overview then shows the destination, the last completed backup and, per
+   folder, whether Time Machine includes or excludes it. If the read found no
+   destination it says **Time Machine is not set up on this Mac**, links to the
+   Time Machine settings, and offers the restic path instead.
+5. Recovery links Apple's guide
+   [Restore items backed up with Time Machine](https://support.apple.com/guide/mac-help/restore-items-backed-up-with-time-machine-mh11422/mac);
+   your dated user report works as for restic.
+
+## Set up restic outside Ori
 
 1. **Check your drive.** Connect a suitable existing drive using macOS. Account
    for its existing contents and confirm its identity, actual mounted root and
@@ -50,7 +119,7 @@ and status do not require a model.
    backup jobs nor OS daemons. Account for sleep, disconnection and full storage.
    Pausing/closing Ori stops Ori's checks, **not** the external backup schedule.
 
-## Connect metadata in Ori
+## Connect restic metadata in Ori
 
 The owning workspace console has **Overview, History, Recovery and Settings**;
 rich connection controls live in Settings, not the generic setup wizard.
@@ -142,8 +211,8 @@ uses compiled, fact-only wording: when it is present or unavailable, the brief
 is rendered without an LLM. Other briefs retain their optional model path.
 A saved brief describes its generation time, not a new metadata check.
 
-The Personal Assistant readiness card only navigates to setup or an in-scope
-owning workspace. It cannot install, connect, enable monitoring or delegate.
+The Personal Assistant readiness card only navigates to the Protect your folders
+chooser or an in-scope owning workspace. It cannot install, connect, enable monitoring or delegate.
 The Backup Advisor shares the same health/report projection in its exact
 workspace. Without an isolated model it still explains compiled stored facts;
 with one, the model may select an explanation topic only. Paths, passwords,

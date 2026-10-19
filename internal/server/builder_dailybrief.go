@@ -416,6 +416,15 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
 	todayService.SetBackupReader(dailyBriefBackupSource{reader: b.backupRecoveryService})
+	// The protection line: stored coverage of adopted folders, and its one
+	// sticky "Not now" kept in the folder digest (wired above).
+	if b.personalAssistantFolderDigest != nil {
+		todayService.SetBackupCoverage(dailyBriefBackupSource{reader: b.backupRecoveryService}, b.personalAssistantFolderDigest)
+		// The same stored fact, stated by each workspace's entry agent.
+		if b.chatHandler != nil {
+			b.chatHandler.SetWorkspaceProtectionReader(todayService)
+		}
+	}
 	// A workspace the assistant is still building asks to be finished.
 	if b.workspaceBuildStore != nil {
 		todayService.SetWorkspaceBuildReader(b.workspaceBuildStore)

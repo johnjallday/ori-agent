@@ -144,8 +144,12 @@ func BackupProblem(source BackupSnapshot) (code, title string, rank int) {
 		{"policy_unavailable", "Backup monitoring policy is unavailable", 3},
 		{"clock_suspect", "Review clock-suspect backup evidence", 3},
 		{"user_reported_recovery_failed", "Review your failed sample-recovery report", 3},
+		{"permission_required", "Time Machine needs Full Disk Access before Ori can read it", 3},
+		{"not_configured", "Time Machine is not set up on this Mac", 2},
+		{"source_excluded", "A checked folder is excluded from Time Machine", 2},
 		{"backup_completion_overdue", "Review an overdue observed backup completion", 2},
 		{"no_completed_snapshot", "No completed backup snapshot has been observed", 2},
+		{"destination_absent", "The Time Machine destination was not connected at the last check", 1},
 		{"destination_space_low", "Review the last observed low backup space", 2},
 		{"destination_disconnected_beyond_grace", "Review the last observed disconnected destination", 2},
 		{"metadata_check_failed", "The last backup metadata check failed", 1},
@@ -161,6 +165,9 @@ func BackupProblem(source BackupSnapshot) (code, title string, rank int) {
 		}
 		if f.Monitoring == "paused" && (candidate.code == "observation_stale" || candidate.code == "metadata_check_failed" || candidate.code == "monitoring_review_required") {
 			continue
+		}
+		if candidate.code == "no_completed_snapshot" && f.Provider == backuprecovery.ProviderTimeMachine {
+			return candidate.code, "No completed Time Machine backup observed", candidate.rank
 		}
 		return candidate.code, candidate.title, candidate.rank
 	}
@@ -208,7 +215,7 @@ func BackupEvidenceLine(source BackupSnapshot) string {
 	if monitoring == "" {
 		monitoring = "Ori monitoring unavailable"
 	}
-	destination := map[string]string{"present": "destination present at last recorded check", "absent": "destination absent at last recorded check, not automatically a failed backup", "identity_mismatch": "destination identity needs review"}[f.Destination]
+	destination := map[string]string{"present": "destination present at last recorded check", "absent": "destination absent at last recorded check, not automatically a failed backup", "identity_mismatch": "destination identity needs review", "not_configured": "no Time Machine destination at last recorded check"}[f.Destination]
 	if destination == "" {
 		destination = "destination evidence unavailable"
 	}

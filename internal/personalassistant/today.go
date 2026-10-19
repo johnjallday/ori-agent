@@ -272,6 +272,8 @@ type TodayService struct {
 	workspaceBuilds    WorkspaceBuildReader
 	meetings           TodayMeetingReader
 	backups            dailybrief.BackupSource
+	backupCoverage     dailybrief.BackupCoverageSource
+	coverageDeclines   BackupCoverageDeclines
 	remembered         interface {
 		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
 	}

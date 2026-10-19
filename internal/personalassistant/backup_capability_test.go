@@ -58,7 +58,9 @@ func TestBackupReadinessRelationshipScopeAndNoWriteAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			card = got.Cards[len(got.Cards)-1]
-			if card.Status != CapabilityNotConfigured || card.ActionRoute != "/?create=1&blueprint=backup-and-recovery" {
+			// With no Backup & Recovery workspace in scope the card opens the
+			// "Protect your folders" chooser, which creates nothing by itself.
+			if card.Status != CapabilityNotConfigured || card.ActionRoute != "/?protect=folders" {
 				t.Fatal(card)
 			}
 		})

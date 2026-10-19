@@ -14,6 +14,7 @@ const (
 	systemContainmentLauncher systemExecutableKind = iota + 1
 	systemDiskMetadataReader
 	systemProductMetadata
+	systemTimeMachineUtility // only its two read verbs, under the Time Machine profile
 )
 
 // These are fixed OS-owned entrypoints, not configuration/PATH lookup. They
@@ -34,6 +35,8 @@ func systemExecutablePath(kind systemExecutableKind) string {
 		return "/usr/sbin/diskutil"
 	case systemProductMetadata:
 		return "/usr/bin/sw_vers"
+	case systemTimeMachineUtility:
+		return "/usr/bin/tmutil"
 	default:
 		return ""
 	}

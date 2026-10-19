@@ -68,25 +68,41 @@ type CoverageEvidence struct {
 	ExclusionCount    int    `json:"exclusion_count"`
 	Kind              string `json:"kind"`
 }
+
+// TimeMachineEvidence is fixed flags and counts from the latest current Time
+// Machine observation: no path, destination name or identifier.
+type TimeMachineEvidence struct {
+	PermissionRequired  bool `json:"permission_required"`
+	Destinations        int  `json:"destinations"`
+	MountedDestinations int  `json:"mounted_destinations"`
+	ExcludedSources     int  `json:"excluded_sources"`
+	UnknownSources      int  `json:"unknown_sources"`
+	Running             bool `json:"running"`
+	// SourceStates is each configured source's inclusion, in the order of the
+	// owner's own Settings source_paths: states only.
+	SourceStates []string `json:"source_states"`
+}
 type Status struct {
 	StateVersion
-	WorkspaceID         string            `json:"workspace_id"`
-	ServerTime          time.Time         `json:"server_time"`
-	Connection          string            `json:"connection"`
-	RuntimeAvailable    bool              `json:"runtime_available"`
-	Destination         string            `json:"destination"`
-	Monitoring          string            `json:"monitoring"`
-	InProgress          bool              `json:"in_progress"`
-	LastAttempt         *Attempt          `json:"last_attempt,omitempty"`
-	LastSuccessfulRead  *time.Time        `json:"last_successful_read,omitempty"`
-	SnapshotCount       *int              `json:"snapshot_count,omitempty"`
-	LastCompletedAt     *time.Time        `json:"last_completed_at,omitempty"`
-	EvidenceCurrent     bool              `json:"evidence_current_generation"`
-	RemovalPending      bool              `json:"removal_pending"`
-	IntendedSourceCount int               `json:"intended_source_count"`
-	Capacity            *CapacityEvidence `json:"capacity,omitempty"`
-	Coverage            *CoverageEvidence `json:"coverage,omitempty"`
-	Health              EvidenceHealth    `json:"health"`
+	Provider            string               `json:"provider,omitempty"`
+	TimeMachine         *TimeMachineEvidence `json:"time_machine,omitempty"`
+	WorkspaceID         string               `json:"workspace_id"`
+	ServerTime          time.Time            `json:"server_time"`
+	Connection          string               `json:"connection"`
+	RuntimeAvailable    bool                 `json:"runtime_available"`
+	Destination         string               `json:"destination"`
+	Monitoring          string               `json:"monitoring"`
+	InProgress          bool                 `json:"in_progress"`
+	LastAttempt         *Attempt             `json:"last_attempt,omitempty"`
+	LastSuccessfulRead  *time.Time           `json:"last_successful_read,omitempty"`
+	SnapshotCount       *int                 `json:"snapshot_count,omitempty"`
+	LastCompletedAt     *time.Time           `json:"last_completed_at,omitempty"`
+	EvidenceCurrent     bool                 `json:"evidence_current_generation"`
+	RemovalPending      bool                 `json:"removal_pending"`
+	IntendedSourceCount int                  `json:"intended_source_count"`
+	Capacity            *CapacityEvidence    `json:"capacity,omitempty"`
+	Coverage            *CoverageEvidence    `json:"coverage,omitempty"`
+	Health              EvidenceHealth       `json:"health"`
 }
 type Attempt struct {
 	Generation string    `json:"generation"`
@@ -95,9 +111,20 @@ type Attempt struct {
 	FinishedAt time.Time `json:"finished_at"`
 	Outcome    string    `json:"outcome"`
 }
+
+// ProviderOption is one provider the console may offer, with a fixed reason
+// when it cannot be used here (platform_unsupported, reader_unavailable).
+type ProviderOption struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+}
 type Settings struct {
 	StateVersion
 	Configured      bool                 `json:"configured"`
+	Provider        string               `json:"provider,omitempty"`
+	Providers       []ProviderOption     `json:"providers"`
 	SourcePaths     []string             `json:"source_paths"`
 	VolumePath      string               `json:"volume_path,omitempty"`
 	RepositoryPath  string               `json:"repository_path,omitempty"`
@@ -108,6 +135,7 @@ type Settings struct {
 type ReviewRequest struct {
 	Generation          string              `json:"generation"`
 	Revision            uint64              `json:"revision"`
+	Provider            string              `json:"provider,omitempty"` // "" is restic
 	SourceSelections    []string            `json:"source_selections"`
 	VolumeSelection     string              `json:"volume_selection"`
 	RepositorySelection string              `json:"repository_selection"`
@@ -117,6 +145,7 @@ type ReviewRequest struct {
 type Review struct {
 	Generation        string              `json:"generation"`
 	Revision          uint64              `json:"revision"`
+	Provider          string              `json:"provider"`
 	Token             string              `json:"review_token"`
 	ExpiresAt         time.Time           `json:"expires_at"`
 	SourcePaths       []string            `json:"source_paths"`
@@ -145,7 +174,8 @@ type Service struct {
 	credentials      BackupCredentials
 	selections       *pathselection.Store
 	picker           FolderPicker
-	provider         localMetadataProvider
+	provider         localMetadataProvider // restic
+	timeMachine      localMetadataProvider
 	clock            func() time.Time
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -182,12 +212,37 @@ func newService(options ServiceOptions, provider localMetadataProvider, clock fu
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &Service{store: store, work: options.WorkGate, credentials: options.Credentials, selections: options.Selections, picker: options.Picker, provider: provider, clock: clock, ctx: ctx, cancel: cancel, releaseLifetime: release, reviews: map[string]pendingReview{}, slots: map[string]*workspaceOperationSlot{}, capacity: make(chan struct{}, 2), closeDone: make(chan struct{}), monitorJobs: make(chan struct{}, 2)}
-	if service.provider == nil && options.ExecutablePath != "" {
+	if provider == nil {
 		constructionCtx, stop := context.WithTimeout(ctx, 10*time.Second)
-		service.provider, _ = newPlatformProvider(constructionCtx, options.ExecutablePath, options.DataDir)
+		if options.ExecutablePath != "" {
+			service.provider, _ = newPlatformProvider(constructionCtx, options.ExecutablePath, options.DataDir)
+		}
+		// Time Machine is part of the OS: no operator-supplied executable.
+		service.timeMachine, _ = newPlatformTimeMachineProvider(constructionCtx, options.DataDir)
 		stop() // missing/unsupported tool leaves stored setup usable, never ready
 	}
 	return service, nil
+}
+
+// providerFor is the reader for a configuration's fixed provider id, or nil.
+func (s *Service) providerFor(provider string) localMetadataProvider {
+	switch provider {
+	case providerRestic:
+		return s.provider
+	case providerTimeMachine:
+		return s.timeMachine
+	default:
+		return nil
+	}
+}
+
+// recordProvider names the provider a record's configuration uses; a record
+// without one is measured against restic, as before Time Machine existed.
+func recordProvider(record localRecord) string {
+	if record.state != nil && record.state.Configuration != nil {
+		return record.state.Configuration.Provider
+	}
+	return providerRestic
 }
 
 func (s *Service) enter() (func(), error) {
@@ -359,10 +414,17 @@ func (s *Service) Review(ctx context.Context, owner, workspace string, request R
 	if !expectedRequest(record, request.Generation, request.Revision) {
 		return Review{}, ErrConfigurationChanged
 	}
+	switch request.Provider {
+	case "", providerRestic:
+	case providerTimeMachine:
+		return s.reviewTimeMachine(ctx, owner, workspace, record, request)
+	default:
+		return Review{}, ErrInvalidRequest
+	}
 	if !localID(request.Credential.VaultID) || !localID(request.Credential.RecordID) || !metadataID(request.Credential.Revision) {
 		return Review{}, ErrInvalidRequest
 	}
-	configuration := localConfiguration{Provider: "restic", Credential: localCredential{request.Credential.VaultID, request.Credential.RecordID, request.Credential.Revision}}
+	configuration := localConfiguration{Provider: providerRestic, Credential: localCredential{request.Credential.VaultID, request.Credential.RecordID, request.Credential.Revision}}
 	if request.UseSavedSelection {
 		if record.state == nil || record.state.Configuration == nil || len(request.SourceSelections) != 0 || request.VolumeSelection != "" || request.RepositorySelection != "" {
 			return Review{}, ErrInvalidRequest
@@ -440,7 +502,73 @@ func (s *Service) Review(ctx context.Context, owner, workspace string, request R
 	for _, source := range configuration.Sources {
 		paths = append(paths, source.Path)
 	}
-	return Review{Generation: request.Generation, Revision: request.Revision, Token: token, ExpiresAt: expires, SourcePaths: paths, VolumePath: configuration.VolumePath, RepositoryPath: configuration.RepositoryPath, Credential: request.Credential}, nil
+	return Review{Generation: request.Generation, Revision: request.Revision, Provider: providerRestic, Token: token, ExpiresAt: expires, SourcePaths: paths, VolumePath: configuration.VolumePath, RepositoryPath: configuration.RepositoryPath, Credential: request.Credential}, nil
+}
+
+// reviewTimeMachine resolves only chosen source tokens. Time Machine has no
+// credential, repository or volume to select, and any supplied is refused, so
+// a review can never carry restic authority into a Time Machine read.
+func (s *Service) reviewTimeMachine(ctx context.Context, owner, workspace string, record localRecord, request ReviewRequest) (Review, error) {
+	if !timeMachinePlatformSupported {
+		return Review{}, ErrUnavailable
+	}
+	if request.Credential != (CredentialReference{}) || request.VolumeSelection != "" || request.RepositorySelection != "" {
+		return Review{}, ErrInvalidRequest
+	}
+	configuration := localConfiguration{Provider: providerTimeMachine}
+	if request.UseSavedSelection {
+		if record.state == nil || record.state.Configuration == nil || record.state.Configuration.Provider != providerTimeMachine || len(request.SourceSelections) != 0 {
+			return Review{}, ErrInvalidRequest
+		}
+		configuration = *record.state.Configuration
+	} else {
+		if len(request.SourceSelections) < 1 || len(request.SourceSelections) > maxSelectedSources || s.selections == nil {
+			return Review{}, ErrInvalidRequest
+		}
+		for _, token := range request.SourceSelections {
+			if len(token) < 1 || len(token) > 256 {
+				return Review{}, ErrInvalidRequest
+			}
+			path, err := s.selections.ResolveFor(token, selectionScope(owner, workspace, "source"))
+			if err != nil {
+				return Review{}, ErrReviewExpired
+			}
+			configuration.Sources = append(configuration.Sources, localSource{Path: path})
+		}
+	}
+	if !configuration.valid(false) {
+		return Review{}, ErrInvalidRequest
+	}
+	if err := s.authorize(ctx, record.expected(), true); err != nil {
+		return Review{}, err
+	}
+	now := s.clock().UTC()
+	token, expires, err := s.addReview(workspace, pendingReview{expected: record.expected(), configuration: configuration, expires: now.Add(5 * time.Minute)}, now)
+	if err != nil {
+		return Review{}, err
+	}
+	paths := make([]string, 0, len(configuration.Sources))
+	for _, source := range configuration.Sources {
+		paths = append(paths, source.Path)
+	}
+	return Review{Generation: request.Generation, Revision: request.Revision, Provider: providerTimeMachine, Token: token, ExpiresAt: expires, SourcePaths: paths}, nil
+}
+
+// providerOptions lists Time Machine first, then restic, each with whether
+// this server can read it and a fixed reason when it cannot.
+func (s *Service) providerOptions() []ProviderOption {
+	tm := ProviderOption{ID: providerTimeMachine, Label: "Time Machine", Available: s.timeMachine != nil}
+	switch {
+	case !timeMachinePlatformSupported:
+		tm.Reason = "platform_unsupported"
+	case s.timeMachine == nil:
+		tm.Reason = "reader_unavailable"
+	}
+	restic := ProviderOption{ID: providerRestic, Label: "restic", Available: s.provider != nil}
+	if s.provider == nil {
+		restic.Reason = "reader_unavailable"
+	}
+	return []ProviderOption{tm, restic}
 }
 
 func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Status, error) {
@@ -460,7 +588,11 @@ func (s *Service) GetStatus(ctx context.Context, owner, workspace string) (Statu
 // a provider/password callback. Owning readers share the same time policy.
 func (s *Service) storedStatus(record localRecord) Status {
 	workspace := record.authority.Workspace
-	status := Status{StateVersion: revisionOf(record), WorkspaceID: workspace, ServerTime: s.clock().UTC(), Connection: "not_configured", RuntimeAvailable: s.provider != nil, Destination: "not_checked", Monitoring: "manual_only"}
+	reader := s.providerFor(recordProvider(record))
+	status := Status{StateVersion: revisionOf(record), WorkspaceID: workspace, ServerTime: s.clock().UTC(), Connection: "not_configured", RuntimeAvailable: reader != nil, Destination: "not_checked", Monitoring: "manual_only"}
+	if record.state != nil && record.state.Configuration != nil {
+		status.Provider = record.state.Configuration.Provider
+	}
 	s.mu.Lock()
 	monitoringBound := s.monitoringBound
 	if slot := s.slots[workspace]; slot != nil {
@@ -483,7 +615,7 @@ func (s *Service) storedStatus(record localRecord) Status {
 		status.Monitoring = "review_required"
 		if periodicReadAdmissible(record) {
 			status.Monitoring = "unavailable"
-			if monitoringBound && s.provider != nil {
+			if monitoringBound && reader != nil {
 				status.Monitoring = "active"
 			}
 		}
@@ -538,10 +670,46 @@ func (s *Service) storedStatus(record localRecord) Status {
 					status.LastCompletedAt = &value
 				}
 			}
+			if observation.TimeMachine != nil {
+				applyTimeMachineStatus(&status, *observation.TimeMachine)
+			}
 		}
 	}
 	status.Health = evaluateHealth(status, state, status.ServerTime)
 	return status
+}
+
+// applyTimeMachineStatus projects the private Time Machine evidence: without
+// Full Disk Access completions and capacity are unknown, never zero, and a
+// destination that is listed but not mounted is absent.
+func applyTimeMachineStatus(status *Status, evidence localTimeMachine) {
+	tm := &TimeMachineEvidence{PermissionRequired: !evidence.PreferencesReadable, Destinations: len(evidence.Destinations), Running: evidence.Running, SourceStates: append([]string{}, evidence.Sources...)}
+	for _, destination := range evidence.Destinations {
+		if destination.Mounted {
+			tm.MountedDestinations++
+		}
+	}
+	for _, state := range evidence.Sources {
+		switch state {
+		case timeMachineExcluded:
+			tm.ExcludedSources++
+		case timeMachineUnknown:
+			tm.UnknownSources++
+		}
+	}
+	status.TimeMachine = tm
+	status.Coverage = nil // a Time Machine backup declares no paths
+	if tm.PermissionRequired {
+		status.SnapshotCount, status.LastCompletedAt, status.Capacity = nil, nil, nil
+	}
+	switch {
+	case tm.Destinations == 0 && !tm.PermissionRequired:
+		status.Destination = "not_configured"
+	case tm.Destinations > 0 && tm.MountedDestinations == 0:
+		status.Destination = "absent"
+	case tm.MountedDestinations > 0:
+		status.Destination = "present"
+	}
 }
 func (s *Service) GetSettings(ctx context.Context, owner, workspace string) (Settings, error) {
 	release, err := s.enter()
@@ -553,13 +721,16 @@ func (s *Service) GetSettings(ctx context.Context, owner, workspace string) (Set
 	if err != nil {
 		return Settings{}, err
 	}
-	settings := Settings{StateVersion: revisionOf(record), SourcePaths: []string{}, PickerAvailable: s.picker != nil && s.picker.Available(), Monitoring: storedMonitoring(record)}
+	settings := Settings{StateVersion: revisionOf(record), Providers: s.providerOptions(), SourcePaths: []string{}, PickerAvailable: s.picker != nil && s.picker.Available(), Monitoring: storedMonitoring(record)}
 	if record.state != nil && record.state.Configuration != nil {
 		configuration := record.state.Configuration
 		settings.Configured = true
+		settings.Provider = configuration.Provider
 		settings.VolumePath = configuration.VolumePath
 		settings.RepositoryPath = configuration.RepositoryPath
-		settings.Credential = &CredentialReference{configuration.Credential.VaultID, configuration.Credential.RecordID, configuration.Credential.Revision}
+		if configuration.Provider == providerRestic {
+			settings.Credential = &CredentialReference{configuration.Credential.VaultID, configuration.Credential.RecordID, configuration.Credential.Revision}
+		}
 		for _, source := range configuration.Sources {
 			settings.SourcePaths = append(settings.SourcePaths, source.Path)
 		}
@@ -599,6 +770,9 @@ func (s *Service) Close(ctx context.Context) error {
 	if !s.stopped {
 		if s.provider != nil {
 			s.provider.close()
+		}
+		if s.timeMachine != nil {
+			s.timeMachine.close()
 		}
 		s.releaseLifetime()
 		s.stopped = true

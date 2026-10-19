@@ -9,6 +9,8 @@ import (
 // persistence object. No root/path, volume/repository/snapshot ID, Vault reference,
 // review/grant token, freeform report note or external label has a field here.
 type AdvisorFacts struct {
+	Provider           string         `json:"provider,omitempty"`
+	SourceCoverage     []string       `json:"source_coverage,omitempty"`
 	Connection         string         `json:"connection"`
 	Destination        string         `json:"destination"`
 	Monitoring         string         `json:"monitoring"`
@@ -37,5 +39,5 @@ func (s *Service) ReadBackupAdvisor(ctx context.Context, owner, workspace string
 		return AdvisorFacts{}, ErrWorkspaceUnavailable
 	}
 	facts := read.Sources[0]
-	return AdvisorFacts{Connection: facts.Connection, Destination: facts.Destination, Monitoring: facts.Monitoring, ReaderAvailable: facts.ReaderAvailable, LastSuccessfulRead: facts.LastSuccessfulRead, LastCompletedAt: facts.LastCompletedAt, SnapshotCount: facts.SnapshotCount, LastAttemptOutcome: facts.LastAttemptOutcome, Route: facts.Route, AsOf: facts.AsOf, EvidenceCurrent: facts.EvidenceCurrent, Health: facts.Health, RecoveryState: facts.RecoveryState, RecoveryTestedAt: facts.RecoveryTestedAt}, nil
+	return AdvisorFacts{Provider: facts.Provider, SourceCoverage: facts.SourceCoverage, Connection: facts.Connection, Destination: facts.Destination, Monitoring: facts.Monitoring, ReaderAvailable: facts.ReaderAvailable, LastSuccessfulRead: facts.LastSuccessfulRead, LastCompletedAt: facts.LastCompletedAt, SnapshotCount: facts.SnapshotCount, LastAttemptOutcome: facts.LastAttemptOutcome, Route: facts.Route, AsOf: facts.AsOf, EvidenceCurrent: facts.EvidenceCurrent, Health: facts.Health, RecoveryState: facts.RecoveryState, RecoveryTestedAt: facts.RecoveryTestedAt}, nil
 }

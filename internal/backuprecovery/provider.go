@@ -16,6 +16,19 @@ var (
 	errCredentialUnavailable = errors.New("backup credential is unavailable")
 )
 
+// Fixed provider ids. Nothing else is ever a configuration's provider.
+const (
+	providerRestic      = "restic"
+	providerTimeMachine = "time_machine"
+
+	// ProviderTimeMachine is the exported id summary readers compare against.
+	ProviderTimeMachine = providerTimeMachine
+)
+
+// TimeMachinePlatformSupported reports whether this build can ever read Time
+// Machine (Apple-silicon macOS). It is a build fact, not an OS query.
+func TimeMachinePlatformSupported() bool { return timeMachinePlatformSupported }
+
 type backupPasswordUse func(context.Context, func([]byte) error) error
 
 type providerReadResult struct {
@@ -23,6 +36,7 @@ type providerReadResult struct {
 	observedAt    time.Time
 	snapshots     []localSnapshot
 	capacity      *localCapacity
+	timeMachine   *localTimeMachine // Time Machine reads only
 }
 
 // Private adapter boundary, not a runtime grant or public command interface.

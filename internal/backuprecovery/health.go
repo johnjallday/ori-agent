@@ -182,6 +182,23 @@ func evaluateHealth(status Status, state *localState, now time.Time) EvidenceHea
 			health.Capacity = "unknown"
 		}
 	}
+	if tm := status.TimeMachine; tm != nil && status.EvidenceCurrent {
+		// Without Full Disk Access nothing about completion is known, and "not
+		// set up" is never claimed: an unreadable list is not an empty one.
+		switch {
+		case tm.PermissionRequired:
+			health.Recency = "unknown"
+			add("permission_required")
+		case tm.Destinations == 0:
+			add("not_configured")
+		}
+		if tm.Destinations > 0 && tm.MountedDestinations == 0 {
+			add("destination_absent")
+		}
+		if tm.ExcludedSources > 0 {
+			add("source_excluded")
+		}
+	}
 	if status.Monitoring == "review_required" {
 		add("monitoring_review_required")
 	}

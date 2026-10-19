@@ -85,6 +85,8 @@ export function todayLabel(value) {
 
 // The controls an unfinished workspace build may offer from Today (FR42).
 const WORKSPACE_BUILD_ACTIONS = ['resume', 'discard'];
+// The protection line's only in-place control; "Check protection" is its route.
+const BACKUP_COVERAGE_ACTIONS = ['not_now'];
 
 export function todaySectionItems(section) {
   const seen = new Set();
@@ -113,15 +115,48 @@ export function todaySectionItems(section) {
         kind: String(item?.kind || ''),
         sourceAt: String(item?.source_at || '')
       };
-      // Every row retains canonical identity; only builds have in-place controls.
+      // Every row retains canonical identity; only builds and the protection
+      // line have in-place controls.
       if (row.kind === 'workspace_build') {
         row.id = String(item?.id || '').trim();
         row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
           WORKSPACE_BUILD_ACTIONS.includes(action)
         );
       }
+      if (row.kind === 'backup_coverage') {
+        row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
+          BACKUP_COVERAGE_ACTIONS.includes(action)
+        );
+      }
       return row;
     });
+}
+
+// The protection line's controls: "Check protection" follows the server's
+// route; "Not now" is quiet and only offered when the server lists it.
+export function backupCoverageControls(row) {
+  const controls = [];
+  if (row?.route) {
+    controls.push({ kind: 'link', label: 'Check protection', href: row.route, primary: true });
+  }
+  if (row?.actions?.includes('not_now')) {
+    controls.push({ kind: 'button', label: 'Not now', action: 'not_now', primary: false });
+  }
+  return controls;
+}
+
+// "Not now" sends no data: the server records the decline from its own count.
+export async function declineBackupCoverage(fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl('/api/personal-assistant/today/backup-coverage/decline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: '{}'
+    });
+    return Boolean(response?.ok);
+  } catch (_) {
+    return false;
+  }
 }
 
 // Resume opens the Create Workspace dialog in build mode on the open build.
@@ -582,7 +617,9 @@ function renderCompactRows(list, rows, skipCards = false) {
     // inert row that looks like a competing action.
     if (skipCards && (row.kind === 'folder_offer' || row.kind === 'hq_setup')) return;
     const li = document.createElement('li');
-    if (row.route) {
+    // The protection line's route is its primary button, not its title.
+    if (row.kind === 'backup_coverage') li.textContent = row.title;
+    else if (row.route) {
       const link = document.createElement('a');
       link.href = row.route;
       link.textContent = row.title;
@@ -616,6 +653,31 @@ function renderCompactRows(list, rows, skipCards = false) {
           else void discardWorkspaceBuild(row.id, button);
         });
         actions.append(button);
+      }
+      li.append(actions);
+    }
+    if (row.kind === 'backup_coverage') {
+      li.classList.add('personal-assistant-today__coverage');
+      const actions = document.createElement('div');
+      actions.className = 'personal-assistant-today__actions';
+      for (const control of backupCoverageControls(row)) {
+        const element = document.createElement(control.kind === 'link' ? 'a' : 'button');
+        element.className = control.primary
+          ? 'personal-assistant-today__action personal-assistant-today__action--primary'
+          : 'personal-assistant-today__action personal-assistant-today__action--quiet';
+        element.textContent = control.label;
+        if (control.kind === 'link') element.href = control.href;
+        else {
+          element.type = 'button';
+          element.dataset.backupCoverageAction = control.action;
+          element.addEventListener('click', async () => {
+            element.disabled = true;
+            if (await declineBackupCoverage()) li.remove();
+            else element.disabled = false;
+            void loadToday();
+          });
+        }
+        actions.append(element);
       }
       li.append(actions);
     }
