@@ -9,7 +9,8 @@ import {
   isPanelRequest,
   nextConversationId,
   shouldRestoreInput,
-  tagMessageRow
+  tagMessageRow,
+  unansweredTurnLine
 } from './personal-assistant-conversation.js';
 
 test('a request carries only an opaque conversation ID, or none for a new conversation', () => {
@@ -55,6 +56,28 @@ test('unsent text comes back only when the turn was refused or unanswered', () =
   assert.equal(shouldRestoreInput(null), false);
 });
 
+test('an unanswered turn is one line that says why and that the draft is kept', () => {
+  assert.equal(
+    unansweredTurnLine({ model_unavailable: true, failure_reason: 'provider_overloaded' }),
+    'Assistant could not answer (model at capacity). Your draft is kept.'
+  );
+  assert.equal(
+    unansweredTurnLine({ model_unavailable: true, failure_reason: 'model_timeout' }),
+    'Assistant could not answer (the model timed out). Your draft is kept.'
+  );
+  // An unknown reason is never printed as a code.
+  assert.equal(
+    unansweredTurnLine({ model_unavailable: true, failure_reason: 'server_overloaded_v2' }),
+    'Assistant could not answer (the model is unavailable). Your draft is kept.'
+  );
+  assert.equal(unansweredTurnLine({ response: 'An answer' }), '');
+  // The conversation bar does not say it a second time.
+  assert.equal(
+    conversationNotice({ model_unavailable: true, conversation: { id: 'c', stored: false } }),
+    ''
+  );
+});
+
 test('saved turns stay quiet while history limitations remain explicit', () => {
   const started = conversationNotice(
     { conversation: { id: 'c', started: true, stored: true } },
@@ -74,12 +97,13 @@ test('saved turns stay quiet while history limitations remain explicit', () => {
     conversationNotice({ response: 'draft', conversation: { id: 'c', stored: false } }, 'Nova'),
     /could not be saved/
   );
-  assert.match(
+  // An unanswered turn says so in its own line (unansweredTurnLine), once.
+  assert.equal(
     conversationNotice(
       { model_unavailable: true, conversation: { id: 'c', stored: false } },
       'Nova'
     ),
-    /was not saved/
+    ''
   );
   assert.equal(
     conversationNotice({ conversation: { error: 'conversation_not_found' } }, 'Nova'),

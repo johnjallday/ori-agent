@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -159,7 +160,45 @@ func TestFolderDigest_AProposedGroupIsNamedAroundWhatAlreadyExists(t *testing.T)
 	}
 }
 
-func TestFolderDigest_NoThanksOnAGroupIsAboutThatFolderOnly(t *testing.T) {
+func TestFolderDigest_NoThanksOnAGroupIsShownWhenTheFolderIsShownAgain(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	offer, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offer.Declined != nil {
+		t.Fatalf("a folder never declined says it was: %+v", offer.Declined)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "no-1"}); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := f.store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The No thanks is about this folder only; no kind of work was declined.
+	key := doc.Offer(offer.ID).Subject.Key
+	if !doc.Tombstoned(key) || len(doc.DomainDeclines) != 0 {
+		t.Fatalf("after No thanks: tombstones %+v, declines %+v", doc.Tombstones, doc.DomainDeclines)
+	}
+	// Shown again, the folder is still proposed as its group, and the card says
+	// when the user said no so it can be asked about again.
+	again, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Structure == nil || !again.Structure.ProposesWorkspaces() || !again.Subject.IsRoot || len(again.Structure.Included()) != 6 ||
+		again.Declined == nil || again.Declined.FolderKey != key || again.Declined.Name != "Music" || !again.Declined.At.Equal(f.now) {
+		t.Fatalf("a declined folder was not proposed as its group: %+v / %+v", again, again.Declined)
+	}
+	stored, err := f.store.Read(ctx, "local")
+	if err != nil || stored.Offer(again.ID).Declined == nil {
+		t.Fatalf("the decline was not kept on the stored offer: %v", err)
+	}
+}
+
+func TestFolderDigest_ForgetAsksAboutAFolderAgain(t *testing.T) {
 	ctx := context.Background()
 	f, _ := homeCollectionFixture(t)
 	offer, err := f.service.ScanChip(ctx, "local", "music")
@@ -169,22 +208,93 @@ func TestFolderDigest_NoThanksOnAGroupIsAboutThatFolderOnly(t *testing.T) {
 	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "no-1"}); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := f.store.Read(ctx, "local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The folder is not asked about again; no kind of work was declined.
-	if !doc.Tombstoned(doc.Offer(offer.ID).Subject.Key) || len(doc.DomainDeclines) != 0 {
-		t.Fatalf("after No thanks: tombstones %+v, declines %+v", doc.Tombstones, doc.DomainDeclines)
-	}
-	// Shown again, the folder is not proposed as a group; its projects can
-	// still be offered one by one, as before.
 	again, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil || again.Declined == nil {
+		t.Fatalf("rescan after No thanks: %+v, %v", again, err)
+	}
+	view, err := f.service.Forget(ctx, "local", FolderForgetInput{FolderKey: again.Declined.FolderKey})
+	if err != nil || view.Offer == nil || view.Offer.ID != again.ID || view.Offer.Declined != nil || view.Offer.Structure == nil {
+		t.Fatalf("Ask again: %+v, %v", view.Offer, err)
+	}
+	doc, err := f.store.Read(ctx, "local")
+	if err != nil || len(doc.Tombstones) != 0 || doc.Offer(again.ID).Declined != nil || doc.Offer(offer.ID).Status != FolderOfferDeclined {
+		t.Fatalf("after Ask again: tombstones %+v, %v", doc.Tombstones, err)
+	}
+	// Asking again about a folder that is not declined changes nothing.
+	if _, err := f.service.Forget(ctx, "local", FolderForgetInput{FolderKey: again.Declined.FolderKey}); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := f.store.Read(ctx, "local"); err != nil || replay.Version != doc.Version {
+		t.Fatalf("a second Ask again wrote the digest: %v", err)
+	}
+}
+
+func TestFolderDigest_ShowBringsADeclinedKindOfWorkBack(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	if err := os.WriteFile(filepath.Join(f.home, "Desktop", "Song.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The older app card said no as well; it is the answer the digest started from.
+	f.service.deps.LegacyDeclined = func(context.Context, string, string) (bool, error) { return true, nil }
+	declinedAt := f.now.AddDate(0, 0, -13)
+	if _, err := f.store.Mutate(ctx, "local", func(doc *FolderDigestDocument) error {
+		doc.DomainDeclines = append(doc.DomainDeclines, FolderDomainDecline{Domain: "music_production", FirstEvidence: "single_project", Count: 1, At: declinedAt})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || hidden.Capability != nil || hidden.CapabilityHidden == nil || hidden.CapabilityHidden.Domain != "music_production" ||
+		hidden.CapabilityHidden.Label != "REAPER setup" || !hidden.CapabilityHidden.At.Equal(declinedAt) {
+		t.Fatalf("a declined kind of work on Home: %+v / %+v, %v", hidden.Capability, hidden.CapabilityHidden, err)
+	}
+	view, err := f.service.Forget(ctx, "local", FolderForgetInput{Domain: "music_production"})
+	if err != nil || view.Offer == nil || view.Offer.ID != hidden.ID || view.Offer.Capability == nil || view.Offer.CapabilityHidden != nil {
+		t.Fatalf("Show: %+v, %v", view.Offer, err)
+	}
+	doc, err := f.store.Read(ctx, "local")
+	if err != nil || len(doc.DomainDeclines) != 0 || len(doc.DomainsAskedAgain) != 1 || doc.DomainsAskedAgain[0] != "music_production" {
+		t.Fatalf("after Show: declines %+v, asked again %v, %v", doc.DomainDeclines, doc.DomainsAskedAgain, err)
+	}
+	// The older answer is not read again: the next look leads with it.
+	again, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || again.Capability == nil || again.CapabilityHidden != nil {
+		t.Fatalf("the older answer came back: %+v, %v", again, err)
+	}
+}
+
+func TestFolderDigest_ForgetTakesOneFolderKeyOrOneKnownDomain(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	for name, input := range map[string]FolderForgetInput{
+		"nothing":         {},
+		"both":            {FolderKey: strings.Repeat("a", 64), Domain: "music_production"},
+		"a path":          {FolderKey: "/Users/riley/Albums"},
+		"a short key":     {FolderKey: "abc"},
+		"an unknown kind": {Domain: "chess"},
+	} {
+		if _, err := f.service.Forget(ctx, "local", input); !errors.Is(err, ErrValidation) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestFolderDigest_AReadyHomeIsAChoiceNotTheDefault(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	offer, err := f.service.ScanChip(ctx, "local", "music")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Structure != nil || again.Subject.IsRoot {
-		t.Fatalf("a declined folder was proposed as a group again: %+v", again)
+	if offer.Structure == nil || offer.Structure.Group.Type != FolderGroupPlain || offer.Structure.Group.Name != "Music" ||
+		!offer.Structure.Group.HomeAvailable || offer.Structure.Group.Availability != "" || offer.Portfolio == nil {
+		t.Fatalf("Home offer with the Home ready: %+v", offer.Structure)
+	}
+	listed, err := f.service.AdjustStructure(ctx, "local", offer.ID, FolderStructureAdjustment{GroupType: FolderGroupLibrary})
+	if err != nil || listed.Structure.Group.Type != FolderGroupLibrary || listed.Structure.Group.Name != "Music Production Home" {
+		t.Fatalf("Adjust → the Home: %+v, %v", listed.Structure, err)
 	}
 }
 

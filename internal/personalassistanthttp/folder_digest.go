@@ -450,6 +450,49 @@ func (h *Handler) AdjustFolderStructure(w http.ResponseWriter, r *http.Request) 
 	orihttp.Success(w, map[string]any{"offer": offer})
 }
 
+// folderDigestForgetter is the part of the digest service behind Ask again and
+// Show. It is asked for by assertion, like Adjust.
+type folderDigestForgetter interface {
+	Forget(ctx context.Context, userID string, input personalassistant.FolderForgetInput) (personalassistant.FolderDigestView, error)
+}
+
+// ForgetFolderDigest undoes one earlier No thanks: a folder's, named by the key
+// its tombstone stores (never a path), or a kind of work's, named by its
+// domain. Nothing is scanned or set up; the answer is the digest as it is now.
+// POST /api/personal-assistant/folder-digest/forget
+func (h *Handler) ForgetFolderDigest(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	forgetter, ok := any(h.folderDigestService()).(folderDigestForgetter)
+	if !ok {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	var req struct {
+		FolderKey string `json:"folder_key"`
+		Domain    string `json:"domain"`
+		RequestID string `json:"request_id"`
+	}
+	if !decodeFolderDigestBody(w, r, &req, "folder_key", "domain", "request_id") {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	view, err := forgetter.Forget(r.Context(), userID, personalassistant.FolderForgetInput{FolderKey: req.FolderKey, Domain: req.Domain})
+	if errors.Is(err, personalassistant.ErrValidation) {
+		orihttp.BadRequest(w, "Name one folder by its key, or one kind of work")
+		return
+	}
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_digest": view})
+}
+
 // folderDigestService returns the digest service, or nil when none is wired.
 func (h *Handler) folderDigestService() any {
 	if h == nil || h.folderDigest == nil {

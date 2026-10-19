@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   setupCandidates,
+  reviewLinkHidden,
   choiceIsCurrent,
   currentReview,
   currentSuggestion,
@@ -455,14 +456,18 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
     view.headline.map(part => part.text),
     ['Albums', ' has 5 Session folders and 1 other folder.']
   );
-  assert.equal(view.question, 'Set up a group with 6 workspaces?');
-  assert.equal(view.structure.label, 'Rule-based setup option');
+  assert.equal(view.question, 'Set up Albums as a group?');
+  // The proposal under the question names itself without asking it again.
+  assert.equal(view.structure.label, '');
+  assert.equal(view.structure.ariaLabel, 'Set up Albums as a group?');
+  assert.equal(
+    view.structure.description,
+    '6 workspaces, one per folder · linked to their folders · nothing is moved'
+  );
   assert.equal(view.structure.members.length, 6);
-  // What the proposal goes without is said once, by the proposal card.
+  // What a member goes without is its short note, never a sentence.
   assert.equal(view.capabilityDetail, '');
-  assert.deepEqual(view.structure.notes, [
-    'The Home is not installed; a plain group is proposed instead.'
-  ]);
+  assert.deepEqual(view.structure.notes, []);
   assert.deepEqual(
     view.actions.map(action => action.label),
     ['Adjust…', 'Keep chatting']
@@ -589,4 +594,18 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
   assert.equal(structureCounts(mixed), '5 project folders and 1 other folder');
   mixed.members = mixed.members.slice(0, 1);
   assert.equal(structureCounts(mixed), '1 Repository folder');
+});
+
+test('Review setup stays away for a collection, whose card is the way in', () => {
+  const observed = {
+    projects: [
+      { id: 'root', name: 'Albums', root: true },
+      { id: 'c1', name: 'Album-1' }
+    ]
+  };
+  // A single folder (or a collection with no proposal) keeps the link.
+  assert.equal(reviewLinkHidden(observed, null), false);
+  assert.equal(reviewLinkHidden(observed, albumsStructure()), true);
+  // Nothing to set up: no link either way.
+  assert.equal(reviewLinkHidden({ projects: [] }, null), true);
 });

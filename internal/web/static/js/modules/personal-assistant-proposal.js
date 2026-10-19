@@ -17,7 +17,32 @@ const effects = {
 };
 
 // How many member rows a card shows before "Show all".
-export const STRUCTURE_ROWS = 6;
+export const STRUCTURE_ROWS = 3;
+
+// shortDate is a host timestamp as a card says it: "Oct 6". An unreadable one
+// is "earlier".
+export function shortDate(at) {
+  const date = new Date(String(at || ''));
+  return Number.isNaN(date.getTime())
+    ? 'earlier'
+    : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// declinedLine is the chip that stands in for Set up on a folder the user said
+// No thanks to: when, and the way to change their mind.
+export function declinedLine(declined, folder) {
+  const name = bounded(declined?.name) || bounded(folder) || 'this folder';
+  const when = shortDate(declined?.at);
+  return `You said no to ${name} ${when === 'earlier' ? 'earlier' : `on ${when}`} · Ask again`;
+}
+
+// structureLine is the one line under a proposed group's question: how many
+// workspaces it makes, and that each stays linked where its folder is.
+export function structureLine(count) {
+  return count === 1
+    ? '1 workspace · linked to its folder · nothing is moved'
+    : `${count} workspaces, one per folder · linked to their folders · nothing is moved`;
+}
 
 // structureOption wraps a bare structure record (the attach response, an offer)
 // as the option a proposal is rendered from.
@@ -55,25 +80,45 @@ function structureView(option) {
       note: member.availability ? 'plain for now' : ''
     }));
   const existing = s.group.destination_state === 'existing';
+  const omitted = Number.isInteger(s.omitted) && s.omitted > 0 ? s.omitted : 0;
+  if (arranged)
+    return {
+      kind: 'structure',
+      state: 'proposed',
+      art: 'district',
+      label: 'Group from a saved arrangement',
+      subject: bounded(s.group.name) || 'Selected folder',
+      scope: `${members.length} workspace${members.length === 1 ? '' : 's'}`,
+      description: `Only the folders the saved arrangement selected. ${effects.structure}`,
+      destination: 'Creates this group',
+      action: 'Review group setup',
+      members,
+      notes: (Array.isArray(s.notes) ? s.notes : []).map(bounded).filter(Boolean),
+      omitted
+    };
+  // The rule-based proposal is one question and one line. What a member goes
+  // without is its short note; the plan, once reviewed, says the rest.
+  const folder = bounded(s.folder) || bounded(s.group.name) || 'this folder';
+  const group = bounded(s.group.name);
   return {
     kind: 'structure',
     state: 'proposed',
     art: 'district',
-    label: arranged ? 'Group from a saved arrangement' : 'Rule-based setup option',
-    subject: bounded(s.group.name) || 'Selected folder',
-    scope: `${members.length} workspace${members.length === 1 ? '' : 's'}`,
-    description: arranged
-      ? `Only the folders the saved arrangement selected. ${effects.structure}`
-      : `Not an agent assessment. ${effects.structure}`,
+    label: `Set up ${folder} as a group?`,
+    subject: '',
+    scope: '',
+    description: structureLine(members.length),
     destination: existing
-      ? `Adds to your existing ${bounded(s.group.name)}`
+      ? `Adds to your existing ${group}`
       : s.group.type === 'home'
-        ? 'Creates this Home'
-        : 'Creates this group',
-    action: 'Review group setup',
+        ? `Creates ${group}`
+        : group && group !== folder
+          ? `Creates the group ${group}`
+          : '',
+    action: 'Set up',
     members,
-    notes: (Array.isArray(s.notes) ? s.notes : []).map(bounded).filter(Boolean),
-    omitted: Number.isInteger(s.omitted) && s.omitted > 0 ? s.omitted : 0
+    notes: [],
+    omitted
   };
 }
 
@@ -167,7 +212,8 @@ export function renderProposal(view, doc, art) {
   card.className = 'personal-assistant-proposal';
   card.dataset.proposalKind = view.kind;
   card.dataset.proposalState = view.state;
-  card.setAttribute('aria-label', view.label);
+  // A card under its own question names itself without repeating it.
+  card.setAttribute('aria-label', view.ariaLabel || view.label);
   const image = doc.createElement('div');
   image.className = 'personal-assistant-proposal__art';
   image.setAttribute('aria-hidden', 'true');
@@ -182,6 +228,7 @@ export function renderProposal(view, doc, art) {
     ['description', view.description],
     ['destination', view.destination]
   ]) {
+    if (!value) continue;
     const node = doc.createElement('p');
     node.className = `personal-assistant-proposal__${className}`;
     node.textContent = value;

@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 import {
   createFolderContextController,
   discussionChips,
+  emptySendView,
   folderContextChoices,
+  folderDecline,
+  structureCardView,
   FOLDER_DISCLOSURE,
   observationSummary,
   coverageSummary
@@ -377,10 +380,147 @@ test('an attached collection keeps its proposed group as a local preview until S
   assert.equal(f.controller.state.structure, null);
 });
 
+test('the attach card is the proposal with Set up, Adjust and Not now, or one line', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  const declined = { folder_key: 'a'.repeat(64), name: 'Albums', at: '2026-10-06T08:02:00Z' };
+  let reply = { observation: observation('a'), revision: '', structure };
+  const f = fixture(async () => reply);
+  await f.controller.select('chip', 'downloads');
+  let view = structureCardView(f.controller.state);
+  assert.equal(view.kind, 'proposal');
+  assert.deepEqual(
+    view.actions.map(action => [action.label, action.disabled]),
+    [
+      ['Set up', false],
+      ['Adjust…', false],
+      ['Not now', false]
+    ]
+  );
+  // Not now keeps this folder's card away; the next attach is a new folder.
+  assert.equal(structureCardView(f.controller.state, 'a').kind, 'none');
+  assert.equal(structureCardView(f.controller.state, 'other').kind, 'proposal');
+
+  // An earlier No thanks keeps the card; its chip stands where Set up would.
+  reply = { observation: observation('b'), revision: '', structure, declined };
+  await f.controller.select('chip', 'downloads');
+  assert.deepEqual(f.controller.state.declined, declined);
+  view = structureCardView(f.controller.state);
+  assert.equal(view.kind, 'proposal');
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['ask', 'You said no to Albums on Oct 6 · Ask again'],
+      ['adjust', 'Adjust…'],
+      ['later', 'Not now']
+    ]
+  );
+  // A decline with no usable key is not shown as one.
+  reply = { observation: observation('c'), revision: '', structure, declined: { name: 'Albums' } };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(f.controller.state.declined, null);
+
+  // No card: the reason in one line, never a code.
+  for (const [reason, line] of [
+    [
+      'review_pending',
+      'Another setup review is open. Finish or close it to see the proposal for this folder.'
+    ],
+    ['setup_unavailable', 'Setting up workspaces is not available here.']
+  ]) {
+    reply = { observation: observation(reason), revision: '', structure_unavailable: reason };
+    await f.controller.select('chip', 'downloads');
+    view = structureCardView(f.controller.state);
+    assert.equal(view.kind, 'unavailable');
+    assert.equal(view.line, line);
+  }
+  reply = { observation: observation('e'), revision: '', structure_unavailable: 'surprise' };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(structureCardView(f.controller.state).kind, 'none');
+  // A single folder has neither.
+  reply = { observation: observation('f'), revision: '' };
+  await f.controller.select('chip', 'desktop');
+  assert.equal(structureCardView(f.controller.state).kind, 'none');
+  assert.equal(folderDecline({ ...declined, folder_key: '../etc' }), null);
+});
+
+test('the proposal card stays when the turn sent with it gets no answer', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  const f = fixture(async () => ({ observation: observation('a'), revision: '', structure }));
+  await f.controller.select('chip', 'downloads');
+  // Send asks for the references; an unanswered turn saves nothing, so the
+  // folder is never accepted into a conversation and the preview stays.
+  assert.ok(f.controller.request());
+  assert.equal(structureCardView(f.controller.state).kind, 'proposal');
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  // Retry asks again with the same references.
+  assert.deepEqual(f.controller.request(), f.controller.request());
+});
+
+test('Ask again sends only the decline key and gives the card its Set up back', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  const declined = { folder_key: 'b'.repeat(64), name: 'Albums', at: '2026-10-06T08:02:00Z' };
+  let forget = async () => ({ folder_digest: {} });
+  const f = fixture(async (url, body) =>
+    url.endsWith('/select')
+      ? { observation: observation('a'), revision: '', structure, declined }
+      : forget(url, body)
+  );
+  await f.controller.select('chip', 'downloads');
+  assert.equal(await f.controller.askAgain(), true);
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1].url, '/api/personal-assistant/folder-digest/forget');
+  assert.deepEqual(f.calls[1].body, { folder_key: declined.folder_key });
+  assert.equal(f.controller.state.declined, null);
+  // The folder was not looked at again: same observation, same proposal.
+  assert.equal(f.controller.state.observation.id, 'a');
+  assert.equal(f.controller.state.structure, structure);
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  // Nothing to ask again about: no request.
+  assert.equal(await f.controller.askAgain(), false);
+  assert.equal(f.calls.length, 2);
+
+  // A failed Ask again keeps the chip and says so.
+  await f.controller.select('chip', 'downloads');
+  forget = async () => {
+    throw new Error('That folder could not be asked about again.');
+  };
+  assert.equal(await f.controller.askAgain(), false);
+  assert.deepEqual(f.controller.state.declined, declined);
+  assert.equal(f.controller.state.notice, 'That folder could not be asked about again.');
+  assert.equal(f.controller.state.pending, false);
+});
+
+test('an empty Send asks for the proposal on a collection and explores any other folder', () => {
+  assert.deepEqual(emptySendView('Albums', true), {
+    placeholder: 'Propose workspaces for Albums',
+    text: 'Propose workspaces for this folder'
+  });
+  assert.deepEqual(emptySendView('Thesis', false), {
+    placeholder: 'Explore this folder',
+    text: 'Explore this folder'
+  });
+  assert.equal(emptySendView('', true), null);
+});
+
 test('a proposed group replaces the discussion shortcuts with its own three controls', () => {
   assert.deepEqual(
     discussionChips({ structure: true, children: 6, markers: true }).map(chip => chip.label),
-    ['Set up this structure', 'Adjust…', 'Just discuss']
+    ['Set up', 'Adjust…', 'Just discuss']
   );
   // Without a proposal the two shortcuts are what they were.
   assert.deepEqual(

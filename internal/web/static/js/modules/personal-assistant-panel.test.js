@@ -26,6 +26,7 @@ import {
   recipientIdentityView,
   restoreAssistantPanelFocus,
   restoredDraft,
+  composerPlaceholder,
   safeTodayRoute,
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
@@ -698,4 +699,23 @@ test('Escape closes only an open drawer and focus returns only to a connected tr
   assert.equal(focused, true);
   assert.equal(restoreAssistantPanelFocus(trigger, { contains: () => false }), false);
   assert.equal(restoreAssistantPanelFocus(null, { contains: () => true }), false);
+});
+
+test('with a folder attached the placeholder says what an empty Send asks for', () => {
+  const ready = {
+    available: true,
+    placeholder: 'Ask Atlas a question or describe what you want help with'
+  };
+  assert.equal(
+    composerPlaceholder(ready, 'Propose workspaces for Albums'),
+    'Propose workspaces for Albums'
+  );
+  assert.equal(composerPlaceholder(ready, 'Explore this folder'), 'Explore this folder');
+  assert.equal(composerPlaceholder(ready, ''), ready.placeholder);
+  // An assistant that cannot take work says why, folder or not.
+  const blocked = {
+    available: false,
+    placeholder: 'Finish personal assistant setup before sending work'
+  };
+  assert.equal(composerPlaceholder(blocked, 'Explore this folder'), blocked.placeholder);
 });

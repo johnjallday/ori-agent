@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { conversationNotice } from './personal-assistant-conversation.js';
+import { conversationNotice, unansweredTurnLine } from './personal-assistant-conversation.js';
 
 test('continuity notices report recap/retrieval and honest omissions', () => {
   const notice = continuity => conversationNotice({ conversation: { stored: true, continuity } });
@@ -17,10 +17,10 @@ test('continuity never hides unsaved/model/scope failures or claims a new memory
     conversationNotice({ conversation: { stored: false, continuity } }),
     /could not be saved/
   );
-  assert.match(
-    conversationNotice({ model_unavailable: true, conversation: { continuity } }),
-    /No answer yet/
-  );
+  // An unanswered turn is said by its own line, never by a continuity claim.
+  const unanswered = { model_unavailable: true, conversation: { continuity } };
+  assert.equal(conversationNotice(unanswered), '');
+  assert.match(unansweredTurnLine(unanswered), /could not answer.*Your draft is kept/);
   assert.match(
     conversationNotice({ conversation: { error: 'context_save_failed', continuity } }),
     /reply was not saved/

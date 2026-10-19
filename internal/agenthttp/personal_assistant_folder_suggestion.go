@@ -177,6 +177,17 @@ func folderStructureOption(options []personalassistant.FolderReviewOption) *pers
 	return nil
 }
 
+// folderProposedStructure is the group the options propose for a collection,
+// as the attach response carried it, or nil.
+func folderProposedStructure(options []personalassistant.FolderReviewOption) *personalassistant.FolderStructure {
+	for _, option := range options {
+		if p := option.Presentation; p != nil && p.Kind == "structure" && p.State == "proposed" && option.Structure != nil {
+			return option.Structure
+		}
+	}
+	return nil
+}
+
 // folderStructureProposalPrompt is the proposed group and its member workspaces
 // as reference data for the model: names, type labels, counts and the fixed
 // sentences that say what is unavailable. It carries no id, path or plan, and

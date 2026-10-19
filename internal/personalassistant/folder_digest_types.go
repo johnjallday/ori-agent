@@ -171,6 +171,9 @@ type FolderOffer struct {
 	// group and a workspace per subfolder. It is set only on an offer whose
 	// subject is the root, and holds no path.
 	Structure *FolderStructure `json:"structure,omitempty"`
+	// Declined is the earlier No thanks on a collection's root. The group is
+	// still proposed; the card says when the user said no and offers Ask again.
+	Declined *FolderRootDecline `json:"declined,omitempty"`
 	// NeedsCandidate says the folder holds several software projects and the
 	// user has not said which one this offer is about. Nothing can be set up
 	// until they choose; the subject is only the first of them.
@@ -184,13 +187,16 @@ type FolderOffer struct {
 	// names. Nil until the user asks for a review.
 	SoftwareReview *FolderSoftwareReview `json:"software_review,omitempty"`
 	// The proactive capability decision is frozen when this scan is offered.
-	CapabilitySuppressed bool           `json:"capability_suppressed,omitempty"`
-	CapabilityRevived    bool           `json:"capability_revived,omitempty"`
-	LooseFiles           int            `json:"loose_files,omitempty"`
-	LooseKinds           int            `json:"loose_kinds,omitempty"`
-	Decision             string         `json:"decision,omitempty"`
-	Choice               string         `json:"choice,omitempty"`
-	Outcome              *FolderOutcome `json:"outcome,omitempty"`
+	CapabilitySuppressed bool `json:"capability_suppressed,omitempty"`
+	// CapabilityHiddenAt is when the user said no to the kind of work a
+	// suppressed offer would have led with, so the card can say since when.
+	CapabilityHiddenAt *time.Time     `json:"capability_hidden_at,omitempty"`
+	CapabilityRevived  bool           `json:"capability_revived,omitempty"`
+	LooseFiles         int            `json:"loose_files,omitempty"`
+	LooseKinds         int            `json:"loose_kinds,omitempty"`
+	Decision           string         `json:"decision,omitempty"`
+	Choice             string         `json:"choice,omitempty"`
+	Outcome            *FolderOutcome `json:"outcome,omitempty"`
 	// EntryName is the base name of the file the user picked, when the offer came
 	// from a picked file rather than a folder. Never a path.
 	EntryName string `json:"entry_name,omitempty"`
@@ -201,6 +207,23 @@ type FolderOffer struct {
 	DecidedAt  *time.Time      `json:"decided_at,omitempty"`
 	LaterUntil *time.Time      `json:"later_until,omitempty"`
 	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+}
+
+// FolderRootDecline is a folder's tombstone as its proposal shows it: the
+// folder's key (what Ask again sends back, never a path), its base name, and
+// when the user said no.
+type FolderRootDecline struct {
+	FolderKey string    `json:"folder_key"`
+	Name      string    `json:"name"`
+	At        time.Time `json:"at"`
+}
+
+func (d *FolderRootDecline) clone() *FolderRootDecline {
+	if d == nil {
+		return nil
+	}
+	copied := *d
+	return &copied
 }
 
 // FolderEnclosingHint names the repository a subject sits inside: how many
@@ -255,7 +278,10 @@ type FolderDigestDocument struct {
 	Decisions      []FolderDecision      `json:"decisions,omitempty"`
 	Tombstones     []FolderTombstone     `json:"tombstones,omitempty"`
 	DomainDeclines []FolderDomainDecline `json:"domain_declines,omitempty"`
-	Receipts       []FolderReceipt       `json:"receipts,omitempty"`
+	// DomainsAskedAgain are the kinds of work whose decline the user undid
+	// (Show). The older app-card answer for them is not read again.
+	DomainsAskedAgain []string        `json:"domains_asked_again,omitempty"`
+	Receipts          []FolderReceipt `json:"receipts,omitempty"`
 	// FirstPromptShownAt persists the one-time hand-over after HQ activation.
 	FirstPromptShownAt *time.Time `json:"first_prompt_shown_at,omitempty"`
 	Present            bool       `json:"-"`
@@ -307,12 +333,17 @@ func (d *FolderDigestDocument) Offer(id string) *FolderOffer {
 
 // Tombstoned reports whether a candidate key was declined before.
 func (d *FolderDigestDocument) Tombstoned(key string) bool {
-	for _, t := range d.Tombstones {
-		if t.Key == key {
-			return true
+	return d.Tombstone(key) != nil
+}
+
+// Tombstone finds a candidate key's earlier No thanks.
+func (d *FolderDigestDocument) Tombstone(key string) *FolderTombstone {
+	for i := range d.Tombstones {
+		if d.Tombstones[i].Key == key {
+			return &d.Tombstones[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // DeclineFor finds this domain's saved no, including a migrated app-card no.
@@ -323,6 +354,30 @@ func (d *FolderDigestDocument) DeclineFor(domain string) *FolderDomainDecline {
 		}
 	}
 	return nil
+}
+
+// askedAgain reports whether the user undid this domain's decline.
+func (d *FolderDigestDocument) askedAgain(domain string) bool {
+	for _, asked := range d.DomainsAskedAgain {
+		if asked == domain {
+			return true
+		}
+	}
+	return false
+}
+
+// KnownFolderDomain reports whether domain is a capability domain of the host
+// table: the only kinds of work a decline can be about.
+func KnownFolderDomain(domain string) bool {
+	if domain == "" {
+		return false
+	}
+	for _, row := range folderdigest.AllCapabilities() {
+		if row.Offer != nil && row.Offer.Slug == domain {
+			return true
+		}
+	}
+	return false
 }
 
 // Receipt finds a stored request receipt.
@@ -371,7 +426,7 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		if err := validateConversationReview(offer.ConversationReview); err != nil {
 			return err
 		}
-		if offer.CapabilitySuppressed && offer.CapabilityRevived {
+		if (offer.CapabilitySuppressed && offer.CapabilityRevived) || (offer.CapabilityHiddenAt != nil && !offer.CapabilitySuppressed) {
 			return fmt.Errorf("%w: capability offer", errFolderDigestInvalid)
 		}
 		if len(offer.SubjectIdentity) > 200 || strings.ContainsAny(offer.SubjectIdentity, "/\\\x00\r\n") {
@@ -446,6 +501,13 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 				return err
 			}
 		}
+		// Only a collection's own proposal carries its root's No thanks.
+		if declined := offer.Declined; declined != nil {
+			if offer.Structure == nil || !offer.Subject.IsRoot || declined.FolderKey != offer.Subject.Key ||
+				validateFolderName(declined.Name) != nil || declined.At.IsZero() {
+				return fmt.Errorf("%w: declined", errFolderDigestInvalid)
+			}
+		}
 		if len(offer.Queue) > folderDigestMaxQueue {
 			return fmt.Errorf("%w: queue", errFolderDigestInvalid)
 		}
@@ -469,6 +531,16 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			return fmt.Errorf("%w: domain decline", errFolderDigestInvalid)
 		}
 		domains[decline.Domain] = true
+	}
+	if len(doc.DomainsAskedAgain) > 16 {
+		return fmt.Errorf("%w: domains asked again", errFolderDigestInvalid)
+	}
+	asked := map[string]bool{}
+	for _, domain := range doc.DomainsAskedAgain {
+		if !KnownFolderDomain(domain) || asked[domain] {
+			return fmt.Errorf("%w: domains asked again", errFolderDigestInvalid)
+		}
+		asked[domain] = true
 	}
 	for _, t := range doc.Tombstones {
 		if err := validateFolderKey(t.Key); err != nil {

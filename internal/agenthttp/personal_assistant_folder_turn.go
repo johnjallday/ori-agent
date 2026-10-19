@@ -175,15 +175,16 @@ func treeCoverage(observation *foldercontext.Observation) *struct {
 
 // The folder-turn instructions differ in two places between a single folder and
 // a folder that holds several projects. For a single folder the reply is a short
-// interpretation and setup stays in the background. Collections additionally
-// carry a rule-based setup fallback, not an agent-authored recommendation.
+// interpretation and setup stays in the background. For a collection Ori has
+// already shown its proposed group as a card with its own controls, so the
+// reply speaks over that card in a sentence or two, never instead of it.
 // Every rule about contents, privacy and who can run setup is shared.
 const (
 	folderDiscussionLead    = " For an initial exploratory request, aim for two or three short sentences, normally no more than about 80 words, and at most one consequential question when the user's goal is unknown."
 	folderDiscussionOptions = " New setup options are optional background, not a required recommendation or final paragraph. Do not prefer a child merely because it is the only available setup option. Keep the next decision conversational unless the user wants setup, or an existing review needs an accurate explanation. Explain whole-folder versus individual scope only when relevant to that decision, never choose a candidate on the user's behalf."
 
-	folderCollectionLead    = folderDiscussionLead + " The folder_structure_proposal is a rule-based setup fallback based on observed markers, not an agent assessment or the user's chosen arrangement. Start from the user's current goal and bounded evidence, not from a requirement to endorse this layout. If the goal is unclear, ask a consequential question; leaving folders unchanged is a valid outcome."
-	folderCollectionOptions = folderDiscussionOptions + " Label any mentioned fallback as rule-based. Do not infer one workspace per folder, progress, quality or authoritative versions from names, counts or dates. Explain unavailable capabilities honestly without treating them as barriers to ordinary discussion or available plain setup. A requested arrangement uses separate metadata-sharing consent and bounded planning; this ordinary discussion has not saved an arrangement. Do not promise an executable arrangement or require a setup pitch at the end of the reply."
+	folderCollectionLead    = " Ori has already shown the user, right under your reply, a card that proposes one group for this folder (folder_structure_proposal): a workspace for each listed folder, each linked where it is, nothing moved, with its own Set up and Adjust… controls. A request to propose workspaces for this folder, or to explore it, is answered by that card. Reply in at most two short sentences and about 40 words: one sentence on what the group would do for this folder, then at most one observation from the metadata that the card does not show, such as the most recent activity or a folder that differs from the rest. Never list the member folders, give counts or totals, say what kinds of folders there are, repeat availability notes or describe the controls: the card shows all of them. If the user asked something else specific, answer that briefly instead. Ask at most one question, and only when the user's goal is unclear."
+	folderCollectionOptions = " Set up and Adjust… are Ori's controls on that card, not something you run or confirm; never ask the user to say yes in chat. Do not pitch alternatives such as single-folder setups, the Home or another layout unless the user asks; a different arrangement goes through Adjust… or Suggest arrangement, and this conversation has not saved one. Do not infer progress, quality or authoritative versions from names, counts or dates. If the user would rather just discuss the folder, discuss it; leaving the folders as they are is a valid outcome."
 )
 
 const (
@@ -293,6 +294,8 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 		if err != nil {
 			resp := h.conversationModelUnavailable(ctx, prompt, homeAssistantConversationIntent.Key, workContext, conversation, err)
 			resp.DraftContext = draftContext
+			// The proposal never depended on the model: it stays, with its controls.
+			resp.FolderStructure = folderProposedStructure(options)
 			return resp
 		}
 	}

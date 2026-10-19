@@ -49,6 +49,8 @@ type fakeFolderDigest struct {
 	// firstLook, when set, is the first look the reads carry: digest-wide on the
 	// plain read, and on the offer of a read by id.
 	firstLook *personalassistant.FolderFirstTaskView
+	// forgets records every Ask again / Show that reached the service.
+	forgets []personalassistant.FolderForgetInput
 }
 
 func (f *fakeFolderDigest) StoredOffer(_ context.Context, _ string, offerID string) (personalassistant.FolderOffer, error) {
@@ -567,6 +569,57 @@ func TestFolderSetup_AcceptsOnlyTheDigestAndAnEntryNameAndNeverAPath(t *testing.
 	h.SetupFolderDigest(gw, r)
 	if gw.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET => %d", gw.Code)
+	}
+}
+
+// Forget records every undo that reached the service; one key or one domain,
+// as the real service requires.
+func (f *fakeFolderDigest) Forget(ctx context.Context, userID string, input personalassistant.FolderForgetInput) (personalassistant.FolderDigestView, error) {
+	if (input.FolderKey == "") == (input.Domain == "") {
+		return personalassistant.FolderDigestView{}, personalassistant.ErrValidation
+	}
+	f.forgets = append(f.forgets, input)
+	return f.Current(ctx, userID)
+}
+
+func TestFolderForget_TakesAFolderKeyOrADomainAndNeverAPath(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ForgetFolderDigest(w, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/forget", strings.NewReader(body)))
+		return w
+	}
+	key := strings.Repeat("ab", 32)
+	for _, body := range []string{
+		`{"folder_key":"` + key + `","path":"/Users/riley/Albums"}`,
+		`{"folder":"/Users/riley/Albums"}`,
+		`{"offer_id":"offer-1"}`,
+		`{}`,
+		`{"folder_key":"` + key + `","domain":"music_production"}`,
+		`not json`,
+	} {
+		if w := post(body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s => %d, want 400", body, w.Code)
+		}
+	}
+	if len(fake.forgets) != 0 {
+		t.Fatalf("a refused body reached the service: %+v", fake.forgets)
+	}
+	ask := post(`{"folder_key":"` + key + `","request_id":"r1"}`)
+	show := post(`{"domain":"music_production"}`)
+	if ask.Code != http.StatusOK || show.Code != http.StatusOK || len(fake.forgets) != 2 ||
+		fake.forgets[0] != (personalassistant.FolderForgetInput{FolderKey: key}) ||
+		fake.forgets[1] != (personalassistant.FolderForgetInput{Domain: "music_production"}) {
+		t.Fatalf("ask %d, show %d, forgets %+v", ask.Code, show.Code, fake.forgets)
+	}
+	if !strings.Contains(ask.Body.String(), `"folder_digest"`) {
+		t.Fatalf("the answer is not the digest: %s", ask.Body.String())
+	}
+	w := httptest.NewRecorder()
+	h.ForgetFolderDigest(w, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET => %d", w.Code)
 	}
 }
 

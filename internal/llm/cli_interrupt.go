@@ -74,6 +74,15 @@ func codexTurnInterrupted(detail string) bool {
 	return strings.EqualFold(strings.TrimSpace(last), "turn interrupted")
 }
 
+// codexProviderOverloaded reports whether Codex failed because its model had no
+// capacity. Codex says so in words, not in an exit code: "server_overloaded" /
+// "Selected model is at capacity" (codex-cli 0.160.0, 2026-10-19).
+func codexProviderOverloaded(detail string) bool {
+	text := strings.ToLower(detail)
+	return strings.Contains(text, "server_overloaded") || strings.Contains(text, "at capacity") ||
+		strings.Contains(text, "overloaded")
+}
+
 // claudeRunAborted reports whether Claude Code ended the run because it was
 // interrupted. It says so in a field of its own: an interrupted run's result
 // carries terminal_reason "aborted_streaming" (Claude Code 2.1.289).

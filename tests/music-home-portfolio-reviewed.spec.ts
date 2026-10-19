@@ -83,7 +83,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   const offerCard = page.locator('#personalAssistantFolderOffer');
   // With the provider not installed yet the folder is first proposed as a plain
   // group; listing it in the Home is the Adjust choice this suite takes.
-  await expect(offerCard).toContainText('Set up a group with 5 workspaces?');
+  await expect(offerCard).toContainText('Set up Documents as a group?');
   await offerCard.getByRole('button', { name: 'Adjust…', exact: true }).click();
   const sheet = offerCard.locator('[data-folder-adjust]').first();
   await sheet.locator('input[type=radio][value=library]').check();
@@ -95,10 +95,11 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     disclosures.push(dialog.message());
     await dialog.accept(); // Only inside the disposable HOME; the test asserts consequences below.
   });
-  // Set up is the one-card run for the whole collection (portfolio-hire-once.spec.ts);
-  // this suite walks the step-by-step path behind Adjust…, which reviews the
-  // provider release, then opens the Home creator.
-  await offerCard.locator('[data-folder-action="adjust"]').click();
+  // Set up is the one-card run for the whole collection (portfolio-hire-once.spec.ts).
+  // With the provider not installed there is no one-card plan yet (no Home
+  // template to plan from), so the card's own button is the step-by-step path:
+  // it reviews the provider release, then opens the Home creator.
+  await offerCard.getByRole('button', { name: 'Yes, set up Music Production Home' }).click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible({ timeout: 90_000 });
   expect(disclosures.join('\n')).toContain(

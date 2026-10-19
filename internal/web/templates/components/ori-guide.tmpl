@@ -145,22 +145,30 @@
     <div class="personal-assistant-explorer__workbench">
       <aside id="personalAssistantFolderExplorer" class="personal-assistant-explorer__pane" aria-labelledby="personalAssistantFolderExplorerName" hidden>
         <div id="personalAssistantFolderExplorerHeader" class="personal-assistant-explorer__header">
+          <!-- The pinned header holds only controls, so it stays pinned on a phone. -->
           <div class="personal-assistant-explorer__heading">
             <h3 id="personalAssistantFolderExplorerName"></h3>
-            <label id="personalAssistantFolderSelection" class="personal-assistant-folder-tree__select-all">
+            <!-- Focus is opt-in: it reveals the checks, Select all and the status line. -->
+            <label id="personalAssistantFolderSelection" class="personal-assistant-folder-tree__select-all" hidden>
               <input type="checkbox" id="personalAssistantFolderSelectAll" aria-controls="personalAssistantFolderTree" aria-describedby="personalAssistantFolderSelectionStatus" disabled>
               <span>Select all</span>
             </label>
+            <button type="button" id="personalAssistantFolderFocusToggle" class="personal-assistant-conversation__button" aria-pressed="false" aria-controls="personalAssistantFolderTree">Focus</button>
           </div>
-          <p id="personalAssistantFolderSelectionStatus" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
+          <p id="personalAssistantFolderSelectionLine" class="personal-assistant-explorer__selection" hidden>
+            <span id="personalAssistantFolderSelectionStatus" role="status" aria-live="polite"></span> ·
+            <button type="button" id="personalAssistantFolderFocusClear" class="btn btn-sm btn-link">Clear</button>
+          </p>
         </div>
         <div class="personal-assistant-explorer__body">
-          <p id="personalAssistantFolderExplorerStatus" class="personal-assistant-explorer__eyebrow"></p>
-          <p class="personal-assistant-explorer__hint">Contents not read. Send shares metadata with your model. Checks set topics—not access, a privacy filter or descendants.</p>
-          <details class="personal-assistant-explorer__coverage">
-            <summary id="personalAssistantFolderExplorerCoverageSummary">Bounded snapshot</summary>
-            <p id="personalAssistantFolderExplorerCoverage" class="personal-assistant-explorer__hint"></p>
-          </details>
+          <p class="personal-assistant-explorer__counts">
+            <span id="personalAssistantFolderExplorerCounts"></span>
+            <button type="button" class="personal-assistant-explorer__info" aria-describedby="personalAssistantFolderExplorerPrivacy" title="Contents are not read. Send shares names, kinds, counts, markers and dates with your model. Checks choose topics for the next message, not access or a privacy filter.">
+              <i class="bi bi-info-circle" aria-hidden="true"></i><span class="visually-hidden">What is shared</span>
+            </button>
+            <span id="personalAssistantFolderExplorerPrivacy" class="visually-hidden">Contents are not read. Send shares names, kinds, counts, markers and dates with your model. Checks choose topics for the next message, not access or a privacy filter.</span>
+          </p>
+          <p id="personalAssistantFolderExplorerPartial" class="personal-assistant-explorer__partial" hidden></p>
           <p id="personalAssistantExplorerNotice" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
           <ul id="personalAssistantFolderTree" class="personal-assistant-folder-tree" aria-label="Recorded folder and file discussion topics"></ul>
         </div>
@@ -336,7 +344,6 @@
       <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
         <div id="personalAssistantFolderSummary"></div>
         <div id="personalAssistantFolderStructure" aria-label="Proposed workspace group" hidden></div>
-        <p>Send your question, or send “Explore this folder” to discuss this snapshot. No workspace is created.</p>
       </section>
       <section id="personalAssistantFolderDiscussionChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderDiscussionLabel" hidden>
         <label id="personalAssistantFolderDiscussionLabel" for="personalAssistantFolderDiscussionCandidate">Which observed folder would you like to discuss?</label>
@@ -361,10 +368,6 @@
 
     </div><!-- explorer workbench -->
     <!-- The composer stays pinned and shared by Tree/Chat on every page. -->
-    <div id="personalAssistantFolderFocus" class="personal-assistant-folder-focus" hidden>
-      <span id="personalAssistantFolderFocusText" role="status" aria-live="polite"></span>
-      <button type="button" id="personalAssistantFolderFocusClear" class="personal-assistant-conversation__button" hidden>Clear checks</button>
-    </div>
     <button type="button" id="personalAssistantNewReply" class="personal-assistant-transcript__jump"
             aria-controls="homeAssistantConversation" hidden>New reply</button>
     <span id="personalAssistantReplyAnnouncement" class="visually-hidden" role="status" aria-live="polite"></span>
@@ -396,7 +399,6 @@
         </span>
         <button type="button" id="personalAssistantExploreAttachedFolder" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantFolderExplorer" hidden>Tree + Chat</button>
         <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
-        <span id="personalAssistantFolderSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Explore this folder”</span>
         <button type="button" id="personalAssistantLinkChip" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantLinkField" hidden>
           <i class="bi bi-link-45deg" aria-hidden="true"></i>
           <span>Add link</span>

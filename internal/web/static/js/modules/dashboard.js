@@ -10551,7 +10551,21 @@
       if (conversationRef) window.PersonalAssistantTranscript?.beforeChange?.();
       // Ask is authoritative when it refines a route into a conversation.
       if (data && data.intent === 'assistant_conversation') isConversation = true;
-      var responseText = String((data && data.response) || '').trim();
+      // A turn the model could not answer is one line and Retry. Nothing was
+      // saved, the draft is back in the box, and a folder's proposal stays.
+      var unanswered = Boolean(
+        conversationRef &&
+        data &&
+        data.model_unavailable &&
+        !data.conversation?.error &&
+        !confirmedAction &&
+        !options.researchApproval
+      );
+      var unansweredLine =
+        unanswered && conversations && typeof conversations.unansweredTurnLine === 'function'
+          ? conversations.unansweredTurnLine(data)
+          : '';
+      var responseText = unansweredLine || String((data && data.response) || '').trim();
       var assistantRow = responseText
         ? appendHomeAssistantMessage('assistant', responseText)
         : null;
@@ -10746,7 +10760,10 @@
         return;
       }
 
-      if (isConversation) {
+      if (unanswered) {
+        // The turn's own line says it all.
+        setHomeAssistantRoutingSummary('', '');
+      } else if (isConversation) {
         // The conversation bar already says what happened to a stored turn, so
         // the routing summary stays quiet unless the turn needs attention.
         var needsAttention =
@@ -10759,7 +10776,29 @@
         setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
       }
       var buttons = buildHomeActionButtons(data && data.actions, routeContext, intent);
-      if (conversationRef && data && (data.model_unavailable || data.conversation?.error)) {
+      if (unanswered) {
+        // Retry sends the same draft, folder and focus again. Only a missing
+        // model keeps its way to Settings, where Retry could not help.
+        // The failed line is replaced by the retried turn, never stacked.
+        var failedRow = assistantRow;
+        if (data.failure_reason !== 'model_not_configured')
+          buttons = [
+            {
+              label: 'Retry',
+              variant: 'primary',
+              onClick: function () {
+                var panel = window.PersonalAssistantPanel;
+                if (panel && typeof panel.takeDraft === 'function') panel.takeDraft(text);
+                if (failedRow && failedRow.isConnected) {
+                  window.PersonalAssistantTranscript?.beforeChange?.();
+                  failedRow.remove();
+                  window.PersonalAssistantTranscript?.changed?.();
+                }
+                runHomeAssistantInline(text, routeContext, intent, options);
+              }
+            }
+          ];
+      } else if (conversationRef && data && (data.model_unavailable || data.conversation?.error)) {
         buttons.unshift(manualWorkspaceReviewButton());
         setHomeAssistantRoutingSummary('Not completed', formatHomeAskSummary(data));
       }
@@ -11139,6 +11178,7 @@
         invalid_workspace_proposal:
           'The proposal could not be used. Open the workspace form manually.',
         model_timeout: 'The model timed out. Your draft is kept.',
+        provider_overloaded: 'The model is at capacity. Your draft is kept.',
         request_cancelled: 'Request cancelled. Your draft is kept.',
         model_not_configured: 'No system model is configured. Manual workspace setup is available.',
         context_changed: 'The context changed. Reopen the original conversation.'

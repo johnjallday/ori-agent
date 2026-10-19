@@ -188,6 +188,14 @@ export function canSubmitAssistantWork({ available, pending, busy, text }) {
 }
 
 /**
+ * The composer's placeholder. With a folder attached it says what an empty Send
+ * asks for; an assistant that cannot take work says why instead.
+ */
+export function composerPlaceholder(view, folderPlaceholder = '') {
+  return (view?.available && String(folderPlaceholder || '')) || view?.placeholder || '';
+}
+
+/**
  * The composer text after an unsent message comes back. Text typed since the
  * failed send is never overwritten.
  */
@@ -359,12 +367,6 @@ function syncPanelViewport() {
   const inlineToolbar =
     window.innerWidth / scale >= 600 && (window.innerHeight - (bottom || 0)) / scale <= 520;
   panel?.classList.toggle('personal-assistant-panel--inline-toolbar', inlineToolbar);
-  const clear = document.getElementById('personalAssistantFolderFocusClear');
-  const clearMount =
-    inlineToolbar && panel?.classList.contains('personal-assistant-panel--exploring')
-      ? state.els.chips
-      : document.getElementById('personalAssistantFolderFocus');
-  if (clear && clearMount && clear.parentElement !== clearMount) clearMount.append(clear);
   if (Number.isFinite(bottom)) {
     state.els.root.style.setProperty(
       '--ori-navbar-bottom',
@@ -578,7 +580,10 @@ function renderIdentity() {
   if (els.name) els.name.textContent = title;
   else els.title.textContent = title;
   renderPicker(who);
-  els.input.placeholder = who.placeholder;
+  // An attached folder belongs to the hired assistant's conversation only.
+  els.input.placeholder = who.personal
+    ? composerPlaceholder(who, state.folderPlaceholder)
+    : who.placeholder;
   els.input.disabled = !who.available;
   els.send.disabled = !who.available || state.pending;
   if (els.modelSetup)
@@ -1023,6 +1028,26 @@ function announceWhenReplyArrives() {
   }, 400);
 }
 
+/** The attached folder's own placeholder, or '' for the assistant's default. */
+function setComposerPlaceholder(text) {
+  const next = String(text || '');
+  if (state.folderPlaceholder === next) return;
+  state.folderPlaceholder = next;
+  renderIdentity();
+}
+
+/**
+ * Takes a restored message back out of the composer when it is sent again
+ * (Retry). Text the user typed or changed since is never cleared.
+ */
+function takeDraft(text) {
+  if (!state.els?.input || state.els.input.value.trim() !== String(text || '').trim()) return false;
+  state.draft = '';
+  state.els.input.value = '';
+  state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
 /** Puts a message that was not sent back in the composer. */
 function restoreDraft(text) {
   if (!state.els?.input) return false;
@@ -1086,7 +1111,7 @@ function submit(event) {
   const text =
     typed ||
     (who.personal && window.PersonalAssistantFolderContext?.hasFolder?.()
-      ? 'Explore this folder'
+      ? window.PersonalAssistantFolderContext.emptySend?.()?.text || 'Explore this folder'
       : who.personal && window.PersonalAssistantLink?.hasLink?.()
         ? window.PersonalAssistantLink.sendText()
         : '');
@@ -1402,6 +1427,8 @@ const api = {
   suggestReply,
   suggestionNotice: () => state.suggestionNotice,
   restoreDraft,
+  takeDraft,
+  setComposerPlaceholder,
   refresh,
   applyPersonalAssistant,
   setToday,

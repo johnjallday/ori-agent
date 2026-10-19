@@ -148,25 +148,34 @@ const albums = (extra = {}, group = {}) => ({
 test('a folder of several projects is one proposed group with its member workspaces', () => {
   const view = proposalView(structureOption(albums()), { name: 'ignored', root: true });
   assert.equal(view.kind, 'structure');
-  assert.equal(view.label, 'Rule-based setup option');
-  assert.match(view.description, /Not an agent assessment/);
-  assert.equal(view.subject, 'Albums');
-  assert.equal(view.scope, '6 workspaces');
+  // One question and one line: no label, scope or availability sentence.
+  assert.equal(view.label, 'Set up Albums as a group?');
+  assert.equal(
+    view.description,
+    '6 workspaces, one per folder · linked to their folders · nothing is moved'
+  );
+  assert.equal(view.subject, '');
+  assert.equal(view.scope, '');
   assert.equal(view.art, 'district');
-  assert.equal(view.destination, 'Creates this group');
-  assert.equal(view.action, 'Review group setup');
-  assert.match(view.description, /Nothing is moved, copied or read/);
+  assert.equal(view.destination, '');
+  assert.equal(view.action, 'Set up');
   assert.deepEqual(view.members[0], {
     name: 'Album-1',
     type: 'Session folder',
     note: 'plain for now'
   });
   assert.deepEqual(view.members[5], { name: 'Logic Sketch', type: 'Plain workspace', note: '' });
-  assert.deepEqual(view.notes, ['The integration is not installed; it can be added later.']);
+  assert.deepEqual(view.notes, []);
 
+  // A group named apart from its folder says the name it gets.
+  const renamed = albums({}, { name: 'Albums group' });
+  assert.equal(
+    proposalView(structureOption(renamed)).destination,
+    'Creates the group Albums group'
+  );
   // The shape's Home, new or the owner's own; unchecked members are not listed.
   const home = albums({}, { name: 'Music Home', type: 'home' });
-  assert.equal(proposalView(structureOption(home)).destination, 'Creates this Home');
+  assert.equal(proposalView(structureOption(home)).destination, 'Creates Music Home');
   const existing = albums({}, { name: 'Music Home', type: 'home', destination_state: 'existing' });
   assert.equal(
     proposalView(structureOption(existing)).destination,
@@ -175,10 +184,13 @@ test('a folder of several projects is one proposed group with its member workspa
   const adjusted = albums();
   adjusted.members[5].included = false;
   const fewer = proposalView(structureOption(adjusted));
-  assert.equal(fewer.scope, '5 workspaces');
+  assert.match(fewer.description, /^5 workspaces, one per folder/);
   assert.equal(fewer.members.length, 5);
   adjusted.members.forEach((member, index) => (member.included = index === 0));
-  assert.equal(proposalView(structureOption(adjusted)).scope, '1 workspace');
+  assert.equal(
+    proposalView(structureOption(adjusted)).description,
+    '1 workspace · linked to its folder · nothing is moved'
+  );
 
   // Only the closed host fields make a structure: a type string, a foreign
   // version, an unavailable state or the library choice never does.
@@ -193,7 +205,7 @@ test('a folder of several projects is one proposed group with its member workspa
     assert.notEqual(proposalView(broken).kind, 'structure');
 });
 
-test('the member list is literal text, collapsed after six rows, with each note once', () => {
+test('the member list is literal text, collapsed after three rows, with no sentences', () => {
   const nodes = [];
   const doc = {
     createElement(tag) {
@@ -234,7 +246,7 @@ test('the member list is literal text, collapsed after six rows, with each note 
   assert.equal(rows.length, 8);
   assert.deepEqual(
     rows.map(row => row.hidden),
-    [false, false, false, false, false, false, true, true]
+    [false, false, false, true, true, true, true, true]
   );
   assert.equal(rows[0].children[1].textContent, 'Session folder · plain for now');
   assert.equal(rows[6].children[0].textContent, '<img src=x onerror=confirm()>');
@@ -249,18 +261,28 @@ test('the member list is literal text, collapsed after six rows, with each note 
   const notes = nodes
     .filter(node => node.className === 'personal-assistant-proposal__note')
     .map(node => node.textContent);
-  assert.deepEqual(notes, [
-    '3 more folders are not listed and get no workspace here.',
-    'The integration is not installed; it can be added later.'
-  ]);
+  assert.deepEqual(notes, ['3 more folders are not listed and get no workspace here.']);
   assert.equal(
     nodes.some(node => ['img', 'a', 'input'].includes(node.tag) || node.innerHTML),
     false
   );
+  // The card's text is its question and its one line; empty parts are not drawn.
+  const lines = nodes.filter(
+    node => node.tag === 'p' && String(node.className || '') !== 'personal-assistant-proposal__note'
+  );
+  assert.deepEqual(
+    lines.map(node => node.textContent),
+    [
+      'Set up Albums as a group?',
+      '8 workspaces, one per folder · linked to their folders · nothing is moved'
+    ]
+  );
 
-  // Six or fewer rows need no "Show all".
+  // Three or fewer rows need no "Show all".
   nodes.length = 0;
-  renderProposal(proposalView(structureOption(albums())), doc, null);
+  const trio = albums();
+  trio.members = trio.members.slice(0, 3);
+  renderProposal(proposalView(structureOption(trio)), doc, null);
   assert.equal(
     nodes.some(node => node.className === 'personal-assistant-proposal__more'),
     false

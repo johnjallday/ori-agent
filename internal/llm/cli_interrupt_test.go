@@ -56,6 +56,32 @@ func TestRunCodexExec_InterruptedTurnIsTypedAndBrief(t *testing.T) {
 	}
 }
 
+// A model with no capacity (Codex's server_overloaded) is the provider being
+// overloaded, so the caller can say "model at capacity" and offer Retry.
+func TestRunCodexExec_AModelAtCapacityIsTypedOverloaded(t *testing.T) {
+	cli := fakeCLI(t, "codex", fakeCodexPreamble+"printf 'ERROR: server_overloaded: Selected model is at capacity. Please try a different model.\\n' >&2\nexit 1\n")
+
+	_, err := (&CodexProvider{cliPath: cli}).runCodexExec(context.Background(), "gpt-test", longCodexPrompt(), "medium", nil, nil)
+	typed, ok := AsProviderError(err)
+	if !ok || typed.Category != CategoryProviderOverloaded || typed.Provider != "codex" {
+		t.Fatalf("error = %v, want a typed overload", err)
+	}
+	if strings.Contains(err.Error(), "tool definition") {
+		t.Fatalf("the error must not carry the prompt, got %d chars", len(err.Error()))
+	}
+	for detail, want := range map[string]bool{
+		"ERROR: server_overloaded":                       true,
+		"Selected model is at capacity":                  true,
+		"stream error: the provider is overloaded":       true,
+		"ERROR: stream disconnected before completion":   false,
+		"hook: SessionStart\nERROR: usage limit reached": false,
+	} {
+		if got := codexProviderOverloaded(detail); got != want {
+			t.Fatalf("codexProviderOverloaded(%q) = %v, want %v", detail, got, want)
+		}
+	}
+}
+
 // An ordinary failure keeps its reason, loses the echoed prompt, and is not
 // mistaken for an interruption.
 func TestRunCodexExec_FailureKeepsTheReasonNotThePrompt(t *testing.T) {

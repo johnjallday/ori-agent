@@ -82,7 +82,7 @@ test('a local-only provider cannot resolve a portfolio offer or grant a discover
   const offerCard = page.locator('#personalAssistantFolderOffer');
   // A Home whose provider cannot be verified does not block the folder: it is
   // proposed as a plain group, and the card says why the Home is not used.
-  await expect(offerCard).toContainText('Set up a group with 5 workspaces?');
+  await expect(offerCard).toContainText('Set up Documents as a group?');
   await expect(offerCard).toContainText(
     'Music Production Home could not be verified right now; a plain group is proposed instead.'
   );

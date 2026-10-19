@@ -83,8 +83,31 @@ test('group types are offered only when the folder has a Home, and only when it 
     available.some(choice => choice.disabled),
     false
   );
-  assert.equal(available[1].label, 'List them in Music Home');
+  assert.equal(available[1].label, 'Add to Music Home instead');
   assert.match(available[1].hint, /first time you open it there/);
+  // A Home whose provider is not in place is listed, unavailable, with why.
+  for (const [reason, hint] of [
+    ['provider_not_installed', 'Music Home is not installed.'],
+    ['provider_unverified', 'Music Home could not be verified right now.']
+  ]) {
+    const blocked = groupTypeChoices(
+      adjustModel(
+        structure({ home_name: 'Music Home', home_available: true, availability: reason })
+      )
+    );
+    assert.equal(blocked[1].label, 'Add to Music Home instead');
+    assert.equal(blocked[1].disabled, true);
+    assert.equal(blocked[1].hint, hint);
+    // Home's own card walks through installing it, so there it can be chosen.
+    const guided = groupTypeChoices(
+      adjustModel(
+        structure({ home_name: 'Music Home', home_available: true, availability: reason })
+      ),
+      { guidedHome: true }
+    );
+    assert.equal(guided[1].disabled, false);
+    assert.equal(guided[1].hint, `${hint} Choosing it walks you through setting it up.`);
+  }
   // A listing that is the current choice starts selected, with the plain name
   // falling back to the folder's.
   const listed = adjustModel(

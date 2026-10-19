@@ -486,7 +486,11 @@ for (const path of ['/', '/settings']) {
     await choose(page);
     expect(fixture.requests).toHaveLength(0);
     await expect(page.locator('#personalAssistantFolderPreview')).toContainText('Local preview');
-    await expect(page.locator('#personalAssistantFolderSendHint')).toBeVisible();
+    // The placeholder says what an empty Send asks for (no separate hint).
+    await expect(page.locator('#personalAssistantInput')).toHaveAttribute(
+      'placeholder',
+      'Explore this folder'
+    );
     await say(page, '');
     let asks = fixture.requests.filter(request => request.stage === 'ask');
     expect(asks).toHaveLength(1);
@@ -1041,11 +1045,22 @@ for (const theme of ['light', 'dark']) {
     await choose(page);
     const pane = page.locator('#personalAssistantFolderExplorer');
     await expect(pane).toBeVisible();
-    await expect(pane).toContainText('Partial snapshot · 64 entries · 14 omitted');
+    // One counts line by default, and the partial notice only because it is partial.
+    await expect(pane).toContainText('Partial scan · entry limit reached');
+    await expect(pane).toContainText('metadata only, nothing read');
+    await expect(pane).not.toContainText('Local snapshot');
     await expect(pane.locator('img, script')).toHaveCount(0);
     const checks = pane.locator('[data-tree-focus]');
     const checkedEntries = pane.locator('[data-tree-focus]:checked');
     const selectionStatus = page.locator('#personalAssistantFolderSelectionStatus');
+    // Focus is opt-in: the checks appear only once it is pressed, for each folder.
+    const focusOn = async () => {
+      const toggle = pane.getByRole('button', { name: 'Focus', exact: true });
+      if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+    };
+    await expect(checks.first()).toBeHidden();
+    await focusOn();
+    await expect(checks.first()).toBeVisible();
     await checks.first().focus();
     await page.keyboard.press('Space');
     await expect(checks.first()).toBeChecked();
@@ -1055,15 +1070,12 @@ for (const theme of ['light', 'dark']) {
     expect(fixture.requests).toHaveLength(0);
     const selectAll = pane.getByRole('checkbox', { name: 'Select all', exact: true });
     await expect(selectAll).toBeChecked({ indeterminate: true });
-    await expect(selectionStatus).toHaveText('9 topics selected');
+    await expect(selectionStatus).toHaveText('9 topics for the next message');
     await selectAll.focus();
     await page.keyboard.press('Space');
     await expect(selectAll).toBeChecked();
     await expect(checkedEntries).toHaveCount(64);
-    await expect(selectionStatus).toHaveText('All 64 recorded items selected');
-    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
-      'Next message · 64 topics'
-    );
+    await expect(selectionStatus).toHaveText('64 topics for the next message');
     await checks.last().uncheck();
     await checks.nth(10).uncheck();
     const remainingIDs = Array.from({ length: 64 }, (_, index) => `entry-${index}`)
@@ -1072,7 +1084,7 @@ for (const theme of ['light', 'dark']) {
     await expect(checks.last()).not.toBeChecked();
     await expect(checks.nth(10)).not.toBeChecked();
     await expect(selectAll).toBeChecked({ indeterminate: true });
-    await expect(selectionStatus).toHaveText('62 topics selected');
+    await expect(selectionStatus).toHaveText('62 topics for the next message');
     expect(
       await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
     ).toEqual(remainingIDs);
@@ -1090,7 +1102,8 @@ for (const theme of ['light', 'dark']) {
     await expect(selectAll).toBeChecked();
     await selectAll.uncheck();
     await expect(checkedEntries).toHaveCount(0);
-    await expect(selectionStatus).toHaveText('Whole folder · no individual topics');
+    // With nothing checked there is no status line: the whole folder is discussed.
+    await expect(selectionStatus).toBeHidden();
     await selectAll.check();
     await checks.last().uncheck();
     await checks.nth(10).uncheck();
@@ -1177,10 +1190,12 @@ for (const theme of ['light', 'dark']) {
     await expect(checks.first()).toBeDisabled();
     await expect(checks.last()).toBeDisabled();
     await expect(pane).toContainText('indistinguishable name');
+    await focusOn();
     await expect(selectAll).toBeVisible();
     await selectAll.click();
     await expect(checkedEntries).toHaveCount(2);
-    await expect(selectionStatus).toHaveText('All 2 recorded items selected · Whole folder');
+    await expect(selectionStatus).toHaveText('2 topics for the next message');
+    await expect(pane).toContainText('the next message discusses the whole folder');
     await expect(input).toHaveValue('  Newer exact text 🎼  ');
     await page.locator('#personalAssistantExplorerBack').click();
     fixture.scenario = {
@@ -1198,11 +1213,12 @@ for (const theme of ['light', 'dark']) {
     await choose(page, 'Desktop');
     const smallAll = selectAll;
     const beforeAll = fixture.requests.length;
+    await focusOn();
     await expect(smallAll).not.toBeChecked();
     await smallAll.focus();
     await page.keyboard.press('Space');
     await expect(checkedEntries).toHaveCount(3);
-    await expect(selectionStatus).toHaveText('All 3 recorded items selected');
+    await expect(selectionStatus).toHaveText('3 topics for the next message');
     await expect(pane.locator('[data-tree-focus="entry-1"]')).toBeHidden();
     await expect(input).toHaveValue('  Newer exact text 🎼  ');
     expect(fixture.requests).toHaveLength(beforeAll);
@@ -1214,20 +1230,21 @@ for (const theme of ['light', 'dark']) {
     await pane.locator('[data-tree-focus="entry-1"]').uncheck();
     await expect(pane.locator('[data-tree-focus="entry-0"]')).toBeChecked();
     await expect(smallAll).toBeChecked({ indeterminate: true });
-    await expect(selectionStatus).toHaveText('2 topics selected');
-    await expect(page.locator('#personalAssistantContextStatus')).toContainText(
+    await expect(selectionStatus).toHaveText('2 topics for the next message');
+    // The status line says it; no second notice under the conversation.
+    await expect(page.locator('#personalAssistantContextStatus')).not.toContainText(
       'Discussion focus updated'
     );
     await page.locator('#personalAssistantExplorerBack').click();
-    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
-      'Next message · 2 topics'
-    );
+    expect(
+      await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
+    ).toHaveLength(2);
     fixture.scenario = { tree: null };
     await choose(page);
     await expect(pane).toBeHidden();
     await expect(page.locator('#personalAssistantExploreAttachedFolder')).toBeHidden();
     await page.evaluate(() => (window as any).PersonalAssistantFolderContext.explore());
-    await expect(pane).toContainText('Saved folder summaries only');
+    await expect(pane).toContainText('metadata only, nothing read');
     await expect(page.locator('#personalAssistantFolderSelectAll')).toBeHidden();
     await expect(checks).toHaveCount(0);
     await page.locator('#personalAssistantRemoveFolder').click();

@@ -22,7 +22,13 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
-import { proposalView, renderProposal, structureOption } from './personal-assistant-proposal.js';
+import {
+  declinedLine,
+  proposalView,
+  renderProposal,
+  shortDate,
+  structureOption
+} from './personal-assistant-proposal.js';
 import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
@@ -669,9 +675,22 @@ export function structureCounts(structure) {
   return parts.join(' and ');
 }
 
+// capabilityHiddenView is the line a waiting card shows for the kind of work it
+// does not lead with because the user said no to it: "<integration> setup
+// hidden since Oct 6", with Show. Only the host's closed fields make one.
+export function capabilityHiddenView(offer) {
+  const hidden = offer?.capability_hidden;
+  const domain = String(hidden?.domain || '');
+  const label = String(hidden?.label || '').trim();
+  if (!['pending', 'later'].includes(offer?.status) || !/^[a-z0-9_]{1,64}$/.test(domain) || !label)
+    return { visible: false, text: '', domain: '' };
+  return { visible: true, text: `${label} hidden since ${shortDate(hidden.at)}`, domain };
+}
+
 // A proposed group rides the same result card as every other offer: one
 // question, the member workspaces, and the plan once the server has one. What
-// the proposal goes without is said, and never removes Set up.
+// the proposal goes without is said, and never removes Set up. An earlier No
+// thanks on the folder stands where Set up would, with Ask again.
 function structureOfferView(offer, base, subject) {
   const structure = offerStructure(offer);
   const proposal = proposalView(structureOption(structure));
@@ -682,19 +701,29 @@ function structureOfferView(offer, base, subject) {
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const arranged = Boolean(arrangedStructure(offer));
+  const folder = String(structure.folder || subject).trim();
   let question = arranged
     ? `Set up the group ${group} with ${count} plain workspace${count === 1 ? '' : 's'} from your saved arrangement?`
     : structure.group.destination_state === 'existing'
       ? `Add ${workspaces} to your ${group}?`
       : structure.group.type === 'home'
         ? `Set up ${group} with ${workspaces}?`
-        : `Set up a group with ${workspaces}?`;
+        : `Set up ${folder} as a group?`;
   if (hasPlan) question += ' Here is everything Set up will do:';
   if (run) question = run.question;
   let actions = [];
   if (run) actions = run.actions;
   else if (!base.decided) {
-    if (hasPlan) actions.push({ id: 'setup', label: 'Set up', style: 'primary', oneCard: true });
+    const key = String(offer.declined?.folder_key || '');
+    if (/^[0-9a-f]{64}$/.test(key))
+      actions.push({
+        id: 'ask',
+        label: declinedLine(offer.declined, folder),
+        style: 'outline',
+        forget: { folder_key: key }
+      });
+    else if (hasPlan)
+      actions.push({ id: 'setup', label: 'Set up', style: 'primary', oneCard: true });
     if (!arranged)
       actions.push({ id: 'adjust', label: 'Adjust…', style: 'outline', adjustStructure: true });
     // On Home the proposal can be declined or put off; in a conversation its
@@ -737,7 +766,13 @@ function structureOfferView(offer, base, subject) {
     structured: true,
     // The plan names the group, every workspace and what is unavailable, so
     // with a plan (or a run of it) the proposal card would only repeat it.
-    structure: hasPlan || run || base.decided ? null : proposal
+    // Under the card's question it does not ask that question again.
+    structure:
+      hasPlan || run || base.decided
+        ? null
+        : arranged
+          ? proposal
+          : { ...proposal, ariaLabel: proposal.label, label: '' }
   };
 }
 
@@ -2129,6 +2164,7 @@ function elements() {
     prerequisites: document.getElementById('personalAssistantFolderPrerequisites'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
+    hidden: document.getElementById('personalAssistantFolderOfferHidden'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
     result: document.getElementById('personalAssistantFolderFirstLookResult'),
@@ -2707,6 +2743,7 @@ function renderOffer(place) {
     firstLook.visible && firstLook.readiness?.length ? firstLook.readiness : view.prerequisites
   );
   setText(els.capability, view.capabilityDetail);
+  renderHidden(els.hidden, capabilityHiddenView(state.offer));
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
   if (els.receipt) {
@@ -2877,9 +2914,74 @@ function enterThread({ byUser }) {
   }
 }
 
+// renderHidden draws the one line that says what the card does not lead with,
+// and its Show. The line is text; Show sends only the host's domain.
+function renderHidden(node, view) {
+  if (!node) return;
+  const key = view.visible ? `${state.offer?.id || ''}:${view.domain}` : '';
+  if (node.dataset.hiddenKey === key) return;
+  node.dataset.hiddenKey = key;
+  node.replaceChildren();
+  node.hidden = !view.visible;
+  if (!view.visible) return;
+  const show = document.createElement('button');
+  show.type = 'button';
+  show.className = 'btn btn-sm btn-link pa-folder__hidden-show';
+  show.textContent = 'Show';
+  show.disabled = state.busy;
+  show.addEventListener('click', () => void forgetDecline({ domain: view.domain }));
+  node.append(`${view.text} · `, show);
+}
+
+// forgetDecline undoes one earlier No thanks (Ask again, Show) and draws the
+// card again from the offer as it is now. Nothing is scanned or set up.
+async function forgetDecline(body) {
+  if (state.busy) return;
+  const offerId = state.offer?.id || '';
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    const response = await fetch(`${DIGEST_ENDPOINT}/forget`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const payload = await readJSON(response);
+    if (!response.ok) {
+      showError(String(payload?.error || 'That could not be changed right now. Try again.'));
+      return;
+    }
+    if (!offerId || generation !== state.reviewGeneration) return;
+    const fresh = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(offerId)}`, {
+      headers: { Accept: 'application/json' }
+    });
+    const current = fresh.ok ? (await readJSON(fresh))?.folder_digest?.offer : null;
+    if (
+      current?.id === offerId &&
+      generation === state.reviewGeneration &&
+      state.offer?.id === offerId
+    ) {
+      state.offer = current;
+      state.confirm = '';
+      announceOffer();
+    }
+  } catch (_) {
+    showError('That could not be changed right now. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
 // runAction carries out one of the offer's actions, wherever its button was
 // pressed: the panel's card or the mission card (act below).
 function runAction(action) {
+  if (action.forget) {
+    void forgetDecline(action.forget);
+    return;
+  }
   if (action.closeReview) {
     void window.PersonalAssistantFolderSetup?.closeReview?.(state.offer);
     return;
@@ -3729,6 +3831,8 @@ function openStructureAdjust() {
   closeStructureAdjust(false);
   const sheet = createAdjustSheet({
     structure: offer.structure,
+    // Home's own card can walk through installing the Home's plugin.
+    guidedHome: true,
     onCancel: () => closeStructureAdjust(),
     onDone: adjustment => void saveStructureAdjust(offer.id, adjustment)
   });

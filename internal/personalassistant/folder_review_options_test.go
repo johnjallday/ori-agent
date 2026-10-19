@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,24 +144,33 @@ func TestFolderReviewOptions_ACollectionRootIsAStructureListedFirst(t *testing.T
 		t.Fatal("describing a collection wrote an offer or allocated an id")
 	}
 
-	// With the provider and the integration in place the collection is listed
-	// in the shape's Home, as it was before: that Home makes each project's
-	// workspace when it is opened. The root is then the earlier collection
-	// option, not a group of blank workspaces, and it is still listed.
+	// With the provider and the integration in place the default is still the
+	// plain group: listing the collection in the shape's Home (which makes each
+	// project's workspace when it is opened) waits in Adjust, so nothing is
+	// created lazily behind the user's back.
 	ready := &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
 	f.service.deps.Setup = ready
 	options = service.ReviewOptions(ctx, target, observation.ID)
-	if len(options) != 7 || options[0].CandidateID != "candidate-0" || options[0].Structure != nil ||
-		options[0].Presentation.Kind == "structure" || options[0].WorkspaceType != "Music Production Home" {
+	if len(options) != 7 || options[0].CandidateID != "candidate-0" || options[0].Structure == nil ||
+		options[0].Presentation.Kind != "structure" || options[0].WorkspaceType != "Group with 6 workspaces" ||
+		options[0].Structure.Group.Type != FolderGroupPlain || !options[0].Structure.Group.HomeAvailable ||
+		options[0].Structure.Group.Availability != "" {
 		t.Fatalf("collection with its Home in place: %+v / %+v", options[0], options[0].Presentation)
 	}
-	if service.Structure(ctx, target, observation.ID) != nil {
-		t.Fatal("a collection whose Home is in place was proposed as a plain group on attach")
+	if attached := service.Structure(ctx, target, observation.ID); attached.Structure == nil || attached.Structure.Group.Type != FolderGroupPlain ||
+		attached.Structure.Group.HomeName != "Music Production Home" || attached.Declined != nil || attached.Unavailable != "" {
+		t.Fatalf("a collection whose Home is in place was not proposed as a plain group on attach: %+v", attached)
 	}
 	offer, err := service.prepareReviewOffer(ctx, service.selections[observation.ID], target, "candidate-0")
-	if err != nil || offer.Structure == nil || offer.Structure.Validate() != nil || offer.Structure.Group.Type != FolderGroupLibrary ||
-		offer.Structure.Group.Name != "Music Production Home" || !offer.Structure.Group.HomeAvailable || offer.Portfolio == nil {
+	if err != nil || offer.Structure == nil || offer.Structure.Validate() != nil || offer.Structure.Group.Type != FolderGroupPlain ||
+		offer.Structure.Group.Name != "Music" || !offer.Structure.Group.HomeAvailable || offer.Portfolio == nil {
 		t.Fatalf("root offer: %+v, %v", offer.Structure, err)
+	}
+	// The Home is one choice in Adjust.
+	library, err := service.prepareReviewOffer(WithFolderStructureAdjustment(ctx, &FolderStructureAdjustment{GroupType: FolderGroupLibrary}),
+		service.selections[observation.ID], target, "candidate-0")
+	if err != nil || library.Structure.Group.Type != FolderGroupLibrary || library.Structure.Group.Name != "Music Production Home" {
+		t.Fatalf("Adjust → the Home: %+v, %v", library.Structure, err)
 	}
 	// The members a group would get are known all the same: each folder is
 	// witnessed, and none starts from a blueprint that lives in the Home.
@@ -171,10 +181,20 @@ func TestFolderReviewOptions_ACollectionRootIsAStructureListedFirst(t *testing.T
 	}
 }
 
-func TestFolderReviewOptions_ADeclinedDomainIsListedAndTheGroupStaysPlain(t *testing.T) {
+func TestFolderReviewOptions_ADeclinedDomainDoesNotChangeTheConversation(t *testing.T) {
 	ctx := context.Background()
 	f, service, target, observation := albumsObservation(t)
 	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	before, err := json.Marshal(service.ReviewOptions(ctx, target, observation.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A No thanks to the kind of work, in the digest and on the older app card.
+	legacyReads := 0
+	f.service.deps.LegacyDeclined = func(context.Context, string, string) (bool, error) {
+		legacyReads++
+		return true, nil
+	}
 	if _, err := f.store.Mutate(ctx, target.UserID, func(doc *FolderDigestDocument) error {
 		doc.DomainDeclines = append(doc.DomainDeclines, FolderDomainDecline{Domain: "music_production", FirstEvidence: "portfolio", Count: 2, At: f.now})
 		return nil
@@ -182,22 +202,105 @@ func TestFolderReviewOptions_ADeclinedDomainIsListedAndTheGroupStaysPlain(t *tes
 		t.Fatal(err)
 	}
 	options := service.ReviewOptions(ctx, target, observation.ID)
-	if len(options) != 7 {
-		t.Fatalf("a declined domain dropped options: %+v", options)
+	after, err := json.Marshal(options)
+	if err != nil {
+		t.Fatal(err)
 	}
-	p := options[0].Presentation
-	if p.Kind != "structure" || p.State != "proposed" || p.GroupType != FolderGroupPlain || p.Availability != FolderAvailabilityDeclinedEarlier ||
-		len(p.Notes) != 1 || p.Notes[0] != "You declined this kind of setup earlier; Adjust can bring it back." {
-		t.Fatalf("declined collection: %+v", p)
+	// The user asked about this folder: every option is described as it is.
+	if string(after) != string(before) || legacyReads != 0 || strings.Contains(string(after), FolderAvailabilityDeclinedEarlier) ||
+		strings.Contains(string(after), "declined") {
+		t.Fatalf("a declined domain changed the options (%d legacy reads):\nbefore %s\nafter  %s", legacyReads, before, after)
 	}
-	for _, option := range options[1:] {
-		candidate, _ := observedReviewCandidate(service.selections[observation.ID], option.CandidateID)
-		if candidate.Name == "Logic Sketch" {
-			continue
+	attached := service.Structure(ctx, target, observation.ID)
+	if attached.Structure == nil || attached.Structure.Group.Availability != "" || attached.Declined != nil {
+		t.Fatalf("attach after a declined domain: %+v", attached)
+	}
+	for _, member := range attached.Structure.Members {
+		if member.Availability == FolderAvailabilityDeclinedEarlier {
+			t.Fatalf("member said declined: %+v", member)
 		}
-		if option.Presentation.State != "unavailable" || option.Presentation.Availability != FolderAvailabilityDeclinedEarlier {
-			t.Fatalf("%s after a decline: %+v", candidate.Name, option.Presentation)
+	}
+}
+
+func TestFolderReviewOptions_ADeclinedCollectionIsStillProposedAndSaysSo(t *testing.T) {
+	ctx := context.Background()
+	f, service, target, observation := albumsObservation(t)
+	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	held := service.selections[observation.ID]
+	albumID := ""
+	for _, project := range observation.Projects {
+		if project.Name == "Album-1" {
+			albumID = project.ID
 		}
+	}
+	declinedAt := f.now.AddDate(0, 0, -13)
+	// One No thanks on the whole folder, one on a single album in it.
+	if _, err := f.store.Mutate(ctx, target.UserID, func(doc *FolderDigestDocument) error {
+		doc.Tombstones = append(doc.Tombstones,
+			FolderTombstone{Key: FolderKey(held.root), Name: "Music", CreatedAt: declinedAt},
+			FolderTombstone{Key: FolderKey(filepath.Join(held.root, "Album-1")), Name: "Album-1", CreatedAt: declinedAt})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	options := service.ReviewOptions(ctx, target, observation.ID)
+	root := options[0]
+	if len(options) != 6 || root.CandidateID != folderRootCandidateID || root.Structure == nil || len(root.Structure.Included()) != 6 ||
+		root.Declined == nil || root.Declined.FolderKey != FolderKey(held.root) || root.Declined.Name != "Music" || !root.Declined.At.Equal(declinedAt) {
+		t.Fatalf("the declined root option: %d options, %+v / %+v", len(options), root, root.Declined)
+	}
+	for _, option := range options {
+		if option.CandidateID == albumID {
+			t.Fatalf("a single folder the user declined was listed: %+v", option)
+		}
+	}
+	attached := service.Structure(ctx, target, observation.ID)
+	if attached.Structure == nil || attached.Declined == nil || attached.Declined.FolderKey != FolderKey(held.root) || attached.Unavailable != "" {
+		t.Fatalf("attach of a declined collection: %+v", attached)
+	}
+	// The album the user declined on its own still has no question of its own.
+	if _, err := service.prepareReviewOffer(ctx, held, target, albumID); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("a declined single folder: %v", err)
+	}
+	data, err := json.Marshal(attached.Declined)
+	if err != nil || strings.Contains(string(data), f.home) {
+		t.Fatalf("the decline carries a path: %s", data)
+	}
+	// Reviewing it keeps the decline on the stored offer, which reads back valid.
+	reviewed, err := service.Review(ctx, target, "conversation-declined", observation.ID, folderRootCandidateID)
+	if err != nil || reviewed.Structure == nil || reviewed.Declined == nil || reviewed.Declined.Name != "Music" {
+		t.Fatalf("review of a declined collection: %+v, %v", reviewed, err)
+	}
+	doc, err := f.store.Read(ctx, target.UserID)
+	if err != nil || doc.Offer(reviewed.ID).Declined == nil || doc.Offer(reviewed.ID).Declined.FolderKey != FolderKey(held.root) {
+		t.Fatalf("stored review: %v", err)
+	}
+}
+
+func TestFolderStructure_OnlyAPendingReviewOrNoSetupHostKeepsTheCardAway(t *testing.T) {
+	ctx := context.Background()
+	f, service, target, observation := albumsObservation(t)
+	f.service.deps.Setup = nil
+	if got := service.Structure(ctx, target, observation.ID); got.Structure != nil || got.Unavailable != FolderStructureSetupUnavailable {
+		t.Fatalf("no setup host: %+v", got)
+	}
+	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	if got := service.Structure(ctx, target, observation.ID); got.Structure == nil || got.Unavailable != "" {
+		t.Fatalf("a setup host: %+v", got)
+	}
+	if _, err := f.service.ScanChip(ctx, target.UserID, "documents"); err != nil {
+		t.Fatal(err)
+	}
+	if got := service.Structure(ctx, target, observation.ID); got.Structure != nil || got.Unavailable != FolderStructureReviewPending {
+		t.Fatalf("another review pending: %+v", got)
+	}
+	// A single folder has no card and no reason.
+	desktop, err := service.Observe(ctx, target, "chip", "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := service.Structure(ctx, target, desktop.ID); got != (FolderStructureProposal{}) {
+		t.Fatalf("a single folder: %+v", got)
 	}
 }
 

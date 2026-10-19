@@ -343,21 +343,29 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 	response := map[string]any{"observation": observation, "revision": revision, "cancelled": observation == nil}
 	// A folder that holds several projects is proposed as a group right away,
 	// before any message is sent. It is a description from the scan just made:
-	// no model is called and nothing is offered or created.
-	if structure := h.folderStructure(r.Context(), target, observation); structure != nil {
-		response["structure"] = structure
+	// no model is called and nothing is offered or created. An earlier No
+	// thanks travels with it; a card that cannot be shown says why.
+	proposal := h.folderStructure(r.Context(), target, observation)
+	if proposal.Structure != nil {
+		response["structure"] = proposal.Structure
+		if proposal.Declined != nil {
+			response["declined"] = proposal.Declined
+		}
+	} else if proposal.Unavailable != "" {
+		response["structure_unavailable"] = proposal.Unavailable
 	}
 	orihttp.WriteJSON(w, response)
 }
 
-// folderStructure reads the proposed group for a live selection, or nil when
-// the folder is not a collection or the host has no setup service to ask.
-func (h *HomeAssistantAskHandler) folderStructure(ctx context.Context, target foldercontext.Target, observation *foldercontext.Observation) *personalassistant.FolderStructure {
+// folderStructure reads the proposed group for a live selection: empty when
+// the folder is not a collection, and only a reason when the host cannot
+// show one now.
+func (h *HomeAssistantAskHandler) folderStructure(ctx context.Context, target foldercontext.Target, observation *foldercontext.Observation) personalassistant.FolderStructureProposal {
 	reader, ok := h.FolderSetups.(interface {
-		Structure(context.Context, foldercontext.Target, string) *personalassistant.FolderStructure
+		Structure(context.Context, foldercontext.Target, string) personalassistant.FolderStructureProposal
 	})
 	if !ok || observation == nil {
-		return nil
+		return personalassistant.FolderStructureProposal{}
 	}
 	return reader.Structure(ctx, target, observation.ID)
 }

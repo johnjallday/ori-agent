@@ -238,7 +238,8 @@ func TestFolderAvailabilityCopy_OneSentencePerReason(t *testing.T) {
 		{FolderAvailabilityIntegrationNotInstalled, "REAPER", "REAPER integration is not installed; it can be added later."},
 		{FolderAvailabilityProviderNotInstalled, "Music Production Home", "Music Production Home is not installed; a plain group is proposed instead."},
 		{FolderAvailabilityProviderUnverified, "Music Production Home", "Music Production Home could not be verified right now; a plain group is proposed instead."},
-		{FolderAvailabilityDeclinedEarlier, "REAPER", "You declined this kind of setup earlier; Adjust can bring it back."},
+		// An earlier decline is said on Home's card with Show, never as a note.
+		{FolderAvailabilityDeclinedEarlier, "REAPER", ""},
 		{FolderAvailabilityPlanUnavailable, "REAPER", "REAPER setup is unavailable right now; it can be added later."},
 		{FolderAvailabilityPlanUnavailable, "", "One-click setup is unavailable right now; it can be added later."},
 		{"", "REAPER", ""},

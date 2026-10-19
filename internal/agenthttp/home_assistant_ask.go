@@ -155,6 +155,10 @@ type HomeAssistantAskResponse struct {
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
 	// Safe failure category only; never raw provider errors or private output.
 	FailureReason string `json:"failure_reason,omitempty"`
+	// FolderStructure is the group Ori proposed for the attached collection,
+	// carried on a turn the model could not answer so the card stays with its
+	// controls. Path-free, like the attach response's.
+	FolderStructure *personalassistant.FolderStructure `json:"folder_structure,omitempty"`
 	// DraftReview opens the save-to-backlog review for a typed "save this
 	// draft" request. Nothing has been written when it is set.
 	DraftReview *PersonalAssistantDraftReview `json:"draft_review,omitempty"`
@@ -734,6 +738,9 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 	case errors.Is(err, errHomeModelNotConfigured):
 		reason = "model_not_configured"
 		msg = fmt.Sprintf("%s needs a system model to answer. Choose one in Settings, or open the workspace form manually without a model.", name)
+	case providerOverloaded(err):
+		reason = "provider_overloaded"
+		msg = fmt.Sprintf("%s could not get an answer: the model is at capacity right now. Your draft is kept; try again in a moment.", name)
 	}
 	if errors.Is(err, assistantdiscovery.ErrReviewRefused) || errors.Is(err, errAssistantWorkspaceScopeChanged) {
 		reason = "context_changed"
@@ -751,6 +758,19 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 		ModelUnavailable: true,
 		FailureReason:    reason,
 	}
+}
+
+// providerOverloaded reports a model with no capacity: a provider that typed it,
+// or one that only said so ("overloaded", "at capacity").
+func providerOverloaded(err error) bool {
+	if err == nil {
+		return false
+	}
+	if typed, ok := llm.AsProviderError(err); ok {
+		return typed.Category == llm.CategoryProviderOverloaded
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "overloaded") || strings.Contains(text, "at capacity")
 }
 
 func (h *HomeAssistantAskHandler) resolvePersonalAssistantContext(ctx context.Context) (*PersonalAssistantWorkContext, error) {

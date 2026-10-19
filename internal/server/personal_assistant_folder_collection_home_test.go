@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // Choosing the Home in Adjust hands the offer back to the earlier collection
@@ -42,6 +44,82 @@ func TestHomeFolderCollection_ChoosingTheHomeIsTheEarlierCollectionSetup(t *test
 	}
 	if len(files.CachedWorkspaces()) != before {
 		t.Fatal("choosing the Home created a workspace")
+	}
+}
+
+// One No thanks on the group is about that folder, and it is shown wherever
+// the folder is shown again: the composer's attach and Home's scan both still
+// propose the group, with when the user said no. Only a review waiting
+// elsewhere keeps the composer's card away, and the response says so.
+func TestHomeFolderCollection_ADeclinedFolderIsStillProposedAndSaysWhen(t *testing.T) {
+	f := newDraftServerFixture(t)
+	seedAlbumsCollection(t)
+
+	status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/scan", map[string]any{"chip": "music"})
+	if status != http.StatusOK {
+		t.Fatalf("scan: %d %v", status, body)
+	}
+	id := body["offer"].(map[string]any)["id"].(string)
+	if status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+id+"/decide",
+		map[string]any{"decision": "no", "request_id": "no-thanks"}); status != http.StatusOK {
+		t.Fatalf("No thanks: %d %v", status, body)
+	}
+
+	status, body = f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",
+		map[string]any{"draft_id": uuid.NewString(), "revision": "", "mode": "chip", "chip": "music"})
+	declined, _ := body["declined"].(map[string]any)
+	if status != http.StatusOK || body["structure"] == nil || declined == nil || declined["name"] != "Music" ||
+		len(declined["folder_key"].(string)) != 64 || declined["at"] == nil || body["structure_unavailable"] != nil {
+		t.Fatalf("attach after No thanks: %d %v", status, body)
+	}
+
+	status, body = f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/scan", map[string]any{"chip": "music"})
+	offer, _ := body["offer"].(map[string]any)
+	again, _ := offer["declined"].(map[string]any)
+	if status != http.StatusOK || offer["structure"] == nil || again == nil || again["folder_key"] != declined["folder_key"] {
+		t.Fatalf("Home scan after No thanks: %d %v", status, offer)
+	}
+
+	// That scan's offer is now waiting on Home: the composer says so in one line.
+	status, body = f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",
+		map[string]any{"draft_id": uuid.NewString(), "revision": "", "mode": "chip", "chip": "music"})
+	if status != http.StatusOK || body["structure"] != nil || body["structure_unavailable"] != "review_pending" {
+		t.Fatalf("attach while a review waits on Home: %d %v", status, body)
+	}
+}
+
+// Ask again sends back only the key the decline carried, and the next attach
+// is a folder nobody said no to.
+func TestHomeFolderCollection_AskAgainUndoesTheNoThanks(t *testing.T) {
+	f := newDraftServerFixture(t)
+	seedAlbumsCollection(t)
+	_, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/scan", map[string]any{"chip": "music"})
+	id := body["offer"].(map[string]any)["id"].(string)
+	if status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+id+"/decide",
+		map[string]any{"decision": "no", "request_id": "no-thanks"}); status != http.StatusOK {
+		t.Fatalf("No thanks: %d %v", status, body)
+	}
+	attach := func() map[string]any {
+		t.Helper()
+		status, body := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",
+			map[string]any{"draft_id": uuid.NewString(), "revision": "", "mode": "chip", "chip": "music"})
+		if status != http.StatusOK || body["structure"] == nil {
+			t.Fatalf("attach: %d %v", status, body)
+		}
+		return body
+	}
+	declined := attach()["declined"].(map[string]any)
+	// A path is never accepted in its place.
+	if status, _ := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/forget",
+		map[string]any{"folder_key": "/Users/riley/Music"}); status != http.StatusBadRequest {
+		t.Fatalf("a path as the key: %d", status)
+	}
+	if status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/forget",
+		map[string]any{"folder_key": declined["folder_key"]}); status != http.StatusOK || body["folder_digest"] == nil {
+		t.Fatalf("Ask again: %d %v", status, body)
+	}
+	if again := attach(); again["declined"] != nil {
+		t.Fatalf("still declined after Ask again: %v", again["declined"])
 	}
 }
 

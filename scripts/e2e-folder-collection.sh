@@ -15,6 +15,11 @@
 #             nothing.
 #   home      Explore uses the same attachment picker; no-model planning refuses,
 #             while explicit rule-based review/adjust/setup remains usable.
+#   declined  the folder carries an old No thanks (seeded with --tombstone after
+#             the HQ exists): the card still comes, says when, and Ask again
+#             brings Set up back; Set up creates the group.
+#   model-down  the system model cannot be reached (Ollama pointed at a closed
+#             port): a Send keeps the card, shows one line and Retry.
 #
 # For each phase this:
 #
@@ -95,9 +100,12 @@ stop_server() {
 trap stop_server EXIT
 
 failed=0
-# run_phase <phase> <folder under the sandboxed home>
+# run_phase <phase> <folder under the sandboxed home> [VAR=value ...]
+# Any VAR=value is set for that phase's server only.
 run_phase() {
 	local phase="$1" folder="$2" status=0
+	shift 2
+	local server_env=("$@")
 	local home="$base-$phase"
 	if [[ -e "$home" ]]; then
 		echo "$home already exists" >&2
@@ -112,7 +120,7 @@ run_phase() {
 	echo "SANDBOX[$phase]=$home"
 	./scripts/folder-collection-seed.sh "$home" "$folder" >"$home/seed.log"
 	local log="$home/playwright-$phase.log"
-	./scripts/demo-server.sh "$port" "$home" >"$home/server-$phase.log" 2>&1 &
+	env ${server_env[@]+"${server_env[@]}"} ./scripts/demo-server.sh "$port" "$home" >"$home/server-$phase.log" 2>&1 &
 	./scripts/e2e.sh --port "$port" --wait 300 --tail 0 \
 		--env "ORI_COLLECTION_SANDBOX=$home" \
 		--env "ORI_COLLECTION_PHASE=$phase" \
@@ -131,5 +139,8 @@ run_phase() {
 
 run_phase composer Downloads || true
 run_phase home Music || true
+run_phase declined Downloads || true
+# Port 9 (discard) is closed on a normal machine: every model call fails fast.
+run_phase model-down Downloads OLLAMA_BASE_URL=http://127.0.0.1:9 || true
 
 exit "$failed"

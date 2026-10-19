@@ -210,7 +210,8 @@ const (
 
 // FolderAvailabilityCopy is the one sentence shown for an availability reason.
 // subject names what is unavailable: the integration's application or the
-// shape's Home. An unknown reason has no sentence.
+// shape's Home. An unknown reason has no sentence, and neither has an earlier
+// decline: Home's card says that on its own line, with Show.
 func FolderAvailabilityCopy(reason, subject string) string {
 	subject = strings.TrimSpace(subject)
 	switch reason {
@@ -229,8 +230,6 @@ func FolderAvailabilityCopy(reason, subject string) string {
 			subject = "The Home"
 		}
 		return subject + " could not be verified right now; a plain group is proposed instead."
-	case FolderAvailabilityDeclinedEarlier:
-		return "You declined this kind of setup earlier; Adjust can bring it back."
 	case FolderAvailabilityPlanUnavailable:
 		if subject == "" {
 			return "One-click setup is unavailable right now; it can be added later."
@@ -305,7 +304,8 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 			}
 		}
 		// The Home can be chosen in Adjust whenever the owner can be offered it;
-		// reason says whether it is in place now, which decides the default.
+		// reason says whether it is in place now. It is never the default: the
+		// plain group is, so nothing is created lazily behind the user's back.
 		structure.Group.HomeAvailable = offer.Portfolio != nil
 		useHome := false
 		switch {
@@ -328,17 +328,15 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 			}
 			// Choosing the Home is how Adjust brings an earlier no back.
 			useHome, revived = true, row.Offer.Slug
+		case reason != "":
+			// A Home that cannot be used says why first, whatever was declined.
+			structure.Group.Availability = reason
 		case declined(row.Offer.Slug):
 			structure.Group.Availability = FolderAvailabilityDeclinedEarlier
-		case reason != "":
-			structure.Group.Availability = reason
-		default:
-			useHome = true
 		}
 		if useHome {
-			// With the Home in place the collection is listed in it, as before:
-			// each project gets its workspace, from its own blueprint, the first
-			// time it is opened there. The plain group stays one choice away.
+			// Listed in the Home, as before: each project gets its workspace, from
+			// its own blueprint, the first time it is opened there.
 			structure.Group.Type, structure.Group.Name = FolderGroupLibrary, structure.Group.HomeName
 			if offer.Portfolio.ExistingHome {
 				structure.Group.DestinationState = "existing"
@@ -398,13 +396,13 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 	if err := structure.applyMembers(adjustment); err != nil {
 		return nil, err
 	}
-	if err := s.checkStructureNames(ctx, structure); err != nil {
-		if adjustment != nil {
+	// Only the user's own names are refused here. Default names were made free
+	// above, and a proposal is never dropped because one of them is taken: the
+	// setup's review says so, and Adjust can rename it.
+	if adjustment != nil {
+		if err := s.checkStructureNames(ctx, structure); err != nil {
 			return nil, err
 		}
-		// A proposal whose own default names cannot all be made free is not
-		// one to offer; the folders stay available one by one.
-		return nil, nil
 	}
 	if len(structure.Included()) == 0 && structure.Group.Type != FolderGroupLibrary {
 		// Every folder is already a workspace: there is no group left to propose.

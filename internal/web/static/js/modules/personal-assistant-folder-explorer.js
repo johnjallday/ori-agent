@@ -11,6 +11,33 @@ const element = (tag, text = '', className = '') => {
   return node;
 };
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// explorerCountsLine is the Tree pane's one line: what was recorded, and that
+// nothing was read. The privacy details sit in its info tooltip.
+export function explorerCountsLine(observation, tree) {
+  if (!observation) return '';
+  const folders = tree
+    ? tree.entries.filter(entry => entry.kind === 'folder').length
+    : (observation.projects || []).filter(project => !project.root).length;
+  const more = tree?.omitted ? '+' : '';
+  const files = Number.isInteger(observation.files) ? observation.files : 0;
+  return `${folders}${more} ${folders === 1 && !more ? 'folder' : 'folders'} · ${plural(files, 'file', 'files')} · metadata only, nothing read`;
+}
+
+// explorerPartialLine says, only for a scan that stopped early, why.
+export function explorerPartialLine(observation) {
+  const coverage = observation?.coverage;
+  if (!coverage?.partial) return '';
+  const reasons = { entries: 'entry limit reached', time: 'time limit reached' };
+  return `Partial scan · ${reasons[coverage.partial_reason] || 'some entries were not recorded'}`;
+}
+
+// focusStatusLine is the Focus status, shown only while topics are checked.
+export function focusStatusLine(count) {
+  return count > 0 ? `${plural(count, 'topic', 'topics')} for the next message` : '';
+}
+
 // Uses the same panel, attachment, conversation and composer. This controller
 // owns only ephemeral layout/disclosures, never permissions or durable scope.
 export function initFolderExplorer({ current, setFocus, notify }) {
@@ -24,12 +51,15 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     launch = get('ExploreAttachedFolder');
   const treeTab = get('ExplorerTreeTab'),
     chatTab = get('ExplorerChatTab'),
-    selectAll = get('FolderSelectAll');
+    selectAll = get('FolderSelectAll'),
+    focusToggle = get('FolderFocusToggle');
   const expanded = new Set();
   let open = false,
     tab = 'tree',
     renderedKey = '',
-    observationId = '';
+    observationId = '',
+    // Focus mode: the checks, Select all and the status line are shown.
+    focusing = false;
 
   function layout() {
     panel.classList.toggle('personal-assistant-panel--exploring', open);
@@ -37,8 +67,6 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     pane.hidden = !open;
     toolbar.hidden = !open;
     launch.setAttribute('aria-expanded', String(open));
-    const state = current();
-    get('FolderFocus').hidden = !state?.observation?.tree || (!open && !state.focusIDs.length);
     treeTab.setAttribute('aria-pressed', String(tab === 'tree'));
     chatTab.setAttribute('aria-pressed', String(tab === 'chat'));
     window.PersonalAssistantPanel?.syncViewport?.();
@@ -126,8 +154,9 @@ export function initFolderExplorer({ current, setFocus, notify }) {
           get('ExplorerNotice').textContent = message;
           notify(message);
         } else {
+          // The status line says what the next message is about.
           get('ExplorerNotice').textContent = '';
-          notify('Discussion focus updated for the next message. No message sent.');
+          notify('');
         }
       });
       const name = element(
@@ -163,21 +192,25 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     launch.hidden = !folderTreeView(observation);
     launch.disabled = Boolean(state?.pending || loading);
     const all = folderSelectAllFocus(observation);
-    get('FolderSelection').hidden = launch.hidden;
-    get('FolderSelectionStatus').hidden = launch.hidden;
     selectAll.disabled = !all || state?.pending || loading;
     const selectedCount = state?.focusIDs.length || 0;
+    // Checks in use are always shown; otherwise Focus is the user's choice.
+    if (observation?.id !== observationId) focusing = false;
+    if (selectedCount) focusing = true;
+    pane.classList.toggle('personal-assistant-explorer__pane--focus', focusing);
+    focusToggle.hidden = launch.hidden;
+    focusToggle.disabled = Boolean(state?.pending || loading);
+    focusToggle.setAttribute('aria-pressed', String(focusing));
+    get('FolderSelection').hidden = !focusing || launch.hidden;
     selectAll.checked = Boolean(all && selectedCount === all.count);
     selectAll.indeterminate = selectedCount > 0 && !selectAll.checked;
     selectAll.title = all?.wholeFolder
       ? 'Some recorded names are indistinguishable. Select all uses whole-folder discussion.'
       : 'Select every recorded entry, including entries in collapsed folders, for the next message.';
-    get('FolderSelectionStatus').textContent = selectAll.checked
-      ? `All ${all.count} recorded items selected${all.wholeFolder ? ' · Whole folder' : ''}`
-      : selectedCount
-        ? `${selectedCount} ${selectedCount === 1 ? 'topic' : 'topics'} selected`
-        : 'Whole folder · no individual topics';
-    get('FolderFocus').hidden = !observation?.tree || (!open && !state.focusIDs.length);
+    const status = focusStatusLine(selectedCount);
+    get('FolderSelectionStatus').textContent = status;
+    get('FolderSelectionLine').hidden = !status;
+    get('FolderFocusClear').disabled = Boolean(state?.pending || loading);
     if (!observation || loading) {
       collapse({ focus: false });
       renderedKey = '';
@@ -191,31 +224,14 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     const tree = folderTreeView(observation);
     const focus = folderSelectionFocus(observation, state.focusIDs);
     const labels = focus?.topics.map(topic => topic.names.join(' › ')) || [];
-    const focusText = get('FolderFocusText');
-    focusText.textContent =
-      labels.length === 1
-        ? `Next message · ${labels[0]}`
-        : labels.length
-          ? `Next message · ${labels.length} topics`
-          : 'Next message · Whole folder';
-    focusText.setAttribute(
-      'aria-label',
-      `Next message discussion focus: ${labels.length ? labels.join('; ') : 'Whole folder'}`
-    );
-    focusText.title = labels.join('; ') || 'Whole folder';
-    get('FolderFocusClear').hidden = !state.focusIDs.length;
-    get('FolderFocusClear').disabled = state.pending || loading;
+    // The topics themselves are the status line's title, for a pointer.
+    get('FolderSelectionStatus').title = labels.join('; ');
     get('FolderExplorerName').textContent = observation.folder;
     get('FolderExplorerName').title = observation.folder;
-    get('FolderExplorerCoverageSummary').textContent = tree
-      ? `${observation.coverage?.partial ? 'Partial' : 'Bounded'} snapshot · ${tree.entries.length} entries${tree.omitted ? ` · ${tree.omitted} omitted` : ''}`
-      : 'Saved folder summaries only';
-    get('FolderExplorerStatus').textContent = state.preview
-      ? 'Local snapshot · not sent'
-      : `Saved snapshot${state.authority ? ' · historical' : ''}`;
-    get('FolderExplorerCoverage').textContent = tree
-      ? `${tree.entries.length} recorded entries${tree.omitted ? ` · ${tree.omitted} more observed entries omitted` : ''}. Scanned ${new Date(observation.scanned_at).toLocaleString()}. Limits: ${observation.coverage.max_depth} directory levels, ${observation.coverage.max_entries.toLocaleString()} entries, ${observation.coverage.budget_seconds} seconds; ${observation.coverage.skipped_links} links skipped. Bounded look, not a complete tree. Hidden/tooling folders, links, deeper levels and inaccessible entries may be absent. Expanding reads nothing.`
-      : 'This saved snapshot contains folder summaries, not a file tree. Pick again for fresh metadata; nothing is rescanned automatically.';
+    get('FolderExplorerCounts').textContent = explorerCountsLine(observation, tree);
+    const partial = explorerPartialLine(observation);
+    get('FolderExplorerPartial').textContent = partial;
+    get('FolderExplorerPartial').hidden = !partial;
     if (observationId !== observation.id) {
       expanded.clear();
       get('ExplorerNotice').textContent = '';
@@ -278,11 +294,11 @@ export function initFolderExplorer({ current, setFocus, notify }) {
       refresh();
       return;
     }
-    const message = !selecting
-      ? 'Checks cleared. The next message will discuss the whole folder. Nothing read or sent.'
-      : all.wholeFolder
-        ? `All ${all.count} recorded items selected. The next message will discuss the whole folder. Nothing read or sent.`
-        : `All ${all.count} recorded items selected for the next message. Nothing read or sent.`;
+    // The status line says it; only an indistinguishable selection needs more.
+    const message =
+      selecting && all.wholeFolder
+        ? 'Some recorded names are indistinguishable, so the next message discusses the whole folder.'
+        : '';
     get('ExplorerNotice').textContent = message;
     notify(message);
   });
@@ -290,9 +306,20 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     const state = current();
     if (state?.observation && setFocus([], binding(state))) {
       get('ExplorerNotice').textContent = '';
-      notify('Whole-folder focus selected. No message sent.');
+      notify('');
       get('Input')?.focus();
     }
+  });
+  // Leaving Focus mode with topics checked returns to whole-folder discussion.
+  focusToggle.addEventListener('click', () => {
+    const state = current();
+    if (!state?.observation || state.pending || window.PersonalAssistantConversation?.isLoading?.())
+      return;
+    if (focusing && state.focusIDs.length && !setFocus([], binding(state))) return;
+    focusing = !focusing;
+    get('ExplorerNotice').textContent = '';
+    refresh();
+    if (focusing) (list.querySelector('input:not(:disabled)') || selectAll).focus();
   });
   function revealFocusedControl() {
     if (!open || !pane.getClientRects().length) return;

@@ -12,10 +12,17 @@ import {
   folderPresentation,
   renderFolderSummary
 } from './personal-assistant-folder-presentation.js';
-import { proposalView, renderProposal, structureOption } from './personal-assistant-proposal.js';
+import {
+  declinedLine,
+  proposalView,
+  renderProposal,
+  structureOption
+} from './personal-assistant-proposal.js';
 export { observationSummary, coverageSummary } from './personal-assistant-folder-presentation.js';
 
 const ENDPOINT = '/api/home-assistant/folder-context';
+// Ask again: undoes one folder's No thanks by the key its decline carried.
+const FORGET_ENDPOINT = '/api/personal-assistant/folder-digest/forget';
 export const FOLDER_DISCLOSURE =
   'File contents have not been read. Send shares the recorded file/folder and project names, kinds, counts, project markers, last-changed dates, scan time and coverage with your configured model. Selecting a folder stays local.';
 
@@ -37,6 +44,9 @@ export function createFolderContextController({
     // attach response described it. A local preview only: after Send the
     // reply's own suggestion carries the proposal.
     structure: null,
+    // The earlier No thanks on that folder, and why no card could be shown.
+    declined: null,
+    structureUnavailable: '',
     focusIDs: [],
     accepted: null,
     offerId: '',
@@ -66,6 +76,8 @@ export function createFolderContextController({
       revision: saved.revision || '',
       observation: saved.observation || null,
       structure: null,
+      declined: null,
+      structureUnavailable: '',
       focusIDs: [],
       accepted: saved.observation || null,
       offerId: saved.offer_id || '',
@@ -105,6 +117,10 @@ export function createFolderContextController({
       }
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
+      state.declined = state.structure ? folderDecline(result.declined) : null;
+      state.structureUnavailable = state.structure
+        ? ''
+        : String(result.structure_unavailable || '');
       state.focusIDs = [];
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
@@ -113,7 +129,8 @@ export function createFolderContextController({
       }
       state.authority = '';
       state.preview = true;
-      notify('Local preview only — not sent to the model yet.');
+      // The preview says "Local preview · not sent" itself.
+      notify('');
       return true;
     } catch (error) {
       if (generation === state.generation && owner === currentId())
@@ -151,6 +168,8 @@ export function createFolderContextController({
       }
       state.observation = null;
       state.structure = null;
+      state.declined = null;
+      state.structureUnavailable = '';
       state.focusIDs = [];
       state.accepted = null;
       state.offerId = '';
@@ -166,6 +185,30 @@ export function createFolderContextController({
           error.message ||
             'Could not remove the saved folder. Reopen the conversation and try again.'
         );
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
+      }
+    }
+  }
+  // askAgain undoes the attached folder's earlier No thanks. Only the key its
+  // decline carried is sent; the folder is not looked at again, and its card
+  // simply gets Set up back.
+  async function askAgain() {
+    if (!state.declined || state.pending) return false;
+    const generation = state.generation;
+    state.pending = true;
+    changed(state);
+    try {
+      await post(FORGET_ENDPOINT, { folder_key: state.declined.folder_key });
+      if (generation !== state.generation) return false;
+      state.declined = null;
+      return true;
+    } catch (error) {
+      if (generation === state.generation)
+        notify(error.message || 'Could not ask about this folder again right now. Try again.');
       return false;
     } finally {
       if (generation === state.generation) {
@@ -286,7 +329,19 @@ export function createFolderContextController({
       }
     }
   }
-  return { state, select, remove, reset, request, setFocus, accepted, adopt, review, notify };
+  return {
+    state,
+    select,
+    remove,
+    reset,
+    request,
+    setFocus,
+    accepted,
+    adopt,
+    review,
+    notify,
+    askAgain
+  };
 }
 
 // folderContextChoices is what the Add folder sheet shows for the server's
@@ -378,7 +433,7 @@ export function discussionChips({
 }) {
   if (structure && !historical)
     return [
-      { id: 'setup', label: 'Set up this structure' },
+      { id: 'setup', label: 'Set up' },
       { id: 'adjust', label: 'Adjust…' },
       { id: 'discuss', label: 'Just discuss' }
     ];
@@ -397,49 +452,158 @@ export function discussionChips({
   return chips;
 }
 
+// folderDecline is the host's record of an earlier No thanks on a folder, or
+// null. Only its closed fields are kept: the folder's key (never a path), its
+// name and when.
+export function folderDecline(value) {
+  const key = String(value?.folder_key || '');
+  const at = new Date(String(value?.at || ''));
+  if (
+    !/^[0-9a-f]{64}$/.test(key) ||
+    !String(value?.name || '').trim() ||
+    Number.isNaN(at.getTime())
+  )
+    return null;
+  return { folder_key: key, name: String(value.name).trim(), at: value.at };
+}
+
+// Why no card could be shown for an attached collection, in one line.
+const STRUCTURE_UNAVAILABLE = {
+  review_pending:
+    'Another setup review is open. Finish or close it to see the proposal for this folder.',
+  setup_unavailable: 'Setting up workspaces is not available here.'
+};
+
+// structureCardView is the whole decision for the card shown as soon as a
+// collection is attached, before Send: the proposal and its three controls, the
+// one line that says why there is none, or nothing. parkedId is the folder the
+// user said Not now to in this conversation.
+export function structureCardView(state, parkedId = '') {
+  const live = Boolean(state?.preview && !state.authority && state.observation);
+  const id = String(state?.observation?.id || '');
+  if (!live) return { kind: 'none', key: '' };
+  if (state.structure) {
+    if (parkedId && parkedId === id) return { kind: 'none', key: '' };
+    const declined = Boolean(state.declined);
+    return {
+      kind: 'proposal',
+      key: `${id}:${declined ? 'declined' : 'open'}`,
+      actions: [
+        // An earlier No thanks stands where Set up would, until Ask again.
+        declined
+          ? {
+              id: 'ask',
+              label: declinedLine(state.declined, state.structure.folder),
+              style: 'btn btn-sm btn-outline-secondary personal-assistant-structure__declined',
+              disabled: Boolean(state.pending)
+            }
+          : {
+              id: 'setup',
+              label: 'Set up',
+              style: 'btn btn-sm btn-primary',
+              disabled: Boolean(state.pending)
+            },
+        {
+          id: 'adjust',
+          label: 'Adjust…',
+          style: 'btn btn-sm btn-outline-secondary',
+          disabled: Boolean(state.pending)
+        },
+        { id: 'later', label: 'Not now', style: 'btn btn-sm btn-link', disabled: false }
+      ]
+    };
+  }
+  const line = STRUCTURE_UNAVAILABLE[state.structureUnavailable] || '';
+  return line ? { kind: 'unavailable', key: `${id}:unavailable`, line } : { kind: 'none', key: '' };
+}
+
+// The folder the user said Not now to: its card stays away for this
+// conversation, and nothing is written.
+let parkedStructure = '';
+
+// emptySendView is what an empty Send means with a folder attached: a folder
+// Ori proposed a group for is asked for that proposal, any other is explored.
+// The placeholder says it before Send.
+export function emptySendView(folder, collection) {
+  if (!folder) return null;
+  return collection
+    ? {
+        placeholder: `Propose workspaces for ${folder}`,
+        text: 'Propose workspaces for this folder'
+      }
+    : { placeholder: 'Explore this folder', text: 'Explore this folder' };
+}
+
+function currentEmptySend() {
+  const state = controller?.state;
+  if (!state?.observation) return null;
+  const collection =
+    Boolean(state.preview && state.structure) ||
+    Boolean(window.PersonalAssistantFolderSetup?.structure?.());
+  return emptySendView(state.observation.folder, collection);
+}
+
+// The reply whose proposal the user chose to just discuss: its chips go, and
+// nothing is written.
+let discussedMessage = '';
+
 // The proposal card shown as soon as a collection is attached, before Send.
 // It is drawn from the attach response alone; pressing a control is what
-// starts a request, and "Just discuss" starts none.
+// starts a request, and Not now starts none.
 function renderStructure(state) {
   const host = elements?.structure;
   if (!host) return;
-  const structure = state.preview && !state.authority ? state.structure : null;
-  const key = structure ? String(state.observation?.id || '') : '';
-  if (host.dataset.structureKey === key) {
-    for (const button of host.querySelectorAll('[data-structure-action]'))
-      button.disabled = state.pending;
+  const view = structureCardView(state, parkedStructure);
+  if (host.dataset.structureKey === view.key) {
+    for (const action of view.actions || []) {
+      const button = host.querySelector(`[data-structure-action="${action.id}"]`);
+      if (button) button.disabled = action.disabled;
+    }
     return;
   }
-  host.dataset.structureKey = key;
+  host.dataset.structureKey = view.key;
   host.replaceChildren();
-  host.hidden = !structure;
-  if (!structure) return;
+  host.hidden = view.kind === 'none';
+  if (view.kind === 'unavailable') {
+    host.append(node('p', view.line, 'personal-assistant-structure__unavailable'));
+    return;
+  }
+  if (view.kind !== 'proposal') return;
   host.append(
     renderProposal(
-      proposalView(structureOption(structure)),
+      proposalView(structureOption(state.structure)),
       document,
       window.OriWorkspaceBuildingArt
     )
   );
   const actions = node('div', '', 'personal-assistant-structure__actions');
-  const control = (id, label, className, run) => {
-    const button = node('button', label, className);
-    button.type = 'button';
-    button.dataset.structureAction = id;
-    button.disabled = state.pending;
-    button.addEventListener('click', () => run(button));
-    actions.append(button);
+  const runs = {
+    setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
+    ask: async () => {
+      if (await controller.askAgain())
+        host.querySelector('[data-structure-action="setup"]')?.focus();
+    },
+    adjust: button =>
+      window.PersonalAssistantFolderSetup?.adjustStructure?.(button, controller.state.structure),
+    later: () => {
+      parkedStructure = String(controller.state.observation?.id || '');
+      renderStructure(controller.state);
+      document.getElementById('personalAssistantInput')?.focus();
+    }
   };
-  control('review', 'Review group setup', 'btn btn-sm btn-primary', button =>
-    window.PersonalAssistantFolderSetup?.reviewStructure?.(button)
-  );
-  control('adjust', 'Adjust…', 'btn btn-sm btn-outline-secondary', button =>
-    window.PersonalAssistantFolderSetup?.adjustStructure?.(button, controller.state.structure)
-  );
-  control('discuss', 'Just discuss', 'btn btn-sm btn-link', () =>
-    document.getElementById('personalAssistantInput')?.focus()
-  );
+  for (const action of view.actions) {
+    const button = node('button', action.label, action.style);
+    button.type = 'button';
+    button.dataset.structureAction = action.id;
+    button.disabled = action.disabled;
+    button.addEventListener('click', () => runs[action.id](button));
+    actions.append(button);
+  }
   host.append(actions);
+  // A new proposal is read from its question down, also in a short drawer: the
+  // transcript scrolls to it and stops following the bottom.
+  if (typeof requestAnimationFrame === 'function')
+    requestAnimationFrame(() => window.PersonalAssistantTranscript?.revealControl?.(host, true));
 }
 
 function renderDiscussion() {
@@ -457,7 +621,7 @@ function renderDiscussion() {
     discussionBinding = { ...discussionBinding, generation: controller.state.generation };
   }
   const row = discussionRow(discussionBinding);
-  if (!row) {
+  if (!row || discussedMessage === discussionBinding?.messageId) {
     existing?.remove();
     closeDiscussionChooser({ restoreFocus: false });
     return;
@@ -486,7 +650,14 @@ function renderDiscussion() {
     const runs = {
       setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
       adjust: button => window.PersonalAssistantFolderSetup?.adjustStructure?.(button),
-      discuss: () => document.getElementById('personalAssistantInput')?.focus()
+      // Parks the proposal for this conversation: no decline is written, and
+      // Set up stays one Add folder away.
+      discuss: () => {
+        discussedMessage = value.messageId;
+        window.PersonalAssistantFolderSetup?.parkSuggestion?.();
+        renderDiscussion();
+        document.getElementById('personalAssistantInput')?.focus();
+      }
     };
     for (const chip of discussionChips({ structure: true })) {
       const button = node('button', chip.label, 'personal-assistant-conversation__button');
@@ -580,6 +751,11 @@ const node = (tag, text, className = '') => {
 function render(state) {
   if (!elements) return;
   elements.active.hidden = !state.observation;
+  // With a folder attached its own chip says which; Add shrinks to its icon and
+  // replaces the folder.
+  elements.add.classList.toggle('personal-assistant-panel__chip--icon', Boolean(state.observation));
+  elements.add.setAttribute('aria-label', state.observation ? 'Replace folder' : 'Add folder');
+  elements.add.title = state.observation ? 'Replace folder' : '';
   elements.name.textContent = state.observation?.folder || '';
   elements.remove.disabled = state.pending;
   elements.preview.hidden = !state.observation || !state.preview;
@@ -606,6 +782,7 @@ function render(state) {
   elements.status.textContent = state.notice;
   renderStructure(state);
   updateSendHint();
+  window.PersonalAssistantPanel?.setComposerPlaceholder?.(currentEmptySend()?.placeholder || '');
   window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
   window.PersonalAssistantConversation?.refresh?.();
   window.PersonalAssistantFolder?.contextProgress?.(state);
@@ -856,6 +1033,8 @@ const api = {
   adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,
   hasFolder: () => Boolean(controller?.state.observation),
+  // What an empty Send sends with this folder attached, or null.
+  emptySend: () => currentEmptySend(),
   _controller: () => controller
 };
 if (typeof window !== 'undefined') window.PersonalAssistantFolderContext = api;
