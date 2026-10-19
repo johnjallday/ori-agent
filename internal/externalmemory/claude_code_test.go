@@ -133,16 +133,34 @@ func TestDecodeProjectKey(t *testing.T) {
 			exists: []string{"/Users", "/Users/me", "/Users/me/연구", "/Users/me/연구/비트코인"},
 			want:   "/Users/me/연구/비트코인", ok: true,
 		},
+		{
+			// A temp folder name mixes a dash and a dot inside one name.
+			name:   "mixed characters inside one name",
+			key:    "-private-var-T-ori-test-run-gIURPp-go-tmp-TestX-1-001",
+			exists: []string{"/private", "/private/var", "/private/var/T", "/private/var/T/ori-test-run.gIURPp", "/private/var/T/ori-test-run.gIURPp/go-tmp", "/private/var/T/ori-test-run.gIURPp/go-tmp/TestX_1", "/private/var/T/ori-test-run.gIURPp/go-tmp/TestX_1/001"},
+			want:   "/private/var/T/ori-test-run.gIURPp/go-tmp/TestX_1/001", ok: true,
+		},
+		{
+			name:   "backtracks when the longest name leads nowhere",
+			key:    "-Users-me-a-b-c",
+			exists: []string{"/Users", "/Users/me", "/Users/me/a-b", "/Users/me/a", "/Users/me/a/b-c"},
+			want:   "/Users/me/a/b-c", ok: true,
+		},
 		{name: "nothing exists", key: "-Users-me-gone", exists: []string{"/Users"}},
 		{name: "not a key", key: "Users-me", exists: []string{"/Users"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			set := map[string]bool{}
-			for _, p := range tc.exists {
-				set[p] = true
+			list := func(dir string) []string {
+				var names []string
+				for _, p := range tc.exists {
+					if filepath.Dir(p) == dir {
+						names = append(names, filepath.Base(p))
+					}
+				}
+				return names
 			}
-			got, ok := decodeProjectKey(tc.key, func(p string) bool { return set[p] })
+			got, ok := decodeProjectKey(tc.key, list)
 			if ok != tc.ok || got != tc.want {
 				t.Fatalf("decodeProjectKey(%q) = %q, %v; want %q, %v", tc.key, got, ok, tc.want, tc.ok)
 			}

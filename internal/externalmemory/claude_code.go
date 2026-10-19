@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -22,13 +22,13 @@ import (
 type ClaudeCodeSource struct {
 	root      string
 	tempRoots []string
-	exists    func(string) bool
+	list      func(dir string) []string
 }
 
 // NewClaudeCodeSource reads Claude Code memory under root (a Claude config
 // folder, the one holding projects/).
 func NewClaudeCodeSource(root string) *ClaudeCodeSource {
-	return &ClaudeCodeSource{root: root, tempRoots: defaultTempRoots(), exists: dirExists}
+	return &ClaudeCodeSource{root: root, tempRoots: defaultTempRoots(), list: subdirectories}
 }
 
 // WithTempRoots replaces the folders whose project keys are skipped as
@@ -103,7 +103,7 @@ type decodedFolder struct {
 }
 
 func (s *ClaudeCodeSource) decodeFolder(key string) decodedFolder {
-	if path, ok := decodeProjectKey(key, s.exists); ok {
+	if path, ok := decodeProjectKey(key, s.list); ok {
 		return decodedFolder{path: path}
 	}
 	return decodedFolder{path: key, unverified: true}
@@ -226,60 +226,78 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+// subdirectories lists the folder names inside dir; nil when it cannot be read.
+func subdirectories(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+			continue
+		}
+		// A symlink to a folder counts as a folder.
+		if entry.Type()&os.ModeSymlink != 0 {
+			if info, err := os.Stat(filepath.Join(dir, entry.Name())); err == nil && info.IsDir() {
+				names = append(names, entry.Name())
+			}
+		}
+	}
+	return names
 }
 
-// maxKeySegmentsPerName bounds how many dash-separated pieces one folder name
-// may span while decoding a project key.
-const maxKeySegmentsPerName = 8
-
-// keyNameJoiners are the characters a folder name may have had where its
-// project key shows a dash. Claude Code writes every character that is not a
-// letter or digit as a dash.
-var keyNameJoiners = []string{"-", "_", ".", " "}
-
-// decodeProjectKey turns a project key back into the folder it was made from:
-// "-Users-me-Projects-ori-agent" may be /Users/me/Projects/ori-agent or
-// /Users/me/Projects/ori/agent. A dash is ambiguous, so each folder name is
-// tried from the longest run of pieces down, and a candidate is kept only when
-// that folder exists. A name that starts with a dot shows as an empty piece
-// ("--claude" for "/.claude").
-func decodeProjectKey(key string, exists func(string) bool) (string, bool) {
-	if !strings.HasPrefix(key, "-") || exists == nil {
+// decodeProjectKey turns a project key back into the folder it was made from.
+// Claude Code writes every character that is not a letter or digit as a dash,
+// so "-Users-me-Projects-ori-agent" may be /Users/me/Projects/ori-agent or
+// /Users/me/Projects/ori/agent, and a name such as "run.v2_x" shows as
+// "run-v2-x". Guessing is ambiguous, so each level is matched against the
+// folders that actually exist there: a child whose own name encodes to the
+// next part of the key is a candidate, the longest first, backtracking when a
+// deeper level does not match.
+func decodeProjectKey(key string, list func(dir string) []string) (string, bool) {
+	if !strings.HasPrefix(key, "-") || list == nil {
 		return "", false
 	}
-	segments := strings.Split(key[1:], "-")
-	var walk func(prefix string, rest []string) (string, bool)
-	walk = func(prefix string, rest []string) (string, bool) {
-		if len(rest) == 0 {
-			return prefix, true
+	listed := map[string][]string{}
+	children := func(dir string) []string {
+		if names, ok := listed[dir]; ok {
+			return names
 		}
-		dot := ""
-		if rest[0] == "" && len(rest) > 1 {
-			dot, rest = ".", rest[1:]
+		names := list(dir)
+		listed[dir] = names
+		return names
+	}
+	var walk func(dir, rest string) (string, bool)
+	walk = func(dir, rest string) (string, bool) {
+		if rest == "" {
+			return dir, dir != ""
 		}
-		for n := min(len(rest), maxKeySegmentsPerName); n >= 1; n-- {
-			if slices.Contains(rest[:n], "") {
-				continue
+		type match struct {
+			name string
+			used int
+		}
+		var matches []match
+		listing := dir
+		if listing == "" {
+			listing = "/"
+		}
+		for _, name := range children(listing) {
+			encoded := "-" + encodeProjectKey(name)
+			if rest == encoded || strings.HasPrefix(rest, encoded+"-") {
+				matches = append(matches, match{name: name, used: len(encoded)})
 			}
-			for _, joiner := range keyNameJoiners {
-				if n == 1 && joiner != "-" {
-					continue
-				}
-				candidate := prefix + "/" + dot + strings.Join(rest[:n], joiner)
-				if !exists(candidate) {
-					continue
-				}
-				if found, ok := walk(candidate, rest[n:]); ok {
-					return found, true
-				}
+		}
+		sort.SliceStable(matches, func(i, j int) bool { return matches[i].used > matches[j].used })
+		for _, m := range matches {
+			if found, ok := walk(dir+"/"+m.name, rest[m.used:]); ok {
+				return found, true
 			}
 		}
 		return "", false
 	}
-	return walk("", segments)
+	return walk("", key)
 }
 
 // encodeProjectKey is Claude Code's folder-to-key rule: every character that
