@@ -70,6 +70,13 @@
     folderSendHint: 'Empty Send: “Set it up from the attached folder”',
     folderSummary: (files, partial) =>
       `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`,
+    // What Ori recognized in the attached folder, from the host's own table.
+    folderRecognized: (label, evidence) =>
+      `Recognized: ${label}${evidence ? ` · ${evidence}` : ''}`,
+    folderEvidence: (count, noun) => `${count} ${noun} ${count === 1 ? 'file' : 'files'}`,
+    folderUnrecognized: 'Not a project Ori recognizes yet',
+    folderCollection: count =>
+      `Holds ${count} projects · Explore a folder on Home sets them up together`,
     // Add link: one address, read for what it says about itself.
     addLink: 'Add link',
     removeLink: 'Remove link',
@@ -108,6 +115,30 @@
     if (observation.kind === 'document') return `Document · ${host} · not read`;
     if (observation.readable !== true) return `Could only read the address · ${host}`;
     return `Page · ${host}`;
+  }
+
+  // folderRecognitionText is the one line under an attached folder that says
+  // what Ori recognized it as, from server facts only. A folder the server
+  // said nothing about (an older build, a recognition that failed) has none.
+  function folderRecognitionText(recognition) {
+    if (!recognition || typeof recognition !== 'object') return '';
+    switch (recognition.verdict) {
+      case 'project': {
+        const label = text(recognition.label);
+        if (!label) return '';
+        const count = Math.max(0, Math.floor(Number(recognition.marker_count) || 0));
+        const noun = text(recognition.marker_noun);
+        return COPY.folderRecognized(label, count && noun ? COPY.folderEvidence(count, noun) : '');
+      }
+      case 'collection': {
+        const count = Math.max(0, Math.floor(Number(recognition.project_count) || 0));
+        return count >= 2 ? COPY.folderCollection(count) : '';
+      }
+      case 'none':
+        return COPY.folderUnrecognized;
+      default:
+        return '';
+    }
   }
 
   // A reason code ("desktop_off") is for code, never for the user; a note
@@ -481,6 +512,15 @@
     // the reply box never re-announces the folder.
     if (els.folderSummary.textContent !== summary) els.folderSummary.textContent = summary;
     els.folderSummary.hidden = !summary;
+    const recognized = folder ? folderRecognitionText(state.session?.folder?.recognition) : '';
+    if (els.folderRecognition.textContent !== recognized) {
+      els.folderRecognition.textContent = recognized;
+    }
+    els.folderRecognition.hidden = !recognized;
+    els.folderRecognition.classList.toggle(
+      'is-recognized',
+      state.session?.folder?.recognition?.verdict === 'project'
+    );
     // With a link attached too, the link's hint speaks for both.
     els.folderHint.hidden = !folder || Boolean(attachedLink()) || Boolean(text(els.input?.value));
   }
@@ -770,6 +810,10 @@
     folderSummary.setAttribute('role', 'status');
     folderSummary.setAttribute('aria-live', 'polite');
     folderSummary.hidden = true;
+    // Not a live region: the summary above already announces the attach.
+    const folderRecognition = createElement('p', 'workspace-build-folder__recognition');
+    folderRecognition.id = 'workspaceBuildFolderRecognition';
+    folderRecognition.hidden = true;
 
     const chooser = createElement('section', 'workspace-build-folder-chooser');
     chooser.id = 'workspaceBuildFolderChooser';
@@ -831,6 +875,7 @@
 
     composer.appendChild(attachments);
     composer.appendChild(folderSummary);
+    composer.appendChild(folderRecognition);
     composer.appendChild(linkEls.linkSummary);
     composer.appendChild(chooser);
     composer.appendChild(linkEls.linkField);
@@ -842,6 +887,7 @@
       folderRemove,
       folderHint,
       folderSummary,
+      folderRecognition,
       chooser,
       chooserChoices: choices,
       chooserNote,
@@ -1328,6 +1374,7 @@
     assistantName: () => assistantName(state.assistant),
     paneView,
     folderChooserView,
+    folderRecognitionText,
     linkSummaryText
   };
 })();

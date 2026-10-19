@@ -734,6 +734,77 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   assert.equal(controls.hint.hidden, true);
 });
 
+test('the recognition line says what Ori recognized, from server facts only', () => {
+  const { pane } = loadPane();
+  const reaper = {
+    verdict: 'project',
+    label: 'REAPER project',
+    marker_noun: 'session',
+    marker_count: 3,
+    project_count: 1
+  };
+  assert.equal(pane.folderRecognitionText(reaper), 'Recognized: REAPER project · 3 session files');
+  assert.equal(
+    pane.folderRecognitionText({ ...reaper, marker_count: 1 }),
+    'Recognized: REAPER project · 1 session file'
+  );
+  // A marker that is a folder (a repository) has no count to give.
+  assert.equal(
+    pane.folderRecognitionText({ verdict: 'project', label: 'software project', project_count: 1 }),
+    'Recognized: software project'
+  );
+  assert.equal(pane.folderRecognitionText({ verdict: 'none' }), 'Not a project Ori recognizes yet');
+  assert.equal(
+    pane.folderRecognitionText({ verdict: 'collection', project_count: 7 }),
+    'Holds 7 projects · Explore a folder on Home sets them up together'
+  );
+  // Nothing said, or something the pane cannot vouch for, says nothing.
+  for (const silent of [
+    null,
+    undefined,
+    {},
+    { verdict: 'project' },
+    { verdict: 'collection', project_count: 1 },
+    { verdict: 'maybe', label: 'x' }
+  ]) {
+    assert.equal(pane.folderRecognitionText(silent), '');
+  }
+});
+
+test('an attached folder shows its recognition line under the chip', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const line = () =>
+    root.querySelectorAll('p').find(node => node.id === 'workspaceBuildFolderRecognition');
+  assert.equal(line().hidden, true);
+
+  pane.applySession({
+    transcript: [],
+    folder: {
+      observation: { ...observation, folder: 'Ori Music Demo' },
+      recognition: {
+        verdict: 'project',
+        label: 'REAPER project',
+        marker_noun: 'session',
+        marker_count: 3
+      }
+    }
+  });
+  assert.equal(line().hidden, false);
+  assert.equal(line().textContent, 'Recognized: REAPER project · 3 session files');
+  assert.equal(line().classList.contains('is-recognized'), true);
+
+  pane.applySession({ transcript: [], folder: { observation, recognition: { verdict: 'none' } } });
+  assert.equal(line().textContent, 'Not a project Ori recognizes yet');
+  assert.equal(line().classList.contains('is-recognized'), false);
+
+  // An older build kept no recognition: the folder shows without a line.
+  pane.applySession({ transcript: [], folder: { observation } });
+  assert.equal(line().hidden, true);
+  pane.applySession({ transcript: [] });
+  assert.equal(line().hidden, true);
+});
+
 // ----- Add link -----
 
 function linkControls(root) {

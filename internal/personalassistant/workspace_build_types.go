@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 2
+	WorkspaceBuildSchemaVersion = 3
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -46,6 +46,9 @@ const (
 	workspaceBuildMaxChoices  = 4
 	workspaceBuildMaxWhy      = 8
 	workspaceBuildMaxList     = 32
+	// buildFolderMaxCount bounds a recognition's counts: well past any scan's
+	// entry budget, so only a corrupt document reaches it.
+	buildFolderMaxCount = 1_000_000
 )
 
 // WorkspaceBuildStatus is where a build is in its life.
@@ -155,6 +158,108 @@ type BuildRetry struct {
 // record cannot revive once it expires.
 type BuildFolder struct {
 	Observation foldercontext.Observation `json:"observation"`
+	// Recognition is what the folder digest concluded about the same scan,
+	// kept when the folder is attached. Nil when it could not be read.
+	Recognition *BuildFolderRecognition `json:"recognition,omitempty"`
+}
+
+// What a build's attached folder was recognized as.
+const (
+	// BuildFolderProject is one project Ori knows the kind of.
+	BuildFolderProject = "project"
+	// BuildFolderCollection holds several projects, which Ori sets up together
+	// from Home's Explore a folder, never as one workspace.
+	BuildFolderCollection = "collection"
+	// BuildFolderUnrecognized is everything else.
+	BuildFolderUnrecognized = "none"
+)
+
+// BuildFolderRecognition is the folder digest's verdict on a build's attached
+// folder and the capability row it matched, from the host's own table: no
+// model is involved, and nothing here names a path. The pane says it, the
+// model reads it as reference data, and the plan starts from it.
+type BuildFolderRecognition struct {
+	Verdict string `json:"verdict"`
+	Shape   string `json:"shape,omitempty"`
+	// ProjectCount is 1 for a project and the number of projects a
+	// collection holds.
+	ProjectCount int `json:"project_count"`
+	// CandidateID is the recognized project's id in the observation's own
+	// projects list, never a path.
+	CandidateID string `json:"candidate_id,omitempty"`
+	// Label names the kind of project ("<integration> project"). MarkerNoun and
+	// MarkerCount count the files that say so ("session", 3); a marker that is
+	// a folder, or none, has no count.
+	Label       string `json:"label,omitempty"`
+	MarkerNoun  string `json:"marker_noun,omitempty"`
+	MarkerCount int    `json:"marker_count,omitempty"`
+	// BlueprintID is the project blueprint the shape suggests, by the host
+	// table's own id ("<blueprint>"): a catalog entry is that blueprint when
+	// its id or its plugin's blueprint id is this one. BlueprintLabel names it.
+	BlueprintID    string `json:"blueprint_id,omitempty"`
+	BlueprintLabel string `json:"blueprint_label,omitempty"`
+	// The reviewed integration and Home provider the capability row names.
+	IntegrationKey   string `json:"integration_key,omitempty"`
+	IntegrationName  string `json:"integration_name,omitempty"`
+	HomeProviderKey  string `json:"home_provider_key,omitempty"`
+	HomeProviderName string `json:"home_provider_name,omitempty"`
+	HomeName         string `json:"home_name,omitempty"`
+	// HomeExists says the owner already had that Home when the folder was
+	// attached. The plan re-reads it; this is what the model is told.
+	HomeExists bool `json:"home_exists,omitempty"`
+	// OfferID is the folder digest offer the setup runs on, once there is one.
+	OfferID string `json:"offer_id,omitempty"`
+}
+
+// Recognized reports a single project of a kind Ori knows.
+func (r *BuildFolderRecognition) Recognized() bool {
+	return r != nil && r.Verdict == BuildFolderProject
+}
+
+func validateBuildFolderRecognition(r *BuildFolderRecognition, observation foldercontext.Observation) error {
+	if r == nil {
+		return nil
+	}
+	switch r.Verdict {
+	case BuildFolderProject:
+		if r.ProjectCount != 1 || r.CandidateID == "" || r.Label == "" {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	case BuildFolderCollection:
+		if r.ProjectCount < 2 || r.CandidateID != "" || r.OfferID != "" {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	case BuildFolderUnrecognized:
+		if *r != (BuildFolderRecognition{Verdict: BuildFolderUnrecognized}) {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+	}
+	if r.ProjectCount > buildFolderMaxCount || r.MarkerCount < 0 || r.MarkerCount > buildFolderMaxCount {
+		return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+	}
+	// A recognized project is one the observation disclosed.
+	if r.CandidateID != "" {
+		disclosed := false
+		for _, project := range observation.Projects {
+			disclosed = disclosed || project.ID == r.CandidateID
+		}
+		if !disclosed {
+			return fmt.Errorf("%w: folder recognition candidate", ErrWorkspaceBuildInvalid)
+		}
+	}
+	for _, value := range []string{r.Shape, r.CandidateID, r.BlueprintID, r.IntegrationKey, r.HomeProviderKey, r.OfferID} {
+		if !boundedText(value, 128) || strings.ContainsAny(value, "/\\\r\n") {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	}
+	for _, value := range []string{r.Label, r.MarkerNoun, r.BlueprintLabel, r.IntegrationName, r.HomeProviderName, r.HomeName} {
+		if !boundedText(value, workspaceBuildMaxName) || strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	}
+	return nil
 }
 
 // BuildLink is the link the user attached to the build from the pane's own
@@ -459,8 +564,13 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 	}
 	// An attached folder is held to the observation's own bounds: path-free,
 	// at most 8 KiB, names of at most 96 runes.
-	if folder := session.Folder; folder != nil && folder.Observation.Validate() != nil {
-		return fmt.Errorf("%w: folder", ErrWorkspaceBuildInvalid)
+	if folder := session.Folder; folder != nil {
+		if folder.Observation.Validate() != nil {
+			return fmt.Errorf("%w: folder", ErrWorkspaceBuildInvalid)
+		}
+		if err := validateBuildFolderRecognition(folder.Recognition, folder.Observation); err != nil {
+			return err
+		}
 	}
 	return nil
 }

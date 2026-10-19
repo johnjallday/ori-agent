@@ -633,6 +633,12 @@ func offerableCatalog(catalog []WorkspaceBuildCatalogEntry) []WorkspaceBuildCata
 		if entry.Template.ID == personalhq.PersonalHQTemplateID {
 			continue
 		}
+		// A Home carrier makes the group a workspace lives in, not the
+		// workspace. The server's build catalog leaves them out already; this
+		// keeps any catalog from offering one to the model.
+		if entry.Template.ProgramHomeOwner != nil {
+			continue
+		}
 		out = append(out, entry)
 	}
 	return out

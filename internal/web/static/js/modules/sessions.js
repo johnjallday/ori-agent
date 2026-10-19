@@ -12314,13 +12314,14 @@ const sessionManager = {
         if (button) button.hidden = true;
       }
     }
+    const groupLine = assisted ? this.workspaceBuildGroupLine() : '';
     const status = document.getElementById('workspaceBuildModeStatus');
     if (status) {
       status.hidden = !this.workspaceBuild;
       status.textContent = this.workspaceBuild?.draftError
         ? 'Draft not saved to the assistant. Your edits are kept here; switch back to retry before closing.'
         : assisted
-          ? 'Assisted setup · one shared draft'
+          ? `Assisted setup · one shared draft${groupLine ? ` · ${groupLine}` : ''}`
           : this.workspaceBuild?.withdrawn
             ? 'Manual setup · assistant unavailable. Your draft is kept.'
             : 'Manual setup · your draft and conversation are kept while this dialog is open.';
@@ -12352,8 +12353,26 @@ const sessionManager = {
       const link = String(
         linkObservation?.title || linkObservation?.repo?.full_name || linkObservation?.host || ''
       ).trim();
-      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}${link ? ` · Link: ${link}` : ''}`;
+      const attached = `${folder ? ` · Folder: ${folder}` : ''}${link ? ` · Link: ${link}` : ''}`;
+      // A blueprint that lives inside a group names the group apart from the
+      // workspace, so the draft never reads as if the group were the workspace.
+      text.textContent = groupLine
+        ? `${groupLine} · Workspace: ${name || 'not named yet'} · ${step}${attached}`
+        : `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${attached}`;
     }
+  },
+
+  // workspaceBuildGroupLine names the group the chosen blueprint lives in, from
+  // the session's needs_home: new unless the attached folder's recognition says
+  // the user already has that Home. "" when the blueprint needs no group.
+  workspaceBuildGroupLine() {
+    const session = this.workspaceBuild?.session;
+    const label = String(session?.needs_home?.label || '').trim();
+    if (!label) return '';
+    const recognition = session?.folder?.recognition;
+    const existing =
+      recognition?.home_exists === true && String(recognition.home_name || '').trim() === label;
+    return `Group: ${label} (${existing ? 'existing' : 'new'})`;
   },
 
   teardownWorkspaceBuild() {

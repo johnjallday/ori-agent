@@ -35,12 +35,14 @@ import (
 // composer holds one (foldercontext.SelectionTTL); the session keeps only the
 // observation, which can never revive that root.
 
-// WorkspaceBuildFolders observes a folder for a build and resolves it again
-// at Create (personalassistant.FolderObservationService in production).
+// WorkspaceBuildFolders observes a folder for a build, says what the folder
+// digest recognized in it, and resolves it again at Create
+// (personalassistant.FolderObservationService in production).
 type WorkspaceBuildFolders interface {
 	Choices(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	Observe(ctx context.Context, target foldercontext.Target, mode, choice string) (*foldercontext.Observation, error)
 	ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error)
+	Recognize(ctx context.Context, target foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error)
 }
 
 // Fixed copy the host writes into the transcript for the folder. Both are
@@ -209,6 +211,14 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		respondBuildSession(w, http.StatusOK, current, map[string]any{"cancelled": true})
 		return
 	}
+	// What the folder digest recognized in the same scan. A folder that cannot
+	// be recognized right now is still attached; the pane then says nothing
+	// about its kind rather than guess.
+	recognition, err := deps.Folders.Recognize(ctx, target, observation.ID)
+	if err != nil {
+		logger.Info("Workspace build folder not recognized", logger.Fields{"session_id": id, "error": err})
+		recognition = nil
+	}
 	var result personalassistant.WorkspaceBuildSession
 	_, err = deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		build := doc.Session(id)
@@ -219,7 +229,7 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
 		now := deps.Store.Now()
-		build.Folder = &personalassistant.BuildFolder{Observation: *observation}
+		build.Folder = &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition}
 		build.Append(personalassistant.BuildTranscriptEntry{
 			Role: personalassistant.BuildRoleForm, Text: fmt.Sprintf(buildCopyFolderAttached, observation.Folder), At: now,
 		})

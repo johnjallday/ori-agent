@@ -6099,3 +6099,48 @@ test('an obsolete session cannot roll a completed draft sync back', async () => 
   assert.equal(manager.workspaceBuild.session.version, 7);
   assert.equal(nameInput.value, 'Latest');
 });
+
+test('a blueprint that lives in a group names the group apart from the workspace', () => {
+  const elements = new Map([
+    ['addFolderModal', { dataset: {}, classList: { toggle() {} } }],
+    ['workspaceBuildModeStatus', { hidden: true, textContent: '' }],
+    ['workspaceBuildDraftSummary', { hidden: true }],
+    ['workspaceBuildDraftText', { textContent: '' }],
+    ['folderNameInput', { value: 'Ori Music Demo' }]
+  ]);
+  const manager = loadSessionManager(
+    undefined,
+    { ProjectTemplateCard: { getSelectedTemplate: () => ({ name: 'REAPER song' }) } },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  const draft = () => elements.get('workspaceBuildDraftText').textContent;
+  const status = () => elements.get('workspaceBuildModeStatus').textContent;
+  manager.wizardStep = 2;
+  manager.workspaceBuild = {
+    session: {
+      needs_home: { label: 'Music Production Home' },
+      folder: { observation: { folder: 'Ori Music Demo' } }
+    }
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(
+    draft(),
+    'Group: Music Production Home (new) · Workspace: Ori Music Demo · Details · Folder: Ori Music Demo'
+  );
+  assert.equal(status(), 'Assisted setup · one shared draft · Group: Music Production Home (new)');
+
+  // The user's own Home, as the folder's recognition found it, is not new.
+  manager.workspaceBuild.session.folder.recognition = {
+    verdict: 'project',
+    home_exists: true,
+    home_name: 'Music Production Home'
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.match(draft(), /^Group: Music Production Home \(existing\) · Workspace: Ori Music Demo/);
+
+  // Without a group the line is what it always was.
+  manager.workspaceBuild.session.needs_home = null;
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(draft(), 'Ori Music Demo · REAPER song · Details · Folder: Ori Music Demo');
+  assert.equal(status(), 'Assisted setup · one shared draft');
+});

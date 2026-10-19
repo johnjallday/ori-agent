@@ -2217,12 +2217,21 @@ func (s *FolderDigestService) blueprintForOffer(offer FolderOffer) (id, label, n
 // acquiring the wrong tool-specific blueprint. Non-audio shapes keep the existing
 // installed-blueprint/blank fallback.
 func (s *FolderDigestService) blueprintForSubject(subject FolderCandidateRecord) (id, label, note string) {
-	if subject.Shape == string(folderdigest.ShapeAudio) {
-		if _, ok := folderdigest.ProjectCapabilityFor(folderdigest.ShapeAudio, subject.MarkerName, subject.DominantExtension); !ok {
-			return "", "", ""
-		}
+	if _, ok := subjectBlueprint(subject); !ok {
+		return "", "", ""
 	}
 	return s.blueprintFor(subject.Shape)
+}
+
+// subjectBlueprint is the shape's blueprint for a subject, whether or not it
+// is installed: none for an audio project no reviewed tool owns.
+func subjectBlueprint(subject FolderCandidateRecord) (folderdigest.ShapeBlueprint, bool) {
+	if subject.Shape == string(folderdigest.ShapeAudio) {
+		if _, ok := folderdigest.ProjectCapabilityFor(folderdigest.ShapeAudio, subject.MarkerName, subject.DominantExtension); !ok {
+			return folderdigest.ShapeBlueprint{}, false
+		}
+	}
+	return folderdigest.BlueprintForShape(folderdigest.Shape(subject.Shape))
 }
 
 // FolderFirstTask is the suggested first task for a workspace created from a

@@ -96,13 +96,7 @@ func (b *ServerBuilder) wireProjectTemplateResolver() {
 		if err != nil {
 			return nil, false, err
 		}
-		entries := make([]sessionhttp.GroupTemplateCatalogEntry, 0, len(snapshot.Entries))
-		for _, entry := range snapshot.Entries {
-			entries = append(entries, sessionhttp.GroupTemplateCatalogEntry{
-				Template: entry.Template, Readiness: entry.Readiness, Active: snapshot.Active[entry.ID],
-			})
-		}
-		return entries, snapshot.DependencyStateUnavailable, nil
+		return groupTemplateCatalogEntries(snapshot), snapshot.DependencyStateUnavailable, nil
 	})
 	if b.chatHandler != nil {
 		b.chatHandler.SetProjectTemplateCatalog(
@@ -241,6 +235,33 @@ type blueprintCatalogSnapshot struct {
 	Entries                    []blueprintCatalogEntry
 	Active                     map[string]bool
 	DependencyStateUnavailable bool
+}
+
+// groupTemplateCatalogEntries is the snapshot as the Group creator reads it:
+// every entry, Home carriers included, each with its own active state.
+func groupTemplateCatalogEntries(snapshot blueprintCatalogSnapshot) []sessionhttp.GroupTemplateCatalogEntry {
+	entries := make([]sessionhttp.GroupTemplateCatalogEntry, 0, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		entries = append(entries, sessionhttp.GroupTemplateCatalogEntry{
+			Template: entry.Template, Readiness: entry.Readiness, Active: snapshot.Active[entry.ID],
+		})
+	}
+	return entries
+}
+
+// workspaceBuildCatalogEntries is the snapshot as an assisted build reads it:
+// the active workspace blueprints only. A Home carrier (a plugin's program
+// Home, ProgramHomeOwner set) makes the group a workspace lives in, never the
+// workspace itself, so a build can neither choose nor be offered one.
+func workspaceBuildCatalogEntries(snapshot blueprintCatalogSnapshot) []sessionhttp.WorkspaceBuildCatalogEntry {
+	entries := make([]sessionhttp.WorkspaceBuildCatalogEntry, 0, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		if !snapshot.Active[entry.ID] || entry.ProgramHomeOwner != nil {
+			continue
+		}
+		entries = append(entries, sessionhttp.WorkspaceBuildCatalogEntry{Template: entry.Template, Readiness: entry.Readiness})
+	}
+	return entries
 }
 
 func buildBlueprintCatalogSnapshot(root string, catalog projecttemplates.RuntimeCatalog, plugins installedPluginSource, ownerUserID string) (blueprintCatalogSnapshot, error) {

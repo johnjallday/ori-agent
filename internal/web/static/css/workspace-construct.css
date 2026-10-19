@@ -2618,6 +2618,7 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-folder[hidden],
 .workspace-create-modal .workspace-build-folder__hint[hidden],
 .workspace-create-modal .workspace-build-folder__summary[hidden],
+.workspace-create-modal .workspace-build-folder__recognition[hidden],
 .workspace-create-modal .workspace-build-folder-chooser[hidden],
 .workspace-create-modal .workspace-build-folder-chooser__note[hidden],
 .workspace-create-modal .workspace-build-link-field[hidden],
@@ -2681,11 +2682,15 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   cursor: default;
 }
 .workspace-create-modal .workspace-build-folder__hint,
-.workspace-create-modal .workspace-build-folder__summary {
+.workspace-create-modal .workspace-build-folder__summary,
+.workspace-create-modal .workspace-build-folder__recognition {
   margin: 0;
   color: var(--wc-ink-dim);
   font-family: var(--wc-font-mono);
   font-size: 11px;
+}
+.workspace-create-modal .workspace-build-folder__recognition.is-recognized {
+  color: var(--wc-ink-heading);
 }
 .workspace-create-modal .workspace-build-folder-chooser {
   display: flex;

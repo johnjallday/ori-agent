@@ -72,14 +72,7 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 			if err != nil {
 				return nil, err
 			}
-			entries := make([]sessionhttp.WorkspaceBuildCatalogEntry, 0, len(snapshot.Entries))
-			for _, entry := range snapshot.Entries {
-				if !snapshot.Active[entry.ID] {
-					continue
-				}
-				entries = append(entries, sessionhttp.WorkspaceBuildCatalogEntry{Template: entry.Template, Readiness: entry.Readiness})
-			}
-			return entries, nil
+			return workspaceBuildCatalogEntries(snapshot), nil
 		},
 		ResolveModel: func(_ context.Context, profileName string) (sessionhttp.WorkspaceBuildModel, error) {
 			return resolveWorkspaceBuildModel(b.st, b.configManager, b.llmFactory, profileName)
@@ -139,6 +132,14 @@ func (o buildFolderObservations) ResolveRoot(ctx context.Context, target folderc
 		return "", personalassistant.ErrFolderSelection
 	}
 	return service.ResolveRoot(ctx, target, id)
+}
+
+func (o buildFolderObservations) Recognize(ctx context.Context, target foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.Recognize(ctx, target, id)
 }
 
 // resolveWorkspaceBuildModel picks the model a build talks to (FR30): the
