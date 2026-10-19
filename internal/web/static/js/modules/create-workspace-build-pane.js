@@ -80,6 +80,13 @@
     // A recognized folder's plan: the host's own lines, never the model's.
     planTitle: 'What Set it up will do',
     planWhy: 'Why this suggestion?',
+    setUp: 'Set it up',
+    setupRetry: 'Retry',
+    setupRunning: 'Setting it up… Ori is running the plan, line by line.',
+    setupEntry: name => `Use ${name}`,
+    folderExpiresIn: minutes => `Folder pick expires in ${minutes} min`,
+    folderExpired: 'The folder pick expired. Add the folder again to set it up.',
+    folderAgain: 'Add the folder again',
     // Why a recognized folder has no plan, by the server's reason code.
     planUnavailable: (reason, subject) => {
       if (subject && reason === 'provider_not_installed') {
@@ -275,16 +282,18 @@
     }
 
     const hiddenCount = expanded ? 0 : Math.max(0, entries.length - VISIBLE_ENTRIES);
+    // While Set it up runs the build takes no turn: the plan is already decided.
+    const running = session?.status === 'preparing' && Boolean(session?.setup);
     return {
       entries: entries.map((entry, index) => ({
         ...entry,
         index,
         latest: index === latestAssistant,
-        choicesActive: index === activeIndex && !busy
+        choicesActive: index === activeIndex && !busy && !running
       })),
       firstVisible: hiddenCount,
       hiddenCount,
-      composerDisabled: Boolean(busy),
+      composerDisabled: Boolean(busy) || running,
       status: busy ? COPY.busy : latestAssistant >= 0 ? entries[latestAssistant].text : '',
       busy: Boolean(busy)
     };
@@ -538,8 +547,13 @@
       'is-recognized',
       state.session?.folder?.recognition?.verdict === 'project'
     );
-    // With a link attached too, the link's hint speaks for both.
-    els.folderHint.hidden = !folder || Boolean(attachedLink()) || Boolean(text(els.input?.value));
+    // With a link attached too, the link's hint speaks for both. A ready plan
+    // has its own Set it up, so an empty Send is not offered as one.
+    els.folderHint.hidden =
+      !folder ||
+      Boolean(attachedLink()) ||
+      Boolean(text(els.input?.value)) ||
+      state.session?.plan?.ready === true;
   }
 
   // renderPlan draws the setup plan the server computed for a recognized
@@ -549,11 +563,21 @@
   function renderPlan() {
     const { els } = state;
     if (!els.plan) return;
-    const plan = state.session?.plan;
+    const session = state.session || {};
+    const plan = session.plan;
+    const run =
+      session.setup_run && typeof session.setup_run === 'object' ? session.setup_run : null;
     const shared = globalThis.OriFolderPlanLines;
-    const lines = plan && plan.ready === true && shared ? shared.setupLinesView(plan.lines) : [];
+    // Once Set it up ran, its own lines (with their states) stand in for the plan's.
+    const source =
+      run && Array.isArray(run.lines) && run.lines.length
+        ? run.lines
+        : plan && plan.ready === true
+          ? plan.lines
+          : [];
+    const lines = shared ? shared.setupLinesView(source) : [];
     const note =
-      plan && plan.ready !== true
+      !lines.length && plan && plan.ready !== true
         ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
         : '';
     els.plan.hidden = !lines.length && !note;
@@ -562,9 +586,71 @@
     els.planLines.hidden = !lines.length;
     els.planNote.textContent = note;
     els.planNote.hidden = !note;
-    const evidence = lines.length ? text(plan.evidence) : '';
+    const evidence = lines.length && plan ? text(plan.evidence) : '';
     els.planEvidence.textContent = evidence;
     els.planWhy.hidden = !evidence;
+    renderSetupControls(lines.length > 0);
+  }
+
+  // folderPickMinutes is how long the server still holds the attached folder's
+  // pick, in whole minutes rounded up; Infinity when it did not say.
+  function folderPickMinutes(session) {
+    const at = Date.parse(String(session?.folder_expires_at || ''));
+    if (!Number.isFinite(at)) return Infinity;
+    return Math.ceil((at - Date.now()) / 60000);
+  }
+
+  // renderSetupControls offers the one action the build's state allows: Set it
+  // up on a ready plan, nothing while it runs, Retry (or the project files to
+  // choose from) after it stopped. A pick about to expire says so; an expired
+  // one turns the action into Add the folder again.
+  function renderSetupControls(hasLines) {
+    const { els } = state;
+    const session = state.session || {};
+    const run = session.setup_run || null;
+    const stopped = Boolean(session.setup) && (!run || run.status === 'stopped');
+    const preparing = session.status === 'preparing' && !stopped;
+    const open = session.status === 'open';
+    const minutes = folderPickMinutes(session);
+    const expired = open && session.folder && minutes <= 0;
+    const busy = Boolean(state.busy);
+    els.planStatus.textContent = preparing ? COPY.setupRunning : '';
+    els.planStatus.hidden = !preparing;
+    els.setupButton.hidden = !(hasLines && open && !session.setup && session.plan?.ready === true);
+    els.setupButton.disabled = busy || expired || !text(session.draft?.name);
+    const candidates =
+      stopped && run?.stop_reason === 'needs_choice' && Array.isArray(run.entry_candidates)
+        ? run.entry_candidates.map(text).filter(Boolean).slice(0, 4)
+        : [];
+    els.retryButton.hidden =
+      !(open || session.status === 'preparing') || !stopped || candidates.length > 0;
+    els.retryButton.disabled = busy || expired;
+    els.setupEntries.textContent = '';
+    candidates.forEach(name => {
+      const button = createElement(
+        'button',
+        'modern-btn modern-btn-secondary',
+        COPY.setupEntry(name)
+      );
+      button.type = 'button';
+      button.dataset.buildControl = 'setup-entry';
+      button.dataset.entryName = name;
+      button.disabled = busy || expired;
+      els.setupEntries.appendChild(button);
+    });
+    els.setupEntries.hidden = !candidates.length;
+    const warning =
+      !open || !session.folder
+        ? ''
+        : expired
+          ? COPY.folderExpired
+          : minutes < 5
+            ? COPY.folderExpiresIn(minutes)
+            : '';
+    els.planExpiry.textContent = warning;
+    els.planExpiry.hidden = !warning;
+    els.folderAgain.hidden = !expired;
+    els.folderAgain.disabled = busy;
   }
 
   // renderPlanBlock builds the plan section the pane shows above the
@@ -585,11 +671,55 @@
     planWhy.appendChild(createElement('summary', '', COPY.planWhy));
     const planEvidence = createElement('p', 'workspace-build-plan__evidence');
     planWhy.appendChild(planEvidence);
+    const planStatus = createElement('p', 'workspace-build-plan__status');
+    planStatus.setAttribute('role', 'status');
+    planStatus.setAttribute('aria-live', 'polite');
+    planStatus.hidden = true;
+    const actions = createElement('div', 'workspace-build-plan__actions');
+    const setupButton = createElement('button', 'modern-btn modern-btn-primary', COPY.setUp);
+    setupButton.type = 'button';
+    setupButton.dataset.buildControl = 'setup';
+    setupButton.hidden = true;
+    const retryButton = createElement('button', 'modern-btn modern-btn-primary', COPY.setupRetry);
+    retryButton.type = 'button';
+    retryButton.dataset.buildControl = 'setup-retry';
+    retryButton.hidden = true;
+    const setupEntries = createElement('div', 'workspace-build-plan__entries');
+    setupEntries.hidden = true;
+    const folderAgain = createElement(
+      'button',
+      'modern-btn modern-btn-secondary',
+      COPY.folderAgain
+    );
+    folderAgain.type = 'button';
+    folderAgain.dataset.buildControl = 'folder-again';
+    folderAgain.hidden = true;
+    actions.appendChild(setupButton);
+    actions.appendChild(retryButton);
+    actions.appendChild(setupEntries);
+    actions.appendChild(folderAgain);
+    const planExpiry = createElement('p', 'workspace-build-plan__expiry');
+    planExpiry.hidden = true;
     plan.appendChild(title);
     plan.appendChild(planLines);
     plan.appendChild(planNote);
     plan.appendChild(planWhy);
-    return { plan, planLines, planNote, planWhy, planEvidence };
+    plan.appendChild(planStatus);
+    plan.appendChild(actions);
+    plan.appendChild(planExpiry);
+    return {
+      plan,
+      planLines,
+      planNote,
+      planWhy,
+      planEvidence,
+      planStatus,
+      setupButton,
+      retryButton,
+      setupEntries,
+      folderAgain,
+      planExpiry
+    };
   }
 
   // setFolderPathBusy locks the path field while the controller has the
@@ -769,6 +899,14 @@
       ...folderEls,
       ...planEls
     };
+    // A folder pick lasts a set time: its warning counts down while the pane
+    // is open, and destroy stops it with the listeners.
+    if (typeof setInterval === 'function') {
+      const timer = setInterval(() => {
+        if (state.root && !state.root.hidden) renderPlan();
+      }, 30000);
+      state.listeners.push(() => clearInterval(timer));
+    }
 
     listen(root, 'click', event => {
       const control = event.target?.closest?.('[data-build-control]');
@@ -794,6 +932,13 @@
           if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-link-remove');
         } else if (kind === 'link-cancel') closeLinkField();
         else if (kind === 'link-attach') submitLink();
+        else if ((kind === 'setup' || kind === 'setup-retry') && !control.disabled) {
+          emit('workspace-build-setup', {});
+        } else if (kind === 'setup-entry' && !control.disabled) {
+          emit('workspace-build-setup', { entry_name: text(control.dataset.entryName) });
+        } else if (kind === 'folder-again' && !control.disabled) {
+          emit('workspace-build-folder-open');
+        }
         return;
       }
       const folderChoice = event.target?.closest?.('[data-build-folder-mode]');

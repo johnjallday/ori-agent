@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -168,6 +169,14 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			}
 			return
 		}
+		if len(parts) == 1 && strings.TrimSpace(parts[0]) != "" {
+			if r.Method != http.MethodGet {
+				_ = orihttp.RespondMethodNotAllowed(w)
+				return
+			}
+			h.getWorkspaceBuildSession(w, r, parts[0])
+			return
+		}
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
 			_ = orihttp.RespondNotFound(w, "Build session not found")
 			return
@@ -192,7 +201,9 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			h.postWorkspaceBuildFolder(w, r, id)
 		case action == "link" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildLink(w, r, id)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link":
+		case action == "setup" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildSetup(w, r, id)
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -274,12 +285,27 @@ func respondBuildUnavailable(w http.ResponseWriter, reason string) {
 type buildSessionView struct {
 	*personalassistant.WorkspaceBuildSession
 	Plan *personalassistant.BuildFolderPlan `json:"plan,omitempty"`
+	// SetupRun is the run Set it up started, line by line.
+	SetupRun *buildSetupRunView `json:"setup_run,omitempty"`
+	// FolderExpiresAt is when the server stops holding the attached folder's
+	// pick (foldercontext.SelectionTTL after it was observed).
+	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
 }
 
 func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
 	var view any = session
 	if session != nil {
-		view = buildSessionView{WorkspaceBuildSession: session, Plan: h.workspaceBuildPlan(ctx, h.workspaceBuildUserID(ctx), nil, session)}
+		userID := h.workspaceBuildUserID(ctx)
+		built := buildSessionView{
+			WorkspaceBuildSession: session,
+			Plan:                  h.workspaceBuildPlan(ctx, userID, nil, session),
+			SetupRun:              h.readBuildSetupRun(ctx, userID, nil, session),
+		}
+		if session.Folder != nil && (session.Status == personalassistant.WorkspaceBuildOpen || session.Status == personalassistant.WorkspaceBuildPreparing) {
+			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
+			built.FolderExpiresAt = &expires
+		}
+		view = built
 	}
 	body := map[string]any{"session": view}
 	for key, value := range extra {

@@ -6201,6 +6201,155 @@ function plannedBuild() {
   };
 }
 
+test('Set it up runs the reviewed plan and follows the run until it made the workspace', async () => {
+  const elements = planReviewElements();
+  const hidden = [];
+  const manager = loadSessionManager(
+    undefined,
+    {
+      bootstrap: { Modal: { getInstance: modal => ({ hide: () => hidden.push(modal) }) } }
+    },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  const lines = [];
+  const pane = {
+    COPY: {},
+    applySession: session => lines.push(session.status),
+    setBusy() {},
+    showLine: text => lines.push(`line:${text}`)
+  };
+  manager.workspaceBuildPane = () => pane;
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.rememberWorkspaceBuildSession = () => {};
+  const toasts = [];
+  manager.showToast = (message, type) => toasts.push([message, type]);
+  const changed = [];
+  manager.notifyWorkspacesChanged = detail => changed.push(detail.workspaceId);
+  const queue = [];
+  manager.workspaceBuildScheduler = fn => queue.push(fn);
+
+  const build = plannedBuild();
+  build.session.id = 'build-1';
+  build.session.version = 4;
+  build.session.status = 'open';
+  build.session.plan.digest = 'digest-1';
+  manager.workspaceBuild = build;
+  const calls = [];
+  const reads = [
+    {
+      status: 'preparing',
+      setup: { plan_digest: 'digest-1' },
+      version: 6,
+      setup_run: { status: 'running', lines: [] }
+    },
+    {
+      status: 'created',
+      version: 7,
+      created_workspace_id: 'ws-song',
+      setup_receipt:
+        'Created Music Production Home and Ori Music Demo inside it. Linked folder “Ori Music Demo”.'
+    }
+  ];
+  manager.workspaceBuildTransport = {
+    setup: async (id, body) => {
+      calls.push(['setup', id, body]);
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          session: {
+            ...build.session,
+            status: 'preparing',
+            version: 5,
+            setup: { plan_digest: 'digest-1' }
+          }
+        }
+      };
+    },
+    read: async id => {
+      calls.push(['read', id]);
+      return { ok: true, status: 200, body: { session: { ...build.session, ...reads.shift() } } };
+    }
+  };
+
+  await manager.setUpWorkspaceBuild({});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), [
+    'setup',
+    'build-1',
+    { version: 4, plan_digest: 'digest-1' }
+  ]);
+  assert.equal(manager.workspaceBuild.session.status, 'preparing');
+  assert.equal(queue.length, 1);
+  // A second follow while one runs adds nothing.
+  manager.followWorkspaceBuildSetup(build);
+  assert.equal(queue.length, 1);
+
+  await queue.shift()();
+  assert.equal(manager.workspaceBuild.session.version, 6);
+  assert.equal(queue.length, 1);
+  await queue.shift()();
+  assert.deepEqual(changed, ['ws-song']);
+  assert.deepEqual(toasts, [
+    [
+      'Created Music Production Home and Ori Music Demo inside it. Linked folder “Ori Music Demo”.',
+      'success'
+    ]
+  ]);
+  assert.equal(hidden.length, 1);
+  assert.equal(queue.length, 0);
+});
+
+test('a refused Set it up says why and does not follow anything', async () => {
+  const elements = planReviewElements();
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => elements.get(id) || null,
+      querySelector: () => null
+    }
+  );
+  const lines = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    applySession() {},
+    setBusy() {},
+    showLine: text => lines.push(text)
+  });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.rememberWorkspaceBuildSession = () => {};
+  const queue = [];
+  manager.workspaceBuildScheduler = fn => queue.push(fn);
+  const build = plannedBuild();
+  build.session.id = 'build-1';
+  build.session.version = 4;
+  build.session.plan.digest = 'digest-1';
+  manager.workspaceBuild = build;
+  manager.workspaceBuildTransport = {
+    setup: async () => ({
+      ok: false,
+      status: 409,
+      body: {
+        code: 'review_pending',
+        error: 'Another folder setup is waiting for an answer on Home.'
+      }
+    })
+  };
+  await manager.setUpWorkspaceBuild({});
+  assert.deepEqual(lines, ['Another folder setup is waiting for an answer on Home.']);
+  assert.equal(queue.length, 0);
+  // A run's own digest is what a Retry sends, with the chosen project file.
+  const sent = [];
+  manager.workspaceBuildTransport = {
+    setup: async (id, body) => (sent.push(body), { ok: false, status: 409, body: {} })
+  };
+  build.session.setup = { plan_digest: 'run-digest' };
+  await manager.setUpWorkspaceBuild({ entry_name: 'Take Two.rpp' });
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' }
+  ]);
+});
+
 test('a recognized folder’s plan is “Plan so far”, reviewed in place of the wizard', () => {
   const elements = planReviewElements();
   const rendered = [];

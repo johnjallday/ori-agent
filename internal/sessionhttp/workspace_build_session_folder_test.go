@@ -41,6 +41,50 @@ type fakeBuildFolders struct {
 	plan    *personalassistant.BuildFolderPlan
 	planErr error
 	planned []string
+	// The setup seam: what ReviewSetup answers, and every call made.
+	reviewed  []reviewedSetup
+	reviewErr error
+	offerID   string
+	started   []startedSetup
+	startErr  error
+	run       *personalassistant.FolderSetupView
+	reads     []foldercontext.Target
+}
+
+type reviewedSetup struct {
+	draft                                                foldercontext.Target
+	sessionID, observationID, candidateID, workspaceName string
+}
+
+type startedSetup struct{ userID, offerID, digest, requestID, entryName string }
+
+func (f *fakeBuildFolders) ReviewSetup(_ context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
+	f.reviewed = append(f.reviewed, reviewedSetup{draft, sessionID, observationID, candidateID, workspaceName})
+	if f.reviewErr != nil {
+		return personalassistant.FolderOfferView{}, f.reviewErr
+	}
+	id := f.offerID
+	if id == "" {
+		id = "offer-1"
+	}
+	return personalassistant.FolderOfferView{ID: id}, nil
+}
+
+func (f *fakeBuildFolders) StartSetup(_ context.Context, userID, offerID, digest, requestID, entryName string) (personalassistant.FolderOfferView, error) {
+	f.started = append(f.started, startedSetup{userID, offerID, digest, requestID, entryName})
+	if f.startErr != nil {
+		return personalassistant.FolderOfferView{}, f.startErr
+	}
+	return personalassistant.FolderOfferView{ID: offerID}, nil
+}
+
+func (f *fakeBuildFolders) ReadSetup(_ context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error) {
+	f.reads = append(f.reads, review)
+	if f.run == nil {
+		return nil, personalassistant.ErrFolderOfferNotFound
+	}
+	copied := *f.run
+	return &personalassistant.FolderOfferView{ID: offerID, Setup: &copied}, nil
 }
 
 // Plan answers with plan (nil with no error: nothing to plan) and records the

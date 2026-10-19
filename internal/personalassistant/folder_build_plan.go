@@ -2,7 +2,6 @@ package personalassistant
 
 import (
 	"context"
-	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -57,6 +56,8 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	if err != nil {
 		return nil, err
 	}
+	// Named as Set it up's review will name it, so the digests are the same.
+	ctx = WithFolderReviewWorkspaceName(ctx, workspaceName)
 	offer, err := s.prepareReviewOffer(ctx, held, target, candidateID)
 	if err != nil {
 		return nil, err
@@ -70,7 +71,6 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	if offer.Structure != nil || offer.Portfolio != nil || !isProjectCapabilityOffer(offer) {
 		return unavailable(""), nil
 	}
-	offer.ConversationReview.WorkspaceName = strings.TrimSpace(workspaceName)
 	view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
 	s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
 	row, capability := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)

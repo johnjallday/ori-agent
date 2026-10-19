@@ -537,6 +537,31 @@ type FolderDigestService struct {
 	running  map[string]bool   // offer id → a one-card setup is running in this process
 	// offer id → what a software review copied out of the project; memory only
 	evidence map[string]FolderSoftwareEvidence
+	// setupObservers hear when a one-card setup run stops, finishes or is
+	// resolved: the workspace build follows the run it started this way.
+	setupObservers []func(ctx context.Context, userID string, offer FolderOffer)
+}
+
+// AddSetupObserver adds fn to what hears each settled setup run: a run that
+// stopped, one that finished, and the offer it resolved. fn gets the offer as
+// stored, runs on the run's own goroutine, and must not block.
+func (s *FolderDigestService) AddSetupObserver(fn func(ctx context.Context, userID string, offer FolderOffer)) {
+	if s == nil || fn == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setupObservers = append(s.setupObservers, fn)
+}
+
+func (s *FolderDigestService) notifySetup(ctx context.Context, userID string, offer FolderOffer) {
+	s.mu.Lock()
+	observers := make([]func(context.Context, string, FolderOffer), len(s.setupObservers))
+	copy(observers, s.setupObservers)
+	s.mu.Unlock()
+	for _, observe := range observers {
+		observe(ctx, userID, offer)
+	}
 }
 
 // NewFolderDigestService builds the service.
@@ -2188,6 +2213,9 @@ func (s *FolderDigestService) afterOutcome(ctx context.Context, userID string, o
 	}
 	if s.deps.OnOutcome != nil {
 		s.deps.OnOutcome(ctx, userID, offer)
+	}
+	if offer.Setup != nil {
+		s.notifySetup(ctx, userID, offer)
 	}
 	return offer
 }

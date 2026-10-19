@@ -11655,6 +11655,8 @@ const sessionManager = {
       detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
       link: (id, body) => call('POST', sessionURL(id, 'link'), body),
       detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body),
+      read: id => call('GET', `${base}/${encodeURIComponent(String(id || ''))}`),
+      setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
       janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
       janitorDefer: (id, body) => call('POST', sessionURL(id, 'janitor-defer'), body)
@@ -11684,6 +11686,9 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-defer', () => {
       void this.deferWorkspaceBuildPreparation();
+    });
+    modal.addEventListener('workspace-build-setup', event => {
+      void this.setUpWorkspaceBuild(event?.detail || {});
     });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
@@ -12492,6 +12497,9 @@ const sessionManager = {
     this.workspaceBuild = null;
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = null;
+    // A run keeps going on the server; only this dialog stops following it.
+    if (this.workspaceBuildSetupTimer) clearTimeout(this.workspaceBuildSetupTimer);
+    this.workspaceBuildSetupTimer = null;
     // A manual open never mounted anything, so it has nothing to take down.
     if (!active) return;
     pane?.destroy();
@@ -13570,6 +13578,108 @@ const sessionManager = {
     this.workspaceBuildPane()?.applySession(session);
     this.syncWorkspaceBuildPresentation();
     if (this.isWorkspaceCreator?.()) this.refreshWorkspaceReview();
+    // A run Set it up started is followed until it settles, wherever the
+    // session came from (the press, a resume, another tab).
+    if (session.status === 'preparing' && session.setup) this.followWorkspaceBuildSetup(build);
+  },
+
+  // setUpWorkspaceBuild is Set it up: the plan the user reviewed runs as Home's
+  // setup journey on the server. A Retry continues the run that stopped; a
+  // project file chosen from the run's own candidates goes with it.
+  async setUpWorkspaceBuild(detail = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || build.busy || build.setupBusy) return;
+    const digest = String(
+      build.session.setup?.plan_digest || build.session.plan?.digest || ''
+    ).trim();
+    if (!digest) return;
+    build.setupBusy = true;
+    pane.setBusy?.(true);
+    let result;
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      const body = { version: Number(build.session.version) || 0, plan_digest: digest };
+      const entry = String(detail.entry_name || '').trim();
+      if (entry) body.entry_name = entry;
+      try {
+        result = await this.workspaceBuildApi().setup(build.session.id, body);
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.setupBusy = false;
+        pane.setBusy?.(false);
+      }
+    }
+    if (this.workspaceBuild !== build || !result) return;
+    if (result.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+    if (result.ok) return;
+    if (result.status === 409 && result.body?.code === 'version') {
+      await this.reloadWorkspaceBuildSession();
+      if (this.workspaceBuild === build)
+        pane.showLine('The build moved on in another tab. Try Set it up again.');
+      return;
+    }
+    pane.showLine(
+      String(result.body?.error || '').trim() || 'Set it up could not start. Nothing was changed.'
+    );
+  },
+
+  // followWorkspaceBuildSetup reads the build while its run is preparing, so
+  // the plan's lines turn done one by one, and hands the finished build on.
+  // Calling it again while it follows does nothing.
+  followWorkspaceBuildSetup(build) {
+    if (!build || build.setupFollowing) return;
+    build.setupFollowing = true;
+    const schedule = this.workspaceBuildScheduler || ((fn, ms) => setTimeout(fn, ms));
+    const tick = async () => {
+      if (this.workspaceBuild !== build || !build.session) {
+        build.setupFollowing = false;
+        return;
+      }
+      let session = null;
+      try {
+        session = (await this.workspaceBuildApi().read(build.session.id))?.body?.session || null;
+      } catch (_) {
+        session = null;
+      }
+      if (this.workspaceBuild !== build) {
+        build.setupFollowing = false;
+        return;
+      }
+      if (session?.status === 'created') {
+        build.setupFollowing = false;
+        this.finishWorkspaceBuildSetupInDialog(build, session);
+        return;
+      }
+      if (session && session.status !== 'preparing') {
+        build.setupFollowing = false;
+        this.adoptWorkspaceBuildSession(session);
+        return;
+      }
+      if (session) {
+        build.session = session;
+        this.workspaceBuildPane()?.applySession(session);
+        this.syncWorkspaceBuildPresentation();
+      }
+      this.workspaceBuildSetupTimer = schedule(tick, 1500);
+    };
+    this.workspaceBuildSetupTimer = schedule(tick, 1000);
+  },
+
+  // finishWorkspaceBuildSetupInDialog closes the dialog on a build Set it up
+  // finished: the workspaces it made are announced, and what it made is said.
+  finishWorkspaceBuildSetupInDialog(build, session) {
+    build.session = session;
+    const workspaceId = String(session.created_workspace_id || '').trim();
+    this.notifyWorkspacesChanged?.({ workspaceId });
+    const receipt = String(session.setup_receipt || '').trim();
+    if (receipt) this.showToast?.(receipt, 'success');
+    const modal = document.getElementById('addFolderModal');
+    if (typeof bootstrap !== 'undefined') bootstrap.Modal.getInstance(modal)?.hide();
   },
 
   // Review's statement of the folder attached in the conversation: Create

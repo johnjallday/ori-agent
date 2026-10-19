@@ -15,6 +15,9 @@ const (
 	reaperSongID       = "plugin:reaper-plugin:reaper-song"
 )
 
+// songDigest is the song plan's digest, shaped like the host's (sha256 hex).
+var songDigest = strings.Repeat("d", 64)
+
 // withMusicCatalog adds the two music templates as a catalog would list them
 // before the server filters it: the REAPER plugin's song blueprint and the
 // Music plugin's Home carrier the Group creator makes Music Production Homes
@@ -99,7 +102,7 @@ func songPlan() *personalassistant.BuildFolderPlan {
 			{Kind: "workspace", Name: "Creates a REAPER song workspace named Ori Music Demo"},
 			{Kind: "folder", Name: "Links Ori Music Demo where it is", Detail: "Nothing is moved or copied."},
 		},
-		Digest: "digest-1",
+		Digest: songDigest,
 		Needs: []personalassistant.BuildFolderNeed{
 			{Kind: "integration", Name: "REAPER integration", State: personalassistant.FolderInstallReady},
 			{Kind: "provider", Name: "Music Project Management", State: personalassistant.FolderInstallInstall},
@@ -147,7 +150,7 @@ func TestWorkspaceBuildPlan_EveryResponseCarriesTheHostPlanAndSaysItsNeedsOnce(t
 		t.Fatalf("attach: %d %v", status, body)
 	}
 	plan := planOf(t, body)
-	if plan == nil || plan["digest"] != "digest-1" || plan["ready"] != true || plan["placement"] != "grouped" {
+	if plan == nil || plan["digest"] != songDigest || plan["ready"] != true || plan["placement"] != "grouped" {
 		t.Fatalf("the attach response carries the plan: %v", body["session"])
 	}
 	attached := sessionOf(t, body)
@@ -184,7 +187,7 @@ func TestWorkspaceBuildPlan_EveryResponseCarriesTheHostPlanAndSaysItsNeedsOnce(t
 			t.Fatalf("planned prompt lacks %q:\n%s", want, system)
 		}
 	}
-	for _, absent := range []string{"Blueprints (id", "digest-1", "Choose suggested_blueprint_id"} {
+	for _, absent := range []string{"Blueprints (id", songDigest, "Choose suggested_blueprint_id"} {
 		if strings.Contains(system, absent) {
 			t.Fatalf("planned prompt still has %q:\n%s", absent, system)
 		}

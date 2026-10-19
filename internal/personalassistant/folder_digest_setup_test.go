@@ -29,6 +29,7 @@ type fakeFolderSetup struct {
 	// intent is what each plan promises; planned records every request planned.
 	intent  FolderSetupIntent
 	planned []FolderSetupRequest
+	ran     []FolderSetupRequest
 }
 
 func (f *fakeFolderSetup) entryNames() []string {
@@ -86,6 +87,7 @@ func (f *fakeFolderSetup) Run(ctx context.Context, req FolderSetupRequest) error
 	f.mu.Lock()
 	f.runs++
 	f.entries = append(f.entries, req.EntryName)
+	f.ran = append(f.ran, req)
 	hold, finish := f.hold, f.finish
 	f.mu.Unlock()
 	lines := append([]FolderPlanLine(nil), req.Plan.Lines...)

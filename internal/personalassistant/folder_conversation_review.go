@@ -50,18 +50,29 @@ func (s *FolderObservationService) ConfigureConversationReviews(
 	s.digest.conversationLease = s.acquireReview
 }
 
+// reviewAuthority is the guard and lease that vouch for a review target: a
+// workspace build's own for a build review, the conversation's otherwise.
+// Neither ever vouches for the other's reviews.
+func (s *FolderObservationService) reviewAuthority(target foldercontext.Target) (func(context.Context, FolderOffer) error, func(foldercontext.Target) (func(), bool)) {
+	if IsBuildReview(target) {
+		return s.buildGuard, s.buildLease
+	}
+	return s.reviewGuard, s.reviewLease
+}
+
 func (s *FolderObservationService) acquireReview(ctx context.Context, offer FolderOffer) (func(), error) {
 	if offer.ConversationReview == nil {
 		return func() {}, nil
 	}
-	if s.reviewGuard == nil || s.reviewLease == nil {
+	guard, lease := s.reviewAuthority(offer.ConversationReview.Target)
+	if guard == nil || lease == nil {
 		return nil, ErrFolderSelection
 	}
-	release, ok := s.reviewLease(offer.ConversationReview.Target)
+	release, ok := lease(offer.ConversationReview.Target)
 	if !ok {
 		return nil, ErrFolderScanBusy
 	}
-	if err := s.reviewGuard(ctx, offer); err != nil {
+	if err := guard(ctx, offer); err != nil {
 		release()
 		return nil, ErrFolderSelection
 	}
@@ -74,11 +85,15 @@ func (s *FolderObservationService) acquireReview(ctx context.Context, offer Fold
 
 func (s *FolderObservationService) reviewSource(offer FolderOffer) (string, bool) {
 	review := offer.ConversationReview
-	if review == nil || s.reviewGuard == nil {
+	if review == nil {
+		return "", false
+	}
+	guard, _ := s.reviewAuthority(review.Target)
+	if guard == nil {
 		return "", false
 	}
 	ctx := context.Background()
-	if err := s.reviewGuard(ctx, offer); err != nil {
+	if err := guard(ctx, offer); err != nil {
 		return "", false
 	}
 	held, _, err := s.resolve(ctx, review.Target, review.ObservationID)
@@ -175,6 +190,8 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 					offer.ConversationReview.DestinationUnavailable = prior.ConversationReview.DestinationUnavailable
 					offer.ConversationReview.DestinationBlocker = prior.ConversationReview.DestinationBlocker.clone()
 					offer.ConversationReview.Structure = prior.ConversationReview.Structure.clone()
+					// A confirmed run creates the name it was planned with.
+					offer.ConversationReview.WorkspaceName = prior.ConversationReview.WorkspaceName
 				} else {
 					// A pending review's proposal follows the review: what is
 					// available now, and what the user chose in Adjust.
@@ -224,9 +241,12 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		FolderKey: FolderKey(held.root), FolderName: held.result.Name, RootIdentity: held.identity,
 		Verdict: string(folderdigest.KindProject), Reason: folderdigest.DescribeCandidate(candidate, now),
 		Partial: held.result.Partial, ScannedAt: held.observation.ScannedAt, CreatedAt: now,
-		Subject:            folderCandidateRecord(candidate, FolderChoiceProject, folderdigest.DescribeCandidate(candidate, now)),
-		ProjectsCount:      1,
-		ConversationReview: &FolderConversationReview{Target: target, ObservationID: held.observation.ID, CandidateID: candidateID, CandidateIdentity: identity},
+		Subject:       folderCandidateRecord(candidate, FolderChoiceProject, folderdigest.DescribeCandidate(candidate, now)),
+		ProjectsCount: 1,
+		ConversationReview: &FolderConversationReview{
+			Target: target, ObservationID: held.observation.ID, CandidateID: candidateID, CandidateIdentity: identity,
+			WorkspaceName: folderReviewWorkspaceName(ctx),
+		},
 	}
 	offer.Enclosing = d.enclosingHint(offer.Subject.Repository, candidate.Path)
 	placement := folderReviewPlacement(ctx)

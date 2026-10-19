@@ -46,6 +46,13 @@ type WorkspaceBuildFolders interface {
 	// Plan reads the setup plan Home's card would show for the recognized
 	// project, named as the draft names the workspace. It creates nothing.
 	Plan(ctx context.Context, target foldercontext.Target, observationID, candidateID, workspaceName string) (*personalassistant.BuildFolderPlan, error)
+	// ReviewSetup makes or reuses the canonical offer Set it up runs on, for
+	// the build's own review (draft is the build's selection target);
+	// StartSetup runs it on the confirmed digest; ReadSetup projects the offer
+	// and its run for the build that owns it.
+	ReviewSetup(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error)
+	StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName string) (personalassistant.FolderOfferView, error)
+	ReadSetup(ctx context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error)
 }
 
 // Fixed copy the host writes into the transcript for the folder. Both are
@@ -97,29 +104,40 @@ func noteBuildNeeds(session *personalassistant.WorkspaceBuildSession, plan *pers
 // preparing and the server still holds the pick. Anything else has none.
 // projection may be nil; it is then read.
 func (h *Handler) workspaceBuildPlan(ctx context.Context, userID string, projection *personalassistant.Projection, session *personalassistant.WorkspaceBuildSession) *personalassistant.BuildFolderPlan {
-	deps := h.workspaceBuild
-	if deps == nil || deps.Folders == nil || session == nil || session.Folder == nil {
-		return nil
-	}
-	recognition := session.Folder.Recognition
-	if !recognition.Recognized() || recognition.IntegrationKey == "" ||
-		(session.Status != personalassistant.WorkspaceBuildOpen && session.Status != personalassistant.WorkspaceBuildPreparing) {
-		return nil
-	}
-	if projection == nil {
-		read, err := deps.Assistant(ctx, userID)
-		if err != nil || read == nil {
-			return nil
-		}
-		projection = read
-	}
-	target := buildFolderTarget(userID, projection, session.ID)
-	plan, err := deps.Folders.Plan(ctx, target, session.Folder.Observation.ID, recognition.CandidateID, strings.TrimSpace(session.Draft.Name))
+	plan, err := h.readBuildPlan(ctx, userID, projection, session)
 	if err != nil {
 		logger.Info("Workspace build plan not read", logger.Fields{"session_id": session.ID, "error": err})
 		return nil
 	}
 	return plan
+}
+
+// readBuildPlan is workspaceBuildPlan with the reason a recognized folder's
+// plan could not be read: the server no longer holds the pick, most often.
+// (nil, nil) is a build that has no plan to read at all.
+func (h *Handler) readBuildPlan(ctx context.Context, userID string, projection *personalassistant.Projection, session *personalassistant.WorkspaceBuildSession) (*personalassistant.BuildFolderPlan, error) {
+	deps := h.workspaceBuild
+	if deps == nil || deps.Folders == nil || session == nil || session.Folder == nil {
+		return nil, nil
+	}
+	recognition := session.Folder.Recognition
+	if !recognition.Recognized() || recognition.IntegrationKey == "" ||
+		(session.Status != personalassistant.WorkspaceBuildOpen && session.Status != personalassistant.WorkspaceBuildPreparing) {
+		return nil, nil
+	}
+	if projection == nil {
+		read, err := deps.Assistant(ctx, userID)
+		if err != nil || read == nil {
+			return nil, nil
+		}
+		projection = read
+	}
+	target := buildFolderTarget(userID, projection, session.ID)
+	if recognition.OfferID != "" {
+		// Set it up moved the held pick to the build's own review.
+		target = personalassistant.BuildReviewTarget(target, session.ID)
+	}
+	return deps.Folders.Plan(ctx, target, session.Folder.Observation.ID, recognition.CandidateID, strings.TrimSpace(session.Draft.Name))
 }
 
 // buildReasonFolderAttached refuses the model's folder question once a folder
@@ -460,6 +478,13 @@ var (
 		kind:    "build_folder",
 		message: "The workspace folder could not be created, so the attached folder was not linked and the workspace was not created.",
 	}
+	// errBuildFolderSetItUp refuses the wizard's create for a folder Ori sets
+	// up itself: the plan, not the form, decides that workspace.
+	errBuildFolderSetItUp = &createWorkspaceAttachError{
+		status:  http.StatusConflict,
+		kind:    "build_folder",
+		message: "Ori sets this folder up from the plan in the conversation: use Set it up there. To create the workspace yourself instead, remove the folder first.",
+	}
 )
 
 // planCreateWorkspaceBuildFolder resolves the build's attached folder, if the
@@ -485,6 +510,14 @@ func (h *Handler) planCreateWorkspaceBuildFolder(ctx context.Context, req create
 	projection, err := deps.Assistant(ctx, userID)
 	if err != nil || projection == nil {
 		return nil, errBuildFolderLost
+	}
+	// A recognized folder whose plan Set it up can run, or already started,
+	// is never also created by the wizard.
+	if build.Setup != nil {
+		return nil, errBuildFolderSetItUp
+	}
+	if plan, _ := h.readBuildPlan(ctx, userID, projection, build); plan != nil && plan.Ready {
+		return nil, errBuildFolderSetItUp
 	}
 	target := buildFolderTarget(userID, projection, build.ID)
 	root, err := deps.Folders.ResolveRoot(ctx, target, build.Folder.Observation.ID)

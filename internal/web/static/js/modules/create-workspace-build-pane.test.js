@@ -217,7 +217,8 @@ function loadPane() {
     'workspace-build-link-remove',
     'workspace-build-review',
     'workspace-build-prepare',
-    'workspace-build-defer'
+    'workspace-build-defer',
+    'workspace-build-setup'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -894,6 +895,123 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
 
   pane.applySession({ transcript: [], folder: { observation } });
   assert.equal(block().hidden, true);
+});
+
+test('Set it up is offered on a ready, named plan and follows the run it starts', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const buttons = () => root.querySelectorAll('button');
+  const control = kind => buttons().find(button => button.dataset.buildControl === kind);
+  const status = () =>
+    root
+      .querySelectorAll('p')
+      .find(node => node.classList.contains('workspace-build-plan__status'));
+  const expiry = () =>
+    root
+      .querySelectorAll('p')
+      .find(node => node.classList.contains('workspace-build-plan__expiry'));
+  const later = new Date(Date.now() + 20 * 60000).toISOString();
+  const plan = {
+    ready: true,
+    digest: 'd',
+    lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }]
+  };
+  const session = {
+    status: 'open',
+    transcript: [],
+    folder: { observation },
+    folder_expires_at: later,
+    plan,
+    draft: {}
+  };
+
+  // Unnamed: offered but not yet pressable.
+  pane.applySession(session);
+  assert.equal(control('setup').hidden, false);
+  assert.equal(control('setup').disabled, true);
+  pane.applySession({ ...session, draft: { name: 'Ori Music Demo' } });
+  assert.equal(control('setup').disabled, false);
+  // Set it up is the plan's action; an empty Send is not offered as one.
+  assert.equal(
+    root
+      .querySelectorAll('span')
+      .find(node => node.classList.contains('workspace-build-folder__hint')).hidden,
+    true
+  );
+  assert.equal(expiry().hidden, true);
+  control('setup').click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: {} });
+
+  // While it runs: the run's own lines, a status, and no action at all.
+  pane.applySession({
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    status: 'preparing',
+    setup: { plan_digest: 'd' },
+    setup_run: {
+      status: 'running',
+      lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”', state: 'working' }]
+    }
+  });
+  assert.equal(control('setup').hidden, true);
+  assert.equal(control('setup-retry').hidden, true);
+  // The build takes no turn while it runs.
+  assert.equal(root.querySelectorAll('textarea')[0].disabled, true);
+  assert.equal(status().hidden, false);
+  assert.equal(status().textContent, 'Setting it up… Ori is running the plan, line by line.');
+  const item = root.querySelectorAll('li').find(node => node.dataset.kind === 'home');
+  assert.equal(item.dataset.state, 'working');
+
+  // Stopped: Retry continues it; a project-file question offers the files.
+  const stopped = {
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    setup: { plan_digest: 'd', stop_reason: 'install_failed' },
+    setup_run: { status: 'stopped', stop_reason: 'install_failed', lines: plan.lines }
+  };
+  pane.applySession(stopped);
+  assert.equal(status().hidden, true);
+  assert.equal(control('setup').hidden, true);
+  assert.equal(control('setup-retry').hidden, false);
+  control('setup-retry').click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: {} });
+  pane.applySession({
+    ...stopped,
+    setup_run: {
+      status: 'stopped',
+      stop_reason: 'needs_choice',
+      entry_candidates: ['Take One.rpp', 'Take Two.rpp'],
+      lines: plan.lines
+    }
+  });
+  assert.equal(control('setup-retry').hidden, true);
+  const entries = buttons().filter(button => button.dataset.buildControl === 'setup-entry');
+  assert.deepEqual(
+    entries.map(button => button.textContent),
+    ['Use Take One.rpp', 'Use Take Two.rpp']
+  );
+  entries[1].click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: { entry_name: 'Take Two.rpp' } });
+
+  // A pick about to expire says so; an expired one asks for the folder again.
+  pane.applySession({
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    folder_expires_at: new Date(Date.now() + 3.5 * 60000).toISOString()
+  });
+  assert.equal(expiry().hidden, false);
+  assert.equal(expiry().textContent, 'Folder pick expires in 4 min');
+  assert.equal(control('folder-again').hidden, true);
+  pane.applySession({
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    folder_expires_at: new Date(Date.now() - 60000).toISOString()
+  });
+  assert.equal(expiry().textContent, 'The folder pick expired. Add the folder again to set it up.');
+  assert.equal(control('setup').disabled, true);
+  assert.equal(control('folder-again').hidden, false);
+  control('folder-again').click();
+  same(events.at(-1), { type: 'workspace-build-folder-open', detail: {} });
 });
 
 // ----- Add link -----

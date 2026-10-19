@@ -42,6 +42,10 @@ type FolderObservationService struct {
 	busy        map[string]bool
 	reviewGuard func(context.Context, FolderOffer) error
 	reviewLease func(foldercontext.Target) (func(), bool)
+	// buildGuard and buildLease vouch for reviews a workspace build owns
+	// (IsBuildReview), as reviewGuard and reviewLease do for a conversation's.
+	buildGuard func(context.Context, FolderOffer) error
+	buildLease func(foldercontext.Target) (func(), bool)
 }
 
 func NewFolderObservationService(digest *FolderDigestService) *FolderObservationService {

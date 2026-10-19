@@ -355,6 +355,40 @@ type WorkspaceBuildSession struct {
 	FirstRequest       string                 `json:"first_request,omitempty"`
 	CreatedWorkspaceID string                 `json:"created_workspace_id,omitempty"`
 	Preparation        *BuildPreparationClaim `json:"preparation,omitempty"`
+	// Setup is the folder setup run Set it up started for a recognized folder:
+	// it holds the build in preparing while it runs, and stays while the build
+	// is open again after a stop, so Retry continues the same run.
+	Setup *BuildSetupClaim `json:"setup,omitempty"`
+	// HomeWorkspaceID is the Home a setup run made or joined, beside the
+	// project workspace in CreatedWorkspaceID; SetupReceipt is what the run
+	// made, in the host's words. Both outlive Settle.
+	HomeWorkspaceID string `json:"home_workspace_id,omitempty"`
+	SetupReceipt    string `json:"setup_receipt,omitempty"`
+}
+
+// BuildSetupClaim is the setup run a build's Set it up started: the folder
+// digest offer it runs on, the plan digest the user confirmed, and the request
+// that started it.
+type BuildSetupClaim struct {
+	OfferID    string    `json:"offer_id"`
+	PlanDigest string    `json:"plan_digest"`
+	RequestID  string    `json:"request_id"`
+	StartedAt  time.Time `json:"started_at"`
+	// StopReason is why the run last stopped (FolderStop*), while the build is
+	// open again; empty while it runs.
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+func (c BuildSetupClaim) validate() error {
+	for _, value := range []string{c.OfferID, c.RequestID} {
+		if strings.TrimSpace(value) == "" || !boundedText(value, 128) || strings.ContainsAny(value, "/\\\r\n") {
+			return fmt.Errorf("%w: setup claim", ErrWorkspaceBuildInvalid)
+		}
+	}
+	if !buildPreparationDigest(c.PlanDigest) || c.StartedAt.IsZero() || !boundedText(c.StopReason, 64) || strings.ContainsAny(c.StopReason, "/\\\r\n") {
+		return fmt.Errorf("%w: setup claim", ErrWorkspaceBuildInvalid)
+	}
+	return nil
 }
 
 // Touch records a write: a new version and a new update time.
@@ -408,6 +442,7 @@ func (s *WorkspaceBuildSession) Settle() {
 	s.Retry = nil
 	s.Folder = nil
 	s.Link = nil
+	s.Setup = nil
 	s.Draft = BuildDraft{Name: s.Draft.Name}
 }
 
@@ -517,6 +552,9 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if session.Preparation != nil && session.Setup != nil {
+		return fmt.Errorf("%w: preparation and setup", ErrWorkspaceBuildInvalid)
+	}
 	if session.Preparation != nil {
 		if err := session.Preparation.Validate(); err != nil {
 			return err
@@ -524,8 +562,23 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildCreated && session.Status != WorkspaceBuildAbandoned {
 			return fmt.Errorf("%w: preparation lifecycle", ErrWorkspaceBuildInvalid)
 		}
+	} else if session.Setup != nil {
+		// A setup run belongs to an open or preparing build; Settle drops it.
+		if err := session.Setup.validate(); err != nil {
+			return err
+		}
+		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildOpen {
+			return fmt.Errorf("%w: setup lifecycle", ErrWorkspaceBuildInvalid)
+		}
+		if session.Status == WorkspaceBuildPreparing && session.Setup.StopReason != "" {
+			return fmt.Errorf("%w: setup lifecycle", ErrWorkspaceBuildInvalid)
+		}
 	} else if session.Status == WorkspaceBuildPreparing {
 		return fmt.Errorf("%w: missing preparation", ErrWorkspaceBuildInvalid)
+	}
+	if !boundedText(session.SetupReceipt, workspaceBuildMaxShort) || !boundedText(session.HomeWorkspaceID, 128) ||
+		strings.ContainsAny(session.HomeWorkspaceID, "/\\\r\n") {
+		return fmt.Errorf("%w: setup receipt", ErrWorkspaceBuildInvalid)
 	}
 	if session.Version < 1 || session.FurthestStep < 0 || session.FurthestStep > 4 || session.TurnCount < 0 {
 		return fmt.Errorf("%w: counters", ErrWorkspaceBuildInvalid)

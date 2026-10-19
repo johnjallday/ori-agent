@@ -706,7 +706,14 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Storage.PersonalAssistantKnowledge = b.personalAssistantKnowledge
 	b.server.Storage.AssistantOperations = b.assistantOperationStore()
 	if b.personalAssistantFolderDigest != nil {
-		b.server.Storage.PersonalAssistantFolderObservations = personalassistant.NewFolderObservationService(b.personalAssistantFolderDigest)
+		observations := personalassistant.NewFolderObservationService(b.personalAssistantFolderDigest)
+		b.server.Storage.PersonalAssistantFolderObservations = observations
+		// A workspace build's Set it up runs Home's setup journey as a review of
+		// its own: the build vouches for that review and hears how its run ended.
+		if b.sessionHandler != nil {
+			observations.ConfigureBuildReviews(b.sessionHandler.WorkspaceBuildReviewAuthority())
+			b.personalAssistantFolderDigest.AddSetupObserver(b.sessionHandler.WorkspaceBuildSetupSettled)
+		}
 	}
 	if b.projectStaffing != nil {
 		b.server.Storage.AgentEditCarrier = carriedEdits{service: b.projectStaffing}

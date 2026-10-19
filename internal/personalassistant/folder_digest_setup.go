@@ -451,7 +451,7 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 // that is no longer awaiting its outcome, so a late update cannot undo a resolve.
 func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID string, u FolderSetupUpdate) error {
 	now := s.now()
-	_, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
 		offer := d.Offer(offerID)
 		if offer == nil || offer.Setup == nil || offer.Status != FolderOfferAwaitingOutcome {
 			return errFolderReplay
@@ -478,6 +478,13 @@ func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID s
 	})
 	if errors.Is(err, errFolderReplay) {
 		return nil
+	}
+	// A run that stopped is settled; one that finished is settled by its
+	// resolve (afterOutcome), or stopped again when it cannot be verified.
+	if err == nil && u.Status == FolderSetupStopped {
+		if stored := updated.Offer(offerID); stored != nil {
+			s.notifySetup(ctx, userID, *stored)
+		}
 	}
 	return err
 }

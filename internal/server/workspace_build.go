@@ -150,6 +150,30 @@ func (o buildFolderObservations) Plan(ctx context.Context, target foldercontext.
 	return service.BuildPlan(ctx, target, observationID, candidateID, workspaceName)
 }
 
+func (o buildFolderObservations) ReviewSetup(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderSelection
+	}
+	return service.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
+}
+
+func (o buildFolderObservations) StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName string) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderOutcomeUnavailable
+	}
+	return service.StartBuildSetup(ctx, userID, offerID, planDigest, requestID, entryName)
+}
+
+func (o buildFolderObservations) ReadSetup(ctx context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderOfferNotFound
+	}
+	return service.ReadBuildSetup(ctx, review, offerID)
+}
+
 // resolveWorkspaceBuildModel picks the model a build talks to (FR30): the
 // Personal Assistant's own agent profile when its provider and model
 // resolve, otherwise the system model.

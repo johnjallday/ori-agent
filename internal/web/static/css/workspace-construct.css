@@ -2699,8 +2699,32 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-plan-review[hidden],
 .workspace-create-modal .workspace-build-plan__lines[hidden],
 .workspace-create-modal .workspace-build-plan__note[hidden],
-.workspace-create-modal .workspace-build-plan__why[hidden] {
+.workspace-create-modal .workspace-build-plan__why[hidden],
+.workspace-create-modal .workspace-build-plan__status[hidden],
+.workspace-create-modal .workspace-build-plan__entries[hidden],
+.workspace-create-modal .workspace-build-plan__expiry[hidden],
+.workspace-create-modal .workspace-build-plan__actions [hidden] {
   display: none;
+}
+.workspace-create-modal .workspace-build-plan__actions,
+.workspace-create-modal .workspace-build-plan__entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-build-plan__actions:not(:has(> :not([hidden]))) {
+  display: none;
+}
+.workspace-create-modal .workspace-build-plan__status {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-plan__expiry {
+  margin: 0;
+  color: var(--wc-alert);
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
 }
 .workspace-create-modal .workspace-build-plan,
 .workspace-create-modal .workspace-build-plan-review {

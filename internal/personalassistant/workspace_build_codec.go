@@ -33,7 +33,8 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 			if doc.SchemaVersion == 1 && (session.Preparation != nil || session.Status == WorkspaceBuildPreparing) {
 				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 			}
-			if session.Folder != nil && session.Folder.Recognition != nil {
+			if (session.Folder != nil && session.Folder.Recognition != nil) || session.Setup != nil ||
+				session.HomeWorkspaceID != "" || session.SetupReceipt != "" {
 				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 			}
 		}

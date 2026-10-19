@@ -143,6 +143,9 @@ type Handler struct {
 	// workspaceBuild wires "Build with your assistant" sessions; nil leaves
 	// the Create Workspace wizard manual everywhere.
 	workspaceBuild *WorkspaceBuildDeps
+	// buildReviews is the lease on the folder setups builds run: one setup
+	// request at a time per build.
+	buildReviews buildReviewGate
 	// Serializes reviewed creation with ordinary creates naming the same build.
 	// Durable claims remain the cross-restart identity; this is only admission.
 	buildPreparationMu sync.Mutex

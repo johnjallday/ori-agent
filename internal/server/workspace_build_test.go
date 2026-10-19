@@ -1,13 +1,80 @@
 package server
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// The server wires a workspace build's Set it up into Home's own setup: the
+// folder digest reads a build review's folder only while a build session
+// stands behind it, through the build handler's guard.
+func TestWorkspaceBuildSetup_HomesSetupReadsABuildsFolderThroughItsBuild(t *testing.T) {
+	f := newDraftServerFixture(t)
+	ctx := context.Background()
+	song := filepath.Join(os.Getenv("HOME"), "Music", "Ori Music Demo") // sandboxed by the fixture
+	if err := os.MkdirAll(filepath.Join(song, "Media"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Ori Music Demo.rpp", "Media/take.wav"} {
+		if err := os.WriteFile(filepath.Join(song, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observations := f.builder.server.Storage.PersonalAssistantFolderObservations
+	projection, err := f.builder.personalAssistantService.Get(ctx, "local")
+	if err != nil || observations == nil || f.builder.workspaceBuildStore == nil {
+		t.Fatalf("wiring: %v %v %v", projection, observations, err)
+	}
+	sessionID := "8f3c9a3e-1d2b-4c5d-9e6f-0a1b2c3d4e5f"
+	draft := foldercontext.Target{UserID: "local", WorkspaceID: projection.HQWorkspaceID,
+		AgentName: strings.ToLower(projection.GlobalAgentProfile), DraftID: personalassistant.BuildReviewPrefix + sessionID}
+	observation, err := observations.Observe(ctx, draft, "chip", "music")
+	if err != nil || observation == nil {
+		t.Fatalf("observe: %+v %v", observation, err)
+	}
+	recognition, err := observations.Recognize(ctx, draft, observation.ID)
+	if err != nil || !recognition.Recognized() {
+		t.Fatalf("recognize: %+v %v", recognition, err)
+	}
+	offer, err := observations.ReviewBuild(ctx, draft, sessionID, observation.ID, recognition.CandidateID, "Summer Demos")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No build session stands behind the review: Home's setup cannot read it.
+	if _, err := f.builder.personalAssistantFolderDigest.SubjectPath(ctx, "local", offer.ID); !errors.Is(err, personalassistant.ErrFolderPathLost) {
+		t.Fatalf("an unowned build review was read: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := f.builder.workspaceBuildStore.Mutate(ctx, "local", func(doc *personalassistant.WorkspaceBuildDocument) error {
+		doc.Add(personalassistant.WorkspaceBuildSession{
+			ID: sessionID, Status: personalassistant.WorkspaceBuildOpen, Version: 1, CreatedAt: now, UpdatedAt: now,
+			EntryPoint: "home_cockpit_create", Transcript: []personalassistant.BuildTranscriptEntry{},
+			Folder: &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition},
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(song)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, err := f.builder.personalAssistantFolderDigest.SubjectPath(ctx, "local", offer.ID); err != nil || path != canonical {
+		t.Fatalf("the build's own review reads its folder: %q %v (want %q)", path, err, canonical)
+	}
+}
 
 // musicHomeCarrierPlugin is the Music plugin as far as the catalog sees it:
 // one program Home ("Music Production Home") and no project blueprint.

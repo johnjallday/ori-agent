@@ -1954,6 +1954,74 @@ sys.exit(3 if s.get("status") == "running" else 0)
   esac
 }
 
+# smoke_narrated drives a narrated folder setup (tasks/tasks-narrated-folder-setup.md)
+# through the build-session API, as the Create Workspace pane does:
+#   setup [chip] [text]  start (or resume) a build, attach the chip's folder, send one
+#                        turn (a real model call), press Set it up on the plan the
+#                        server shows, and follow the run until it settles; prints the
+#                        plan, each poll's line states, and what the build ended with.
+#   show <session-id>    print one build's status, run and host lines.
+# Run it on a sandbox from scripts/narrated-folder-demo.sh.
+smoke_narrated() {
+  local stage="${3:-}"
+  case "$stage" in
+  setup)
+    local chip="${4:-documents}" text="${5:-music production demos}"
+    python3 - "$BASE_URL" "$chip" "$text" <<'PY'
+import json, sys, time, urllib.error, urllib.request
+base, chip, text = sys.argv[1:]
+def call(method, path, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(base + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+def host(session):
+    return [e["text"] for e in session.get("transcript") or [] if e.get("host")]
+status, body = call("POST", "/api/workspaces/build-sessions", {"entry_point": "home_cockpit_create"})
+session = body["session"]
+print("build", session["id"], "status", status, "resumed" if body.get("resumed") else "new")
+status, body = call("POST", f"/api/workspaces/build-sessions/{session['id']}/folder", {"mode": "chip", "chip": chip, "version": session["version"]})
+session = body.get("session") or session
+print("attach", status, body.get("error", ""), "| recognition:", (session.get("folder") or {}).get("recognition", {}).get("label"))
+status, body = call("POST", f"/api/workspaces/build-sessions/{session['id']}/turns", {"text": text, "version": session["version"]})
+session = body.get("session") or session
+plan = session.get("plan") or {}
+print("turn", status, "| name:", session.get("draft", {}).get("name"), "| plan ready:", plan.get("ready"), plan.get("unavailable", ""))
+print("needs:", [(n["name"], n["state"]) for n in plan.get("needs") or []])
+replies = [e["text"] for e in session.get("transcript") or [] if e.get("role") == "assistant"]
+print("reply:", replies[-1] if replies else "(none)")
+if not plan.get("ready"):
+    sys.exit("no ready plan; nothing set up")
+status, body = call("POST", f"/api/workspaces/build-sessions/{session['id']}/setup", {"version": session["version"], "plan_digest": plan["digest"]})
+print("setup", status, body.get("code", ""), body.get("error", ""))
+if status != 200:
+    sys.exit(1)
+for _ in range(450):
+    time.sleep(2)
+    status, body = call("GET", f"/api/workspaces/build-sessions/{session['id']}")
+    session = body.get("session") or {}
+    run = session.get("setup_run") or {}
+    print("poll", session.get("status"), run.get("status", "-"), run.get("stop_reason", ""),
+          " ".join("[%s] %s" % (l.get("state", "-"), l.get("kind")) for l in run.get("lines") or []))
+    if session.get("status") != "preparing":
+        break
+print("ended:", session.get("status"), "| workspace:", session.get("created_workspace_id"), "| home:", session.get("home_workspace_id"))
+print("receipt:", session.get("setup_receipt", ""))
+print("host lines:", host(session))
+PY
+    ;;
+  show)
+    local id="${4:-}"
+    [[ -n "$id" ]] || fail "usage: $0 narrated <base-url> show <session-id>"
+    curl -s "$BASE_URL/api/workspaces/build-sessions/$id" | python3 -c 'import json,sys; s=json.load(sys.stdin).get("session") or {}; r=s.get("setup_run") or {}; print(s.get("status"), r.get("status","-"), r.get("stop_reason","")); [print(" ", e["text"]) for e in s.get("transcript") or [] if e.get("host")]'
+    ;;
+  *) fail "usage: $0 narrated <base-url> <setup [chip] [text]|show <session-id>>" ;;
+  esac
+}
+
 # smoke_meet_assistant drives Mission 01 ("Meet your assistant") through the API.
 #   onboard       close onboarding without a hire (what the modal's Model step does)
 #   status        print the relationship state and the five missions with their locks
@@ -4099,6 +4167,7 @@ blueprintintake | blueprint-intake) smoke_blueprint_intake "${3:-}" ;;
 starter) smoke_starter "$@" ;;
 meetassistant) smoke_meet_assistant "$@" ;;
 showfolder) smoke_show_folder "$@" ;;
+narrated) smoke_narrated "$@" ;;
 drawer) smoke_drawer "$@" ;;
 rail) smoke_rail "$@" ;;
 build-session) smoke_build_session "$@" ;;
