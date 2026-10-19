@@ -1053,6 +1053,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { activated: true });
       return;
     }
+    // The Command view reads its linked folder's Protection fact. No scene
+    // has an adopted folder, so the answer is the real "no fact" state and
+    // the captured screenshots are unchanged.
+    if (/^\/api\/workspaces\/[^/]+\/protection$/.test(url.pathname)) {
+      await json(route, { protection: null });
+      return;
+    }
     // The task-run show's activity feed, in its idle state. The in-page
     // EventSource above normally answers the stream without a request; these
     // cover the snapshot endpoint and any stream request that still reaches
