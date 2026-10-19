@@ -952,6 +952,7 @@
     if (!step || !isResolved(step)) {
       renderStep();
       renderActions();
+      if (els().dialog?.open) focusHeading();
       return;
     }
     const next = (status?.steps || [])[stepIndex(stepId) + 1];
@@ -963,6 +964,9 @@
     }
     currentStepId = next ? next.id : stepId;
     render();
+    // Native pickers and other async actions replace the focused step control.
+    // Return to the live dialog heading, not a detached button (or <body>).
+    if (els().dialog?.open) focusHeading();
   }
 
   function goBack() {

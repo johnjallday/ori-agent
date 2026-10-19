@@ -240,3 +240,13 @@ separate supported-desktop check, never inferred from `selected:false` when
 `reason:dialog_off`. Both themes, keyboard, narrow layout, zoom and reduced motion
 remain delivery requirements. Tests and receipts are not evidence that the whole
 journey or a foreground picker was exercised.
+
+Watcher lifecycle diagnostics retain opaque watch IDs, not selected folder paths
+or raw path-bearing removal errors. This is a narrow privacy boundary, not a
+claim that unrelated application infrastructure never logs any filesystem path.
+
+Representative isolated-server screenshots (only synthetic folder paths are
+redacted; permissions and result states are unedited):
+
+- [Narrow permission review](file-janitor-creation-flow/narrow-consent.png).
+- [Manual initial review](file-janitor-creation-flow/manual-review.png).

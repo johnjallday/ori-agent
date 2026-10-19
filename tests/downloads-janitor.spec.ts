@@ -633,7 +633,13 @@ test.describe('Downloads Janitor', () => {
     // And the map station carries the same signal, so it is visible from the
     // surface the user actually works on rather than only in the page body.
     // The station is keyed by the capability id now that it is derived from the
-    // install record rather than hardcoded (FR-93).
+    // install record rather than hardcoded (FR-93). A fresh browser starts in
+    // Details, so enter Map explicitly instead of depending on a saved view.
+    await page
+      .locator('#fileJanitorConsole')
+      .getByRole('button', { name: 'Close File Janitor', exact: true })
+      .click();
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
     await expect(page.locator('[data-cmd-hq-station="file-janitor"]').first()).toContainText(
       'Needs attention'
     );

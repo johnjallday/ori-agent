@@ -34,7 +34,11 @@ func preparationAccessMatches(ws *workspace.Workspace, preparation *SetupPrepara
 		return err == nil && preparation.AccessRevision != "" && revision == preparation.AccessRevision
 	}
 	ref, err := ws.GetDirectoryReference(preparation.ReferenceID)
-	if err != nil || ref == nil || ref.Purpose != "" || filepath.Clean(ref.Path) != filepath.Clean(root) {
+	if err != nil || ref == nil || ref.Purpose != "" {
+		return false
+	}
+	linkedRoot, err := filepath.EvalSymlinks(ref.Path)
+	if err != nil || filepath.Clean(linkedRoot) != filepath.Clean(root) {
 		return false
 	}
 	install, _ := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)

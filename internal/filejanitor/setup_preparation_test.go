@@ -64,6 +64,27 @@ func TestLinkedPreparation_ManualInitialResultAndRestartReplay(t *testing.T) {
 	}
 }
 
+func TestLinkedPreparation_StableSymlinkSpellingPreservesTheAdoptedReference(t *testing.T) {
+	service, store, root, request := preparationFixture(t, false)
+	alias := filepath.Join(t.TempDir(), "inbox-alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	store.workspaces["ws-1"].DirectoryReferences[0].Path = alias
+	review, err := service.ReviewLinkedSetup("ws-1", "local", request.ReferenceID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ReviewRevision = review.Revision
+	result, err := service.PrepareLinkedSetup(request, nil)
+	if err != nil || result.Result == nil {
+		t.Fatalf("canonical alias was treated as permission drift: %+v, %v", result, err)
+	}
+	if store.workspaces["ws-1"].DirectoryReferences[0].Path != alias {
+		t.Fatal("adopted reference spelling was rewritten")
+	}
+}
+
 func TestLinkedPreparation_ConcurrentConfirmationsReplayOneResult(t *testing.T) {
 	service, _, _, request := preparationFixture(t, false)
 	results := make([]SetupPreparationResult, 8)
