@@ -73,6 +73,22 @@ func TestTimeMachineBinaryPlistRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestTimeMachineBinaryPlistReadsSignedEightByteIntegers(t *testing.T) {
+	// bplist00, one object (0x13 = 8-byte int, -2), a one-entry offset table
+	// at 17, and the trailer: offset/ref size 1, 1 object, top 0, table 17.
+	raw := append([]byte("bplist00"), 0x13, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 8)
+	trailer := make([]byte, 32)
+	trailer[6], trailer[7], trailer[15], trailer[31] = 1, 1, 1, 17
+	p, top, err := openBinaryPlist(append(raw, trailer...), 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := p.object(top, 0)
+	if err != nil || value.kind != "integer" || value.text != "-2" {
+		t.Fatal(value, err)
+	}
+}
+
 func TestTimeMachineVerbsKeepIdentityAndDropLabels(t *testing.T) {
 	destinations, err := parseTimeMachineDestinations(timeMachineFixture(t, "invented_destinationinfo.plist"))
 	if err != nil || len(destinations) != 2 {

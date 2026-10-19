@@ -43,7 +43,7 @@ func decodeTimeMachinePlist(raw []byte) (diskPlistValue, error) {
 type binaryPlist struct {
 	raw        []byte
 	offsets    []uint64
-	refSize    int
+	refSize    uint64
 	visits     int
 	tableStart uint64
 }
@@ -67,18 +67,19 @@ func openBinaryPlist(raw []byte, maxObjects uint64) (*binaryPlist, uint64, error
 		return nil, 0, errTimeMachinePlist
 	}
 	trailer := raw[len(raw)-32:]
-	offsetSize, refSize := int(trailer[6]), int(trailer[7])
+	offsetSize, refSize := uint64(trailer[6]), uint64(trailer[7])
 	count := binary.BigEndian.Uint64(trailer[8:16])
 	top := binary.BigEndian.Uint64(trailer[16:24])
 	table := binary.BigEndian.Uint64(trailer[24:32])
+	end := uint64(len(raw)) - 32 // the trailer starts here; len(raw) >= 40 above
 	if !validPlistIntSize(offsetSize) || !validPlistIntSize(refSize) || count == 0 || count > maxObjects || top >= count ||
-		table < 8 || table > uint64(len(raw)-32) || count*uint64(offsetSize) > uint64(len(raw)-32)-table {
+		table < 8 || table > end || count*offsetSize > end-table {
 		return nil, 0, errTimeMachinePlist
 	}
 	p := &binaryPlist{raw: raw, refSize: refSize, tableStart: table, offsets: make([]uint64, count)}
-	for i := range p.offsets {
-		start := table + uint64(i*offsetSize)
-		p.offsets[i] = readPlistUint(raw[start : start+uint64(offsetSize)])
+	for i := uint64(0); i < count; i++ {
+		start := table + i*offsetSize
+		p.offsets[i] = readPlistUint(raw[start : start+offsetSize])
 		if p.offsets[i] < 8 || p.offsets[i] >= table {
 			return nil, 0, errTimeMachinePlist
 		}
@@ -86,7 +87,7 @@ func openBinaryPlist(raw []byte, maxObjects uint64) (*binaryPlist, uint64, error
 	return p, top, nil
 }
 
-func validPlistIntSize(size int) bool { return size == 1 || size == 2 || size == 4 || size == 8 }
+func validPlistIntSize(size uint64) bool { return size == 1 || size == 2 || size == 4 || size == 8 }
 
 func readPlistUint(b []byte) uint64 {
 	var v uint64
@@ -153,8 +154,9 @@ func (p *binaryPlist) object(index uint64, depth int) (diskPlistValue, error) {
 			return bad()
 		}
 		v := readPlistUint(body)
-		if nibble == 3 {
-			return diskPlistValue{kind: "integer", text: strconv.FormatInt(int64(v), 10)}, nil
+		// Eight-byte integers are signed (two's complement); shorter ones are not.
+		if nibble == 3 && v>>63 == 1 {
+			return diskPlistValue{kind: "integer", text: "-" + strconv.FormatUint(^v+1, 10)}, nil
 		}
 		return diskPlistValue{kind: "integer", text: strconv.FormatUint(v, 10)}, nil
 	case 0x2, 0x3:
@@ -165,9 +167,11 @@ func (p *binaryPlist) object(index uint64, depth int) (diskPlistValue, error) {
 		if !ok {
 			return bad()
 		}
-		v := float64(math.Float32frombits(uint32(readPlistUint(body))))
+		var v float64
 		if nibble == 3 {
-			v = math.Float64frombits(readPlistUint(body))
+			v = math.Float64frombits(binary.BigEndian.Uint64(body))
+		} else {
+			v = float64(math.Float32frombits(binary.BigEndian.Uint32(body)))
 		}
 		if math.IsNaN(v) || math.IsInf(v, 0) {
 			return bad()
@@ -219,12 +223,12 @@ func (p *binaryPlist) object(index uint64, depth int) (diskPlistValue, error) {
 		if kind == 0xD {
 			refs = 2 * n
 		}
-		body, ok := p.span(start, refs*uint64(p.refSize))
+		body, ok := p.span(start, refs*p.refSize)
 		if !ok {
 			return bad()
 		}
 		ref := func(i uint64) uint64 {
-			return readPlistUint(body[i*uint64(p.refSize) : (i+1)*uint64(p.refSize)])
+			return readPlistUint(body[i*p.refSize : (i+1)*p.refSize])
 		}
 		if kind == 0xA {
 			out := diskPlistValue{kind: "array"}
