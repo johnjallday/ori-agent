@@ -18,12 +18,15 @@ func (b *ServerBuilder) initializeExternalMemory() {
 		externalmemory.NewCodexSource(externalmemory.DefaultCodexRoot()),
 		externalmemory.NewClaudeCodeSource(externalmemory.DefaultClaudeCodeRoot()),
 		externalmemory.NewGeminiSource(externalmemory.DefaultGeminiRoot()),
+		externalmemory.NewClaudeAccountSource(store),
 	)
 	b.externalMemoryRunner = externalmemory.NewRunner(store, registry)
 	b.externalMemoryHandler = externalmemoryhttp.NewHandler(b.externalMemoryRunner)
 	// Promote to global goes through the personal assistant's knowledge
 	// service, read when called: it may be unset (no hired assistant).
 	b.externalMemoryHandler.SetGlobalMemory(builderGlobalMemory{b: b})
+	// Copy for Claude import: the profile and approved Personal HQ facts.
+	b.externalMemoryHandler.SetExportSource(externalMemoryExport{b: b})
 	// Workspace chat: only the personal assistant answering in its own
 	// Personal HQ gets the block and memory_recall; the knowledge reader's
 	// binding check is the gate. Task runs are never wired here.

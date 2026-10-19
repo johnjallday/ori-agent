@@ -2193,7 +2193,9 @@ Deletes that workspace's copied line and nothing else. Returns `{"removed": true
 
 ## External Memory API
 
-Ori keeps a read-only mirror of what other agents remember about the user: Codex CLI (`codex`, `$CODEX_HOME/memories`, else `~/.codex/memories`), Claude Code (`claude_code`, `$CLAUDE_CONFIG_DIR/projects/*/memory/*.md`, else under `~/.claude`; each file's front matter gives its title, type and date, and the project key is decoded back to its folder) and Gemini CLI (`gemini_cli`, `~/.gemini/GEMINI.md` plus the `GEMINI.md` of each project in `~/.gemini/projects.json`). The mirror lives in `<data dir>/external_memory/` (`sources.json` and `entries/<source>.json`), so `ORI_DATA_DIR` scopes it. Ori never writes under a source's folder. Every source is off until the user enables it on the Profile page; nothing is read before that.
+Ori keeps a read-only mirror of what other agents remember about the user (and, from a paste, their Claude account; see below): Codex CLI (`codex`, `$CODEX_HOME/memories`, else `~/.codex/memories`), Claude Code (`claude_code`, `$CLAUDE_CONFIG_DIR/projects/*/memory/*.md`, else under `~/.claude`; each file's front matter gives its title, type and date, and the project key is decoded back to its folder) and Gemini CLI (`gemini_cli`, `~/.gemini/GEMINI.md` plus the `GEMINI.md` of each project in `~/.gemini/projects.json`). The mirror lives in `<data dir>/external_memory/` (`sources.json` and `entries/<source>.json`), so `ORI_DATA_DIR` scopes it. Ori never writes under a source's folder. Every source is off until the user enables it on the Profile page; nothing is read before that.
+
+**Who reads it.** Only the hired personal assistant, wherever it answers: Home and the workspace-page assistant drawer (`/api/home-assistant/ask`), and its own Personal HQ workspace chat. Its prompt gets a short block of profile-grade entries (Codex user profile and general preferences, Claude Code `user` facts, global Gemini instructions, Claude account identity/preference/instruction/career entries) under `## External memory (other agents' memory, read-only)`, delimited and labeled as data, capped at the global-memory budget; on Home it travels in the turn's user data as `<untrusted_external_memory>`. It also gets the `memory_recall` tool (`query`, optional `source`, `folder`, `since`, `limit` ≤ 25), which searches every visible entry and returns delimited results with source, title, excerpt, folder, date, origin and id. Workspace agents, task runs (manual, scheduled, orchestrated) and every other chat get neither; a paused assistant gets neither. Entries with secret-like text are left out of the block and withheld in recall results.
 
 A sync reads each enabled source, splits it into entries with stable ids, and compares content hashes: unchanged entries are untouched, changed ones are updated, new ones are added, and entries no longer present are marked `removed` (kept, hidden from every reader). One sync runs at a time. Syncs run in the background once the server is serving (only when the last completed sync is a day old or there has never been one), then 24 hours after the last completed sync, when a source is enabled or an enabled source's exclusions change, and on **Sync now**.
 
@@ -2284,6 +2286,36 @@ Both fields are optional and default to the entry's `suggested_text` and `sugges
 ```
 
 `status` is `promoted`, `already_known` or `already_pending`. `400` for a wording or category that is not allowed, `404` for an id that is not visible (unknown, removed, or from a source that is off), `409 global_memory_unavailable` without a hired assistant and a Personal HQ, `409 global_memory_changed` when global memory changed or is full.
+
+### Add the Claude account paste
+
+**Endpoint:** `POST /api/external-memory/sources/claude_account/paste`
+
+```json
+{ "text": "## Preferences\n[2026-10-17] - Prefers plain language.\n- Lead with the result." }
+```
+
+The Claude account (`claude_account`, kind `paste`) keeps its memory on Anthropic's servers, with no API, so the user copies it from claude.ai (Settings › Memory, or Settings › Capabilities › "View and edit your memory", or by asking Claude to write its memories out verbatim) and pastes it here. The text replaces the previous paste, turns the source on, and is split at once: each bullet, numbered item, paragraph, or `[YYYY-MM-DD] - …` line is one entry; the nearest heading is its category (slugged, `account` when there is none); a leading `[YYYY-MM-DD]` is its date. An entry's id comes from its text, so a line that is unchanged in the next paste keeps its id and its promoted link; lines no longer present are marked removed. The paste is kept in `<data dir>/external_memory/paste/` and never logged. Answers with the same body as `GET /api/external-memory/sources` (the card's `paste_date` and counts updated); `400` for an empty paste or one over 256 KB ("split it and add it in parts"). The account source has no schedule and is not part of the daily sync.
+
+### Copy for Claude import
+
+**Endpoint:** `GET /api/external-memory/export/claude`
+
+Returns `text/plain` (no caching): the user's approved Personal HQ facts and profile in claude.ai's five-category import format, one `[YYYY-MM-DD] - text` line per fact, oldest first, `[unknown]` when undated. Every heading is present even when empty:
+
+```
+## Instructions
+[2026-09-30] - Response style: Plain language, no jargon
+## Identity
+[2026-09-30] - Name: Sam
+## Career
+## Projects
+[2026-10-05] - chart-lab: fee-aware backtests of EMA exit rules.
+## Preferences
+[2026-08-01] - Reports backtests net of fees.
+```
+
+Mapping: the profile's saved preferences go to Instructions; its name, role, time zone (the profile records no place) and locale go to Identity; its specializations and About text go to Career; `projects` facts and facts promoted from a workspace go to Projects; every other approved fact goes to Preferences. Email is never exported, and neither is anything from the external mirror. Without a hired assistant the export holds the profile only. `503` when the profile or global memory cannot be read.
 
 ## Home Project Library Notifications API
 

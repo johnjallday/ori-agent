@@ -1046,7 +1046,20 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
 }
 
 .connected-memory-switch {
+  display: flex;
   flex-shrink: 0;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding-left: 0;
+}
+
+/* Keep Bootstrap's switch proportions even where narrow-screen rules size
+   form inputs to the full width. */
+.connected-memory-switch .form-check-input {
+  flex: none;
+  width: 2em;
+  height: 1em;
   margin: 0;
 }
 
@@ -1292,6 +1305,53 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
 
 .connected-memory-promote small {
   color: var(--text-secondary);
+}
+
+/* The Claude account card's paste box and the export preview. */
+.connected-memory-paste {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.connected-memory-paste-help {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.connected-memory-paste label {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.connected-memory-paste textarea {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.connected-memory-paste small,
+.connected-memory-paste-notice {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.connected-memory-export-preview {
+  max-height: 18rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 576px) {

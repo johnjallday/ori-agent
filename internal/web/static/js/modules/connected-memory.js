@@ -100,7 +100,7 @@ export function sourceCardModel(source, { sync, now = Date.now() } = {}) {
   }
   const nextSync = source?.next_due ? relativeTime(source.next_due, now) || 'soon' : '';
 
-  return {
+  const model = {
     id: source?.id || '',
     label: source?.label || source?.id || 'Source',
     state,
@@ -109,6 +109,7 @@ export function sourceCardModel(source, { sync, now = Date.now() } = {}) {
     location,
     status,
     entries: entriesLine(source),
+    lastLabel: 'Last synced',
     lastSync,
     nextSync,
     folders: Array.isArray(source?.folders) ? source.folders : [],
@@ -116,6 +117,40 @@ export function sourceCardModel(source, { sync, now = Date.now() } = {}) {
     exclusions: Array.isArray(source?.exclusions) ? source.exclusions : [],
     isFiles: source?.kind !== 'paste',
     canSync: Boolean(source?.enabled) && state !== 'syncing'
+  };
+  return model.isFiles ? model : pasteCardModel(model, source, now);
+}
+
+// pasteCardModel adjusts a card for the Claude account, which has no folder:
+// its input is the text the user pastes, and "unavailable" just means no
+// paste yet.
+function pasteCardModel(model, source, now) {
+  const pasted = Boolean(source?.available);
+  model.state = !pasted ? 'empty' : model.enabled ? 'synced' : 'off';
+  model.dimmed = false;
+  model.location = '';
+  model.status = !pasted
+    ? 'No paste yet. Copy your memory from claude.ai and add it below.'
+    : model.enabled
+      ? 'On. Your personal assistant can use these entries, labeled as external.'
+      : 'Off. Your paste is kept; switch it on to let your assistant use it.';
+  model.lastLabel = 'Last pasted';
+  model.lastSync = source?.paste_date
+    ? relativeTime(source.paste_date, now) || source.paste_date
+    : 'Never';
+  model.nextSync = '';
+  model.canSync = false;
+  return model;
+}
+
+// pasteState is the paste box's counter and whether Add may be pressed.
+export function pasteState(text) {
+  const bytes = new TextEncoder().encode(String(text ?? '')).length;
+  const limit = 256 * 1024;
+  return {
+    counter: `${Math.ceil(bytes / 1024)} / 256 KB`,
+    valid: String(text ?? '').trim() !== '' && bytes <= limit,
+    tooLarge: bytes > limit
   };
 }
 
@@ -202,6 +237,63 @@ async function request(url, options = {}) {
   return { status: response.status, payload };
 }
 
+// CLAUDE_MEMORY_HELP says where the account's memory can be copied from: there
+// is no API, only the settings pages and Claude itself.
+export const CLAUDE_MEMORY_HELP = [
+  'In claude.ai, open Settings › Memory (on the older layout: Settings › Capabilities › “View and edit your memory”) and copy the text.',
+  'Or ask Claude in a chat: “Write out everything you remember about me, verbatim.”',
+  'Paste it below. Ori splits it into entries; nothing is sent anywhere.'
+];
+
+// createPasteBox is the Claude account card's paste area.
+function createPasteBox(id, actions) {
+  const root = element('div', 'connected-memory-paste');
+  const help = element('ol', 'connected-memory-paste-help');
+  CLAUDE_MEMORY_HELP.forEach(line => help.append(element('li', '', line)));
+  const label = element('label', '', 'Your Claude account memory');
+  const textID = `connectedMemoryPaste-${id}`;
+  label.htmlFor = textID;
+  const text = element('textarea', 'form-control');
+  text.id = textID;
+  text.rows = 5;
+  text.placeholder = '## Preferences\n[2026-10-17] - …';
+  text.spellcheck = false;
+  const counter = element('small');
+  const notice = element(
+    'p',
+    'connected-memory-paste-notice',
+    'Adding again replaces the previous paste. Entries you promoted stay in global memory.'
+  );
+  const add = element('button', 'modern-btn modern-btn-primary', 'Add');
+  add.type = 'button';
+  const row = element('div', 'connected-memory-card-actions');
+  row.append(add);
+  root.append(help, label, text, counter, notice, row);
+
+  const refresh = () => {
+    const state = pasteState(text.value);
+    counter.textContent = state.tooLarge
+      ? `${state.counter}: larger than 256 KB; split it and add it in parts.`
+      : state.counter;
+    add.disabled = !state.valid;
+  };
+  text.addEventListener('input', refresh);
+  add.addEventListener('click', async () => {
+    add.disabled = true;
+    if (await actions.paste(id, text.value)) text.value = '';
+    refresh();
+  });
+  refresh();
+  return {
+    root,
+    update(source, context) {
+      add.textContent = source?.available ? 'Replace paste' : 'Add';
+      if (context?.busy) add.disabled = true;
+      else refresh();
+    }
+  };
+}
+
 // createSourceCard builds one card once and updates it in place, so a refresh
 // never steals focus from the exclusion editor.
 function createSourceCard(initial, actions) {
@@ -231,15 +323,17 @@ function createSourceCard(initial, actions) {
   const status = element('p', 'connected-memory-state');
 
   const facts = element('dl', 'connected-memory-facts');
-  const factValue = label => {
-    facts.append(element('dt', '', label));
+  const factRow = label => {
+    const term = element('dt', '', label);
     const value = element('dd');
-    facts.append(value);
-    return value;
+    facts.append(term, value);
+    return { term, value };
   };
-  const entriesValue = factValue('Entries');
-  const lastSyncValue = factValue('Last synced');
-  const nextSyncValue = factValue('Next sync');
+  const entriesValue = factRow('Entries').value;
+  const lastSyncRow = factRow('Last synced');
+  const lastSyncValue = lastSyncRow.value;
+  const nextSyncRow = factRow('Next sync');
+  const nextSyncValue = nextSyncRow.value;
 
   const folders = element('details', 'connected-memory-folders');
   const foldersSummary = element('summary', '', 'Entries by folder');
@@ -274,6 +368,8 @@ function createSourceCard(initial, actions) {
   actionsRow.append(syncButton);
 
   root.append(header, status, facts, folders, exclusions, actionsRow);
+  const paste = initial.kind === 'paste' ? createPasteBox(id, actions) : null;
+  if (paste) root.append(paste.root);
 
   switchInput.addEventListener('change', () => actions.setEnabled(id, switchInput.checked));
   syncButton.addEventListener('click', () => actions.sync());
@@ -292,8 +388,11 @@ function createSourceCard(initial, actions) {
     switchLabel.textContent = model.enabled ? 'On' : 'Off';
     status.textContent = model.status;
     entriesValue.textContent = model.entries;
+    lastSyncRow.term.textContent = model.lastLabel;
     lastSyncValue.textContent = model.lastSync;
     nextSyncValue.textContent = model.nextSync || '—';
+    nextSyncRow.term.hidden = nextSyncRow.value.hidden = !model.isFiles;
+    paste?.update(source, context);
 
     const folderRows = model.folders.map(folder => {
       const item = element('li');
@@ -442,11 +541,112 @@ export function mountConnectedMemory(doc = document) {
           }),
         'The folder list could not be saved.'
       ),
-    sync: () => mutate(() => request(`${API}/sync`, { method: 'POST' }), 'The sync could not run.')
+    sync: () => mutate(() => request(`${API}/sync`, { method: 'POST' }), 'The sync could not run.'),
+    paste: async (id, text) => {
+      let added = false;
+      await mutate(async () => {
+        const result = await request(`${API}/sources/${encodeURIComponent(id)}/paste`, {
+          method: 'POST',
+          body: JSON.stringify({ text })
+        });
+        added = true;
+        return result;
+      }, 'The paste could not be added.');
+      return added;
+    }
   };
+
+  const exportHost = doc.getElementById('connectedMemoryExport');
+  if (exportHost) createExportCard(exportHost, doc);
 
   void load();
   return { reload: load };
+}
+
+// exportFactCount counts the "[date] - text" lines of an import text.
+export function exportFactCount(text) {
+  return String(text ?? '')
+    .split('\n')
+    .filter(line => /^\[(\d{4}-\d{2}-\d{2}|unknown)\] - /.test(line)).length;
+}
+
+async function fetchClaudeExport() {
+  const response = await fetch(`${API}/export/claude`);
+  const text = await response.text();
+  if (!response.ok) {
+    let message = '';
+    try {
+      message = JSON.parse(text).message || '';
+    } catch {
+      message = '';
+    }
+    throw new Error(message || 'The export could not be loaded.');
+  }
+  return text;
+}
+
+// createExportCard is Copy for Claude import: the user's approved global
+// memory and profile in claude.ai's five-category import format.
+function createExportCard(host, doc) {
+  const title = element('h3', 'connected-memory-browser-title', 'Copy for Claude import');
+  title.id = 'connectedMemoryExportTitle';
+  host.setAttribute('aria-labelledby', title.id);
+  const intro = element(
+    'p',
+    'connected-memory-browser-hint',
+    'Your approved global memory and profile, in the format claude.ai’s “Start import” box expects. Only what you approved is included, nothing from other agents.'
+  );
+  const note = element(
+    'p',
+    'connected-memory-browser-hint',
+    'claude.ai’s memory import is experimental and tends to keep work-related facts only.'
+  );
+  const summary = element('p', 'connected-memory-results-line');
+  summary.setAttribute('role', 'status');
+  summary.setAttribute('aria-live', 'polite');
+  const preview = element('pre', 'connected-memory-export-preview');
+  preview.tabIndex = 0;
+  preview.setAttribute('aria-label', 'Import text preview');
+  const copy = element('button', 'modern-btn modern-btn-primary', 'Copy for Claude import');
+  copy.type = 'button';
+  const refresh = element('button', 'modern-btn modern-btn-secondary', 'Refresh');
+  refresh.type = 'button';
+  const row = element('div', 'connected-memory-card-actions');
+  row.append(copy, refresh);
+  host.append(title, intro, note, summary, preview, row);
+
+  let text = '';
+  async function load() {
+    try {
+      text = await fetchClaudeExport();
+      preview.textContent = text;
+      const count = exportFactCount(text);
+      summary.textContent = count
+        ? `${count} ${count === 1 ? 'line' : 'lines'} ready to copy.`
+        : 'Nothing approved yet: add facts to global memory or your profile first.';
+      copy.disabled = count === 0;
+    } catch (error) {
+      summary.textContent = error.message;
+      copy.disabled = true;
+    }
+  }
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      summary.textContent =
+        'Copied. In claude.ai, open Settings › Memory, choose Start import, and paste it.';
+    } catch {
+      const range = doc.createRange();
+      range.selectNodeContents(preview);
+      const selection = doc.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      summary.textContent = 'The browser blocked copying. The text is selected: copy it yourself.';
+    }
+  });
+  refresh.addEventListener('click', () => void load());
+  doc.addEventListener('personal-assistant-knowledge-changed', () => void load());
+  void load();
 }
 
 if (typeof document !== 'undefined') {

@@ -5,10 +5,12 @@ import {
   changesPhrase,
   entriesLine,
   exclusionSync,
+  exportFactCount,
   folderSuggestions,
   generalEntryCount,
   mirrorSignature,
   needsPoll,
+  pasteState,
   sourceCardModel,
   sourceCardState,
   trimValue
@@ -190,6 +192,55 @@ test('the browser reloads only when what a reader sees may have changed', () => 
     same
   );
   assert.equal(mirrorSignature(null), '');
+});
+
+test('the Claude account card speaks about pastes, never a missing folder', () => {
+  const account = overrides => ({
+    id: 'claude_account',
+    label: 'Claude account',
+    kind: 'paste',
+    available: false,
+    enabled: false,
+    entry_count: 0,
+    ...overrides
+  });
+  const empty = sourceCardModel(account(), { now: NOW });
+  assert.equal(empty.state, 'empty');
+  assert.equal(empty.dimmed, false);
+  assert.match(empty.status, /No paste yet/);
+  assert.doesNotMatch(empty.status, /Not found/);
+  assert.equal(empty.lastLabel, 'Last pasted');
+  assert.equal(empty.lastSync, 'Never');
+  const on = sourceCardModel(
+    account({ available: true, enabled: true, entry_count: 7, paste_date: '2026-10-19T11:00:00Z' }),
+    { now: NOW }
+  );
+  assert.equal(on.state, 'synced');
+  assert.equal(on.lastSync, '1h ago');
+  assert.equal(on.entries, '7 entries');
+  assert.equal(on.nextSync, '');
+  assert.equal(on.canSync, false);
+  const off = sourceCardModel(account({ available: true }), { now: NOW });
+  assert.match(off.status, /Your paste is kept/);
+});
+
+test('the paste box counts kilobytes and refuses empty or oversized text', () => {
+  assert.deepEqual(pasteState(''), { counter: '0 / 256 KB', valid: false, tooLarge: false });
+  assert.equal(pasteState('  \n ').valid, false);
+  assert.equal(pasteState('- a fact').valid, true);
+  const korean = '가'.repeat(1024); // 3 KB
+  assert.equal(pasteState(korean).counter, '3 / 256 KB');
+  const huge = pasteState('x'.repeat(256 * 1024 + 1));
+  assert.equal(huge.valid, false);
+  assert.equal(huge.tooLarge, true);
+});
+
+test('the export summary counts dated lines only', () => {
+  const text =
+    '## Instructions\n[2026-09-30] - Lead with the result\n## Identity\n[unknown] - Name: Sam\n## Career\n';
+  assert.equal(exportFactCount(text), 2);
+  assert.equal(exportFactCount('## Instructions\n## Identity\n'), 0);
+  assert.equal(exportFactCount(undefined), 0);
 });
 
 test('the Claude account card has no file controls', () => {

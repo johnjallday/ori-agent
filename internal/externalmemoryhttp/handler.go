@@ -31,6 +31,7 @@ const (
 type Handler struct {
 	runner *externalmemory.Runner
 	global GlobalMemory
+	export ExportSource
 }
 
 // NewHandler builds the handler. A nil runner makes every endpoint 503.
