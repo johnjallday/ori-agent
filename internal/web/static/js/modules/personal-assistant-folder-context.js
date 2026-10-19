@@ -12,10 +12,17 @@ import {
   folderPresentation,
   renderFolderSummary
 } from './personal-assistant-folder-presentation.js';
-import { proposalView, renderProposal, structureOption } from './personal-assistant-proposal.js';
+import {
+  declinedLine,
+  proposalView,
+  renderProposal,
+  structureOption
+} from './personal-assistant-proposal.js';
 export { observationSummary, coverageSummary } from './personal-assistant-folder-presentation.js';
 
 const ENDPOINT = '/api/home-assistant/folder-context';
+// Ask again: undoes one folder's No thanks by the key its decline carried.
+const FORGET_ENDPOINT = '/api/personal-assistant/folder-digest/forget';
 export const FOLDER_DISCLOSURE =
   'File contents have not been read. Send shares the recorded file/folder and project names, kinds, counts, project markers, last-changed dates, scan time and coverage with your configured model. Selecting a folder stays local.';
 
@@ -185,6 +192,30 @@ export function createFolderContextController({
       }
     }
   }
+  // askAgain undoes the attached folder's earlier No thanks. Only the key its
+  // decline carried is sent; the folder is not looked at again, and its card
+  // simply gets Set up back.
+  async function askAgain() {
+    if (!state.declined || state.pending) return false;
+    const generation = state.generation;
+    state.pending = true;
+    changed(state);
+    try {
+      await post(FORGET_ENDPOINT, { folder_key: state.declined.folder_key });
+      if (generation !== state.generation) return false;
+      state.declined = null;
+      return true;
+    } catch (error) {
+      if (generation === state.generation)
+        notify(error.message || 'Could not ask about this folder again right now. Try again.');
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
+      }
+    }
+  }
   function request() {
     if (!state.observation || state.pending || state.conversationId !== currentId()) return null;
     const focus = folderSelectionFocus(state.observation, state.focusIDs);
@@ -297,7 +328,19 @@ export function createFolderContextController({
       }
     }
   }
-  return { state, select, remove, reset, request, setFocus, accepted, adopt, review, notify };
+  return {
+    state,
+    select,
+    remove,
+    reset,
+    request,
+    setFocus,
+    accepted,
+    adopt,
+    review,
+    notify,
+    askAgain
+  };
 }
 
 // folderContextChoices is what the Add folder sheet shows for the server's
@@ -445,12 +488,20 @@ export function structureCardView(state, parkedId = '') {
       kind: 'proposal',
       key: `${id}:${declined ? 'declined' : 'open'}`,
       actions: [
-        {
-          id: 'setup',
-          label: 'Set up',
-          style: 'btn btn-sm btn-primary',
-          disabled: Boolean(state.pending) || declined
-        },
+        // An earlier No thanks stands where Set up would, until Ask again.
+        declined
+          ? {
+              id: 'ask',
+              label: declinedLine(state.declined, state.structure.folder),
+              style: 'btn btn-sm btn-outline-secondary personal-assistant-structure__declined',
+              disabled: Boolean(state.pending)
+            }
+          : {
+              id: 'setup',
+              label: 'Set up',
+              style: 'btn btn-sm btn-primary',
+              disabled: Boolean(state.pending)
+            },
         {
           id: 'adjust',
           label: 'Adjust…',
@@ -501,6 +552,10 @@ function renderStructure(state) {
   const actions = node('div', '', 'personal-assistant-structure__actions');
   const runs = {
     setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
+    ask: async () => {
+      if (await controller.askAgain())
+        host.querySelector('[data-structure-action="setup"]')?.focus();
+    },
     adjust: button =>
       window.PersonalAssistantFolderSetup?.adjustStructure?.(button, controller.state.structure),
     later: () => {

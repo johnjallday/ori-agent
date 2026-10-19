@@ -118,6 +118,7 @@
 /api/orchestration/workspace/agents
 /api/orchestration/workspace/layout
 /api/personal-assistant/folder-digest
+/api/personal-assistant/folder-digest/forget
 /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/decide
 /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/home-provider
 /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/project-selection

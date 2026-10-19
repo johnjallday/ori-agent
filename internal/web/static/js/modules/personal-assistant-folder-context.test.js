@@ -404,14 +404,20 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   assert.equal(structureCardView(f.controller.state, 'a').kind, 'none');
   assert.equal(structureCardView(f.controller.state, 'other').kind, 'proposal');
 
-  // An earlier No thanks keeps the card, with Set up held back.
+  // An earlier No thanks keeps the card; its chip stands where Set up would.
   reply = { observation: observation('b'), revision: '', structure, declined };
   await f.controller.select('chip', 'downloads');
   assert.deepEqual(f.controller.state.declined, declined);
   view = structureCardView(f.controller.state);
   assert.equal(view.kind, 'proposal');
-  assert.equal(view.actions[0].disabled, true);
-  assert.equal(view.actions[1].disabled, false);
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['ask', 'You said no to Albums on Oct 6 · Ask again'],
+      ['adjust', 'Adjust…'],
+      ['later', 'Not now']
+    ]
+  );
   // A decline with no usable key is not shown as one.
   reply = { observation: observation('c'), revision: '', structure, declined: { name: 'Albums' } };
   await f.controller.select('chip', 'downloads');
@@ -439,6 +445,45 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   await f.controller.select('chip', 'desktop');
   assert.equal(structureCardView(f.controller.state).kind, 'none');
   assert.equal(folderDecline({ ...declined, folder_key: '../etc' }), null);
+});
+
+test('Ask again sends only the decline key and gives the card its Set up back', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  const declined = { folder_key: 'b'.repeat(64), name: 'Albums', at: '2026-10-06T08:02:00Z' };
+  let forget = async () => ({ folder_digest: {} });
+  const f = fixture(async (url, body) =>
+    url.endsWith('/select')
+      ? { observation: observation('a'), revision: '', structure, declined }
+      : forget(url, body)
+  );
+  await f.controller.select('chip', 'downloads');
+  assert.equal(await f.controller.askAgain(), true);
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1].url, '/api/personal-assistant/folder-digest/forget');
+  assert.deepEqual(f.calls[1].body, { folder_key: declined.folder_key });
+  assert.equal(f.controller.state.declined, null);
+  // The folder was not looked at again: same observation, same proposal.
+  assert.equal(f.controller.state.observation.id, 'a');
+  assert.equal(f.controller.state.structure, structure);
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  // Nothing to ask again about: no request.
+  assert.equal(await f.controller.askAgain(), false);
+  assert.equal(f.calls.length, 2);
+
+  // A failed Ask again keeps the chip and says so.
+  await f.controller.select('chip', 'downloads');
+  forget = async () => {
+    throw new Error('That folder could not be asked about again.');
+  };
+  assert.equal(await f.controller.askAgain(), false);
+  assert.deepEqual(f.controller.state.declined, declined);
+  assert.equal(f.controller.state.notice, 'That folder could not be asked about again.');
+  assert.equal(f.controller.state.pending, false);
 });
 
 test('a proposed group replaces the discussion shortcuts with its own three controls', () => {

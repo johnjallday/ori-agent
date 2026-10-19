@@ -13,6 +13,7 @@ import {
   folderSceneView,
   firstFolderPromptView,
   folderOfferView,
+  capabilityHiddenView,
   folderOutcomeNote,
   folderReceiptView,
   folderFirstLookOpen,
@@ -2012,4 +2013,51 @@ test('Home proposes a folder of several projects as one group, with its own four
   });
   assert.equal(listed.structure, undefined);
   assert.equal(listed.question, 'Set up one Home for these projects?');
+
+  // A folder the user said No thanks to: the card is the same, and its chip
+  // stands where Set up would. Ask again sends only the decline's key.
+  const key = 'c'.repeat(64);
+  const declined = folderOfferView({
+    ...offer,
+    declined: { folder_key: key, name: 'Albums', at: '2026-10-06T08:02:00Z' }
+  });
+  assert.deepEqual(
+    declined.actions.map(action => action.label),
+    ['You said no to Albums on Oct 6 · Ask again', 'Adjust…', 'No thanks', 'Later']
+  );
+  assert.deepEqual(declined.actions[0].forget, { folder_key: key });
+  assert.equal(
+    declined.actions.some(action => action.oneCard),
+    false
+  );
+  // A decline without a usable key is not a control.
+  const keyless = folderOfferView({ ...offer, declined: { name: 'Albums', at: 'x' } });
+  assert.equal(keyless.actions[0].label, 'Set up');
+});
+
+test('a card says what it does not lead with since a No thanks, with Show', () => {
+  const offer = {
+    id: 'offer-2',
+    status: 'pending',
+    capability_hidden: {
+      domain: 'music_production',
+      label: 'REAPER setup',
+      at: '2026-10-06T08:02:00Z'
+    }
+  };
+  assert.deepEqual(capabilityHiddenView(offer), {
+    visible: true,
+    text: 'REAPER setup hidden since Oct 6',
+    domain: 'music_production'
+  });
+  // Only a waiting card says it, and only with the host's closed fields.
+  assert.equal(capabilityHiddenView({ ...offer, status: 'resolved' }).visible, false);
+  assert.equal(
+    capabilityHiddenView({
+      ...offer,
+      capability_hidden: { ...offer.capability_hidden, domain: '../x' }
+    }).visible,
+    false
+  );
+  assert.equal(capabilityHiddenView({ id: 'offer-3', status: 'pending' }).visible, false);
 });

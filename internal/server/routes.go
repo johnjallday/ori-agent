@@ -1215,6 +1215,8 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+folderDigest+"/prompted", s.Handlers.PersonalAssistant.PromptedFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/scan", s.Handlers.PersonalAssistant.ScanFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/picker", s.Handlers.PersonalAssistant.PickFolderDigest)
+		// Ask again / Show: undo one earlier No thanks, by folder key or domain.
+		mux.HandleFunc("POST "+folderDigest+"/forget", s.Handlers.PersonalAssistant.ForgetFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/decide", s.Handlers.PersonalAssistant.DecideFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/resolve", s.Handlers.PersonalAssistant.ResolveFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/candidate", s.Handlers.PersonalAssistant.ChooseFolderCandidate)

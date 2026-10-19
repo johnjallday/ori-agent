@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -194,6 +195,88 @@ func TestFolderDigest_NoThanksOnAGroupIsShownWhenTheFolderIsShownAgain(t *testin
 	stored, err := f.store.Read(ctx, "local")
 	if err != nil || stored.Offer(again.ID).Declined == nil {
 		t.Fatalf("the decline was not kept on the stored offer: %v", err)
+	}
+}
+
+func TestFolderDigest_ForgetAsksAboutAFolderAgain(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	offer, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "no-1"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.service.ScanChip(ctx, "local", "music")
+	if err != nil || again.Declined == nil {
+		t.Fatalf("rescan after No thanks: %+v, %v", again, err)
+	}
+	view, err := f.service.Forget(ctx, "local", FolderForgetInput{FolderKey: again.Declined.FolderKey})
+	if err != nil || view.Offer == nil || view.Offer.ID != again.ID || view.Offer.Declined != nil || view.Offer.Structure == nil {
+		t.Fatalf("Ask again: %+v, %v", view.Offer, err)
+	}
+	doc, err := f.store.Read(ctx, "local")
+	if err != nil || len(doc.Tombstones) != 0 || doc.Offer(again.ID).Declined != nil || doc.Offer(offer.ID).Status != FolderOfferDeclined {
+		t.Fatalf("after Ask again: tombstones %+v, %v", doc.Tombstones, err)
+	}
+	// Asking again about a folder that is not declined changes nothing.
+	if _, err := f.service.Forget(ctx, "local", FolderForgetInput{FolderKey: again.Declined.FolderKey}); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := f.store.Read(ctx, "local"); err != nil || replay.Version != doc.Version {
+		t.Fatalf("a second Ask again wrote the digest: %v", err)
+	}
+}
+
+func TestFolderDigest_ShowBringsADeclinedKindOfWorkBack(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	if err := os.WriteFile(filepath.Join(f.home, "Desktop", "Song.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The older app card said no as well; it is the answer the digest started from.
+	f.service.deps.LegacyDeclined = func(context.Context, string, string) (bool, error) { return true, nil }
+	declinedAt := f.now.AddDate(0, 0, -13)
+	if _, err := f.store.Mutate(ctx, "local", func(doc *FolderDigestDocument) error {
+		doc.DomainDeclines = append(doc.DomainDeclines, FolderDomainDecline{Domain: "music_production", FirstEvidence: "single_project", Count: 1, At: declinedAt})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || hidden.Capability != nil || hidden.CapabilityHidden == nil || hidden.CapabilityHidden.Domain != "music_production" ||
+		hidden.CapabilityHidden.Label != "REAPER setup" || !hidden.CapabilityHidden.At.Equal(declinedAt) {
+		t.Fatalf("a declined kind of work on Home: %+v / %+v, %v", hidden.Capability, hidden.CapabilityHidden, err)
+	}
+	view, err := f.service.Forget(ctx, "local", FolderForgetInput{Domain: "music_production"})
+	if err != nil || view.Offer == nil || view.Offer.ID != hidden.ID || view.Offer.Capability == nil || view.Offer.CapabilityHidden != nil {
+		t.Fatalf("Show: %+v, %v", view.Offer, err)
+	}
+	doc, err := f.store.Read(ctx, "local")
+	if err != nil || len(doc.DomainDeclines) != 0 || len(doc.DomainsAskedAgain) != 1 || doc.DomainsAskedAgain[0] != "music_production" {
+		t.Fatalf("after Show: declines %+v, asked again %v, %v", doc.DomainDeclines, doc.DomainsAskedAgain, err)
+	}
+	// The older answer is not read again: the next look leads with it.
+	again, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || again.Capability == nil || again.CapabilityHidden != nil {
+		t.Fatalf("the older answer came back: %+v, %v", again, err)
+	}
+}
+
+func TestFolderDigest_ForgetTakesOneFolderKeyOrOneKnownDomain(t *testing.T) {
+	ctx := context.Background()
+	f, _ := homeCollectionFixture(t)
+	for name, input := range map[string]FolderForgetInput{
+		"nothing":         {},
+		"both":            {FolderKey: strings.Repeat("a", 64), Domain: "music_production"},
+		"a path":          {FolderKey: "/Users/riley/Albums"},
+		"a short key":     {FolderKey: "abc"},
+		"an unknown kind": {Domain: "chess"},
+	} {
+		if _, err := f.service.Forget(ctx, "local", input); !errors.Is(err, ErrValidation) {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 }
 

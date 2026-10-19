@@ -190,8 +190,6 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 			// Retirement is not a decline, tombstone or memory preference.
 			pending.Status = FolderOfferClosed
 		}
-		domain, _ := folderOfferDomainClass(offer)
-		offer.CapabilitySuppressed = offer.CapabilitySuppressed || doc.DeclineFor(domain) != nil
 		doc.Offers = append(doc.Offers, offer)
 		pruneFolderDigest(doc)
 		result = offer
@@ -262,15 +260,8 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 			}
 		}
 	}
-	domain, _ := folderOfferDomainClass(offer)
-	legacyDeclined := false
-	if domain != "" && doc.DeclineFor(domain) == nil && d.deps.LegacyDeclined != nil {
-		legacyDeclined, err = d.deps.LegacyDeclined(ctx, target.UserID, domain)
-		if err != nil {
-			return FolderOffer{}, err
-		}
-	}
-	offer.CapabilitySuppressed = offer.CapabilitySuppressed || legacyDeclined || doc.DeclineFor(domain) != nil
+	// A No thanks to a kind of work is not read here: in a conversation the
+	// user asked about this folder, and every option is described as it is.
 	if collection {
 		offer.ConversationReview.DestinationID = ""
 	}
@@ -295,7 +286,7 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		return FolderOffer{}, structureAdjustmentError("this folder is not proposed as a group")
 	}
 	if collection {
-		offer.Structure, err = d.structureFor(ctx, target.UserID, held.result, verdict, offer, d.declinedDomains(ctx, target.UserID, doc), adjustment)
+		offer.Structure, err = d.structureFor(ctx, target.UserID, held.result, verdict, offer, nil, adjustment)
 		if err != nil {
 			return FolderOffer{}, err
 		}
@@ -330,8 +321,8 @@ func (s *FolderDigestService) declinedDomains(ctx context.Context, userID string
 			return declined
 		}
 		declined := doc.DeclineFor(domain) != nil
-		if !declined && s.deps.LegacyDeclined != nil {
-			legacy, err := s.deps.LegacyDeclined(ctx, userID, domain)
+		if !declined {
+			legacy, err := s.legacyDeclined(ctx, userID, doc, domain)
 			declined = legacy || err != nil
 		}
 		answers[domain] = declined
@@ -387,7 +378,6 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 			option.Presentation = unavailableReviewPresentation(option.Presentation, reason, folderAvailabilitySubject(offer, reason))
 		}
 		row, software := softwareCapability(offer.Subject)
-		capability, recognized := folderOfferCapabilityWorkspace(offer)
 		switch {
 		case offer.Structure.ProposesWorkspaces():
 			// A structure never waits on a plugin, only on a host that can set
@@ -406,9 +396,6 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 			if s.digest.deps.InspectSoftware == nil || s.digest.deps.Setup == nil {
 				unavailable(FolderAvailabilityPlanUnavailable)
 			}
-		case offer.CapabilitySuppressed && recognized:
-			option.WorkspaceType = capability
-			unavailable(FolderAvailabilityDeclinedEarlier)
 		case view.Capability != nil:
 			option.WorkspaceType = view.Capability.Workspace
 			if view.Plan == nil {

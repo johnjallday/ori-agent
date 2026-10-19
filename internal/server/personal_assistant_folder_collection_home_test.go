@@ -88,6 +88,41 @@ func TestHomeFolderCollection_ADeclinedFolderIsStillProposedAndSaysWhen(t *testi
 	}
 }
 
+// Ask again sends back only the key the decline carried, and the next attach
+// is a folder nobody said no to.
+func TestHomeFolderCollection_AskAgainUndoesTheNoThanks(t *testing.T) {
+	f := newDraftServerFixture(t)
+	seedAlbumsCollection(t)
+	_, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/scan", map[string]any{"chip": "music"})
+	id := body["offer"].(map[string]any)["id"].(string)
+	if status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+id+"/decide",
+		map[string]any{"decision": "no", "request_id": "no-thanks"}); status != http.StatusOK {
+		t.Fatalf("No thanks: %d %v", status, body)
+	}
+	attach := func() map[string]any {
+		t.Helper()
+		status, body := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",
+			map[string]any{"draft_id": uuid.NewString(), "revision": "", "mode": "chip", "chip": "music"})
+		if status != http.StatusOK || body["structure"] == nil {
+			t.Fatalf("attach: %d %v", status, body)
+		}
+		return body
+	}
+	declined := attach()["declined"].(map[string]any)
+	// A path is never accepted in its place.
+	if status, _ := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/forget",
+		map[string]any{"folder_key": "/Users/riley/Music"}); status != http.StatusBadRequest {
+		t.Fatalf("a path as the key: %d", status)
+	}
+	if status, body := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/forget",
+		map[string]any{"folder_key": declined["folder_key"]}); status != http.StatusOK || body["folder_digest"] == nil {
+		t.Fatalf("Ask again: %d %v", status, body)
+	}
+	if again := attach(); again["declined"] != nil {
+		t.Fatalf("still declined after Ask again: %v", again["declined"])
+	}
+}
+
 func TestHomeFolderCollection_AdjustThenSetUpCreatesTheRenamedGroup(t *testing.T) {
 	f := newDraftServerFixture(t)
 	provider := &capturingChatProvider{}

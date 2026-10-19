@@ -124,7 +124,7 @@ func TestFolderStructureAdjustment_RefusesWhatTheProposalCannotTake(t *testing.T
 	}
 }
 
-func TestFolderStructureAdjustment_ChoosingTheHomeBringsADeclinedSetupBack(t *testing.T) {
+func TestFolderStructureAdjustment_ADeclinedDomainLeavesEveryChoiceInAConversation(t *testing.T) {
 	ctx := context.Background()
 	f, service, target, observation := albumsObservation(t)
 	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
@@ -134,12 +134,19 @@ func TestFolderStructureAdjustment_ChoosingTheHomeBringsADeclinedSetupBack(t *te
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// In a conversation an earlier No thanks to the kind of work is not read:
+	// the plain group is proposed with the Home one choice away, as always.
 	declined, err := rootStructure(t, service, observation.ID, nil)
-	if err != nil || declined.Group.Type != FolderGroupPlain || declined.Group.Availability != FolderAvailabilityDeclinedEarlier || !declined.Group.HomeAvailable {
-		t.Fatalf("declined proposal: %+v, %v", declined, err)
+	if err != nil || declined.Group.Type != FolderGroupPlain || declined.Group.Availability != "" || !declined.Group.HomeAvailable {
+		t.Fatalf("proposal after a declined domain: %+v, %v", declined, err)
 	}
-	// A Home that is not installed says so, whatever was declined: that is what
-	// keeps it from being chosen.
+	for _, member := range declined.Members {
+		if member.Availability == FolderAvailabilityDeclinedEarlier {
+			t.Fatalf("member said declined: %+v", member)
+		}
+	}
+	// A Home that is not installed says so: that is what keeps it from being
+	// chosen.
 	ready := f.service.deps.Setup
 	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}, home: FolderAvailabilityProviderNotInstalled}
 	if missing, err := rootStructure(t, service, observation.ID, nil); err != nil || missing.Group.Availability != FolderAvailabilityProviderNotInstalled {

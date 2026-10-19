@@ -210,7 +210,8 @@ const (
 
 // FolderAvailabilityCopy is the one sentence shown for an availability reason.
 // subject names what is unavailable: the integration's application or the
-// shape's Home. An unknown reason has no sentence.
+// shape's Home. An unknown reason has no sentence, and neither has an earlier
+// decline: Home's card says that on its own line, with Show.
 func FolderAvailabilityCopy(reason, subject string) string {
 	subject = strings.TrimSpace(subject)
 	switch reason {
@@ -229,8 +230,6 @@ func FolderAvailabilityCopy(reason, subject string) string {
 			subject = "The Home"
 		}
 		return subject + " could not be verified right now; a plain group is proposed instead."
-	case FolderAvailabilityDeclinedEarlier:
-		return "You declined this kind of setup earlier; Adjust can bring it back."
 	case FolderAvailabilityPlanUnavailable:
 		if subject == "" {
 			return "One-click setup is unavailable right now; it can be added later."

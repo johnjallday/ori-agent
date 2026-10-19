@@ -638,6 +638,9 @@ type FolderOfferView struct {
 	// Capability is derived from the host table and the saved digest evidence;
 	// it is never accepted as a client-supplied action or plugin declaration.
 	Capability *FolderCapabilityView `json:"capability,omitempty"`
+	// CapabilityHidden says what the card does not lead with because the user
+	// said no to that kind of work, and since when; Show brings it back.
+	CapabilityHidden *FolderCapabilityHiddenView `json:"capability_hidden,omitempty"`
 	// Software describes a recognized software project: its marker, a pending
 	// choice among several, and any workspace that already covers the folder.
 	Software *FolderSoftwareView `json:"software,omitempty"`
@@ -664,6 +667,35 @@ type FolderOfferView struct {
 	// FirstTask is where the folder's first look stands, on a resolved project
 	// offer whose workspace has one. It is read live, never stored on the offer.
 	FirstTask *FolderFirstTaskView `json:"first_task,omitempty"`
+}
+
+// FolderCapabilityHiddenView names a capability a card does not lead with: its
+// domain (what Show sends back), a short label ("REAPER setup") and when the
+// user said no to it.
+type FolderCapabilityHiddenView struct {
+	Domain string    `json:"domain"`
+	Label  string    `json:"label"`
+	At     time.Time `json:"at"`
+}
+
+// capabilityHidden describes a suppressed offer's capability, or nil.
+func capabilityHidden(offer FolderOffer) *FolderCapabilityHiddenView {
+	if !offer.CapabilitySuppressed || offer.CapabilityHiddenAt == nil {
+		return nil
+	}
+	domain, _ := folderOfferDomainClass(offer)
+	label := ""
+	if offer.Portfolio != nil {
+		if row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape)); ok && row.Offer != nil {
+			label = row.Offer.HomeName
+		}
+	} else if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension); ok {
+		label = row.Offer.IntegrationName + " setup"
+	}
+	if domain == "" || strings.TrimSpace(label) == "" {
+		return nil
+	}
+	return &FolderCapabilityHiddenView{Domain: domain, Label: label, At: *offer.CapabilityHiddenAt}
 }
 
 // FolderCapabilityView is the optional explanation on the existing digest
@@ -1108,8 +1140,8 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	}
 	domain, evidence := folderOfferDomainClass(offer)
 	legacyDeclined := false
-	if domain != "" && doc.DeclineFor(domain) == nil && s.deps.LegacyDeclined != nil {
-		legacyDeclined, err = s.deps.LegacyDeclined(ctx, userID, domain)
+	if domain != "" && doc.DeclineFor(domain) == nil {
+		legacyDeclined, err = s.legacyDeclined(ctx, userID, doc, domain)
 		if err != nil {
 			return FolderOfferView{}, err // do not offer on an unreadable prior no
 		}
@@ -1172,6 +1204,10 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		if decline := d.DeclineFor(domain); decline != nil {
 			offer.CapabilityRevived = decline.Count == 1 && decline.FirstEvidence == "single_project" && evidence == "portfolio"
 			offer.CapabilitySuppressed = !offer.CapabilityRevived
+			if offer.CapabilitySuppressed {
+				at := decline.At
+				offer.CapabilityHiddenAt = &at
+			}
 		}
 		// Showing a second folder replaces the pending offer; the earlier
 		// one becomes "later" (FR8).
@@ -1436,6 +1472,89 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 		result = s.afterOutcome(ctx, userID, result)
 	}
 	return s.viewFor(ctx, userID, result, binding.Paused), nil
+}
+
+// FolderForgetInput names one earlier No thanks to undo: a folder's by its key
+// (the tombstone's own, never a path), or a kind of work's by its domain.
+// Exactly one is set.
+type FolderForgetInput struct {
+	FolderKey string
+	Domain    string
+}
+
+// Forget undoes one earlier No thanks: Ask again on a folder, Show on a kind of
+// work. A folder's tombstone goes, and no offer says the folder was declined
+// any more; a domain's decline goes, and its older app-card answer is not read
+// again. Nothing else is changed, scanned or set up, and forgetting what is not
+// there is no change. It returns the digest as it is now.
+func (s *FolderDigestService) Forget(ctx context.Context, userID string, input FolderForgetInput) (FolderDigestView, error) {
+	if s == nil || s.store == nil {
+		return FolderDigestView{}, ErrRepairNeeded
+	}
+	key, domain := strings.TrimSpace(input.FolderKey), strings.TrimSpace(input.Domain)
+	if (key == "") == (domain == "") || (key != "" && validateFolderKey(key) != nil) || (domain != "" && !KnownFolderDomain(domain)) {
+		return FolderDigestView{}, fmt.Errorf("%w: forget", ErrValidation)
+	}
+	_, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		changed := false
+		if key != "" {
+			kept := d.Tombstones[:0]
+			for _, tombstone := range d.Tombstones {
+				if tombstone.Key == key {
+					changed = true
+					continue
+				}
+				kept = append(kept, tombstone)
+			}
+			d.Tombstones = kept
+			for i := range d.Offers {
+				if d.Offers[i].Declined != nil && d.Offers[i].Declined.FolderKey == key {
+					d.Offers[i].Declined, changed = nil, true
+				}
+			}
+		} else {
+			kept := d.DomainDeclines[:0]
+			for _, decline := range d.DomainDeclines {
+				if decline.Domain == domain {
+					changed = true
+					continue
+				}
+				kept = append(kept, decline)
+			}
+			d.DomainDeclines = kept
+			if !d.askedAgain(domain) {
+				d.DomainsAskedAgain, changed = append(d.DomainsAskedAgain, domain), true
+			}
+			// A card still waiting leads with that kind of work again.
+			for i := range d.Offers {
+				offer := &d.Offers[i]
+				if offer.CapabilityHiddenAt == nil || (offer.Status != FolderOfferPending && offer.Status != FolderOfferLater) {
+					continue
+				}
+				if hidden, _ := folderOfferDomainClass(*offer); hidden == domain {
+					offer.CapabilitySuppressed, offer.CapabilityHiddenAt, changed = false, nil, true
+				}
+			}
+		}
+		if !changed {
+			return errFolderReplay
+		}
+		pruneFolderDigest(d)
+		return nil
+	})
+	if err != nil && !errors.Is(err, errFolderReplay) {
+		return FolderDigestView{}, err
+	}
+	return s.Current(ctx, userID)
+}
+
+// legacyDeclined reads the older app-card answer for a domain, unless the
+// user has since undone that domain's decline.
+func (s *FolderDigestService) legacyDeclined(ctx context.Context, userID string, doc FolderDigestDocument, domain string) (bool, error) {
+	if domain == "" || s.deps.LegacyDeclined == nil || doc.askedAgain(domain) {
+		return false, nil
+	}
+	return s.deps.LegacyDeclined(ctx, userID, domain)
 }
 
 // runCreate has the host set the project workspace up for the offer's
@@ -2325,6 +2444,7 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		}
 	} else if offer.CapabilitySuppressed {
 		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = "", "", ""
+		v.CapabilityHidden = capabilityHidden(offer)
 	} else if offer.Verdict == string(folderdigest.KindProject) && offer.Subject.Kind == FolderChoiceProject {
 		if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension); ok {
 			tool, found := folderdigest.ToolForExtension(offer.Subject.DominantExtension)

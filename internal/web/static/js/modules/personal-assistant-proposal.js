@@ -19,6 +19,23 @@ const effects = {
 // How many member rows a card shows before "Show all".
 export const STRUCTURE_ROWS = 3;
 
+// shortDate is a host timestamp as a card says it: "Oct 6". An unreadable one
+// is "earlier".
+export function shortDate(at) {
+  const date = new Date(String(at || ''));
+  return Number.isNaN(date.getTime())
+    ? 'earlier'
+    : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// declinedLine is the chip that stands in for Set up on a folder the user said
+// No thanks to: when, and the way to change their mind.
+export function declinedLine(declined, folder) {
+  const name = bounded(declined?.name) || bounded(folder) || 'this folder';
+  const when = shortDate(declined?.at);
+  return `You said no to ${name} ${when === 'earlier' ? 'earlier' : `on ${when}`} · Ask again`;
+}
+
 // structureLine is the one line under a proposed group's question: how many
 // workspaces it makes, and that each stays linked where its folder is.
 export function structureLine(count) {

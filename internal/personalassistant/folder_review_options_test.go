@@ -181,10 +181,20 @@ func TestFolderReviewOptions_ACollectionRootIsAStructureListedFirst(t *testing.T
 	}
 }
 
-func TestFolderReviewOptions_ADeclinedDomainIsListedAndTheGroupStaysPlain(t *testing.T) {
+func TestFolderReviewOptions_ADeclinedDomainDoesNotChangeTheConversation(t *testing.T) {
 	ctx := context.Background()
 	f, service, target, observation := albumsObservation(t)
 	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	before, err := json.Marshal(service.ReviewOptions(ctx, target, observation.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A No thanks to the kind of work, in the digest and on the older app card.
+	legacyReads := 0
+	f.service.deps.LegacyDeclined = func(context.Context, string, string) (bool, error) {
+		legacyReads++
+		return true, nil
+	}
 	if _, err := f.store.Mutate(ctx, target.UserID, func(doc *FolderDigestDocument) error {
 		doc.DomainDeclines = append(doc.DomainDeclines, FolderDomainDecline{Domain: "music_production", FirstEvidence: "portfolio", Count: 2, At: f.now})
 		return nil
@@ -192,21 +202,22 @@ func TestFolderReviewOptions_ADeclinedDomainIsListedAndTheGroupStaysPlain(t *tes
 		t.Fatal(err)
 	}
 	options := service.ReviewOptions(ctx, target, observation.ID)
-	if len(options) != 7 {
-		t.Fatalf("a declined domain dropped options: %+v", options)
+	after, err := json.Marshal(options)
+	if err != nil {
+		t.Fatal(err)
 	}
-	p := options[0].Presentation
-	if p.Kind != "structure" || p.State != "proposed" || p.GroupType != FolderGroupPlain || p.Availability != FolderAvailabilityDeclinedEarlier ||
-		len(p.Notes) != 1 || p.Notes[0] != "You declined this kind of setup earlier; Adjust can bring it back." {
-		t.Fatalf("declined collection: %+v", p)
+	// The user asked about this folder: every option is described as it is.
+	if string(after) != string(before) || legacyReads != 0 || strings.Contains(string(after), FolderAvailabilityDeclinedEarlier) ||
+		strings.Contains(string(after), "declined") {
+		t.Fatalf("a declined domain changed the options (%d legacy reads):\nbefore %s\nafter  %s", legacyReads, before, after)
 	}
-	for _, option := range options[1:] {
-		candidate, _ := observedReviewCandidate(service.selections[observation.ID], option.CandidateID)
-		if candidate.Name == "Logic Sketch" {
-			continue
-		}
-		if option.Presentation.State != "unavailable" || option.Presentation.Availability != FolderAvailabilityDeclinedEarlier {
-			t.Fatalf("%s after a decline: %+v", candidate.Name, option.Presentation)
+	attached := service.Structure(ctx, target, observation.ID)
+	if attached.Structure == nil || attached.Structure.Group.Availability != "" || attached.Declined != nil {
+		t.Fatalf("attach after a declined domain: %+v", attached)
+	}
+	for _, member := range attached.Structure.Members {
+		if member.Availability == FolderAvailabilityDeclinedEarlier {
+			t.Fatalf("member said declined: %+v", member)
 		}
 	}
 }
