@@ -2,6 +2,7 @@ package dailybrief
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -34,6 +35,63 @@ type WorkspaceScopeResult struct {
 	Workspaces []ScopedWorkspace
 	Gaps       []string
 	Complete   bool
+	// managedFolders is each scoped workspace's own Ori-managed folder when the
+	// source can say, server-only and never serialized, so adopted-folder
+	// enumeration can tell it from a folder the user showed Ori.
+	managedFolders map[string]string
+}
+
+// workspaceFolderSource is the folder store's optional own-folder lookup.
+type workspaceFolderSource interface {
+	GetFolderPath(workspaceID string) (string, error)
+}
+
+func (r *WorkspaceScopeResult) recordManagedFolder(src WorkspaceSource, id string) {
+	folders, ok := src.(workspaceFolderSource)
+	if !ok {
+		return
+	}
+	folder, err := folders.GetFolderPath(id)
+	if err != nil || strings.TrimSpace(folder) == "" {
+		return
+	}
+	if r.managedFolders == nil {
+		r.managedFolders = map[string]string{}
+	}
+	r.managedFolders[id] = filepath.Clean(folder)
+}
+
+// Including returns the scope with ws added when it is absent, for a read
+// about one workspace that must still see the scope's other workspaces.
+func (r WorkspaceScopeResult) Including(src WorkspaceSource, ws *workspace.Workspace) WorkspaceScopeResult {
+	if ws == nil {
+		return r
+	}
+	for _, candidate := range r.Workspaces {
+		if candidate.ID == ws.ID {
+			return r
+		}
+	}
+	out := r
+	out.Workspaces = append(append([]ScopedWorkspace(nil), r.Workspaces...), scopedWorkspaceOf(ws))
+	out.managedFolders = map[string]string{}
+	for id, folder := range r.managedFolders {
+		out.managedFolders[id] = folder
+	}
+	out.recordManagedFolder(src, ws.ID)
+	return out
+}
+
+func scopedWorkspaceOf(ws *workspace.Workspace) ScopedWorkspace {
+	slug := ""
+	if workspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+		slug = ws.FolderSlug
+	}
+	name := strings.TrimSpace(ws.Name)
+	if name == "" {
+		name = ws.ID
+	}
+	return ScopedWorkspace{ID: ws.ID, Slug: slug, Name: name, Workspace: ws}
 }
 
 // FollowUpOwner is an authorized operational owner whose canonical follow-up
@@ -136,17 +194,8 @@ func ResolveWorkspaceScope(src WorkspaceSource, cfg Config, userID string) Works
 		if cfg.Scope != ScopeSelected && !cfg.IncludeFutureWorkspaces && !cfg.UpdatedAt.IsZero() && ws.CreatedAt.After(cfg.UpdatedAt) {
 			continue
 		}
-		slug := ""
-		if workspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
-			slug = ws.FolderSlug
-		}
-		name := strings.TrimSpace(ws.Name)
-		if name == "" {
-			name = ws.ID
-		}
-		result.Workspaces = append(result.Workspaces, ScopedWorkspace{
-			ID: ws.ID, Slug: slug, Name: name, Workspace: ws,
-		})
+		result.Workspaces = append(result.Workspaces, scopedWorkspaceOf(ws))
+		result.recordManagedFolder(src, ws.ID)
 	}
 	result.Gaps = gaps.values()
 	return result

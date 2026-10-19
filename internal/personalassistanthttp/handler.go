@@ -273,6 +273,85 @@ func (h *Handler) GetToday(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"today": projection})
 }
 
+// WorkspaceProtectionReader is one workspace's read-only Protection fact.
+type WorkspaceProtectionReader interface {
+	WorkspaceProtection(ctx context.Context, userID, workspaceID string) (*dailybrief.ProtectionFact, error)
+}
+
+// GetWorkspaceProtection serves the stored-only Protection fact for the
+// workspace Command view. It performs no backup read and carries no path; a
+// workspace with no adopted folder answers null.
+func (h *Handler) GetWorkspaceProtection(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	var reader WorkspaceProtectionReader
+	if h != nil {
+		reader, _ = h.today.(WorkspaceProtectionReader)
+	}
+	if reader == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "Workspace protection is unavailable")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	if workspaceID == "" || len(workspaceID) > 128 {
+		orihttp.BadRequest(w, "workspace id is required")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	fact, err := reader.WorkspaceProtection(r.Context(), userID, workspaceID)
+	if errors.Is(err, personalassistant.ErrProtectionWorkspaceNotFound) {
+		orihttp.NotFound(w, "Workspace not found")
+		return
+	}
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "Workspace protection is temporarily unavailable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	orihttp.Success(w, map[string]any{"protection": fact})
+}
+
+// BackupCoverageDecliner records "Not now" on Today's protection line.
+type BackupCoverageDecliner interface {
+	DeclineBackupCoverage(ctx context.Context, userID string) error
+}
+
+// DeclineBackupCoverage takes no request data: the decline's evidence is the
+// server's own current coverage count, and it names no folder or path.
+func (h *Handler) DeclineBackupCoverage(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var decliner BackupCoverageDecliner
+	if h != nil {
+		decliner, _ = h.today.(BackupCoverageDecliner)
+	}
+	if decliner == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "The protection line is unavailable")
+		return
+	}
+	if r.Body != nil {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 32))
+		if trimmed := strings.TrimSpace(string(body)); err != nil || trimmed != "" && trimmed != "{}" {
+			orihttp.BadRequest(w, "Not now does not accept request data")
+			return
+		}
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	if err := decliner.DeclineBackupCoverage(r.Context(), userID); err != nil {
+		orihttp.ServiceUnavailable(w, "The protection line could not be dismissed just now")
+		return
+	}
+	orihttp.Success(w, map[string]any{"declined": true})
+}
+
 type hireRequest struct {
 	RequestID   string                 `json:"request_id"`
 	IfVersion   int64                  `json:"if_version"`

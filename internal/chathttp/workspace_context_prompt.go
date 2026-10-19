@@ -43,10 +43,11 @@ func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normali
 	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, true)
 	profile := h.buildUserProfilePrompt(ctx, routeCtx)
 	memory := h.buildWorkspaceMemoryPrompt(ctx, routeCtx, true)
+	protection := h.buildWorkspaceProtectionPrompt(ctx, routeCtx)
 	managedLearning := h.buildAssistantManagedLearningPrompt(routeCtx)
 	refinement := h.buildAgentRefinementPrompt(routeCtx)
 
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0, 6)
 	if strings.TrimSpace(base) != "" {
 		parts = append(parts, base)
 	}
@@ -55,6 +56,9 @@ func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normali
 	}
 	if strings.TrimSpace(memory) != "" {
 		parts = append(parts, memory)
+	}
+	if strings.TrimSpace(protection) != "" {
+		parts = append(parts, protection)
 	}
 	if strings.TrimSpace(managedLearning) != "" {
 		parts = append(parts, managedLearning)

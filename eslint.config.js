@@ -218,6 +218,7 @@ export default defineConfig([
       'internal/web/static/js/modules/setup-workspace-creator.js',
       'internal/web/static/js/modules/group-builder.js',
       'internal/web/static/js/modules/group-template-status.js',
+      'internal/web/static/js/modules/workspace-protection.js',
       'internal/web/static/js/modules/smartOnboarding.js',
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',

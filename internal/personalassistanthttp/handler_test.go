@@ -267,6 +267,99 @@ func TestHandlerGetToday_UsesCurrentUserAndDoesNotLeakReadErrors(t *testing.T) {
 	})
 }
 
+type fakeCoverageDecliner struct {
+	fakeTodayReader
+	declines int
+	err      error
+}
+
+func (f *fakeCoverageDecliner) DeclineBackupCoverage(_ context.Context, userID string) error {
+	f.declines++
+	f.userID = userID
+	return f.err
+}
+
+func TestHandlerDeclineBackupCoverageTakesNoRequestData(t *testing.T) {
+	const route = "/api/personal-assistant/today/backup-coverage/decline"
+	post := func(handler *Handler, body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		handler.DeclineBackupCoverage(recorder, httptest.NewRequest(http.MethodPost, route, strings.NewReader(body)))
+		return recorder
+	}
+	decliner := &fakeCoverageDecliner{}
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	handler.SetTodayService(decliner)
+	for _, body := range []string{"", "{}"} {
+		if recorder := post(handler, body); recorder.Code != http.StatusOK || decliner.userID != "user-a" {
+			t.Fatalf("status=%d user=%q body=%s", recorder.Code, decliner.userID, recorder.Body.String())
+		}
+	}
+	if recorder := post(handler, `{"not_covered":9}`); recorder.Code != http.StatusBadRequest || decliner.declines != 2 {
+		t.Fatal("client-supplied evidence was accepted", recorder.Code, decliner.declines)
+	}
+	recorder := httptest.NewRecorder()
+	handler.DeclineBackupCoverage(recorder, httptest.NewRequest(http.MethodGet, route, nil))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatal(recorder.Code)
+	}
+	decliner.err = errors.New("PRIVATE /Invented/path")
+	if recorder := post(handler, ""); recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "PRIVATE") {
+		t.Fatal(recorder.Code, recorder.Body.String())
+	}
+	readOnly := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	readOnly.SetTodayService(&fakeTodayReader{})
+	if recorder := post(readOnly, ""); recorder.Code != http.StatusServiceUnavailable {
+		t.Fatal("a Today reader without the decline accepted it", recorder.Code)
+	}
+}
+
+type fakeProtectionReader struct {
+	fakeTodayReader
+	fact        *dailybrief.ProtectionFact
+	err         error
+	workspaceID string
+}
+
+func (f *fakeProtectionReader) WorkspaceProtection(_ context.Context, userID, workspaceID string) (*dailybrief.ProtectionFact, error) {
+	f.userID, f.workspaceID = userID, workspaceID
+	return f.fact, f.err
+}
+
+func TestHandlerGetWorkspaceProtectionServesTheStoredFact(t *testing.T) {
+	get := func(handler *Handler, id string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+id+"/protection", nil)
+		request.SetPathValue("workspaceID", id)
+		handler.GetWorkspaceProtection(recorder, request)
+		return recorder
+	}
+	reader := &fakeProtectionReader{fact: &dailybrief.ProtectionFact{State: "not_covered", Sentence: "Not in any backup Ori observes"}}
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	handler.SetTodayService(reader)
+	recorder := get(handler, "song")
+	if recorder.Code != http.StatusOK || reader.userID != "user-a" || reader.workspaceID != "song" || recorder.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(recorder.Body.String(), `"sentence":"Not in any backup Ori observes"`) {
+		t.Fatal(recorder.Code, recorder.Body.String())
+	}
+	reader.fact = nil
+	if recorder := get(handler, "hq"); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"protection":null`) {
+		t.Fatal("no adopted folder must answer null", recorder.Body.String())
+	}
+	reader.err = personalassistant.ErrProtectionWorkspaceNotFound
+	if recorder := get(handler, "theirs"); recorder.Code != http.StatusNotFound {
+		t.Fatal(recorder.Code)
+	}
+	reader.err = errors.New("PRIVATE /Invented/path")
+	if recorder := get(handler, "song"); recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "PRIVATE") {
+		t.Fatal(recorder.Code, recorder.Body.String())
+	}
+	readOnly := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	readOnly.SetTodayService(&fakeTodayReader{})
+	if recorder := get(readOnly, "song"); recorder.Code != http.StatusServiceUnavailable {
+		t.Fatal(recorder.Code)
+	}
+}
+
 func TestHandlerHire_FreshHireReturnsNeedsHQWithoutHQOrBriefClaims(t *testing.T) {
 	hirer := &fakeHireService{result: &personalassistant.HireResult{
 		State: &personalassistant.State{

@@ -3214,6 +3214,25 @@ button.ws-cmd-rpg-class-card:focus-visible {
   border: 1px solid rgba(232, 181, 75, 0.18);
   background: linear-gradient(135deg, rgba(232, 181, 75, 0.05), rgba(15, 18, 24, 0));
 }
+/* The linked folder's Protection fact: one muted line of stored evidence. */
+.ws-cmd-protection-fact {
+  margin: 0;
+  padding: 0 9px 8px;
+  font-family: var(--ws-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  line-height: 1.5;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-protection-link {
+  color: var(--ws-ink-dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ws-cmd-protection-link:hover,
+.ws-cmd-protection-link:focus-visible {
+  color: var(--ws-keeper);
+}
 .ws-cmd-project-actions {
   display: flex;
   flex-wrap: wrap;

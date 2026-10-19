@@ -618,6 +618,60 @@ test('project-entry actions render only on the Project Folder row with badge and
   }
 });
 
+test('the Protection fact sits under the Project Folder row only, in its three states', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      getPrimaryDirectoryId: () => 'dir-project',
+      isProjectDirectory: dir => dir.id === 'dir-project'
+    }
+  });
+  const rows = [
+    { id: 'dir-project', name: 'Night Drive', path: '/tmp/night-drive' },
+    { id: 'dir-ref', name: 'Reference', path: '/tmp/reference' }
+  ];
+  const render = fact => {
+    commandView.workspaceProtection = fact;
+    return commandView.folderRailItems(rows);
+  };
+
+  const [covered, reference] = render({
+    state: 'covered',
+    sentence: 'Protected by restic in My Backups, last completed backup 14 h ago',
+    route: '/workspaces/my-backups?panel=backup-recovery&tab=overview&section=coverage',
+    route_label: 'Open Backup & Recovery'
+  });
+  assert.match(covered, /ws-cmd-project-entry-row/);
+  assert.match(covered, /data-cmd-protection="covered"/);
+  assert.match(covered, /Protected by restic in My Backups, last completed backup 14 h ago/);
+  assert.match(
+    covered,
+    /href="\/workspaces\/my-backups\?panel=backup-recovery&amp;tab=overview&amp;section=coverage"/
+  );
+  assert.doesNotMatch(reference, /ws-cmd-protection-fact/, 'a reference folder carries no fact');
+
+  const [missing] = render({
+    state: 'not_covered',
+    sentence: 'Not in any backup Ori observes',
+    route: '/?create=1&blueprint=backup-and-recovery',
+    route_label: 'Check protection'
+  });
+  assert.match(missing, /is-not-covered/);
+  assert.match(missing, />Check protection<\/a>/);
+
+  const [unknown] = render({
+    state: 'unknown',
+    sentence: 'Protection unknown: backup evidence is unavailable',
+    route: 'https://elsewhere.example/'
+  });
+  assert.match(unknown, /Protection unknown: backup evidence is unavailable/);
+  assert.doesNotMatch(unknown, /<a /, 'a foreign route is never linked');
+
+  for (const absent of [null, { state: 'verified', sentence: 'Backed up' }]) {
+    assert.doesNotMatch(render(absent)[0], /ws-cmd-protection-fact/);
+  }
+});
+
 test('command rail badges project and reference directory roles', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
