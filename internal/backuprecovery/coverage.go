@@ -109,6 +109,12 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 		state     string
 		reason    string
 		completed *time.Time
+		// Time Machine only: each source's stored inclusion state and the
+		// preference exclusions, so a folder deeper than a source is excluded
+		// when listed. A deeper folder's own exclusion attribute is not read
+		// here (stored-only); Time Machine sources default to adopted folders.
+		sourceStates []string
+		preferences  *tmPreferences
 	}
 	var configurations []configuration
 	unreadable := false
@@ -122,10 +128,17 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 			if row.record.state != nil && row.record.state.Configuration != nil {
 				console.Configured = true
 				cfg := row.record.state.Configuration
-				state, reason, completed := configurationCoverage(s.storedStatus(row.record))
+				status := s.storedStatus(row.record)
+				state, reason, completed := configurationCoverage(status)
 				entry := configuration{workspace: row.id, provider: cfg.Provider, state: state, reason: reason, completed: completed}
 				for _, source := range cfg.Sources {
 					entry.sources = append(entry.sources, source.Path)
+				}
+				if observation := row.record.state.Observation; cfg.Provider == providerTimeMachine && status.EvidenceCurrent && observation != nil && observation.TimeMachine != nil {
+					entry.sourceStates = append([]string(nil), observation.TimeMachine.Sources...)
+					if observation.TimeMachine.PreferencesReadable {
+						entry.preferences = &tmPreferences{exclusions: observation.TimeMachine.Exclusions, unresolved: observation.TimeMachine.ExclusionsUnresolved}
+					}
 				}
 				configurations = append(configurations, entry)
 			}
@@ -150,17 +163,22 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 			continue
 		}
 		for _, cfg := range configurations {
-			if !coversFolder(cfg.sources, folder.Path) {
+			index := coveringSource(cfg.sources, folder.Path)
+			if index < 0 {
 				continue
 			}
-			better := rank[cfg.state] > rank[row.State]
-			if !better && cfg.state == row.State && cfg.state == CoverageCovered && cfg.completed != nil && row.LastCompletedAt != nil {
+			state, reason := cfg.state, cfg.reason
+			if cfg.provider == providerTimeMachine && state == CoverageCovered {
+				state, reason = timeMachineFolderCoverage(folder.Path, cfg.sourceStates, index, cfg.preferences)
+			}
+			better := rank[state] > rank[row.State]
+			if !better && state == row.State && state == CoverageCovered && cfg.completed != nil && row.LastCompletedAt != nil {
 				better = cfg.completed.After(*row.LastCompletedAt)
 			}
 			if better {
-				row.State, row.Reason, row.Provider, row.CoveringWorkspaceID = cfg.state, cfg.reason, cfg.provider, cfg.workspace
+				row.State, row.Reason, row.Provider, row.CoveringWorkspaceID = state, reason, cfg.provider, cfg.workspace
 				row.LastCompletedAt = nil
-				if cfg.state == CoverageCovered && cfg.completed != nil {
+				if state == CoverageCovered && cfg.completed != nil {
 					at := *cfg.completed
 					row.LastCompletedAt = &at
 				}
@@ -183,26 +201,48 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 	return result, nil
 }
 
-// coversFolder reports whether a configured source is the folder or one of its
-// ancestors. Both are clean absolute paths; comparison is exact and resolves
-// no links, so a spelling mismatch reads as not covered, never as covered.
-func coversFolder(sources []string, folder string) bool {
-	for _, source := range sources {
-		if folder == source || strings.HasPrefix(folder, source+"/") {
-			return true
+// coveringSource is the index of a configured source that is the folder or
+// one of its ancestors, or -1. Both are clean absolute paths; comparison is
+// exact and resolves no links, so a spelling mismatch reads as not covered,
+// never as covered. The nearest (longest) such source wins.
+func coveringSource(sources []string, folder string) int {
+	best := -1
+	for i, source := range sources {
+		if (folder == source || strings.HasPrefix(folder, source+"/")) && (best < 0 || len(source) > len(sources[best])) {
+			best = i
 		}
 	}
-	return false
+	return best
+}
+
+// timeMachineFolderCoverage narrows a covering Time Machine configuration to
+// one folder: an excluded source, ancestor or listed folder is not covered;
+// anything the stored evidence cannot decide is unknown.
+func timeMachineFolderCoverage(folder string, sourceStates []string, index int, preferences *tmPreferences) (string, string) {
+	if index >= len(sourceStates) {
+		return CoverageUnknown, "evidence_unavailable"
+	}
+	switch timeMachineFolderState(folder, sourceStates[index], preferences) {
+	case timeMachineIncluded:
+		return CoverageCovered, "completed_backup_observed"
+	case timeMachineExcluded:
+		return CoverageNotCovered, "source_excluded"
+	default:
+		return CoverageUnknown, "evidence_unavailable"
+	}
 }
 
 // configurationCoverage maps one configuration's stored status to the state it
 // gives the folders its sources contain. Only a current observation with at
 // least one completed backup covers; evidence that is stale, from an earlier
-// configuration, clock-suspect or pending removal is unknown.
+// configuration, clock-suspect or pending removal is unknown, and so is Time
+// Machine evidence read without Full Disk Access.
 func configurationCoverage(status Status) (state, reason string, completed *time.Time) {
 	switch {
 	case status.RemovalPending || status.Health.Observation == "clock_suspect" || status.Health.Recency == "clock_suspect":
 		return CoverageUnknown, "evidence_unavailable", nil
+	case status.EvidenceCurrent && status.TimeMachine != nil && status.TimeMachine.PermissionRequired:
+		return CoverageUnknown, "permission_required", nil
 	case status.LastSuccessfulRead == nil:
 		return CoverageNotCovered, "no_completed_backup_observed", nil
 	case !status.EvidenceCurrent:

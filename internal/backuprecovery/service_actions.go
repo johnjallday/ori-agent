@@ -262,7 +262,8 @@ func (s *Service) Refresh(ctx context.Context, owner, workspace string, request 
 
 func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *workspaceOperationSlot, id, digest string, activate bool, monitoringRevision uint64, unlock func()) (OperationResult, error) {
 	started := s.clock().UTC()
-	if s.provider == nil {
+	provider := s.providerFor(recordProvider(record))
+	if provider == nil {
 		unlock()
 		return s.publishRead(record, id, started, providerReadResult{}, errProviderUnavailable, activate, monitoringRevision)
 	}
@@ -319,8 +320,9 @@ func (s *Service) runMetadata(ctx context.Context, record localRecord, slot *wor
 	var result providerReadResult
 	readErr := s.authorizeMetadata(readCtx, record, monitoringRevision)
 	if readErr == nil {
-		result, readErr = s.provider.read(readCtx, configuration, func(secretCtx context.Context, use func([]byte) error) error {
-			if s.credentials == nil || secretCtx == nil || secretCtx.Err() != nil || readCtx.Err() != nil {
+		result, readErr = provider.read(readCtx, configuration, func(secretCtx context.Context, use func([]byte) error) error {
+			// Time Machine has no credential: its reader is never handed one.
+			if configuration.Provider != providerRestic || s.credentials == nil || secretCtx == nil || secretCtx.Err() != nil || readCtx.Err() != nil {
 				return errCredentialUnavailable
 			}
 			ref := vault.BackupSecretReference{VaultID: configuration.Credential.VaultID, RecordID: configuration.Credential.RecordID, WorkspaceID: record.authority.Workspace, Revision: configuration.Credential.Revision}
@@ -381,7 +383,8 @@ func (s *Service) publishRead(scope localRecord, id string, started time.Time, r
 	if clockSuspect {
 		readErr = errReadProcess
 	}
-	if readErr == nil && (!result.configuration.valid(true) || configurationIntentDigest(&result.configuration) != configurationIntentDigest(scope.state.Configuration) || !compatibleValidationEvidence(scope.state.Configuration, &result.configuration) || !localTime(result.observedAt) || result.observedAt.Before(started) || result.observedAt.After(finished)) {
+	if readErr == nil && (!result.configuration.valid(true) || configurationIntentDigest(&result.configuration) != configurationIntentDigest(scope.state.Configuration) || !compatibleValidationEvidence(scope.state.Configuration, &result.configuration) || !localTime(result.observedAt) || result.observedAt.Before(started) || result.observedAt.After(finished) ||
+		(result.timeMachine != nil) != (result.configuration.Provider == providerTimeMachine)) {
 		readErr = errReadProcess
 	}
 	outcome := outcomeForReadError(readErr)
@@ -417,7 +420,7 @@ func (s *Service) publishRead(scope localRecord, id string, started time.Time, r
 			if readErr == nil {
 				configuration := result.configuration
 				state.Configuration = &configuration
-				state.Observation = &localObservation{Generation: state.Generation, Sequence: state.Sequence, ObservedAt: finished, Snapshots: result.snapshots, Capacity: result.capacity}
+				state.Observation = &localObservation{Generation: state.Generation, Sequence: state.Sequence, ObservedAt: finished, Snapshots: result.snapshots, Capacity: result.capacity, TimeMachine: result.timeMachine}
 				if activate {
 					record.activate(finished)
 				}

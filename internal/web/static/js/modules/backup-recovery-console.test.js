@@ -667,6 +667,174 @@ test('lost recovery-report response retries exactly and invalid note/date choice
   );
 });
 
+const bothProviders = [
+  { id: 'time_machine', label: 'Time Machine', available: true },
+  { id: 'restic', label: 'restic', available: true }
+];
+
+test('Time Machine leads the provider choice and hides every restic credential control', async () => {
+  const f = fixture({ connection: 'not_configured' });
+  f.settings.providers = bothProviders;
+  await f.console._test.loadStored();
+  f.console.open({ tab: 'settings' });
+  await settle();
+  assert.equal(f.console._test.state.provider, 'time_machine');
+  assert.ok(findButton(f.document, 'Review Time Machine check'));
+  assert.ok(findButton(f.document, 'Choose a folder to check'));
+  for (const id of ['brVaultID', 'brRecordID']) assert.equal(f.document.getElementById(id), null);
+  assert.equal(findButton(f.document, 'Choose external volume root'), undefined);
+  assert.doesNotMatch(f.document.body.textContent, /Describe selected reference/);
+
+  await findButton(f.document, 'restic').fire('click');
+  assert.equal(f.console._test.state.provider, 'restic');
+  assert.ok(f.document.getElementById('brVaultID'), 'restic keeps its Vault reference');
+  assert.match(f.document.body.textContent, /restic 0\.19\.1, installed by you/);
+  assert.ok(f.calls.every(call => !call.options?.method || call.options.method === 'GET'));
+});
+
+test('an unavailable provider says why and a chooser preselect cannot pick it', async () => {
+  const f = fixture({ connection: 'not_configured' });
+  f.settings.providers = [
+    { id: 'time_machine', label: 'Time Machine', available: false, reason: 'platform_unsupported' },
+    { id: 'restic', label: 'restic', available: true }
+  ];
+  assert.equal(f.console._test.defaultProvider(f.settings, 'time_machine'), 'restic');
+  assert.equal(
+    f.console._test.defaultProvider({ ...f.settings, providers: bothProviders }, 'time_machine'),
+    'time_machine'
+  );
+  assert.equal(
+    f.console._test.defaultProvider(
+      { configured: true, provider: 'restic', providers: bothProviders },
+      'time_machine'
+    ),
+    'restic',
+    'a saved provider wins over a preselect'
+  );
+  await f.console._test.loadStored();
+  f.console.open({ tab: 'settings' });
+  await settle();
+  assert.match(f.document.body.textContent, /Time Machine is unavailable: it is only on macOS\./);
+  assert.equal(findButton(f.document, 'Time Machine').disabled, true);
+});
+
+test('a Time Machine review sends sources only and approves with "Check Time Machine once"', async () => {
+  const f = fixture({ connection: 'not_configured' });
+  f.settings.providers = bothProviders;
+  await f.console._test.loadStored();
+  f.console._test.state.sources = ['opaque-token'];
+  await f.console._test.reviewSelection();
+  const review = f.calls.find(call => call.url.endsWith('/review'));
+  const body = JSON.parse(review.options.body);
+  assert.equal(body.provider, 'time_machine');
+  assert.deepEqual(body.source_selections, ['opaque-token']);
+  for (const key of ['credential', 'volume_selection', 'repository_selection'])
+    assert.equal(key in body, false, key + ' was sent for Time Machine');
+
+  f.console._test.state.review = {
+    provider: 'time_machine',
+    generation: 'g1',
+    revision: 1,
+    review_token: 'review',
+    source_paths: ['/Invented/Songs']
+  };
+  f.console.open({ tab: 'settings' });
+  await settle();
+  assert.doesNotMatch(f.document.body.textContent, /External volume/);
+  assert.match(f.document.body.textContent, /Do not start, stop or change a backup/);
+  assert.equal(findButton(f.document, 'Check Time Machine once').disabled, true);
+});
+
+test('a Time Machine read with no destination says "not set up" and offers restic instead', async () => {
+  const f = fixture({
+    provider: 'time_machine',
+    destination: 'not_configured',
+    time_machine: {
+      permission_required: false,
+      destinations: 0,
+      mounted_destinations: 0,
+      source_states: ['included']
+    }
+  });
+  f.settings.providers = bothProviders;
+  f.settings.configured = true;
+  f.settings.provider = 'time_machine';
+  f.settings.source_paths = ['/Invented/Songs'];
+  f.console.open();
+  await settle();
+  assert.match(f.document.body.textContent, /Time Machine is not set up on this Mac/);
+  assert.match(f.document.body.textContent, /Ori created nothing on any drive/);
+  const link = f.document.body.all(
+    node => node.tagName === 'a' && node.textContent === 'Open Time Machine settings'
+  )[0];
+  assert.equal(link.href, 'x-apple.systempreferences:com.apple.Time-Machine-Settings.extension');
+  assert.match(f.document.body.textContent, /An encrypted repository you prepare on that drive/);
+  await findButton(f.document, 'Use a restic repository instead').fire('click');
+  assert.equal(f.console.activeTab(), 'settings');
+  assert.equal(f.console._test.state.provider, 'restic');
+  assert.ok(f.calls.every(call => !call.options?.method || call.options.method === 'GET'));
+});
+
+test('without Full Disk Access completions are unknown and the exact setting is named', async () => {
+  const f = fixture({
+    provider: 'time_machine',
+    destination: 'present',
+    snapshot_count: undefined,
+    time_machine: {
+      permission_required: true,
+      destinations: 1,
+      mounted_destinations: 1,
+      source_states: ['included']
+    }
+  });
+  f.settings.providers = bothProviders;
+  f.settings.configured = true;
+  f.settings.provider = 'time_machine';
+  f.settings.source_paths = ['/Invented/Songs'];
+  f.console.open();
+  await settle();
+  assert.match(f.document.body.textContent, /Time Machine needs Full Disk Access/);
+  assert.match(f.document.body.textContent, /Privacy & Security → Full Disk Access/);
+  assert.match(f.document.body.textContent, /Unknown — Full Disk Access is needed/);
+  assert.match(f.document.body.textContent, /Inclusion unknown without Full Disk Access/);
+  assert.doesNotMatch(f.document.body.textContent, /not set up/);
+  const link = f.document.body.all(
+    node => node.tagName === 'a' && node.textContent === 'Open Full Disk Access settings'
+  )[0];
+  assert.match(link.href, /Privacy_AllFiles$/);
+});
+
+test('the coverage deep link opens the Overview at each folder’s stored inclusion', async () => {
+  const f = fixture(
+    {
+      provider: 'time_machine',
+      destination: 'present',
+      snapshot_count: 2,
+      last_completed_at: '2026-01-01T19:00:00Z',
+      time_machine: {
+        permission_required: false,
+        destinations: 1,
+        mounted_destinations: 1,
+        source_states: ['included', 'source_excluded']
+      }
+    },
+    'http://localhost:8765/workspaces/owned-ws?panel=backup-recovery&tab=overview&section=coverage'
+  );
+  f.settings.providers = bothProviders;
+  f.settings.configured = true;
+  f.settings.provider = 'time_machine';
+  f.settings.source_paths = ['/Invented/Songs', '/Invented/Scratch'];
+  await f.console.init();
+  await settle();
+  const section = f.document.getElementById('brCoverage');
+  assert.ok(section, 'no coverage section');
+  assert.match(section.textContent, /\/Invented\/Songs .* Included in Time Machine/);
+  assert.match(section.textContent, /\/Invented\/Scratch .* Excluded from Time Machine/);
+  assert.match(section.textContent, /not proof of a recoverable copy/);
+  assert.equal(f.document.activeElement, section);
+  assert.ok(findButton(f.document, 'Check Time Machine now'));
+});
+
 test('partial coverage and capacity remain point-in-time evidence, not protection', async () => {
   const f = fixture({
     snapshot_count: 1,

@@ -102,11 +102,11 @@ func (helper *ownBackupHelper) matches(ctx context.Context, process *os.Process)
 // that helper in turn pins restic before forwarding any password bytes.
 func (helper *ownBackupHelper) run(parent context.Context, mode, profile, scratch string, request []byte, usePassword backupPasswordUse) ([]byte, error) {
 	if parent == nil || parent.Err() != nil || helper == nil || helper.executable == nil || !validMetadataPath(scratch) || len(profile) > maxSandboxProfileBytes ||
-		(mode != "broker-v1" && mode != "reader-v1") || (mode == "reader-v1") != (usePassword != nil) || len(request) > maxHelperInputBytes-4096 {
+		(mode != "broker-v1" && mode != "reader-v1" && mode != "timemachine-v1") || (mode == "reader-v1") != (usePassword != nil) || len(request) > maxHelperInputBytes-4096 {
 		return nil, errReadProcess
 	}
 	timeout, limit := 75*time.Second, maxBrokerOutputBytes
-	if mode == "reader-v1" {
+	if mode == "reader-v1" || mode == "timemachine-v1" {
 		timeout, limit = 45*time.Second, maxPrivateStateBytes
 	}
 	if !helper.executable.unchanged(parent) {

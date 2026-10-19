@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Destinations</key>
+	<array>
+		<dict>
+			<key>ID</key>
+			<string>11111111-2222-4333-8444-555555555555</string>
+			<key>Kind</key>
+			<string>Local</string>
+			<key>LastDestination</key>
+			<integer>1</integer>
+			<key>MountPoint</key>
+			<string>/Volumes/Invented Backup</string>
+			<key>Name</key>
+			<string>UNTRUSTED drive label</string>
+		</dict>
+		<dict>
+			<key>ID</key>
+			<string>66666666-7777-4888-8999-000000000000</string>
+			<key>Kind</key>
+			<string>Network</string>
+			<key>LastDestination</key>
+			<integer>0</integer>
+			<key>Name</key>
+			<string>UNTRUSTED share label</string>
+		</dict>
+	</array>
+</dict>
+</plist>

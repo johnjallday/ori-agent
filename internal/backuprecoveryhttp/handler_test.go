@@ -16,6 +16,7 @@ type domainSpy struct {
 	calls            atomic.Int32
 	err              error
 	owner, workspace string
+	review           backuprecovery.ReviewRequest
 }
 
 func (s *domainSpy) called(owner, workspace string) error {
@@ -44,7 +45,8 @@ func (s *domainSpy) Pick(_ context.Context, o, w, _ string) (string, error) {
 func (s *domainSpy) DescribeCredential(_ context.Context, o, w, _, _ string) (backuprecovery.CredentialReference, error) {
 	return backuprecovery.CredentialReference{}, s.called(o, w)
 }
-func (s *domainSpy) Review(_ context.Context, o, w string, _ backuprecovery.ReviewRequest) (backuprecovery.Review, error) {
+func (s *domainSpy) Review(_ context.Context, o, w string, request backuprecovery.ReviewRequest) (backuprecovery.Review, error) {
+	s.review = request
 	return backuprecovery.Review{}, s.called(o, w)
 }
 func (s *domainSpy) Connect(_ context.Context, o, w string, _ backuprecovery.ConnectRequest) (backuprecovery.OperationResult, error) {
@@ -157,6 +159,26 @@ func TestBackupHTTPRejectsAmbiguousOrExecutablePayloadsBeforeDomain(t *testing.T
 	backupMux(spy).ServeHTTP(response, request)
 	if response.Code != http.StatusRequestEntityTooLarge || spy.calls.Load() != 0 {
 		t.Fatal("oversized body reached domain", response.Code)
+	}
+}
+func TestBackupHTTPReviewCarriesOnlyTheFixedProviderID(t *testing.T) {
+	spy := &domainSpy{}
+	response := httptest.NewRecorder()
+	backupMux(spy).ServeHTTP(response, backupRequest(http.MethodPost, "/review", `{"generation":"","revision":0,"provider":"time_machine","source_selections":["opaque"]}`))
+	if response.Code != http.StatusOK || spy.review.Provider != "time_machine" || len(spy.review.SourceSelections) != 1 {
+		t.Fatal("the provider did not reach the domain", response.Code, spy.review)
+	}
+	for name, body := range map[string]string{
+		"case alias":  `{"PROVIDER":"time_machine"}`,
+		"provider fn": `{"provider":"time_machine","provider_command":"tmutil startbackup"}`,
+		"raw path":    `{"provider":"time_machine","source_paths":["/Invented/Private"]}`,
+	} {
+		spy := &domainSpy{}
+		response := httptest.NewRecorder()
+		backupMux(spy).ServeHTTP(response, backupRequest(http.MethodPost, "/review", body))
+		if response.Code != http.StatusBadRequest || spy.calls.Load() != 0 {
+			t.Fatal(name, "reached the domain", response.Code)
+		}
 	}
 }
 func TestBackupHTTPReadRoutesNeverDispatchAMutation(t *testing.T) {

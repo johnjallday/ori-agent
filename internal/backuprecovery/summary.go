@@ -19,6 +19,7 @@ const maxSummaryWorkspaces = 32
 // references, tokens, notes or executable action. Titles are compiled by callers.
 type SummaryFacts struct {
 	WorkspaceID        string         `json:"workspace_id"`
+	Provider           string         `json:"provider,omitempty"` // fixed id, never a provider label
 	Generation         string         `json:"generation,omitempty"`
 	Sequence           uint64         `json:"sequence"`
 	Route              string         `json:"route"`
@@ -35,6 +36,9 @@ type SummaryFacts struct {
 	LastAttemptOutcome string         `json:"last_attempt_outcome,omitempty"`
 	RecoveryState      string         `json:"recovery_state"`
 	RecoveryTestedAt   *time.Time     `json:"recovery_tested_at,omitempty"`
+	// SourceCoverage is each configured source's stored Time Machine
+	// inclusion (included / source_excluded / unknown), in order, never a path.
+	SourceCoverage []string `json:"source_coverage,omitempty"`
 }
 type SummaryFailure struct {
 	WorkspaceID string `json:"workspace_id"`
@@ -49,7 +53,7 @@ type SummaryRead struct {
 
 func summaryFromRecord(s *Service, record localRecord) SummaryFacts {
 	status := s.storedStatus(record)
-	facts := SummaryFacts{WorkspaceID: record.authority.Workspace, Generation: status.Generation, Sequence: status.Sequence, AsOf: status.ServerTime, Connection: status.Connection, Destination: status.Destination, Monitoring: status.Monitoring, ReaderAvailable: status.RuntimeAvailable, EvidenceCurrent: status.EvidenceCurrent, Health: status.Health, LastSuccessfulRead: status.LastSuccessfulRead, LastCompletedAt: status.LastCompletedAt, SnapshotCount: status.SnapshotCount, RecoveryState: "not_tested"}
+	facts := SummaryFacts{WorkspaceID: record.authority.Workspace, Provider: status.Provider, Generation: status.Generation, Sequence: status.Sequence, AsOf: status.ServerTime, Connection: status.Connection, Destination: status.Destination, Monitoring: status.Monitoring, ReaderAvailable: status.RuntimeAvailable, EvidenceCurrent: status.EvidenceCurrent, Health: status.Health, LastSuccessfulRead: status.LastSuccessfulRead, LastCompletedAt: status.LastCompletedAt, SnapshotCount: status.SnapshotCount, RecoveryState: "not_tested"}
 	// Future dates remain unavailable to every summary consumer, not just the
 	// owning console. Historical read times retain their evidence-current label.
 	if facts.LastSuccessfulRead != nil && facts.LastSuccessfulRead.After(status.ServerTime.Add(5*time.Minute)) {
@@ -60,6 +64,9 @@ func summaryFromRecord(s *Service, record localRecord) SummaryFacts {
 	}
 	if status.LastAttempt != nil && status.LastAttempt.Generation == status.Generation {
 		facts.LastAttemptOutcome = status.LastAttempt.Outcome
+	}
+	if status.EvidenceCurrent && record.state != nil && record.state.Observation != nil && record.state.Observation.TimeMachine != nil {
+		facts.SourceCoverage = append([]string(nil), record.state.Observation.TimeMachine.Sources...)
 	}
 	if record.state != nil {
 		superseded := map[string]bool{}

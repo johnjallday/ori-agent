@@ -214,6 +214,34 @@ func runCompiledBackupHelper(mode string) int {
 		}
 		return 0
 	}
+	if mode == "timemachine-v1" {
+		input, err := io.ReadAll(io.LimitReader(os.Stdin, maxSettingsBytes+1))
+		if err != nil {
+			return 1
+		}
+		defer clear(input)
+		request, err := decodeLocalJSON[timeMachineHelperRequest](input, maxSettingsBytes)
+		if err != nil {
+			return 1
+		}
+		readCtx, stop := context.WithTimeout(ctx, 45*time.Second)
+		defer stop()
+		result, err := runTimeMachineHelper(readCtx, request)
+		if err != nil {
+			return helperFailureCode(err)
+		}
+		encoded, err := json.Marshal(result)
+		if err != nil || len(encoded) > maxPrivateStateBytes {
+			return 1
+		}
+		if _, err := os.Stdout.Write(encoded); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if mode != "reader-v1" {
+		return 2
+	}
 	input, err := io.ReadAll(io.LimitReader(os.Stdin, maxHelperInputBytes+1))
 	if err != nil {
 		return 1

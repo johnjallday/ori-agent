@@ -100,6 +100,27 @@ func TestWorkspaceProtectionKeepsTheViewedWorkspaceInsideTheCap(t *testing.T) {
 	}
 }
 
+func TestTimeMachineProblemsUseFixedTimeMachineWording(t *testing.T) {
+	snapshot := func(provider string, problems ...string) BackupSnapshot {
+		return BackupSnapshot{Facts: backuprecovery.SummaryFacts{Provider: provider, Connection: "configured", Health: backuprecovery.EvidenceHealth{Problems: problems}}}
+	}
+	for _, c := range []struct {
+		facts      BackupSnapshot
+		code, want string
+	}{
+		{snapshot("time_machine", "permission_required", "no_completed_snapshot"), "permission_required", "Time Machine needs Full Disk Access before Ori can read it"},
+		{snapshot("time_machine", "no_completed_snapshot", "not_configured"), "not_configured", "Time Machine is not set up on this Mac"},
+		{snapshot("time_machine", "no_completed_snapshot"), "no_completed_snapshot", "No completed Time Machine backup observed"},
+		{snapshot("restic", "no_completed_snapshot"), "no_completed_snapshot", "No completed backup snapshot has been observed"},
+		{snapshot("time_machine", "source_excluded"), "source_excluded", "A checked folder is excluded from Time Machine"},
+	} {
+		code, title, _ := BackupProblem(c.facts)
+		if code != c.code || title != c.want || strings.Contains(strings.ToLower(title), "verified") {
+			t.Fatal(c.code, code, title)
+		}
+	}
+}
+
 func TestRelativeAgeAndProviderLabelsAreFixed(t *testing.T) {
 	now := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
 	for age, want := range map[time.Duration]string{30 * time.Second: "just now", 5 * time.Minute: "5 min ago", 14 * time.Hour: "14 h ago", 50 * time.Hour: "2 d ago"} {

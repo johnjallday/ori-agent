@@ -100,11 +100,56 @@ func proposedMonitoringPolicy() monitoringPolicy {
 }
 
 type localObservation struct {
-	Generation string          `json:"generation"`
-	Sequence   uint64          `json:"sequence"`
-	ObservedAt time.Time       `json:"observed_at"`
-	Snapshots  []localSnapshot `json:"snapshots"` // empty is known empty, not failed
-	Capacity   *localCapacity  `json:"capacity,omitempty"`
+	Generation  string            `json:"generation"`
+	Sequence    uint64            `json:"sequence"`
+	ObservedAt  time.Time         `json:"observed_at"`
+	Snapshots   []localSnapshot   `json:"snapshots"` // empty is known empty, not failed
+	Capacity    *localCapacity    `json:"capacity,omitempty"`
+	TimeMachine *localTimeMachine `json:"time_machine,omitempty"`
+}
+
+// localTimeMachine is the private Time Machine part of one observation. With
+// PreferencesReadable false (no Full Disk Access) the snapshots are unknown,
+// not empty. Sources holds each configuration source's inclusion state in
+// order. Exclusions are private paths, never projected.
+type localTimeMachine struct {
+	PreferencesReadable  bool                          `json:"preferences_readable"`
+	Running              bool                          `json:"running"`
+	Destinations         []localTimeMachineDestination `json:"destinations"`
+	Exclusions           []string                      `json:"exclusions,omitempty"`
+	ExclusionsUnresolved bool                          `json:"exclusions_unresolved,omitempty"`
+	Sources              []string                      `json:"sources"`
+}
+
+type localTimeMachineDestination struct {
+	ID      string `json:"id"`
+	Network bool   `json:"network,omitempty"`
+	Mounted bool   `json:"mounted"`
+}
+
+func (t localTimeMachine) valid(sources int, snapshots []localSnapshot) bool {
+	if t.Destinations == nil || len(t.Destinations) > maxTimeMachineDestinations || len(t.Sources) != sources || len(t.Exclusions) > maxTimeMachineExclusions ||
+		(!t.PreferencesReadable && (len(snapshots) != 0 || len(t.Exclusions) != 0 || t.ExclusionsUnresolved)) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, destination := range t.Destinations {
+		if !validStorageUUID(destination.ID) || seen[destination.ID] {
+			return false
+		}
+		seen[destination.ID] = true
+	}
+	for _, state := range t.Sources {
+		if state != timeMachineIncluded && state != timeMachineExcluded && state != timeMachineUnknown {
+			return false
+		}
+	}
+	for _, exclusion := range t.Exclusions {
+		if !localPath(exclusion) {
+			return false
+		}
+	}
+	return true
 }
 
 type localSnapshot struct {
@@ -167,9 +212,23 @@ func (s localState) valid() bool {
 		if !validStorageUUID(o.Generation) || o.Sequence == 0 || o.Sequence > s.Sequence || !localTime(o.ObservedAt) || o.Snapshots == nil || len(o.Snapshots) > maxSnapshotCount {
 			return false
 		}
+		if o.TimeMachine != nil {
+			sources := len(o.TimeMachine.Sources)
+			if s.Configuration != nil && o.Generation == s.Generation {
+				if s.Configuration.Provider != providerTimeMachine {
+					return false
+				}
+				sources = len(s.Configuration.Sources)
+			}
+			if !o.TimeMachine.valid(sources, o.Snapshots) {
+				return false
+			}
+		}
 		seen := map[string]bool{}
 		for _, snapshot := range o.Snapshots {
-			if !metadataID(snapshot.ID) || seen[snapshot.ID] || !localTime(snapshot.StartedAt) || !optionalLocalTime(snapshot.CompletedAt) || len(snapshot.DeclaredPaths) == 0 || len(snapshot.DeclaredPaths) > maxDeclaredSources || len(snapshot.Exclusions) > maxDeclaredExcludes {
+			// A Time Machine backup declares no paths; a restic snapshot must.
+			declared := len(snapshot.DeclaredPaths) > 0
+			if !metadataID(snapshot.ID) || seen[snapshot.ID] || !localTime(snapshot.StartedAt) || !optionalLocalTime(snapshot.CompletedAt) || declared == (o.TimeMachine != nil) || len(snapshot.DeclaredPaths) > maxDeclaredSources || len(snapshot.Exclusions) > maxDeclaredExcludes {
 				return false
 			}
 			seen[snapshot.ID] = true
@@ -239,7 +298,10 @@ func (s localState) valid() bool {
 }
 
 func (c localConfiguration) valid(requireEvidence bool) bool {
-	if c.Provider != "restic" || len(c.Sources) == 0 || len(c.Sources) > maxSelectedSources || !localPath(c.VolumePath) || !localPath(c.RepositoryPath) ||
+	if c.Provider == providerTimeMachine {
+		return c.validTimeMachine()
+	}
+	if c.Provider != providerRestic || len(c.Sources) == 0 || len(c.Sources) > maxSelectedSources || !localPath(c.VolumePath) || !localPath(c.RepositoryPath) ||
 		(c.RepositoryPath != c.VolumePath && !strings.HasPrefix(c.RepositoryPath, c.VolumePath+"/")) || !localID(c.Credential.VaultID) || !localID(c.Credential.RecordID) || !metadataID(c.Credential.Revision) {
 		return false
 	}
@@ -276,6 +338,25 @@ func (c localConfiguration) valid(requireEvidence bool) bool {
 				}
 			}
 		}
+	}
+	encoded, err := json.Marshal(c)
+	return err == nil && len(encoded) <= maxSettingsBytes
+}
+
+// validTimeMachine: sources only. Time Machine owns its destination and keeps
+// no repository, volume selection or credential Ori could hold; the
+// destination identity is observation evidence, not configuration.
+func (c localConfiguration) validTimeMachine() bool {
+	if len(c.Sources) == 0 || len(c.Sources) > maxSelectedSources || c.VolumePath != "" || c.RepositoryPath != "" || c.RepositoryID != "" ||
+		c.RepositoryFileID != 0 || c.Destination != nil || c.Credential != (localCredential{}) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, source := range c.Sources {
+		if !localPath(source.Path) || seen[source.Path] || source.Storage != nil || source.DirectoryFileID != 0 {
+			return false
+		}
+		seen[source.Path] = true
 	}
 	encoded, err := json.Marshal(c)
 	return err == nil && len(encoded) <= maxSettingsBytes
