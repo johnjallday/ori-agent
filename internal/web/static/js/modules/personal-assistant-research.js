@@ -178,7 +178,9 @@ export function researchCapabilityView(capability) {
 }
 
 export function renderResearchResponse(row, data, { post, approve, isCurrent = () => false } = {}) {
-  if (!row?.ownerDocument) return;
+  // An unanswered turn is one line and Retry; nothing about research belongs
+  // under it.
+  if (!row?.ownerDocument || data?.model_unavailable) return;
   const bubble = row.firstElementChild || row;
   const doc = row.ownerDocument;
   const capability = data?.research_capability;

@@ -74,14 +74,34 @@ export function shouldRestoreInput(data) {
   return Boolean(data?.model_unavailable || data?.conversation?.error);
 }
 
+// Why a turn got no answer, as the drawer's one line says it.
+const UNANSWERED_BECAUSE = {
+  provider_overloaded: 'model at capacity',
+  model_timeout: 'the model timed out',
+  request_cancelled: 'the request was cancelled',
+  model_not_configured: 'no system model is set',
+  invalid_workspace_proposal: 'its proposal could not be used',
+  context_changed: 'the conversation changed'
+};
+
+/**
+ * The one line an unanswered turn shows in place of a reply, or ''. Its Retry
+ * sends the same draft again; nothing was saved.
+ */
+export function unansweredTurnLine(data) {
+  if (!data?.model_unavailable) return '';
+  const because = UNANSWERED_BECAUSE[data.failure_reason] || 'the model is unavailable';
+  return `Assistant could not answer (${because}). Your draft is kept.`;
+}
+
 /** One line telling the user what happened to this turn's history. */
 export function conversationNotice(data) {
   const reply = data?.conversation;
   if (!reply) return '';
   if (reply.error)
     return CONVERSATION_ERRORS[reply.error] || CONVERSATION_ERRORS.conversation_unavailable;
-  if (data.model_unavailable)
-    return 'No answer yet. Your message is back in the box and was not saved.';
+  // The unanswered turn's own line already says the draft is kept.
+  if (data.model_unavailable) return '';
   if (!reply.stored) {
     return 'This reply could not be saved to the conversation history. Copy anything you want to keep.';
   }
@@ -694,6 +714,7 @@ const api = {
   currentId: () => state.id,
   refresh: render,
   isLoading: () => state.loading,
+  unansweredTurnLine,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantConversation = api;

@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/llm"
 )
 
 func TestAssistantFolderSuggestion_RealSendHydrationAndExplicitReview(t *testing.T) {
@@ -117,6 +120,51 @@ func TestAssistantFolderSuggestion_ADeclinedCollectionIsStillInTheFirstPrompt(t 
 	}
 	if !strings.Contains(sent.String(), "folder_structure_proposal") {
 		t.Fatalf("the declined collection's group was not in the prompt:\n%s", sent.String())
+	}
+}
+
+// overloadedChatProvider is a system model with no capacity: every turn fails
+// the way an overloaded provider reports it.
+type overloadedChatProvider struct{ capturingChatProvider }
+
+func (p *overloadedChatProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.requests = append(p.requests, req)
+	return nil, llm.NewProviderError("claude_code", llm.CategoryProviderOverloaded, errors.New("server_overloaded: Selected model is at capacity"))
+}
+
+// A model at capacity costs the user one click, not the proposal: the failed
+// turn says why in a safe category and carries the same group the attach did.
+func TestAssistantFolderSuggestion_AModelAtCapacityKeepsTheProposal(t *testing.T) {
+	f := newDraftServerFixture(t)
+	provider := &overloadedChatProvider{}
+	f.builder.llmFactory.Register("claude_code", provider)
+	if status, body := f.call(t, http.MethodPost, "/api/settings/system-model", map[string]string{"provider": "claude_code", "model": "sonnet"}); status != http.StatusOK {
+		t.Fatal(status, body)
+	}
+	seedAlbumsCollection(t)
+	draft := "7a2e4d3b-9c8f-4e6a-8b1c-3d4e5f6a7b8c"
+	status, selected := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",
+		map[string]any{"draft_id": draft, "revision": "", "mode": "chip", "chip": "music"})
+	if status != http.StatusOK || selected["structure"] == nil {
+		t.Fatalf("select: %d %v", status, selected)
+	}
+	observation := selected["observation"].(map[string]any)
+	status, reply := f.call(t, http.MethodPost, "/api/home-assistant/ask", map[string]any{
+		"prompt": "Propose workspaces for this folder", "intent": "assistant_conversation", "conversation": map[string]string{},
+		"folder_context": map[string]any{"draft_id": draft, "selection_id": observation["id"]},
+	})
+	structure, _ := reply["folder_structure"].(map[string]any)
+	if status != http.StatusOK || reply["model_unavailable"] != true || reply["failure_reason"] != "provider_overloaded" ||
+		structure == nil || len(structure["members"].([]any)) != 6 || len(provider.requests) != 1 {
+		t.Fatalf("overloaded turn: %d %v (%d model calls)", status, reply, len(provider.requests))
+	}
+	if mustJSON(t, structure) != mustJSON(t, selected["structure"]) {
+		t.Fatalf("the failed turn's proposal differs from the attach:\n%s\n%s", mustJSON(t, structure), mustJSON(t, selected["structure"]))
+	}
+	if strings.Contains(mustJSON(t, reply), "Selected model is at capacity") {
+		t.Fatal("the raw provider error reached the browser")
 	}
 }
 

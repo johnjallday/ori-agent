@@ -299,7 +299,8 @@ function renderIdentity() {
   els.launcher.hidden = !view.visible;
   els.launcherName.textContent = view.name;
   els.title.textContent = state.workActivityOnly && !view.visible ? 'Work activity' : view.name;
-  els.input.placeholder = view.placeholder;
+  // With a folder attached the placeholder says what an empty Send asks for.
+  els.input.placeholder = (view.available && state.folderPlaceholder) || view.placeholder;
   els.input.disabled = !view.available;
   els.send.disabled = !view.available || state.pending;
   if (els.modelSetup)
@@ -688,6 +689,26 @@ function announceWhenReplyArrives() {
   }, 400);
 }
 
+/** The attached folder's own placeholder, or '' for the assistant's default. */
+function setComposerPlaceholder(text) {
+  const next = String(text || '');
+  if (state.folderPlaceholder === next) return;
+  state.folderPlaceholder = next;
+  renderIdentity();
+}
+
+/**
+ * Takes a restored message back out of the composer when it is sent again
+ * (Retry). Text the user typed or changed since is never cleared.
+ */
+function takeDraft(text) {
+  if (!state.els?.input || state.els.input.value.trim() !== String(text || '').trim()) return false;
+  state.draft = '';
+  state.els.input.value = '';
+  state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
 /** Puts a message that was not sent back in the composer. */
 function restoreDraft(text) {
   if (!state.els?.input) return false;
@@ -729,7 +750,7 @@ function submit(event) {
   const text =
     String(state.els?.input?.value || '').trim() ||
     (window.PersonalAssistantFolderContext?.hasFolder?.()
-      ? 'Explore this folder'
+      ? window.PersonalAssistantFolderContext.emptySend?.()?.text || 'Explore this folder'
       : window.PersonalAssistantLink?.hasLink?.()
         ? window.PersonalAssistantLink.sendText()
         : '');
@@ -1010,6 +1031,8 @@ const api = {
   suggestReply,
   suggestionNotice: () => state.suggestionNotice,
   restoreDraft,
+  takeDraft,
+  setComposerPlaceholder,
   refresh,
   applyPersonalAssistant,
   setToday,

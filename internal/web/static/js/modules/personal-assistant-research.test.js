@@ -64,6 +64,21 @@ function domFixture() {
   return { row, made, bubble };
 }
 
+test('an unanswered turn gets no capability footer or research note', () => {
+  const dom = domFixture();
+  renderResearchResponse(dom.row, {
+    model_unavailable: true,
+    failure_reason: 'provider_overloaded',
+    research_capability: { provider: 'codex', model: 'gpt', manual_discovery_href: '/skills' }
+  });
+  assert.equal(dom.bubble.children.length, 0);
+  // An answered turn still says which model answered.
+  renderResearchResponse(dom.row, {
+    research_capability: { provider: 'codex', model: 'gpt', manual_discovery_href: '/skills' }
+  });
+  assert.equal(dom.bubble.children.length, 1);
+});
+
 test('public research links reject credentials, schemes and private destinations', () => {
   for (const bad of [
     'javascript:alert(1)',

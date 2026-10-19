@@ -432,7 +432,7 @@ export function discussionChips({
 }) {
   if (structure && !historical)
     return [
-      { id: 'setup', label: 'Set up this structure' },
+      { id: 'setup', label: 'Set up' },
       { id: 'adjust', label: 'Adjust…' },
       { id: 'discuss', label: 'Just discuss' }
     ];
@@ -520,6 +520,32 @@ export function structureCardView(state, parkedId = '') {
 // conversation, and nothing is written.
 let parkedStructure = '';
 
+// emptySendView is what an empty Send means with a folder attached: a folder
+// Ori proposed a group for is asked for that proposal, any other is explored.
+// The placeholder says it before Send.
+export function emptySendView(folder, collection) {
+  if (!folder) return null;
+  return collection
+    ? {
+        placeholder: `Propose workspaces for ${folder}`,
+        text: 'Propose workspaces for this folder'
+      }
+    : { placeholder: 'Explore this folder', text: 'Explore this folder' };
+}
+
+function currentEmptySend() {
+  const state = controller?.state;
+  if (!state?.observation) return null;
+  const collection =
+    Boolean(state.preview && state.structure) ||
+    Boolean(window.PersonalAssistantFolderSetup?.structure?.());
+  return emptySendView(state.observation.folder, collection);
+}
+
+// The reply whose proposal the user chose to just discuss: its chips go, and
+// nothing is written.
+let discussedMessage = '';
+
 // The proposal card shown as soon as a collection is attached, before Send.
 // It is drawn from the attach response alone; pressing a control is what
 // starts a request, and Not now starts none.
@@ -590,7 +616,7 @@ function renderDiscussion() {
     discussionBinding = { ...discussionBinding, generation: controller.state.generation };
   }
   const row = discussionRow(discussionBinding);
-  if (!row) {
+  if (!row || discussedMessage === discussionBinding?.messageId) {
     existing?.remove();
     closeDiscussionChooser({ restoreFocus: false });
     return;
@@ -619,7 +645,14 @@ function renderDiscussion() {
     const runs = {
       setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
       adjust: button => window.PersonalAssistantFolderSetup?.adjustStructure?.(button),
-      discuss: () => document.getElementById('personalAssistantInput')?.focus()
+      // Parks the proposal for this conversation: no decline is written, and
+      // Set up stays one Add folder away.
+      discuss: () => {
+        discussedMessage = value.messageId;
+        window.PersonalAssistantFolderSetup?.parkSuggestion?.();
+        renderDiscussion();
+        document.getElementById('personalAssistantInput')?.focus();
+      }
     };
     for (const chip of discussionChips({ structure: true })) {
       const button = node('button', chip.label, 'personal-assistant-conversation__button');
@@ -739,6 +772,7 @@ function render(state) {
   elements.status.textContent = state.notice;
   renderStructure(state);
   updateSendHint();
+  window.PersonalAssistantPanel?.setComposerPlaceholder?.(currentEmptySend()?.placeholder || '');
   window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
   window.PersonalAssistantConversation?.refresh?.();
   window.PersonalAssistantFolder?.contextProgress?.(state);
@@ -989,6 +1023,8 @@ const api = {
   adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,
   hasFolder: () => Boolean(controller?.state.observation),
+  // What an empty Send sends with this folder attached, or null.
+  emptySend: () => currentEmptySend(),
   _controller: () => controller
 };
 if (typeof window !== 'undefined') window.PersonalAssistantFolderContext = api;

@@ -1074,6 +1074,12 @@ if (typeof window !== 'undefined')
     structure: currentStructure,
     reviewStructure,
     adjustStructure,
+    // Just discuss: the reply's proposal leaves this conversation's view. It
+    // writes nothing; the folder can be proposed again by attaching it.
+    parkSuggestion: () => {
+      retireSuggestion(document.querySelector('[data-folder-setup-suggestion]'));
+      suggestion = null;
+    },
     closeReview: async offer => {
       if (
         offer?.conversation_id &&

@@ -348,6 +348,7 @@ func (p *CodexProvider) execCodex(ctx context.Context, prompt, dir string, args 
 			msg = codexFailureDetail(stdout.String(), prompt)
 		}
 		interrupted := cliStoppedBySignal(err) || codexTurnInterrupted(msg)
+		overloaded := codexProviderOverloaded(msg)
 		if msg == "" {
 			msg = "codex exec failed"
 		}
@@ -357,6 +358,9 @@ func (p *CodexProvider) execCodex(ctx context.Context, prompt, dir string, args 
 		runErr := fmt.Errorf("%s: %w", msg, err)
 		if interrupted {
 			return "", NewProviderError(p.Name(), CategoryInterrupted, runErr)
+		}
+		if overloaded {
+			return "", NewProviderError(p.Name(), CategoryProviderOverloaded, runErr)
 		}
 		return "", runErr
 	}

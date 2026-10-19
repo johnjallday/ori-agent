@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   createFolderContextController,
   discussionChips,
+  emptySendView,
   folderContextChoices,
   folderDecline,
   structureCardView,
@@ -447,6 +448,24 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   assert.equal(folderDecline({ ...declined, folder_key: '../etc' }), null);
 });
 
+test('the proposal card stays when the turn sent with it gets no answer', async () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { name: 'Albums', type: 'group', destination_state: 'new' },
+    members: [{ candidate_id: 'candidate-1', name: 'Album-1', included: true }]
+  };
+  const f = fixture(async () => ({ observation: observation('a'), revision: '', structure }));
+  await f.controller.select('chip', 'downloads');
+  // Send asks for the references; an unanswered turn saves nothing, so the
+  // folder is never accepted into a conversation and the preview stays.
+  assert.ok(f.controller.request());
+  assert.equal(structureCardView(f.controller.state).kind, 'proposal');
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  // Retry asks again with the same references.
+  assert.deepEqual(f.controller.request(), f.controller.request());
+});
+
 test('Ask again sends only the decline key and gives the card its Set up back', async () => {
   const structure = {
     version: 1,
@@ -486,10 +505,22 @@ test('Ask again sends only the decline key and gives the card its Set up back', 
   assert.equal(f.controller.state.pending, false);
 });
 
+test('an empty Send asks for the proposal on a collection and explores any other folder', () => {
+  assert.deepEqual(emptySendView('Albums', true), {
+    placeholder: 'Propose workspaces for Albums',
+    text: 'Propose workspaces for this folder'
+  });
+  assert.deepEqual(emptySendView('Thesis', false), {
+    placeholder: 'Explore this folder',
+    text: 'Explore this folder'
+  });
+  assert.equal(emptySendView('', true), null);
+});
+
 test('a proposed group replaces the discussion shortcuts with its own three controls', () => {
   assert.deepEqual(
     discussionChips({ structure: true, children: 6, markers: true }).map(chip => chip.label),
-    ['Set up this structure', 'Adjust…', 'Just discuss']
+    ['Set up', 'Adjust…', 'Just discuss']
   );
   // Without a proposal the two shortcuts are what they were.
   assert.deepEqual(
