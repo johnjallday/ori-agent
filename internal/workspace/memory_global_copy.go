@@ -35,6 +35,7 @@ func (s *MemoryStore) RemoveByProvenance(workspaceID, provenance string) (Memory
 	if provenance == "" || IsHQManagedProvenance(provenance) {
 		return MemoryEntry{}, ErrMemoryEntryNotFound
 	}
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)

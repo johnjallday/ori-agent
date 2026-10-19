@@ -42,6 +42,7 @@ func toolDefinitionNames(t *testing.T, dir string) []string {
 		"MemoryWriteToolName":         workspace.MemoryWriteToolName,
 		"MemoryForgetToolName":        workspace.MemoryForgetToolName,
 		"MemoryProposeGlobalToolName": workspace.MemoryProposeGlobalToolName,
+		"MemoryRecallToolName":        workspace.MemoryRecallToolName,
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

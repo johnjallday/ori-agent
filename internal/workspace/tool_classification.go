@@ -111,6 +111,11 @@ const (
 	// MemoryProposeGlobalToolName sends a fact about the user to the Personal
 	// HQ review queue. It writes no canonical memory anywhere.
 	MemoryProposeGlobalToolName = "memory_propose_global"
+	// MemoryRecallToolName searches the read-only mirror of other agents'
+	// memory. Only the personal assistant's chat turns are offered it; task
+	// runs never build it. It is classified external: other agents' memory
+	// lies beyond the workspace, so a goal run could never call it.
+	MemoryRecallToolName = "memory_recall"
 )
 
 // nativeToolSideEffects classifies the tools Ori itself offers in a workspace:
@@ -152,6 +157,7 @@ var nativeToolSideEffects = map[string]SideEffect{
 	MemoryWriteToolName:                   SideEffectWrite,
 	MemoryForgetToolName:                  SideEffectWrite,
 	MemoryProposeGlobalToolName:           SideEffectWrite,
+	MemoryRecallToolName:                  SideEffectExternal,
 	"delegate_task":                       SideEffectExternal,
 	"workspace_create_project":            SideEffectExternal,
 	"workspace_manage_agents":             SideEffectExternal,

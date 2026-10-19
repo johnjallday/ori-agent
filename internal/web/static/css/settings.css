@@ -976,6 +976,408 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   }
 }
 
+/* Connected memory: one card per external source (Codex, Claude Code,
+   Gemini CLI, the Claude account). Cards stack on narrow screens; an
+   unavailable source is dimmed but its switch stays usable. */
+#connectedMemoryStatus:empty {
+  display: none;
+}
+
+#connectedMemoryStatus.is-error {
+  border-color: var(--danger-color, #c0392b);
+  color: var(--text-primary);
+}
+
+.connected-memory-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.connected-memory-card {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1.25rem 1.4rem;
+  border-top: 3px solid var(--border-color);
+  overflow-wrap: anywhere;
+}
+
+.connected-memory-card.is-synced,
+.connected-memory-card.is-syncing,
+.connected-memory-card.is-pending {
+  border-top-color: var(--primary-color);
+}
+
+.connected-memory-card.is-error {
+  border-top-color: var(--danger-color, #c0392b);
+}
+
+.connected-memory-card.is-dimmed .connected-memory-card-heading,
+.connected-memory-card.is-dimmed .connected-memory-state,
+.connected-memory-card.is-dimmed .connected-memory-facts {
+  opacity: 0.6;
+}
+
+.connected-memory-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.connected-memory-card-heading {
+  min-width: 0;
+}
+
+.connected-memory-card h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.connected-memory-location {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+}
+
+.connected-memory-switch {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding-left: 0;
+}
+
+/* Keep Bootstrap's switch proportions. common.css gives every form input a
+   44px minimum on touch screens, which turns a switch into a ring; here the
+   switch row (the clickable label included) is the 44px target instead. */
+.connected-memory-switch .form-check-input {
+  flex: none;
+  width: 2em;
+  height: 1em;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .connected-memory-switch {
+    min-height: 44px;
+  }
+
+  .connected-memory-switch .form-check-input {
+    width: 2.75rem;
+    height: 1.5rem;
+  }
+
+  .connected-memory-switch .form-check-label {
+    padding: 0.6rem 0;
+  }
+}
+
+.connected-memory-switch .form-check-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.connected-memory-state {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.connected-memory-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.9rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.connected-memory-facts dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.connected-memory-facts dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.connected-memory-folders summary {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.connected-memory-folders ul {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.connected-memory-folders li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.connected-memory-folder-path {
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  overflow-wrap: anywhere;
+}
+
+.connected-memory-folder-count {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.connected-memory-exclusions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.connected-memory-exclusions-label {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.connected-memory-exclusions small {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+/* Folder paths differ only at their ends, so chips show them whole. */
+.connected-memory-exclusions .tag-chip,
+.connected-memory-exclusions .tag-input-suggested-chip {
+  max-width: 100%;
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.connected-memory-exclusions .tag-chip-label,
+.connected-memory-exclusions .tag-input-suggested-chip {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.connected-memory-folder-general {
+  color: var(--text-secondary);
+}
+
+.connected-memory-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.connected-memory-card [hidden],
+.connected-memory-browser [hidden] {
+  display: none;
+}
+
+/* The browser: search, source and category chips, and one row per entry. */
+.connected-memory-browser {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 1.25rem 1.4rem;
+  min-width: 0;
+}
+
+.connected-memory-browser-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.connected-memory-browser-hint,
+.connected-memory-results-line {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.connected-memory-search {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.connected-memory-search .form-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.connected-memory-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.connected-memory-chip {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.connected-memory-chip.is-active {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+  color: var(--text-on-primary, #fff);
+}
+
+.connected-memory-entries {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connected-memory-entry {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  overflow-wrap: anywhere;
+}
+
+.connected-memory-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.connected-memory-entry-source {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.connected-memory-entry-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.connected-memory-entry-excerpt {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.connected-memory-entry-actions,
+.connected-memory-promote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.connected-memory-entry-promoted,
+.connected-memory-entry-message {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.connected-memory-promote {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 42rem;
+}
+
+.connected-memory-promote label {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.connected-memory-promote small {
+  color: var(--text-secondary);
+}
+
+/* The Claude account card's paste box and the export preview. */
+.connected-memory-paste {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.connected-memory-paste-help {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.connected-memory-paste label {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.connected-memory-paste textarea {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.connected-memory-paste small,
+.connected-memory-paste-notice {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.connected-memory-export-preview {
+  max-height: 18rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 576px) {
+  .connected-memory-search {
+    flex-direction: column;
+  }
+}
+
 .profile-knowledge-header {
   display: flex;
   align-items: flex-end;

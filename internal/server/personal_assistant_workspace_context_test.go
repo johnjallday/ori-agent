@@ -178,7 +178,10 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 		"assistant_installed_capabilities": true, "assistant_mcp_catalog": true, "assistant_public_registry_sources": true, "assistant_propose_research_lookup": true, "assistant_propose_workspace": true,
 		// A local read of the reviewed registry and the plugin store's install
 		// state. It installs, enables and starts nothing.
-		"assistant_reviewed_integrations": true}
+		"assistant_reviewed_integrations": true,
+		// A local search of the read-only mirror of other agents' memory; the
+		// hired assistant's own turns only, writing nothing anywhere.
+		"memory_recall": true}
 	for _, tool := range request.Tools {
 		if !allowed[tool.Name] {
 			t.Fatalf("unexpected panel tool %q", tool.Name)

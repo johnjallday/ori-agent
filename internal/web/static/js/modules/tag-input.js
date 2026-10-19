@@ -26,16 +26,19 @@ export function normalizeTagValue(value) {
 
 /**
  * Normalize a tag list: trim/lowercase, drop empties, dedupe, enforce caps.
+ * options.normalize replaces the per-value normalization (an editor of
+ * case-sensitive values such as folder paths passes a trim-only function).
  * Returns { tags, error } where error is '' when the list is valid.
  */
 export function normalizeTagList(tags, options = {}) {
   const maxTags = options.maxTags ?? DEFAULT_MAX_TAGS;
   const maxTagLength = options.maxTagLength ?? DEFAULT_MAX_TAG_LENGTH;
+  const normalize = options.normalize ?? normalizeTagValue;
 
   const normalized = [];
   const seen = new Set();
   (Array.isArray(tags) ? tags : []).forEach(tag => {
-    const value = normalizeTagValue(tag);
+    const value = normalize(tag);
     if (!value || seen.has(value)) return;
     seen.add(value);
     normalized.push(value);
@@ -57,6 +60,7 @@ export function normalizeTagList(tags, options = {}) {
 /**
  * Typeahead matches for the dropdown: pool tags containing the query,
  * prefix matches first, then by usage. Already-selected tags are excluded.
+ * Matching ignores case, so a pool of case-sensitive values still matches.
  */
 export function filterSuggestions(pool, options = {}) {
   const query = normalizeTagValue(options.query);
@@ -64,13 +68,13 @@ export function filterSuggestions(pool, options = {}) {
   const exclude = new Set((options.exclude || []).map(normalizeTagValue));
 
   const candidates = (Array.isArray(pool) ? pool : [])
-    .filter(entry => entry && entry.name && !exclude.has(entry.name))
-    .filter(entry => query === '' || entry.name.includes(query));
+    .filter(entry => entry && entry.name && !exclude.has(normalizeTagValue(entry.name)))
+    .filter(entry => query === '' || normalizeTagValue(entry.name).includes(query));
 
   candidates.sort((a, b) => {
     if (query !== '') {
-      const aPrefix = a.name.startsWith(query) ? 0 : 1;
-      const bPrefix = b.name.startsWith(query) ? 0 : 1;
+      const aPrefix = normalizeTagValue(a.name).startsWith(query) ? 0 : 1;
+      const bPrefix = normalizeTagValue(b.name).startsWith(query) ? 0 : 1;
       if (aPrefix !== bPrefix) return aPrefix - bPrefix;
     }
     if ((b.total ?? 0) !== (a.total ?? 0)) return (b.total ?? 0) - (a.total ?? 0);
@@ -124,7 +128,8 @@ export async function fetchTagPool(options = {}) {
  * Create the tag input widget inside `container`.
  *
  * Options: initialTags, maxTags, maxTagLength, placeholder, suggestedLimit,
- * dropdownLimit, fetchPool (override), onChange(tags).
+ * dropdownLimit, fetchPool (override), onChange(tags), normalize(value)
+ * (default trim + lowercase), ariaLabel.
  * Returns { getTags, setTags, focus, refreshPool, destroy, element }.
  */
 export function createTagInput(options = {}) {
@@ -136,8 +141,9 @@ export function createTagInput(options = {}) {
   const suggestedLimit = options.suggestedLimit ?? 10;
   const dropdownLimit = options.dropdownLimit ?? 8;
   const loadPool = options.fetchPool || fetchTagPool;
+  const normalize = options.normalize ?? normalizeTagValue;
 
-  let tags = normalizeTagList(options.initialTags, { maxTags, maxTagLength }).tags;
+  let tags = normalizeTagList(options.initialTags, { maxTags, maxTagLength, normalize }).tags;
   let pool = [];
   let poolLoaded = false;
   let highlightIndex = -1;
@@ -156,7 +162,7 @@ export function createTagInput(options = {}) {
   field.maxLength = maxTagLength;
   field.autocomplete = 'off';
   field.spellcheck = false;
-  field.setAttribute('aria-label', 'Add tag');
+  field.setAttribute('aria-label', options.ariaLabel ?? 'Add tag');
 
   const dropdown = document.createElement('div');
   dropdown.className = 'tag-input-dropdown';
@@ -285,9 +291,9 @@ export function createTagInput(options = {}) {
   }
 
   function addTag(rawValue) {
-    const value = normalizeTagValue(rawValue);
+    const value = normalize(rawValue);
     if (!value) return false;
-    const result = normalizeTagList([...tags, value], { maxTags, maxTagLength });
+    const result = normalizeTagList([...tags, value], { maxTags, maxTagLength, normalize });
     if (result.error) {
       setHint(result.error);
       return false;
@@ -380,7 +386,7 @@ export function createTagInput(options = {}) {
     element: root,
     getTags: () => [...tags],
     setTags: nextTags => {
-      tags = normalizeTagList(nextTags, { maxTags, maxTagLength }).tags;
+      tags = normalizeTagList(nextTags, { maxTags, maxTagLength, normalize }).tags;
       setHint('');
       field.value = '';
       closeDropdown();

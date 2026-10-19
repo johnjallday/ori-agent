@@ -150,6 +150,7 @@ func (s *MemoryStore) EditExact(workspaceID string, target MemoryExactTarget, re
 		}
 		replacement = &cleaned
 	}
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
@@ -193,6 +194,7 @@ func (s *MemoryStore) AppendExact(workspaceID, expectedFileHash string, entry Me
 	if expectedFileHash == "" {
 		return MemoryExactTarget{}, ErrMemoryConflict
 	}
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)

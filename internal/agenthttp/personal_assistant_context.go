@@ -16,6 +16,9 @@ const (
 	personalAssistantContextMandateLimit = 1000
 	personalAssistantContextProfileLimit = 3000
 	personalAssistantContextMemoryLimit  = 4000
+	// The external memory block has the global-memory section's budget
+	// (workspace.MemoryPromptTokenBudget * 4); its renderer already holds it.
+	personalAssistantContextExternalLimit = 8000
 )
 
 // PersonalAssistantContextSource describes one independently loaded, bounded
@@ -47,7 +50,17 @@ type PersonalAssistantWorkContext struct {
 	ConversationAgent string
 	UserProfile       string
 	HQMemory          string
-	Sources           map[string]PersonalAssistantContextSource
+	// ExternalMemory is the delimited block of what the user's other coding
+	// agents remember about them (externalmemory.RenderContextBlock): data
+	// for the hired assistant only.
+	ExternalMemory string
+	Sources        map[string]PersonalAssistantContextSource
+}
+
+// MayRecallExternalMemory reports whether this turn's assistant may search
+// the external memory mirror: hired, with a Personal HQ, and not paused.
+func (c *PersonalAssistantWorkContext) MayRecallExternalMemory() bool {
+	return c != nil && c.State == "active" && c.HQWorkspaceID != ""
 }
 
 func (c *PersonalAssistantWorkContext) ReadyForWork() bool {
@@ -269,6 +282,10 @@ func renderPersonalAssistantPromptContext(c *PersonalAssistantWorkContext) strin
 		html.EscapeString(safePersonalAssistantPromptValue(c.UserProfile, personalAssistantContextProfileLimit)))
 	fmt.Fprintf(&b, "<untrusted_personal_hq_memory>%s</untrusted_personal_hq_memory>\n",
 		html.EscapeString(safePersonalAssistantPromptValue(c.HQMemory, personalAssistantContextMemoryLimit)))
+	if strings.TrimSpace(c.ExternalMemory) != "" {
+		fmt.Fprintf(&b, "<untrusted_external_memory>%s</untrusted_external_memory>\n",
+			html.EscapeString(safePersonalAssistantPromptValue(c.ExternalMemory, personalAssistantContextExternalLimit)))
+	}
 
 	keys := make([]string, 0, len(c.Sources))
 	for key := range c.Sources {

@@ -71,6 +71,8 @@ type Handler struct {
 	userProfileStore       userprofile.UserStore
 	userProvider           userprofile.UserProvider
 	reviewedMemory         workspace.ReviewedMemoryReader
+	externalMemory         ExternalMemoryReader  // other agents' memory, personal assistant only (external_memory.go)
+	externalMemoryGate     PersonalAssistantGate // verifies the responding instance is that assistant
 	runtimeResolver        chatRuntimeResolver
 	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
 	toolCallStore          session.ToolCallStore

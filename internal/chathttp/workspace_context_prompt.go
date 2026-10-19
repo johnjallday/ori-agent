@@ -95,7 +95,13 @@ func (h *Handler) resolveAgentBasePromptVars(ctx context.Context, routeCtx norma
 			memory = raw
 		}
 		if strings.Contains(prompt, "workspace.memory") {
-			memory = strings.TrimSpace(memory + "\n\n" + h.reviewedHQMemorySection(ctx, routeCtx))
+			parts := []string{}
+			for _, part := range []string{memory, h.reviewedHQMemorySection(ctx, routeCtx), h.externalMemorySection(ctx, routeCtx)} {
+				if part = strings.TrimSpace(part); part != "" {
+					parts = append(parts, part)
+				}
+			}
+			memory = strings.Join(parts, "\n\n")
 		}
 	}
 
@@ -208,16 +214,7 @@ func (h *Handler) reviewedHQMemorySection(ctx context.Context, routeCtx normaliz
 	if err != nil || ws == nil {
 		return ""
 	}
-	var principal string
-	for _, inst := range ws.AgentInstances {
-		if !strings.EqualFold(strings.TrimSpace(inst.Name), strings.TrimSpace(routeCtx.AgentName)) || routeCtx.AgentName == "" {
-			continue
-		}
-		if principal != "" || strings.TrimSpace(inst.ID) == "" {
-			return ""
-		}
-		principal = strings.TrimSpace(inst.ID)
-	}
+	principal := respondingInstance(ws, routeCtx.AgentName)
 	if principal == "" {
 		return ""
 	}
@@ -245,12 +242,16 @@ func (h *Handler) buildWorkspaceMemoryPrompt(ctx context.Context, routeCtx norma
 		return ""
 	}
 	section := workspace.RenderMemoryPromptSection(doc, toolCallable)
-	reviewed := h.reviewedHQMemorySection(ctx, routeCtx)
-	if reviewed != "" {
+	// Global memory, then what other agents remember: both for the personal
+	// assistant's own turns only.
+	for _, extra := range []string{h.reviewedHQMemorySection(ctx, routeCtx), h.externalMemorySection(ctx, routeCtx)} {
+		if extra == "" {
+			continue
+		}
 		if section != "" {
 			section += "\n\n---\n"
 		}
-		section += reviewed
+		section += extra
 	}
 	return section
 }
