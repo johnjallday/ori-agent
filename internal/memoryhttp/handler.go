@@ -28,6 +28,55 @@ type Handler struct {
 	memory    *workspace.MemoryStore
 	learnings *workspace.AssistantLearningStore
 	global    GlobalMemory
+	// contextFiles renders this memory into AGENTS.md / CLAUDE.md / GEMINI.md
+	// for the user's own CLI sessions; nil disables the settings endpoint.
+	contextFiles *workspace.MemoryContextWriter
+}
+
+// SetContextFiles wires the context-file writer behind the Memory station's
+// "Also write to the folder root" switch.
+func (h *Handler) SetContextFiles(writer *workspace.MemoryContextWriter) {
+	if h != nil {
+		h.contextFiles = writer
+	}
+}
+
+type settingsRequest struct {
+	RootFiles *bool `json:"root_files"`
+}
+
+// UpdateSettings handles PATCH /api/workspaces/{workspaceID}/memory/settings:
+// the "Also write to the folder root" switch (PRD FR24, FR25). Turning it on
+// writes Ori's managed block into the root AGENTS.md, CLAUDE.md and GEMINI.md
+// at once; turning it off takes the block out and deletes a file left empty.
+func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if h.contextFiles == nil || h.contextFiles.Settings == nil {
+		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable,
+			orihttp.NewAPIError("unavailable", "Context files are not available."))
+		return
+	}
+	var req settingsRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if req.RootFiles == nil {
+		_ = orihttp.RespondBadRequest(w, "root_files is required")
+		return
+	}
+	if err := h.contextFiles.Settings.SetRootFiles(workspaceID, *req.RootFiles); err != nil {
+		_ = orihttp.RespondInternalError(w, "Failed to save the setting: "+err.Error())
+		return
+	}
+	if *req.RootFiles {
+		h.contextFiles.Render(workspaceID)
+	} else {
+		h.contextFiles.RemoveRootBlocks(workspaceID)
+	}
+	h.writeMemoryResponse(w, r, workspaceID)
 }
 
 // NewHandler builds the memory handler over a folder-backed store. Both
@@ -75,6 +124,9 @@ type memoryResponse struct {
 	TokenBudget      int                  `json:"token_budget"`
 	OverBudget       bool                 `json:"over_budget"`
 	GlobalMemory     globalMemoryDTO      `json:"global_memory"`
+	// ContextFiles says where this memory is rendered for the user's own CLIs
+	// and whether the folder-root switch is on; absent when unavailable.
+	ContextFiles *workspace.MemoryContextStatus `json:"context_files,omitempty"`
 }
 
 type writeRequest struct {
@@ -275,6 +327,10 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, r *http.Request, wo
 		TokenBudget:      workspace.MemoryPromptTokenBudget,
 		OverBudget:       len(raw) > workspace.MemoryPromptTokenBudget*4,
 		GlobalMemory:     h.globalMemoryStatus(r.Context(), workspaceID),
+	}
+	if h.contextFiles != nil {
+		status := h.contextFiles.Status(workspaceID)
+		resp.ContextFiles = &status
 	}
 	if err := orihttp.RespondJSON(w, http.StatusOK, resp); err != nil {
 		logger.Debug("Failed to write memory response", logger.Fields{"workspace_id": workspaceID, "error": err})

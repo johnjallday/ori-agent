@@ -1,0 +1,22 @@
+## Instructions
+[2026-09-30] - Detail level: Lead with the result, then the method
+[2026-09-30] - Response style: Plain language, no jargon
+
+## Identity
+[2026-09-30] - Name: Sam Example
+[2026-09-30] - Role: Software developer
+[2026-09-30] - Time zone: Asia/Seoul
+[2026-09-30] - Language: ko-KR
+
+## Career
+[2026-09-30] - Specializes in Go, trading research
+[2026-09-30] - Builds trading research tools and a personal agent app.
+
+## Projects
+[2026-10-05] - chart-lab: fee-aware backtests of EMA exit rules.
+[2026-10-12] - Album 3 masters at -14 LUFS.
+
+## Preferences
+[2026-08-01] - Reports backtests net of fees.
+[2026-10-01] - Mixes at night.
+[unknown] - Relies on the exchange's public fee schedule.

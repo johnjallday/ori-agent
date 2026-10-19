@@ -410,12 +410,20 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		handler.SetWorkspaceBuildAvailable(session.WorkspaceBuildAvailable)
 	}
 	if s.Storage != nil && s.Storage.PersonalAssistant != nil {
-		handler.SetPersonalAssistantContextProvider(personalAssistantContextAdapter{
+		adapter := personalAssistantContextAdapter{
 			relationship: s.Storage.PersonalAssistant,
 			profiles:     s.Storage.UserStore,
 			workspaces:   s.Storage.WorkspaceStore,
 			knowledge:    s.Storage.PersonalAssistantKnowledge,
-		}, "local")
+		}
+		// What the user's other coding agents remember, for the hired assistant
+		// only: Home and the workspace-page drawer both answer here.
+		if s.externalMemory != nil {
+			reader := s.externalMemory.Reader()
+			adapter.external = reader
+			handler.SetExternalMemory(reader)
+		}
+		handler.SetPersonalAssistantContextProvider(adapter, "local")
 		if s.Storage.PersonalAssistantMemory != nil {
 			handler.SetPersonalAssistantMemoryWriter(s.Storage.PersonalAssistantMemory)
 		}

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // One conversation, start to finish, on the production browser and host under
 // `wt demo`: a folder is attached and reviewed on a group's page, the user moves
@@ -141,6 +142,9 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
     await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
+    // The group has a Commander, so the drawer opens as it; these are the
+    // Personal Assistant's turns.
+    await talkToPersonalAssistant(page);
   };
   const send = async (prompt: string) => {
     await input.fill(prompt);

@@ -44,6 +44,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerTicketRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
+	registerExternalMemoryRoutes(mux, s)
 	registerFileJanitorRoutes(mux, s)
 	registerBackupRecoveryRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
@@ -1421,7 +1422,23 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries/{index}/promote", s.Handlers.WorkspaceMemory.PromoteEntry)
+		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/memory/settings", s.Handlers.WorkspaceMemory.UpdateSettings)
 	}
+}
+
+// registerExternalMemoryRoutes registers the Profile page's Connected memory
+// endpoints over the read-only mirror of other agents' memory.
+func registerExternalMemoryRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.ExternalMemory == nil {
+		return
+	}
+	mux.HandleFunc("GET /api/external-memory/sources", s.Handlers.ExternalMemory.GetSources)
+	mux.HandleFunc("PATCH /api/external-memory/sources/{source}", s.Handlers.ExternalMemory.PatchSource)
+	mux.HandleFunc("POST /api/external-memory/sources/claude_account/paste", s.Handlers.ExternalMemory.PasteClaudeAccount)
+	mux.HandleFunc("GET /api/external-memory/export/claude", s.Handlers.ExternalMemory.GetClaudeExport)
+	mux.HandleFunc("POST /api/external-memory/sync", s.Handlers.ExternalMemory.Sync)
+	mux.HandleFunc("GET /api/external-memory/entries", s.Handlers.ExternalMemory.GetEntries)
+	mux.HandleFunc("POST /api/external-memory/entries/{id}/promote", s.Handlers.ExternalMemory.PromoteEntry)
 }
 
 // registerFileJanitorRoutes registers the workspace-scoped Downloads

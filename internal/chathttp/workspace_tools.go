@@ -78,6 +78,11 @@ type WorkspaceToolProvider struct {
 	// HQ tools need. The source factory deliberately resolves stores when the
 	// tool runs, after server construction has finished wiring its stores.
 	hqVisibility HQVisibilityDeps
+
+	// externalRecall, when set, enables memory_recall over the mirror of other
+	// agents' memory. Only the chat handler sets it, and only for the personal
+	// assistant's own turns (external_memory.go); task runs never do.
+	externalRecall ExternalMemoryReader
 }
 
 // HQVisibilityDeps supplies the read-only inputs shared by Personal HQ
@@ -220,6 +225,9 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	}
 	if p.hqVisibility.ProposeGlobal != nil {
 		tools = append(tools, p.memoryProposeGlobalTool())
+	}
+	if p.externalRecall != nil {
+		tools = append(tools, p.memoryRecallTool())
 	}
 	if p.userStore != nil {
 		tools = append(tools, p.profileSetTool())

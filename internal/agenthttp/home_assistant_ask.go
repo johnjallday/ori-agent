@@ -273,7 +273,10 @@ type HomeAssistantAskHandler struct {
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool
-	now                     func() time.Time
+	// ExternalMemory searches the mirror of other agents' memory for the hired
+	// assistant's memory_recall tool; nil offers no such tool.
+	ExternalMemory ExternalMemoryRecaller
+	now            func() time.Time
 }
 
 // NewHomeAssistantAskHandler builds the handler from its data sources.
@@ -647,11 +650,12 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		// turn, so the assistant revises what is stored now, not a stale reply.
 		savedDraft, draftContext := h.savedDraftPromptContext(req.Draft, workContext)
 		answer, err := h.runModel(ctx, modelTurn{
-			system:      buildAssistantConversationSystemPrompt(workContext),
-			history:     history,
-			user:        buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft + linkTurnFrom(ctx).prompt(),
-			sources:     promptSources,
-			temperature: 0.6,
+			system:         buildAssistantConversationSystemPrompt(workContext),
+			history:        history,
+			user:           buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft + linkTurnFrom(ctx).prompt(),
+			sources:        promptSources,
+			temperature:    0.6,
+			externalRecall: workContext.MayRecallExternalMemory(),
 		})
 		if err != nil {
 			resp := h.conversationModelUnavailable(ctx, prompt, intent, workContext, conversation, err)
@@ -800,11 +804,12 @@ func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, in
 	// The behavior naturally turns off once they create their first workspace.
 	firstRun := snapshot.Meta.WorkspaceCount == 0
 	return h.runModel(ctx, modelTurn{
-		system:      buildHomeSystemPromptWithAssistant(firstRun, workContext),
-		history:     history,
-		user:        buildHomeUserPromptWithAssistant(prompt, intent, snapshot, workContext),
-		sources:     promptSources,
-		temperature: 0.3,
+		system:         buildHomeSystemPromptWithAssistant(firstRun, workContext),
+		history:        history,
+		user:           buildHomeUserPromptWithAssistant(prompt, intent, snapshot, workContext),
+		sources:        promptSources,
+		temperature:    0.3,
+		externalRecall: workContext.MayRecallExternalMemory(),
 	})
 }
 
@@ -821,6 +826,9 @@ type modelTurn struct {
 	user        string
 	sources     HomeSnapshotSources
 	temperature float64
+	// externalRecall offers memory_recall: set only for the hired, active
+	// assistant's own turns.
+	externalRecall bool
 }
 
 // runModel sends one turn to the configured system model with the read-only
@@ -851,6 +859,10 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	operations := operationTurnFromContext(ctx)
 	if operations != nil {
 		registry = &operationRegistry{base: registry, turn: operations}
+	}
+	recallOffered := turn.externalRecall && h.ExternalMemory != nil && provider.Capabilities().SupportsTools
+	if recallOffered {
+		registry = &externalMemoryRegistry{base: registry, recall: h.ExternalMemory}
 	}
 	// A reader is offered only on a path that can run it; the prompt then says
 	// exactly which readers exist, so no path claims a read it cannot make.
@@ -888,8 +900,12 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if research != nil && research.result != nil {
 		researchEvidence = researchReferencePrompt(*research.result)
 	}
+	recallPrompt := ""
+	if recallOffered {
+		recallPrompt = externalRecallPrompt
+	}
 	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence+
-		reviewedIntegrationTurnFromContext(ctx).referencePrompt()+folderPathTurnFromContext(ctx).referencePrompt()))
+		reviewedIntegrationTurnFromContext(ctx).referencePrompt()+folderPathTurnFromContext(ctx).referencePrompt()+recallPrompt))
 	if len(tools) == 0 && scope != nil {
 		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}

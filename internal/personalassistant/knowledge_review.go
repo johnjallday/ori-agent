@@ -46,6 +46,11 @@ type KnowledgeReviewSource struct {
 	Agent         string     `json:"agent,omitempty"`
 	TaskID        string     `json:"task_id,omitempty"`
 	ObservedAt    *time.Time `json:"observed_at,omitempty"`
+	// External names the other agent (codex, claude_code, gemini_cli,
+	// claude_account) of a fact promoted from the external memory mirror, and
+	// ExternalEntryID the mirror entry it came from.
+	External        string `json:"external,omitempty"`
+	ExternalEntryID string `json:"external_entry_id,omitempty"`
 }
 
 // KnowledgeInterviewSourceKind is the review display kind of an explicit fact
@@ -58,7 +63,8 @@ func knowledgeReviewSource(item KnowledgeItem, interviewed map[string]bool) Know
 		source.Kind = KnowledgeInterviewSourceKind
 	}
 	if item.SourceKind == "explicit" {
-		// A fact the user promoted from a workspace names that workspace.
+		// A fact the user promoted from a workspace names that workspace; one
+		// promoted from another agent's memory names that agent and entry.
 		for _, revision := range item.Revisions {
 			for _, evidence := range revision.Evidence {
 				if evidence.SourceKind == WorkspacePromoteSourceKind && evidence.SourceID != "" {
@@ -68,6 +74,18 @@ func knowledgeReviewSource(item KnowledgeItem, interviewed map[string]bool) Know
 						source.ObservedAt = &observed
 					}
 					return source
+				}
+				if evidence.SourceKind == ExternalMemorySourceKind {
+					rest, ok := strings.CutPrefix(evidence.SourceID, "external:")
+					external, entryID, found := strings.Cut(rest, ":")
+					if ok && found && external != "" && entryID != "" {
+						source.External, source.ExternalEntryID = external, entryID
+						if !evidence.ObservedAt.IsZero() {
+							observed := evidence.ObservedAt
+							source.ObservedAt = &observed
+						}
+						return source
+					}
 				}
 			}
 		}

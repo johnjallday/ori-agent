@@ -40,6 +40,26 @@ test('normalizeTagList enforces the tag cap', () => {
   assert.match(result.error, /At most 20 tags/);
 });
 
+test('normalizeTagList accepts a case-preserving normalizer for paths', () => {
+  const trim = value => String(value ?? '').trim();
+  const result = normalizeTagList([' ~/Projects/BTC ', '~/Projects/BTC', '~/projects/btc'], {
+    normalize: trim,
+    maxTagLength: 1024
+  });
+  assert.deepEqual(result, { tags: ['~/Projects/BTC', '~/projects/btc'], error: '' });
+});
+
+test('filterSuggestions matches and excludes case-sensitive pool values ignoring case', () => {
+  const folders = [
+    { name: '~/Projects/BTC-Lab', total: 4 },
+    { name: '~/Projects/notes', total: 2 }
+  ];
+  assert.deepEqual(filterSuggestions(folders, { query: 'btc' }), ['~/Projects/BTC-Lab']);
+  assert.deepEqual(filterSuggestions(folders, { query: '', exclude: ['~/Projects/BTC-Lab'] }), [
+    '~/Projects/notes'
+  ]);
+});
+
 test('filterSuggestions matches substrings and ranks prefix matches first', () => {
   const names = filterSuggestions(pool, { query: 'm' });
   // Prefix matches (music, mixing, mastering) before substring-only ones.

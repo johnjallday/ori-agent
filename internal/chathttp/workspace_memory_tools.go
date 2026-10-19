@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/externalmemory"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -144,6 +145,33 @@ func (p *WorkspaceToolProvider) memoryForgetTool() toolapi.Tool {
 				"removed": removed,
 				"message": fmt.Sprintf("Removed from workspace memory: %q", removed.Text),
 			})
+		},
+	}
+}
+
+// --- memory_recall (personal assistant only; read-only) ---
+
+// SetExternalMemoryRecall enables memory_recall. Only the chat handler calls
+// it, for the personal assistant's own turns.
+func (p *WorkspaceToolProvider) SetExternalMemoryRecall(reader ExternalMemoryReader) {
+	if p != nil {
+		p.externalRecall = reader
+	}
+}
+
+func (p *WorkspaceToolProvider) memoryRecallTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{
+			Name:        workspace.MemoryRecallToolName,
+			Description: externalmemory.RecallToolDescription,
+			Parameters:  externalmemory.RecallToolParameters(),
+		},
+		call: func(_ context.Context, args string) (string, error) {
+			q, err := externalmemory.ParseRecallArgs(args)
+			if err != nil {
+				return "", err
+			}
+			return p.externalRecall.Recall(q), nil
 		},
 	}
 }
