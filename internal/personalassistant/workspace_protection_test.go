@@ -58,7 +58,7 @@ func TestWorkspaceProtectionHidesOtherOwnersAndMissingWorkspaces(t *testing.T) {
 	if fact, err := service.WorkspaceProtection(context.Background(), "local", "mine"); err != nil || fact == nil || fact.State != backuprecovery.CoverageNotCovered {
 		t.Fatal(fact, err)
 	}
-	var unwired *TodayService = NewTodayService(stubTodayRelationship{}, stubTodayBrief{}, workspace.NewInMemoryStore(), stubTodayFollowUps{})
+	unwired := NewTodayService(stubTodayRelationship{}, stubTodayBrief{}, workspace.NewInMemoryStore(), stubTodayFollowUps{})
 	if _, err := unwired.WorkspaceProtection(context.Background(), "local", "mine"); !errors.Is(err, ErrRepairNeeded) {
 		t.Fatal(err)
 	}

@@ -899,6 +899,39 @@ the "external-only is not off-site protection" disclaimer stays.
 `internal/backuprecovery/testdata/timemachine/`; the real read is a manual
 acceptance recorded with its host.
 
+**Implementation.** Helper mode `timemachine-v1` (Ori's own pinned helper
+image, the same validated product-build pin as restic). The configuration holds
+sources only; a Time Machine review refuses any credential, volume or
+repository, and the read is never handed a usable credential callback. Time
+Machine snapshots declare no paths (restic snapshots still must). A bounded
+`bplist00` reader parses the binary preferences without a new dependency.
+Observations keep the destination identities, the exclusion lists and each
+source's inclusion state privately; projections carry fixed states and counts.
+
+**Acceptance on the validated host (2026-10-19).** With the opt-in test
+`TestTimeMachineHelperLiveReadOnValidatedHost` the real verbs ran under the
+real profile: `status -X` returned `Percent` (the backupd rule is effective),
+`destinationinfo -X` parsed with no destination, the preferences read was
+refused for missing Full Disk Access (degraded mode), and `tmutil status -X`
+was identical before and after. Not yet exercised: a configured destination,
+completed-backup dates, capacity and a deliberately excluded folder, which
+need Time Machine set up and Full Disk Access granted to the app running Ori.
+
+### Folder coverage
+
+`ReadFolderCoverage` compares host-supplied adopted folders (the workspace's
+project-entry or primary linked directory, and a Home's active library roots;
+never capability-owned references, File Janitor roots or a workspace's own
+managed folder) with stored configuration sources in one read transaction,
+capped at 32 folders. A folder is covered when a configured source is the
+folder or an ancestor (exact path ancestry, no link resolution) and that
+configuration's current observation has a completed backup; Time Machine
+additionally requires readable preferences and no exclusion. Stale, historical,
+clock-suspect, removal-pending or unreadable evidence is unknown, never a
+not-covered claim. The result returns workspace identities, fixed reasons,
+provider ids and completion times only; Today, the workspace fact and the
+entry agent's compiled fact line are rendered from it by the host.
+
 ## Implementation and acceptance gates
 
 Freeze resolves design/feasibility, not all later implementation tests:

@@ -2076,6 +2076,86 @@ Chat and task runs in a workspace with a linked directory get two tools:
 
 Both are read-only; nothing here writes to a linked directory.
 
+## Folder Protection API
+
+Stored-only reads of whether adopted folders are in a backup Ori observes (see
+`docs/backup-and-recovery.md`). None of them reads a backup provider, checks a
+drive, or returns a path, volume or repository identifier.
+
+### Today's protection line
+
+`GET /api/personal-assistant/today` carries at most one item of `kind`
+`backup_coverage` in `backups.items` (and `needs_you.items`), outside the cap
+of five per-configuration problems: `title` (fixed wording, e.g. `"3 project
+folders have no backup Ori can see"` or `"1 of your 2 project folders is not
+covered by a backup Ori observes"`), `detail` (up to three workspace names,
+then `+N more`), `attribution` `"Backup & Recovery"`, `state` `"not_covered"`,
+`actions` `["not_now"]`, and `route`: `/?protect=folders` (the chooser) when no
+Backup & Recovery workspace is in scope, otherwise
+`/workspaces/{slug}?panel=backup-recovery&tab=overview&section=coverage`.
+
+### Decline the Protection Line
+
+**Endpoint:** `POST /api/personal-assistant/today/backup-coverage/decline`
+
+No body (`{}` is accepted; any other data is `400`). Records "Not now" for the
+domain `backup` in the folder digest. The server reads the current uncovered
+count itself: a first decline below five revives once when five folders are
+uncovered; a decline at five or more, or a second decline, is final. `503`
+when the decline cannot be recorded.
+
+### Protection Options
+
+**Endpoint:** `GET /api/personal-assistant/protection-options`
+
+```json
+{ "protection_options": { "time_machine": { "platform_supported": true }, "restic": { "platform_supported": true } } }
+```
+
+Build facts for the "Protect your folders" chooser: no drive, folder or OS
+query.
+
+### Workspace Protection Fact
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/protection`
+
+```json
+{
+  "protection": {
+    "state": "covered",
+    "reason": "completed_backup_observed",
+    "provider": "time_machine",
+    "provider_label": "Time Machine",
+    "covering": { "id": "…", "slug": "backup-recovery", "name": "Backup & Recovery" },
+    "last_completed_at": "2026-10-18T19:00:00Z",
+    "sentence": "Protected by Time Machine in Backup & Recovery, last completed backup 14 h ago",
+    "route": "/workspaces/backup-recovery?panel=backup-recovery&tab=overview&section=coverage",
+    "route_label": "Open Backup & Recovery",
+    "as_of": "2026-10-19T09:00:00Z"
+  }
+}
+```
+
+`state` is `covered`, `not_covered` or `unknown`; `reason` is a fixed code
+(`completed_backup_observed`, `no_configuration`, `not_in_any_source`,
+`no_completed_backup_observed`, `source_excluded`, `evidence_stale`,
+`evidence_unavailable`, `configuration_unavailable`, `permission_required`).
+`protection` is `null` for a workspace with no adopted folder. Computed over
+the saved Daily Brief scope plus this workspace. `404` for another owner's or
+an unknown workspace; `Cache-Control: no-store`.
+
+### Backup & Recovery provider selection
+
+`GET /api/workspaces/{workspaceID}/backup-recovery/settings` adds `provider`
+(the saved one) and `providers`: `[{ "id": "time_machine", "label": "Time
+Machine", "available": true }, { "id": "restic", … }]`, with `reason`
+`platform_unsupported` or `reader_unavailable` when one cannot be used.
+`POST …/backup-recovery/review` accepts `"provider": "time_machine"` with
+`source_selections` (or `use_saved_selection`) only; any credential, volume or
+repository selection is `400`. Status gains `provider` and, for Time Machine,
+`time_machine` (`permission_required`, `destinations`, `mounted_destinations`,
+`excluded_sources`, `unknown_sources`, `running`, `source_states`).
+
 ## Personal Assistant Interview API
 
 The optional three-question interview (contract in `docs/architecture/personal-assistant-foundation-contract.md`). Its first question, "What's the main thing you're working on right now?", can be answered by showing the assistant a folder: the scan proposes wording, the user confirms or edits it, and nothing is saved before the wizard's Save (`POST /api/personal-assistant/knowledge/interview/save`). Available only once Personal HQ is built (`409` otherwise).
