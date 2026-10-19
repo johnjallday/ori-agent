@@ -20,7 +20,7 @@ func ResetRecordTables() []string {
 		"continuity_dirty", "continuity_operations", "continuity_attachments",
 		"continuity_components", "continuity_records", "continuity_installs", "continuity_projections", "continuity_retained_records", "continuity_file_mutations", "followup_continuity_source_refs",
 		// Encrypted local credentials/grants are not part of retained folders.
-		"workspace_local_config",
+		"workspace_local_config", "backup_recovery_local", "backup_recovery_receipts", "backup_recovery_authority",
 		"users", "user_preference_revisions", "workspaces", "sessions", "messages", "session_tags", "tool_calls",
 		"assistant_conversation_checkpoints", // disposable Session-owned derived context, never retained memory
 		"assistant_arrangements",             // device-local inert drafts, before their owning messages/sessions

@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/continuityprep"
@@ -61,6 +62,7 @@ type Server struct {
 	// closing process keeps dispatching work.
 	workspacePlanAuto        *workspaceplan.AutoRunner
 	fileJanitorAutomation    *filejanitor.Automation
+	backupRecoveryService    *backuprecovery.Service
 	blueprintReintake        *blueprintintake.ReintakeAutomation
 	assistantSetupRetries    *assistantsetup.RetryRunner
 	workspaceSurfaceServices *workspacesurface.ServiceManager
@@ -86,10 +88,12 @@ type Server struct {
 	// the CLIs read; it follows memory writes once the server is serving.
 	memoryContext *workspace.MemoryContextWriter
 
-	shutdownOnce   sync.Once
-	shutdownErr    error
-	resetCloseOnce sync.Once
-	resetCloseErr  error
+	shutdownOnce      sync.Once
+	shutdownErr       error
+	shutdownFinalOnce sync.Once
+	shutdownFinalErr  error
+	resetCloseOnce    sync.Once
+	resetCloseErr     error
 }
 
 func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
@@ -222,6 +226,20 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) shutdownBackground(ctx context.Context) error {
+	// Retryable, before once-only closure: an ambiguous metadata child/request
+	// retains ownership and must never have stores or the process lease closed
+	// behind it. No new backup request is admitted once Close begins.
+	if s.backupRecoveryService != nil {
+		drainCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := s.backupRecoveryService.Close(drainCtx)
+		cancel()
+		if err != nil {
+			if s.resetLease != nil {
+				s.resetLease.MarkUncertain()
+			}
+			return err
+		}
+	}
 	s.shutdownOnce.Do(func() {
 		// Stop plugin source checks before workspace plugin services. A check may
 		// be waiting on the manager operation gate while a service mutation completes.
@@ -267,22 +285,25 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 			s.Storage.LocationManager.Stop()
 		}
 
-		// The loops are stopped, but the writers they or a request admitted
-		// through the gate may still be finishing: a task's tail after its
-		// status flipped, every event subscriber persisting what that
-		// completion meant. Nothing above stops or joins them, so let them
-		// finish before anything they write to is closed behind this call.
-		s.shutdownErr = errors.Join(s.shutdownErr, s.waitForAdmittedWork(ctx))
-
+	})
+	if s.shutdownErr != nil {
+		return s.shutdownErr
+	}
+	// Do not cache a timed-out join inside sync.Once. Dependency closure is a
+	// separate once-only phase, reached only after a successful, retryable join.
+	if err := s.waitForAdmittedWork(ctx); err != nil {
+		return err
+	}
+	s.shutdownFinalOnce.Do(func() {
 		// The helper can only call back through fenced ordinary HTTP, but ask it
 		// to exit before destructive application anyway.
-		s.shutdownErr = errors.Join(s.shutdownErr, workspace.ShutdownFolderPicker(ctx))
+		s.shutdownFinalErr = errors.Join(s.shutdownFinalErr, workspace.ShutdownFolderPicker(ctx))
 
 		if s.Core != nil && s.Core.Gateway != nil {
-			s.shutdownErr = errors.Join(s.shutdownErr, s.Core.Gateway.Shutdown(ctx))
+			s.shutdownFinalErr = errors.Join(s.shutdownFinalErr, s.Core.Gateway.Shutdown(ctx))
 		}
 	})
-	return s.shutdownErr
+	return s.shutdownFinalErr
 }
 
 // waitForAdmittedWork joins finite work the reset gate admitted, bounded by

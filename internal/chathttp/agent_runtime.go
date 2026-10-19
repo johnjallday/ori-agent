@@ -108,6 +108,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 	}
 
 	if err != nil {
+		if errors.Is(err, workspace.ErrBackupAdvisorRuntime) {
+			return nil, err
+		}
 		if errors.Is(err, workspace.ErrAgentPaused) {
 			return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
 		}

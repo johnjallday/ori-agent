@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/getlantern/systray"
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/environ"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -38,6 +39,12 @@ var menuPortCheck = ensurePortAvailableForStart
 var menuInputDialog = showInputDialog
 
 func main() {
+	// The embedded server uses this same image for metadata helpers. Exit before
+	// shell settings, credentials, logging, ports or native UI initialization.
+	if handled, code := backuprecovery.RunHelperProcess(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+
 	// Expand PATH to include common development tool locations
 	// This ensures tools like codex, go, node are available when launched from macOS app bundle
 	environ.ExpandPath()

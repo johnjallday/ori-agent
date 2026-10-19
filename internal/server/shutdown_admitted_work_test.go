@@ -81,6 +81,10 @@ func TestShutdownStopsWaitingForStuckAdmittedWorkAndReportsIt(t *testing.T) {
 	if got := g.Snapshot(); got.Fenced || got.Active != 1 {
 		t.Fatalf("gate after bounded shutdown: %+v", got)
 	}
+	release()
+	if err := s.shutdownBackground(t.Context()); err != nil {
+		t.Fatalf("completed work could not retry shutdown: %v", err)
+	}
 }
 
 // No gate means nothing to join; a Server built without one shuts down as before.

@@ -101,5 +101,6 @@ func BuiltinDefinitions() []Definition {
 	return []Definition{
 		FileJanitorDefinition(),
 		SampleLibraryDefinition(),
+		BackupRecoveryDefinition(),
 	}
 }

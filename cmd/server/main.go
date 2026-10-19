@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/environ"
 	"github.com/johnjallday/ori-agent/internal/gateway/channels/console"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -35,6 +36,12 @@ var startupBeforeStores = settingsreset.BeforeStores
 var startupServer = server.NewWithResetLease
 
 func main() {
+	// Private metadata children must never initialize dotenv, application
+	// persistence, native secret discovery, HTTP ports or browser launching.
+	if handled, code := backuprecovery.RunHelperProcess(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+
 	// Load .env from the working directory (if present) before anything reads
 	// os.Getenv, so local secrets don't need to be exported in the shell.
 	environ.LoadDotEnv(".")

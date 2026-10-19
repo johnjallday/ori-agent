@@ -130,6 +130,12 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		return nil, fmt.Errorf("agent runtime resolver is not configured")
 	}
 
+	// The advisor never enters the generic core/filesystem/toolbox resolver.
+	// Its sole supported execution path uses compiled stored facts and an
+	// isolated text-only provider request before any generic chat routing.
+	if BackupAdvisorRuntimeRestricted(r.workspaceStore, workspaceID, agentName, r.agentStore) {
+		return nil, ErrBackupAdvisorRuntime
+	}
 	var baseAgent *agent.Agent
 	fromCopy := false
 	if strings.TrimSpace(workspaceID) != "" && r.workspaceStore != nil {

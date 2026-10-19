@@ -7,12 +7,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
+	"github.com/johnjallday/ori-agent/internal/backuprecoveryhttp"
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakewizard"
@@ -442,6 +445,8 @@ type ServerBuilder struct {
 	fileJanitorHandler    *filejanitorhttp.Handler
 	fileJanitorService    *filejanitor.Service
 	fileJanitorAutomation *filejanitor.Automation
+	backupRecoveryService *backuprecovery.Service
+	backupRecoveryHandler *backuprecoveryhttp.Handler
 	// fileJanitorCapabilityRuntime is held so a later wiring phase can give it
 	// the automation it needs for removal (see wireFileJanitorAutomation).
 	fileJanitorCapabilityRuntime *filejanitor.CapabilityRuntime
@@ -565,6 +570,11 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	}
 	constructed := false
 	defer func() {
+		if !constructed && b.backupRecoveryService != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = b.backupRecoveryService.Close(ctx)
+			cancel()
+		}
 		if !constructed && b.resetLease != nil {
 			// Earlier phases may already own writers/children. A failed build
 			// cannot be treated as a clean, freely retryable runtime boundary.
@@ -718,6 +728,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
 	b.server.Workflow.MapActivityTracker = b.mapActivityTracker
 	b.server.fileJanitorAutomation = b.fileJanitorAutomation
+	b.server.backupRecoveryService = b.backupRecoveryService
 	b.server.blueprintReintake = b.blueprintReintake
 	b.server.assistantSetupRetries = b.assistantSetupRetries
 
@@ -784,6 +795,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		MapActivity:           b.mapActivityHandler,
 		OriGuide:              b.oriGuideHandler,
 		FileJanitor:           b.fileJanitorHandler,
+		BackupRecovery:        b.backupRecoveryHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		WorkspaceSurfaces:     b.workspaceSurfaceHandler,
 		WorkspaceMap:          b.workspaceMapHandler,

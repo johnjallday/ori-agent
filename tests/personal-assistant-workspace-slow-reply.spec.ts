@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // A reply can take several model calls, and a CLI provider takes ten seconds or
 // more for each, so a real answer often needs longer than 30 seconds. The
@@ -91,6 +92,9 @@ test('wt demo: a reply slower than 30 seconds still arrives, and a failure names
   await page.goto(`/workspaces/${group.folder_slug}/canvas`);
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
   if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
+  // The group has a Commander, so the drawer opens as it; this is about the
+  // hired assistant's own slow reply.
+  await talkToPersonalAssistant(page);
   await expect(label).toHaveText('Context · Group: Music portfolio slow fixture');
 
   // 1. The provider holds the reply to an ordinary question for longer than the

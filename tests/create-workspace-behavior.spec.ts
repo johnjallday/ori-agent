@@ -1209,8 +1209,12 @@ test('agent setup remains keyboard-safe and readable at narrow widths in both th
   await advanceToTeam(page);
   const roleRow = page.locator('#workspaceRoleRoster .ws-role-row').first();
   const opener = roleRow.getByRole('button', { name: 'Create an agent for Narrow Lead' });
-  await opener.focus();
-  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => page.evaluate(() => (window as any).sessionManager.teamView()?.planStatus))
+    .toBe('ready');
+  // Resolve/focus the current reviewed row and send Enter together, rather
+  // than typing on a stale node replaced between separate focus/key calls.
+  await opener.press('Enter');
 
   for (const theme of ['dark', 'light']) {
     await page.evaluate(
@@ -1274,7 +1278,12 @@ test('required roles are explicit while optional roles may remain empty', async 
   await expect(rows.nth(1).locator('.ws-role-tag')).toHaveText('Optional');
   await expect(rows.nth(2).locator('.ws-role-tag')).toHaveText('Optional');
   await rows.nth(0).getByRole('button', { name: 'Create an agent for Lead' }).click();
+  await expect(page.locator('#addAgentModal')).toBeVisible();
+  // The shown-modal handler owns initial focus; let it settle before typing
+  // into another field rather than racing its autofocus back to Agent Name.
+  await expect(page.locator('#agentName')).toBeFocused();
   await page.locator('#agentSystemPrompt').fill('Individually reviewed.');
+  await expect(page.locator('#agentSystemPrompt')).toHaveValue('Individually reviewed.');
   await page.locator('#createAgentBtn').click();
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(rows.nth(0)).toContainText('Lead');

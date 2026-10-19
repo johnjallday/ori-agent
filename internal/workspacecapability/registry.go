@@ -36,6 +36,13 @@ type Remover interface {
 	OnCapabilityRemove(workspaceID string) error
 }
 
+// RemovalFence is an optional final check under the canonical workspace update
+// lock. It prevents an old, drained removal from dropping a newly installed
+// generation while another retry completes. It must perform no external work.
+type RemovalFence interface {
+	ValidateCapabilityRemoval(workspaceID string) error
+}
+
 // AutomationController is an optional Runtime capability that can stop a
 // capability's registered watcher and schedule. Removal and revoke must stop
 // automation before releasing access so no event races the teardown (FR-26,

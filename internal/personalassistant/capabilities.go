@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/emailsetup"
 	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -68,9 +69,11 @@ type EmailCapabilityReader interface {
 }
 
 type CapabilityService struct {
-	relationships *Service
-	workspaces    workspace.Store
-	email         EmailCapabilityReader
+	relationships    *Service
+	workspaces       workspace.Store
+	email            EmailCapabilityReader
+	backups          dailybrief.BackupSource
+	backupWorkspaces dailybrief.WorkspaceSource
 }
 
 func NewCapabilityService(relationships *Service, workspaces workspace.Store, email EmailCapabilityReader) *CapabilityService {
@@ -95,6 +98,9 @@ func (s *CapabilityService) Get(ctx context.Context, userID string) (*Capability
 	cards := []CapabilityCard{emailCard}
 	workspaceCards, domainWorkspaceExists := s.workspaceCapabilityCards(userID, relationship.HQWorkspaceID, entry, hasSpecialist)
 	cards = append(cards, workspaceCards...)
+	if s.backups != nil {
+		cards = append(cards, s.backupCapabilityCard(ctx, userID, relationship))
+	}
 	projection := &CapabilityProjection{State: string(relationship.State), Cards: cards}
 	if !hasSpecialist {
 		return projection, nil

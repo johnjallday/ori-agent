@@ -127,6 +127,8 @@ model_categories.json
 *~
 .backup-*/
 backup-*/
+# Shipped template source, not a local backup artifact.
+!internal/projecttemplates/starter/backup-and-recovery/
 
 # Local development files
 .local/

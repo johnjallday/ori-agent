@@ -60,7 +60,7 @@ func TestActiveStarterTemplatesShipBoundedGoals(t *testing.T) {
 		})
 		covered[id] = true
 	}
-	if len(covered) != 11 || !covered["code-project"] || !covered["writing-project"] {
+	if len(covered) != 12 || !covered["code-project"] || !covered["writing-project"] || !covered["backup-and-recovery"] {
 		t.Fatalf("active starter coverage changed: %v; review the shipped catalog", covered)
 	}
 	retired, err := FindLibraryTemplate(dir, "downloads-janitor")
