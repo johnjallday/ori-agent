@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // Production browser, Route/Ask/Review/Decide, Ollama adapter and canonical
 // stores under `wt demo`. Only the loopback provider's reply text is fixed, so
@@ -94,6 +95,9 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   const openDrawer = async () => {
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
+    // The group has a Commander, so the drawer opens as it; these are the
+    // Personal Assistant's turns.
+    await talkToPersonalAssistant(page);
   };
   const attachDocuments = async () => {
     await page.locator('#personalAssistantFolderChip').click();
