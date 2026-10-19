@@ -694,6 +694,220 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   flex: 1;
 }
 
+/* Avatar, name and sub-line. With more than one recipient the name is a menu
+   button whose hit area is stretched over the whole block, so the heading
+   keeps its semantics and the block is still one target (FR8). */
+.personal-assistant-panel__identity {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  border-radius: 12px;
+}
+
+.personal-assistant-panel__identity:has(.personal-assistant-panel__recipient:not([hidden])):hover {
+  background: var(--ori-paper);
+}
+
+.personal-assistant-panel__name[hidden],
+.personal-assistant-panel__recipient[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__recipient {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__recipient::after {
+  position: absolute;
+  inset: -4px;
+  border-radius: 12px;
+  content: "";
+}
+
+.personal-assistant-panel__recipient:focus-visible {
+  outline: none;
+}
+
+.personal-assistant-panel__recipient:focus-visible::after {
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: 0;
+}
+
+.personal-assistant-panel__recipient > .personal-assistant-panel__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-panel__recipient .bi {
+  flex: none;
+  font-size: 14px;
+  transition: transform 0.15s ease;
+}
+
+.personal-assistant-panel__recipient[aria-expanded="true"] .bi {
+  transform: rotate(180deg);
+}
+
+/* With the workspace's entry agent selected, the drawer shows its conversation
+   only. The hired assistant's own surfaces — Today, its folder and link flows,
+   reviews, setup cards, recovered requests and Operate Ori — belong to the
+   assistant's conversation and come back when it is selected again (FR17). */
+.personal-assistant-panel[data-recipient="workspace_entry"]
+  :is(
+    #personalAssistantToday,
+    #personalAssistantFolder,
+    #personalAssistantDraftReview,
+    #personalAssistantMemoryReview,
+    #personalAssistantRecoveredHandoff,
+    #assistantLedSetup,
+    #personalAssistantContextChooser,
+    #personalAssistantLinkField,
+    #personalAssistantContextProgress,
+    #personalAssistantFolderPreview,
+    #personalAssistantFolderDiscussionChooser,
+    #personalAssistantFolderSetupChoices,
+    #personalAssistantFolderHistorical,
+    #personalAssistantFolderReviewStatus,
+    #personalAssistantContextStatus,
+    #personalAssistantFolderFocus,
+    #personalAssistantExplorerToolbar,
+    #personalAssistantFolderExplorer,
+    #personalAssistantOperation
+  ) {
+  display: none;
+}
+
+/* The two recipients: the workspace's entry agent, then the hired assistant. */
+.personal-assistant-recipient-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 11;
+  display: grid;
+  width: min(320px, calc(100vw - 48px));
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+}
+
+.personal-assistant-recipient-menu[hidden] {
+  display: none;
+}
+
+.personal-assistant-recipient-menu__item {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.personal-assistant-recipient-menu__item:hover,
+.personal-assistant-recipient-menu__item:focus-visible {
+  background: var(--ori-paper);
+}
+
+.personal-assistant-recipient-menu__item:focus-visible,
+.personal-assistant-recipient-menu__fill:focus-visible {
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: -2px;
+}
+
+.personal-assistant-recipient-menu__item[aria-checked="true"] {
+  background: color-mix(in srgb, var(--pa-accent-text) 12%, transparent);
+}
+
+.personal-assistant-recipient-menu__item[aria-disabled="true"] {
+  color: var(--pa-ink-dim);
+  cursor: not-allowed;
+}
+
+.personal-assistant-recipient-menu__avatar {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+
+.personal-assistant-recipient-menu__avatar .agent-avatar {
+  --aa-size: 32px;
+  border-radius: 8px;
+}
+
+.personal-assistant-recipient-menu__copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.personal-assistant-recipient-menu__name,
+.personal-assistant-recipient-menu__role {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-recipient-menu__name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.personal-assistant-recipient-menu__role {
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+}
+
+.personal-assistant-recipient-menu__check {
+  flex: none;
+  color: var(--pa-accent-text);
+  visibility: hidden;
+}
+
+.personal-assistant-recipient-menu__item[aria-checked="true"]
+  .personal-assistant-recipient-menu__check {
+  visibility: visible;
+}
+
+.personal-assistant-recipient-menu__fill {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 4px 10px 6px 52px;
+  border-radius: 7px;
+  color: var(--pa-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-recipient-menu__fill[hidden] {
+  display: none;
+}
+
 .personal-assistant-panel__title {
   overflow: hidden;
   margin: 0;
@@ -719,6 +933,36 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/* Who wrote a workspace agent's reply: its avatar and name above the text. */
+.personal-assistant-message__author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: var(--pa-ink-dim);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.personal-assistant-message__author-avatar {
+  display: inline-flex;
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+/* The shared renderer sizes a portrait from --aa-size, not from its box. */
+.personal-assistant-message__author-avatar .agent-avatar {
+  --aa-size: 20px;
+  border-radius: 6px;
+}
+
+.personal-assistant-message__author-avatar:empty {
+  display: none;
 }
 
 /* What a reply read: a compact disclosure under the answer, closed by default. */
