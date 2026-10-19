@@ -32,6 +32,9 @@
   let workspaceId = '';
   let busy = false;
   let lastStatus = null;
+  let setupReview = null;
+  let setupReviewRequest = 0;
+  let statusRequest = 0;
   let lastBatch = null;
   let lastCandidates = [];
   // Assistant-led setup may link to the exact first-review batch. Keep that
@@ -244,10 +247,24 @@
     if (pending > 0) {
       return { id: 'review_ready', label: 'Review ready' };
     }
+    if (manualScansOnly(settings)) {
+      return { id: 'ready', label: 'Ready · Manual scans' };
+    }
     if (settings.paused) {
       return { id: 'paused', label: 'Paused' };
     }
     return { id: 'watching', label: 'Watching' };
+  }
+
+  function manualScansOnly(settings = {}) {
+    const decision = settings.setup_decision;
+    return Boolean(
+      decision?.mode === 'manual' &&
+      decision.root_id &&
+      decision.root_id === settings.root_id &&
+      settings.paused &&
+      (!settings.automation_approved_at || settings.automation_approved_at.startsWith('0001-'))
+    );
   }
 
   function disclosureList(rootLabel, filingRootName, dailyTime) {
@@ -1301,9 +1318,11 @@
       el(
         'p',
         'fj-setting-help',
-        settings.paused
-          ? 'Automatic scanning is paused. You can still scan on demand.'
-          : 'Watching this folder, with a daily catch-up.'
+        manualScansOnly(settings)
+          ? 'Ready · Manual scans. Watching and daily scans are off.'
+          : settings.paused
+            ? 'Automatic scanning is paused. You can still scan on demand.'
+            : 'Watching this folder, with a daily catch-up.'
       )
     );
     health.appendChild(readinessRows(lastStatus));
@@ -2175,10 +2194,15 @@
   // saves the user wondering whether pausing loses their pending review.
   function pauseControl(settings) {
     const paused = Boolean(settings && settings.paused);
+    if (manualScansOnly(settings) && !setupWizardOwnsSetup()) {
+      return el('span', 'fj-sub fj-sub-muted', 'Manual scans only. Monitoring is off.');
+    }
+    const needsApproval =
+      manualScansOnly(settings) || (paused && setupAwaitingAutomationApproval());
     const control = button(
       paused ? 'Resume watching' : 'Pause watching',
       'fj-btn fj-btn-secondary',
-      () => void setPaused(!paused)
+      () => (needsApproval ? window.SetupWizard?.open?.('automation') : void setPaused(!paused))
     );
     control.id = 'fileJanitorPause';
     control.setAttribute(
@@ -2192,13 +2216,12 @@
     // first. The control stays visible and says where the decision lives
     // (FR-56); scanning on demand is unaffected, because the user is the one
     // asking for each scan.
-    if (paused && setupAwaitingAutomationApproval()) {
-      control.textContent = 'Approve in setup';
+    if (needsApproval) {
+      control.textContent = manualScansOnly(settings) ? 'Review monitoring' : 'Approve in setup';
       control.setAttribute(
         'title',
         'Setup explains what folder watching and the daily scan do before turning them on.'
       );
-      control.onclick = () => window.SetupWizard?.open?.('automation');
     }
     return control;
   }
@@ -2437,6 +2460,7 @@
   }
 
   function render(status) {
+    statusRequest++;
     // Marks and selections belong to the folder that was on screen. Changing
     // the managed folder invalidates every one of them, so they are discarded
     // here — but ONLY then.
@@ -2493,14 +2517,19 @@
   // access to it. Either one missing means setup is unfinished.
   function isConfigured(status) {
     const settings = (status && status.settings) || {};
-    return Boolean(settings.root_path && settings.directory_reference_id);
+    return Boolean(
+      settings.root_path &&
+      settings.directory_reference_id &&
+      (!settings.access_revoked_at || settings.access_revoked_at.startsWith('0001-'))
+    );
   }
 
   // renderConsoleBody paints the console's active tab. It reuses the renderers
   // the inline panel already had: they address their hosts by id, so moving
   // those hosts into the console moves the surfaces with them.
   function renderConsoleBody(host, status) {
-    if (!isConfigured(status)) {
+    if (setupReview?.state === 'preparation_incomplete' || !isConfigured(status)) {
+      if (renderLinkedSetupReview(host)) return;
       // An unconfigured install opens straight into the real setup experience
       // — the wizard when the blueprint declares one, the folder card
       // otherwise. Never a placeholder, and never a second chooser beside the
@@ -2715,7 +2744,9 @@
     renderConsole();
     syncUrl();
     // A console opened from the Map may be showing status read minutes ago.
-    void refresh();
+    // Preparation already awaited a fresh canonical result; do not immediately
+    // disable it behind a redundant loading state on that handoff.
+    if (options.source !== 'folder-preparation') void refresh();
     notifySubscribers();
     openJanitorParcels(id);
     return true;
@@ -3164,6 +3195,260 @@
     return Boolean(status && status.applicable && status.state !== 'ready');
   }
 
+  async function loadSetupReview(choice) {
+    const id = wsId();
+    if (!id) return null;
+    const sequence = ++setupReviewRequest;
+    try {
+      const response = await fetch(
+        apiBase(id) + '/setup-review',
+        choice
+          ? {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(choice)
+            }
+          : undefined
+      );
+      const body = await response.json();
+      if (!response.ok)
+        throw new Error(body.error?.message || body.message || 'Could not review folder setup.');
+      if (sequence === setupReviewRequest && id === wsId()) {
+        setupReview = body.review || null;
+        if (
+          !choice &&
+          [
+            'review',
+            'choose_folder',
+            'preparation_incomplete',
+            'folder_unavailable',
+            'folder_conflict'
+          ].includes(setupReview?.state)
+        ) {
+          // The console and wizard can request the initial projection at once.
+          // Whichever read wins must repaint the current folder step too; an
+          // earlier superseded read cannot leave it on the picker fallback.
+          window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
+        }
+      }
+    } catch (error) {
+      if (sequence === setupReviewRequest) setupReview = null;
+      if (choice) throw error;
+    }
+    return setupReview;
+  }
+
+  async function landOnPreparedReview(result, ctx) {
+    linkedBatchID = result?.batch_id || '';
+    emptyReviewState = result?.outcome === 'no_eligible' ? 'no_proposals' : 'unscanned';
+    reviewStatusMessage =
+      result?.outcome === 'no_eligible'
+        ? 'Initial scan finished. No eligible files are ready for review. Files may still be settling; scan again when you choose.'
+        : 'Your first review is ready. Nothing was moved.';
+    busy = false;
+    ctx?.setBusy?.(false, '');
+    await window.SetupWizard?.refresh?.();
+    if (window.SetupWizard?.getStatus?.()?.state === 'ready') await window.SetupWizard.close?.();
+    await refresh();
+    open({ tab: 'review', source: 'folder-preparation' });
+    document.getElementById('fileJanitorConsoleTitle')?.focus();
+  }
+
+  // One host-rendered consent card serves the console and the existing wizard's
+  // folder step. A read never grants; only the explicit final button prepares.
+  function renderLinkedSetupReview(host, ctx) {
+    const review = setupReview;
+    if (
+      !review ||
+      ![
+        'review',
+        'choose_folder',
+        'preparation_incomplete',
+        'folder_unavailable',
+        'folder_conflict'
+      ].includes(review.state)
+    )
+      return false;
+    const card = el('section', 'fj-setup-review');
+    card.setAttribute('aria-label', 'Review File Janitor permissions');
+    card.appendChild(
+      el(
+        'h3',
+        'fj-title',
+        review.operation_id ? 'Finish preparing your review' : 'Use your attached folder'
+      )
+    );
+    const selectedFolder = (review.candidates || []).find(
+      item => item.reference_id === review.reference_id
+    );
+    const candidate = selectedFolder || (review.candidates || [])[0];
+    const message = el('p', 'fj-sub');
+    message.setAttribute('role', 'status');
+    message.setAttribute('aria-live', 'polite');
+    card.appendChild(message);
+    const repaint = async choice => {
+      message.textContent = 'Updating the permission review…';
+      try {
+        await loadSetupReview(choice);
+        if (!card.isConnected) return;
+        clear(host);
+        if (!renderLinkedSetupReview(host, ctx)) {
+          message.textContent = 'Setup changed. Close this review and open the current settings.';
+          host.appendChild(message);
+        }
+        host.querySelector('input, select, button')?.focus();
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    };
+    if ((review.candidates || []).length > 1) {
+      const label = el('label', 'fj-label', 'Attached folder');
+      const select = el('select', 'fj-input');
+      select.setAttribute('aria-label', 'Attached folder');
+      const placeholder = el('option', '', 'Choose which folder to tidy');
+      placeholder.value = '';
+      select.appendChild(placeholder);
+      review.candidates.forEach(item => {
+        const option = el('option', '', safeName(item.name) + ' — ' + item.path);
+        option.value = item.reference_id;
+        select.appendChild(option);
+      });
+      select.value = review.reference_id || '';
+      select.disabled = Boolean(review.operation_id) || busy;
+      select.addEventListener('change', () => {
+        if (select.value)
+          void repaint({ reference_id: select.value, monitoring: Boolean(review.monitoring) });
+      });
+      label.appendChild(select);
+      card.appendChild(label);
+    }
+    if (selectedFolder) {
+      card.appendChild(el('p', 'fj-setup-folder', safeName(selectedFolder.name)));
+      const details = el('details', 'fj-setup-details');
+      details.appendChild(el('summary', '', 'Folder details'));
+      details.appendChild(el('p', 'fj-setup-path', selectedFolder.path));
+      card.appendChild(details);
+    }
+    const terms = review.terms || {};
+    const disclosure = el('ul', 'fj-disclosure');
+    [
+      'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
+      'Scan top-level file names, types, sizes, and dates once. No file contents are opened.',
+      'Every move into Filed/ or action to Trash needs your separate approval.'
+    ].forEach(line => disclosure.appendChild(el('li', 'fj-disclosure-item', line)));
+    card.appendChild(disclosure);
+    const monitorLabel = el('label', 'fj-setup-monitor');
+    const monitor = el('input');
+    monitor.type = 'checkbox';
+    monitor.checked = Boolean(review.monitoring);
+    monitor.disabled = busy || Boolean(review.operation_id) || !review.reference_id;
+    monitor.addEventListener(
+      'change',
+      () => void repaint({ reference_id: review.reference_id, monitoring: monitor.checked })
+    );
+    monitorLabel.appendChild(monitor);
+    monitorLabel.appendChild(el('span', '', 'Also watch new arrivals and run a daily scan'));
+    card.appendChild(monitorLabel);
+    card.appendChild(
+      el(
+        'p',
+        'fj-sub fj-sub-muted',
+        review.monitoring
+          ? 'Watch top-level ' +
+              (terms.watch_events || []).join(' / ') +
+              ' events after a ' +
+              terms.debounce_seconds +
+              '-second delay; skip Filed/. Daily scan at ' +
+              terms.daily_scan_local_time +
+              ' (' +
+              terms.timezone +
+              '). Files still settling are excluded. Nothing moves automatically.'
+          : 'Manual scans only. No watcher or daily scan will run.'
+      )
+    );
+    if (review.state === 'folder_unavailable')
+      message.textContent =
+        'This attached folder is unavailable. Restore access or choose another folder.';
+    if (review.state === 'folder_conflict')
+      message.textContent =
+        'Another workspace already manages an overlapping folder. Choose another folder.';
+    const actions = el('div', 'fj-actions');
+    const confirm = button(
+      review.operation_id
+        ? 'Retry preparation'
+        : 'Use attached ' + safeName(candidate?.name, 'folder'),
+      'fj-btn fj-btn-primary',
+      async () => {
+        if (busy || !['review', 'preparation_incomplete'].includes(review.state)) return;
+        busy = true;
+        confirm.disabled = true;
+        monitor.disabled = true;
+        ctx?.setBusy?.(true, 'Preparing a metadata-only review…');
+        message.textContent = 'Preparing a metadata-only review…';
+        try {
+          const response = await fetch(apiBase(wsId()) + '/prepare-review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              reference_id: review.reference_id,
+              monitoring: Boolean(review.monitoring),
+              review_revision: review.review_revision
+            })
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok)
+            throw new Error(
+              body.error?.message ||
+                body.message ||
+                'Setup was saved but preparation stopped. Retry this workspace, not creation.'
+            );
+          await landOnPreparedReview(body.preparation?.result, ctx);
+        } catch (error) {
+          busy = false;
+          ctx?.setBusy?.(false, '');
+          await loadSetupReview();
+          if (setupReview?.state === 'prepared' && setupReview.result) {
+            await landOnPreparedReview(setupReview.result, ctx);
+            return;
+          }
+          // Re-render from fresh authority, not a closure over the failed review.
+          // A stale/revoked choice loses its retry rather than silently regranting.
+          clear(host);
+          message.textContent = error.message;
+          message.setAttribute('role', 'alert');
+          host.appendChild(message);
+          if (!renderLinkedSetupReview(host, ctx)) {
+            host.appendChild(
+              button('Open current settings', 'fj-btn fj-btn-secondary', () => {
+                void window.SetupWizard?.refresh?.();
+                void refresh();
+              })
+            );
+          }
+          host.querySelector('button')?.focus();
+        } finally {
+          busy = false;
+          ctx?.setBusy?.(false, '');
+        }
+      }
+    );
+    confirm.disabled = busy || !['review', 'preparation_incomplete'].includes(review.state);
+    actions.appendChild(confirm);
+    const change = button('Choose another folder', 'fj-btn fj-btn-secondary', () => {
+      if (busy) return;
+      if (ctx) void chooseFolder(ctx);
+      else {
+        clear(host);
+        renderSetupCard(host, lastStatus || {});
+      }
+    });
+    change.disabled = busy || Boolean(review.operation_id);
+    actions.appendChild(change);
+    card.appendChild(actions);
+    host.appendChild(card);
+    return true;
+  }
+
   // renderSetupEntry is the compact stand-in for the retired setup card: it
   // says what state setup is in and opens the wizard.
   function renderSetupEntry(host) {
@@ -3220,7 +3505,9 @@
 
     // What happens next, in the user's own words: a daily time they set, or a
     // plain statement that nothing is scheduled while paused.
-    if (settings.paused) {
+    if (manualScansOnly(settings)) {
+      parts.push('manual scans only');
+    } else if (settings.paused) {
       parts.push('automatic scanning paused');
     } else if (settings.daily_scan_local_time) {
       parts.push('next catch-up at ' + settings.daily_scan_local_time);
@@ -3534,11 +3821,19 @@
   async function refresh() {
     const id = wsId();
     if (!id) return;
+    const sequence = ++statusRequest;
     try {
       const response = await fetch(apiBase(id));
       if (!response.ok) throw new Error('status failed');
       const body = await response.json();
       const status = body.status;
+      if (sequence !== statusRequest || id !== wsId()) return;
+      if (status?.applies && (!isConfigured(status) || status.settings?.setup_preparation)) {
+        await loadSetupReview();
+      } else {
+        setupReview = null;
+      }
+      if (sequence !== statusRequest || id !== wsId()) return;
       render(status);
       if (status && status.applies && status.settings && status.settings.root_path) {
         await loadCategories();
@@ -3647,6 +3942,9 @@
       };
     }
     const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (manualScansOnly(settings)) {
+      return { applies: true, value: 'Ready', description: 'Manual scans only', tone: 'idle' };
+    }
     if (settings.paused) {
       return {
         applies: true,
@@ -3760,6 +4058,7 @@
   const directoryStepRenderer = {
     render(container, ctx) {
       if (!ownsStep(ctx.step)) return;
+      if (renderLinkedSetupReview(container, ctx)) return;
       const root = chosenRoot();
       const suggestion = (lastStatus && lastStatus.suggestion) || {};
 
@@ -3779,11 +4078,24 @@
       pick.id = 'fileJanitorWizardPick';
       actions.appendChild(pick);
       container.appendChild(actions);
+      if (!root) {
+        void loadSetupReview().then(() => {
+          if (!container.isConnected || busy) return;
+          const offer = el('div');
+          if (renderLinkedSetupReview(offer, ctx)) {
+            clear(container);
+            container.appendChild(offer);
+          }
+        });
+      }
     },
     primaryLabel(ctx) {
       if (!ownsStep(ctx.step)) return '';
       // Until a folder exists there is nothing to approve; the step's own
       // button is the action.
+      if (['review', 'preparation_incomplete'].includes(setupReview?.state)) {
+        return 'Confirm the folder review above';
+      }
       return chosenRoot() ? 'Continue' : 'Choose a folder to continue';
     },
     disablePrimary(ctx) {
@@ -3950,6 +4262,10 @@
       lastBatch = null;
       lastCandidates = [];
       expandedCandidates = new Set();
+      setupReview = null;
+      setupReviewRequest++;
+      statusRequest++;
+      busy = false;
     },
     _select: id => {
       selected.add(id);
@@ -3957,7 +4273,11 @@
     },
     // The wizard step renderers, exposed so their content can be asserted
     // without standing up the whole dialog.
-    _setupSteps: { directory: directoryStepRenderer, automation: automationStepRenderer }
+    _setupSteps: { directory: directoryStepRenderer, automation: automationStepRenderer },
+    _setSetupReview: review => {
+      setupReview = review;
+    },
+    _renderSetupReview: renderLinkedSetupReview
   };
 
   window.FileJanitorConsole = controller;

@@ -191,6 +191,9 @@ type Service struct {
 	// Setup is rare and user-initiated, so serializing the whole claim (check,
 	// grant, persist) costs nothing worth optimizing.
 	claimMu sync.Mutex
+	// prepareMu single-flights explicit setup confirmations. Setup is rare; a
+	// bounded service lock avoids a permanent per-workspace lock registry.
+	prepareMu sync.Mutex
 }
 
 // NewService wires the Janitor service to its settings store and the workspace
@@ -301,6 +304,8 @@ func (s *Service) ApproveAutomation(workspaceID string) (Status, error) {
 		if settings.AutomationApprovedAt.IsZero() {
 			settings.AutomationApprovedAt = s.clock()
 		}
+		recordMonitoringDecision(settings)
+		settings.SetupPreparation = nil
 		settings.Paused = false
 		settings.LastAssistedAutomation = nil
 		return nil
@@ -315,7 +320,11 @@ func (s *Service) ApproveAutomation(workspaceID string) (Status, error) {
 // where the user left off.
 func (s *Service) SetPaused(workspaceID string, paused bool) (Status, error) {
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		if err := refuseUnreviewedManualActivation(*settings, paused); err != nil {
+			return err
+		}
 		settings.Paused = paused
+		settings.SetupPreparation = nil
 		settings.LastAssistedAutomation = nil
 		return nil
 	}); err != nil {
@@ -464,11 +473,15 @@ type SetupRequest struct {
 	// Operation is supplied only by the owner-scoped assistant setup bridge.
 	// Manual File Janitor setup leaves it nil and retains its existing path API.
 	Operation *FolderGrantOperation
+	// Internal reviewed-link bindings; never accepted as arbitrary HTTP paths.
+	ExpectedRootIdentity string
+	DirectoryReferenceID string
 }
 
 type FolderGrantOperation struct {
-	RunID       string
-	OperationID string
+	RunID         string
+	OperationID   string
+	PreparationID string
 }
 
 // ConfirmSetup validates a confirmed folder selection and configures the
@@ -506,6 +519,12 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		operation.OperationID = strings.TrimSpace(operation.OperationID)
 		if operation.RunID == "" || operation.OperationID == "" {
 			return Status{}, setupErr(CodeFolderChanged, "This folder permission request is no longer current. Choose the folder again.", RepairChooseFolder, nil)
+		}
+		if err := s.validatePreparationBoundary(current, operation.PreparationID); err != nil {
+			return Status{}, err
+		}
+		if !current.AccessRevokedAt.IsZero() {
+			return Status{}, setupErr(CodeFolderChanged, "Folder access was removed. Choose and approve the folder again.", RepairChooseFolder, nil)
 		}
 		if current.LastFolderGrant != nil && current.LastFolderGrant.OperationID == operation.OperationID {
 			if current.LastFolderGrant.RunID != operation.RunID || current.RootID != current.LastFolderGrant.RootID || filepath.Clean(current.RootPath) != filepath.Clean(root) {
@@ -553,7 +572,12 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, err
 	}
 	rootID := current.RootID
-	rootChanged := rootID == "" || filepath.Clean(current.RootPath) != filepath.Clean(root)
+	rootChanged := rootID == "" || !current.AccessRevokedAt.IsZero() || filepath.Clean(current.RootPath) != filepath.Clean(root)
+	if !rootChanged && req.Paused != nil {
+		if err := refuseUnreviewedManualActivation(current, *req.Paused); err != nil {
+			return Status{}, err
+		}
+	}
 	if operation != nil && current.PendingFolderGrant != nil {
 		rootID = current.PendingFolderGrant.RootID
 	} else if rootChanged {
@@ -567,6 +591,9 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 			if settings.PendingFolderGrant != nil {
 				return setupErr(CodeFolderConflict, "Another folder permission is already being completed for this workspace.", RepairRetry, nil)
+			}
+			if err := s.validatePreparationBoundary(*settings, operation.PreparationID); err != nil {
+				return err
 			}
 			settings.PendingFolderGrant = pending
 			settings.LastAssistedAutomation = nil
@@ -582,10 +609,20 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 	}
 	// These are the first external consequences of an assisted grant. Its
 	// operation/root marker is durable before either one can happen.
+	if req.ExpectedRootIdentity != "" {
+		info, err := os.Stat(root) // #nosec G304 -- previously canonicalized reviewed root; identity rechecked before consequences
+		if err != nil || platformFileID(info) != req.ExpectedRootIdentity {
+			return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
+		}
+	}
 	if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
 		return Status{}, err
 	}
-	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root)
+	var preparation *SetupPreparation
+	if operation != nil && operation.PreparationID != "" {
+		preparation = current.SetupPreparation
+	}
+	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root, req.DirectoryReferenceID, preparation)
 	if err != nil {
 		return Status{}, err
 	}
@@ -593,11 +630,17 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 	completedAt := s.clock()
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		if operation != nil {
+			if err := requirePreparation(*settings, operation.PreparationID); err != nil {
+				return err
+			}
 			pending := settings.PendingFolderGrant
 			if pending == nil || pending.RunID != operation.RunID || pending.OperationID != operation.OperationID ||
 				pending.RootID != rootID || filepath.Clean(pending.RootPath) != filepath.Clean(root) {
 				return setupErr(CodeFolderChanged, "The pending folder permission changed. Review it before continuing.", RepairChooseFolder, nil)
 			}
+		}
+		if operation == nil || operation.PreparationID == "" {
+			settings.SetupPreparation = nil
 		}
 		settings.WorkspaceID = workspaceID
 		settings.RootID = rootID
@@ -607,12 +650,17 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		settings.DailyScanLocalTime = dailyTime
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil
-		if req.Paused != nil {
-			settings.Paused = *req.Paused
-		}
 		if rootChanged {
 			settings.AutomationApprovedAt = time.Time{}
+			settings.SetupDecision = nil
 		}
+		if req.Paused != nil {
+			if err := refuseUnreviewedManualActivation(*settings, *req.Paused); err != nil {
+				return err
+			}
+			settings.Paused = *req.Paused
+		}
+		settings.AccessRevokedAt = time.Time{}
 		if settings.SetupCompletedAt.IsZero() {
 			settings.SetupCompletedAt = completedAt
 		}
@@ -627,6 +675,10 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 	}); err != nil {
 		if errors.Is(err, ErrInvalidSettings) {
 			return Status{}, setupErr(CodeInvalidPath, "That folder configuration is not valid.", RepairRetry, err)
+		}
+		var domainError *SetupError
+		if errors.As(err, &domainError) {
+			return Status{}, domainError
 		}
 		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's File Janitor settings.", RepairRetry, err)
 	}
@@ -760,7 +812,7 @@ func verifyFilingRootWritable(path string) error {
 // reference and grants exactly one read-only filesystem binding for it,
 // returning the reference ID. Both are idempotent, so repeating setup with the
 // same folder updates rather than duplicates (FR-24).
-func (s *Service) ensureWorkspaceAccess(workspaceID, root string) (string, error) {
+func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference string, preparation *SetupPreparation) (string, error) {
 	if s.workspaces == nil {
 		return "", setupErr(CodeWorkspaceMissing, "This workspace is unavailable.", "", nil)
 	}
@@ -768,6 +820,9 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root string) (string, error
 	err := s.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
 		if ws == nil {
 			return errors.New("workspace is nil")
+		}
+		if err := validatePreparationWorkspace(ws, preparation); err != nil {
+			return err
 		}
 		// Before linking a new folder, make sure the workspace's pre-existing
 		// filesystem access is explicit. Ori synthesizes an all-tools binding
@@ -777,7 +832,19 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root string) (string, error
 		pinExistingFilesystemAccess(ws)
 
 		var createdReference bool
-		referenceID, createdReference = ensureDirectoryReference(ws, root)
+		if selectedReference != "" {
+			ref, err := ws.GetDirectoryReference(selectedReference)
+			if err != nil || ref.Purpose != "" {
+				return setupErr(CodeFolderChanged, "The attached folder changed. Review access again.", RepairChooseFolder, nil)
+			}
+			resolved, err := resolveSetupRoot(ref.Path)
+			if err != nil || resolved != root {
+				return setupErr(CodeFolderChanged, "The attached folder changed. Review access again.", RepairChooseFolder, nil)
+			}
+			referenceID = selectedReference
+		} else {
+			referenceID, createdReference = ensureDirectoryReference(ws, root)
+		}
 		if referenceID == "" {
 			return errors.New("directory reference was not recorded")
 		}
@@ -1126,6 +1193,11 @@ func (s *Service) SetAutomationStatus(status AutomationStatus) {
 // pending with a message that says so rather than an error.
 func (s *Service) checkWatcher(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentWatcher}
+	if settings.ManualScansOnly() {
+		check.Status, check.Code = ComponentPending, CodePending
+		check.Message = "Manual scans only. Folder watching is not enabled."
+		return check
+	}
 	if settings.Paused {
 		check.Status = ComponentPending
 		check.Code = CodePending
@@ -1159,6 +1231,11 @@ func (s *Service) checkWatcher(settings JanitorSettings) ComponentCheck {
 // checkScheduler reports whether the daily catch-up is being serviced.
 func (s *Service) checkScheduler(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentScheduler}
+	if settings.ManualScansOnly() {
+		check.Status, check.Code = ComponentPending, CodePending
+		check.Message = "Manual scans only. No daily scan is scheduled."
+		return check
+	}
 	if settings.Paused {
 		check.Status = ComponentPending
 		check.Code = CodePending

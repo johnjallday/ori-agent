@@ -32,6 +32,7 @@ type AutomationReview struct {
 type AssistedAutomationOperation struct {
 	RunID             string
 	OperationID       string
+	PreparationID     string
 	ReviewRevision    string
 	AuthorityRevision string
 }
@@ -68,7 +69,16 @@ func (s *Service) ReviewAutomation(workspaceID string) (AutomationReview, error)
 	if strings.TrimSpace(settings.RootID) == "" {
 		return AutomationReview{}, ErrInvalidSettings
 	}
-	recipe := s.automationRecipe(workspaceID)
+	return s.reviewAutomationSettings(settings), nil
+}
+
+// reviewAutomationSettings also supplies the read-only disclosure before a
+// folder grant. It reads the same effective recipe as configured monitoring.
+func (s *Service) reviewAutomationSettings(settings JanitorSettings) AutomationReview {
+	return reviewAutomationSettings(settings, s.automationRecipe(settings.WorkspaceID))
+}
+
+func reviewAutomationSettings(settings JanitorSettings, recipe workspace.AutomationRecipe) AutomationReview {
 	events := []string{"create", "rename"}
 	debounce := int(DefaultWatchDebounce / time.Second)
 	settling := int(SettleInterval / time.Second)
@@ -106,7 +116,7 @@ func (s *Service) ReviewAutomation(workspaceID string) (AutomationReview, error)
 		WatchEvents:        events, WatchDebounceSecond: debounce, SettlingSecond: settling,
 		AutomationApproved: !settings.AutomationApprovedAt.IsZero(), Paused: settings.Paused,
 		LastAssistedAutomation: assisted,
-	}, nil
+	}
 }
 
 // RecordAutomationApprovalPaused records the separate monitoring consent while
@@ -134,6 +144,7 @@ func (s *Service) ApplyReviewedAutomationTimezone(workspaceID, rootID string, pr
 		}
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil
+		settings.SetupPreparation = nil
 		return nil
 	})
 	return err
@@ -164,6 +175,12 @@ func (s *Service) RecordReviewedAutomationApprovalPaused(workspaceID, rootID str
 		return Status{}, setupErr(CodeFolderChanged, "The reviewed timezone is no longer available. Review the schedule again.", RepairRetry, err)
 	}
 	if _, err = s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		if err := s.validatePreparationBoundary(*settings, operation.PreparationID); err != nil {
+			return err
+		}
+		if operation.PreparationID == "" {
+			settings.SetupPreparation = nil
+		}
 		if settings.RootID != strings.TrimSpace(rootID) || settings.ContentMode != privacy ||
 			settings.DailyScanLocalTime != strings.TrimSpace(dailyTime) {
 			return setupErr(CodeFolderChanged, "The File Janitor folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
@@ -178,6 +195,7 @@ func (s *Service) RecordReviewedAutomationApprovalPaused(workspaceID, rootID str
 		if settings.AutomationApprovedAt.IsZero() {
 			settings.AutomationApprovedAt = s.clock()
 		}
+		recordMonitoringDecision(settings)
 		settings.Paused = true
 		settings.LastAssistedAutomation = automationReceipt(operation, AssistedAutomationApprovalPaused, s.clock())
 		return nil
@@ -196,6 +214,9 @@ func (s *Service) ActivateReviewedAutomation(workspaceID, rootID string, privacy
 		return Status{}, err
 	}
 	if _, err = s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		if err := s.validatePreparationBoundary(*settings, operation.PreparationID); err != nil {
+			return err
+		}
 		if err := validateReviewedAutomation(settings, rootID, privacy, dailyTime, timezone); err != nil {
 			return err
 		}
@@ -221,6 +242,9 @@ func (s *Service) PauseReviewedAutomation(workspaceID, rootID string, privacy Co
 		return err
 	}
 	_, err = s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		if err := s.validatePreparationBoundary(*settings, operation.PreparationID); err != nil {
+			return err
+		}
 		if err := validateReviewedAutomation(settings, rootID, privacy, dailyTime, timezone); err != nil {
 			return err
 		}
@@ -246,6 +270,8 @@ func (s *Service) RecordAutomationApprovalPaused(workspaceID string) (Status, er
 		if settings.AutomationApprovedAt.IsZero() {
 			settings.AutomationApprovedAt = s.clock()
 		}
+		recordMonitoringDecision(settings)
+		settings.SetupPreparation = nil
 		settings.Paused = true
 		settings.LastAssistedAutomation = nil
 		return nil

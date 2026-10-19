@@ -138,9 +138,12 @@ func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, 
 var ErrScanOperationConflict = fmt.Errorf("scan operation no longer matches File Janitor state")
 
 type ScanOperationRequest struct {
-	OperationID string
-	RootID      string
-	PrivacyMode ContentMode
+	// PreparationID is optional for legacy/assistant-led callers; when set,
+	// the accepted setup must still be current under the scan-state lock.
+	PreparationID string
+	OperationID   string
+	RootID        string
+	PrivacyMode   ContentMode
 }
 
 // ScanNowOperation runs or replays one operation-specific metadata scan. Its
@@ -187,6 +190,16 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 			fresh, freshErr := s.store.LoadSettings(workspaceID)
 			if freshErr != nil {
 				return freshErr
+			}
+			if err := requirePreparation(fresh, operation.PreparationID); err != nil {
+				return err
+			}
+			if operation.PreparationID != "" {
+				// Recheck owner/capability/reference/root identity at the scan
+				// boundary too, not just before watcher registration or a callback.
+				if _, _, err := s.validateLinkedPreparation(workspaceID, *fresh.SetupPreparation); err != nil {
+					return err
+				}
 			}
 			if fresh.RootID != operation.RootID || fresh.ContentMode != operation.PrivacyMode ||
 				fresh.ContentMode != ContentModeMetadataOnly {

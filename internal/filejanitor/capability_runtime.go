@@ -91,13 +91,16 @@ func (r *CapabilityRuntime) CapabilityStatus(workspaceID string) (workspacecapab
 	// Collect every condition that currently applies; the helper picks the one
 	// the user most needs to act on.
 	applicable := []workspacecapability.StatusState{workspacecapability.StatusWatching}
+	if settings.ManualScansOnly() {
+		applicable = []workspacecapability.StatusState{workspacecapability.StatusReady}
+	}
 	if readiness.State == ReadinessNeedsAttention {
 		applicable = append(applicable, workspacecapability.StatusNeedsAttention)
 	}
 	if reviewCount > 0 {
 		applicable = append(applicable, workspacecapability.StatusReviewReady)
 	}
-	if settings.Paused {
+	if settings.Paused && !settings.ManualScansOnly() {
 		applicable = append(applicable, workspacecapability.StatusPaused)
 	}
 
@@ -150,6 +153,8 @@ func capabilityStatusDetail(state workspacecapability.StatusState, reviewCount i
 		return "Paused"
 	case workspacecapability.StatusWatching:
 		return "Watching"
+	case workspacecapability.StatusReady:
+		return "Ready · Manual scans"
 	default:
 		return ""
 	}

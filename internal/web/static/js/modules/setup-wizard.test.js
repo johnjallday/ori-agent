@@ -796,6 +796,24 @@ test('a step whose own control is the action does not offer a Continue that must
   assert.equal(elements.setupWizardPrimary.disabled, false);
 });
 
+test('late domain review refreshes the current step and its primary label together', async () => {
+  const { api, elements } = load({ status: status({ state: 'in_progress' }) });
+  await api.init();
+  let reviewed = false;
+  const renderer = {
+    render() {},
+    primaryLabel: () =>
+      reviewed ? 'Confirm the folder review above' : 'Choose a folder to continue',
+    disablePrimary: () => true
+  };
+  api.registerStepRenderer('directory', renderer);
+  api.open();
+  reviewed = true;
+  api.registerStepRenderer('directory', renderer);
+  assert.equal(elements.setupWizardPrimary.textContent, 'Confirm the folder review above');
+  assert.equal(elements.setupWizardPrimary.disabled, true);
+});
+
 test('a step that offers a choice renders it, and choosing is the action', async () => {
   const withOptions = status({
     state: 'in_progress',

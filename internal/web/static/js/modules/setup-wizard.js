@@ -1178,7 +1178,10 @@
       // grow the list.
       if (!list.includes(renderer)) list.push(renderer);
       renderers.set(key, list);
-      if (status && currentStep()?.kind === kind) renderStep();
+      if (status && currentStep()?.kind === kind) {
+        renderStep();
+        renderActions();
+      }
     },
     // Exposed for tests and for domain modules that need the same vocabulary.
     _internals: {
