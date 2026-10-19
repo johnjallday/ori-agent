@@ -822,6 +822,83 @@ provider/lifetime ownership. An ambiguous close retains stores/lease ownership.
 Server loop stop and dependency close are separate once-only phases around a
 retryable finite-work join; reset never closes stores after a drain error.
 
+## Time Machine observe-only provider (folder protection)
+
+A second provider id, `time_machine`, sits beside `restic` under the same
+authority, evidence and argument rules. It reads metadata Time Machine already
+keeps; it never starts, stops, configures, excludes, mounts or restores.
+
+**Validated host (spike, 2026-10-19).** macOS 26.3.1 (25D771280a), arm64,
+`tmutil version 4.0.0`. That host had no Time Machine destination and no Full
+Disk Access for the probing process, so the positive data shapes below come
+from the documented format and remain unverified until live acceptance on a
+Mac with Time Machine configured.
+
+**Executable.** `/usr/bin/tmutil` only, verified like `diskutil`: a fixed
+system path on the sealed, read-only, local APFS system volume, root-owned,
+opened without following links and stat-anchored. Observed signature:
+`com.apple.tmutil`, Apple Software Signing, platform binary, no team id. It is
+never found through `PATH` or named by workspace, template, model or provider
+text.
+
+**Fixed operations.** Exactly three, compiled, run through the sandboxed helper:
+
+| Operation | What it yields | Needs |
+| --- | --- | --- |
+| `tmutil destinationinfo -X` | destination list: id, kind, mount presence | `user-preference-read` of `com.apple.TimeMachine`, cfprefs IPC |
+| `tmutil status -X` | running, phase, percent | `com.apple.backupd.status.xpc`, `com.apple.backupd.xpc` |
+| read `/Library/Preferences/com.apple.TimeMachine.plist` in the helper | completed backup dates, capacity, exclusion lists | Full Disk Access for the app that runs Ori |
+
+The plist is read as data inside the helper: no child process, no argument.
+Destination names and other Time Machine labels are untrusted and are not
+echoed into summaries.
+
+**Forbidden forever.** `startbackup`, `stopbackup`, `enable`, `disable`,
+`setdestination`, `removedestination`, `addexclusion`, `removeexclusion`,
+`localsnapshot`, `deletelocalsnapshots`, `restore`, and also `latestbackup` and
+`listbackups`: the spike observed both trying to **mount** the destination
+("Failed to mount backup destination"), which Ori never does. No command takes
+an argument from model, template, workspace or provider text.
+
+**Folders never reach argv.** Whether a source folder is included is computed
+in Go: the plist exclusion lists, plus the sticky attribute
+`com.apple.metadata:com_apple_backup_excludeItem` (a binary plist string
+`com.apple.backupd`) read in-process on the folder and each ancestor up to its
+volume root. A folder is `covered` only when it is not excluded and at least
+one completed backup is observed; an excluded folder or ancestor is
+`source_excluded`; anything unreadable is `unknown`.
+
+**Silent defaults are not evidence.** Under a denying sandbox the spike saw
+`destinationinfo -X` return an empty dictionary and `status -X` return an idle
+dictionary without `Percent`, both with exit 0. Therefore a status without
+`Percent` is unavailable, and "Time Machine is not set up on this Mac" is
+claimed only when the preferences plist was readable and lists no destination.
+
+**Full Disk Access.** Opening the preferences plist without it fails with
+`EPERM` (TCC), distinct from `EACCES`. That is the fixed state
+`permission_required`, never a failed backup and never a reason to run
+anything unsandboxed. In that degraded mode the read still records destination
+presence and sticky exclusions, but no completion dates or capacity, so no
+folder can be `covered`. The console names the setting: System Settings →
+Privacy & Security → Full Disk Access, for the app that runs Ori
+(`x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles`).
+"Not set up" links to the Time Machine pane
+(`x-apple.systempreferences:com.apple.Time-Machine-Settings.extension`); a
+server with a sandboxed `HOME` never opens it on the user's behalf.
+
+**Health.** The existing fixed codes apply with Time Machine wording:
+`not_configured` (no destination), `no_completed_snapshot` ("No completed
+backup observed"), `backup_completion_overdue`, `destination_absent` (a network
+destination that is not mounted; Ori does not mount it), `observation_stale`,
+plus `source_excluded` and `permission_required`. Capacity is recorded only
+when the plist reports it; otherwise `unknown`. Nothing says "verified", and
+the "external-only is not off-site protection" disclaimer stays.
+
+**Platform.** The reader is `darwin`-only; every other platform reports
+`platform_unsupported`. Linux CI runs fixture-driven unit tests from
+`internal/backuprecovery/testdata/timemachine/`; the real read is a manual
+acceptance recorded with its host.
+
 ## Implementation and acceptance gates
 
 Freeze resolves design/feasibility, not all later implementation tests:
