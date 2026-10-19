@@ -639,6 +639,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
 	b.initializeDailyBrief()            // Phase 22.6 — wire personal hq daily brief storage/scheduling/synthesis
 	b.initializeExternalMemory()        // Phase 22.65 — read-only mirror of other agents' memory (personal assistant only)
+	b.initializeMemoryContextFiles()    // Phase 22.66 — workspace memory as AGENTS.md/CLAUDE.md/GEMINI.md for the user's own CLIs
 	b.completeProgressionWiring()       // Phase 22.7 — progression hooks + backfill that need the assistant, journeys, and brief
 	b.initializeTemplateManager()       // Phase 23
 
@@ -804,6 +805,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	if b.workspaceFileStore != nil {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
 		handlers.WorkspaceMemory.SetGlobalMemory(builderGlobalMemory{b: b})
+		handlers.WorkspaceMemory.SetContextFiles(b.server.memoryContext)
 	}
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices

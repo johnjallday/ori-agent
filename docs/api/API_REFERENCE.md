@@ -2645,6 +2645,29 @@ Copies one ordinary entry into global memory as an approved fact, because the us
 
 `status` is `already_known` when global memory already holds the text (repeating a promote changes nothing; an entry in the Personal HQ itself is already global), or `already_pending` when the same fact is waiting for review. `409 memory_entry_not_promotable` for a reviewed (`ori-hq:`) or copied (`global:`) entry, `409 global_memory_unavailable` with the shared message when there is no Personal HQ, `400` for invalid text or category, `404` for an index out of range.
 
+### Context files for your own CLI sessions
+
+Ori renders each workspace's in-prompt memory (the same selection its agents see; global memory is never included) into identical `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` under `<workspace folder>/.ori/context/`, so `codex`, `claude` or `gemini` run by hand can read it. The files are rewritten after every memory change (once the server is serving) and after each external-memory sync, removed when the memory has nothing to render, and skipped with a log line when the folder is missing or not allowed. `GET /api/workspaces/{workspaceID}/memory` reports them:
+
+```json
+"context_files": {
+  "root_files": false,
+  "context_dir": "/Users/me/Ori Workspaces/chart-lab/.ori/context",
+  "root_dir": "/Users/me/Projects/chart-lab",
+  "file_names": ["AGENTS.md", "CLAUDE.md", "GEMINI.md"]
+}
+```
+
+`root_dir` is the folder you code in: a bound software project's checkout, else the workspace's resolved project path, else the workspace's own folder.
+
+**Endpoint:** `PATCH /api/workspaces/{workspaceID}/memory/settings`
+
+```json
+{ "root_files": true }
+```
+
+"Also write to the folder root" (default off; kept per installation in `<data dir>/workspace_memory_context.json`, so it does not travel with a copied workspace). On, Ori keeps a managed block between `<!-- ori:workspace-memory:start -->` and `<!-- ori:workspace-memory:end -->` in `<root_dir>/AGENTS.md`, `CLAUDE.md` and `GEMINI.md`: appended after your text when a file has no markers, replaced between the markers otherwise, a missing file created with only the block; text outside the markers is never changed, and a file with malformed markers is left alone. Off, the block (and the blank line Ori added before it) is removed and a file left empty is deleted. These files are visible to git; Ori does not edit `.gitignore`. Answers with the memory response; `400` without `root_files`, `503` when context files are unavailable.
+
 ## Workspace Outputs API
 
 Task runs save their results under the workspace's own `outputs/` folder. These two endpoints read that folder; neither writes anything, and neither creates the folder. Both accept a group's id as they accept a workspace's. Home's file tree uses them for its **Outputs** section. To open the folder in the file manager, use the existing `POST /api/workspaces/{workspaceID}/output-dir/open`.

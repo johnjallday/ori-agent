@@ -82,6 +82,9 @@ type Server struct {
 	// externalMemory syncs other agents' memory into the read-only mirror once
 	// the server is serving, then daily. Stopped on shutdown.
 	externalMemory *externalmemory.Runner
+	// memoryContext renders each workspace's memory into the context files
+	// the CLIs read; it follows memory writes once the server is serving.
+	memoryContext *workspace.MemoryContextWriter
 
 	shutdownOnce   sync.Once
 	shutdownErr    error
@@ -151,6 +154,9 @@ func (s *Server) Start() {
 	}
 	if s.externalMemory != nil {
 		s.externalMemory.Start()
+	}
+	if s.memoryContext != nil {
+		workspace.SetMemoryWriteObserver(s.memoryContext.Render)
 	}
 }
 
@@ -229,6 +235,9 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 		}
 		if s.externalMemory != nil {
 			s.externalMemory.Stop()
+		}
+		if s.memoryContext != nil {
+			workspace.SetMemoryWriteObserver(nil)
 		}
 		// Automatic plans dispatch through the task machinery, so stop them first.
 		if s.workspacePlanAuto != nil {
