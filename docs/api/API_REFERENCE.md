@@ -24,6 +24,7 @@ http://localhost:8765/api
 - [Workspace Groups](#workspace-groups)
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
+- [External Memory API](#external-memory-api)
 - [Home Library: Open a Song and the Shared Assistant](#home-library-open-a-song-and-the-shared-assistant)
 - [Workspace Outputs API](#workspace-outputs-api)
 - [Scheduler Nodes API](#scheduler-nodes-api)
@@ -2189,6 +2190,55 @@ Scans active workspaces' `MEMORY.md` files for `global:<item-id>` provenance, on
 **Endpoint:** `DELETE /api/personal-assistant/knowledge/{item_id}/copies/{workspace_id}`
 
 Deletes that workspace's copied line and nothing else. Returns `{"removed": true, "workspace_id": …}`; `404` when the workspace holds no copy.
+
+## External Memory API
+
+Ori keeps a read-only mirror of what other agents remember about the user: Codex CLI (`codex`, `$CODEX_HOME/memories`, else `~/.codex/memories`). The mirror lives in `<data dir>/external_memory/` (`sources.json` and `entries/<source>.json`), so `ORI_DATA_DIR` scopes it. Ori never writes under a source's folder. Every source is off until the user enables it on the Profile page; nothing is read before that.
+
+A sync reads each enabled source, splits it into entries with stable ids, and compares content hashes: unchanged entries are untouched, changed ones are updated, new ones are added, and entries no longer present are marked `removed` (kept, hidden from every reader). One sync runs at a time. Syncs run in the background once the server is serving (only when the last completed sync is a day old or there has never been one), then 24 hours after the last completed sync, when a source is enabled or an enabled source's exclusions change, and on **Sync now**.
+
+### List sources
+
+**Endpoint:** `GET /api/external-memory/sources`
+
+```json
+{
+  "sources": [{
+    "id": "codex", "label": "Codex", "kind": "files",
+    "enabled": true, "available": true,
+    "location": "/Users/me/.codex/memories", "location_display": "~/.codex/memories",
+    "exclusions": ["~/Projects/private"],
+    "entry_count": 109, "folder_count": 5,
+    "folders": [{ "folder": "/Users/me/Projects/chart-lab", "display": "~/Projects/chart-lab", "count": 43 }],
+    "last_sync_started": "2026-10-19T09:00:00Z", "last_sync_finished": "2026-10-19T09:00:00Z",
+    "last_result": "ok", "skipped_files": 0,
+    "last_changes": { "added": 0, "updated": 1, "removed": 0 },
+    "next_due": "2026-10-20T09:00:00Z"
+  }],
+  "sync": { "running": false },
+  "last_completed_sync": "2026-10-19T09:00:00Z",
+  "next_sync_due": "2026-10-20T09:00:00Z",
+  "sync_interval_hours": 24
+}
+```
+
+`entry_count`, `folder_count` and `folders` count active entries outside the exclusions, whether or not the source is on. `last_result` is `ok`, `partial` (some files skipped; `skipped_files` says how many, the server log names them), `error` (`last_error` says why; the mirror is left as it was) or `unavailable` (the folder is gone; its entries are marked removed). `store_full` is set when the mirror reached its 200 MB cap and new entries were left out. Entry bodies are never logged.
+
+### Change a source
+
+**Endpoint:** `PATCH /api/external-memory/sources/{source}`
+
+```json
+{ "enabled": true, "exclusions": ["~/Projects/private", "/Volumes/Work/client"] }
+```
+
+Both fields are optional. Each exclusion is a folder prefix, a full path or one starting with `~/`; entries whose folder is at or under it are not mirrored, and they disappear from every reader at once. Turning a source off hides its entries at once without deleting the mirror. Turning one on, or changing an enabled source's exclusions, queues a background sync. Answers with the same body as `GET`; `400` for a relative exclusion or more than 100, `404` for an unknown source.
+
+### Sync now
+
+**Endpoint:** `POST /api/external-memory/sync`
+
+Runs a sync of every enabled source and answers `200` with the same body as `GET`. When a sync is already running it answers `202` at once, with `sync.running`, `sync.reason` (`startup`, `schedule`, `enabled`, `manual`) and `sync.started_at` describing it.
 
 ## Home Project Library Notifications API
 

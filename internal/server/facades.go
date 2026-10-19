@@ -23,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/emailsetuphttp"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/externalmemoryhttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/gateway"
@@ -200,7 +201,10 @@ type HandlerFacade struct {
 	ActionCenter    *actioncenterhttp.Handler
 	Triggers        *triggerhttp.Handler
 	WorkspaceMemory *memoryhttp.Handler
-	FileJanitor     *filejanitorhttp.Handler
+	// ExternalMemory serves the Profile page's Connected memory cards over the
+	// read-only mirror of other agents' memory.
+	ExternalMemory *externalmemoryhttp.Handler
+	FileJanitor    *filejanitorhttp.Handler
 	// WorkspaceCapabilities serves the built-in Workspace Capability catalog
 	// and install lifecycle. One set of routes serves every capability; there
 	// is no per-capability lifecycle API.

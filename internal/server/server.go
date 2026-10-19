@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/continuityprep"
+	"github.com/johnjallday/ori-agent/internal/externalmemory"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -78,6 +79,9 @@ type Server struct {
 	// reviewedReleases finds and verifies reviewed releases. Blueprint recovery
 	// uses it to install a reviewed Home provider; nil when plugins are off.
 	reviewedReleases *reviewedIntegrationUpdates
+	// externalMemory syncs other agents' memory into the read-only mirror once
+	// the server is serving, then daily. Stopped on shutdown.
+	externalMemory *externalmemory.Runner
 
 	shutdownOnce   sync.Once
 	shutdownErr    error
@@ -144,6 +148,9 @@ func (s *Server) Start() {
 	}
 	if s.continuityWorker != nil {
 		s.continuityWorker.Start()
+	}
+	if s.externalMemory != nil {
+		s.externalMemory.Start()
 	}
 }
 
@@ -219,6 +226,9 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 		// Checkpoint preparation reads every domain store; stop it before any.
 		if s.continuityWorker != nil {
 			s.continuityWorker.Stop()
+		}
+		if s.externalMemory != nil {
+			s.externalMemory.Stop()
 		}
 		// Automatic plans dispatch through the task machinery, so stop them first.
 		if s.workspacePlanAuto != nil {

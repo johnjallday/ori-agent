@@ -976,6 +976,190 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   }
 }
 
+/* Connected memory: one card per external source (Codex, Claude Code,
+   Gemini CLI, the Claude account). Cards stack on narrow screens; an
+   unavailable source is dimmed but its switch stays usable. */
+#connectedMemoryStatus:empty {
+  display: none;
+}
+
+#connectedMemoryStatus.is-error {
+  border-color: var(--danger-color, #c0392b);
+  color: var(--text-primary);
+}
+
+.connected-memory-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.connected-memory-card {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1.25rem 1.4rem;
+  border-top: 3px solid var(--border-color);
+  overflow-wrap: anywhere;
+}
+
+.connected-memory-card.is-synced,
+.connected-memory-card.is-syncing,
+.connected-memory-card.is-pending {
+  border-top-color: var(--primary-color);
+}
+
+.connected-memory-card.is-error {
+  border-top-color: var(--danger-color, #c0392b);
+}
+
+.connected-memory-card.is-dimmed .connected-memory-card-heading,
+.connected-memory-card.is-dimmed .connected-memory-state,
+.connected-memory-card.is-dimmed .connected-memory-facts {
+  opacity: 0.6;
+}
+
+.connected-memory-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.connected-memory-card-heading {
+  min-width: 0;
+}
+
+.connected-memory-card h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.connected-memory-location {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+}
+
+.connected-memory-switch {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.connected-memory-switch .form-check-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.connected-memory-state {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.connected-memory-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.9rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.connected-memory-facts dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.connected-memory-facts dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.connected-memory-folders summary {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.connected-memory-folders ul {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.connected-memory-folders li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.connected-memory-folder-path {
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  overflow-wrap: anywhere;
+}
+
+.connected-memory-folder-count {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.connected-memory-exclusions {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.connected-memory-exclusions-label {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.connected-memory-exclusions small {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+/* Folder paths differ only at their ends, so chips show them whole. */
+.connected-memory-exclusions .tag-chip,
+.connected-memory-exclusions .tag-input-suggested-chip {
+  max-width: 100%;
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.connected-memory-exclusions .tag-chip-label,
+.connected-memory-exclusions .tag-input-suggested-chip {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.connected-memory-folder-general {
+  color: var(--text-secondary);
+}
+
+.connected-memory-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.connected-memory-card [hidden] {
+  display: none;
+}
+
 .profile-knowledge-header {
   display: flex;
   align-items: flex-end;

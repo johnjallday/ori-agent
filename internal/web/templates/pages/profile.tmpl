@@ -210,6 +210,18 @@
           <p class="reviewed-knowledge-footnote">You can change or forget approved facts here. For other workspace memories, use the Memory tab in that workspace; the Assistant Program above remains separate.</p>
         </section>
 
+        <section id="connectedMemory" class="profile-knowledge connected-memory" aria-labelledby="connectedMemoryTitle" aria-busy="true">
+          <header class="profile-knowledge-header">
+            <div>
+              <div class="profile-page-kicker">Other agents · read-only mirror</div>
+              <h2 id="connectedMemoryTitle" class="profile-knowledge-title">Connected memory</h2>
+              <p class="profile-knowledge-subtitle">What your other coding agents remember about you, mirrored read-only. Only your personal assistant reads it, labeled as external; workspace agents never do. Ori never changes those agents' files.</p>
+            </div>
+          </header>
+          <p id="connectedMemoryStatus" class="user-knowledge-status" role="status" aria-live="polite">Checking connected memory…</p>
+          <div id="connectedMemorySources" class="connected-memory-sources"></div>
+        </section>
+
         <!-- Personalization: interests, tools, work style. Folded in from the
              retired /personalize page so all "about you" data lives here.
              Saved via /api/onboarding/personalize (personalize.js), which sets
@@ -308,6 +320,7 @@
   <script defer src="/js/modules/user-profile.js"></script>
   <script type="module" src="/js/modules/user-knowledge.js"></script>
   <script type="module" src="/js/modules/personal-hq-knowledge.js"></script>
+  <script type="module" src="/js/modules/connected-memory.js"></script>
   <script type="module" src="/js/modules/personal-assistant-interview.js"></script>
   <script defer src="/js/modules/personalize.js"></script>
 </body>

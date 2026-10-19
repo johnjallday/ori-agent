@@ -44,6 +44,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerTicketRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
+	registerExternalMemoryRoutes(mux, s)
 	registerFileJanitorRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
 	registerWorkspaceSurfaceRoutes(mux, s)
@@ -1419,6 +1420,17 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/memory/entries/{index}/promote", s.Handlers.WorkspaceMemory.PromoteEntry)
 	}
+}
+
+// registerExternalMemoryRoutes registers the Profile page's Connected memory
+// endpoints over the read-only mirror of other agents' memory.
+func registerExternalMemoryRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.ExternalMemory == nil {
+		return
+	}
+	mux.HandleFunc("GET /api/external-memory/sources", s.Handlers.ExternalMemory.GetSources)
+	mux.HandleFunc("PATCH /api/external-memory/sources/{source}", s.Handlers.ExternalMemory.PatchSource)
+	mux.HandleFunc("POST /api/external-memory/sync", s.Handlers.ExternalMemory.Sync)
 }
 
 // registerFileJanitorRoutes registers the workspace-scoped Downloads
