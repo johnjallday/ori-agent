@@ -197,7 +197,9 @@ function loadPane() {
     'workspace-build-folder',
     'workspace-build-folder-remove',
     'workspace-build-link',
-    'workspace-build-link-remove'
+    'workspace-build-link-remove',
+    'workspace-build-review',
+    'workspace-build-prepare'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -209,6 +211,43 @@ const assistant = { display_name: 'Luna', appearance: {} };
 function entries(root) {
   return root.querySelectorAll('li');
 }
+
+test('creation permission review is host-rendered, default-off and explicitly confirmed', () => {
+  const { pane, document, events } = loadPane();
+  const host = document.createElement('section');
+  const review = {
+    review_revision: 'opaque',
+    workspace: { name: '<edited name>', description: 'Edited description', mission: 'Edited goal' },
+    team: [{ name: 'Edited Curator', action: 'create', model: 'local-model' }],
+    folder: { name: 'Synthetic Inbox', path: '/temporary/synthetic-inbox' },
+    terms: {
+      watch_events: ['create', 'rename'],
+      debounce_seconds: 300,
+      daily_scan_local_time: '09:00',
+      timezone: 'Local'
+    }
+  };
+  pane.renderCreationReview(host, { review });
+  assert.match(host.textContent, /<edited name>/);
+  assert.match(host.textContent, /Edited Curator · create · local-model/);
+  assert.match(host.textContent, /This changes the folder on disk/);
+  assert.match(host.textContent, /No file contents are opened/);
+  assert.match(host.textContent, /separate approval/);
+  const checkbox = host.querySelectorAll('input')[0];
+  assert.equal(checkbox.checked, false);
+  assert.equal(events.length, 0);
+  checkbox.checked = true;
+  checkbox.dispatchEvent(new FakeEvent('change'));
+  assert.equal(events[0].type, 'workspace-build-review');
+  assert.equal(events[0].detail.monitoring, true);
+  const confirm = host
+    .querySelectorAll('button')
+    .find(button => button.textContent === 'Create & prepare review');
+  confirm.click();
+  assert.equal(events[1].type, 'workspace-build-prepare');
+  pane.renderCreationReview(host, { review, busy: true });
+  assert.ok(host.querySelectorAll('button').every(button => button.disabled));
+});
 
 test('the pane opens with the fixed opening line, the assistant, and a composer', () => {
   const { pane, root } = loadPane();

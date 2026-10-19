@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 1
+	WorkspaceBuildSchemaVersion = 2
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -52,8 +52,10 @@ const (
 type WorkspaceBuildStatus string
 
 const (
-	WorkspaceBuildOpen      WorkspaceBuildStatus = "open"
-	WorkspaceBuildCreated   WorkspaceBuildStatus = "created"
+	WorkspaceBuildOpen    WorkspaceBuildStatus = "open"
+	WorkspaceBuildCreated WorkspaceBuildStatus = "created"
+	// Preparing freezes the exact accepted draft against edits and late turns.
+	WorkspaceBuildPreparing WorkspaceBuildStatus = "preparing"
 	WorkspaceBuildAbandoned WorkspaceBuildStatus = "abandoned"
 )
 
@@ -235,9 +237,10 @@ type WorkspaceBuildSession struct {
 	Link *BuildLink `json:"link,omitempty"`
 	// TurnCount counts the user's own turns; FirstRequest is their first
 	// description, both kept for the workspace's provenance.
-	TurnCount          int    `json:"turn_count"`
-	FirstRequest       string `json:"first_request,omitempty"`
-	CreatedWorkspaceID string `json:"created_workspace_id,omitempty"`
+	TurnCount          int                    `json:"turn_count"`
+	FirstRequest       string                 `json:"first_request,omitempty"`
+	CreatedWorkspaceID string                 `json:"created_workspace_id,omitempty"`
+	Preparation        *BuildPreparationClaim `json:"preparation,omitempty"`
 }
 
 // Touch records a write: a new version and a new update time.
@@ -311,7 +314,7 @@ type WorkspaceBuildDocument struct {
 // Open returns the one open build, if any.
 func (d *WorkspaceBuildDocument) Open() *WorkspaceBuildSession {
 	for i := range d.Sessions {
-		if d.Sessions[i].Status == WorkspaceBuildOpen {
+		if d.Sessions[i].Status == WorkspaceBuildOpen || d.Sessions[i].Status == WorkspaceBuildPreparing {
 			return &d.Sessions[i]
 		}
 	}
@@ -335,7 +338,7 @@ func (d *WorkspaceBuildDocument) Add(session WorkspaceBuildSession) {
 	for len(d.Sessions) > workspaceBuildMaxSessions {
 		removed := false
 		for i := range d.Sessions {
-			if d.Sessions[i].Status != WorkspaceBuildOpen {
+			if d.Sessions[i].Status != WorkspaceBuildOpen && d.Sessions[i].Status != WorkspaceBuildPreparing {
 				d.Sessions = append(d.Sessions[:i], d.Sessions[i+1:]...)
 				removed = true
 				break
@@ -383,7 +386,7 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 		}
 		seen[session.ID] = true
 		switch session.Status {
-		case WorkspaceBuildOpen:
+		case WorkspaceBuildOpen, WorkspaceBuildPreparing:
 			open++
 		case WorkspaceBuildCreated, WorkspaceBuildAbandoned:
 		default:
@@ -400,6 +403,16 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if session.Preparation != nil {
+		if err := session.Preparation.Validate(); err != nil {
+			return err
+		}
+		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildCreated {
+			return fmt.Errorf("%w: preparation lifecycle", ErrWorkspaceBuildInvalid)
+		}
+	} else if session.Status == WorkspaceBuildPreparing {
+		return fmt.Errorf("%w: missing preparation", ErrWorkspaceBuildInvalid)
+	}
 	if session.Version < 1 || session.FurthestStep < 0 || session.FurthestStep > 4 || session.TurnCount < 0 {
 		return fmt.Errorf("%w: counters", ErrWorkspaceBuildInvalid)
 	}

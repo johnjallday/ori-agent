@@ -44,6 +44,12 @@ type AssistantSetupCreation struct {
 	RunID        string `json:"run_id"`
 	OperationID  string `json:"operation_id"`
 	ReviewDigest string `json:"review_digest"`
+	// Reviewed build preparation additionally binds its original attached
+	// reference and capability install. These are inert reconciliation facts,
+	// never a grant and never inferred from a directory/profile name.
+	FolderReferenceID  string `json:"folder_reference_id,omitempty"`
+	CapabilityRevision string `json:"capability_revision,omitempty"`
+	TeamRevision       string `json:"team_revision,omitempty"`
 }
 
 // TemplateProvenance records the template a workspace was created from in

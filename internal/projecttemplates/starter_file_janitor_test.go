@@ -39,8 +39,8 @@ func TestFileJanitorStarterTemplate_Identity(t *testing.T) {
 	if tpl.Retired {
 		t.Fatal("file-janitor must not be retired")
 	}
-	if tpl.BuiltinVersion < 2 {
-		t.Fatalf("builtin_version = %d; the ~/Downloads default must bump it so existing installs refresh", tpl.BuiltinVersion)
+	if tpl.BuiltinVersion < 5 {
+		t.Fatalf("builtin_version = %d; reviewed preparation/manual-only copy requires version 5", tpl.BuiltinVersion)
 	}
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("file-janitor should load without warnings, got %v", tpl.Warnings)

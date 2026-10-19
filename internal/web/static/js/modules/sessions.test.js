@@ -5639,6 +5639,86 @@ test('“create it” with a gate still closed says why and submits nothing', as
   assert.equal(created, 1, 'with every gate open it runs the Create submit');
 });
 
+test('File Janitor conversational create opens a host review and cannot manufacture consent', async () => {
+  const { manager } = loadBuildWizard();
+  manager.workspaceBuild.session = {
+    id: 'b-1',
+    version: 3,
+    status: 'open',
+    draft: { template_id: 'file-janitor' },
+    folder: { observation: { folder: 'Inbox' } }
+  };
+  manager.workspaceBuildPane = () => ({ COPY: {} });
+  let reviews = 0,
+    creates = 0;
+  manager.reviewWorkspaceBuildPreparation = async () => {
+    reviews++;
+  };
+  manager.createFolder = async () => {
+    creates++;
+  };
+  await manager.createFromWorkspaceBuild();
+  assert.equal(reviews, 1);
+  assert.equal(creates, 0);
+});
+
+test('draft edits invalidate a displayed permission review but cannot overwrite accepted authority', () => {
+  const { manager } = loadBuildWizard();
+  manager.workspaceCreatorContext = { buildRevision: 1 };
+  manager.workspaceBuild.janitorReview = { review_revision: 'old' };
+  manager.noteWorkspaceBuildIntent();
+  assert.equal(manager.workspaceBuild.janitorReview, null);
+  manager.workspaceBuild.acceptedPreparation = true;
+  manager.workspaceBuild.janitorReview = { review_revision: 'accepted' };
+  manager.noteWorkspaceBuildIntent();
+  assert.equal(manager.workspaceBuild.janitorReview.review_revision, 'accepted');
+  assert.equal(
+    manager.workspaceBuildCanApply(manager.workspaceBuild, manager.workspaceBuildRevision()),
+    false
+  );
+});
+
+test('lost preparation responses recover accepted identity and a double click sends only once', async () => {
+  const { manager } = loadBuildWizard();
+  const build = manager.workspaceBuild;
+  build.session = { id: 'b-1', status: 'open' };
+  build.janitorReview = { version: 4, review_revision: 'reviewed', monitoring: false };
+  manager.workspaceCreatorContext = {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.workspaceBuildPane = () => ({ setBusy() {} });
+  let calls = 0;
+  let release;
+  const pending = new Promise(resolve => {
+    release = resolve;
+  });
+  manager.workspaceBuildTransport = {
+    janitorPrepare: async () => {
+      calls++;
+      await pending;
+      throw new Error('Lost response');
+    },
+    janitorReview: async () => ({
+      ok: true,
+      body: {
+        review: {
+          state: 'accepted',
+          version: 4,
+          review_revision: 'reviewed',
+          workspace_id: 'exact-workspace'
+        }
+      }
+    })
+  };
+  const first = manager.confirmWorkspaceBuildPreparation();
+  await manager.confirmWorkspaceBuildPreparation();
+  release();
+  await first;
+  assert.equal(calls, 1);
+  assert.equal(build.acceptedPreparation, true);
+  assert.equal(build.janitorReview.workspace_id, 'exact-workspace');
+  assert.equal(build.preparationBusy, false);
+});
+
 test('the picker’s own default is never the user’s edit, and the assistant’s blueprint goes back', async () => {
   const { manager } = loadBuildWizard();
   const scheduled = [];

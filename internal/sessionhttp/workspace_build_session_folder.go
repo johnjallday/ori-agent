@@ -351,9 +351,10 @@ func buildFolderPromptJSON(observation foldercontext.Observation) (string, error
 // server's own root before anything is created so a lost pick refuses the
 // create and leaves nothing behind.
 type createWorkspaceBuildFolderPlan struct {
-	sessionID string
-	name      string
-	root      string
+	sessionID   string
+	name        string
+	root        string
+	referenceID string
 }
 
 // Why a build folder refused a create. The pick the server held for the
@@ -429,6 +430,7 @@ func (h *Handler) recordCreateWorkspaceBuildFolder(ctx context.Context, ws *sess
 		logger.Warn("Workspace build folder could not be linked", logger.Fields{"workspace_id": ws.ID, "error": err})
 		return errBuildFolderNotLinked
 	}
+	plan.referenceID = dirID
 	primary := true
 	if previous = strings.TrimSpace(previous); previous != "" && previous != dirID {
 		if ref, err := folderWS.GetDirectoryReference(previous); err == nil && ref != nil && !pathInsideFolder(workspaceFolder, ref.Path) {

@@ -72,7 +72,7 @@ held selection ID and canonical filesystem identity, privacy, mode, local daily
 time/timezone, watcher events/debounce/exclusions, and disclosure version 1.
 No consent field is added to the model-patch schema.
 
-The intended build API is `POST /api/workspace-build-sessions/{id}/janitor-review`
+The build API is `POST /api/workspaces/build-sessions/{id}/janitor-review`
 with `{version, monitoring}`, then `POST .../janitor-prepare` with
 `{version, monitoring, review_revision}`. The first is read-only and returns the
 actual draft summary, effective team, owner-only folder details, terms and opaque
@@ -85,7 +85,10 @@ An accepted build claim retains random operation/workspace IDs, accepted version
 review/root/terms digests, selected mode and acceptance time. An in-flight build
 is frozen against all ordinary edits/turns; its current draft is the accepted
 request until normal creation settles it. A created workspace's server-only
-provenance binds the operation, linked reference and original capability install.
+provenance binds the operation, linked reference, original capability install and
+effective attached team/configuration digest. Canvas node IDs are excluded from
+the team digest because the normal folder mirror canonicalizes them; role,
+attachment identity, custom instructions and profile settings remain bound.
 A lost response is reconciled from those markers, not current profile names.
 If a partial core/profile write cannot prove completion, report reconciliation
 required and do not run creation again. Once a domain preparation is accepted,
@@ -95,7 +98,8 @@ Resolve the unexpired hold and validate the normal create gates **before**
 reserving/creating resources. The path-free observation cannot revive an expired
 hold. Reserve one random workspace ID and stable operation IDs in the accepted
 build record; persist the exact typed draft/team evidence there, not arbitrary
-HTTP JSON. Lock/freeze that accepted build against late turns and form edits.
+HTTP JSON. Lock/freeze that accepted build against late turns and form edits. Preparing
+claims do not expire as ordinary open drafts or permit a second open build.
 Normal unknown/settled-build permissiveness is not reviewed-create authority.
 
 Concurrent submits join/replay the accepted operation, never allocate another
@@ -151,15 +155,15 @@ Selected settings schema: **2 → 3** in the existing domain settings file.
 - Existing scan-state receipt retention remains bounded. An operation older than
   retained evidence is unresolved, not permission to scan again.
 
-Build sidecar: **1 → 2** if/when the accepted creation claim is introduced;
-explicitly decode legacy v1 without fabricating consent, then write v2. Keep the
+Build sidecar: **1 → 2** for `BuildPreparationClaim` and the frozen `preparing`
+status. Decode legacy v1 without fabricating consent, then write v2. Keep the
 existing filename and Windows implementation in sync. Retain at most the current
 bounded number of builds; retain only stable outcome identity after completion,
 not a transcript/path/token. Missing/unknown claims cannot trigger create replay.
 No new database/reset tables are needed for workspace/build-owned records.
 
 Capability definition stays **1**: installs and ownership contracts are unchanged.
-Built-in File Janitor copy version will advance **4 → 5** when UI/disclosures land;
+Built-in File Janitor copy version advances **4 → 5** with UI/disclosures;
 legacy alias identity stays intact. Wizard schema/step IDs stay unchanged: the
 adapter recognizes a real manual decision for existing `automation_review` and
 readiness steps. No bulk rewrite of snapshots or user-authored templates. Existing

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/linkcontext"
@@ -55,6 +56,9 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 	deps := sessionhttp.WorkspaceBuildDeps{
 		Store:     buildStore,
 		Assistant: b.personalAssistantService.Get,
+		FileJanitor: func() (*filejanitor.Service, filejanitor.PreparationAutomation) {
+			return b.fileJanitorService, b.fileJanitorAutomation
+		},
 		// Resolved on every call: plugins enabled after startup change what
 		// the user can build from, exactly as they change the catalog.
 		Catalog: func(_ context.Context, userID string) ([]sessionhttp.WorkspaceBuildCatalogEntry, error) {

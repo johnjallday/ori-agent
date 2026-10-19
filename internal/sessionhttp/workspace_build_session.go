@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -67,6 +68,10 @@ type WorkspaceBuildDeps struct {
 	// Links observes a link the user attaches in the pane. Nil leaves the
 	// pane without Add link.
 	Links WorkspaceBuildLinks
+	// FileJanitor resolves the canonical compiled services at call time. The
+	// optional reviewed create path is unavailable without it; ordinary builds
+	// retain their existing no-grant creation behavior.
+	FileJanitor func() (*filejanitor.Service, filejanitor.PreparationAutomation)
 }
 
 // SetWorkspaceBuild wires build sessions. Without it every build endpoint
@@ -169,6 +174,10 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		}
 		id, action := parts[0], parts[1]
 		switch {
+		case (action == "janitor-review" || action == "janitor-prepare") && r.Method == http.MethodPost:
+			h.postWorkspaceBuildPreparation(w, r, id, action == "janitor-prepare")
+		case action == "janitor-review" || action == "janitor-prepare":
+			_ = orihttp.RespondMethodNotAllowed(w)
 		case action == "turns" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildTurn(w, r, id)
 		case action == "draft" && r.Method == http.MethodPatch:
@@ -1054,7 +1063,7 @@ func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspace
 			recorded = true
 			return nil
 		}
-		if session.Status != personalassistant.WorkspaceBuildOpen {
+		if session.Status != personalassistant.WorkspaceBuildOpen && session.Status != personalassistant.WorkspaceBuildPreparing {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
 		session.Status = personalassistant.WorkspaceBuildCreated

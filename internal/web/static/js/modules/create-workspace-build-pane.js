@@ -51,7 +51,7 @@
     removeFolder: 'Remove folder',
     folderTitle: 'Add a folder',
     folderDisclosure:
-      'Ori records file and folder names, kinds, counts and project markers locally. File contents are not read. Send shares this metadata with your configured model. When you create the workspace, Ori links the folder to it; nothing in it is moved or changed.',
+      'Ori records file and folder names, kinds, counts and project markers locally. File contents are not read. Send shares this metadata with your configured model. Ordinary creation only links the folder. File Janitor offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
     folderLoading: 'Loading folder choices…',
     folderPickerLabel: 'Pick another folder…',
     folderPathLabel: 'or paste a folder path',
@@ -64,7 +64,7 @@
     folderListOnly: 'Pick a folder from the list for now.',
     folderLooking: 'Looking at folder metadata locally… No file contents are read.',
     folderAttached:
-      'Folder attached — I can see its file and folder names, not their contents. Tell me what this workspace should do, or just press Send.',
+      'Folder attached — I can see its file and folder names, not their contents. Tell me what this workspace should do, or use Review & create when the draft is ready.',
     folderCancelled: 'No folder was chosen. Your draft is unchanged.',
     folderSend: 'Set it up from the attached folder.',
     folderSendHint: 'Empty Send: “Set it up from the attached folder”',
@@ -1150,6 +1150,112 @@
     render();
   }
 
+  // The controller owns authority and requests; this host renderer displays
+  // server facts only, never model-authored permission prose or HTML.
+  function renderCreationReview(
+    host,
+    { review = null, busy = false, message = '', accepted = false } = {}
+  ) {
+    if (!host) return;
+    host.textContent = '';
+    host.hidden = false;
+    const heading = createElement(
+      'h3',
+      'workspace-build-review__title',
+      accepted ? 'Resume accepted preparation' : 'Review & create'
+    );
+    heading.tabIndex = -1;
+    host.appendChild(heading);
+    const status = createElement('p', 'workspace-build-review__status', message);
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    host.appendChild(status);
+    const action = (label, type, detail = {}) => {
+      const button = createElement('button', 'modern-btn modern-btn-secondary', label);
+      button.type = 'button';
+      button.disabled = busy;
+      button.addEventListener('click', () => emit(type, detail));
+      return button;
+    };
+    if (review?.workspace) {
+      host.appendChild(createElement('strong', '', review.workspace.name));
+      if (review.workspace.description)
+        host.appendChild(createElement('p', '', review.workspace.description));
+      host.appendChild(createElement('p', '', review.workspace.mission || 'No goal specified'));
+      host.appendChild(
+        createElement('p', '', 'Placement: ' + (review.placement_label || 'Workspace root'))
+      );
+      const team = createElement('ul', 'workspace-build-review__team');
+      for (const member of review.team || []) {
+        team.appendChild(
+          createElement(
+            'li',
+            '',
+            member.name + ' · ' + member.action + (member.model ? ' · ' + member.model : '')
+          )
+        );
+      }
+      if (!(review.team || []).length)
+        team.appendChild(createElement('li', '', 'No agents will be created or attached.'));
+      host.appendChild(team);
+      host.appendChild(createElement('strong', '', 'Folder: ' + review.folder.name));
+      const details = createElement('details', 'workspace-build-review__details');
+      details.appendChild(createElement('summary', '', 'Folder details'));
+      details.appendChild(createElement('p', '', review.folder.path));
+      host.appendChild(details);
+      const disclosure = createElement('ul', 'workspace-build-review__terms');
+      for (const line of [
+        'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
+        'Scan top-level file names, types, sizes, and dates once. No file contents are opened.',
+        'Every move into Filed/ or action to Trash needs your separate approval.'
+      ])
+        disclosure.appendChild(createElement('li', '', line));
+      host.appendChild(disclosure);
+      const label = createElement('label', 'workspace-build-review__monitor');
+      const checkbox = createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = Boolean(review.monitoring);
+      checkbox.disabled = busy || accepted;
+      checkbox.addEventListener('change', () =>
+        emit('workspace-build-review', { monitoring: checkbox.checked })
+      );
+      label.appendChild(checkbox);
+      label.appendChild(createElement('span', '', 'Also watch new arrivals and run a daily scan'));
+      host.appendChild(label);
+      const terms = review.terms;
+      host.appendChild(
+        createElement(
+          'p',
+          '',
+          review.monitoring
+            ? `Watch top-level ${(terms.watch_events || []).join(' / ')} events after a ${terms.debounce_seconds}-second delay; skip Filed/. Daily scan at ${terms.daily_scan_local_time} (${terms.timezone}). Files still settling are excluded. Nothing moves automatically.`
+            : 'Manual scans only. No watcher or daily scan will run.'
+        )
+      );
+    }
+    const actions = createElement('div', 'workspace-build-review__actions');
+    if (review?.review_revision) {
+      const confirm = action(
+        accepted ? 'Retry preparation' : 'Create & prepare review',
+        'workspace-build-prepare'
+      );
+      confirm.className = 'modern-btn modern-btn-primary';
+      actions.appendChild(confirm);
+    } else if (!accepted) {
+      actions.appendChild(action('Review & create', 'workspace-build-review'));
+    }
+    if (!accepted) {
+      actions.appendChild(action('Edit setup', 'workspace-build-collapse'));
+      actions.appendChild(action('Change folder', 'workspace-build-folder-open'));
+    }
+    if (accepted && review?.workspace_id) {
+      const open = createElement('a', 'modern-btn modern-btn-secondary', 'Open workspace');
+      open.href = '/workspaces/' + encodeURIComponent(review.workspace_id) + '?panel=file-janitor';
+      actions.appendChild(open);
+    }
+    host.appendChild(actions);
+  }
+
   function destroy() {
     for (const release of state.listeners.splice(0)) release();
     if (state.root) {
@@ -1189,6 +1295,7 @@
     collapse,
     expand,
     destroy,
+    renderCreationReview,
     openFolderChooser,
     closeFolderChooser,
     folderChooserOpen: () => Boolean(state.root && state.chooserOpen),

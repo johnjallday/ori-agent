@@ -2617,11 +2617,13 @@
       const value = el('span', 'fj-row-value');
       // Screen readers get the status word; sighted users get the mark + text.
       value.textContent =
-        (check.status === 'ok'
-          ? 'OK'
-          : check.status === 'failed'
-            ? 'Needs attention'
-            : 'Not running yet') + (check.message ? ' — ' + check.message : '');
+        (manualScansOnly(status?.settings) && ['watcher', 'scheduler'].includes(check.component)
+          ? 'Off'
+          : check.status === 'ok'
+            ? 'OK'
+            : check.status === 'failed'
+              ? 'Needs attention'
+              : 'Not running yet') + (check.message ? ' — ' + check.message : '');
       li.appendChild(value);
       rows.appendChild(li);
     });
@@ -3834,6 +3836,23 @@
         setupReview = null;
       }
       if (sequence !== statusRequest || id !== wsId()) return;
+      // Creation links only an operation identity, never counts or success
+      // flags. The first-result message comes from its canonical receipt.
+      const preparationID = new URLSearchParams(window.location?.search || '').get('preparation');
+      if (
+        preparationID &&
+        setupReview?.state === 'prepared' &&
+        setupReview.operation_id === preparationID &&
+        setupReview.result
+      ) {
+        if (setupReview.result.outcome === 'no_eligible') {
+          emptyReviewState = 'no_proposals';
+          reviewStatusMessage =
+            'Initial scan finished. No eligible files are ready for review. Files may still be settling; scan again when you choose.';
+        } else {
+          reviewStatusMessage = 'Your first review is ready. Nothing was moved.';
+        }
+      }
       render(status);
       if (status && status.applies && status.settings && status.settings.root_path) {
         await loadCategories();

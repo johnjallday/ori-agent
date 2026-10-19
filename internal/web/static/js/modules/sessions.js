@@ -11648,7 +11648,9 @@ const sessionManager = {
       folder: (id, body) => call('POST', sessionURL(id, 'folder'), body),
       detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
       link: (id, body) => call('POST', sessionURL(id, 'link'), body),
-      detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body)
+      detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body),
+      janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
+      janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body)
     };
   },
 
@@ -11666,6 +11668,12 @@ const sessionManager = {
     if (!modal?.addEventListener) return;
     modal.addEventListener('workspace-build-turn', event => {
       void this.sendWorkspaceBuildTurn(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-review', event => {
+      void this.reviewWorkspaceBuildPreparation(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-prepare', () => {
+      void this.confirmWorkspaceBuildPreparation();
     });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
@@ -12138,7 +12146,25 @@ const sessionManager = {
       return;
     const revision = options.revision ?? this.workspaceBuildRevision();
     const current = () => this.workspaceBuildCanApply(build, revision);
+    if (build.acceptedPreparation && !session.preparation) return;
+    if (build.janitorReview && !session.preparation) {
+      build.janitorReview = null;
+      build.janitorReviewSequence = (build.janitorReviewSequence || 0) + 1;
+    }
     build.session = session;
+    if (session.preparation) {
+      build.acceptedPreparation = true;
+      build.janitorReview = {
+        state: 'accepted',
+        version: session.preparation.build_version,
+        review_revision: session.preparation.review_revision,
+        monitoring: session.preparation.monitoring,
+        workspace_id: session.preparation.workspace_id
+      };
+      pane.applySession(session);
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     this.rememberWorkspaceBuildSession(session);
     pane.applySession(session);
     if (!current()) {
@@ -12181,6 +12207,7 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
+    if (build.preparationBusy || build.acceptedPreparation) return;
     this.noteWorkspaceBuildIntent();
     build.collapsed = true;
     pane.collapse({ withdraw });
@@ -12243,11 +12270,19 @@ const sessionManager = {
   noteWorkspaceBuildIntent() {
     const context = this.workspaceCreatorContext;
     if (context) context.buildRevision = (Number(context.buildRevision) || 0) + 1;
+    if (this.workspaceBuild && !this.workspaceBuild.acceptedPreparation) {
+      this.workspaceBuild.janitorReview = null;
+      this.workspaceBuild.preparationReviewActive = false;
+      this.workspaceBuild.janitorReviewSequence =
+        (this.workspaceBuild.janitorReviewSequence || 0) + 1;
+    }
   },
 
   workspaceBuildCanApply(build, revision) {
     return (
       this.workspaceBuild === build &&
+      !build.acceptedPreparation &&
+      !build.preparationBusy &&
       this.workspaceBuildAssisted() &&
       this.workspaceBuildRevision() === revision
     );
@@ -12258,6 +12293,15 @@ const sessionManager = {
     const modal = document.getElementById('addFolderModal');
     if (modal?.dataset) modal.dataset.creationPresentation = assisted ? 'assisted' : 'manual';
     modal?.classList?.toggle?.('workspace-create-modal--build', assisted);
+    modal?.classList?.toggle?.(
+      'workspace-create-modal--review',
+      Boolean(
+        assisted &&
+        (this.workspaceBuild?.janitorReview ||
+          this.workspaceBuild?.preparationBusy ||
+          this.workspaceBuild?.preparationReviewActive)
+      )
+    );
     const body = document.querySelector('#addFolderModal .workspace-create-modal-body');
     if (body) body.hidden = assisted;
     if (assisted) {
@@ -12277,8 +12321,23 @@ const sessionManager = {
             ? 'Manual setup · assistant unavailable. Your draft is kept.'
             : 'Manual setup · your draft and conversation are kept while this dialog is open.';
     }
+    const preparationHost = document.getElementById('workspaceBuildCreationReview');
+    if (preparationHost) {
+      const offered = assisted && this.workspaceBuildPreparationEligible();
+      preparationHost.hidden = !offered;
+      if (offered) {
+        this.workspaceBuildPane()?.renderCreationReview?.(preparationHost, {
+          review: this.workspaceBuild.janitorReview,
+          busy: Boolean(this.workspaceBuild.preparationBusy || this.workspaceBuild.busy),
+          accepted: Boolean(this.workspaceBuild.acceptedPreparation),
+          message:
+            this.workspaceBuild.preparationMessage ||
+            'Ready to create? Review the current draft and folder permissions.'
+        });
+      }
+    }
     const summary = document.getElementById('workspaceBuildDraftSummary');
-    if (summary) summary.hidden = !assisted;
+    if (summary) summary.hidden = !assisted || Boolean(this.workspaceBuild?.acceptedPreparation);
     const text = document.getElementById('workspaceBuildDraftText');
     if (text && assisted) {
       const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
@@ -12491,7 +12550,7 @@ const sessionManager = {
 
   noteWorkspaceBuildUserEdit(event) {
     // Trusted edits during asynchronous patch preparation also invalidate it.
-    if (event?.target?.closest?.('#workspaceBuildPane')) return;
+    if (event?.target?.closest?.('#workspaceBuildPane, #workspaceBuildCreationReview')) return;
     if (event?.isTrusted || this.workspaceBuildApplyDepth === 0) this.noteWorkspaceBuildIntent();
     if (!this.workspaceBuild || (this.workspaceBuildApplyDepth > 0 && !event?.isTrusted)) return;
     const key = this.workspaceBuildKeyForTarget(event?.target);
@@ -13030,7 +13089,14 @@ const sessionManager = {
   // version under the other, and the loser's 409 would cost the user what
   // they typed.
   workspaceBuildFolderLocked(build) {
-    return Boolean(build.busy || build.turnPending || build.folderPending || build.linkPending);
+    return Boolean(
+      build.busy ||
+      build.turnPending ||
+      build.folderPending ||
+      build.linkPending ||
+      build.preparationBusy ||
+      build.acceptedPreparation
+    );
   },
 
   // Whether a folder or link request is in flight. Create waits for it: a
@@ -13062,6 +13128,10 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build?.session || !pane || this.workspaceBuildFolderLocked(build)) return;
     if (!this.workspaceBuildAssisted()) return;
+    if (build.janitorReview || build.preparationReviewActive) {
+      this.noteWorkspaceBuildIntent();
+      this.syncWorkspaceBuildPresentation();
+    }
     build.folderGeneration = (build.folderGeneration || 0) + 1;
     const generation = build.folderGeneration;
     if (!pane.openFolderChooser()) return;
@@ -13357,9 +13427,10 @@ const sessionManager = {
   // draft line, and Review's folder card move.
   adoptWorkspaceBuildSession(session) {
     const build = this.workspaceBuild;
-    if (!build || !session) return;
+    if (!build || !session || build.acceptedPreparation) return;
     if (build.session?.id === session.id && Number(build.session.version) > Number(session.version))
       return;
+    if (build.janitorReview) this.noteWorkspaceBuildIntent();
     build.session = session;
     this.rememberWorkspaceBuildSession(session);
     this.workspaceBuildPane()?.applySession(session);
@@ -13472,6 +13543,10 @@ const sessionManager = {
       );
       return;
     }
+    if (this.workspaceBuildPreparationEligible()) {
+      await this.reviewWorkspaceBuildPreparation();
+      return;
+    }
     const problem = this.workspaceBuildGateProblem();
     if (problem) {
       pane.showLine(`${pane.COPY.gateFailurePrefix}${problem}`);
@@ -13483,6 +13558,169 @@ const sessionManager = {
     const review = steps[steps.length - 1];
     if (this.wizardStep !== review) this.goToWizardStep(review, { focus: false });
     await this.createFolder();
+  },
+
+  workspaceBuildPreparationEligible() {
+    const build = this.workspaceBuild;
+    return Boolean(
+      build?.acceptedPreparation ||
+      (build?.session?.folder &&
+        ['file-janitor', 'downloads-janitor'].includes(build.session.draft?.template_id))
+    );
+  },
+
+  async reviewWorkspaceBuildPreparation({ monitoring = false } = {}) {
+    const build = this.workspaceBuild;
+    if (
+      !build?.session ||
+      build.preparationBusy ||
+      build.busy ||
+      !this.workspaceBuildPreparationEligible()
+    )
+      return;
+    if (build.acceptedPreparation) {
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
+    const problem = this.workspaceBuildGateProblem();
+    if (problem) {
+      build.preparationReviewActive = true;
+      build.preparationMessage = 'Not yet — ' + problem + ' Use Edit setup to repair the draft.';
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
+    if (this.workspaceBuildAttachmentPending(build)) return;
+    build.preparationBusy = true;
+    build.preparationReviewActive = true;
+    build.preparationMessage = 'Checking the current draft, team and held folder…';
+    this.syncWorkspaceBuildPresentation();
+    const revision = this.workspaceBuildRevision();
+    try {
+      this.scheduleWorkspaceBuildDraft({ user: true });
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (
+        this.workspaceBuild !== build ||
+        build.draftError ||
+        revision !== this.workspaceBuildRevision()
+      )
+        return;
+      const sequence = (build.janitorReviewSequence || 0) + 1;
+      build.janitorReviewSequence = sequence;
+      const result = await this.workspaceBuildApi().janitorReview(build.session.id, {
+        version: build.session.version,
+        monitoring
+      });
+      if (
+        this.workspaceBuild !== build ||
+        sequence !== build.janitorReviewSequence ||
+        revision !== this.workspaceBuildRevision()
+      )
+        return;
+      if (!result?.ok)
+        throw new Error(
+          result?.body?.error?.message ||
+            result?.body?.message ||
+            result?.body?.error ||
+            'The current review could not be prepared. Your draft is kept.'
+        );
+      build.janitorReview = result.body.review;
+      build.acceptedPreparation = result.body.review?.state === 'accepted';
+      build.preparationMessage = build.acceptedPreparation
+        ? 'An earlier confirmation was saved. Resume that exact workspace.'
+        : 'Review these permissions, then explicitly confirm below.';
+    } catch (error) {
+      build.preparationMessage = error.message;
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.preparationBusy = false;
+        this.syncWorkspaceBuildPresentation();
+        document.querySelector('#workspaceBuildCreationReview h3')?.focus();
+      }
+    }
+  },
+
+  async confirmWorkspaceBuildPreparation() {
+    const build = this.workspaceBuild;
+    const review = build?.janitorReview;
+    if (
+      !build ||
+      !review?.review_revision ||
+      build.busy ||
+      build.preparationBusy ||
+      this.isCreatingFolder
+    )
+      return;
+    // The click is the consent boundary; no conversational flag calls here.
+    build.preparationBusy = true;
+    build.preparationMessage =
+      'Creating the reviewed workspace and preparing one metadata-only scan…';
+    this.syncWorkspaceBuildPresentation();
+    this.workspaceBuildPane()?.setBusy?.(true);
+    if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = true;
+    const request = {
+      version: review.version,
+      monitoring: Boolean(review.monitoring),
+      review_revision: review.review_revision
+    };
+    try {
+      const result = await this.workspaceBuildApi().janitorPrepare(build.session.id, request);
+      if (this.workspaceBuild !== build) return;
+      if (!result?.ok) {
+        const details = result?.body?.details || result?.body?.error?.details || {};
+        if (details.workspace_id) {
+          build.acceptedPreparation = true;
+          build.janitorReview = { ...review, workspace_id: details.workspace_id };
+        } else {
+          build.janitorReview = null;
+        }
+        throw new Error(
+          result?.body?.error?.message ||
+            result?.body?.message ||
+            (typeof result?.body?.error === 'string' ? result.body.error : '') ||
+            'Preparation stopped. Keep this build; do not create another workspace.'
+        );
+      }
+      build.acceptedPreparation = true;
+      const id = result.body.workspace_id;
+      const slug = result.body.folder_slug || id;
+      this.notifyWorkspacesChanged({ workspaceId: id });
+      const params = new URLSearchParams({ panel: 'file-janitor', tab: 'review' });
+      if (result.body.preparation?.operation_id)
+        params.set('preparation', result.body.preparation.operation_id);
+      const batch = result.body.preparation?.result?.batch_id;
+      if (batch) params.set('batch_id', batch);
+      bootstrap.Modal.getInstance(document.getElementById('addFolderModal'))?.hide();
+      window.location.href = '/workspaces/' + encodeURIComponent(slug) + '?' + params.toString();
+    } catch (error) {
+      build.preparationMessage =
+        error.message || 'The response was lost. Checking the accepted operation…';
+      // A lost response may have committed. Read the current build review;
+      // never retry ordinary POST /workspaces or guess from a display name.
+      try {
+        const recovered = await this.workspaceBuildApi().janitorReview(build.session.id, {
+          version: request.version,
+          monitoring: request.monitoring
+        });
+        if (
+          this.workspaceBuild === build &&
+          recovered?.ok &&
+          recovered.body.review?.state === 'accepted'
+        ) {
+          build.acceptedPreparation = true;
+          build.janitorReview = recovered.body.review;
+        }
+      } catch (_) {
+        /* Keep the exact confirmation available for bounded retry. */
+      }
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.preparationBusy = false;
+        this.workspaceBuildPane()?.setBusy?.(false);
+        if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = false;
+        this.syncWorkspaceBuildPresentation();
+        document.querySelector('#workspaceBuildCreationReview h3')?.focus();
+      }
+    }
   },
 
   // A refused create is also said in the conversation, with the same words the
@@ -13658,7 +13896,12 @@ const sessionManager = {
 
   // Create folder
   async createFolder(options = {}) {
-    if (this.isCreatingFolder) return;
+    if (
+      this.isCreatingFolder ||
+      this.workspaceBuild?.preparationBusy ||
+      this.workspaceBuild?.acceptedPreparation
+    )
+      return;
     // A folder or link still being attached would be lost by a create that
     // closes the build first; the button is disabled meanwhile, and this
     // covers any other path that submits.
