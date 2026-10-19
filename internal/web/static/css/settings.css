@@ -1156,8 +1156,148 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   gap: 0.5rem;
 }
 
-.connected-memory-card [hidden] {
+.connected-memory-card [hidden],
+.connected-memory-browser [hidden] {
   display: none;
+}
+
+/* The browser: search, source and category chips, and one row per entry. */
+.connected-memory-browser {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 1.25rem 1.4rem;
+  min-width: 0;
+}
+
+.connected-memory-browser-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.connected-memory-browser-hint,
+.connected-memory-results-line {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.connected-memory-search {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.connected-memory-search .form-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.connected-memory-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.connected-memory-chip {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.connected-memory-chip.is-active {
+  border-color: var(--primary-color);
+  background: var(--primary-color);
+  color: var(--text-on-primary, #fff);
+}
+
+.connected-memory-entries {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connected-memory-entry {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  overflow-wrap: anywhere;
+}
+
+.connected-memory-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.connected-memory-entry-source {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.connected-memory-entry-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.connected-memory-entry-excerpt {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.connected-memory-entry-actions,
+.connected-memory-promote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.connected-memory-entry-promoted,
+.connected-memory-entry-message {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.connected-memory-promote {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 42rem;
+}
+
+.connected-memory-promote label {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.connected-memory-promote small {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 576px) {
+  .connected-memory-search {
+    flex-direction: column;
+  }
 }
 
 .profile-knowledge-header {

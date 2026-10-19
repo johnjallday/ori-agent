@@ -2193,7 +2193,7 @@ Deletes that workspace's copied line and nothing else. Returns `{"removed": true
 
 ## External Memory API
 
-Ori keeps a read-only mirror of what other agents remember about the user: Codex CLI (`codex`, `$CODEX_HOME/memories`, else `~/.codex/memories`). The mirror lives in `<data dir>/external_memory/` (`sources.json` and `entries/<source>.json`), so `ORI_DATA_DIR` scopes it. Ori never writes under a source's folder. Every source is off until the user enables it on the Profile page; nothing is read before that.
+Ori keeps a read-only mirror of what other agents remember about the user: Codex CLI (`codex`, `$CODEX_HOME/memories`, else `~/.codex/memories`), Claude Code (`claude_code`, `$CLAUDE_CONFIG_DIR/projects/*/memory/*.md`, else under `~/.claude`; each file's front matter gives its title, type and date, and the project key is decoded back to its folder) and Gemini CLI (`gemini_cli`, `~/.gemini/GEMINI.md` plus the `GEMINI.md` of each project in `~/.gemini/projects.json`). The mirror lives in `<data dir>/external_memory/` (`sources.json` and `entries/<source>.json`), so `ORI_DATA_DIR` scopes it. Ori never writes under a source's folder. Every source is off until the user enables it on the Profile page; nothing is read before that.
 
 A sync reads each enabled source, splits it into entries with stable ids, and compares content hashes: unchanged entries are untouched, changed ones are updated, new ones are added, and entries no longer present are marked `removed` (kept, hidden from every reader). One sync runs at a time. Syncs run in the background once the server is serving (only when the last completed sync is a day old or there has never been one), then 24 hours after the last completed sync, when a source is enabled or an enabled source's exclusions change, and on **Sync now**.
 
@@ -2239,6 +2239,51 @@ Both fields are optional. Each exclusion is a folder prefix, a full path or one 
 **Endpoint:** `POST /api/external-memory/sync`
 
 Runs a sync of every enabled source and answers `200` with the same body as `GET`. When a sync is already running it answers `202` at once, with `sync.running`, `sync.reason` (`startup`, `schedule`, `enabled`, `manual`) and `sync.started_at` describing it.
+
+### Search entries
+
+**Endpoint:** `GET /api/external-memory/entries?q=&source=&category=&folder=&since=&limit=&offset=`
+
+Searches the entries any reader may see: active, from enabled sources, outside each source's exclusions. `q` holds keywords and optional `"quoted phrases"`; matching ignores case and works inside words, so a Korean stem finds the word with its particle attached. Results rank phrase matches first, then the number of distinct terms matched, then newest first; an empty `q` lists everything newest first. `folder` keeps entries at or under that folder (`~/` expands), `since` keeps entries dated on or after `YYYY-MM-DD`. `limit` defaults to 25, at most 100.
+
+```json
+{
+  "entries": [{
+    "id": "4f0c…", "source": "codex", "source_label": "Codex",
+    "title": "Exits on an EMA20 close below EMA50 beat a fixed 3% stop…",
+    "excerpt": "…at most 600 characters around the best match…",
+    "category": "reusable-knowledge",
+    "folder": "/Users/me/Projects/chart-lab", "folder_display": "~/Projects/chart-lab",
+    "date": "2026-10-05",
+    "origin": "/Users/me/.codex/memories/MEMORY.md#chart-lab-…/reusable-knowledge/…",
+    "origin_display": "~/.codex/memories/MEMORY.md",
+    "promoted_item_id": "",
+    "suggested_text": "Exits on an EMA20 close below EMA50 beat a fixed 3% stop once fees reach 0.6% per side.",
+    "suggested_category": "projects"
+  }],
+  "total": 4, "offset": 0, "limit": 25,
+  "facets": { "sources": { "codex": 3, "claude_code": 1 }, "categories": { "reusable-knowledge": 2, "task": 2 } }
+}
+```
+
+`facets` count the matches by source and category ignoring the `source` and `category` filters. `folder_unverified` marks a Claude Code project key that could not be decoded to an existing folder (`folder` is then the raw key); `truncated` marks a body cut at 64 KB.
+
+### Promote an entry to global memory
+
+**Endpoint:** `POST /api/external-memory/entries/{id}/promote`
+
+```json
+{ "text": "Report backtests net of fees.", "category": "how_you_work" }
+```
+
+Both fields are optional and default to the entry's `suggested_text` and `suggested_category`. The text becomes an approved explicit Personal HQ fact through the same path as Promote to global on a workspace Memory entry: one safe line of at most 500 characters, category `how_you_work`, `people`, `projects` or `routines`. The fact's evidence is `{source_kind: "external_memory", source_id: "external:<source>:<entry id>", summary: <entry title>}`; the origin path stays in the mirror entry, never in the evidence. The entry records the item it became (`promoted_item_id`), and promoting it again links that item instead of creating another, unless the item was forgotten. In `GET /api/personal-assistant/knowledge`, such an item's `source` carries `external` (the source id) and `external_entry_id`.
+
+```json
+{ "status": "promoted", "created": true, "item_id": "…", "href": "/profile#personalHQKnowledge",
+  "message": "Promoted to global memory. Your assistant now knows it as your own fact.", "entry": { "…": "…" } }
+```
+
+`status` is `promoted`, `already_known` or `already_pending`. `400` for a wording or category that is not allowed, `404` for an id that is not visible (unknown, removed, or from a source that is off), `409 global_memory_unavailable` without a hired assistant and a Personal HQ, `409 global_memory_changed` when global memory changed or is full.
 
 ## Home Project Library Notifications API
 

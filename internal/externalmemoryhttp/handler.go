@@ -1,6 +1,7 @@
 // Package externalmemoryhttp serves the Connected memory API on the Profile
-// page: the source cards (switches, exclusions, sync status) and the Sync now
-// trigger over the read-only external memory mirror.
+// page over the read-only external memory mirror: the source cards (switches,
+// exclusions, sync status), Sync now, the entry browser, and Promote to
+// global.
 package externalmemoryhttp
 
 import (
@@ -29,6 +30,7 @@ const (
 // Handler serves /api/external-memory/*.
 type Handler struct {
 	runner *externalmemory.Runner
+	global GlobalMemory
 }
 
 // NewHandler builds the handler. A nil runner makes every endpoint 503.

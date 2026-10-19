@@ -83,6 +83,19 @@ test('every approved global fact names its origin', () => {
   // An older server without the source object still labels by source_kind.
   assert.equal(approvedSourceChip({ source_kind: 'saved_app' }), 'From saved apps');
   assert.equal(chip('something_new'), '');
+  // A fact promoted from another agent's memory names that agent.
+  assert.equal(
+    approvedSourceChip({ source: { kind: 'explicit', external: 'codex' } }),
+    'From Codex memory'
+  );
+  assert.equal(
+    approvedSourceChip({ source: { kind: 'explicit', external: 'claude_account' } }),
+    'From your Claude account memory'
+  );
+  assert.equal(
+    approvedSourceChip({ source: { kind: 'explicit', external: 'future_agent' } }),
+    'From another agent’s memory'
+  );
 });
 
 test('a workspace proposal names its agent, workspace link and task or chat', () => {

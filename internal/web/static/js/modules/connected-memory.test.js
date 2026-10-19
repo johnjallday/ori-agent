@@ -7,6 +7,7 @@ import {
   exclusionSync,
   folderSuggestions,
   generalEntryCount,
+  mirrorSignature,
   needsPoll,
   sourceCardModel,
   sourceCardState,
@@ -169,6 +170,26 @@ test('entries with no folder are counted as general', () => {
   );
   assert.equal(generalEntryCount(codex({ entry_count: 2, folders: [{ count: 5 }] })), 0);
   assert.equal(sourceCardModel(codex({ entry_count: 50 }), { now: NOW }).generalCount, 7);
+});
+
+test('an empty GEMINI.md says so after a sync', () => {
+  const gemini = { id: 'gemini_cli', entry_count: 0, last_sync_finished: '2026-10-19T11:00:00Z' };
+  assert.equal(entriesLine(gemini), '0 entries (GEMINI.md is empty)');
+  assert.equal(entriesLine({ ...gemini, last_sync_finished: undefined }), 'No entries yet');
+});
+
+test('the browser reloads only when what a reader sees may have changed', () => {
+  const base = { sources: [codex()] };
+  const same = mirrorSignature({ sources: [codex()] });
+  assert.equal(mirrorSignature(base), same);
+  assert.notEqual(mirrorSignature({ sources: [codex({ enabled: false })] }), same);
+  assert.notEqual(mirrorSignature({ sources: [codex({ entry_count: 110 })] }), same);
+  assert.notEqual(mirrorSignature({ sources: [codex({ exclusions: ['~/x'] })] }), same);
+  assert.notEqual(
+    mirrorSignature({ sources: [codex({ last_sync_finished: '2026-10-19T12:00:00Z' })] }),
+    same
+  );
+  assert.equal(mirrorSignature(null), '');
 });
 
 test('the Claude account card has no file controls', () => {

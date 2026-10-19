@@ -16,8 +16,13 @@ func (b *ServerBuilder) initializeExternalMemory() {
 	store := externalmemory.NewStore(config.DefaultExternalMemoryDir())
 	registry := externalmemory.NewRegistry(
 		externalmemory.NewCodexSource(externalmemory.DefaultCodexRoot()),
+		externalmemory.NewClaudeCodeSource(externalmemory.DefaultClaudeCodeRoot()),
+		externalmemory.NewGeminiSource(externalmemory.DefaultGeminiRoot()),
 	)
 	b.externalMemoryRunner = externalmemory.NewRunner(store, registry)
 	b.externalMemoryHandler = externalmemoryhttp.NewHandler(b.externalMemoryRunner)
+	// Promote to global goes through the personal assistant's knowledge
+	// service, read when called: it may be unset (no hired assistant).
+	b.externalMemoryHandler.SetGlobalMemory(builderGlobalMemory{b: b})
 	b.server.externalMemory = b.externalMemoryRunner
 }

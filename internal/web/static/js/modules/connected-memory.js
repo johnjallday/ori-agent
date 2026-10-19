@@ -2,11 +2,12 @@
 // (what Codex, Claude Code, Gemini CLI, and the Claude account remember about
 // the user), mirrored read-only by the server. Only the personal assistant
 // reads the mirror; this section is where the user switches sources on and
-// off, leaves folders out, and syncs.
+// off, leaves folders out, syncs, browses, and promotes entries.
 //
 // Pure helpers are exported for node:test; mountConnectedMemory() wires the
 // DOM inside #connectedMemory.
 
+import { createConnectedMemoryBrowser } from './connected-memory-browser.js';
 import { formatRelativeTime } from './relative-time.js';
 import { createTagInput } from './tag-input.js';
 
@@ -28,6 +29,9 @@ function relativeTime(iso, now) {
 export function entriesLine(source) {
   const entries = Number(source?.entry_count) || 0;
   const folders = Number(source?.folder_count) || 0;
+  // FR7: the Gemini CLI's global file is often empty; say so after a sync.
+  if (entries === 0 && source?.id === 'gemini_cli' && source?.last_sync_finished)
+    return '0 entries (GEMINI.md is empty)';
   if (entries === 0) return 'No entries yet';
   if (folders === 0) return plural(entries, 'entry', 'entries');
   return `${plural(entries, 'entry', 'entries')} across ${plural(folders, 'folder')}`;
@@ -144,6 +148,22 @@ export function exclusionSync({ lastServer, server, shown, force = false }) {
   const changed = force || key !== lastServer;
   const differs = (Array.isArray(shown) ? shown : []).join('\n') !== key;
   return { apply: changed && differs, lastServer: key };
+}
+
+// mirrorSignature changes whenever what a reader sees may have changed.
+export function mirrorSignature(payload) {
+  if (!payload) return '';
+  return (payload.sources || [])
+    .map(source =>
+      [
+        source.id,
+        source.enabled ? 1 : 0,
+        source.entry_count,
+        source.last_sync_finished || '',
+        (source.exclusions || []).join('|')
+      ].join(':')
+    )
+    .join(';');
 }
 
 // folderSuggestions turns a card's folder counts into the exclusion editor's
@@ -314,11 +334,24 @@ export function mountConnectedMemory(doc = document) {
   if (!section) return null;
   const statusLine = doc.getElementById('connectedMemoryStatus');
   const list = doc.getElementById('connectedMemorySources');
+  const browserHost = doc.getElementById('connectedMemoryBrowser');
   const cards = new Map();
   let payload = null;
   let busy = false;
   let pollTimer = null;
   let polls = 0;
+  let browser = null;
+  let browsed = null;
+
+  // The browser shows what the cards count, so it reloads whenever the
+  // mirror a reader sees changed: a switch, an exclusion, or a sync.
+  function refreshBrowser() {
+    const signature = mirrorSignature(payload);
+    if (!browserHost || signature === browsed) return;
+    browsed = signature;
+    browser ??= createConnectedMemoryBrowser(browserHost, { request });
+    void browser.reload();
+  }
 
   function setStatus(message, isError = false) {
     if (!statusLine) return;
@@ -362,6 +395,7 @@ export function mountConnectedMemory(doc = document) {
       payload = next;
       setStatus('');
       render();
+      refreshBrowser();
       schedulePoll();
     } catch (error) {
       setStatus(error.message || 'Connected memory could not be loaded.', true);
@@ -384,6 +418,7 @@ export function mountConnectedMemory(doc = document) {
       busy = false;
       // A refused change puts the saved folder list back in the editor.
       render({ resyncExclusions: failed });
+      refreshBrowser();
       schedulePoll();
     }
   }

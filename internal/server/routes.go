@@ -1431,6 +1431,8 @@ func registerExternalMemoryRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/external-memory/sources", s.Handlers.ExternalMemory.GetSources)
 	mux.HandleFunc("PATCH /api/external-memory/sources/{source}", s.Handlers.ExternalMemory.PatchSource)
 	mux.HandleFunc("POST /api/external-memory/sync", s.Handlers.ExternalMemory.Sync)
+	mux.HandleFunc("GET /api/external-memory/entries", s.Handlers.ExternalMemory.GetEntries)
+	mux.HandleFunc("POST /api/external-memory/entries/{id}/promote", s.Handlers.ExternalMemory.PromoteEntry)
 }
 
 // registerFileJanitorRoutes registers the workspace-scoped Downloads

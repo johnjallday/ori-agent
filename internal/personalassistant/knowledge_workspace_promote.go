@@ -79,29 +79,49 @@ func (s *KnowledgeLearningService) PromoteWorkspaceEntry(ctx context.Context, us
 	if workspaceID == binding.HQWorkspaceID {
 		return WorkspacePromoteAlreadyKnown, KnowledgeItem{}, nil // HQ memory is global memory
 	}
+	evidence := KnowledgeEvidence{SourceKind: WorkspacePromoteSourceKind, SourceID: workspaceID, ObservedAt: s.now().UTC()}
+	if original, err := workspace.ValidateMemoryText(req.Original); err == nil && original == req.Original {
+		evidence.Summary = original
+	}
+	return s.promoteExplicit(ctx, userID, binding, workspaceID, req.Category, text, evidence)
+}
+
+// promoteExplicit saves a user's Promote to global as an approved explicit
+// fact with inert evidence of where it came from. Wording global memory
+// already holds, by normalized text, creates nothing. requestSeed names the
+// promoted thing, so one user action keeps one retry key.
+func (s *KnowledgeLearningService) promoteExplicit(ctx context.Context, userID string, binding KnowledgeBinding, requestSeed, category, text string, evidence KnowledgeEvidence) (WorkspacePromoteResult, KnowledgeItem, error) {
 	snapshot, err := s.memory.SnapshotExact(binding.HQWorkspaceID)
 	if err != nil {
 		return "", KnowledgeItem{}, err
-	}
-	key := knowledgeTextKey(text)
-	for _, entry := range snapshot.Entries {
-		if knowledgeTextKey(entry.Entry.Text) == key {
-			return WorkspacePromoteAlreadyKnown, KnowledgeItem{}, nil
-		}
 	}
 	doc, err := s.store.Read(ctx, userID)
 	if err != nil {
 		return "", KnowledgeItem{}, err
 	}
+	key := knowledgeTextKey(text)
+	for _, entry := range snapshot.Entries {
+		if knowledgeTextKey(entry.Entry.Text) != key {
+			continue
+		}
+		// Name the reviewed item for that line when there is one, so the caller
+		// can link it; an HQ line older than the sidecar has none.
+		for _, item := range doc.Items {
+			if item.State != KnowledgeRejected && item.State != KnowledgeForgotten && knowledgeItemMatches(item, key) {
+				return WorkspacePromoteAlreadyKnown, item, nil
+			}
+		}
+		return WorkspacePromoteAlreadyKnown, KnowledgeItem{}, nil
+	}
 	// One user action, one retry key: a lost response resumes the same save.
 	// After Forget the same wording may be promoted again under a fresh key.
-	requestID := workspacePromoteRequestID(workspaceID, text, "")
+	requestID := workspacePromoteRequestID(requestSeed, text, "")
 	resuming := ""
 	if receipt, found := knowledgeReceiptByID(doc, requestID); found {
 		if item, ok := knowledgeItemByID(doc, receipt.ItemID); ok && item.State != KnowledgeForgotten && item.State != KnowledgeRejected {
 			resuming = item.ID
 		} else {
-			requestID = workspacePromoteRequestID(workspaceID, text, uuid.NewString())
+			requestID = workspacePromoteRequestID(requestSeed, text, uuid.NewString())
 		}
 	}
 	for _, item := range doc.Items {
@@ -113,15 +133,72 @@ func (s *KnowledgeLearningService) PromoteWorkspaceEntry(ctx context.Context, us
 		}
 		return WorkspacePromoteAlreadyKnown, item, nil
 	}
-	evidence := KnowledgeEvidence{SourceKind: WorkspacePromoteSourceKind, SourceID: workspaceID, ObservedAt: s.now().UTC()}
-	if original, err := workspace.ValidateMemoryText(req.Original); err == nil && original == req.Original {
-		evidence.Summary = original
-	}
-	item, err := s.saveExplicit(ctx, userID, binding.StateVersion, requestID, req.Category, text, []KnowledgeEvidence{evidence})
+	item, err := s.saveExplicit(ctx, userID, binding.StateVersion, requestID, category, text, []KnowledgeEvidence{evidence})
 	if err != nil {
 		return "", KnowledgeItem{}, err
 	}
 	return WorkspacePromoted, item, nil
+}
+
+// ExternalPromoteRequest is a user's Promote to global action on one entry of
+// the external memory mirror. Text is the one-line wording the user confirmed;
+// Title is the entry's title, kept as the evidence summary.
+type ExternalPromoteRequest struct {
+	Source   string
+	EntryID  string
+	Category string
+	Text     string
+	Title    string
+	// PromotedItemID is the item this entry was promoted to before, if any.
+	PromotedItemID string
+}
+
+// ExternalEvidenceSourceID is the provenance of a fact promoted from the
+// external memory mirror (PRD FR20): "external:<source>:<entry id>".
+func ExternalEvidenceSourceID(source, entryID string) string {
+	return "external:" + source + ":" + entryID
+}
+
+// PromoteExternalEntry copies an external memory entry into global memory as
+// an approved fact, the same way Promote to global works for a workspace
+// memory entry. Promoting an entry again links to the item it already became,
+// unless that item was forgotten or rejected.
+func (s *KnowledgeLearningService) PromoteExternalEntry(ctx context.Context, userID string, req ExternalPromoteRequest) (WorkspacePromoteResult, KnowledgeItem, error) {
+	if s == nil || s.store == nil || s.memory == nil || s.now == nil {
+		return "", KnowledgeItem{}, ErrGlobalMemoryUnavailable
+	}
+	source, entryID := strings.TrimSpace(req.Source), strings.TrimSpace(req.EntryID)
+	sourceID := ExternalEvidenceSourceID(source, entryID)
+	if !validInterviewID(source) || !validInterviewID(entryID) || len(sourceID) > 200 {
+		return "", KnowledgeItem{}, fmt.Errorf("%w: external entry is required", ErrValidation)
+	}
+	text, err := workspace.ValidateMemoryText(req.Text)
+	if err != nil {
+		return "", KnowledgeItem{}, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	switch req.Category {
+	case "how_you_work", "people", "projects", "routines":
+	default:
+		return "", KnowledgeItem{}, fmt.Errorf("%w: unsupported category", ErrValidation)
+	}
+	binding, err := s.store.resolve(ctx, userID)
+	if err != nil {
+		return "", KnowledgeItem{}, globalMemoryResolveError(err)
+	}
+	if previous := strings.TrimSpace(req.PromotedItemID); previous != "" {
+		doc, err := s.store.Read(ctx, userID)
+		if err != nil {
+			return "", KnowledgeItem{}, err
+		}
+		if item, ok := knowledgeItemByID(doc, previous); ok && item.State != KnowledgeForgotten && item.State != KnowledgeRejected {
+			return WorkspacePromoteAlreadyKnown, item, nil
+		}
+	}
+	evidence := KnowledgeEvidence{SourceKind: ExternalMemorySourceKind, SourceID: sourceID, ObservedAt: s.now().UTC()}
+	if title, err := workspace.ValidateMemoryText(req.Title); err == nil && title == req.Title {
+		evidence.Summary = title
+	}
+	return s.promoteExplicit(ctx, userID, binding, sourceID, req.Category, text, evidence)
 }
 
 func workspacePromoteRequestID(workspaceID, text, salt string) string {
