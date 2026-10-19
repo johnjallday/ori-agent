@@ -33,6 +33,10 @@ type FolderConversationReview struct {
 	// Structure is what the user changed in Adjust on a collection's proposal,
 	// kept so a refreshed review proposes the same group, names and members.
 	Structure *FolderStructureAdjustment `json:"structure,omitempty"`
+	// WorkspaceName is the name the user gave the new workspace in the review
+	// (a workspace build's draft). Empty names it after the folder, as Home's
+	// card does. The plan, its digest and the run all use it.
+	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
 // ConfigureConversationReviews is wired once at host construction. The guard
@@ -624,6 +628,9 @@ func validateConversationReview(review *FolderConversationReview) error {
 		return errFolderDigestInvalid
 	}
 	if review.Operation != "" && review.Operation != FolderOperationCreate && review.Operation != FolderOperationSupport {
+		return errFolderDigestInvalid
+	}
+	if review.WorkspaceName != "" && (strings.TrimSpace(review.WorkspaceName) != review.WorkspaceName || validateFolderName(review.WorkspaceName) != nil) {
 		return errFolderDigestInvalid
 	}
 	if len(review.DestinationID) > 200 || strings.ContainsAny(review.DestinationID, "/\\\x00\r\n") {

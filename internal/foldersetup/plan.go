@@ -34,7 +34,9 @@ type PlanFacts struct {
 	// BlueprintLabel names the workspace blueprint.
 	BlueprintLabel string
 	WorkspaceName  string
-	Integration    Plugin
+	// FolderName is the linked folder's own name; empty is the workspace's.
+	FolderName  string
+	Integration Plugin
 	// Provider is the plugin that supplies the Home a split blueprint needs; nil
 	// when the blueprint has none.
 	Provider *Plugin
@@ -217,9 +219,13 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		lines = append(lines, line)
 		intent.SetsProfile, intent.GrantsTemplates = true, grants
 	}
+	folderName := strings.TrimSpace(facts.FolderName)
+	if folderName == "" {
+		folderName = facts.WorkspaceName
+	}
 	lines = append(lines,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: workspaceName},
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.WorkspaceName + " where it is", Detail: "Nothing is moved or copied."},
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + folderName + " where it is", Detail: "Nothing is moved or copied."},
 		mode,
 		agents,
 		// Nothing starts it: the user does, with Start first look, which is when

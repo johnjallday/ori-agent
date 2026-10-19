@@ -36,7 +36,58 @@ const (
 	buildReasonAgentless      = "only a Blank workspace can have no agents"
 	buildReasonModel          = "that model is not available"
 	buildReasonColor          = "not one of the offered colors"
+	// A recognized folder's plan fixes the blueprint, the group, the folder,
+	// the inputs and the team; the assistant names the workspace and may add
+	// one saved teammate.
+	buildReasonSetByPlan    = "set by the plan"
+	buildReasonOneTeammate  = "the plan takes at most one extra saved teammate"
+	buildMaxPlannedTeammate = 1
 )
+
+// plannedBuildPatch is what a reply may set when the session has a host plan:
+// the workspace's name, description and goal, and at most one extra saved
+// teammate. Every other field it names is the plan's and is refused, so the
+// rest of applyBuildReply never sees it.
+func plannedBuildPatch(patch buildReplyPatch, result *buildApplyResult) buildReplyPatch {
+	for _, field := range []string{buildFieldBlueprint, buildFieldParent, buildFieldInputs, buildFieldAskFolder, buildFieldTags, buildFieldColor} {
+		if patch.sets(field) {
+			result.reject(field, buildReasonSetByPlan)
+		}
+	}
+	kept := buildReplyPatch{Set: []string{}}
+	if patch.sets(buildFieldName) {
+		kept.Name, kept.Set = patch.Name, append(kept.Set, buildFieldName)
+	}
+	if patch.sets(buildFieldDescription) {
+		kept.Description, kept.Set = patch.Description, append(kept.Set, buildFieldDescription)
+	}
+	if patch.sets(buildFieldGoal) {
+		kept.Goal, kept.Set = patch.Goal, append(kept.Set, buildFieldGoal)
+	}
+	if patch.sets(buildFieldTeam) {
+		team := patch.Team
+		if len(team.Roles) > 0 {
+			result.reject("team.roles", buildReasonSetByPlan)
+		}
+		if len(team.Agents) > 0 {
+			result.reject("team.agents", buildReasonSetByPlan)
+		}
+		if mode := strings.TrimSpace(team.Mode); mode != "" && !strings.EqualFold(mode, "staffed") {
+			result.reject("team.mode", buildReasonSetByPlan)
+		}
+		switch {
+		case len(team.SavedAgents) > buildMaxPlannedTeammate:
+			result.reject("team.saved_agents", buildReasonOneTeammate)
+		case len(team.SavedAgents) == buildMaxPlannedTeammate:
+			kept.Team.SavedAgents, kept.Set = []string{team.SavedAgents[0]}, append(kept.Set, buildFieldTeam)
+		}
+	}
+	// An empty Set is never read back from the values: nothing is set.
+	if len(kept.Set) == 0 {
+		kept.Set = []string{"none"}
+	}
+	return kept
+}
 
 // unknownAgentReason names the agent the assistant tried to assign, so its
 // next turn can correct the name instead of repeating it.
@@ -75,6 +126,9 @@ type buildValidation struct {
 	groups    []buildGroup
 	nameTaken func(name string) bool
 	modelOK   func(provider, model string) bool
+	// plan is the host's ready setup plan for a recognized folder. With one,
+	// the reply may set only what plannedBuildPatch keeps.
+	plan *personalassistant.BuildFolderPlan
 }
 
 // lookup finds a catalog blueprint by id, including a plugin's namespaced id
@@ -178,6 +232,9 @@ func clearBlueprintDerived(session *personalassistant.WorkspaceBuildSession, tem
 func applyBuildReply(session *personalassistant.WorkspaceBuildSession, patch buildReplyPatch, v buildValidation) buildApplyResult {
 	var result buildApplyResult
 	draft := &session.Draft
+	if v.plan != nil {
+		patch = plannedBuildPatch(patch, &result)
+	}
 
 	if patch.sets(buildFieldBlueprint) {
 		id := strings.TrimSpace(patch.BlueprintID)
@@ -289,7 +346,17 @@ func applyBuildReply(session *personalassistant.WorkspaceBuildSession, patch bui
 		}
 	}
 
-	if patch.sets(buildFieldTeam) {
+	if patch.sets(buildFieldTeam) && v.plan != nil {
+		// The plan staffs the workspace; this is the one teammate added to it.
+		name := patch.Team.SavedAgents[0]
+		if canonical, ok := v.savedAgent(name); ok {
+			session.TeamPatch = &personalassistant.BuildTeamPatch{SavedAgents: []string{canonical}}
+			result.teamPatch = session.TeamPatch
+			result.applied = append(result.applied, "team")
+		} else {
+			result.reject("team.saved_agents."+strings.TrimSpace(name), unknownAgentReason(name))
+		}
+	} else if patch.sets(buildFieldTeam) {
 		if team := validateBuildTeam(*draft, template, hasTemplate, patch.Team, v, &result); team != nil {
 			session.TeamPatch = team
 			result.teamPatch = team

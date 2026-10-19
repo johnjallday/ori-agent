@@ -142,6 +142,14 @@ func (o buildFolderObservations) Recognize(ctx context.Context, target foldercon
 	return service.Recognize(ctx, target, id)
 }
 
+func (o buildFolderObservations) Plan(ctx context.Context, target foldercontext.Target, observationID, candidateID, workspaceName string) (*personalassistant.BuildFolderPlan, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.BuildPlan(ctx, target, observationID, candidateID, workspaceName)
+}
+
 // resolveWorkspaceBuildModel picks the model a build talks to (FR30): the
 // Personal Assistant's own agent profile when its provider and model
 // resolve, otherwise the system model.

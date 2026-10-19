@@ -298,6 +298,29 @@ func TestBuildPlanSaysWhenTheAppItselfIsNotInstalled(t *testing.T) {
 	}
 }
 
+// A workspace named apart from its folder (a build's draft) still links the
+// folder by the folder's own name; one named after it reads exactly as before.
+func TestBuildPlanLinksTheFolderByItsOwnName(t *testing.T) {
+	same := BuildPlan(baseFacts())
+	named := baseFacts()
+	named.FolderName = "My Song"
+	if plan := BuildPlan(named); plan.Digest != same.Digest || line(plan, personalassistant.FolderPlanFolder).Name != "Links My Song where it is" {
+		t.Fatalf("a folder named like its workspace changes nothing: %+v", plan.Lines)
+	}
+	renamed := baseFacts()
+	renamed.WorkspaceName, renamed.FolderName = "Summer Demos", "My Song"
+	plan := BuildPlan(renamed)
+	if got := line(plan, personalassistant.FolderPlanFolder).Name; got != "Links My Song where it is" {
+		t.Fatalf("folder line = %q", got)
+	}
+	if got := line(plan, personalassistant.FolderPlanWorkspace).Name; !strings.Contains(got, "named Summer Demos") {
+		t.Fatalf("workspace line = %q", got)
+	}
+	if plan.Digest == same.Digest {
+		t.Fatal("another workspace name is another consent")
+	}
+}
+
 func TestBuildPlanDigestMovesWithWhatItPromises(t *testing.T) {
 	base := BuildPlan(baseFacts())
 	installing := baseFacts()

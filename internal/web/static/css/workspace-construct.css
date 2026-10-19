@@ -2692,6 +2692,101 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-folder__recognition.is-recognized {
   color: var(--wc-ink-heading);
 }
+/* A recognized folder's plan: the folder card's own lines (folder-plan-lines.js)
+   in the pane, and again in the review that stands in for the wizard. The
+   state is a glyph and a hidden word, never colour alone. */
+.workspace-create-modal .workspace-build-plan[hidden],
+.workspace-create-modal .workspace-build-plan-review[hidden],
+.workspace-create-modal .workspace-build-plan__lines[hidden],
+.workspace-create-modal .workspace-build-plan__note[hidden],
+.workspace-create-modal .workspace-build-plan__why[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-build-plan,
+.workspace-create-modal .workspace-build-plan-review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+}
+.workspace-create-modal .workspace-build-plan-review {
+  margin: 0 16px 12px;
+}
+.workspace-create-modal .workspace-build-plan__title,
+.workspace-create-modal .workspace-build-plan-review h2 {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-font-display);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-build-plan__lines {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.workspace-create-modal .workspace-build-plan__lines li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-deep);
+  color: var(--wc-ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-icon {
+  flex: none;
+  width: 1.1em;
+  color: var(--wc-ink-faint);
+  font-weight: 750;
+  text-align: center;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-text {
+  min-width: 0;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-text small {
+  display: block;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="working"] {
+  border-color: var(--wc-line-bright);
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-icon {
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="failed"],
+.workspace-create-modal .workspace-build-plan__lines li[data-state="failed"] .pa-folder__plan-icon {
+  border-color: var(--wc-alert);
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-build-plan__note,
+.workspace-create-modal .workspace-build-plan__evidence {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-plan__why summary {
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-build-plan-review__fields {
+  display: grid;
+  gap: 4px;
+}
+.workspace-create-modal .workspace-build-plan-review__fields label {
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+}
 .workspace-create-modal .workspace-build-folder-chooser {
   display: flex;
   flex-direction: column;

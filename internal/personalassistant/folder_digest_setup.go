@@ -100,6 +100,9 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 // setupRequest is what the host needs to plan an offer's setup.
 func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
 	req := FolderSetupRequest{UserID: userID, Offer: offer}
+	if review := offer.ConversationReview; review != nil {
+		req.WorkspaceName = review.WorkspaceName
+	}
 	if isSoftwareOffer(offer) {
 		// A request the service cannot fill in (the folder is no longer held, or
 		// its workspaces cannot be read) carries no software part, and the host
@@ -360,6 +363,9 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	update := func(ctx context.Context, u FolderSetupUpdate) error { return s.recordSetup(ctx, userID, offer.ID, u) }
 	request := FolderSetupRequest{
 		UserID: userID, Offer: offer, Path: path, EntryName: entryName, Plan: plan, Update: update,
+	}
+	if review := offer.ConversationReview; review != nil {
+		request.WorkspaceName = review.WorkspaceName
 	}
 	if isSoftwareOffer(offer) {
 		software, softwareErr := s.softwareRequest(ctx, userID, offer)

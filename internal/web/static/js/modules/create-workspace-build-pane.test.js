@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./create-workspace-build-pane.js', import.meta.url), 'utf8');
+const planLinesSource = readFileSync(new URL('./folder-plan-lines.js', import.meta.url), 'utf8');
 
 // A small DOM: enough elements, attributes, events, and simple selectors for
 // the pane to render into and be driven the way a user drives it.
@@ -105,6 +106,19 @@ class FakeElement {
     child.parentNode = this;
     this.children.unshift(child);
   }
+  // Text becomes a text node, as it does in the DOM.
+  append(...nodes) {
+    for (const node of nodes) {
+      if (typeof node === 'string') {
+        const textNode = new FakeElement('#text', this.ownerDocument);
+        textNode.textContent = node;
+        this.appendChild(textNode);
+      } else this.appendChild(node);
+    }
+  }
+  replaceChildren() {
+    this.textContent = '';
+  }
   contains(node) {
     for (let current = node; current; current = current.parentNode) {
       if (current === this) return true;
@@ -185,7 +199,10 @@ function loadPane() {
     AgentAvatar: { markup: input => `<span class="agent-avatar">${input.name[0]}</span>` }
   };
   class CustomEvent extends FakeEvent {}
-  vm.runInNewContext(source, { window, document, CustomEvent }, { filename: 'pane.js' });
+  // Loaded before the pane, as in base.tmpl.
+  const context = vm.createContext({ window, document, CustomEvent });
+  vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
+  vm.runInContext(source, context, { filename: 'pane.js' });
   const events = [];
   for (const type of [
     'workspace-build-turn',
@@ -803,6 +820,80 @@ test('an attached folder shows its recognition line under the chip', () => {
   assert.equal(line().hidden, true);
   pane.applySession({ transcript: [] });
   assert.equal(line().hidden, true);
+});
+
+test('a recognized folder’s plan is the host’s lines, with the reason behind it', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const find = (tag, id) => root.querySelectorAll(tag).find(node => node.id === id);
+  const block = () => find('section', 'workspaceBuildPlan');
+  assert.equal(block().hidden, true);
+
+  const plan = {
+    ready: true,
+    digest: 'digest-1',
+    evidence: 'Has a REAPER session, edited yesterday',
+    lines: [
+      { kind: 'provider', name: 'Installs the Music Project Management plugin' },
+      {
+        kind: 'home',
+        name: 'Creates Home “Music Production Home”',
+        detail: 'Your later projects of this kind join it.'
+      },
+      { kind: 'workspace', name: '  ' }
+    ]
+  };
+  pane.applySession({ transcript: [], folder: { observation }, plan });
+  assert.equal(block().hidden, false);
+  const items = find('ul', 'workspaceBuildPlanLines').children;
+  // The card's own normalizer drops a line with no name.
+  assert.equal(items.length, 2);
+  assert.equal(items[1].dataset.kind, 'home');
+  assert.equal(
+    items[1].textContent,
+    '•Creates Home “Music Production Home”Your later projects of this kind join it.'
+  );
+  const why = root.querySelectorAll('details')[0];
+  assert.equal(why.hidden, false);
+  assert.equal(why.textContent, 'Why this suggestion?Has a REAPER session, edited yesterday');
+
+  // A plan that cannot run says so, names what it waits on, and lists nothing.
+  pane.applySession({
+    transcript: [],
+    folder: { observation },
+    plan: {
+      ready: false,
+      lines: [],
+      unavailable: 'provider_unverified',
+      unavailable_subject: 'Music Project Management'
+    }
+  });
+  assert.equal(block().hidden, false);
+  assert.equal(find('ul', 'workspaceBuildPlanLines').hidden, true);
+  assert.equal(why.hidden, true);
+  assert.equal(
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-plan__note'))
+      .textContent,
+    'Set it up isn’t available: the installed Music Project Management isn’t the reviewed release. The form still works.'
+  );
+
+  // Each reason says what it waits on; one the pane does not know says only
+  // that Set it up is unavailable.
+  assert.equal(
+    pane.COPY.planUnavailable('provider_not_installed', 'Music Project Management'),
+    'Set it up needs the Music Project Management plugin installed first: Ori makes the Home from it. The form still works.'
+  );
+  assert.equal(
+    pane.COPY.planUnavailable('integration_not_installed', 'REAPER'),
+    'Set it up isn’t available: REAPER has no reviewed install here. The form still works.'
+  );
+  assert.equal(
+    pane.COPY.planUnavailable('plan_unavailable', 'REAPER'),
+    'Set it up isn’t available for this folder right now. The form still works.'
+  );
+
+  pane.applySession({ transcript: [], folder: { observation } });
+  assert.equal(block().hidden, true);
 });
 
 // ----- Add link -----

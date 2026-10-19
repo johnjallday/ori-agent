@@ -292,7 +292,8 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 			facts.Destination, facts.HomeName = destination, destination.Name
 		}
 	}
-	facts.WorkspaceName = strings.TrimSpace(req.Offer.Subject.Name)
+	facts.FolderName = strings.TrimSpace(req.Offer.Subject.Name)
+	facts.WorkspaceName = setupWorkspaceName(req)
 	facts.AppInstalled = req.AppInstalled
 	// Worded per plan from the owner's Home as it is now: what that Home
 	// already knows changes the sentence. A Home that cannot be read is treated
@@ -453,7 +454,7 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 		}}
 	}
 	config := foldersetup.Config{
-		Plan: req.Plan, WorkspaceName: strings.TrimSpace(req.Offer.Subject.Name), EntryName: req.EntryName,
+		Plan: req.Plan, WorkspaceName: setupWorkspaceName(req), EntryName: req.EntryName,
 	}
 	if req.Offer.Setup != nil {
 		config.RunID, config.HomeID = req.Offer.Setup.RunID, req.Offer.Setup.HomeID
@@ -466,6 +467,17 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 		})
 	}
 	return err
+}
+
+// setupWorkspaceName is the name a project setup gives the new workspace: the
+// one its review chose (a workspace build's draft), else the folder's own, as
+// Home's card names it. Plan and run read it the same way, so the digest the
+// user confirmed is the name the run creates.
+func setupWorkspaceName(req personalassistant.FolderSetupRequest) string {
+	if name := strings.TrimSpace(req.WorkspaceName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(req.Offer.Subject.Name)
 }
 
 // sharedStaffing adapts the project staffing service to the runner. grant is

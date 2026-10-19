@@ -6144,3 +6144,128 @@ test('a blueprint that lives in a group names the group apart from the workspace
   assert.equal(draft(), 'Ori Music Demo · REAPER song · Details · Folder: Ori Music Demo');
   assert.equal(status(), 'Assisted setup · one shared draft');
 });
+
+function planReviewElements() {
+  const field = (id, value) => ({ id, value, focus() {} });
+  return new Map([
+    ['addFolderModal', { dataset: {}, classList: { toggle() {} } }],
+    ['workspaceBuildModeStatus', { hidden: true, textContent: '' }],
+    ['workspaceBuildDraftSummary', { hidden: true }],
+    ['workspaceBuildDraftTitle', { textContent: 'Draft so far' }],
+    ['workspaceBuildDraftText', { textContent: '' }],
+    [
+      'workspaceBuildEditDraftBtn',
+      {
+        attributes: {},
+        setAttribute(k, v) {
+          this.attributes[k] = v;
+        }
+      }
+    ],
+    ['workspaceBuildPlanReview', { hidden: true }],
+    ['workspaceBuildPlanReviewLines', { rendered: null }],
+    ['workspaceBuildPlanReviewWhy', { hidden: true }],
+    ['workspaceBuildPlanReviewEvidence', { textContent: '' }],
+    ['workspaceBuildPlanName', field('workspaceBuildPlanName', '')],
+    ['workspaceBuildPlanDescription', field('workspaceBuildPlanDescription', '')],
+    ['folderNameInput', field('folderNameInput', '')],
+    ['folderDescriptionInput', field('folderDescriptionInput', 'Demos for the next release.')]
+  ]);
+}
+
+function plannedBuild() {
+  return {
+    session: {
+      draft: {},
+      folder: {
+        observation: {
+          folder: 'Documents',
+          projects: [
+            { id: 'candidate-0', name: 'Documents' },
+            { id: 'candidate-1', name: 'Ori Music Demo' }
+          ]
+        },
+        recognition: { verdict: 'project', candidate_id: 'candidate-1' }
+      },
+      plan: {
+        ready: true,
+        evidence: 'Has a REAPER session, edited yesterday',
+        lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }],
+        home: { name: 'Music Production Home', status: 'new' },
+        needs: [
+          { kind: 'integration', name: 'REAPER integration', state: 'ready' },
+          { kind: 'provider', name: 'Music Project Management', state: 'install' }
+        ]
+      }
+    }
+  };
+}
+
+test('a recognized folder’s plan is “Plan so far”, reviewed in place of the wizard', () => {
+  const elements = planReviewElements();
+  const rendered = [];
+  const manager = loadSessionManager(
+    undefined,
+    {
+      OriFolderPlanLines: {
+        setupLinesView: lines => lines,
+        renderSetupLines: (list, lines) => rendered.push([list, lines])
+      }
+    },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  manager.workspaceBuild = plannedBuild();
+  let collapsed = 0;
+  manager.collapseWorkspaceBuild = () => collapsed++;
+  const scheduled = [];
+  manager.scheduleWorkspaceBuildDraft = () => scheduled.push(elements.get('folderNameInput').value);
+  manager.syncWorkspaceBuildPresentation();
+
+  // The plan names the folder it links (the project inside what was attached)
+  // and only what still has to be installed.
+  assert.equal(elements.get('workspaceBuildDraftTitle').textContent, 'Plan so far');
+  assert.equal(
+    elements.get('workspaceBuildDraftText').textContent,
+    'Music Production Home (new) › Ori Music Demo · Folder: Ori Music Demo · Needs: Music Project Management (install)'
+  );
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+
+  // Review or edit draft opens the plan review, never the wizard.
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(collapsed, 0);
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
+  assert.equal(elements.get('workspaceBuildEditDraftBtn').attributes['aria-expanded'], 'true');
+  assert.equal(rendered.at(-1)[0], elements.get('workspaceBuildPlanReviewLines'));
+  assert.equal(rendered.at(-1)[1][0].name, 'Creates Home “Music Production Home”');
+  assert.equal(elements.get('workspaceBuildPlanDescription').value, 'Demos for the next release.');
+  assert.equal(elements.get('workspaceBuildPlanReviewWhy').hidden, false);
+
+  // A name typed there is the wizard's name: the draft is saved as a wizard
+  // edit, and the plan line follows it.
+  elements.get('workspaceBuildPlanName').value = 'Summer Demos';
+  manager.noteWorkspaceBuildPlanEdit(elements.get('workspaceBuildPlanName'), 'folderNameInput');
+  assert.equal(elements.get('folderNameInput').value, 'Summer Demos');
+  assert.deepEqual(scheduled, ['Summer Demos']);
+  assert.match(
+    elements.get('workspaceBuildDraftText').textContent,
+    /› Summer Demos · Folder: Ori Music Demo/
+  );
+
+  // Closing it again; and once every plugin is ready there is nothing to need.
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+  manager.workspaceBuild.session.plan.needs[1].state = 'ready';
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(
+    elements.get('workspaceBuildDraftText').textContent,
+    'Music Production Home (new) › Summer Demos · Folder: Ori Music Demo'
+  );
+
+  // Without a ready plan the button is the wizard again.
+  manager.workspaceBuild.session.plan.ready = false;
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(collapsed, 1);
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(elements.get('workspaceBuildDraftTitle').textContent, 'Draft so far');
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+});

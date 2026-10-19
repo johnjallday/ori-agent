@@ -268,8 +268,20 @@ func respondBuildUnavailable(w http.ResponseWriter, reason string) {
 	})
 }
 
-func respondBuildSession(w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
-	body := map[string]any{"session": session}
+// buildSessionView is a session as every response carries it: the stored
+// session plus what is read fresh for it, never stored with it. Plan is the
+// host's setup plan for a recognized folder.
+type buildSessionView struct {
+	*personalassistant.WorkspaceBuildSession
+	Plan *personalassistant.BuildFolderPlan `json:"plan,omitempty"`
+}
+
+func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
+	var view any = session
+	if session != nil {
+		view = buildSessionView{WorkspaceBuildSession: session, Plan: h.workspaceBuildPlan(ctx, h.workspaceBuildUserID(ctx), nil, session)}
+	}
+	body := map[string]any{"session": view}
 	for key, value := range extra {
 		body[key] = value
 	}
@@ -357,12 +369,12 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if existing != nil {
-		respondBuildSession(w, http.StatusOK, existing, map[string]any{"resumed": true})
+		h.respondBuildSession(r.Context(), w, http.StatusOK, existing, map[string]any{"resumed": true})
 		return
 	}
 	logger.Info("Workspace build started", logger.Fields{"session_id": fresh.ID, "entry_point": entryPoint, "first_message": message != ""})
 	if message == "" {
-		respondBuildSession(w, http.StatusCreated, &fresh, nil)
+		h.respondBuildSession(r.Context(), w, http.StatusCreated, &fresh, nil)
 		return
 	}
 	session, status, code := h.runWorkspaceBuildTurn(ctx, userID, fresh.ID, buildTurnRequest{Text: message, Version: fresh.Version}, readiness)
@@ -370,7 +382,7 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 		_ = orihttp.RespondJSON(w, status, map[string]any{"error": "The build could not continue.", "code": code})
 		return
 	}
-	respondBuildSession(w, http.StatusCreated, session, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusCreated, session, nil)
 }
 
 type buildTurnRequest struct {
@@ -413,7 +425,7 @@ func (h *Handler) postWorkspaceBuildTurn(w http.ResponseWriter, r *http.Request,
 		_ = orihttp.RespondJSON(w, status, map[string]any{"error": buildErrorText(code), "code": code})
 		return
 	}
-	respondBuildSession(w, http.StatusOK, session, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, session, nil)
 }
 
 func buildErrorText(code string) string {
@@ -444,6 +456,17 @@ func (e errBuildTurn) Error() string { return e.code }
 // called, so a failed call never loses it.
 func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, req buildTurnRequest, readiness buildReadiness) (*personalassistant.WorkspaceBuildSession, int, string) {
 	deps := h.workspaceBuild
+	// A recognized folder's plan is read before the turn is staged: a Needs
+	// line whose states changed is part of what the model hears, and a ready
+	// plan fixes what the reply may set.
+	var plan *personalassistant.BuildFolderPlan
+	plannedFor := ""
+	if doc, err := deps.Store.Read(ctx, userID); err == nil {
+		if current := doc.Session(id); current != nil && current.Folder != nil {
+			plan = h.workspaceBuildPlan(ctx, userID, readiness.projection, current)
+			plannedFor = current.Folder.Observation.ID
+		}
+	}
 	var staged personalassistant.WorkspaceBuildSession
 	_, err := deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		session := doc.Session(id)
@@ -457,6 +480,9 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 			return errBuildTurn{http.StatusConflict, "version"}
 		}
 		now := deps.Store.Now()
+		if plan != nil && session.Folder != nil && session.Folder.Observation.ID == plannedFor {
+			noteBuildNeeds(session, plan, now)
+		}
 		if err := stageBuildUserTurn(session, req, now); err != nil {
 			return err
 		}
@@ -483,6 +509,9 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		groups:    h.workspaceBuildGroups(ctx, userID),
 		nameTaken: func(name string) bool { return h.workspaceNameTaken(ctx, name) },
 		modelOK:   deps.ModelAvailable,
+	}
+	if plan != nil && plan.Ready && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
+		validation.plan = plan
 	}
 	outcome := h.askWorkspaceBuildModel(ctx, readiness, &staged, validation)
 
@@ -664,6 +693,7 @@ func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildRea
 		Catalog:       validation.catalog,
 		Agents:        validation.agents,
 		Groups:        validation.groups,
+		Plan:          validation.plan,
 	}
 	messages := buildMessages(session)
 	prompted := cloneBuildSession(*session)
@@ -700,10 +730,11 @@ func buildReplyDoesWork(session *personalassistant.WorkspaceBuildSession, reply 
 	if !result.changed() && !asked && !creating {
 		return false, result.rejections
 	}
-	// The first answer to the user's description sets the essentials.
+	// The first answer to the user's description sets the essentials. With a
+	// host plan the blueprint is the plan's, so the name and description are.
 	if session.TurnCount == 1 && !session.Draft.HasBlueprint() {
 		draft := scratch.Draft
-		ok := draft.HasBlueprint() && strings.TrimSpace(draft.Name) != "" && strings.TrimSpace(draft.Description) != ""
+		ok := (draft.HasBlueprint() || validation.plan != nil) && strings.TrimSpace(draft.Name) != "" && strings.TrimSpace(draft.Description) != ""
 		return ok, result.rejections
 	}
 	return true, result.rejections

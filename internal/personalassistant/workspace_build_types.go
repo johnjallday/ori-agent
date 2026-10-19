@@ -78,13 +78,16 @@ type BuildChoice struct {
 
 // BuildTranscriptEntry is one line of the conversation. Fixed marks a line the
 // host wrote from fixed copy (a model failure, a substituted question); fixed
-// lines are shown but never sent to the model as something it said.
+// lines are shown but never sent to the model as something it said. Host marks
+// a form line that states server facts (what a folder needs, what a setup
+// made) rather than the user's own edit; the model hears it as Ori's note.
 type BuildTranscriptEntry struct {
 	Role    string        `json:"role"`
 	Text    string        `json:"text"`
 	Choices []BuildChoice `json:"choices,omitempty"`
 	Chosen  string        `json:"chosen,omitempty"`
 	Fixed   bool          `json:"fixed,omitempty"`
+	Host    bool          `json:"host,omitempty"`
 	At      time.Time     `json:"at"`
 }
 
@@ -209,6 +212,9 @@ type BuildFolderRecognition struct {
 	HomeExists bool `json:"home_exists,omitempty"`
 	// OfferID is the folder digest offer the setup runs on, once there is one.
 	OfferID string `json:"offer_id,omitempty"`
+	// NeedsSaid is the Needs line the host last wrote into the transcript, so
+	// the same states are never said twice.
+	NeedsSaid string `json:"needs_said,omitempty"`
 }
 
 // Recognized reports a single project of a kind Ori knows.
@@ -258,6 +264,9 @@ func validateBuildFolderRecognition(r *BuildFolderRecognition, observation folde
 		if !boundedText(value, workspaceBuildMaxName) || strings.ContainsAny(value, "\r\n") {
 			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
 		}
+	}
+	if !boundedText(r.NeedsSaid, workspaceBuildMaxShort) || strings.ContainsAny(r.NeedsSaid, "\r\n") {
+		return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
 	}
 	return nil
 }
@@ -530,7 +539,8 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 		default:
 			return fmt.Errorf("%w: transcript role", ErrWorkspaceBuildInvalid)
 		}
-		if !boundedText(entry.Text, WorkspaceBuildMaxText) || len(entry.Choices) > workspaceBuildMaxChoices {
+		if !boundedText(entry.Text, WorkspaceBuildMaxText) || len(entry.Choices) > workspaceBuildMaxChoices ||
+			(entry.Host && entry.Role != BuildRoleForm) {
 			return fmt.Errorf("%w: transcript entry", ErrWorkspaceBuildInvalid)
 		}
 		if err := validateBuildChoices(entry.Choices); err != nil {

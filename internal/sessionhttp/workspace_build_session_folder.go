@@ -43,6 +43,9 @@ type WorkspaceBuildFolders interface {
 	Observe(ctx context.Context, target foldercontext.Target, mode, choice string) (*foldercontext.Observation, error)
 	ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error)
 	Recognize(ctx context.Context, target foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error)
+	// Plan reads the setup plan Home's card would show for the recognized
+	// project, named as the draft names the workspace. It creates nothing.
+	Plan(ctx context.Context, target foldercontext.Target, observationID, candidateID, workspaceName string) (*personalassistant.BuildFolderPlan, error)
 }
 
 // Fixed copy the host writes into the transcript for the folder. Both are
@@ -51,7 +54,73 @@ type WorkspaceBuildFolders interface {
 const (
 	buildCopyFolderAttached = "You attached the folder “%s”. It will be linked to the workspace when you create it."
 	buildCopyFolderRemoved  = "You removed the attached folder."
+	// buildCopyFolderNeeds is a host line: what a recognized folder's setup
+	// needs, from the plan, said once per set of states.
+	buildCopyFolderNeeds = "Needs: %s"
 )
+
+// buildNeedsLine is the Needs line for a plan: each plugin and where it
+// stands. "" when the plan needs no plugin at all.
+func buildNeedsLine(plan *personalassistant.BuildFolderPlan) string {
+	if plan == nil || len(plan.Needs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(plan.Needs))
+	for _, need := range plan.Needs {
+		word := need.State
+		if word == personalassistant.FolderInstallReady {
+			word = "installed"
+		}
+		parts = append(parts, need.Name+" ("+word+")")
+	}
+	return fmt.Sprintf(buildCopyFolderNeeds, strings.Join(parts, " · "))
+}
+
+// noteBuildNeeds writes the Needs line for plan into the transcript as a host
+// line, when it differs from the one last said, and reports whether it did.
+// The plan must be for the session's current folder.
+func noteBuildNeeds(session *personalassistant.WorkspaceBuildSession, plan *personalassistant.BuildFolderPlan, now time.Time) bool {
+	if session.Folder == nil || !session.Folder.Recognition.Recognized() {
+		return false
+	}
+	line := buildNeedsLine(plan)
+	if line == "" || line == session.Folder.Recognition.NeedsSaid {
+		return false
+	}
+	session.Folder.Recognition.NeedsSaid = line
+	session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: line, Host: true, At: now})
+	return true
+}
+
+// workspaceBuildPlan reads the setup plan for a build's recognized folder: a
+// single project with a reviewed capability, while the build is open or
+// preparing and the server still holds the pick. Anything else has none.
+// projection may be nil; it is then read.
+func (h *Handler) workspaceBuildPlan(ctx context.Context, userID string, projection *personalassistant.Projection, session *personalassistant.WorkspaceBuildSession) *personalassistant.BuildFolderPlan {
+	deps := h.workspaceBuild
+	if deps == nil || deps.Folders == nil || session == nil || session.Folder == nil {
+		return nil
+	}
+	recognition := session.Folder.Recognition
+	if !recognition.Recognized() || recognition.IntegrationKey == "" ||
+		(session.Status != personalassistant.WorkspaceBuildOpen && session.Status != personalassistant.WorkspaceBuildPreparing) {
+		return nil
+	}
+	if projection == nil {
+		read, err := deps.Assistant(ctx, userID)
+		if err != nil || read == nil {
+			return nil
+		}
+		projection = read
+	}
+	target := buildFolderTarget(userID, projection, session.ID)
+	plan, err := deps.Folders.Plan(ctx, target, session.Folder.Observation.ID, recognition.CandidateID, strings.TrimSpace(session.Draft.Name))
+	if err != nil {
+		logger.Info("Workspace build plan not read", logger.Fields{"session_id": session.ID, "error": err})
+		return nil
+	}
+	return plan
+}
 
 // buildReasonFolderAttached refuses the model's folder question once a folder
 // is attached: there is nothing left to ask.
@@ -208,7 +277,7 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 	}
 	if observation == nil {
 		// The dialog was cancelled: nothing changes, and the pane hears so.
-		respondBuildSession(w, http.StatusOK, current, map[string]any{"cancelled": true})
+		h.respondBuildSession(r.Context(), w, http.StatusOK, current, map[string]any{"cancelled": true})
 		return
 	}
 	// What the folder digest recognized in the same scan. A folder that cannot
@@ -219,6 +288,10 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		logger.Info("Workspace build folder not recognized", logger.Fields{"session_id": id, "error": err})
 		recognition = nil
 	}
+	// What the recognized folder's setup needs, said once the folder is in.
+	probe := *current
+	probe.Folder = &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition}
+	plan := h.workspaceBuildPlan(ctx, userID, readiness.projection, &probe)
 	var result personalassistant.WorkspaceBuildSession
 	_, err = deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		build := doc.Session(id)
@@ -233,6 +306,7 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		build.Append(personalassistant.BuildTranscriptEntry{
 			Role: personalassistant.BuildRoleForm, Text: fmt.Sprintf(buildCopyFolderAttached, observation.Folder), At: now,
 		})
+		noteBuildNeeds(build, plan, now)
 		build.Applied = nil
 		build.Touch(now)
 		result = *build
@@ -249,7 +323,7 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	logger.Info("Workspace build folder attached", logger.Fields{"session_id": id, "mode": req.Mode, "files": observation.Files})
-	respondBuildSession(w, http.StatusOK, &result, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)
 }
 
 // postWorkspaceBuildFolderDetach removes the attached folder. Removing twice
@@ -298,7 +372,7 @@ func (h *Handler) postWorkspaceBuildFolderDetach(w http.ResponseWriter, r *http.
 		return
 	}
 	logger.Info("Workspace build folder removed", logger.Fields{"session_id": id})
-	respondBuildSession(w, http.StatusOK, &result, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)
 }
 
 // buildFolderPromptJSON is the attached folder as the model sees it: the

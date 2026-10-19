@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -85,6 +86,198 @@ func TestWorkspaceBuildPrompt_ARecognizedFolderSuggestsItsBlueprintAndNeverAHome
 		if strings.Contains(system, private) {
 			t.Fatalf("ids never reach the model (%q):\n%s", private, system)
 		}
+	}
+}
+
+// songPlan is the host plan for the REAPER song folder: the integration is in
+// place, the Home provider is to be installed, and a new Home is made.
+func songPlan() *personalassistant.BuildFolderPlan {
+	return &personalassistant.BuildFolderPlan{
+		Lines: []personalassistant.FolderPlanLine{
+			{Kind: "provider", Name: "Installs the Music Project Management plugin"},
+			{Kind: "home", Name: "Creates Home “Music Production Home”", Detail: "Your later projects of this kind join it."},
+			{Kind: "workspace", Name: "Creates a REAPER song workspace named Ori Music Demo"},
+			{Kind: "folder", Name: "Links Ori Music Demo where it is", Detail: "Nothing is moved or copied."},
+		},
+		Digest: "digest-1",
+		Needs: []personalassistant.BuildFolderNeed{
+			{Kind: "integration", Name: "REAPER integration", State: personalassistant.FolderInstallReady},
+			{Kind: "provider", Name: "Music Project Management", State: personalassistant.FolderInstallInstall},
+		},
+		Home:      &personalassistant.BuildFolderHome{Name: "Music Production Home", Status: "new"},
+		Placement: "grouped", Evidence: "Has a REAPER session, edited yesterday", Ready: true,
+	}
+}
+
+// plannedReply narrates the plan and names the workspace, as the planned
+// rules ask.
+const plannedReply = `{"say":"This is a REAPER project. Set it up adds the Music Project Management plugin, then makes Music Production Home with Ori Music Demo inside it.",
+"ask":{"question":"","choices":[],"allow_free_text":true},
+"patch":{"set":["name","description"],"blueprint_id":"","name":"Ori Music Demo","description":"Demos for the next release.",
+"inputs":[],"parent_id":"","ask_folder":false,"team":{"mode":"","agents":[],"roles":[],"saved_agents":[]},"tags":[],"color":""},
+"why":[],"alternatives":[],"ready":true,"create_now":false}`
+
+// planOf is the plan a response carries on its session, or nil.
+func planOf(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	session, _ := body["session"].(map[string]any)
+	plan, _ := session["plan"].(map[string]any)
+	return plan
+}
+
+func hostLines(session personalassistant.WorkspaceBuildSession) []string {
+	var lines []string
+	for _, entry := range session.Transcript {
+		if entry.Host {
+			lines = append(lines, entry.Text)
+		}
+	}
+	return lines
+}
+
+func TestWorkspaceBuildPlan_EveryResponseCarriesTheHostPlanAndSaysItsNeedsOnce(t *testing.T) {
+	f := newBuildFixture(t, true, plannedReply, plannedReply, plannedReply)
+	f.withMusicCatalog()
+	folders := &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan()}
+	f.withFolders(t, folders)
+	build := f.start(t)
+
+	status, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
+	if status != http.StatusOK {
+		t.Fatalf("attach: %d %v", status, body)
+	}
+	plan := planOf(t, body)
+	if plan == nil || plan["digest"] != "digest-1" || plan["ready"] != true || plan["placement"] != "grouped" {
+		t.Fatalf("the attach response carries the plan: %v", body["session"])
+	}
+	attached := sessionOf(t, body)
+	needs := "Needs: REAPER integration (installed) · Music Project Management (install)"
+	if got := hostLines(attached); len(got) != 1 || got[0] != needs {
+		t.Fatalf("host lines after attach = %q", got)
+	}
+	if last := lastEntry(attached); last.Role != personalassistant.BuildRoleForm || !last.Host || last.Text != needs {
+		t.Fatalf("the Needs line follows the attach as a host form line: %+v", last)
+	}
+	// The draft has no name yet: the plan is read for the folder's name.
+	if len(folders.planned) == 0 || folders.planned[0] != "" {
+		t.Fatalf("planned names %q", folders.planned)
+	}
+
+	_, body = f.turn(t, attached, map[string]any{"text": "music production demos"})
+	turned := sessionOf(t, body)
+	if planOf(t, body) == nil || turned.Draft.Name != "Ori Music Demo" || turned.Draft.Description == "" {
+		t.Fatalf("the turn names the workspace and keeps the plan: %+v", turned.Draft)
+	}
+	if got := hostLines(turned); len(got) != 1 {
+		t.Fatalf("the same needs are never said twice: %q", got)
+	}
+	heard := false
+	for _, message := range f.provider.messages[0] {
+		heard = heard || message.Content == "[Ori noted] "+needs
+	}
+	if !heard {
+		t.Fatalf("the model hears the Needs line as Ori's note, not the user's edit: %+v", f.provider.messages[0])
+	}
+	system := f.provider.systems[0]
+	for _, want := range []string{"<setup_plan>", `"name":"Creates Home “Music Production Home”"`, `"state":"install"`, "You may set only name, description, goal", "Its setup plan fixes the blueprint and the group"} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("planned prompt lacks %q:\n%s", want, system)
+		}
+	}
+	for _, absent := range []string{"Blueprints (id", "digest-1", "Choose suggested_blueprint_id"} {
+		if strings.Contains(system, absent) {
+			t.Fatalf("planned prompt still has %q:\n%s", absent, system)
+		}
+	}
+
+	// The provider gets installed elsewhere: the next turn says the new states.
+	folders.plan.Needs[1].State = personalassistant.FolderInstallReady
+	_, body = f.turn(t, turned, map[string]any{"text": "sounds good"})
+	again := sessionOf(t, body)
+	if got := hostLines(again); len(got) != 2 || got[1] != "Needs: REAPER integration (installed) · Music Project Management (installed)" {
+		t.Fatalf("changed needs are said again: %q", got)
+	}
+	// From now on the plan is read with the draft's own name.
+	if got := folders.planned[len(folders.planned)-1]; got != "Ori Music Demo" {
+		t.Fatalf("planned with %q, want the draft's name", got)
+	}
+
+	// A folder without a plan carries none.
+	_, body = f.do(t, http.MethodPost, "/api/workspaces/build-sessions/"+again.ID+"/folder/detach", map[string]any{"version": again.Version})
+	if planOf(t, body) != nil {
+		t.Fatalf("no folder, no plan: %v", body["session"])
+	}
+}
+
+// overreachReply sets everything at once, as the 2026-10-19 model would.
+const overreachReply = `{"say":"I set it all up.",
+"ask":{"question":"","choices":[],"allow_free_text":true},
+"patch":{"set":["blueprint_id","name","description","goal","inputs","parent_id","ask_folder","team","tags","color"],
+"blueprint_id":"` + reaperSongID + `","name":"Ori Music Demo","description":"Demos for the next release.","goal":"Finish three demos.",
+"inputs":[{"id":"tempo","value":"120"}],"parent_id":"group-1","ask_folder":true,
+"team":{"mode":"agentless","agents":[],"roles":[{"role_id":"producer","mode":"create","agent_name":"Producer"}],"saved_agents":["scout"]},
+"tags":["music"],"color":"#ef4444"},
+"why":[],"alternatives":[],"ready":true,"create_now":false}`
+
+func TestWorkspaceBuildPlan_TheRecognizedPathSetsOnlyWhatThePlanLeavesOpen(t *testing.T) {
+	f := newBuildFixture(t, true, overreachReply)
+	f.withMusicCatalog()
+	f.withFolders(t, &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan()})
+	build := f.start(t)
+	_, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
+	_, body = f.turn(t, sessionOf(t, body), map[string]any{"text": "music production demos"})
+	got := sessionOf(t, body)
+
+	if got.Draft.Name != "Ori Music Demo" || got.Draft.Description != "Demos for the next release." || got.Draft.Mission != "Finish three demos." {
+		t.Fatalf("name, description and goal are the assistant's to set: %+v", got.Draft)
+	}
+	if got.Draft.TemplateID != "" || got.Draft.ParentID != "" || len(got.Draft.BlueprintInputs) != 0 || len(got.Draft.Tags) != 0 || got.Draft.Color != "" || got.AskFolder {
+		t.Fatalf("the plan's fields stay the plan's: %+v ask_folder=%v", got.Draft, got.AskFolder)
+	}
+	if got.TeamPatch == nil || len(got.TeamPatch.SavedAgents) != 1 || got.TeamPatch.SavedAgents[0] != "Scout" || len(got.TeamPatch.Roles) != 0 {
+		t.Fatalf("one extra saved teammate, by their saved name: %+v", got.TeamPatch)
+	}
+	refused := map[string]string{}
+	for _, rejection := range got.Rejections {
+		refused[rejection.Field] = rejection.Reason
+	}
+	for _, field := range []string{"blueprint_id", "inputs", "parent_id", "ask_folder", "tags", "color", "team.roles", "team.mode"} {
+		if refused[field] != buildReasonSetByPlan {
+			t.Fatalf("%s refused as %q, want %q (all: %v)", field, refused[field], buildReasonSetByPlan, refused)
+		}
+	}
+	if _, ok := refused["name"]; ok {
+		t.Fatalf("the name is never refused here: %v", refused)
+	}
+}
+
+func TestWorkspaceBuildPlan_MoreThanOneTeammateOrAPlanThatIsNotReady(t *testing.T) {
+	twoTeammates := strings.Replace(plannedReply, `"set":["name","description"]`, `"set":["name","description","team"]`, 1)
+	twoTeammates = strings.Replace(twoTeammates, `"saved_agents":[]`, `"saved_agents":["Scout","Luna"]`, 1)
+	f := newBuildFixture(t, true, twoTeammates)
+	f.withFolders(t, &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan()})
+	build := f.start(t)
+	_, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
+	_, body = f.turn(t, sessionOf(t, body), map[string]any{"text": "music production demos"})
+	got := sessionOf(t, body)
+	if got.TeamPatch != nil || len(got.Rejections) != 1 || got.Rejections[0] != (personalassistant.BuildRejection{Field: "team.saved_agents", Reason: buildReasonOneTeammate}) {
+		t.Fatalf("two teammates: team %+v rejections %+v", got.TeamPatch, got.Rejections)
+	}
+
+	// A plan that cannot run now leaves the build to choose a blueprint.
+	blocked := songPlan()
+	blocked.Ready, blocked.Digest, blocked.Unavailable = false, "", "integration_unavailable"
+	f = newBuildFixture(t, true, songReply)
+	f.withMusicCatalog()
+	f.withFolders(t, &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: blocked})
+	build = f.start(t)
+	_, body = f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
+	_, body = f.turn(t, sessionOf(t, body), map[string]any{"text": "music production demos"})
+	if got := sessionOf(t, body); got.Draft.TemplateID != reaperSongID {
+		t.Fatalf("an unavailable plan does not fix the blueprint: %+v", got.Draft)
+	}
+	if strings.Contains(f.provider.systems[0], "<setup_plan>") || !strings.Contains(f.provider.systems[0], "Blueprints (id") {
+		t.Fatal("an unavailable plan is not given to the model")
 	}
 }
 

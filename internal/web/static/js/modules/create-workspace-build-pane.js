@@ -77,6 +77,22 @@
     folderUnrecognized: 'Not a project Ori recognizes yet',
     folderCollection: count =>
       `Holds ${count} projects · Explore a folder on Home sets them up together`,
+    // A recognized folder's plan: the host's own lines, never the model's.
+    planTitle: 'What Set it up will do',
+    planWhy: 'Why this suggestion?',
+    // Why a recognized folder has no plan, by the server's reason code.
+    planUnavailable: (reason, subject) => {
+      if (subject && reason === 'provider_not_installed') {
+        return `Set it up needs the ${subject} plugin installed first: Ori makes the Home from it. The form still works.`;
+      }
+      if (subject && reason === 'provider_unverified') {
+        return `Set it up isn’t available: the installed ${subject} isn’t the reviewed release. The form still works.`;
+      }
+      if (subject && reason === 'integration_not_installed') {
+        return `Set it up isn’t available: ${subject} has no reviewed install here. The form still works.`;
+      }
+      return 'Set it up isn’t available for this folder right now. The form still works.';
+    },
     // Add link: one address, read for what it says about itself.
     addLink: 'Add link',
     removeLink: 'Remove link',
@@ -420,6 +436,7 @@
     els.send.disabled = view.composerDisabled;
     state.root.classList.toggle('is-busy', view.busy);
     renderFolder(view);
+    renderPlan();
     if (els.transcript && typeof els.transcript.scrollHeight === 'number') {
       els.transcript.scrollTop = els.transcript.scrollHeight;
     }
@@ -523,6 +540,56 @@
     );
     // With a link attached too, the link's hint speaks for both.
     els.folderHint.hidden = !folder || Boolean(attachedLink()) || Boolean(text(els.input?.value));
+  }
+
+  // renderPlan draws the setup plan the server computed for a recognized
+  // folder, with the folder card's own lines (folder-plan-lines.js), the
+  // digest's reason behind the suggestion, or why there is none. The assistant
+  // narrates the plan; no line here comes from the model.
+  function renderPlan() {
+    const { els } = state;
+    if (!els.plan) return;
+    const plan = state.session?.plan;
+    const shared = globalThis.OriFolderPlanLines;
+    const lines = plan && plan.ready === true && shared ? shared.setupLinesView(plan.lines) : [];
+    const note =
+      plan && plan.ready !== true
+        ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
+        : '';
+    els.plan.hidden = !lines.length && !note;
+    if (lines.length) shared.renderSetupLines(els.planLines, lines, document);
+    else els.planLines.textContent = '';
+    els.planLines.hidden = !lines.length;
+    els.planNote.textContent = note;
+    els.planNote.hidden = !note;
+    const evidence = lines.length ? text(plan.evidence) : '';
+    els.planEvidence.textContent = evidence;
+    els.planWhy.hidden = !evidence;
+  }
+
+  // renderPlanBlock builds the plan section the pane shows above the
+  // composer. It is hidden until a session carries a plan.
+  function renderPlanBlock() {
+    const plan = createElement('section', 'workspace-build-plan');
+    plan.id = 'workspaceBuildPlan';
+    plan.hidden = true;
+    const title = createElement('h3', 'workspace-build-plan__title', COPY.planTitle);
+    title.id = 'workspaceBuildPlanTitle';
+    plan.setAttribute('aria-labelledby', title.id);
+    const planLines = createElement('ul', 'workspace-build-plan__lines');
+    planLines.id = 'workspaceBuildPlanLines';
+    const planNote = createElement('p', 'workspace-build-plan__note');
+    planNote.hidden = true;
+    const planWhy = createElement('details', 'workspace-build-plan__why');
+    planWhy.hidden = true;
+    planWhy.appendChild(createElement('summary', '', COPY.planWhy));
+    const planEvidence = createElement('p', 'workspace-build-plan__evidence');
+    planWhy.appendChild(planEvidence);
+    plan.appendChild(title);
+    plan.appendChild(planLines);
+    plan.appendChild(planNote);
+    plan.appendChild(planWhy);
+    return { plan, planLines, planNote, planWhy, planEvidence };
   }
 
   // setFolderPathBusy locks the path field while the controller has the
@@ -686,10 +753,22 @@
     row.appendChild(input);
     row.appendChild(send);
     composer.appendChild(row);
+    const planEls = renderPlanBlock();
     root.appendChild(transcript);
     root.appendChild(status);
+    root.appendChild(planEls.plan);
     root.appendChild(composer);
-    state.els = { transcript, showEarlier, log, status, composer, input, send, ...folderEls };
+    state.els = {
+      transcript,
+      showEarlier,
+      log,
+      status,
+      composer,
+      input,
+      send,
+      ...folderEls,
+      ...planEls
+    };
 
     listen(root, 'click', event => {
       const control = event.target?.closest?.('[data-build-control]');

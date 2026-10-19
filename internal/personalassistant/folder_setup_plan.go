@@ -463,6 +463,9 @@ type FolderSetupRequest struct {
 	AppInstalled bool
 	Path         string
 	EntryName    string
+	// WorkspaceName names the new workspace when the review gave it a name of
+	// its own; empty names it after the folder.
+	WorkspaceName string
 	// Plan is the confirmed plan a Run is held to.
 	Plan FolderSetupPlan
 	// Software is set for a built-in software offer: what the service holds

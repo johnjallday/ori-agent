@@ -158,7 +158,7 @@ func (h *Handler) postWorkspaceBuildLink(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	logger.Info("Workspace build link attached", logger.Fields{"session_id": id, "kind": string(observation.Kind), "host": observation.Host, "readable": observation.Readable})
-	respondBuildSession(w, http.StatusOK, &result, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)
 }
 
 // postWorkspaceBuildLinkDetach removes the attached link. Removing twice is
@@ -201,7 +201,7 @@ func (h *Handler) postWorkspaceBuildLinkDetach(w http.ResponseWriter, r *http.Re
 		return
 	}
 	logger.Info("Workspace build link removed", logger.Fields{"session_id": id})
-	respondBuildSession(w, http.StatusOK, &result, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)
 }
 
 // buildLinkPromptJSON is the attached link as the model sees it: the

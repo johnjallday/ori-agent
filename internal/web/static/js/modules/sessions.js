@@ -1,6 +1,12 @@
 // Session Sidebar Module
 // Handles session management, folders, tags, search, and UI interactions
 
+// The plan review's editable fields and the wizard fields they edit.
+const WORKSPACE_BUILD_PLAN_FIELDS = [
+  ['workspaceBuildPlanName', 'folderNameInput'],
+  ['workspaceBuildPlanDescription', 'folderDescriptionInput']
+];
+
 const sessionManager = {
   // State
   sessions: [],
@@ -11682,8 +11688,15 @@ const sessionManager = {
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
     document.getElementById('workspaceBuildEditDraftBtn')?.addEventListener('click', () => {
-      this.collapseWorkspaceBuild();
+      this.reviewOrEditWorkspaceBuild();
     });
+    // The plan review's fields edit the wizard's own, so the draft is saved
+    // exactly as a wizard edit is.
+    for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
+      document.getElementById(reviewID)?.addEventListener('input', event => {
+        this.noteWorkspaceBuildPlanEdit(event?.target, wizardID);
+      });
+    }
     modal.addEventListener('workspace-build-start-over', () => {
       void this.startOverWorkspaceBuild();
     });
@@ -12292,6 +12305,98 @@ const sessionManager = {
     );
   },
 
+  // workspaceBuildPlanReady says the build's recognized folder has a host plan
+  // Set it up can run: the plan, not the wizard, then decides the workspace.
+  workspaceBuildPlanReady() {
+    return this.workspaceBuild?.session?.plan?.ready === true;
+  },
+
+  // reviewOrEditWorkspaceBuild is "Review or edit draft": a ready plan is
+  // reviewed in place and the wizard stays hidden; any other build goes to
+  // the wizard, as before.
+  reviewOrEditWorkspaceBuild() {
+    const build = this.workspaceBuild;
+    if (!build || !this.workspaceBuildPlanReady()) {
+      this.collapseWorkspaceBuild();
+      return;
+    }
+    build.planReviewOpen = !build.planReviewOpen;
+    this.syncWorkspaceBuildPresentation();
+    if (build.planReviewOpen) document.getElementById('workspaceBuildPlanName')?.focus?.();
+  },
+
+  noteWorkspaceBuildPlanEdit(field, wizardID) {
+    const wizard = document.getElementById(wizardID);
+    if (!field || !wizard || !this.workspaceBuild) return;
+    wizard.value = field.value;
+    this.noteWorkspaceBuildUserEdit({ target: wizard, isTrusted: true });
+    this.syncWorkspaceBuildPresentation();
+  },
+
+  // workspaceBuildPlanFolder is the recognized project's own name: the folder
+  // the plan links, which can sit inside the folder that was attached.
+  workspaceBuildPlanFolder() {
+    const folder = this.workspaceBuild?.session?.folder;
+    const id = folder?.recognition?.candidate_id;
+    const projects = Array.isArray(folder?.observation?.projects)
+      ? folder.observation.projects
+      : [];
+    const project = projects.find(item => item && item.id === id);
+    return String(project?.name || folder?.observation?.folder || '').trim();
+  },
+
+  // workspaceBuildPlanLine is "Plan so far": the Home, the workspace inside
+  // it, the folder it links, and what still has to be installed.
+  workspaceBuildPlanLine() {
+    const session = this.workspaceBuild?.session;
+    const plan = session?.plan || {};
+    const folder = this.workspaceBuildPlanFolder();
+    const name =
+      String(
+        document.getElementById('folderNameInput')?.value || session?.draft?.name || ''
+      ).trim() ||
+      folder ||
+      'Workspace not named yet';
+    const homeName = String(plan.home?.name || '').trim();
+    const home = homeName
+      ? `${homeName} (${plan.home.status === 'existing' ? 'existing' : 'new'}) › `
+      : '';
+    const needs = (Array.isArray(plan.needs) ? plan.needs : [])
+      .filter(
+        need => need && need.state && need.state !== 'ready' && String(need.name || '').trim()
+      )
+      .map(need => `${String(need.name).trim()} (${need.state})`);
+    return `${home}${name}${folder ? ` · Folder: ${folder}` : ''}${needs.length ? ` · Needs: ${needs.join(', ')}` : ''}`;
+  },
+
+  // syncWorkspaceBuildPlanReview fills the in-modal plan review: the host's
+  // lines, read only, and the name and description from the wizard's fields.
+  syncWorkspaceBuildPlanReview(planReady) {
+    const review = document.getElementById('workspaceBuildPlanReview');
+    if (!review) return;
+    const open = Boolean(planReady && this.workspaceBuild?.planReviewOpen);
+    review.hidden = !open;
+    document
+      .getElementById('workspaceBuildEditDraftBtn')
+      ?.setAttribute?.('aria-expanded', String(open));
+    if (!open) return;
+    const plan = this.workspaceBuild.session.plan;
+    const shared = window.OriFolderPlanLines;
+    const list = document.getElementById('workspaceBuildPlanReviewLines');
+    if (shared && list) shared.renderSetupLines(list, shared.setupLinesView(plan.lines), document);
+    for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
+      const field = document.getElementById(reviewID);
+      const wizard = document.getElementById(wizardID);
+      // Never overwrite what the user is typing.
+      if (field && wizard && document.activeElement !== field) field.value = wizard.value || '';
+    }
+    const evidence = String(plan.evidence || '').trim();
+    const why = document.getElementById('workspaceBuildPlanReviewWhy');
+    if (why) why.hidden = !evidence;
+    const evidenceText = document.getElementById('workspaceBuildPlanReviewEvidence');
+    if (evidenceText) evidenceText.textContent = evidence;
+  },
+
   syncWorkspaceBuildPresentation() {
     const assisted = this.workspaceBuildAssisted();
     const modal = document.getElementById('addFolderModal');
@@ -12343,8 +12448,14 @@ const sessionManager = {
     }
     const summary = document.getElementById('workspaceBuildDraftSummary');
     if (summary) summary.hidden = !assisted || Boolean(this.workspaceBuild?.acceptedPreparation);
+    const planReady = assisted && this.workspaceBuildPlanReady();
+    const title = document.getElementById('workspaceBuildDraftTitle');
+    if (title) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
+    this.syncWorkspaceBuildPlanReview(planReady);
     const text = document.getElementById('workspaceBuildDraftText');
-    if (text && assisted) {
+    if (text && planReady) {
+      text.textContent = this.workspaceBuildPlanLine();
+    } else if (text && assisted) {
       const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';

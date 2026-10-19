@@ -36,6 +36,27 @@ type fakeBuildFolders struct {
 	recognition  *personalassistant.BuildFolderRecognition
 	recognizeErr error
 	recognized   []string
+	// plan is what Plan reads for a recognized folder; planned records the
+	// workspace name of every read.
+	plan    *personalassistant.BuildFolderPlan
+	planErr error
+	planned []string
+}
+
+// Plan answers with plan (nil with no error: nothing to plan) and records the
+// workspace name each read was asked for.
+func (f *fakeBuildFolders) Plan(_ context.Context, target foldercontext.Target, observationID, candidateID, workspaceName string) (*personalassistant.BuildFolderPlan, error) {
+	f.planned = append(f.planned, workspaceName)
+	if f.planErr != nil {
+		return nil, f.planErr
+	}
+	if f.plan == nil {
+		return nil, nil
+	}
+	copied := *f.plan
+	copied.Lines = append([]personalassistant.FolderPlanLine(nil), f.plan.Lines...)
+	copied.Needs = append([]personalassistant.BuildFolderNeed(nil), f.plan.Needs...)
+	return &copied, nil
 }
 
 func (f *fakeBuildFolders) Recognize(_ context.Context, _ foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error) {
