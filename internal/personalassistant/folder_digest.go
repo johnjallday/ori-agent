@@ -670,7 +670,7 @@ type FolderOfferView struct {
 }
 
 // FolderCapabilityHiddenView names a capability a card does not lead with: its
-// domain (what Show sends back), a short label ("REAPER setup") and when the
+// domain (what Show sends back), a short label ("<integration> setup") and when the
 // user said no to it.
 type FolderCapabilityHiddenView struct {
 	Domain string    `json:"domain"`

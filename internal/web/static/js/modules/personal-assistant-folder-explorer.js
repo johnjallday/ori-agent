@@ -201,7 +201,7 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     focusToggle.hidden = launch.hidden;
     focusToggle.disabled = Boolean(state?.pending || loading);
     focusToggle.setAttribute('aria-pressed', String(focusing));
-    get('FolderFocusControls').hidden = !focusing || launch.hidden;
+    get('FolderSelection').hidden = !focusing || launch.hidden;
     selectAll.checked = Boolean(all && selectedCount === all.count);
     selectAll.indeterminate = selectedCount > 0 && !selectAll.checked;
     selectAll.title = all?.wholeFolder

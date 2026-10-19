@@ -676,8 +676,8 @@ export function structureCounts(structure) {
 }
 
 // capabilityHiddenView is the line a waiting card shows for the kind of work it
-// does not lead with because the user said no to it: "REAPER setup hidden
-// since Oct 6", with Show. Only the host's closed fields make one.
+// does not lead with because the user said no to it: "<integration> setup
+// hidden since Oct 6", with Show. Only the host's closed fields make one.
 export function capabilityHiddenView(offer) {
   const hidden = offer?.capability_hidden;
   const domain = String(hidden?.domain || '');
@@ -3831,6 +3831,8 @@ function openStructureAdjust() {
   closeStructureAdjust(false);
   const sheet = createAdjustSheet({
     structure: offer.structure,
+    // Home's own card can walk through installing the Home's plugin.
+    guidedHome: true,
     onCancel: () => closeStructureAdjust(),
     onDone: adjustment => void saveStructureAdjust(offer.id, adjustment)
   });

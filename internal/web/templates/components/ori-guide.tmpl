@@ -134,11 +134,22 @@
     <div class="personal-assistant-explorer__workbench">
       <aside id="personalAssistantFolderExplorer" class="personal-assistant-explorer__pane" aria-labelledby="personalAssistantFolderExplorerName" hidden>
         <div id="personalAssistantFolderExplorerHeader" class="personal-assistant-explorer__header">
+          <!-- The pinned header holds only controls, so it stays pinned on a phone. -->
           <div class="personal-assistant-explorer__heading">
             <h3 id="personalAssistantFolderExplorerName"></h3>
             <!-- Focus is opt-in: it reveals the checks, Select all and the status line. -->
+            <label id="personalAssistantFolderSelection" class="personal-assistant-folder-tree__select-all" hidden>
+              <input type="checkbox" id="personalAssistantFolderSelectAll" aria-controls="personalAssistantFolderTree" aria-describedby="personalAssistantFolderSelectionStatus" disabled>
+              <span>Select all</span>
+            </label>
             <button type="button" id="personalAssistantFolderFocusToggle" class="personal-assistant-conversation__button" aria-pressed="false" aria-controls="personalAssistantFolderTree">Focus</button>
           </div>
+          <p id="personalAssistantFolderSelectionLine" class="personal-assistant-explorer__selection" hidden>
+            <span id="personalAssistantFolderSelectionStatus" role="status" aria-live="polite"></span> ·
+            <button type="button" id="personalAssistantFolderFocusClear" class="btn btn-sm btn-link">Clear</button>
+          </p>
+        </div>
+        <div class="personal-assistant-explorer__body">
           <p class="personal-assistant-explorer__counts">
             <span id="personalAssistantFolderExplorerCounts"></span>
             <button type="button" class="personal-assistant-explorer__info" aria-describedby="personalAssistantFolderExplorerPrivacy" title="Contents are not read. Send shares names, kinds, counts, markers and dates with your model. Checks choose topics for the next message, not access or a privacy filter.">
@@ -147,18 +158,6 @@
             <span id="personalAssistantFolderExplorerPrivacy" class="visually-hidden">Contents are not read. Send shares names, kinds, counts, markers and dates with your model. Checks choose topics for the next message, not access or a privacy filter.</span>
           </p>
           <p id="personalAssistantFolderExplorerPartial" class="personal-assistant-explorer__partial" hidden></p>
-          <div id="personalAssistantFolderFocusControls" class="personal-assistant-explorer__focus" hidden>
-            <label id="personalAssistantFolderSelection" class="personal-assistant-folder-tree__select-all">
-              <input type="checkbox" id="personalAssistantFolderSelectAll" aria-controls="personalAssistantFolderTree" aria-describedby="personalAssistantFolderSelectionStatus" disabled>
-              <span>Select all</span>
-            </label>
-            <p id="personalAssistantFolderSelectionLine" class="personal-assistant-explorer__selection" hidden>
-              <span id="personalAssistantFolderSelectionStatus" role="status" aria-live="polite"></span> ·
-              <button type="button" id="personalAssistantFolderFocusClear" class="btn btn-sm btn-link">Clear</button>
-            </p>
-          </div>
-        </div>
-        <div class="personal-assistant-explorer__body">
           <p id="personalAssistantExplorerNotice" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
           <ul id="personalAssistantFolderTree" class="personal-assistant-folder-tree" aria-label="Recorded folder and file discussion topics"></ul>
         </div>

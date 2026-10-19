@@ -98,6 +98,15 @@ test('group types are offered only when the folder has a Home, and only when it 
     assert.equal(blocked[1].label, 'Add to Music Home instead');
     assert.equal(blocked[1].disabled, true);
     assert.equal(blocked[1].hint, hint);
+    // Home's own card walks through installing it, so there it can be chosen.
+    const guided = groupTypeChoices(
+      adjustModel(
+        structure({ home_name: 'Music Home', home_available: true, availability: reason })
+      ),
+      { guidedHome: true }
+    );
+    assert.equal(guided[1].disabled, false);
+    assert.equal(guided[1].hint, `${hint} Choosing it walks you through setting it up.`);
   }
   // A listing that is the current choice starts selected, with the plain name
   // falling back to the folder's.

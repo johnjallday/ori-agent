@@ -39,10 +39,13 @@ const HOME_UNAVAILABLE = {
 // The plain group is always the default; the Home is the other choice, a place
 // to list the folders that makes each project's workspace itself, when that
 // project is opened there. It is listed even when it cannot be used, with why.
-export function groupTypeChoices(model) {
+// guidedHome is Home's own card, where choosing a Home whose plugin is missing
+// walks through installing it; a conversation's review cannot, so there it is
+// unavailable.
+export function groupTypeChoices(model, { guidedHome = false } = {}) {
   if (!model.homeName) return [];
   const blocked = HOME_UNAVAILABLE[model.homeReason];
-  const usable = model.homeAvailable && !blocked;
+  const usable = model.homeAvailable && (!blocked || guidedHome);
   return [
     {
       value: 'group',
@@ -53,11 +56,14 @@ export function groupTypeChoices(model) {
     {
       value: 'library',
       label: `Add to ${model.homeName} instead`,
-      hint: usable
-        ? 'A project gets its workspace the first time you open it there.'
-        : blocked
-          ? blocked(model.homeName)
-          : `${model.homeName} is not available right now.`,
+      hint:
+        usable && blocked
+          ? `${blocked(model.homeName)} Choosing it walks you through setting it up.`
+          : usable
+            ? 'A project gets its workspace the first time you open it there.'
+            : blocked
+              ? blocked(model.homeName)
+              : `${model.homeName} is not available right now.`,
       disabled: !usable
     }
   ];
@@ -106,7 +112,14 @@ let sequence = 0;
 // createAdjustSheet builds the sheet for one structure. onDone receives the
 // adjustment; onSingle (optional) is the way to set up one folder instead of
 // the group; onCancel closes it. The caller inserts `element` and removes it.
-export function createAdjustSheet({ structure, onDone, onCancel, onSingle, doc = document }) {
+export function createAdjustSheet({
+  structure,
+  onDone,
+  onCancel,
+  onSingle,
+  guidedHome = false,
+  doc = document
+}) {
   const model = adjustModel(structure);
   const id = `personalAssistantFolderAdjust${++sequence}`;
   const sheet = element(doc, 'section', 'personal-assistant-folder-adjust');
@@ -137,7 +150,7 @@ export function createAdjustSheet({ structure, onDone, onCancel, onSingle, doc =
     members.hidden = model.groupType === 'library';
   };
 
-  const choices = groupTypeChoices(model);
+  const choices = groupTypeChoices(model, { guidedHome });
   if (choices.length) {
     const types = element(doc, 'fieldset');
     types.append(element(doc, 'legend', '', 'Group type'));

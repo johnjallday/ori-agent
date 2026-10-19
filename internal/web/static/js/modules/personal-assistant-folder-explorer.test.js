@@ -97,7 +97,7 @@ test('the default Tree pane carries no hint, status or coverage paragraph', () =
     assert.equal(pane.includes(gone), false, `the pane still has ${gone}`);
   // Focus reveals the checks, Select all and the status line; they start hidden.
   assert.match(pane, /id="personalAssistantFolderFocusToggle"[^>]*aria-pressed="false"/);
-  assert.match(pane, /id="personalAssistantFolderFocusControls"[^>]*hidden/);
+  assert.match(pane, /id="personalAssistantFolderSelection"[^>]*hidden/);
   assert.match(pane, /id="personalAssistantFolderSelectionLine"[^>]*hidden/);
   assert.match(pane, /id="personalAssistantFolderExplorerPartial"[^>]*hidden/);
   // The conversation-area focus controls are gone; their work is the status line's.
