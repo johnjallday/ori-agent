@@ -1054,13 +1054,31 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   padding-left: 0;
 }
 
-/* Keep Bootstrap's switch proportions even where narrow-screen rules size
-   form inputs to the full width. */
+/* Keep Bootstrap's switch proportions. common.css gives every form input a
+   44px minimum on touch screens, which turns a switch into a ring; here the
+   switch row (the clickable label included) is the 44px target instead. */
 .connected-memory-switch .form-check-input {
   flex: none;
   width: 2em;
   height: 1em;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
+}
+
+@media (max-width: 768px) {
+  .connected-memory-switch {
+    min-height: 44px;
+  }
+
+  .connected-memory-switch .form-check-input {
+    width: 2.75rem;
+    height: 1.5rem;
+  }
+
+  .connected-memory-switch .form-check-label {
+    padding: 0.6rem 0;
+  }
 }
 
 .connected-memory-switch .form-check-label {

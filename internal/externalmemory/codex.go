@@ -117,7 +117,7 @@ func readMarkdownFile(path string) ([]mdSection, *ParseError, bool) {
 	if err != nil {
 		return nil, &ParseError{Path: path, Reason: "unreadable"}, false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: nothing to flush
 	sections, err := readSections(io.LimitReader(file, maxSourceFileBytes))
 	if err != nil {
 		return nil, &ParseError{Path: path, Reason: "could not parse markdown"}, false

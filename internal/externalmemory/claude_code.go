@@ -138,7 +138,7 @@ func readClaudeCodeMemory(path string, folder decodedFolder) (Entry, *ParseError
 	if err != nil {
 		return Entry{}, &ParseError{Path: path, Reason: "unreadable"}
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: nothing to flush
 	front, body, err := splitFrontMatter(io.LimitReader(file, maxSourceFileBytes))
 	if err != nil {
 		return Entry{}, &ParseError{Path: path, Reason: "could not read"}

@@ -11,7 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func withContextFiles(t *testing.T) (*Handler, *workspace.FileStore, string) {
+func withContextFiles(t *testing.T) (*Handler, string) {
 	t.Helper()
 	h, fs := newTestHandler(t)
 	root := t.TempDir()
@@ -20,7 +20,7 @@ func withContextFiles(t *testing.T) (*Handler, *workspace.FileStore, string) {
 		Settings:   workspace.NewMemoryContextSettings(filepath.Join(t.TempDir(), "settings.json")),
 		RootFolder: func(*workspace.Workspace) string { return root },
 	})
-	return h, fs, root
+	return h, root
 }
 
 func patchSettings(h *Handler, body string) *httptest.ResponseRecorder {
@@ -32,7 +32,7 @@ func patchSettings(h *Handler, body string) *httptest.ResponseRecorder {
 }
 
 func TestUpdateSettings_RootSwitchWritesAndRemovesTheBlock(t *testing.T) {
-	h, _, root := withContextFiles(t)
+	h, root := withContextFiles(t)
 	if rec := serve(h, http.MethodPost, "/api/workspaces/ws1/memory/entries", `{"text":"Studies use 0.6% fees.","type":"fact"}`); rec.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
 	}
@@ -72,7 +72,7 @@ func TestUpdateSettings_RefusalsAndUnwired(t *testing.T) {
 	if resp := decodeMemory(t, serve(h, http.MethodGet, "/api/workspaces/ws1/memory", "")); resp.ContextFiles != nil {
 		t.Fatal("an unwired handler should not report context files")
 	}
-	wired, _, _ := withContextFiles(t)
+	wired, _ := withContextFiles(t)
 	if rec := patchSettings(wired, `{}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing root_files: %d", rec.Code)
 	}

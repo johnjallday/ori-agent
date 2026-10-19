@@ -28,8 +28,8 @@ func newExternalMemoryFixture(t *testing.T) (*readerFixture, *fakeRecall) {
 	return f, recall
 }
 
-func (f *readerFixture) askAssistant(refs *HomeAssistantRouteContext) HomeAssistantAskResponse {
-	return f.handler.Ask(context.Background(), HomeAssistantAskRequest{
+func (f *readerFixture) askAssistant(refs *HomeAssistantRouteContext) {
+	f.handler.Ask(context.Background(), HomeAssistantAskRequest{
 		Prompt: "What did I decide about EMA exits?", Intent: homeAssistantConversationIntent.Key,
 		Context: refs, Conversation: &HomeAssistantConversationRef{ID: "canonical"},
 	})

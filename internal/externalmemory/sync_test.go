@@ -17,11 +17,10 @@ import (
 
 // fakeClock is a settable clock whose timer requests the test answers.
 type fakeClock struct {
-	mu     sync.Mutex
-	now    time.Time
-	waits  chan time.Duration
-	fire   chan time.Time
-	frozen bool
+	mu    sync.Mutex
+	now   time.Time
+	waits chan time.Duration
+	fire  chan time.Time
 }
 
 func newFakeClock(now time.Time) *fakeClock {
@@ -509,8 +508,11 @@ func appendTo(t *testing.T, path, text string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
 	if _, err := file.WriteString(text); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
