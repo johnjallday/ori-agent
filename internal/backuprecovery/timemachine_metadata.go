@@ -22,9 +22,6 @@ const (
 	timeMachineIncluded = "included"
 	timeMachineExcluded = "source_excluded"
 	timeMachineUnknown  = "unknown"
-
-	// timeMachineExcludeAttribute is the sticky per-item exclusion attribute.
-	timeMachineExcludeAttribute = "com.apple.metadata:com_apple_backup_excludeItem"
 )
 
 type tmDestination struct {

@@ -18,6 +18,9 @@ import (
 
 const timeMachinePreferencesPath = "/Library/Preferences/com.apple.TimeMachine.plist"
 
+// timeMachineExcludeAttribute is the sticky per-item exclusion attribute.
+const timeMachineExcludeAttribute = "com.apple.metadata:com_apple_backup_excludeItem"
+
 // timeMachinePlatformSupported reports whether this build can ever read Time Machine.
 const timeMachinePlatformSupported = true
 

@@ -12,11 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
+// requireTimeMachinePlatform skips where Review refuses Time Machine outright;
+// TestTimeMachineReviewIsUnavailableOffPlatform covers that refusal.
+func requireTimeMachinePlatform(t *testing.T) {
+	t.Helper()
+	if !timeMachinePlatformSupported {
+		t.Skip("Time Machine is platform_unsupported on this build")
+	}
+}
+
 // timeMachineServiceFixture connects a Time Machine configuration for the
 // fixture workspace through the real Review and Connect paths, with an
 // invented reader that answers from the checked-in fixtures.
 func timeMachineServiceFixture(t *testing.T, sources []string, sticky []string, denied bool) (*Service, *serviceFixtureProvider) {
 	t.Helper()
+	requireTimeMachinePlatform(t)
 	s, restic, credentials := newBackupServiceFixture(t)
 	reader := &serviceFixtureProvider{}
 	reader.readFn = func(ctx context.Context, cfg localConfiguration, use backupPasswordUse) (providerReadResult, error) {
@@ -136,7 +146,30 @@ func TestTimeMachineWithoutFullDiskAccessIsPermissionRequiredNeverCovered(t *tes
 	}
 }
 
+func TestTimeMachineReviewIsUnavailableOffPlatform(t *testing.T) {
+	if timeMachinePlatformSupported {
+		t.Skip("this build can read Time Machine")
+	}
+	s, _, _ := newBackupServiceFixture(t)
+	settings, err := s.GetSettings(t.Context(), "local", localFixtureWorkspace)
+	if err != nil || len(settings.Providers) != 2 || settings.Providers[0].ID != providerTimeMachine || settings.Providers[0].Available || settings.Providers[0].Reason != "platform_unsupported" {
+		t.Fatal(settings, err)
+	}
+	// Even with a reader in place, Review refuses before resolving a selection.
+	s.timeMachine = &serviceFixtureProvider{}
+	status, err := s.GetStatus(t.Context(), "local", localFixtureWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.selections.IssueFor("/Invented/Songs", selectionScope("local", localFixtureWorkspace, "source"))
+	request := ReviewRequest{Generation: status.Generation, Revision: status.Revision, Provider: providerTimeMachine, SourceSelections: []string{token}}
+	if _, err := s.Review(t.Context(), "local", localFixtureWorkspace, request); err != ErrUnavailable {
+		t.Fatal("an unsupported platform reviewed a Time Machine configuration", err)
+	}
+}
+
 func TestTimeMachineReviewRefusesResticAuthority(t *testing.T) {
+	requireTimeMachinePlatform(t)
 	s, _, _ := newBackupServiceFixture(t)
 	s.timeMachine = &serviceFixtureProvider{}
 	status, err := s.GetStatus(t.Context(), "local", localFixtureWorkspace)

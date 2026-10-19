@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin && arm64
 
 package backuprecovery
 
