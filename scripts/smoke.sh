@@ -2828,6 +2828,38 @@ smoke_show_seed() {
   echo "notes=$notes"
 }
 
+# smoke_recipient_seed fills a fresh `wt demo` sandbox for the assistant
+# drawer's recipient picker (tasks/prd-assistant-recipient-picker.md): the hired
+# assistant "Atlas" with its Personal HQ, the three Commander workspaces (Mira
+# leads Product Launch; she and Atlas answer through the Codex provider), and "Blank
+# Space" with no Commander. With `exchange` it also runs one real Mira turn in a
+# Product Launch session, so switching back to her has history.
+#   ./scripts/smoke.sh recipient-seed <base-url> [exchange]
+smoke_recipient_seed() {
+  local with_exchange="${3:-}" seeded launch session
+  smoke_show_wait
+  smoke_interview_seed
+  seeded="$(smoke_show_seed)"
+  printf '%s\n' "$seeded"
+  launch="$(printf '%s\n' "$seeded" | awk -F= '/^launch=/{print $2}')"
+  [[ -n "$launch" ]] || fail "Product Launch was not created"
+  expect_status 200 PATCH "$BASE_URL/api/agents/Mira" '{"llm_provider":"codex","model":"gpt-5.6-luna"}'
+  # Atlas answers through the system model.
+  expect_status 200 POST "$BASE_URL/api/settings/system-model" '{"provider":"codex","model":"gpt-5.6-luna"}'
+  echo "blank=$(curl -s -X POST "$BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
+    -d '{"name":"Blank Space"}' | workspace_id)"
+  [[ "$with_exchange" == exchange ]] || return 0
+  session="$(curl -s -X POST "$BASE_URL/api/sessions" -H 'Content-Type: application/json' \
+    -d "{\"folder_id\":\"$launch\",\"agent_name\":\"Mira\",\"title\":\"Plan the launch week\"}" |
+    json_field 'session.id')"
+  [[ -n "$session" ]] || fail "the Mira session was not created"
+  echo "session=$session"
+  curl -s --max-time 150 -X POST "$BASE_URL/api/chat" -H 'Content-Type: application/json' \
+    -H "X-Session-ID: $session" \
+    -d "{\"question\":\"Plan the launch week in three short bullets.\",\"agent_name\":\"Mira\",\"route_context\":{\"surface\":\"workspace_detail\",\"workspace_id\":\"$launch\"}}" |
+    json_field 'response' | head -3
+}
+
 # smoke_show_run creates a task (no assignee: the entry agent is the default)
 # and starts it, the same two calls the New Quest composer makes. Put [fail]
 # in the description to play the failure script.
@@ -4048,6 +4080,7 @@ drop-foreign-workspace) smoke_drop_foreign_workspace "$@" ;;
 root-unmounted) smoke_root_unmounted "$@" ;;
 agents-root-verify) smoke_agents_root_verify "$@" ;;
 showseed) smoke_show_seed ;;
+recipient-seed) smoke_recipient_seed "$@" ;;
 showrun) smoke_show_run "$@" ;;
 showmarkfailed) smoke_show_markfailed "$@" ;;
 showstream) smoke_show_stream "$@" ;;
@@ -4114,6 +4147,7 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 confirm-root <sandbox>                # agents in the root: fresh sandbox with a confirmed Workspace Directory" >&2
   echo "  $0 drop-foreign-workspace <root>         # agents in the root: copy in a never-seen workspace with its own agent" >&2
   echo "  $0 showseed <base-url>                   # task-run show: onboarding + 3 workspaces with Commanders" >&2
+  echo "  $0 recipient-seed <base-url> [exchange]  # recipient picker: hired assistant + HQ, Commanders (Mira on Codex), a vacant workspace" >&2
   echo "  $0 showrun <base-url> <ws> [description] # task-run show: create and start a task ([fail] fails it)" >&2
   echo "  $0 showmarkfailed <base-url> <task-id>    # task-run show: answer a blocked task with mark failed" >&2
   echo "  $0 showstream <base-url> [seconds]       # task-run show: print the activity stream" >&2

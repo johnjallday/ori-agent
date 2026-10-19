@@ -18,12 +18,246 @@ import {
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
+  ENTRY_HYDRATION_FAILED,
+  entryAgentSendRecipient,
+  entrySessionStripView,
   personalAssistantPanelView,
+  recipientChromeView,
+  recipientIdentityView,
   restoreAssistantPanelFocus,
   restoredDraft,
   safeTodayRoute,
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
+import { resolveRecipient } from './personal-assistant-recipient.js';
+
+const workspacePage = {
+  surface: 'workspace_detail',
+  workspaceId: 'ws-1',
+  workspaceName: 'test_reaper',
+  entry: { status: 'ready', name: 'REAPER Assistant', role: 'orchestrator' },
+  personal: { name: 'Mina', available: true }
+};
+
+test('the header, launcher and composer name the entry agent on a workspace page', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  const who = recipientIdentityView(view, resolveRecipient(workspacePage));
+  assert.equal(who.personal, false);
+  assert.equal(who.name, 'REAPER Assistant');
+  assert.equal(who.role, 'Commander · test_reaper');
+  assert.equal(who.subline, 'Commander · test_reaper');
+  assert.equal(
+    who.placeholder,
+    'Ask REAPER Assistant about this workspace… (/task creates a task)'
+  );
+  assert.equal(who.available, true);
+  assert.equal(who.launcherVisible, true);
+  // Never the hired assistant's name while a workspace agent is the target.
+  assert.notEqual(who.name, view.name);
+});
+
+test('the Personal Assistant identity is unchanged when it is the recipient', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  for (const resolution of [
+    resolveRecipient({ ...workspacePage, surface: 'home' }),
+    resolveRecipient({ ...workspacePage, pick: 'personal' }),
+    null
+  ]) {
+    const who = recipientIdentityView(view, resolution);
+    assert.equal(who.personal, true);
+    assert.equal(who.name, 'Mina');
+    assert.equal(who.role, 'Personal Assistant');
+    assert.equal(who.placeholder, view.placeholder);
+    assert.equal(who.available, true);
+  }
+});
+
+test('the launcher stays for a reachable entry agent when the assistant is not set up (FR6)', () => {
+  for (const state of ['needs_hire', 'needs_hq', 'provisioning_hq', 'repair_needed']) {
+    const view = personalAssistantPanelView({ state, display_name: 'Mina' });
+    const entry = recipientIdentityView(view, resolveRecipient(workspacePage));
+    assert.equal(entry.launcherVisible, true, state);
+    assert.equal(entry.available, true, state);
+    // Picking the unavailable assistant keeps the launcher and its setup copy.
+    const picked = recipientIdentityView(
+      view,
+      resolveRecipient({ ...workspacePage, pick: 'personal' })
+    );
+    assert.equal(picked.launcherVisible, true, state);
+    assert.equal(picked.available, false, state);
+    assert.equal(picked.placeholder, view.placeholder, state);
+  }
+  // With a vacant Commander only the assistant's own visibility counts.
+  const unhired = personalAssistantPanelView({ state: 'needs_hire' });
+  const vacant = recipientIdentityView(
+    unhired,
+    resolveRecipient({ ...workspacePage, entry: { status: 'vacant' } })
+  );
+  assert.equal(vacant.launcherVisible, false);
+});
+
+test('before the assistant status answers, no workspace agent is named or offered', () => {
+  // The page may be the Personal HQ, whose own agent must never flash in.
+  const view = personalAssistantPanelView(null);
+  const resolution = resolveRecipient({ ...workspacePage, personal: { known: false } });
+  const who = recipientIdentityView(view, resolution);
+  assert.equal(who.personal, true);
+  assert.equal(who.name, view.name);
+  assert.equal(who.launcherVisible, false);
+  assert.equal(who.available, false);
+  assert.equal(
+    entrySessionStripView({ recipient: resolution.current, session: { id: '' } }).visible,
+    false
+  );
+});
+
+test('a loading Commander is named by role and cannot be sent to yet', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  const who = recipientIdentityView(
+    view,
+    resolveRecipient({ ...workspacePage, entry: { status: 'loading' } })
+  );
+  assert.equal(who.name, 'Commander');
+  assert.equal(who.available, false);
+  assert.equal(who.placeholder, 'Finding this workspace’s Commander…');
+  // The launcher waits for the agent's name; a drawer reopened on reload may
+  // already show, and says it is still looking.
+  assert.equal(who.launcherVisible, false);
+  assert.equal(who.openable, true);
+  assert.equal(recipientIdentityView(view, resolveRecipient(workspacePage)).launcherVisible, true);
+});
+
+test('only a ready entry agent gives a send its recipient and current session', () => {
+  const resolution = resolveRecipient(workspacePage);
+  assert.deepEqual(entryAgentSendRecipient(resolution.current, 'sess-1'), {
+    kind: 'workspace_entry',
+    name: 'REAPER Assistant',
+    workspaceId: 'ws-1',
+    workspaceName: 'test_reaper',
+    appearance: null,
+    sessionId: 'sess-1'
+  });
+  assert.equal(entryAgentSendRecipient(resolution.current, '').sessionId, '');
+  assert.equal(entryAgentSendRecipient(resolution.options[1], 'sess-1'), null);
+  assert.equal(
+    entryAgentSendRecipient(
+      resolveRecipient({ ...workspacePage, entry: { status: 'loading' } }).current,
+      ''
+    ),
+    null
+  );
+});
+
+test('the launcher role line can be updated per recipient', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.match(markup, /id="personalAssistantLauncherRole"/);
+  // The entry agent's session strip is its own, never the personal one's.
+  assert.match(markup, /id="personalAssistantEntrySessionBar"[^>]*hidden/);
+  assert.match(markup, /id="personalAssistantEntrySessionTitle"[^>]*>New conversation</);
+  assert.match(markup, /id="personalAssistantEntrySessionNew"/);
+});
+
+test('the session strip names the entry agent session or a new conversation (FR22)', () => {
+  const entry = resolveRecipient(workspacePage).current;
+  assert.deepEqual(
+    entrySessionStripView({ recipient: entry, session: { id: 's1', title: 'Add a reverb bus' } }),
+    { visible: true, title: 'Add a reverb bus', newDisabled: false }
+  );
+  assert.equal(
+    entrySessionStripView({ recipient: entry, session: { id: 's1' } }).title,
+    'Conversation'
+  );
+  assert.deepEqual(entrySessionStripView({ recipient: entry, session: { id: '' } }), {
+    visible: true,
+    title: 'New conversation',
+    newDisabled: true
+  });
+  // Unsaved rows (a turn that failed before a session existed) can be cleared.
+  assert.equal(
+    entrySessionStripView({ recipient: entry, session: { id: '' }, hasMessages: true }).newDisabled,
+    false
+  );
+  const personal = resolveRecipient({ ...workspacePage, pick: 'personal' }).current;
+  assert.equal(
+    entrySessionStripView({ recipient: personal, session: { id: 's1' } }).visible,
+    false
+  );
+  assert.equal(entrySessionStripView({}).visible, false);
+});
+
+test('the hired assistant chrome shows only while it is the recipient (FR17, FR18)', () => {
+  const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
+  const entry = recipientIdentityView(view, resolveRecipient(workspacePage));
+  const personal = recipientIdentityView(
+    view,
+    resolveRecipient({ ...workspacePage, pick: 'personal' })
+  );
+  assert.deepEqual(recipientChromeView(entry, { visible: true }), {
+    needsLine: false,
+    attachments: false,
+    personalConversation: false,
+    entrySession: true,
+    context: true
+  });
+  assert.deepEqual(recipientChromeView(personal, { visible: true }), {
+    needsLine: true,
+    attachments: true,
+    personalConversation: true,
+    entrySession: false,
+    context: true
+  });
+  // Nothing needs the user: the line stays hidden for the assistant too.
+  assert.equal(recipientChromeView(personal, { visible: false }).needsLine, false);
+});
+
+test('the header name is one element that moves into the menu button', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const heading = markup.match(/<h2 id="personalAssistantPanelTitle"[^>]*>([\s\S]*?)<\/h2>/)?.[1];
+  assert.ok(heading, 'the drawer keeps its heading');
+  // Only the name has text, so the heading reads as the name in either state.
+  assert.equal(heading.replace(/<[^>]+>/g, '').trim(), 'Personal assistant');
+  assert.match(heading, /^<span id="personalAssistantPanelName"/);
+  const button = heading.match(/<button[\s\S]*?>/)?.[0] || '';
+  assert.match(button, /id="personalAssistantRecipientButton"/);
+  assert.match(button, /aria-haspopup="menu"/);
+  assert.match(button, /aria-expanded="false"/);
+  assert.match(button, /aria-controls="personalAssistantRecipientMenu"/);
+  assert.match(button, /\bhidden\b/);
+  assert.match(
+    markup,
+    /id="personalAssistantRecipientMenu"[^>]*role="menu"[\s\S]*?aria-label="Who to talk to" hidden>/
+  );
+});
+
+test('the hired assistant flows in the shared thread are hidden for the entry agent', () => {
+  const css = readFileSync(new URL('../../css/ori-guide.css', import.meta.url), 'utf8');
+  const rule = css.match(
+    /\.personal-assistant-panel\[data-recipient="workspace_entry"\]\s*:is\(([^)]*)\)\s*\{\s*display: none;/
+  );
+  assert.ok(rule, 'one rule hides them while the entry agent is the recipient');
+  for (const id of [
+    'personalAssistantFolder',
+    'personalAssistantDraftReview',
+    'personalAssistantMemoryReview',
+    'assistantLedSetup',
+    'personalAssistantFolderExplorer',
+    'personalAssistantOperation'
+  ])
+    assert.match(rule[1], new RegExp(`#${id}\\b`), id);
+});
+
+test('a failed hydration says what happens next and does not block sending (FR21)', () => {
+  assert.equal(
+    ENTRY_HYDRATION_FAILED,
+    'Could not load this conversation. Your next message starts where the server left off.'
+  );
+});
 
 test('backup-console navigation owns focus and Today consumes only its own query', () => {
   assert.deepEqual(assistantPanelOpenIntent('?panel=backup-recovery&tab=overview', false), {
