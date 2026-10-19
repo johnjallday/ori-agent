@@ -249,6 +249,8 @@ export default defineConfig([
       'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/user-knowledge.js',
       'internal/web/static/js/modules/personal-hq-knowledge.js',
+      'internal/web/static/js/modules/connected-memory.js',
+      'internal/web/static/js/modules/connected-memory-browser.js',
       'internal/web/static/js/modules/personal-hq-sources.js',
       'internal/web/static/js/modules/personal-assistant-interview.js',
       'internal/web/static/js/modules/personal-assistant-interview-wizard.js',

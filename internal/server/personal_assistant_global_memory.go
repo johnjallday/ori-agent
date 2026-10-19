@@ -28,6 +28,14 @@ func (g builderGlobalMemory) Promote(ctx context.Context, req personalassistant.
 	return g.b.personalAssistantLearning.PromoteWorkspaceEntry(ctx, userprofile.LocalUserID, req)
 }
 
+// PromoteExternal is Promote to global for an external memory mirror entry.
+func (g builderGlobalMemory) PromoteExternal(ctx context.Context, req personalassistant.ExternalPromoteRequest) (personalassistant.WorkspacePromoteResult, personalassistant.KnowledgeItem, error) {
+	if g.b == nil || g.b.personalAssistantLearning == nil {
+		return "", personalassistant.KnowledgeItem{}, personalassistant.ErrGlobalMemoryUnavailable
+	}
+	return g.b.personalAssistantLearning.PromoteExternalEntry(ctx, userprofile.LocalUserID, req)
+}
+
 var errWorkspaceStoreUnavailable = errors.New("workspace store is unavailable")
 
 // builderWorkspaces reads the builder's composed workspace store when called.

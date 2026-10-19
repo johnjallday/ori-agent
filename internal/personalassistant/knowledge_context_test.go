@@ -50,6 +50,42 @@ func TestKnowledgeContextRequiresBindingApprovedRevisionAndCurrentCanonicalLine(
 	}
 }
 
+// IsPersonalAssistant is the gate for assistant-only context (the external
+// memory mirror): the same binding Section checks, and not while paused.
+func TestIsPersonalAssistantMatchesTheBindingAndNotWhilePaused(t *testing.T) {
+	ctx := context.Background()
+	f := newKnowledgeFixture(t)
+	reader := NewKnowledgeContextReader(NewKnowledgeStore(f.resolver(), f.folder), f.memory, approvingTestAuthority{})
+	if !reader.IsPersonalAssistant(ctx, "local", "hq-local", "instance-local") {
+		t.Fatal("the bound entry instance in its HQ is the personal assistant")
+	}
+	for _, bad := range []struct{ user, workspace, entry string }{
+		{"local", "other", "instance-local"},
+		{"local", "hq-local", "other"},
+		{"local", "hq-local", ""},
+		{"foreign", "hq-local", "instance-local"},
+	} {
+		if reader.IsPersonalAssistant(ctx, bad.user, bad.workspace, bad.entry) {
+			t.Fatalf("%+v passed the gate", bad)
+		}
+	}
+	state, err := f.relationships.GetState(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Status = StatusPaused
+	if _, err := f.relationships.UpdateState(ctx, state, state.StateVersion); err != nil {
+		t.Fatal(err)
+	}
+	if reader.IsPersonalAssistant(ctx, "local", "hq-local", "instance-local") {
+		t.Fatal("a paused assistant passed the gate")
+	}
+	var nilReader *KnowledgeContextReader
+	if nilReader.IsPersonalAssistant(ctx, "local", "hq-local", "instance-local") {
+		t.Fatal("a nil reader passed the gate")
+	}
+}
+
 func TestKnowledgeContextMatrixNeverProjectsPendingRejectedForgottenOrSuspendedRevisions(t *testing.T) {
 	ctx := context.Background()
 	f := newKnowledgeFixture(t)

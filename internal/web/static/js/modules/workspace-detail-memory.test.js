@@ -2,12 +2,65 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   WorkspaceMemoryManager,
+  contextFilesView,
   defaultPromoteCategory,
   memoryBudgetMeter,
   memorySections,
-  recentMemoryLearnings
+  recentMemoryLearnings,
+  rootFilesConfirmation
 } from './workspace-detail-memory.js';
 import { memoryEntryKind } from './memory-station.js';
+
+test('the context files row reads the server status and hides without it', () => {
+  assert.equal(contextFilesView(undefined).visible, false);
+  assert.equal(contextFilesView({ root_files: true }).visible, false, 'no folder, no row');
+  const off = contextFilesView({
+    root_files: false,
+    context_dir: '/w/chart-lab/.ori/context',
+    root_dir: '/Users/me/Projects/chart-lab',
+    file_names: ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+  });
+  assert.deepEqual(off, {
+    visible: true,
+    checked: false,
+    contextDir: '/w/chart-lab/.ori/context',
+    rootDir: '/Users/me/Projects/chart-lab',
+    names: ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+  });
+  assert.equal(contextFilesView({ context_dir: '/x', root_files: true }).checked, true);
+});
+
+test('switching the root files on asks first, naming git and .gitignore (FR25)', () => {
+  const text = rootFilesConfirmation('/Users/me/Projects/chart-lab');
+  assert.match(text, /AGENTS\.md, CLAUDE\.md and GEMINI\.md in \/Users\/me\/Projects\/chart-lab/);
+  assert.match(text, /visible to git and to any program that reads the folder/);
+  assert.match(text, /does not edit \.gitignore/);
+  assert.match(rootFilesConfirmation(''), /at the root of this workspace’s folder/);
+});
+
+test('the context files row renders the switch state and escapes paths', () => {
+  const manager = makeManager();
+  const row = { hidden: true, innerHTML: '' };
+  manager.elements = { context: row };
+  manager.contextFiles = {
+    root_files: true,
+    context_dir: '/w/<lab>/.ori/context',
+    root_dir: '/Users/me/<lab>',
+    file_names: ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+  };
+  manager.renderContextFiles();
+  assert.equal(row.hidden, false);
+  assert.match(row.innerHTML, /data-action="root-files" checked/);
+  assert.match(
+    row.innerHTML,
+    /Also write to the folder root \(AGENTS\.md, CLAUDE\.md, GEMINI\.md\)/
+  );
+  assert.match(row.innerHTML, /&lt;lab&gt;/);
+  assert.doesNotMatch(row.innerHTML, /<lab>/);
+  manager.contextFiles = null;
+  manager.renderContextFiles();
+  assert.equal(row.hidden, true);
+});
 
 // Minimal host: escapeHtml mirrors the page helper closely enough for assertions.
 function makeManager() {

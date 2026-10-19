@@ -130,6 +130,34 @@ function safeLocalHref(href, fallback) {
   return value.startsWith('/') && !value.startsWith('//') ? value : fallback;
 }
 
+// contextFilesView reads the memory response's context_files: where Ori keeps
+// this memory for the CLIs a user runs by hand, and whether the folder-root
+// switch is on. Hidden when the server does not offer context files.
+export function contextFilesView(contextFiles) {
+  if (!contextFiles || typeof contextFiles !== 'object' || !contextFiles.context_dir) {
+    return { visible: false, checked: false, contextDir: '', rootDir: '', names: [] };
+  }
+  const names = Array.isArray(contextFiles.file_names) ? contextFiles.file_names : [];
+  return {
+    visible: true,
+    checked: Boolean(contextFiles.root_files),
+    contextDir: String(contextFiles.context_dir),
+    rootDir: String(contextFiles.root_dir || ''),
+    names: names.length ? names : ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+  };
+}
+
+// rootFilesConfirmation is the question asked before Ori starts writing into
+// the user's own files (PRD FR25).
+export function rootFilesConfirmation(rootDir) {
+  const where = rootDir ? ` in ${rootDir}` : ' at the root of this workspace’s folder';
+  return (
+    `Ori will keep a block of this workspace's memory in AGENTS.md, CLAUDE.md and GEMINI.md${where}. ` +
+    'Those files are visible to git and to any program that reads the folder. ' +
+    'Ori changes only its own block, between its markers, and does not edit .gitignore. Turn this on?'
+  );
+}
+
 export class WorkspaceMemoryManager {
   constructor(host) {
     this.host = host;
@@ -179,6 +207,7 @@ export class WorkspaceMemoryManager {
       learnings: document.getElementById('workspace-detail-memory-learnings'),
       list: document.getElementById('workspace-detail-memory-list'),
       global: document.getElementById('workspace-detail-memory-global'),
+      context: document.getElementById('workspace-detail-memory-context'),
       addForm: document.getElementById('workspace-detail-memory-add-form'),
       addType: document.getElementById('workspace-detail-memory-add-type'),
       addText: document.getElementById('workspace-detail-memory-add-text')
@@ -196,6 +225,11 @@ export class WorkspaceMemoryManager {
 
     // Event delegation for edit/delete/save/cancel on the list.
     this.elements.list?.addEventListener('click', event => this.handleListClick(event));
+
+    this.elements.context?.addEventListener('change', event => {
+      const input = event.target;
+      if (input?.dataset?.action === 'root-files') this.toggleRootFiles(input);
+    });
   }
 
   async load() {
@@ -233,6 +267,10 @@ export class WorkspaceMemoryManager {
       charBudget: Number(payload?.char_budget) || 0,
       overBudget: Boolean(payload?.over_budget)
     };
+    this.contextFiles =
+      payload?.context_files && typeof payload.context_files === 'object'
+        ? payload.context_files
+        : null;
     // The Memory station's badge follows every authoritative payload.
     if (typeof this.onPayload === 'function') this.onPayload(payload);
   }
@@ -261,6 +299,54 @@ export class WorkspaceMemoryManager {
     this.renderLearnings();
     this.renderList();
     this.renderGlobal();
+    this.renderContextFiles();
+  }
+
+  // renderContextFiles is the line about this memory's context files for the
+  // user's own CLI sessions, with the "Also write to the folder root" switch.
+  renderContextFiles() {
+    const row = this.elements.context;
+    if (!row) return;
+    const view = contextFilesView(this.contextFiles);
+    if (!view.visible) {
+      row.hidden = true;
+      row.innerHTML = '';
+      return;
+    }
+    const names = this.esc(view.names.join(', '));
+    const root =
+      view.checked && view.rootDir
+        ? ` It also keeps a managed block in ${names} at <code>${this.esc(view.rootDir)}</code>.`
+        : '';
+    row.hidden = false;
+    row.innerHTML = `
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-memory-root-files" data-action="root-files"${view.checked ? ' checked' : ''}>
+        <label class="form-check-label" for="workspace-detail-memory-root-files">Also write to the folder root (${names})</label>
+      </div>
+      <p class="workspace-detail-memory-global-text">Codex, Claude Code and Gemini CLI sessions you start yourself can read this memory: Ori keeps it in <code>${this.esc(view.contextDir)}</code>.${root}</p>`;
+  }
+
+  // toggleRootFiles saves the switch, asking first when it would start
+  // writing into the user's own files (FR25).
+  async toggleRootFiles(input) {
+    const on = Boolean(input.checked);
+    const view = contextFilesView(this.contextFiles);
+    if (
+      on &&
+      typeof window !== 'undefined' &&
+      !window.confirm(rootFilesConfirmation(view.rootDir))
+    ) {
+      input.checked = false;
+      return;
+    }
+    input.disabled = true;
+    await this.mutate(
+      'PATCH',
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/settings`,
+      { root_files: on }
+    );
+    input.disabled = false;
   }
 
   runHref(runId) {

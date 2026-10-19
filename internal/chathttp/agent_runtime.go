@@ -188,6 +188,7 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, 
 		}
 		wtp.SetManagementDeps(h.store, mcpLister, skillsMgr)
 	}
+	h.attachExternalMemoryRecall(wtp, agentName, routeCtx, instanceID)
 	ag.WorkspaceTools = wtp
 	logger.Info("attachWorkspaceTools: attached workspace tools", logger.Fields{
 		"workspace_id": workspaceID,

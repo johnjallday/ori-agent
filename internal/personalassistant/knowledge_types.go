@@ -48,6 +48,11 @@ func (binding KnowledgeBinding) owner() KnowledgeOwner {
 	}
 }
 
+// ExternalMemorySourceKind tags the evidence of a fact the user promoted from
+// the external memory mirror (another agent's memory). Its SourceID is
+// "external:<source>:<entry id>"; the mirror entry holds the origin path.
+const ExternalMemorySourceKind = "external_memory"
+
 // KnowledgeEvidence contains inert bounded source references, never raw source
 // payloads, filesystem paths, or a grant to reread a source.
 type KnowledgeEvidence struct {

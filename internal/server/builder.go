@@ -40,6 +40,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
+	"github.com/johnjallday/ori-agent/internal/externalmemory"
+	"github.com/johnjallday/ori-agent/internal/externalmemoryhttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
@@ -367,6 +369,10 @@ type ServerBuilder struct {
 	personalAssistantMemory    *personalassistant.MemoryService
 	personalAssistantKnowledge *personalassistant.KnowledgeContextReader
 	personalAssistantLearning  *personalassistant.KnowledgeLearningService
+	// externalMemoryRunner syncs other agents' memory into the read-only
+	// mirror only the personal assistant reads.
+	externalMemoryRunner  *externalmemory.Runner
+	externalMemoryHandler *externalmemoryhttp.Handler
 	// personalAssistantFolderDigest is "show me a folder": chooser, scan,
 	// offers, and decisions over the HQ sidecar.
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
@@ -642,6 +648,8 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	b.wireCalendarOpsPrepTaskExecutor() // Phase 22.1 — Calendar Ops meeting-prep needs the orchestrator
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
 	b.initializeDailyBrief()            // Phase 22.6 — wire personal hq daily brief storage/scheduling/synthesis
+	b.initializeExternalMemory()        // Phase 22.65 — read-only mirror of other agents' memory (personal assistant only)
+	b.initializeMemoryContextFiles()    // Phase 22.66 — workspace memory as AGENTS.md/CLAUDE.md/GEMINI.md for the user's own CLIs
 	b.completeProgressionWiring()       // Phase 22.7 — progression hooks + backfill that need the assistant, journeys, and brief
 	b.initializeTemplateManager()       // Phase 23
 
@@ -803,11 +811,13 @@ func (b *ServerBuilder) createDomainFacades() {
 		Plugin:                b.pluginHandler,
 		// initializeMissionBridge (which builds the trigger handler) runs
 		// before this facade is rebuilt, so it must be attached here too.
-		Triggers: b.triggerHandler,
+		Triggers:       b.triggerHandler,
+		ExternalMemory: b.externalMemoryHandler,
 	}
 	if b.workspaceFileStore != nil {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
 		handlers.WorkspaceMemory.SetGlobalMemory(builderGlobalMemory{b: b})
+		handlers.WorkspaceMemory.SetContextFiles(b.server.memoryContext)
 	}
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices

@@ -57,6 +57,9 @@ func continuityNeverCovered(rel string, dir bool) bool {
 		return true
 	case folded == ".ori/personal-assistant-knowledge.lock":
 		return true
+	case folded == MemoryContextDir || strings.HasPrefix(folded, MemoryContextDir+"/"):
+		// Rendered from MEMORY.md, which the checkpoint already carries.
+		return true
 	}
 	name := path.Base(rel)
 	switch strings.ToLower(name) {

@@ -322,6 +322,17 @@ func DefaultAgentStateDir() string {
 	return filepath.Join(DefaultDataDir(), AgentStateDirName)
 }
 
+// ExternalMemoryDirName is the data-dir folder holding Ori's read-only mirror
+// of other agents' memory (Codex, Claude Code, Gemini CLI, the Claude account).
+const ExternalMemoryDirName = "external_memory"
+
+// DefaultExternalMemoryDir returns where the external memory mirror lives. Like
+// every data-dir store it follows ORI_DATA_DIR, so a demo or smoke server never
+// reads or writes the real mirror.
+func DefaultExternalMemoryDir() string {
+	return filepath.Join(DefaultDataDir(), ExternalMemoryDirName)
+}
+
 // DefaultWorkspaceRoot returns the fallback directory used for new workspace folders.
 func DefaultWorkspaceRoot() string {
 	home, err := os.UserHomeDir()

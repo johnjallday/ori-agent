@@ -1,0 +1,5 @@
+- [User role](user_role.md) — solo developer
+- [Net results](feedback_net_results.md) — never gross
+- [Backtest layout](project_backtest_layout.md) — frozen studies
+- [Exchange fees](reference_exchange_fees.md) — docs/fees.md
+- [Gap handling](untyped_gap_handling.md) — keep gaps

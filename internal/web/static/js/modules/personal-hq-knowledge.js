@@ -124,7 +124,21 @@ const APPROVED_SOURCE_CHIPS = {
 
 // approvedSourceChip names the origin of an approved global fact (FR 14):
 // you, interview, workspace, folder scan, saved apps or janitor.
+// The agents whose memory Ori mirrors (externalmemory.SourceLabel).
+const EXTERNAL_MEMORY_LABELS = {
+  codex: 'Codex',
+  claude_code: 'Claude Code',
+  gemini_cli: 'Gemini CLI',
+  claude_account: 'your Claude account'
+};
+
 export function approvedSourceChip(item) {
+  // A fact you promoted from another agent's memory names that agent.
+  const external = item?.source?.external;
+  if (external) {
+    const label = EXTERNAL_MEMORY_LABELS[external];
+    return label ? `From ${label} memory` : 'From another agent’s memory';
+  }
   return APPROVED_SOURCE_CHIPS[item?.source?.kind || item?.source_kind] || '';
 }
 

@@ -462,6 +462,7 @@ func (s *MemoryStore) Append(workspaceID string, entry MemoryEntry) error {
 	if err != nil {
 		return err
 	}
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
@@ -479,6 +480,7 @@ func (s *MemoryStore) AppendUnique(workspaceID string, entry MemoryEntry) (bool,
 	if err != nil {
 		return false, err
 	}
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
@@ -504,6 +506,7 @@ func (s *MemoryStore) Forget(workspaceID string, match string) (MemoryEntry, err
 	if match == "" {
 		return MemoryEntry{}, errors.New("memory forget match must not be empty")
 	}
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
@@ -548,6 +551,7 @@ func (s *MemoryStore) Forget(workspaceID string, match string) (MemoryEntry, err
 // EditAt replaces the entry at the given entry index (file order, 0-based)
 // with the provided entry, rendered canonically.
 func (s *MemoryStore) EditAt(workspaceID string, index int, entry MemoryEntry) error {
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
@@ -572,6 +576,7 @@ func (s *MemoryStore) EditAt(workspaceID string, index int, entry MemoryEntry) e
 
 // DeleteAt removes the entry at the given entry index (file order, 0-based).
 func (s *MemoryStore) DeleteAt(workspaceID string, index int) error {
+	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
