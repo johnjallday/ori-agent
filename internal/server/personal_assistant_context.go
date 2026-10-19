@@ -22,6 +22,11 @@ type personalAssistantContextAdapter struct {
 	knowledge    interface {
 		HomeSection(ctx context.Context, userID, workspaceID string) (string, error)
 	}
+	// external renders the block of what the user's other coding agents
+	// remember; nil leaves it out. Only the Home ask handler sets it.
+	external interface {
+		ContextBlock(budget int) string
+	}
 }
 
 // ResolvePersonalAssistantRelationship loads no profile, memory or source body.
@@ -73,7 +78,32 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx con
 	}
 	a.loadProfile(ctx, userID, out)
 	a.loadMemory(ctx, userID, out)
+	a.loadExternalMemory(out)
 	return out, nil
+}
+
+// loadExternalMemory adds the profile-grade entries of the external memory
+// mirror for the hired assistant, which this context only ever describes. A
+// paused assistant reads none of it, as with reviewed global memory.
+func (a personalAssistantContextAdapter) loadExternalMemory(out *agenthttp.PersonalAssistantWorkContext) {
+	if a.external == nil {
+		return
+	}
+	if out.State == string(personalassistant.APIStatePaused) {
+		out.Sources["external_memory"] = agenthttp.PersonalAssistantContextSource{Status: "unavailable", Reason: "assistant_paused"}
+		return
+	}
+	block := a.external.ContextBlock(workspace.MemoryPromptTokenBudget * 4)
+	if strings.TrimSpace(block) == "" {
+		out.Sources["external_memory"] = agenthttp.PersonalAssistantContextSource{Status: "healthy_empty"}
+		return
+	}
+	if sensitive.ContainsSecretLikeText(block) {
+		out.Sources["external_memory"] = agenthttp.PersonalAssistantContextSource{Status: "rejected", Reason: "secret_like_text"}
+		return
+	}
+	out.ExternalMemory = block
+	out.Sources["external_memory"] = agenthttp.PersonalAssistantContextSource{Status: "available"}
 }
 
 func (a personalAssistantContextAdapter) loadProfile(ctx context.Context, userID string, out *agenthttp.PersonalAssistantWorkContext) {

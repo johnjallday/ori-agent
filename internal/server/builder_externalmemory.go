@@ -24,5 +24,11 @@ func (b *ServerBuilder) initializeExternalMemory() {
 	// Promote to global goes through the personal assistant's knowledge
 	// service, read when called: it may be unset (no hired assistant).
 	b.externalMemoryHandler.SetGlobalMemory(builderGlobalMemory{b: b})
+	// Workspace chat: only the personal assistant answering in its own
+	// Personal HQ gets the block and memory_recall; the knowledge reader's
+	// binding check is the gate. Task runs are never wired here.
+	if b.chatHandler != nil && b.personalAssistantKnowledge != nil {
+		b.chatHandler.SetExternalMemory(b.externalMemoryRunner.Reader(), b.personalAssistantKnowledge)
+	}
 	b.server.externalMemory = b.externalMemoryRunner
 }

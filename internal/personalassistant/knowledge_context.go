@@ -39,6 +39,22 @@ func (r *KnowledgeContextReader) HomeSection(ctx context.Context, userID, worksp
 	return r.Section(ctx, userID, workspaceID, binding.EntryAgentInstanceID)
 }
 
+// IsPersonalAssistant reports whether entryInstanceID answering in workspaceID
+// is the user's hired personal assistant in its Personal HQ, and not paused.
+// It is the same binding check Section makes, for context only the assistant
+// may read (the external memory mirror). The instance must come from the
+// server's own resolution, never from a browser or a prompt.
+func (r *KnowledgeContextReader) IsPersonalAssistant(ctx context.Context, userID, workspaceID, entryInstanceID string) bool {
+	if r == nil || r.store == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(entryInstanceID) == "" {
+		return false
+	}
+	binding, err := r.store.resolve(ctx, userID)
+	if err != nil {
+		return false
+	}
+	return !binding.Paused && binding.HQWorkspaceID == workspaceID && binding.EntryAgentInstanceID == entryInstanceID
+}
+
 func (r *KnowledgeContextReader) Section(ctx context.Context, userID, workspaceID, entryInstanceID string) (string, error) {
 	if r == nil || r.store == nil || r.memory == nil {
 		return "", ErrRepairNeeded
