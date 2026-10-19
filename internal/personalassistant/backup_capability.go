@@ -15,7 +15,7 @@ func (s *CapabilityService) SetBackupReader(reader dailybrief.BackupSource, work
 	}
 }
 func (s *CapabilityService) backupCapabilityCard(ctx context.Context, owner string, relationship *Projection) CapabilityCard {
-	card := CapabilityCard{Key: "backup-recovery", Label: "Backup & Recovery", Status: CapabilityNotConfigured, Reason: "not_in_saved_workspace_scope", CanRead: "Stored backup metadata and explicitly user-reported recovery results in your saved workspace scope, not files or passwords.", CanPropose: "Explain evidence limits and link to the owning Backup & Recovery workspace.", RequiresConfirmation: "Connection, periodic metadata access and recovery reports use the owning workspace's separate user controls. External software alone runs backups and restores.", MappedWrite: false, ActionLabel: "Choose Backup & Recovery", ActionRoute: "/?create=1&blueprint=backup-and-recovery"}
+	card := CapabilityCard{Key: "backup-recovery", Label: "Backup & Recovery", Status: CapabilityNotConfigured, Reason: "not_in_saved_workspace_scope", CanRead: "Stored backup metadata and explicitly user-reported recovery results in your saved workspace scope, not files or passwords.", CanPropose: "Explain evidence limits and link to the owning Backup & Recovery workspace.", RequiresConfirmation: "Connection, periodic metadata access and recovery reports use the owning workspace's separate user controls. External software alone runs backups and restores.", MappedWrite: false, ActionLabel: "Choose Backup & Recovery", ActionRoute: backupChooserRoute}
 	scope := dailybrief.ResolveWorkspaceScope(s.backupWorkspaces, todayFollowUpConfig(relationship), owner)
 	read := dailybrief.ReadBackups(ctx, s.backups, owner, scope)
 	if len(read.Sources) == 0 {

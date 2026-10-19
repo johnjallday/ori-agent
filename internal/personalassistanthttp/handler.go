@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -313,6 +314,19 @@ func (h *Handler) GetWorkspaceProtection(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	orihttp.Success(w, map[string]any{"protection": fact})
+}
+
+// GetProtectionOptions serves the "Protect your folders" chooser its fixed
+// provider options: build facts only, no drive, folder or OS query.
+func (h *Handler) GetProtectionOptions(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	orihttp.Success(w, map[string]any{"protection_options": map[string]any{
+		"time_machine": map[string]any{"platform_supported": backuprecovery.TimeMachinePlatformSupported()},
+		"restic":       map[string]any{"platform_supported": true},
+	}})
 }
 
 // BackupCoverageDecliner records "Not now" on Today's protection line.

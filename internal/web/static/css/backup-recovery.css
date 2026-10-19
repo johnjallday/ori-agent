@@ -255,6 +255,28 @@
   font-size: 0.95rem;
   margin: 0 0 0.5rem;
 }
+/* "Protect your folders" on Home: two cards, stacked on narrow screens. */
+.br-chooser-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.br-chooser-card {
+  border: 1px solid var(--br-line);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  background: var(--br-paper);
+}
+.br-chooser-card h4 {
+  margin: 0.9rem 0 0.3rem;
+  font-size: 0.85rem;
+}
+.br-chooser-card p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
 /* Provider choice, Time Machine states and the per-folder coverage list. */
 .br-provider {
   display: flex;

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
@@ -357,6 +358,31 @@ func TestHandlerGetWorkspaceProtectionServesTheStoredFact(t *testing.T) {
 	readOnly.SetTodayService(&fakeTodayReader{})
 	if recorder := get(readOnly, "song"); recorder.Code != http.StatusServiceUnavailable {
 		t.Fatal(recorder.Code)
+	}
+}
+
+func TestHandlerProtectionOptionsAreBuildFactsOnly(t *testing.T) {
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	recorder := httptest.NewRecorder()
+	handler.GetProtectionOptions(recorder, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/protection-options", nil))
+	var body struct {
+		Options struct {
+			TimeMachine struct {
+				PlatformSupported bool `json:"platform_supported"`
+			} `json:"time_machine"`
+			Restic struct {
+				PlatformSupported bool `json:"platform_supported"`
+			} `json:"restic"`
+		} `json:"protection_options"`
+	}
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &body) != nil || !body.Options.Restic.PlatformSupported ||
+		body.Options.TimeMachine.PlatformSupported != backuprecovery.TimeMachinePlatformSupported() || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal(recorder.Code, recorder.Body.String())
+	}
+	post := httptest.NewRecorder()
+	handler.GetProtectionOptions(post, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/protection-options", nil))
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatal(post.Code)
 	}
 }
 

@@ -96,9 +96,10 @@ const (
 	// backupCoverageReviveAt is portfolio scale: a first decline made below it
 	// revives once when the uncovered count first reaches it.
 	backupCoverageReviveAt = 5
-	// backupChooserRoute is where the line leads when no Backup & Recovery
-	// workspace is in scope.
-	backupChooserRoute = "/?create=1&blueprint=backup-and-recovery"
+	// backupChooserRoute opens Home's "Protect your folders" chooser: where the
+	// line, the workspace fact and the readiness card lead when no Backup &
+	// Recovery workspace is in scope.
+	backupChooserRoute = "/?protect=folders"
 )
 
 // backupCoverageItem builds the single protection line (FR6–FR10, FR13–FR14).

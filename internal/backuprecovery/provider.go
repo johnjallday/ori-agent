@@ -25,6 +25,10 @@ const (
 	ProviderTimeMachine = providerTimeMachine
 )
 
+// TimeMachinePlatformSupported reports whether this build can ever read Time
+// Machine (Apple-silicon macOS). It is a build fact, not an OS query.
+func TimeMachinePlatformSupported() bool { return timeMachinePlatformSupported }
+
 type backupPasswordUse func(context.Context, func([]byte) error) error
 
 type providerReadResult struct {

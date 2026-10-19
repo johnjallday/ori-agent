@@ -27,6 +27,9 @@
     'x-apple.systempreferences:com.apple.Time-Machine-Settings.extension';
   const FULL_DISK_ACCESS_SETTINGS =
     'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles';
+  // Apple's official restore guide; the console links it and runs nothing.
+  const TIME_MACHINE_RESTORE_GUIDE =
+    'https://support.apple.com/guide/mac-help/restore-items-backed-up-with-time-machine-mh11422/mac';
   const state = {
     status: null,
     settings: null,
@@ -200,7 +203,10 @@
         }
         state.settings = incoming;
         if (!state.review && !state.sources.length && !state.credential && !state.providerChosen) {
-          state.provider = defaultProvider(state.settings, initialDeepLink?.provider);
+          state.provider = defaultProvider(
+            state.settings,
+            initialDeepLink?.provider || takeChooserPreselect(state.settings)
+          );
           state.useSaved = !!state.settings.configured && savedProvider() === state.provider;
           state.vault = state.settings.credential?.vault_id || '';
           state.record = state.settings.credential?.record_id || '';
@@ -227,13 +233,28 @@
       render();
     }
   }
+  // Home's "Protect your folders" chooser leaves a one-time preselect for the
+  // workspace it created. It is used once, only before anything is saved, and
+  // a blocked store simply means no preselect.
+  function takeChooserPreselect(settings) {
+    if (settings?.configured) return '';
+    try {
+      const value = window.sessionStorage?.getItem('ori.backupRecovery.preselect') || '';
+      window.sessionStorage?.removeItem('ori.backupRecovery.preselect');
+      return value === TIME_MACHINE ? value : '';
+    } catch (_) {
+      return '';
+    }
+  }
   // The saved provider wins; then a chooser's preselect, when this server can
-  // read it; then the first provider it can read. Nothing here connects.
+  // read it; otherwise restic, as before Time Machine existed. Time Machine
+  // leads in the chooser, which is where a new user picks it. Nothing here
+  // connects.
   function defaultProvider(settings, preselect) {
     if (settings?.configured && settings.provider) return settings.provider;
     const readable = (settings?.providers || []).filter(option => option.available);
     if (preselect && readable.some(option => option.id === preselect)) return preselect;
-    return readable[0]?.id || 'restic';
+    return 'restic';
   }
   function savedProvider() {
     return state.settings?.provider || 'restic';
@@ -1029,7 +1050,9 @@
       choice.id = 'brProvider-' + option.id;
       choice.setAttribute('role', 'radio');
       choice.setAttribute('aria-checked', String(chosen));
-      choice.disabled = state.busy || (!option.available && !chosen);
+      // Only a platform without the provider rules it out. A missing reader
+      // still lets the user see and prepare its setup; the read is refused.
+      choice.disabled = state.busy || (option.reason === 'platform_unsupported' && !chosen);
       group.appendChild(choice);
       if (!option.available)
         paragraph(
@@ -1037,7 +1060,7 @@
           option.label +
             (option.reason === 'platform_unsupported'
               ? ' is unavailable: it is only on macOS.'
-              : ' is unavailable: its metadata reader is not available on this server.'),
+              : "'s metadata reader is not available on this server yet. You can prepare its setup; Ori cannot read it until the reader is available."),
           'br-note'
         );
     }
@@ -1537,6 +1560,17 @@
       parent,
       'Use the external application to restore a sample to a separate location. Never overwrite the working source as a test. Ori never verifies the result.'
     );
+    if (savedProvider() === TIME_MACHINE) {
+      paragraph(
+        parent,
+        "For Time Machine, follow Apple's own guide to restore a sample. Ori opens nothing and restores nothing."
+      );
+      settingsLink(
+        parent,
+        'Restore items backed up with Time Machine (Apple)',
+        TIME_MACHINE_RESTORE_GUIDE
+      );
+    }
     paragraph(
       parent,
       'Ori does not restore or inspect recovered contents. A dated user report is not Ori verification, and one sample cannot prove all files are recoverable.'
