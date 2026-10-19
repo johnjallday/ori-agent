@@ -127,7 +127,7 @@ func (a *SetupAdapter) Confirm(ctx context.Context, req setupwizard.StepRequest,
 	if err != nil {
 		return setupwizard.StepReadiness{}, err
 	}
-	if status.Settings.RootPath == "" {
+	if !status.Settings.IsSetUp() {
 		// Nothing to automate yet. Returning the pending readiness (rather than
 		// an error) keeps the wizard on the folder step with a reason.
 		return automationReadiness(status), nil
@@ -163,7 +163,7 @@ func (a *SetupAdapter) Confirm(ctx context.Context, req setupwizard.StepRequest,
 // read from the Janitor's status, so the wizard's payload stays free of local
 // paths.
 func directoryReadiness(status Status) setupwizard.StepReadiness {
-	if status.Settings.RootPath == "" {
+	if !status.Settings.IsSetUp() {
 		return setupwizard.StepReadiness{
 			Summary:       "No folder chosen yet.",
 			ErrorCategory: setupwizard.ErrorCategoryNotConfigured,
@@ -191,7 +191,7 @@ func directoryReadiness(status Status) setupwizard.StepReadiness {
 // automation step the wizard configures it that way on purpose, and "not
 // started yet" is a different statement from "something is broken".
 func automationReadiness(status Status) setupwizard.StepReadiness {
-	if status.Settings.RootPath == "" {
+	if !status.Settings.IsSetUp() {
 		return setupwizard.StepReadiness{
 			Summary:       "Choose a folder first.",
 			ErrorCategory: setupwizard.ErrorCategoryNotConfigured,
@@ -207,6 +207,9 @@ func automationReadiness(status Status) setupwizard.StepReadiness {
 				ErrorCategory: categoryFor(check.Code),
 			}
 		}
+	}
+	if status.Settings.ManualScansOnly() {
+		return setupwizard.StepReadiness{Ready: true, Summary: "Manual scans only. Watching and daily scans are off."}
 	}
 	if automationApproved(status) {
 		if status.Settings.Paused {
@@ -256,6 +259,9 @@ func automationApproved(status Status) bool {
 func overallReadiness(status Status) setupwizard.StepReadiness {
 	switch status.Readiness.State {
 	case ReadinessReady:
+		if status.Settings.ManualScansOnly() {
+			return setupwizard.StepReadiness{Ready: true, Summary: "Ready · Manual scans"}
+		}
 		if !automationApproved(status) {
 			// The Janitor reports a paused workspace as ready-but-paused, which
 			// is right for its own surface. Here it means the user has not

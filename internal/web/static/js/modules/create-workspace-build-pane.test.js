@@ -197,7 +197,10 @@ function loadPane() {
     'workspace-build-folder',
     'workspace-build-folder-remove',
     'workspace-build-link',
-    'workspace-build-link-remove'
+    'workspace-build-link-remove',
+    'workspace-build-review',
+    'workspace-build-prepare',
+    'workspace-build-defer'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -209,6 +212,75 @@ const assistant = { display_name: 'Luna', appearance: {} };
 function entries(root) {
   return root.querySelectorAll('li');
 }
+
+test('creation permission review is host-rendered, default-off and explicitly confirmed', () => {
+  const { pane, document, events } = loadPane();
+  const host = document.createElement('section');
+  const review = {
+    review_revision: 'opaque',
+    workspace: { name: '<edited name>', description: 'Edited description', mission: 'Edited goal' },
+    team: [{ name: 'Edited Curator', action: 'create', model: 'local-model' }],
+    folder: { name: 'Synthetic Inbox', path: '/temporary/synthetic-inbox' },
+    terms: {
+      watch_events: ['create', 'rename'],
+      debounce_seconds: 300,
+      daily_scan_local_time: '09:00',
+      timezone: 'Local'
+    }
+  };
+  pane.renderCreationReview(host, { review });
+  assert.match(host.textContent, /<edited name>/);
+  assert.match(host.textContent, /Edited Curator · create · local-model/);
+  assert.match(host.textContent, /This changes the folder on disk/);
+  assert.match(host.textContent, /No file contents are opened/);
+  assert.match(host.textContent, /separate approval/);
+  const checkbox = host.querySelectorAll('input')[0];
+  assert.equal(checkbox.checked, false);
+  assert.equal(events.length, 0);
+  checkbox.checked = true;
+  checkbox.dispatchEvent(new FakeEvent('change'));
+  assert.equal(events[0].type, 'workspace-build-review');
+  assert.equal(events[0].detail.monitoring, true);
+  const confirm = host
+    .querySelectorAll('button')
+    .find(button => button.textContent === 'Create & prepare review');
+  confirm.click();
+  assert.equal(events[1].type, 'workspace-build-prepare');
+  pane.renderCreationReview(host, { review, busy: true });
+  assert.ok(host.querySelectorAll('button').every(button => button.disabled));
+});
+
+test('accepted preparation can be explicitly deferred without offering ordinary recreation', () => {
+  const { pane, document, events } = loadPane();
+  const host = document.createElement('section');
+  const review = {
+    state: 'accepted',
+    review_revision: 'accepted-review',
+    workspace_id: 'reserved-workspace'
+  };
+  pane.renderCreationReview(host, { review, accepted: true });
+  assert.equal(host.querySelectorAll('a').length, 0, 'a reserved ID is not a page route');
+  pane.renderCreationReview(host, {
+    review: { ...review, folder_slug: 'canonical-folder' },
+    accepted: true
+  });
+  assert.equal(
+    host.querySelectorAll('a')[0].href,
+    '/workspaces/canonical-folder?panel=file-janitor'
+  );
+  assert.match(
+    host.textContent,
+    /Any existing workspace, saved access, Filed\/ and results are kept/
+  );
+  host
+    .querySelectorAll('button')
+    .find(button => button.textContent === 'Defer preparation')
+    .click();
+  assert.equal(events[0].type, 'workspace-build-defer');
+  pane.renderCreationReview(host, { review: { ...review, state: 'deferred' }, accepted: true });
+  assert.match(host.textContent, /Preparation deferred/);
+  assert.equal(host.querySelectorAll('button').length, 0);
+});
 
 test('the pane opens with the fixed opening line, the assistant, and a composer', () => {
   const { pane, root } = loadPane();

@@ -2,7 +2,8 @@
 
 The Personal Assistant builds a workspace **with** the user: Create Workspace opens with
 a conversation pane beside the wizard, the assistant fills the form as the user talks, and
-the user confirms with the ordinary Create. PRD: `tasks/prd-build-with-your-assistant.md`.
+the user confirms with ordinary Create or, for an attached File Janitor folder,
+the separately disclosed **Create & prepare review** action. PRD: `tasks/prd-build-with-your-assistant.md`.
 HTTP contract: [API reference](../api/API_REFERENCE.md#workspace-build-sessions-api).
 
 ## The one rule: the draft is the create request
@@ -28,7 +29,10 @@ user: "create it" / clicks Create ─► POST /api/workspaces { …draft, build_
 - The **wizard renders** the accepted fields through its existing setters (card click,
   input events, the team draft's mutators), so every downstream gate and prefill runs as if
   the user had done it.
-- The **user confirms** with the ordinary Create. `ready` from the model is advisory only;
+- The **user confirms** with ordinary Create. For attached File Janitor setup,
+  `create_now` opens the current host review instead of supplying folder/monitoring
+  consent; see [the reviewed preparation contract](file-janitor-creation-flow.md).
+  `ready` means **Ready to create**, not operational readiness. For other builds,
   `create_now` just triggers the ordinary submit, and a closed gate is reported in the
   pane ("Not yet — …") instead of submitting. The host never honours `create_now` on the
   first turn: the user always sees a filled form before anything is created.
@@ -137,17 +141,42 @@ becomes the primary directory unless the create already set one outside the work
 runs after the scaffold or attached project and before the template's tool step, which reads
 and saves the workspace itself. The `BuildSummary` records it as a `folder` decision.
 
+### Reviewed File Janitor preparation
+
+`janitor-review` reads the canonical edited draft/team and live folder hold;
+`janitor-prepare` explicitly confirms its owner/version/root/terms revision.
+The normal creator's gates still run before the first write. Attaching, ordinary
+Create, and model output grant no File Janitor access. Manual monitoring-off is
+explicit completed setup, not missing consent; opting in binds the actual
+watch/debounce/exclusion and local daily schedule. Preparation creates/reuses
+`Filed/` and performs one top-level metadata scan, never file-content inspection
+or file-action approval.
+
+A preparing claim reserves stable operation/workspace IDs and freezes edits and
+late turns. Creation uses the actual draft, not a default one-role proposal.
+Workspace/profile provenance proves exact replay; uncertain partial creation is
+not retried by name. Canonical grant/mode/scan records own downstream retry.
+`janitor-defer` retains the claim as abandoned, stops only provably matching
+preparation, and permits a separate new build without making the old claim
+create-capable again. Recovery links use a proven canonical folder slug, never
+an unconfirmed reservation ID. Full request/recovery details live in the
+[reviewed creation contract](file-janitor-creation-flow.md).
+
 ### Storage
 
-One sidecar file per HQ: `<HQ folder>/.ori/workspace-build-v1.json`, written through the
+Schema **2** retains the filename `workspace-build-v1.json`. Genuine v1 data
+migrates without inventing preparation consent; v1 carrying v2 authority and
+unknown schemas are refused conservatively. One sidecar file per HQ: `<HQ folder>/.ori/workspace-build-v1.json`, written through the
 Personal Assistant knowledge store (locked, atomic replace, a Windows variant). Bounds:
 
-- at most **one open build** per user; creating while one is open returns it (`resumed`);
+- at most **one open or preparing build** per user; creating while one exists
+  returns it (`resumed`); preparing claims are frozen and do not expire as open drafts;
 - the transcript keeps the last **40 entries / 32 KiB**;
 - an open build untouched for **7 days** is read as abandoned;
 - at most **8 builds** are kept, and a created or abandoned one is settled to its id,
   status, name, and counters (its conversation, draft, and team state are dropped), so
-  the file stays far below its 512 KiB limit;
+  the file stays far below its 512 KiB limit; a settled preparation additionally
+  retains its bounded path-free claim (IDs/digests/mode/time), never a path/token;
 - every host-written line is cut to the store's 2,000-character bound, and the lists a
   model can grow (refusals, saved teammates) are capped;
 - an attached folder is kept only as its path-free observation (at most 8 KiB, validated
@@ -156,7 +185,9 @@ Personal Assistant knowledge store (locked, atomic replace, a Windows variant). 
 - every mutation is versioned; a stale `version` is a `409` the client reloads from.
 
 On create, `build_session_id` marks the session `created` and stores a `BuildSummary` in
-the workspace's template provenance. An unknown or closed id never blocks the create.
+the workspace's template provenance. An unknown or ordinary closed id does not block ordinary create. A retained
+accepted preparation claim does: it must use its exact confirm/recovery boundary
+and cannot be bypassed through ordinary create.
 
 ## Client
 

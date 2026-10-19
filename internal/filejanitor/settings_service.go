@@ -40,6 +40,7 @@ type SettingsUpdate struct {
 func (s *Service) UpdateSettings(workspaceID string, update SettingsUpdate) (Status, error) {
 	_, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		settings.LastAssistedAutomation = nil
+		invalidateSetupPreparation(settings)
 		if update.DailyScanLocalTime != nil {
 			normalized, err := workspace.NormalizeLocalTimeOfDay(*update.DailyScanLocalTime)
 			if err != nil {
@@ -57,6 +58,9 @@ func (s *Service) UpdateSettings(workspaceID string, update SettingsUpdate) (Sta
 			settings.Timezone = timezone
 		}
 		if update.Paused != nil {
+			if err := refuseUnreviewedManualActivation(*settings, *update.Paused); err != nil {
+				return err
+			}
 			settings.Paused = *update.Paused
 		}
 		if update.ContentProvider != nil {
@@ -113,6 +117,7 @@ func (s *Service) GrantContentConsent(workspaceID, provider string) (Status, err
 		settings.ContentConsentProvider = provider
 		settings.ContentConsentAt = s.clock()
 		settings.LastAssistedAutomation = nil
+		invalidateSetupPreparation(settings)
 		return nil
 	})
 	if err != nil {
@@ -295,6 +300,11 @@ func exclusivelyOwns(ws *workspace.Workspace, kind, id string) bool {
 // it had access, and revoking access does not make that record untrue (FR-116,
 // FR-117).
 func (s *Service) RevokeAccess(automation WatcherLifecycle, workspaceID string) (Status, error) {
+	// Serialize with pending/final folder grants. A grant admitted first may
+	// finish, but revoke must win afterwards and leave durable invalidation.
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+
 	// 1. Stop the automation.
 	if automation != nil {
 		if err := automation.RemoveWatcher(workspaceID); err != nil {
@@ -304,6 +314,22 @@ func (s *Service) RevokeAccess(automation WatcherLifecycle, workspaceID string) 
 
 	settings, err := s.store.LoadSettings(workspaceID)
 	if err != nil {
+		return Status{}, err
+	}
+
+	// Revoke authority durably before removing access resources. If a later
+	// workspace write fails, a stale accepted grant must not restore access,
+	// and a scan must not treat the remaining binding as usable permission.
+	if _, err := s.store.UpdateSettings(workspaceID, func(current *JanitorSettings) error {
+		current.AccessRevokedAt = s.clock()
+		current.Paused = true
+		current.SetupDecision = nil
+		current.SetupPreparation = nil
+		current.PendingFolderGrant = nil
+		current.LastFolderGrant = nil
+		current.LastAssistedAutomation = nil
+		return nil
+	}); err != nil {
 		return Status{}, err
 	}
 
@@ -356,6 +382,7 @@ func (s *Service) RevokeAccess(automation WatcherLifecycle, workspaceID string) 
 		fresh := NewSettings(workspaceID)
 		fresh.DailyScanLocalTime = settings.DailyScanLocalTime
 		fresh.Timezone = settings.Timezone
+		fresh.AccessRevokedAt = s.clock()
 		*settings = fresh
 		return nil
 	}); err != nil {

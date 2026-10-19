@@ -29,7 +29,7 @@ type buildReply struct {
 	Patch        buildReplyPatch       `json:"patch" jsonschema_description:"The form fields this reply sets. List each one you set in patch.set."`
 	Why          []buildReplyWhy       `json:"why" jsonschema_description:"One short reason per section you changed."`
 	Alternatives []buildReplyAlternate `json:"alternatives" jsonschema_description:"Up to two other blueprints that could fit, or an empty list."`
-	Ready        bool                  `json:"ready" jsonschema_description:"True when blueprint, name, description and team are all decided."`
+	Ready        bool                  `json:"ready" jsonschema_description:"Ready to create when blueprint, name, description and team are all decided; not operational readiness or folder consent."`
 	CreateNow    bool                  `json:"create_now" jsonschema_description:"True only when the user has just told you to create the workspace."`
 }
 
@@ -407,7 +407,8 @@ func buildSystemPrompt(input buildPromptInput) string {
 	b.WriteString("- Use only the blueprint ids, input ids and option values, agent names, role ids, and group ids listed below. The form refuses anything else, and you will see each refusal next turn.\n")
 	b.WriteString("- A blueprint with needs_home lives inside a group it sets up when the user creates the workspace. Say so when you choose one.\n")
 	b.WriteString("- Never claim the workspace is created. When the user tells you to create it, set create_now to true.\n")
-	b.WriteString("- When blueprint, name, description, and team are decided, set ready to true and say: Ready. Check the review on the left, or just tell me \"create it\".\n")
+	b.WriteString("- When blueprint, name, description, and team are decided, set ready to true and say: Ready to create. Use Review & create to check the current setup.\n")
+	b.WriteString("- File Janitor needs the host's explicit folder permission review. create_now may open that review but never supplies consent to configure, scan or monitor.\n")
 	b.WriteString("- When the user changed the form themselves, acknowledge it in a few words and re-decide what depended on it (a new blueprint needs a new team).\n")
 	b.WriteString("- \"say\" is plain text, at most 600 characters, no markdown. Say what you did, not what you will do. Put your question only in ask.question, never in say as well; the form shows them together.\n")
 	b.WriteString("- Choice labels are short answers (at most 60 characters), such as \"Assign Luna\" or \"Make a new one\".\n\n")

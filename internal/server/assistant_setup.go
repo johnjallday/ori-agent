@@ -263,88 +263,37 @@ func (a assistantSetupSessionAdapter) PrepareFirstReview(ctx context.Context, re
 	if fresh.PrivacyMode != string(filejanitor.ContentModeMetadataOnly) || fresh.PrivacyMode != request.Review.PrivacyMode {
 		return result, assistantsetup.ErrPrivacyReview
 	}
-	privacy := filejanitor.ContentMode(request.Review.PrivacyMode)
-	preserveExistingMonitoring := request.Review.WasApproved && request.Review.WasMonitoringActive
-	operation := filejanitor.AssistedAutomationOperation{
-		RunID: request.RunID, OperationID: request.MonitoringOperation,
-		ReviewRevision: request.Review.Revision, AuthorityRevision: request.Review.AuthorityRevision,
+	prepared, err := a.janitor.PrepareMetadataReview(filejanitor.PreparationRequest{
+		WorkspaceID: request.WorkspaceID, RootID: request.Review.RootGenerationID, Monitoring: true,
+		DailyScanLocalTime: request.Review.DailyScanLocalTime, Timezone: request.Review.Timezone,
+		WasApproved: request.Review.WasApproved, WasPaused: request.Review.WasPaused,
+		Operation: filejanitor.AssistedAutomationOperation{
+			RunID: request.RunID, OperationID: request.MonitoringOperation,
+			ReviewRevision: request.Review.Revision, AuthorityRevision: request.Review.AuthorityRevision,
+		},
+		ScanOperationID: request.ScanOperation,
+		BeforeScan: func() error {
+			if a.wizard != nil {
+				_, err := a.wizard.Status(ctx, request.WorkspaceID)
+				return err
+			}
+			return nil
+		},
+	}, a.automation)
+	result.MonitoringRetryBound = prepared.MonitoringRetryBound
+	result.MonitoringApplied = prepared.MonitoringApplied
+	result.ScanAttempted = prepared.ScanAttempted
+	result.WatcherID = prepared.WatcherID
+	if err != nil {
+		return result, mapAssistantSetupJanitorError(err)
 	}
-	rollback := func() bool {
-		if preserveExistingMonitoring {
-			return false
-		}
-		if err := a.janitor.PauseReviewedAutomation(
-			request.WorkspaceID, request.Review.RootGenerationID, privacy,
-			request.Review.DailyScanLocalTime, request.Review.Timezone, operation,
-		); err == nil {
-			_ = a.automation.EnsureWatcher(request.WorkspaceID)
-			return true
-		}
-		return false
-	}
-	if !preserveExistingMonitoring {
-		if _, err := a.janitor.RecordReviewedAutomationApprovalPaused(
-			request.WorkspaceID, request.Review.RootGenerationID, privacy,
-			request.Review.DailyScanLocalTime, request.Review.Timezone,
-			request.Review.WasApproved, request.Review.WasPaused, operation,
-		); err != nil {
-			return result, mapAssistantSetupJanitorError(err)
-		}
-		if _, err := a.janitor.ActivateReviewedAutomation(
-			request.WorkspaceID, request.Review.RootGenerationID, privacy,
-			request.Review.DailyScanLocalTime, request.Review.Timezone, operation,
-		); err != nil {
-			result.MonitoringRetryBound = rollback()
-			return result, mapAssistantSetupJanitorError(err)
-		}
-	}
-	if err := a.automation.EnsureWatcher(request.WorkspaceID); err != nil {
-		result.MonitoringRetryBound = rollback()
-		return result, err
-	}
-	status, err := a.janitor.Status(request.WorkspaceID)
-	if err != nil || status.Settings.RootID != request.Review.RootGenerationID ||
-		status.Settings.ContentMode != privacy || status.Settings.DailyScanLocalTime != request.Review.DailyScanLocalTime ||
-		status.Settings.Timezone != request.Review.Timezone || status.Settings.AutomationApprovedAt.IsZero() ||
-		filejanitor.RequireHealthyAutomation(status) != nil {
-		result.MonitoringRetryBound = rollback()
-		if err == nil && (status.Settings.RootID != request.Review.RootGenerationID || status.Settings.ContentMode != privacy ||
-			status.Settings.DailyScanLocalTime != request.Review.DailyScanLocalTime || status.Settings.Timezone != request.Review.Timezone) {
-			return result, assistantsetup.ErrFolderChanged
-		}
-		return result, assistantsetup.ErrUnavailable
-	}
-	watcherID, enabled, err := a.automation.WatcherRecord(request.WorkspaceID)
-	if err != nil || !enabled || strings.TrimSpace(watcherID) == "" {
-		result.MonitoringRetryBound = rollback()
-		return result, assistantsetup.ErrUnavailable
-	}
-	result.MonitoringApplied = true
-	result.WatcherID = watcherID
+	status, receipt := prepared.Status, prepared.Scan
 	result.Facts = assistantsetup.FileJanitorFacts{
 		Readiness: string(status.Readiness.State), Paused: status.Settings.Paused,
-		MonitoringApproved: !status.Settings.AutomationApprovedAt.IsZero(), MonitoringActive: true,
+		MonitoringApproved: !status.Settings.AutomationApprovedAt.IsZero(), MonitoringActive: prepared.MonitoringApplied,
 		PrivacyMode: string(status.Settings.ContentMode), RootGenerationID: status.Settings.RootID,
 		DirectoryReference: status.Settings.DirectoryReferenceID,
 	}
-	if a.wizard != nil {
-		if _, err := a.wizard.Status(ctx, request.WorkspaceID); err != nil {
-			result.MonitoringRetryBound = rollback()
-			result.MonitoringApplied = false
-			return result, err
-		}
-	}
-	result.ScanAttempted = true
-	receipt, err := a.janitor.ScanNowOperation(request.WorkspaceID, filejanitor.ScanSourceAssistantSetup, filejanitor.ScanOperationRequest{
-		OperationID: request.ScanOperation, RootID: request.Review.RootGenerationID,
-		PrivacyMode: filejanitor.ContentModeMetadataOnly,
-	})
-	if err != nil {
-		result.MonitoringRetryBound = rollback()
-		result.MonitoringApplied = false
-		return result, mapAssistantSetupJanitorError(err)
-	}
-	a.automation.MarkCaughtUp(request.WorkspaceID, workspace.LocalDateKey(status.Settings.Timezone, receipt.CompletedAt))
 	result.ScanOutcome = receipt.Outcome
 	result.BatchID = receipt.BatchID
 	result.EligibleCount = receipt.EligibleCount

@@ -173,10 +173,9 @@ func (w *Watcher) Watch(sessionID, path string) error {
 	w.sessions[sessionID] = path
 	w.pathRefs[path]++
 
-	logger.Info("Started watching filesystem path", logger.Fields{
-		"watch_id": sessionID,
-		"path":     path,
-	})
+	// A watch's opaque identity is enough for lifecycle diagnostics. Selected
+	// folders may be private, including when File Janitor enables monitoring.
+	logger.Info("Started filesystem watch", logger.Fields{"watch_id": sessionID})
 
 	return nil
 }
@@ -200,15 +199,12 @@ func (w *Watcher) Unwatch(sessionID string) error {
 			// "non-existent watch" here is expected and harmless — the watch is
 			// already gone, which is the desired end state. Surface other errors.
 			if errors.Is(err, fsnotify.ErrNonExistentWatch) {
-				logger.Debug("Watch already removed before Unwatch", logger.Fields{
-					"session_id": sessionID,
-					"path":       path,
-				})
+				logger.Debug("Watch already removed before Unwatch", logger.Fields{"watch_id": sessionID})
 			} else {
+				// fsnotify's raw error may also embed the selected folder path.
 				logger.Warn("Failed to remove watcher", logger.Fields{
-					"session_id": sessionID,
-					"path":       path,
-					"error":      err,
+					"watch_id": sessionID,
+					"reason":   "os_watch_remove_failed",
 				})
 			}
 		}
@@ -216,10 +212,7 @@ func (w *Watcher) Unwatch(sessionID string) error {
 		w.pathRefs[path] = remaining
 	}
 
-	logger.Info("Stopped watching filesystem path", logger.Fields{
-		"watch_id": sessionID,
-		"path":     path,
-	})
+	logger.Info("Stopped filesystem watch", logger.Fields{"watch_id": sessionID})
 
 	return nil
 }

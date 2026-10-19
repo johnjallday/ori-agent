@@ -50,6 +50,10 @@ type AssistantSetupCreationDescriptor struct {
 	WorkspaceID         string
 	ProfileProvenanceID string
 	ConfigDigest        string
+	// Exact edited build plans may create more than one profile. A per-name
+	// digest keeps every marker bound to that profile's effective configuration.
+	ProfileConfigDigests   map[string]string
+	AssignedProfileDigests map[string]string
 }
 
 type ReviewedTemplateCreationRequest struct {
@@ -388,10 +392,17 @@ func assistantSetupAgentProvenance(ctx context.Context, name string) *agent.Assi
 	if !ok {
 		return nil
 	}
-	_ = name // The marker is bound by the reviewed config digest, not a display name.
+	configDigest := descriptor.ConfigDigest
+	if descriptor.ProfileConfigDigests != nil {
+		var found bool
+		configDigest, found = descriptor.ProfileConfigDigests[name]
+		if !found {
+			return nil
+		}
+	}
 	return &agent.AssistantSetupProvenance{
 		ID: descriptor.ProfileProvenanceID, RunID: descriptor.RunID,
 		OperationID: descriptor.OperationID, ReviewDigest: descriptor.ReviewDigest,
-		ConfigDigest: descriptor.ConfigDigest,
+		ConfigDigest: configDigest,
 	}
 }

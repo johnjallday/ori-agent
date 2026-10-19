@@ -352,6 +352,7 @@ func TestSettings_StoredRecordCarriesNoFileContent(t *testing.T) {
 		"timezone": true, "content_mode": true, "content_provider": true,
 		"content_consent_provider": true, "content_consent_at": true, "paused": true,
 		"setup_completed_at": true, "automation_approved_at": true, "updated_at": true,
+		"setup_decision": true, "access_revoked_at": true,
 	}
 	for key := range raw {
 		if !allowed[key] {

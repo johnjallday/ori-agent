@@ -577,8 +577,14 @@ test('confirming a step posts it and advances only when the server agrees', asyn
   api.open();
 
   assert.equal(elements.setupWizardStepTitle.textContent, 'Choose the folder to tidy');
+  elements.setupWizardTitle.focused = false;
   await click(elements.setupWizardPrimary);
 
+  assert.equal(
+    elements.setupWizardTitle.focused,
+    true,
+    'async confirmation restores focus after replacing the step'
+  );
   assert.ok(calls.some(call => call.key === 'POST /steps/folder/confirm'));
   assert.equal(elements.setupWizardStepTitle.textContent, 'Summary');
 });
@@ -597,10 +603,33 @@ test('a step the server did not confirm keeps the wizard where it is', async () 
   });
   await api.init();
   api.open();
+  elements.setupWizardTitle.focused = false;
   await click(elements.setupWizardPrimary);
 
+  assert.equal(
+    elements.setupWizardTitle.focused,
+    true,
+    're-rendering an unresolved step also restores focus'
+  );
   assert.equal(elements.setupWizardStepTitle.textContent, 'Choose the folder to tidy');
   assert.equal(elements.setupWizardPrimary.textContent, 'Try again');
+});
+
+test('a confirmation on a closed dialog does not steal focus', async () => {
+  const { api, elements } = load({
+    status: status({ state: 'in_progress' }),
+    routes: {
+      'POST /steps/folder/confirm': status({
+        state: 'in_progress',
+        current_step_id: 'summary',
+        steps: [step({ status: 'complete' }), step({ id: 'summary', kind: 'summary' })]
+      })
+    }
+  });
+  await api.init();
+  await click(elements.setupWizardPrimary);
+  assert.equal(elements.setupWizardDialog.open, false);
+  assert.notEqual(elements.setupWizardTitle.focused, true);
 });
 
 test('an expected failure is explained in plain language with a stable category', async () => {
@@ -794,6 +823,24 @@ test('a step whose own control is the action does not offer a Continue that must
   });
   api.open();
   assert.equal(elements.setupWizardPrimary.disabled, false);
+});
+
+test('late domain review refreshes the current step and its primary label together', async () => {
+  const { api, elements } = load({ status: status({ state: 'in_progress' }) });
+  await api.init();
+  let reviewed = false;
+  const renderer = {
+    render() {},
+    primaryLabel: () =>
+      reviewed ? 'Confirm the folder review above' : 'Choose a folder to continue',
+    disablePrimary: () => true
+  };
+  api.registerStepRenderer('directory', renderer);
+  api.open();
+  reviewed = true;
+  api.registerStepRenderer('directory', renderer);
+  assert.equal(elements.setupWizardPrimary.textContent, 'Confirm the folder review above');
+  assert.equal(elements.setupWizardPrimary.disabled, true);
 });
 
 test('a step that offers a choice renders it, and choosing is the action', async () => {

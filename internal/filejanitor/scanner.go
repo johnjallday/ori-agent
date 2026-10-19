@@ -97,8 +97,12 @@ func (s *Scanner) ResolveRoot(settings JanitorSettings) (string, error) {
 	if reference == nil {
 		return "", fmt.Errorf("%w: this workspace is no longer linked to the folder", ErrRootUnavailable)
 	}
-	resolved := filepath.Clean(strings.TrimSpace(reference.Path))
-	if resolved != filepath.Clean(configured) {
+	resolved := filepath.Clean(configured)
+	// Adopted references keep their original spelling (including stable OS
+	// aliases such as /var -> /private/var). Resolve that spelling, but accept
+	// only the exact canonical root already approved in settings.
+	linked, linkedErr := filepath.EvalSymlinks(filepath.Clean(strings.TrimSpace(reference.Path)))
+	if linkedErr != nil || filepath.Clean(linked) != resolved {
 		// The approved folder and the linked folder disagree. Acting on either
 		// would be acting on something the user did not confirm.
 		return "", fmt.Errorf("%w: the linked folder no longer matches the folder you approved", ErrRootUnavailable)

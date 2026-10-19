@@ -99,6 +99,10 @@ class FakeElement {
   get isConnected() {
     return this._connected !== false;
   }
+  querySelector(selector) {
+    if (selector === 'button') return this.all(node => node.tagName === 'BUTTON')[0] || null;
+    return null;
+  }
   // Depth-first collection helpers used by the assertions below.
   all(predicate, out = []) {
     if (predicate(this)) out.push(this);
@@ -226,6 +230,146 @@ function cardText(doc) {
   return doc.getElementById('fileJanitorMount').textContent;
 }
 
+function attachedReview(overrides = {}) {
+  return {
+    state: 'review',
+    workspace_id: 'ws-1',
+    reference_id: 'attached-1',
+    review_revision: 'a'.repeat(64),
+    monitoring: false,
+    candidates: [
+      { reference_id: 'attached-1', name: 'Synthetic Inbox', path: '/tmp/Synthetic Inbox' }
+    ],
+    terms: {
+      watch_events: ['create', 'rename'],
+      debounce_seconds: 300,
+      daily_scan_local_time: '09:00',
+      timezone: 'Asia/Tokyo'
+    },
+    ...overrides
+  };
+}
+
+test('attached folder review is default-off and discloses its actual filesystem change', () => {
+  const doc = setup();
+  panel._setSetupReview(attachedReview());
+  const host = doc.createElement('div');
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new Error('a pure render must not call an endpoint');
+  };
+  assert.equal(panel._renderSetupReview(host), true);
+  assert.match(host.textContent, /Use attached Synthetic Inbox/);
+  assert.match(host.textContent, /Create or reuse Filed/);
+  assert.match(host.textContent, /No file contents are opened/);
+  assert.match(host.textContent, /separate approval/);
+  assert.match(host.textContent, /No watcher or daily scan/);
+  assert.equal(host.all(node => node.tagName === 'INPUT')[0].checked, false);
+  assert.equal(calls, 0);
+});
+
+test('a malformed success response cannot invent a prepared result', async () => {
+  const doc = setup();
+  panel._setSetupReview(attachedReview());
+  const host = doc.createElement('div');
+  globalThis.fetch = async url => ({
+    ok: true,
+    json: async () =>
+      String(url).endsWith('/prepare-review')
+        ? { preparation: { workspace_id: 'ws-1' } }
+        : { review: { state: 'repair_required', workspace_id: 'ws-1' } }
+  });
+  panel._renderSetupReview(host);
+  host
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .click();
+  await settle();
+  assert.match(host.textContent, /initial result could not be confirmed/);
+  assert.doesNotMatch(host.textContent, /Your first review is ready/);
+});
+
+test('ambiguous attached folders require a choice before confirmation', () => {
+  const doc = setup();
+  panel._setSetupReview(
+    attachedReview({
+      state: 'choose_folder',
+      reference_id: '',
+      review_revision: '',
+      candidates: [
+        ...attachedReview().candidates,
+        { reference_id: 'attached-2', name: 'Synthetic Inbox', path: '/tmp/Other Inbox' }
+      ]
+    })
+  );
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  assert.equal(host.all(node => node.tagName === 'SELECT')[0].value, '');
+  assert.equal(
+    host.all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+      .disabled,
+    true
+  );
+});
+
+test('changed preparation exposes Stop but cannot retry or silently re-enable permissions', () => {
+  const doc = setup();
+  panel._setSetupReview(
+    attachedReview({ state: 'preparation_changed', operation_id: 'accepted-op' })
+  );
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  assert.match(host.textContent, /old confirmation cannot continue/);
+  const buttons = host.all(node => node.tagName === 'BUTTON');
+  assert.equal(buttons.find(node => node.textContent === 'Retry preparation').disabled, true);
+  assert.equal(
+    buttons.find(node => node.textContent === 'Stop here — keep saved setup').disabled,
+    false
+  );
+});
+
+test('incomplete preparation offers an explicit stop without promising to undo saved effects', () => {
+  const doc = setup();
+  panel._setSetupReview(
+    attachedReview({ state: 'preparation_incomplete', operation_id: 'accepted-operation' })
+  );
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  const buttons = host.all(node => node.tagName === 'BUTTON');
+  assert.ok(buttons.some(button => button.textContent === 'Retry preparation'));
+  assert.ok(buttons.some(button => button.textContent === 'Stop here — keep saved setup'));
+  assert.match(host.textContent, /saved access, Filed\/ and any existing result are kept/);
+  assert.match(host.textContent, /nothing already done is undone/);
+  assert.equal(host.all(node => node.tagName === 'INPUT')[0].disabled, true);
+});
+
+test('monitoring review states the server schedule and delay instead of inventing defaults', () => {
+  const doc = setup();
+  panel._setSetupReview(attachedReview({ monitoring: true }));
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  assert.match(host.textContent, /300-second delay/);
+  assert.match(host.textContent, /09:00 \(Asia\/Tokyo\)/);
+  assert.match(host.textContent, /skip Filed/);
+  assert.match(host.textContent, /Nothing moves automatically/);
+});
+
+test('explicit manual-ready is not presented as user-paused or watching', () => {
+  const doc = setup();
+  const status = statusFixture();
+  status.settings = {
+    ...status.settings,
+    root_id: 'root-1',
+    paused: true,
+    setup_decision: { mode: 'manual', root_id: 'root-1', decided_at: '2026-10-19T00:00:00Z' }
+  };
+  openConsole(status);
+  assert.equal(panel.stationState().value, 'Ready');
+  assert.equal(panel.stationState().description, 'Manual scans only');
+  assert.match(text(doc), /Ready · Manual scans/);
+  assert.doesNotMatch(text(doc), /Paused by you/);
+});
+
 test('a workspace without the capability renders nothing and opens no console', () => {
   const doc = setup();
   openConsole({ applies: false });
@@ -351,6 +495,7 @@ test('the folder input is labelled and described for screen readers', () => {
 test('confirming with an empty folder reports an error and calls no endpoint', async () => {
   const doc = setup();
   openConsole(setupRequiredStatus);
+  await settle(); // Drain open's read-only status/folder-review refresh first.
   let called = false;
   globalThis.fetch = async () => {
     called = true;
@@ -2751,6 +2896,17 @@ test('the console is a labelled modal dialog', () => {
   // drift away from what is on screen.
   const labelledBy = dialog.getAttribute('aria-labelledby');
   assert.equal(doc.getElementById(labelledBy).textContent, 'File Janitor');
+});
+
+test('a late status repaint after closing preserves focus on the live compact opener', () => {
+  const doc = setup();
+  panel.render(statusFixture());
+  const opener = doc.getElementById('fileJanitorCardOpen');
+  opener.focus();
+  panel.render(statusFixture());
+  const replacement = doc.getElementById('fileJanitorCardOpen');
+  assert.notEqual(replacement, opener);
+  assert.equal(doc.activeElement, replacement);
 });
 
 test('closing returns focus to the control that opened it', () => {

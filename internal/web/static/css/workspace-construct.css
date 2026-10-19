@@ -2319,6 +2319,58 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   }
 }
 
+/* Reviewed File Janitor creation uses the existing creator's restrained,
+   ledger-like typography. The conversation yields to one permission surface. */
+.workspace-build-review[hidden] {
+  display: none;
+}
+.workspace-build-review {
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 1rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  border-top: 2px solid var(--wc-faction);
+  background: var(--wc-panel);
+  color: var(--wc-ink);
+  font-size: 0.875rem;
+}
+.workspace-create-modal--review .workspace-build-review {
+  flex: 1 1 auto;
+}
+.workspace-create-modal.workspace-create-modal--review .workspace-build-pane {
+  display: none;
+}
+.workspace-build-review__title {
+  margin: 0 0 0.5rem;
+  font-family: var(--wc-font-display);
+  color: var(--wc-ink-heading);
+  font-size: 1.2rem;
+}
+.workspace-build-review__actions,
+.workspace-build-review__monitor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+.workspace-build-review__monitor {
+  flex-wrap: nowrap;
+  align-items: baseline;
+}
+.workspace-build-review__actions .modern-btn {
+  white-space: normal;
+}
+.workspace-build-review__details p {
+  font-family: var(--wc-font-mono);
+  font-size: 0.75rem;
+}
+.workspace-build-review :is(button, input, summary, a):focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 3px;
+}
+
 /* ---------- build with your assistant ---------- */
 /* One active surface, in DOM order. The shared form remains mounted but hidden
    during conversation; no duplicated Team or Review editor. */

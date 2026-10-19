@@ -25,7 +25,7 @@ import (
 // SettingsSchemaVersion is the on-disk revision of a workspace's Janitor
 // settings. Persisted state that predates a field loads with that field's zero
 // value and is treated as unconfigured rather than as an error.
-const SettingsSchemaVersion = 2
+const SettingsSchemaVersion = 3
 
 const (
 	ScanOutcomeBatch      = "batch"
@@ -193,6 +193,14 @@ type JanitorSettings struct {
 	// pausing is an operational choice about something already approved, and it
 	// must never read as unfinished setup.
 	AutomationApprovedAt time.Time `json:"automation_approved_at,omitempty"`
+	// SetupDecision records an explicit manual/monitoring choice for this root.
+	// Missing legacy data is not a manual-only decision.
+	SetupDecision *SetupDecision `json:"setup_decision,omitempty"`
+	// SetupPreparation is accepted operation authority, never a readiness flag.
+	SetupPreparation *SetupPreparation `json:"setup_preparation,omitempty"`
+	// AccessRevokedAt survives clearing settings because an adopted folder link
+	// can survive revocation too. That link must not revive old setup authority.
+	AccessRevokedAt time.Time `json:"access_revoked_at,omitempty"`
 	// SetupCompletedAt is when the user confirmed a folder. Zero means setup has
 	// not completed, which is what makes SetupRequired the default state.
 	SetupCompletedAt time.Time `json:"setup_completed_at,omitempty"`
@@ -225,7 +233,7 @@ func NewSettings(workspaceID string) JanitorSettings {
 func (s JanitorSettings) IsSetUp() bool {
 	return strings.TrimSpace(s.RootPath) != "" &&
 		strings.TrimSpace(s.DirectoryReferenceID) != "" &&
-		!s.SetupCompletedAt.IsZero()
+		!s.SetupCompletedAt.IsZero() && s.AccessRevokedAt.IsZero()
 }
 
 // FilingRootPath returns <root>/Filed. It returns "" before setup, so callers
@@ -263,6 +271,13 @@ func (s JanitorSettings) RequiresContentConsent() bool {
 // name becomes "Filed").
 func (s JanitorSettings) Normalize() JanitorSettings {
 	out := s
+	// New consent is meaningful only in the schema that defines it. Loading
+	// an older or future record must not manufacture a manual-ready decision
+	// or accepted continuation from fields this version cannot interpret.
+	if s.SchemaVersion != SettingsSchemaVersion {
+		out.SetupDecision = nil
+		out.SetupPreparation = nil
+	}
 	out.SchemaVersion = SettingsSchemaVersion
 	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)
 	out.DirectoryReferenceID = strings.TrimSpace(out.DirectoryReferenceID)
@@ -332,6 +347,28 @@ func (s JanitorSettings) Normalize() JanitorSettings {
 	if out.RootPath == "" || out.DirectoryReferenceID == "" {
 		out.SetupCompletedAt = time.Time{}
 	}
+	if out.SetupPreparation != nil {
+		preparation := *out.SetupPreparation
+		preparation.Terms.WatchEvents = append([]string(nil), preparation.Terms.WatchEvents...)
+		if !preparation.valid() || !out.AccessRevokedAt.IsZero() {
+			out.SetupPreparation = nil
+		} else {
+			out.SetupPreparation = &preparation
+		}
+	}
+	if out.SetupDecision != nil {
+		decision := *out.SetupDecision
+		if !decision.validFor(out) {
+			out.SetupDecision = nil
+		} else {
+			out.SetupDecision = &decision
+			// An explicit manual decision is also an automation fence. A malformed
+			// paused flag must not turn that choice into unattended scanning.
+			if out.ManualScansOnly() {
+				out.Paused = true
+			}
+		}
+	}
 	return out
 }
 
@@ -356,6 +393,15 @@ func (s JanitorSettings) Validate() error {
 	}
 	if !slices.Contains(ValidContentModes, NormalizeContentMode(s.ContentMode)) || string(s.ContentMode) != string(NormalizeContentMode(s.ContentMode)) {
 		return fmt.Errorf("%w: unknown content mode %q", ErrInvalidSettings, s.ContentMode)
+	}
+	if s.SetupPreparation != nil && (!s.SetupPreparation.valid() || !s.AccessRevokedAt.IsZero()) {
+		return fmt.Errorf("%w: setup preparation is incomplete or revoked", ErrInvalidSettings)
+	}
+	if s.SetupDecision != nil && !s.SetupDecision.validFor(s) {
+		return fmt.Errorf("%w: setup decision does not match the configured root", ErrInvalidSettings)
+	}
+	if s.ManualScansOnly() && !s.Paused {
+		return fmt.Errorf("%w: manual-only setup cannot enable unattended scanning", ErrInvalidSettings)
 	}
 	if s.RootPath != "" && !filepath.IsAbs(s.RootPath) {
 		return fmt.Errorf("%w: root path %q must be absolute", ErrInvalidSettings, s.RootPath)

@@ -1639,7 +1639,7 @@ An unreviewed `DELETE` returns `409` with code `group_requirement_review_require
 
 ## Workspace Build Sessions API
 
-"Build with your assistant" (`tasks/prd-build-with-your-assistant.md`, architecture in `docs/architecture/workspace-build-sessions.md`): the Personal Assistant fills the Create Workspace wizard through a conversation in a pane beside it. A build session is a server-held draft that **is** the create request. The model proposes; the host validates every field; the wizard renders it through its own setters; the user confirms with the ordinary Create (`POST /api/workspaces` with `build_session_id`). Nothing here creates a workspace.
+"Build with your assistant" (`tasks/prd-build-with-your-assistant.md`, architecture in `docs/architecture/workspace-build-sessions.md`): the Personal Assistant fills the Create Workspace wizard through a conversation in a pane beside it. A build session is a server-held draft that **is** the create request. The model proposes; the host validates every field; the wizard renders it through its own setters; the user confirms with ordinary Create (`POST /api/workspaces` with `build_session_id`). An attached File Janitor draft may instead use the separately reviewed creation endpoints below; ordinary draft/turn/folder endpoints create nothing.
 
 Bodies are capped at 256 KiB and must be one JSON object with only the fields named below (`400` otherwise). Errors carry a stable `code`:
 
@@ -1823,9 +1823,82 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 
 ### Create from a Build
 
-`POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or closed `build_session_id` never blocks the create.
+`POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or ordinary closed `build_session_id` does not block ordinary create. A retained accepted File Janitor preparation claim does: use its exact confirmation/recovery endpoint; ordinary create cannot bypass it.
 
 When the named build has an attached folder, Create links that folder to the new workspace in place — as a linked directory reference, and as its primary directory unless the create already set one outside the workspace folder — and the summary gains a `folder` decision. The folder is resolved through the server's own hold on the pick (the same 30-minute window the assistant's composer has) before anything is created: a pick the server no longer holds is `409` with `conflict.type: "build_folder"` and an `error` to show, and nothing is created. Nothing is copied, moved, or read in the linked folder.
+
+### Reviewed File Janitor Creation
+
+For built-in `file-janitor` (and legacy `downloads-janitor`) with a live attached
+folder, review the **canonical edited BuildDraft**, not a replacement client draft:
+
+| Method / build-session suffix | Closed body | Effect |
+| --- | --- | --- |
+| `POST /{id}/janitor-review` | `{ "version": 9, "monitoring": false }` | Read-only current draft/team/folder/terms review. |
+| `POST /{id}/janitor-prepare` | `{ "version": 9, "monitoring": false, "review_revision": "<opaque revision>" }` | Explicit Create & prepare review confirmation. |
+| `POST /{id}/janitor-defer` | Same accepted version/mode/revision | Settle the accepted claim without making it retryable as a new create. |
+
+Prefix: `/api/workspaces/build-sessions`. These use the build API's body bound
+and reject unknown fields/trailing JSON. No body accepts a path, replacement
+team/draft, operation ID, or reserved workspace ID. Review is `no-store`, owner
+scoped, and returns actual edited identity/team, owner-only folder details,
+metadata/`Filed/` disclosures, default-off monitoring terms and an opaque revision.
+`ready`/model `create_now` cannot grant these permissions; they lead to this review.
+
+Confirmation freezes the accepted build, reserves stable workspace/operation IDs,
+then enters the normal creator's gates. The exact held folder must still resolve
+within its 30-minute selection window **before writes**. Later retries use canonical
+operation markers, never names or an expired observation. Preparation creates/reuses
+`Filed/`, saves the selected manual/monitoring choice and one metadata-only initial
+result; moves/Trash and file-content access remain separately gated.
+
+Success includes `workspace_id`, proven canonical `folder_slug`, and `preparation`
+with operation identity/stage, canonical status and `result` receipt. A result has
+`operation_id`, `root_id`, `privacy_mode: "metadata_only"`, `outcome` (`batch` or
+`no_eligible`), counts, `completed_at`, and `batch_id` only for a real batch.
+No-eligible/settling outcomes are successful, not fabricated empty batches.
+
+Post-create errors preserve the workspace and saved progress; `details` carries
+its identity/stage and, where proven, canonical folder slug. `monitoring_incomplete`,
+`initial_scan_incomplete`, `result_observation_incomplete` and domain codes identify
+repair. Missing/changed/pruned result evidence is `initial_receipt_unavailable`,
+not permission to rescan from old consent. Open existing Review and explicitly
+choose Scan now for a fresh attempt. A malformed/lost reply is recovered from the
+accepted claim; it never initiates another creation. An unconfirmed reservation
+is not a page route and has no Open workspace link.
+
+Defer retains the claim, joins/stops only its matching preparation where provable,
+pauses that monitoring, and keeps workspace/access/adopted references/`Filed/`/results.
+Later unrelated choices are preserved. A separate new build is allowed; old
+review/prepare calls return `409 preparation_deferred`. No native-selection success
+is implied by these API contracts.
+
+## File Janitor Folder Review API
+
+Prefix: `/api/workspaces/{id}/file-janitor`; retained `downloads-janitor` is an alias.
+All routes are owner scoped and `no-store`. POST bodies are closed single JSON
+objects bounded to 4 KiB. Foreign workspaces return `404`.
+
+| Method / suffix | Body | Effect |
+| --- | --- | --- |
+| `GET /setup-review` | None | Read-only candidates/current setup; monitoring defaults off. |
+| `POST /setup-review` | `{ "reference_id": "<linked reference>", "monitoring": false }` | Read-only explicit candidate/mode selection. |
+| `POST /prepare-review` | Same plus `"review_revision": "<opaque revision>"` | Explicit Use attached confirmation; grant/mode/one metadata result. |
+| `POST /stop-preparation` | `{ "operation_id": "<accepted operation>" }` | Join/stop this operation; preserve saved effects, pause monitoring. |
+
+`review.state` distinguishes `review`, `no_candidate`, `choose_folder`,
+`configured`, `revoked`, `repair_required`, `folder_unavailable`, `folder_conflict`,
+`preparation_incomplete`, `preparation_changed`, `result_unavailable` and `prepared`.
+Candidates carry reference identity/name and owner-only path details. A primary
+flag, default Downloads path, scaffold or workspace name is never substituted.
+Changing bindings/ownership/privacy/schedule/root invalidates old continuation;
+changed preparation offers Stop, not silent permission repair. A prepared review
+contains its exact operation/result. These calls never create a workspace/agent
+or delegate setup/scanning to an agent. Manual readiness requires explicit saved
+manual consent, not just `paused:true` or missing approval data.
+
+See [reviewed creation architecture](../architecture/file-janitor-creation-flow.md)
+for persistence versions, dispatch/receipt refusal fences and lifecycle semantics.
 
 ## Personal Assistant Folder Digest API
 

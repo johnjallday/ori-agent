@@ -665,7 +665,7 @@ test.describe('File Janitor capability', () => {
 
     const card = page.locator('#fileJanitorMount');
     await expect(card).toBeVisible({ timeout: 15000 });
-    await expect(card).toContainText('No folder chosen yet');
+    await expect(card).toContainText('Folder access was revoked');
     await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up File Janitor');
   });
 

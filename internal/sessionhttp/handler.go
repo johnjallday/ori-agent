@@ -143,6 +143,9 @@ type Handler struct {
 	// workspaceBuild wires "Build with your assistant" sessions; nil leaves
 	// the Create Workspace wizard manual everywhere.
 	workspaceBuild *WorkspaceBuildDeps
+	// Serializes reviewed creation with ordinary creates naming the same build.
+	// Durable claims remain the cross-restart identity; this is only admission.
+	buildPreparationMu sync.Mutex
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem

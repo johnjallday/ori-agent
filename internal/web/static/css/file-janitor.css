@@ -1681,3 +1681,72 @@
     border-top: 1px solid var(--border-color, #2f2f2f);
   }
 }
+
+/* Reviewed setup stays inside the existing console/wizard, with the folder
+   identity prominent and long owner-only paths available on demand. */
+.fj-setup-review {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color, #777);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.fj-setup-review .fj-input {
+  width: 100%;
+  max-width: 100%;
+}
+
+.fj-setup-review [role="status"]:empty {
+  display: none;
+}
+
+.fj-setup-folder {
+  margin: 0.5rem 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fj-setup-path,
+.fj-setup-review .fj-sub {
+  overflow-wrap: anywhere;
+}
+
+.fj-setup-details summary {
+  width: fit-content;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.fj-setup-monitor {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 1rem 0 0.5rem;
+  cursor: pointer;
+}
+
+.fj-setup-monitor input {
+  flex: none;
+  accent-color: var(--accent-color, #648e75);
+}
+
+.fj-setup-review :is(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--accent-color, #648e75);
+  outline-offset: 3px;
+}
+
+.fj-setup-review .fj-actions {
+  flex-wrap: wrap;
+}
+
+.fj-setup-review .fj-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -553,6 +553,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if req.BuildSessionID != "" && buildPreparationContextFrom(r.Context()) == nil {
+		h.buildPreparationMu.Lock()
+		defer h.buildPreparationMu.Unlock()
+		if err := h.refuseClaimedBuildCreate(r.Context(), req.BuildSessionID); err != nil {
+			respondBuildPreparationError(w, "creation_already_accepted", "This build has an accepted creation. Resume that preparation instead of creating again.", http.StatusConflict, nil)
+			return
+		}
+	}
 	if envelopeErr := validateWorkspaceTeamIntentEnvelope(&req); envelopeErr != nil {
 		respondWorkspaceTeamReadinessError(w, envelopeErr)
 		return
@@ -663,6 +671,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			respondBlueprintReadinessConflict(w, resolvedTemplate, readiness)
 			return
 		}
+	}
+
+	if buildPreparationContextFrom(r.Context()) != nil && (!templateResolved || !resolvedTemplate.Builtin ||
+		!isReviewedJanitorBlueprint(resolvedTemplate.ID) || resolvedTemplate.GroupRequirement != nil) {
+		respondBuildPreparationError(w, "blueprint_changed", "This blueprint no longer supports reviewed File Janitor creation.", http.StatusConflict, nil)
+		return
 	}
 
 	// An attached project is validated here, before any Home claim, agent,
@@ -814,6 +828,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if preparation := buildPreparationContextFrom(r.Context()); preparation != nil {
+		descriptor, proceed := h.preflightBuildPreparation(w, r, req, resolvedTemplate, buildFolderPlan, preparation)
+		if !proceed {
+			return
+		}
+		r = r.WithContext(withAssistantSetupCreation(r.Context(), descriptor))
+	}
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 	if assistantSetup, ok := assistantSetupCreationFromContext(r.Context()); ok {
 		// This server-only descriptor preallocates identity before any profile or
@@ -833,6 +854,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	seed, ok := h.selectCreateWorkspaceEntryAgent(r.Context(), w, ws, req, kind, resolvedTemplate, templateResolved, strictTemplate, strictFreshTemplate)
 	if !ok {
+		return
+	}
+	if err := h.validateBuildPreparationSavedProfiles(r.Context()); err != nil {
+		h.rollbackSeededAgents(seed)
+		respondBuildPreparationError(w, "team_changed", "A reviewed saved teammate changed before creation. No workspace was created; keep this accepted build for reconciliation.", http.StatusConflict, nil)
 		return
 	}
 	if options, pafCreation := personalAssistantCreationOptions(r.Context()); pafCreation {
@@ -938,6 +964,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if descriptor, ok := assistantSetupCreationFromContext(r.Context()); ok {
 		assistantSetupCreation = &agentworkspace.AssistantSetupCreation{
 			RunID: descriptor.RunID, OperationID: descriptor.OperationID, ReviewDigest: descriptor.ReviewDigest,
+		}
+		if buildPreparationContextFrom(r.Context()) != nil && buildFolderPlan != nil {
+			assistantSetupCreation.FolderReferenceID = buildFolderPlan.referenceID
 		}
 	}
 	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, assistantSetupCreation, groupSnapshot); capabilityWarning != "" {
@@ -1688,6 +1717,24 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 			if _, err := w.AddInstalledCapability(record); err != nil {
 				return err
 			}
+		}
+		if prov.AssistantSetup != nil && prov.AssistantSetup.FolderReferenceID != "" {
+			install, found := w.GetInstalledCapability(agentworkspace.CapabilityFileJanitor)
+			if !found {
+				return errors.New("reviewed creation capability is unavailable")
+			}
+			install.OwnedResources = nil
+			digest, err := digestJSON(install)
+			if err != nil {
+				return err
+			}
+			prov.AssistantSetup.CapabilityRevision = digest
+			teamRevision, err := h.preparedWorkspaceTeamDigest(w)
+			if err != nil {
+				return err
+			}
+			prov.AssistantSetup.TeamRevision = teamRevision
+			w.SetTemplateProvenance(prov)
 		}
 		return nil
 	}); err != nil {
