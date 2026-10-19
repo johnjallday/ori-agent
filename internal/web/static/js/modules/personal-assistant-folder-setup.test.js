@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   setupCandidates,
+  reviewLinkHidden,
   choiceIsCurrent,
   currentReview,
   currentSuggestion,
@@ -593,4 +594,18 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
   assert.equal(structureCounts(mixed), '5 project folders and 1 other folder');
   mixed.members = mixed.members.slice(0, 1);
   assert.equal(structureCounts(mixed), '1 Repository folder');
+});
+
+test('Review setup stays away for a collection, whose card is the way in', () => {
+  const observed = {
+    projects: [
+      { id: 'root', name: 'Albums', root: true },
+      { id: 'c1', name: 'Album-1' }
+    ]
+  };
+  // A single folder (or a collection with no proposal) keeps the link.
+  assert.equal(reviewLinkHidden(observed, null), false);
+  assert.equal(reviewLinkHidden(observed, albumsStructure()), true);
+  // Nothing to set up: no link either way.
+  assert.equal(reviewLinkHidden({ projects: [] }, null), true);
 });

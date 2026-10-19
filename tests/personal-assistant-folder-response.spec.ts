@@ -104,16 +104,18 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
     expect(observation.tree.nodes.length).toBeGreaterThan(0);
     expect(observation.tree.nodes.length).toBeLessThanOrEqual(64);
-    const coverageSummary = page.locator('#personalAssistantFolderExplorerCoverageSummary');
-    await coverageSummary.click();
-    const treeCoverage = page.locator('#personalAssistantFolderExplorerCoverage');
-    await expect(treeCoverage).toBeVisible();
-    await expect(treeCoverage).toContainText('3 directory levels, 5,000 entries, 3 seconds');
-    await expect(treeCoverage).toContainText('Expanding reads nothing.');
+    // One counts line; what is shared is the info icon's tooltip, not a paragraph.
+    await expect(page.locator('#personalAssistantFolderExplorerCounts')).toContainText(
+      'metadata only, nothing read'
+    );
+    await expect(explorer.locator('.personal-assistant-explorer__info')).toHaveAttribute(
+      'title',
+      /Contents are not read/
+    );
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-coverage.png`) });
-    await coverageSummary.click();
+    await explorer.getByRole('button', { name: 'Focus', exact: true }).click();
     const folderNode = observation.tree.nodes.find(
       (node: any) => node.kind === 'folder' && !node.parent_id
     );
@@ -126,8 +128,8 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     const fileCheck = explorer.locator(`[data-tree-focus="${fileNode.id}"]`);
     await expect(fileCheck).not.toBeChecked();
     await fileCheck.check();
-    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
-      'Next message · 2 topics'
+    await expect(page.locator('#personalAssistantFolderSelectionStatus')).toHaveText(
+      '2 topics for the next message'
     );
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
     expect((await audit()).requests).toBe(beforeAttachment);
@@ -366,9 +368,8 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(card).toHaveCount(1);
     await expect(page.locator('#personalAssistantPanel')).not.toHaveClass(/--exploring/);
     await expect(firstSentFocus).toContainText(fileNode.name);
-    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
-      'Next message · Whole folder'
-    );
+    // After reload nothing is checked for the next message: no status line.
+    await expect(page.locator('#personalAssistantFolderSelectionStatus')).toBeHidden();
     await expect(card.getByRole('heading')).toHaveText(observation.folder);
     await expect(card).toContainText('Bounded look');
     await expect(

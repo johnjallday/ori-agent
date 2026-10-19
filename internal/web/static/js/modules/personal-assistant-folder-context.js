@@ -129,7 +129,8 @@ export function createFolderContextController({
       }
       state.authority = '';
       state.preview = true;
-      notify('Local preview only — not sent to the model yet.');
+      // The preview says "Local preview · not sent" itself.
+      notify('');
       return true;
     } catch (error) {
       if (generation === state.generation && owner === currentId())
@@ -599,6 +600,10 @@ function renderStructure(state) {
     actions.append(button);
   }
   host.append(actions);
+  // A new proposal is read from its question down, also in a short drawer: the
+  // transcript scrolls to it and stops following the bottom.
+  if (typeof requestAnimationFrame === 'function')
+    requestAnimationFrame(() => window.PersonalAssistantTranscript?.revealControl?.(host, true));
 }
 
 function renderDiscussion() {
@@ -746,6 +751,11 @@ const node = (tag, text, className = '') => {
 function render(state) {
   if (!elements) return;
   elements.active.hidden = !state.observation;
+  // With a folder attached its own chip says which; Add shrinks to its icon and
+  // replaces the folder.
+  elements.add.classList.toggle('personal-assistant-panel__chip--icon', Boolean(state.observation));
+  elements.add.setAttribute('aria-label', state.observation ? 'Replace folder' : 'Add folder');
+  elements.add.title = state.observation ? 'Replace folder' : '';
   elements.name.textContent = state.observation?.folder || '';
   elements.remove.disabled = state.pending;
   elements.preview.hidden = !state.observation || !state.preview;

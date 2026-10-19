@@ -468,6 +468,19 @@ function applySuggestion(value) {
   retireSuggestion(document.querySelector('[data-folder-setup-suggestion]'));
   suggestion = currentSuggestion(current, value, reviews[value?.offer_id]) ? value : null;
   renderSuggestion();
+  syncReviewLink();
+}
+
+// reviewLinkHidden says whether the composer's Review setup link stays away:
+// for a folder with nothing to set up, and for one Ori proposed a group for,
+// which is set up from its card instead.
+export function reviewLinkHidden(observation, structure) {
+  return setupCandidates(observation).length === 0 || Boolean(structure);
+}
+
+function syncReviewLink() {
+  if (!elements || !current) return;
+  elements.open.hidden = reviewLinkHidden(current.observation, currentStructure());
 }
 
 function renderReviewStatus() {
@@ -975,7 +988,7 @@ function contextChanged(state) {
     else closeChoices(false);
   }
   const available = setupCandidates(state.observation).length > 0;
-  elements.open.hidden = !available;
+  syncReviewLink();
   elements.open.disabled = state.pending || Boolean(state.authority);
   elements.open.title = state.authority ? 'Pick the folder again for a current setup review.' : '';
   if ((!available || candidateObservation !== state.observation?.id) && !flowHasFocus()) {
@@ -1079,6 +1092,7 @@ if (typeof window !== 'undefined')
     parkSuggestion: () => {
       retireSuggestion(document.querySelector('[data-folder-setup-suggestion]'));
       suggestion = null;
+      syncReviewLink();
     },
     closeReview: async offer => {
       if (

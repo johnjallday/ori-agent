@@ -106,6 +106,14 @@ export function canSubmitAssistantWork({ available, pending, busy, text }) {
 }
 
 /**
+ * The composer's placeholder. With a folder attached it says what an empty Send
+ * asks for; an assistant that cannot take work says why instead.
+ */
+export function composerPlaceholder(view, folderPlaceholder = '') {
+  return (view?.available && String(folderPlaceholder || '')) || view?.placeholder || '';
+}
+
+/**
  * The composer text after an unsent message comes back. Text typed since the
  * failed send is never overwritten.
  */
@@ -272,12 +280,6 @@ function syncPanelViewport() {
   const inlineToolbar =
     window.innerWidth / scale >= 600 && (window.innerHeight - (bottom || 0)) / scale <= 520;
   panel?.classList.toggle('personal-assistant-panel--inline-toolbar', inlineToolbar);
-  const clear = document.getElementById('personalAssistantFolderFocusClear');
-  const clearMount =
-    inlineToolbar && panel?.classList.contains('personal-assistant-panel--exploring')
-      ? state.els.chips
-      : document.getElementById('personalAssistantFolderFocus');
-  if (clear && clearMount && clear.parentElement !== clearMount) clearMount.append(clear);
   if (Number.isFinite(bottom)) {
     state.els.root.style.setProperty(
       '--ori-navbar-bottom',
@@ -299,8 +301,7 @@ function renderIdentity() {
   els.launcher.hidden = !view.visible;
   els.launcherName.textContent = view.name;
   els.title.textContent = state.workActivityOnly && !view.visible ? 'Work activity' : view.name;
-  // With a folder attached the placeholder says what an empty Send asks for.
-  els.input.placeholder = (view.available && state.folderPlaceholder) || view.placeholder;
+  els.input.placeholder = composerPlaceholder(view, state.folderPlaceholder);
   els.input.disabled = !view.available;
   els.send.disabled = !view.available || state.pending;
   if (els.modelSetup)

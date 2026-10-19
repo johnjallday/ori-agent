@@ -1120,6 +1120,22 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   border-color: var(--ori-accent);
 }
 
+/* With a folder attached, Add folder is its icon only (it replaces the folder). */
+.personal-assistant-panel__chip--icon {
+  min-width: 32px;
+  justify-content: center;
+  padding: 4px 8px;
+}
+
+.personal-assistant-panel__chip--icon > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .personal-assistant-panel__chip:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -1888,6 +1904,23 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   gap: 6px;
   margin-top: 8px;
 }
+/* An earlier No thanks stands where Set up would; it wraps rather than clips. */
+.personal-assistant-structure__declined {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.personal-assistant-structure__unavailable {
+  margin: 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pa-folder__hidden-show {
+  padding: 0 2px;
+  font-size: inherit;
+  vertical-align: baseline;
+}
 .personal-assistant-folder-adjust {
   display: grid;
   gap: 8px;
@@ -2204,11 +2237,10 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-explorer__toolbar[hidden],
 .personal-assistant-explorer__pane[hidden],
 .personal-assistant-explorer__tabs,
-.personal-assistant-folder-focus[hidden],
-.personal-assistant-folder-focus button[hidden],
-#personalAssistantFolderFocusClear[hidden],
-#personalAssistantFolderSelection[hidden],
-#personalAssistantFolderSelectionStatus[hidden],
+#personalAssistantFolderFocusToggle[hidden],
+#personalAssistantFolderFocusControls[hidden],
+#personalAssistantFolderSelectionLine[hidden],
+#personalAssistantFolderExplorerPartial[hidden],
 .personal-assistant-folder-tree__children[hidden],
 #personalAssistantExploreAttachedFolder[hidden] {
   display: none;
@@ -2263,7 +2295,6 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   white-space: nowrap;
 }
 
-.personal-assistant-explorer__eyebrow,
 .personal-assistant-explorer__hint {
   margin: 0 0 10px;
   color: var(--pa-ink-dim);
@@ -2276,16 +2307,87 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   display: none;
 }
 
-.personal-assistant-explorer__coverage {
-  margin-bottom: 10px;
+/* The pane's one line: what was recorded; the privacy text is its tooltip. */
+.personal-assistant-explorer__counts {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 8px;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-explorer__info {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--pa-accent-text);
+  cursor: help;
+}
+
+.personal-assistant-explorer__info:focus-visible,
+#personalAssistantFolderFocusToggle:focus-visible {
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: 2px;
+}
+
+.personal-assistant-explorer__partial {
+  margin: 0 0 8px;
   color: var(--pa-accent-text);
   font-size: 12px;
 }
 
-.personal-assistant-explorer__coverage summary {
-  min-height: 44px;
-  padding: 10px 0;
-  cursor: pointer;
+#personalAssistantFolderFocusToggle {
+  flex: none;
+}
+
+#personalAssistantFolderFocusToggle[aria-pressed="true"] {
+  border-color: var(--pa-accent-text);
+  background: color-mix(in srgb, var(--hc-signal) 14%, var(--ori-paper));
+  color: var(--ori-ink);
+}
+
+.personal-assistant-explorer__focus {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+}
+
+.personal-assistant-explorer__selection {
+  margin: 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+}
+
+.personal-assistant-explorer__selection .btn-link {
+  min-height: 32px;
+  padding: 0 2px;
+  font-size: 12px;
+  vertical-align: baseline;
+}
+
+/* Focus is opt-in: without it the tree is a plain outline to browse. */
+.personal-assistant-explorer__pane:not(.personal-assistant-explorer__pane--focus)
+  .personal-assistant-folder-tree__label {
+  cursor: default;
+  pointer-events: none;
+}
+
+.personal-assistant-explorer__pane:not(.personal-assistant-explorer__pane--focus)
+  .personal-assistant-folder-tree__label
+  input {
+  display: none;
 }
 
 .personal-assistant-folder-tree__select-all {
@@ -2369,24 +2471,6 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   padding: 8px 12px;
   color: var(--pa-ink-dim);
   font-size: 12px;
-}
-
-.personal-assistant-folder-focus {
-  display: flex;
-  min-width: 0;
-  flex: none;
-  align-items: center;
-  gap: 12px;
-  color: var(--pa-ink-dim);
-  font-size: 12px;
-}
-
-.personal-assistant-folder-focus > span {
-  min-width: 0;
-  overflow: hidden;
-  flex: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .personal-assistant-folder-focus__sent {
