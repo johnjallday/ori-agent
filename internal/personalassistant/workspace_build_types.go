@@ -407,7 +407,7 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 		if err := session.Preparation.Validate(); err != nil {
 			return err
 		}
-		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildCreated {
+		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildCreated && session.Status != WorkspaceBuildAbandoned {
 			return fmt.Errorf("%w: preparation lifecycle", ErrWorkspaceBuildInvalid)
 		}
 	} else if session.Status == WorkspaceBuildPreparing {

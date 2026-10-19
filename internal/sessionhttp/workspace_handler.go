@@ -856,6 +856,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := h.validateBuildPreparationSavedProfiles(r.Context()); err != nil {
+		h.rollbackSeededAgents(seed)
+		respondBuildPreparationError(w, "team_changed", "A reviewed saved teammate changed before creation. No workspace was created; keep this accepted build for reconciliation.", http.StatusConflict, nil)
+		return
+	}
 	if options, pafCreation := personalAssistantCreationOptions(r.Context()); pafCreation {
 		markPersonalAssistantPresentation(ws, options)
 	}

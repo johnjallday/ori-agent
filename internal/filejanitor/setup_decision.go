@@ -58,7 +58,7 @@ func (s *Service) recordManualSetupDecision(workspaceID, rootID string, reviewed
 			return setupErr(CodeFolderChanged, "Monitoring has already been configured. Keep its current settings or review a change separately.", RepairRetry, nil)
 		}
 		if preparationID == "" {
-			settings.SetupPreparation = nil
+			invalidateSetupPreparation(settings)
 		}
 		settings.SetupDecision = &SetupDecision{Mode: SetupModeManual, RootID: rootID, DecidedAt: s.clock()}
 		return nil

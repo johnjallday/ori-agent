@@ -43,6 +43,7 @@ type LinkedSetupReview struct {
 	bindingRevision    string
 	settingsDigest     string
 	capabilityRevision string
+	accessRevision     string
 }
 
 type SetupReviewTerms struct {
@@ -77,11 +78,17 @@ func (s *Service) ReviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 	}
 	current, _, err := s.validateLinkedPreparation(workspaceID, *preparation)
 	if err != nil {
-		return LinkedSetupReview{State: "repair_required", WorkspaceID: workspaceID}, nil
+		return LinkedSetupReview{State: "preparation_changed", WorkspaceID: workspaceID,
+			OperationID: preparation.ID, Revision: preparation.ReviewRevision, Monitoring: preparation.Monitoring, Terms: preparation.Terms}, nil
 	}
 	current.State, current.Revision, current.OperationID = "preparation_incomplete", preparation.ReviewRevision, preparation.ID
-	receipt, found, err := s.ScanOperationReceipt(workspaceID, preparation.ID+":scan")
+	receipt, found, err := s.preparedScanReceipt(workspaceID, *preparation)
 	if err != nil {
+		var domainError *SetupError
+		if errors.As(err, &domainError) && domainError.Code == CodeInitialReceiptUnavailable {
+			current.State = "result_unavailable"
+			return current, nil
+		}
 		return LinkedSetupReview{}, err
 	}
 	if found && receipt.RootID == settings.RootID && receipt.PrivacyMode == ContentModeMetadataOnly {
@@ -132,6 +139,10 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 		review.State = "revoked"
 		return review, nil
 	}
+	if !continuing && hasJanitorAccessResources(ws) {
+		review.State = "repair_required"
+		return review, nil
+	}
 	// A pre-tombstone revoke leaves an empty settings file, as can corruption.
 	// Neither is evidence of never-configured state. Keep the explicit picker
 	// repair instead of turning a surviving adopted reference into new consent.
@@ -139,11 +150,17 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 	if err != nil {
 		return review, err
 	}
-	if _, err := os.Stat(settingsPath); err == nil && !continuing {
-		review.State = "repair_required"
-		return review, nil
-	} else if err != nil && !os.IsNotExist(err) {
+	scanPath, err := s.store.scanStatePath(workspaceID)
+	if err != nil {
 		return review, err
+	}
+	for _, path := range []string{settingsPath, scanPath} {
+		if _, err := os.Stat(path); err == nil && !continuing {
+			review.State = "repair_required"
+			return review, nil
+		} else if err != nil && !os.IsNotExist(err) {
+			return review, err
+		}
 	}
 	folder, err := s.store.resolver.GetFolderPath(workspaceID)
 	if err != nil {
@@ -216,6 +233,17 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 	}
 	review.State, review.rootPath, review.rootIdentity = "review", root, platformFileID(info)
 	install, _ := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
+	review.accessRevision, err = setupAccessRevision(ws)
+	if err != nil {
+		return LinkedSetupReview{}, err
+	}
+	if !continuing {
+		primaryAccess, err := setupAccessRevision(primary)
+		if err != nil || primaryAccess != review.accessRevision {
+			review.State = "repair_required"
+			return review, nil
+		}
+	}
 	// Resource associations are the expected consequence of the reviewed grant,
 	// not a new install. Identity/version/removal remain bound.
 	install.OwnedResources = nil
@@ -238,7 +266,7 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 	if err != nil {
 		return LinkedSetupReview{}, err
 	}
-	review.Revision, err = setupDigest([]string{review.bindingRevision, review.settingsDigest})
+	review.Revision, err = setupDigest([]string{review.bindingRevision, review.settingsDigest, review.accessRevision})
 	if err != nil {
 		return LinkedSetupReview{}, err
 	}

@@ -2,6 +2,7 @@ package filejanitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -131,6 +132,35 @@ func (s *Service) TestScan(workspaceID string) (ScanReport, error) {
 // noise in history and, later, a notification about nothing (FR-105). The
 // returned bool reports whether a batch was created.
 func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, bool, error) {
+	// An explicit fresh scan supersedes an unconfirmed initial attempt, without
+	// changing its saved access, mode, or monitoring. It is not an old-confirmation
+	// replay and must not leave a permanent initial-result warning afterward.
+	if source == ScanSourceManual {
+		settings, err := s.store.LoadSettings(workspaceID)
+		if err != nil {
+			return JanitorBatch{}, false, err
+		}
+		if p := settings.SetupPreparation; p != nil && settings.IsSetUp() {
+			_, found, err := s.preparedScanReceipt(workspaceID, *p)
+			if err != nil {
+				var domainError *SetupError
+				if !errors.As(err, &domainError) || domainError.Code != CodeInitialReceiptUnavailable {
+					return JanitorBatch{}, false, err
+				}
+			}
+			if !found {
+				if _, err := s.store.UpdateSettings(workspaceID, func(current *JanitorSettings) error {
+					if err := requirePreparation(*current, p.ID); err != nil {
+						return err
+					}
+					invalidateSetupPreparation(current)
+					return nil
+				}); err != nil {
+					return JanitorBatch{}, false, err
+				}
+			}
+		}
+	}
 	batch, created, _, err := s.scanNow(workspaceID, source, nil)
 	return batch, created, err
 }
@@ -144,6 +174,8 @@ type ScanOperationRequest struct {
 	OperationID   string
 	RootID        string
 	PrivacyMode   ContentMode
+	// Server-memory proof; persisted dispatch intent alone cannot authorize a retry.
+	FreshPreparationAttempt bool
 }
 
 // ScanNowOperation runs or replays one operation-specific metadata scan. Its
@@ -178,6 +210,18 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 				if existing.RootID != operation.RootID || existing.PrivacyMode != operation.PrivacyMode {
 					return ErrScanOperationConflict
 				}
+				if operation.PreparationID != "" {
+					current, err := s.store.LoadSettings(workspaceID)
+					if err != nil {
+						return err
+					}
+					if err := s.validatePreparationBoundary(current, operation.PreparationID); err != nil {
+						return err
+					}
+					if _, _, err := s.preparedScanReceipt(workspaceID, *current.SetupPreparation); err != nil {
+						return err
+					}
+				}
 				receipt = existing
 				if existing.BatchID != "" {
 					created, persisted = state.Batch(existing.BatchID)
@@ -200,6 +244,9 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 				if _, _, err := s.validateLinkedPreparation(workspaceID, *fresh.SetupPreparation); err != nil {
 					return err
 				}
+				if _, _, err := s.preparedScanReceipt(workspaceID, *fresh.SetupPreparation, operation.FreshPreparationAttempt); err != nil {
+					return err
+				}
 			}
 			if fresh.RootID != operation.RootID || fresh.ContentMode != operation.PrivacyMode ||
 				fresh.ContentMode != ContentModeMetadataOnly {
@@ -214,6 +261,13 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 		}
 		if err := scanner.ObserveForSettling(settings, state); err != nil {
 			return err
+		}
+		if operation != nil && operation.PreparationID != "" {
+			// Lifecycle/ownership can change in the workspace store while metadata
+			// is enumerated. Do not publish a batch/receipt under stale authority.
+			if err := s.validatePreparationBoundary(settings, operation.PreparationID); err != nil {
+				return err
+			}
 		}
 		if len(result.Eligible) == 0 {
 			if operation != nil {

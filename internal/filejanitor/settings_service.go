@@ -40,7 +40,7 @@ type SettingsUpdate struct {
 func (s *Service) UpdateSettings(workspaceID string, update SettingsUpdate) (Status, error) {
 	_, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		settings.LastAssistedAutomation = nil
-		settings.SetupPreparation = nil
+		invalidateSetupPreparation(settings)
 		if update.DailyScanLocalTime != nil {
 			normalized, err := workspace.NormalizeLocalTimeOfDay(*update.DailyScanLocalTime)
 			if err != nil {
@@ -117,7 +117,7 @@ func (s *Service) GrantContentConsent(workspaceID, provider string) (Status, err
 		settings.ContentConsentProvider = provider
 		settings.ContentConsentAt = s.clock()
 		settings.LastAssistedAutomation = nil
-		settings.SetupPreparation = nil
+		invalidateSetupPreparation(settings)
 		return nil
 	})
 	if err != nil {

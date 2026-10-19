@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -119,10 +120,14 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 		return
 	}
 	if claim := build.Preparation; claim != nil {
+		if build.Status == personalassistant.WorkspaceBuildAbandoned {
+			respondBuildPreparationError(w, "preparation_deferred", "This preparation was explicitly deferred. Open the workspace's current settings; its old confirmation cannot resume or create anything.", http.StatusConflict, map[string]any{"workspace_id": claim.WorkspaceID})
+			return
+		}
 		if !confirm {
 			_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "review": map[string]any{
 				"state": "accepted", "version": claim.BuildVersion, "review_revision": claim.ReviewRevision,
-				"monitoring": claim.Monitoring, "workspace_id": claim.WorkspaceID,
+				"monitoring": claim.Monitoring, "workspace_id": claim.WorkspaceID, "folder_slug": h.preparedBuildFolderSlug(owner, *build),
 			}})
 			return
 		}
@@ -269,7 +274,7 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 		if !found || profile == nil {
 			return refuse("team_changed", "A saved team member is no longer available.")
 		}
-		digest, err := digestJSON(profile.Settings)
+		digest, err := reviewedBuildProfileDigest(profile)
 		if err != nil {
 			return refuse("team_changed", "The saved team cannot be reviewed.")
 		}
@@ -321,8 +326,33 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 	}
 	p.claim = claim
 	descriptor = AssistantSetupCreationDescriptor{RunID: p.build.ID, OperationID: claim.ID, OwnerUserID: p.owner,
-		WorkspaceID: claim.WorkspaceID, ReviewDigest: claim.ReviewRevision, ProfileProvenanceID: uuid.NewString(), ProfileConfigDigests: profileDigests}
+		WorkspaceID: claim.WorkspaceID, ReviewDigest: claim.ReviewRevision, ProfileProvenanceID: uuid.NewString(), ProfileConfigDigests: profileDigests, AssignedProfileDigests: savedDigests}
 	return descriptor, true
+}
+
+func reviewedBuildProfileDigest(profile *agent.Agent) (string, error) {
+	if profile == nil {
+		return "", errors.New("profile unavailable")
+	}
+	return digestJSON([]any{profile.Settings, profile.Role, profile.Capabilities, profile.Appearance})
+}
+
+func (h *Handler) validateBuildPreparationSavedProfiles(ctx context.Context) error {
+	descriptor, found := assistantSetupCreationFromContext(ctx)
+	if !found || descriptor.AssignedProfileDigests == nil {
+		return nil
+	}
+	for name, expected := range descriptor.AssignedProfileDigests {
+		profile, found := h.agentStore.GetAgent(name)
+		if !found {
+			return errors.New("a reviewed saved profile is no longer available")
+		}
+		digest, err := reviewedBuildProfileDigest(profile)
+		if err != nil || digest != expected {
+			return errors.New("a reviewed saved profile changed before creation")
+		}
+	}
+	return nil
 }
 
 // Hash the actual attached roles and their effective definitions, excluding
@@ -348,7 +378,7 @@ func (h *Handler) preparedWorkspaceTeamDigest(ws *workspace.Workspace) (string, 
 func (h *Handler) prepareCreatedBuild(w http.ResponseWriter, r *http.Request, owner string, build personalassistant.WorkspaceBuildSession, janitor *filejanitor.Service, automation filejanitor.PreparationAutomation) {
 	claim := build.Preparation
 	incomplete := func(code, message, stage string) {
-		respondBuildPreparationError(w, code, message, http.StatusConflict, map[string]any{"workspace_id": claim.WorkspaceID, "stage": stage})
+		respondBuildPreparationError(w, code, message, http.StatusConflict, map[string]any{"workspace_id": claim.WorkspaceID, "folder_slug": h.preparedBuildFolderSlug(owner, build), "stage": stage})
 	}
 	primary, primaryErr := h.workspaceTaskStore.Get(claim.WorkspaceID)
 	if primaryErr != nil || primary == nil {
@@ -428,21 +458,29 @@ func (h *Handler) prepareCreatedBuild(w http.ResponseWriter, r *http.Request, ow
 		claim.LinkedReviewRevision = revision
 	}
 	prepared, err := janitor.PrepareLinkedSetup(filejanitor.LinkedPreparationRequest{
-		WorkspaceID: ws.ID, OwnerUserID: owner, ReferenceID: marker.FolderReferenceID,
+		Context: r.Context(), WorkspaceID: ws.ID, OwnerUserID: owner, ReferenceID: marker.FolderReferenceID,
 		Monitoring: claim.Monitoring, ReviewRevision: claim.LinkedReviewRevision,
 	}, automation)
 	if err != nil {
-		message := "This workspace exists, but preparation stopped. Retry its current preparation step; do not create another workspace."
+		code, message := filejanitor.PreparationFailureSummary(prepared.Stage)
 		var domainError *filejanitor.SetupError
 		if errors.As(err, &domainError) {
-			message = domainError.Message
+			code, message = domainError.Code, domainError.Message
+			if domainError.Code == filejanitor.CodeFolderConflict {
+				message = "Another workspace already manages an overlapping folder. Open this workspace's current settings to choose another folder."
+			}
 		}
-		respondBuildPreparationError(w, "setup_incomplete", message, http.StatusConflict,
-			map[string]any{"workspace_id": ws.ID, "folder_slug": ws.FolderSlug, "preparation": prepared})
+		respondBuildPreparationError(w, code, message, http.StatusConflict,
+			map[string]any{"workspace_id": ws.ID, "folder_slug": h.preparedBuildFolderSlug(owner, build), "preparation": prepared})
 		return
 	}
 	// Reconcile a crash after the canonical creation marker but before the
 	// build's normal finish. This records provenance, never re-runs creation.
 	h.finishWorkspaceBuild(r.Context(), build.ID, ws.ID, build.Draft)
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "workspace_id": ws.ID, "folder_slug": ws.FolderSlug, "preparation": prepared})
+	slug := h.preparedBuildFolderSlug(owner, build)
+	if slug == "" {
+		incomplete("workspace_route_unconfirmed", "The scan result was saved, but this workspace's page route could not be confirmed. Open it from Home; do not create again.", "result")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "workspace_id": ws.ID, "folder_slug": slug, "preparation": prepared})
 }

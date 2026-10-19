@@ -174,6 +174,10 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		}
 		id, action := parts[0], parts[1]
 		switch {
+		case action == "janitor-defer" && r.Method == http.MethodPost:
+			h.deferWorkspaceBuildPreparation(w, r, id)
+		case action == "janitor-defer":
+			_ = orihttp.RespondMethodNotAllowed(w)
 		case (action == "janitor-review" || action == "janitor-prepare") && r.Method == http.MethodPost:
 			h.postWorkspaceBuildPreparation(w, r, id, action == "janitor-prepare")
 		case action == "janitor-review" || action == "janitor-prepare":

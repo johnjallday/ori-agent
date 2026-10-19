@@ -144,7 +144,7 @@ func (s *Service) ApplyReviewedAutomationTimezone(workspaceID, rootID string, pr
 		}
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil
-		settings.SetupPreparation = nil
+		invalidateSetupPreparation(settings)
 		return nil
 	})
 	return err
@@ -179,7 +179,7 @@ func (s *Service) RecordReviewedAutomationApprovalPaused(workspaceID, rootID str
 			return err
 		}
 		if operation.PreparationID == "" {
-			settings.SetupPreparation = nil
+			invalidateSetupPreparation(settings)
 		}
 		if settings.RootID != strings.TrimSpace(rootID) || settings.ContentMode != privacy ||
 			settings.DailyScanLocalTime != strings.TrimSpace(dailyTime) {
@@ -271,7 +271,7 @@ func (s *Service) RecordAutomationApprovalPaused(workspaceID string) (Status, er
 			settings.AutomationApprovedAt = s.clock()
 		}
 		recordMonitoringDecision(settings)
-		settings.SetupPreparation = nil
+		invalidateSetupPreparation(settings)
 		settings.Paused = true
 		settings.LastAssistedAutomation = nil
 		return nil

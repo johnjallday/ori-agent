@@ -1159,10 +1159,15 @@
     if (!host) return;
     host.textContent = '';
     host.hidden = false;
+    host.setAttribute('aria-busy', busy ? 'true' : 'false');
     const heading = createElement(
       'h3',
       'workspace-build-review__title',
-      accepted ? 'Resume accepted preparation' : 'Review & create'
+      review?.state === 'deferred'
+        ? 'Preparation deferred'
+        : accepted
+          ? 'Resume accepted preparation'
+          : 'Review & create'
     );
     heading.tabIndex = -1;
     host.appendChild(heading);
@@ -1234,7 +1239,7 @@
       );
     }
     const actions = createElement('div', 'workspace-build-review__actions');
-    if (review?.review_revision) {
+    if (review?.review_revision && review.state !== 'deferred') {
       const confirm = action(
         accepted ? 'Retry preparation' : 'Create & prepare review',
         'workspace-build-prepare'
@@ -1244,13 +1249,23 @@
     } else if (!accepted) {
       actions.appendChild(action('Review & create', 'workspace-build-review'));
     }
+    if (accepted && review?.state !== 'deferred') {
+      actions.appendChild(action('Defer preparation', 'workspace-build-defer'));
+      host.appendChild(
+        createElement(
+          'p',
+          '',
+          'Deferring stops unstarted preparation and pauses its monitoring, if any. Any existing workspace, saved access, Filed/ and results are kept. You can start a separate build; this confirmation will not run again.'
+        )
+      );
+    }
     if (!accepted) {
       actions.appendChild(action('Edit setup', 'workspace-build-collapse'));
       actions.appendChild(action('Change folder', 'workspace-build-folder-open'));
     }
-    if (accepted && review?.workspace_id) {
+    if (accepted && review?.folder_slug) {
       const open = createElement('a', 'modern-btn modern-btn-secondary', 'Open workspace');
-      open.href = '/workspaces/' + encodeURIComponent(review.workspace_id) + '?panel=file-janitor';
+      open.href = '/workspaces/' + encodeURIComponent(review.folder_slug) + '?panel=file-janitor';
       actions.appendChild(open);
     }
     host.appendChild(actions);

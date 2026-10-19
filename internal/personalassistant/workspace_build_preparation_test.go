@@ -34,6 +34,20 @@ func TestWorkspaceBuildPreparation_SurvivesExpiryAndRefusesAnotherOpenBuild(t *t
 	if !errors.Is(err, ErrWorkspaceBuildOpen) {
 		t.Fatalf("second open build: %v", err)
 	}
+	_, err = store.Mutate(context.Background(), "local", func(doc *WorkspaceBuildDocument) error {
+		accepted := doc.Session(build.ID)
+		accepted.Status = WorkspaceBuildAbandoned
+		accepted.Settle()
+		doc.Add(openBuild("separate-build", *now))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = store.Read(context.Background(), "local")
+	if err != nil || doc.Open().ID != "separate-build" || doc.Session(build.ID).Preparation.ID != build.Preparation.ID {
+		t.Fatalf("defer lost identity or blocked an independent build: %+v, %v", doc, err)
+	}
 }
 
 func TestWorkspaceBuildPreparation_LegacyDecodeNeverFabricatesConsent(t *testing.T) {

@@ -261,6 +261,30 @@ func TestResetAdmissionStreamAfterFenceGetsResetPending(t *testing.T) {
 	}
 }
 
+func TestResetAdmissionReviewedJanitorEndpointsStopBeforeAuthorityReadsOrWrites(t *testing.T) {
+	g := &resetstate.WorkGate{}
+	requireResetNoError(t, g.TryFence(t.Context()))
+	s := &Server{resetWork: g}
+	handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("fenced preparation reached authority/service callbacks")
+	}))
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/setup-review"},
+		{http.MethodPost, "/api/workspaces/ws-1/file-janitor/prepare-review"},
+		{http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/prepare-review"},
+		{http.MethodPost, "/api/workspaces/ws-1/file-janitor/stop-preparation"},
+		{http.MethodPost, "/api/workspaces/build-sessions/build-1/janitor-review"},
+		{http.MethodPost, "/api/workspaces/build-sessions/build-1/janitor-prepare"},
+		{http.MethodPost, "/api/workspaces/build-sessions/build-1/janitor-defer"},
+	} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(route.method, route.path, nil))
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "reset_pending") {
+			t.Fatalf("fenced %s = %d %s", route.path, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestResetAdmissionStreamPatternsExistOnProductionMux(t *testing.T) {
 	s := newRoutesTestServer(t)
 	mux := http.NewServeMux()

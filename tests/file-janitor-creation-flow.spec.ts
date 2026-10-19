@@ -150,9 +150,30 @@ test.describe('attached creation with a scripted local model', () => {
       page.on('request', r => {
         if (r.url().includes('/api/folder-picker/')) pickerCalls++;
       });
+      let lostResponse = false;
+      if (!monitoring) {
+        await page.route('**/api/workspaces/build-sessions/*/janitor-prepare', async route => {
+          if (lostResponse) {
+            await route.continue();
+            return;
+          }
+          const realResponse = await route.fetch();
+          expect(realResponse.ok(), await realResponse.text()).toBeTruthy();
+          lostResponse = true;
+          await route.abort('failed'); // Real server committed; discard transport response only.
+        });
+      }
       const confirm = offer.getByRole('button', { name: 'Create & prepare review', exact: true });
       await confirm.focus();
       await confirm.press('Enter');
+      if (!monitoring) {
+        await expect(
+          offer.getByRole('button', { name: 'Retry preparation', exact: true })
+        ).toBeVisible();
+        expect(lostResponse).toBeTruthy();
+        await page.screenshot({ path: testInfo.outputPath('lost-response-recovery.png') });
+        await offer.getByRole('button', { name: 'Retry preparation', exact: true }).click();
+      }
       await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20000 });
       await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
       await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
@@ -227,6 +248,88 @@ test.describe('attached creation with a scripted local model', () => {
     expect(existsSync(join(root + '-moved', 'Filed'))).toBeFalsy();
     await expect(offer.getByRole('button', { name: 'Edit setup', exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('lost-selection-repair.png') });
+  });
+  test('explicit defer keeps the saved workspace/result and allows a separate build', async ({
+    page,
+    request
+  }, testInfo) => {
+    const root = inbox();
+    const resumed = await request.post('/api/workspaces/build-sessions', {
+      data: { entry_point: 'home_cockpit_create' }
+    });
+    const oldBuild = (await resumed.json()).session;
+    if (oldBuild?.status === 'open')
+      await request.post(`/api/workspaces/build-sessions/${oldBuild.id}/abandon`, {
+        data: { version: oldBuild.version }
+      });
+    await request.post('/api/onboarding/skip');
+    await page.goto('/');
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    const composer = page.locator('#workspaceBuildComposerInput');
+    await expect(composer).toBeEnabled();
+    await composer.fill('Prepare a synthetic File Janitor.');
+    await composer.press('Enter');
+    await expect(page.locator('#folderNameInput')).toHaveValue(/Synthetic Janitor/);
+    await expect(composer).toBeEnabled();
+    await page
+      .locator('#workspaceBuildPane')
+      .getByRole('button', { name: 'Add folder', exact: true })
+      .click();
+    await page.getByPlaceholder('~/Projects/my-app').fill(root);
+    await page.getByRole('button', { name: 'Use this path', exact: true }).click();
+    const offer = page.locator('#workspaceBuildCreationReview');
+    await offer.getByRole('button', { name: 'Review & create', exact: true }).click();
+    await expect(
+      offer.getByRole('button', { name: 'Create & prepare review', exact: true })
+    ).toBeVisible();
+    let accepted:
+      | { workspace_id: string; folder_slug: string; preparation: { result: { batch_id: string } } }
+      | undefined;
+    let confirmation: { version: number; monitoring: boolean; review_revision: string } | undefined;
+    let path = '';
+    await page.route('**/api/workspaces/build-sessions/*/janitor-prepare', async route => {
+      path = new URL(route.request().url()).pathname;
+      confirmation = route.request().postDataJSON();
+      const real = await route.fetch();
+      expect(real.ok(), await real.text()).toBeTruthy();
+      accepted = await real.json();
+      await route.abort('failed');
+    });
+    await offer.getByRole('button', { name: 'Create & prepare review', exact: true }).click();
+    await expect(
+      offer.getByRole('button', { name: 'Defer preparation', exact: true })
+    ).toBeVisible();
+    await expect(offer.getByRole('link', { name: 'Open workspace', exact: true })).toHaveAttribute(
+      'href',
+      `/workspaces/${accepted!.folder_slug}?panel=file-janitor`
+    );
+    await page.screenshot({ path: testInfo.outputPath('explicit-defer.png') });
+    await offer.getByRole('button', { name: 'Defer preparation', exact: true }).click();
+    await expect(page.locator('#addFolderModal')).not.toBeVisible();
+    const oldRetry = await request.post(path, { data: confirmation });
+    expect(oldRetry.status()).toBe(409);
+    expect((await oldRetry.json()).code).toBe('preparation_deferred');
+    const status = (
+      await (await request.get(`/api/workspaces/${accepted!.workspace_id}/file-janitor`)).json()
+    ).status;
+    expect(status.settings.setup_preparation).toBeUndefined();
+    expect(status.settings.setup_decision.mode).toBe('manual');
+    const batches = (
+      await (
+        await request.get(`/api/workspaces/${accepted!.workspace_id}/file-janitor/batches`)
+      ).json()
+    ).batches;
+    expect(batches).toHaveLength(1);
+    expect(batches[0].id).toBe(accepted!.preparation.result.batch_id);
+    expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
+    await page.goto(`/workspaces/${accepted!.folder_slug}?panel=file-janitor`);
+    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
+    await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
+    await page.screenshot({ path: testInfo.outputPath('deferred-saved-review.png') });
+    await page.goto('/');
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await expect(composer).toBeEnabled();
+    await expect(page.locator('#workspaceBuildCreationReview')).not.toBeVisible();
   });
 });
 
@@ -319,6 +422,109 @@ for (const monitoring of [false, true]) {
     expect(after.batches.map((batch: { id: string }) => batch.id)).toEqual(
       before.batches.map((batch: { id: string }) => batch.id)
     );
+    if (!monitoring) {
+      const accepted = (
+        await (
+          await request.get(`/api/workspaces/${workspace.id}/file-janitor/setup-review`)
+        ).json()
+      ).review;
+      const revoked = await request.post(`/api/workspaces/${workspace.id}/file-janitor/revoke`, {
+        data: {}
+      });
+      expect(revoked.ok(), await revoked.text()).toBeTruthy();
+      const stale = await request.post(
+        `/api/workspaces/${workspace.id}/file-janitor/prepare-review`,
+        {
+          data: {
+            reference_id: workspace.refs[0],
+            monitoring: false,
+            review_revision: accepted.review_revision
+          }
+        }
+      );
+      expect(stale.status()).toBe(409);
+      const refs = (await (await request.get(`/api/workspaces/${workspace.id}/directories`)).json())
+        .directories;
+      expect(refs.some((ref: { id: string }) => ref.id === workspace.refs[0])).toBeTruthy();
+      await page.reload();
+      await expect(page.locator('#fileJanitorMount')).toContainText('revoked');
+      await expect(
+        page.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true })
+      ).toHaveCount(0);
+      expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
+      await page.screenshot({ path: testInfo.outputPath('revoked-permission-repair.png') });
+    }
+  });
+}
+
+for (const settling of [false, true]) {
+  test(`manual preparation honestly lands on ${settling ? 'settling files' : 'an empty folder'} and never silently rescans`, async ({
+    page,
+    request
+  }, testInfo) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ori-janitor-empty-')));
+    if (settling)
+      writeFileSync(join(root, 'fresh.pdf'), 'synthetic recent source', { mode: 0o600 });
+    const workspace = await createLinked(request, settling ? 'settling' : 'empty', [root]);
+    await page.goto(`/workspaces/${workspace.slug}?panel=file-janitor`);
+    const review = page.locator('#setupWizardDialog[open] .fj-setup-review');
+    await review.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true }).click();
+    await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
+    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Initial scan finished');
+    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('No eligible files');
+    await expect(page.locator('#fileJanitorConsoleBody')).not.toContainText(
+      'Not scanned in this session'
+    );
+    const statusReview = (
+      await (await request.get(`/api/workspaces/${workspace.id}/file-janitor/setup-review`)).json()
+    ).review;
+    expect(statusReview.state).toBe('prepared');
+    expect(statusReview.result.outcome).toBe('no_eligible');
+    expect(statusReview.result.batch_id || '').toBe('');
+    await page.reload();
+    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Initial scan finished');
+    await expect(page.locator('#fileJanitorConsoleBody')).not.toContainText(
+      'Not scanned in this session'
+    );
+    await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
+    await expect(page.locator('.fj-batch-loading')).not.toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath(settling ? 'initial-settling.png' : 'initial-empty.png')
+    });
+    const replay = await request.post(
+      `/api/workspaces/${workspace.id}/file-janitor/prepare-review`,
+      {
+        data: {
+          reference_id: workspace.refs[0],
+          monitoring: false,
+          review_revision: statusReview.review_revision
+        }
+      }
+    );
+    expect(replay.ok(), await replay.text()).toBeTruthy();
+    expect((await replay.json()).preparation.result.completed_at).toBe(
+      statusReview.result.completed_at
+    );
+    const batches = (
+      await (await request.get(`/api/workspaces/${workspace.id}/file-janitor/batches`)).json()
+    ).batches;
+    expect(batches).toHaveLength(0);
+    if (!settling) {
+      const file = join(root, 'later.pdf');
+      writeFileSync(file, 'synthetic later source', { mode: 0o600 });
+      const old = new Date(Date.now() - 3600000);
+      utimesSync(file, old, old);
+      let scans = 0;
+      page.on('request', req => {
+        if (req.url().endsWith('/file-janitor/scan')) scans++;
+      });
+      await page.waitForTimeout(300);
+      expect(scans).toBe(0);
+      await page.locator('#fileJanitorScan').click();
+      await expect(page.locator('#fileJanitorConsoleBody')).toContainText('later.pdf');
+      expect(scans).toBe(1);
+      expect(new URL(page.url()).searchParams.has('preparation')).toBeFalsy();
+    }
   });
 }
 

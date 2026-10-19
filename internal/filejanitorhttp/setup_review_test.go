@@ -3,6 +3,7 @@ package filejanitorhttp
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +111,29 @@ func TestPrepareReview_ExplicitConfirmationAndResponseLossReplay(t *testing.T) {
 	}
 }
 
+func TestStopPreparation_ExactOwnerOperationKeepsSavedSetup(t *testing.T) {
+	h, _, root, _ := setupReviewFixture(t)
+	_, body := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/file-janitor/setup-review", "")
+	review := body["review"].(map[string]any)
+	request := fmt.Sprintf(`{"reference_id":%q,"monitoring":false,"review_revision":%q}`, review["reference_id"], review["review_revision"])
+	first, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/file-janitor/prepare-review", request)
+	if first.Code != http.StatusOK {
+		t.Fatalf("prepare: %s", first.Body.String())
+	}
+	operationID := body["preparation"].(map[string]any)["operation_id"]
+	stop, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/stop-preparation", fmt.Sprintf(`{"operation_id":%q}`, operationID))
+	if stop.Code != http.StatusOK {
+		t.Fatalf("stop: %s", stop.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "Filed")); err != nil {
+		t.Fatal("stop removed Filed")
+	}
+	replay, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/file-janitor/prepare-review", request)
+	if replay.Code != http.StatusConflict {
+		t.Fatalf("stop resumed: %d %s", replay.Code, replay.Body.String())
+	}
+}
+
 func TestPrepareReview_OmittedConsentAndModelFieldsGrantNothing(t *testing.T) {
 	h, _, root, _ := setupReviewFixture(t)
 	for _, request := range []string{`{}`, `{"create_now":true}`, `{"ready":true}`, `{"path":"/tmp/inbox"}`} {
@@ -120,6 +144,19 @@ func TestPrepareReview_OmittedConsentAndModelFieldsGrantNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "Filed")); !os.IsNotExist(err) {
 		t.Fatal("refusal created Filed")
+	}
+}
+
+func TestReviewedSetupErrors_DoNotExposeUnexpectedPathsOrAnotherOwnerName(t *testing.T) {
+	for _, err := range []error{
+		fmt.Errorf("read /private/another-owner/secret-folder: denied"),
+		&filejanitor.SetupError{Code: filejanitor.CodeFolderConflict, Message: "Private Other Workspace owns the overlapping folder"},
+	} {
+		w := httptest.NewRecorder()
+		respondReviewedSetupError(w, err, "setup_unavailable", "The current review cannot be read. Keep this workspace and retry.")
+		if strings.Contains(w.Body.String(), "secret-folder") || strings.Contains(w.Body.String(), "Private Other Workspace") {
+			t.Fatalf("private error escaped: %s", w.Body.String())
+		}
 	}
 }
 

@@ -10584,7 +10584,7 @@ const sessionManager = {
       const options = [{ value: '', label: 'Choose a project file…' }].concat(
         candidates.map(name => ({ value: name, label: name }))
       );
-      const signature = options.map(option => option.value).join(' ');
+      const signature = options.map(option => option.value).join('\u0000');
       if (select.dataset?.signature !== signature && typeof document.createElement === 'function') {
         select.replaceChildren(
           ...options.map(option => {
@@ -11650,7 +11650,8 @@ const sessionManager = {
       link: (id, body) => call('POST', sessionURL(id, 'link'), body),
       detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
-      janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body)
+      janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
+      janitorDefer: (id, body) => call('POST', sessionURL(id, 'janitor-defer'), body)
     };
   },
 
@@ -11674,6 +11675,9 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-prepare', () => {
       void this.confirmWorkspaceBuildPreparation();
+    });
+    modal.addEventListener('workspace-build-defer', () => {
+      void this.deferWorkspaceBuildPreparation();
     });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
@@ -13667,6 +13671,7 @@ const sessionManager = {
       if (this.workspaceBuild !== build) return;
       if (!result?.ok) {
         const details = result?.body?.details || result?.body?.error?.details || {};
+        if (result?.body?.code === 'preparation_deferred') review.state = 'deferred';
         if (details.workspace_id) {
           build.acceptedPreparation = true;
           build.janitorReview = { ...review, workspace_id: details.workspace_id };
@@ -13680,9 +13685,34 @@ const sessionManager = {
             'Preparation stopped. Keep this build; do not create another workspace.'
         );
       }
+      const receipt = result.body?.preparation?.result;
+      const id = result.body?.workspace_id;
+      const slug = result.body?.folder_slug;
+      if (
+        typeof slug !== 'string' ||
+        !slug ||
+        typeof id !== 'string' ||
+        !id ||
+        result.body?.preparation?.workspace_id !== id ||
+        !receipt?.operation_id ||
+        !receipt.root_id ||
+        receipt.privacy_mode !== 'metadata_only' ||
+        typeof receipt.completed_at !== 'string' ||
+        receipt.completed_at.startsWith('0001-') ||
+        !Number.isSafeInteger(receipt.eligible_count) ||
+        receipt.eligible_count < 0 ||
+        !Number.isSafeInteger(receipt.ineligible_count) ||
+        receipt.ineligible_count < 0 ||
+        !(
+          (receipt.outcome === 'batch' && receipt.batch_id) ||
+          (receipt.outcome === 'no_eligible' && receipt.eligible_count === 0 && !receipt.batch_id)
+        )
+      ) {
+        throw new Error(
+          'The preparation response was incomplete. Checking its accepted identity; do not create another workspace.'
+        );
+      }
       build.acceptedPreparation = true;
-      const id = result.body.workspace_id;
-      const slug = result.body.folder_slug || id;
       this.notifyWorkspacesChanged({ workspaceId: id });
       const params = new URLSearchParams({ panel: 'file-janitor', tab: 'review' });
       if (result.body.preparation?.operation_id)
@@ -13708,6 +13738,8 @@ const sessionManager = {
         ) {
           build.acceptedPreparation = true;
           build.janitorReview = recovered.body.review;
+          build.preparationMessage =
+            'Your confirmation was saved, but the response was lost. Retry preparation to observe its exact result; no second workspace will be created.';
         }
       } catch (_) {
         /* Keep the exact confirmation available for bounded retry. */
@@ -13719,6 +13751,41 @@ const sessionManager = {
         if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = false;
         this.syncWorkspaceBuildPresentation();
         document.querySelector('#workspaceBuildCreationReview h3')?.focus();
+      }
+    }
+  },
+
+  async deferWorkspaceBuildPreparation() {
+    const build = this.workspaceBuild;
+    const review = build?.janitorReview;
+    if (!build?.acceptedPreparation || !review?.review_revision || build.preparationBusy) return;
+    build.preparationBusy = true;
+    build.preparationMessage =
+      'Deferring this accepted preparation without deleting saved resources…';
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.workspaceBuildApi().janitorDefer(build.session.id, {
+        version: review.version,
+        monitoring: Boolean(review.monitoring),
+        review_revision: review.review_revision
+      });
+      if (this.workspaceBuild !== build) return;
+      if (!result?.ok)
+        throw new Error(
+          result?.body?.message ||
+            'Preparation could not be deferred. Retry this same action or open its current workspace.'
+        );
+      build.janitorReview = { ...review, state: 'deferred' };
+      build.session.status = 'abandoned';
+      build.preparationMessage =
+        'Preparation deferred. Saved resources are kept and the old confirmation cannot run again.';
+      bootstrap.Modal.getInstance(document.getElementById('addFolderModal'))?.hide();
+    } catch (error) {
+      build.preparationMessage = error.message;
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.preparationBusy = false;
+        this.syncWorkspaceBuildPresentation();
       }
     }
   },

@@ -78,6 +78,12 @@ func (h *Handler) seedRoleStaffedAgents(
 				return result, fmt.Errorf("you already have an agent named %q; rename this one or assign the agent you have", requested.Name)
 			}
 			config, _ := h.templateAgentCreateConfig(roleStaffedSpec(spec, requested))
+			if descriptor, reviewed := assistantSetupCreationFromContext(ctx); reviewed && descriptor.ProfileConfigDigests != nil {
+				digest, err := digestJSON(config)
+				if err != nil || digest != descriptor.ProfileConfigDigests[requested.Name] {
+					return result, fmt.Errorf("the reviewed configuration changed before the agent could be created; review the team again")
+				}
+			}
 			if provenance := assistantSetupAgentProvenance(ctx, requested.Name); provenance != nil {
 				config.AssistantSetup = provenance
 			}

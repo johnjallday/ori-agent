@@ -958,6 +958,10 @@
       if (batchLoadState === 'loading' || batchLoadState === 'error') return;
       const empty = el('div', 'fj-empty');
       const states = {
+        no_proposals: {
+          title: 'Initial scan complete — no eligible files',
+          copy: 'Files may still be settling. Scan again when you choose; nothing moves without your approval.'
+        },
         scan_empty: {
           title: 'Scan complete — no new proposals',
           copy: 'Ori found no new eligible files. No changes were made.'
@@ -2340,7 +2344,9 @@
         'fj-card-sub',
         configured
           ? 'Sort proposed destinations, then decide what moves.'
-          : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
+          : settings.access_revoked_at && !settings.access_revoked_at.startsWith('0001-')
+            ? 'Folder access was revoked. Choose a folder again to grant fresh permission; nothing is scanned or moved.'
+            : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
       )
     );
     head.appendChild(heading);
@@ -2483,6 +2489,10 @@
     // settings form, and history live in the console and nowhere else, so
     // there is exactly one of each on the page (FR-100, FR-114).
     const host = mount();
+    const focusedOpener =
+      !consoleOpen &&
+      activeElement()?.id === 'fileJanitorCardOpen' &&
+      isInDocument(activeElement());
     if (host) {
       if (!status || !status.applies) {
         clear(host);
@@ -2491,6 +2501,10 @@
         renderCompactCard(host, status);
       }
       syncSummaryVisibility(status);
+      if (focusedOpener) {
+        const replacement = document.getElementById('fileJanitorCardOpen');
+        if (isVisibleFocusTarget(replacement)) replacement.focus();
+      }
     }
 
     if (consoleOpen) renderConsole();
@@ -2528,7 +2542,10 @@
   // the inline panel already had: they address their hosts by id, so moving
   // those hosts into the console moves the surfaces with them.
   function renderConsoleBody(host, status) {
-    if (setupReview?.state === 'preparation_incomplete' || !isConfigured(status)) {
+    if (
+      ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
+      !isConfigured(status)
+    ) {
       if (renderLinkedSetupReview(host)) return;
       // An unconfigured install opens straight into the real setup experience
       // — the wizard when the blueprint declares one, the folder card
@@ -3223,6 +3240,7 @@
             'review',
             'choose_folder',
             'preparation_incomplete',
+            'preparation_changed',
             'folder_unavailable',
             'folder_conflict'
           ].includes(setupReview?.state)
@@ -3231,6 +3249,8 @@
           // Whichever read wins must repaint the current folder step too; an
           // earlier superseded read cannot leave it on the picker fallback.
           window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
+          if (['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state))
+            window.SetupWizard?.registerStepRenderer?.('automation_review', automationStepRenderer);
         }
       }
     } catch (error) {
@@ -3238,6 +3258,23 @@
       if (choice) throw error;
     }
     return setupReview;
+  }
+
+  function isPreparedResult(result) {
+    return Boolean(
+      result &&
+      result.privacy_mode === 'metadata_only' &&
+      result.operation_id &&
+      result.root_id &&
+      typeof result.completed_at === 'string' &&
+      !result.completed_at.startsWith('0001-') &&
+      Number.isSafeInteger(result.eligible_count) &&
+      result.eligible_count >= 0 &&
+      Number.isSafeInteger(result.ineligible_count) &&
+      result.ineligible_count >= 0 &&
+      ((result.outcome === 'batch' && result.batch_id) ||
+        (result.outcome === 'no_eligible' && result.eligible_count === 0 && !result.batch_id))
+    );
   }
 
   async function landOnPreparedReview(result, ctx) {
@@ -3252,12 +3289,24 @@
     await window.SetupWizard?.refresh?.();
     if (window.SetupWizard?.getStatus?.()?.state === 'ready') await window.SetupWizard.close?.();
     await refresh();
+    setPreparationRoute(setupReview?.operation_id || '');
     open({ tab: 'review', source: 'folder-preparation' });
     document.getElementById('fileJanitorConsoleTitle')?.focus();
   }
 
   // One host-rendered consent card serves the console and the existing wizard's
   // folder step. A read never grants; only the explicit final button prepares.
+  function setPreparationRoute(operationID) {
+    if (!window.history?.replaceState || !window.location?.href) return;
+    const url = new URL(window.location.href);
+    if (operationID) url.searchParams.set('preparation', operationID);
+    else {
+      url.searchParams.delete('preparation');
+      url.searchParams.delete('batch_id');
+    }
+    window.history.replaceState({ fileJanitor: consoleOpen }, '', url.toString());
+  }
+
   function renderLinkedSetupReview(host, ctx) {
     const review = setupReview;
     if (
@@ -3266,6 +3315,7 @@
         'review',
         'choose_folder',
         'preparation_incomplete',
+        'preparation_changed',
         'folder_unavailable',
         'folder_conflict'
       ].includes(review.state)
@@ -3277,7 +3327,11 @@
       el(
         'h3',
         'fj-title',
-        review.operation_id ? 'Finish preparing your review' : 'Use your attached folder'
+        review.state === 'preparation_changed'
+          ? 'Preparation changed'
+          : review.operation_id
+            ? 'Finish preparing your review'
+            : 'Use your attached folder'
       )
     );
     const selectedFolder = (review.candidates || []).find(
@@ -3285,8 +3339,12 @@
     );
     const candidate = selectedFolder || (review.candidates || [])[0];
     const message = el('p', 'fj-sub');
-    message.setAttribute('role', 'status');
-    message.setAttribute('aria-live', 'polite');
+    if (!ctx) {
+      message.setAttribute('role', 'status');
+      message.setAttribute('aria-live', 'polite');
+    }
+    // The wizard already announces ctx.setBusy; a second live region here
+    // would repeat every stage. Errors still become their own alert below.
     card.appendChild(message);
     const repaint = async choice => {
       message.textContent = 'Updating the permission review…';
@@ -3368,6 +3426,9 @@
           : 'Manual scans only. No watcher or daily scan will run.'
       )
     );
+    if (review.state === 'preparation_changed')
+      message.textContent =
+        'The folder or permissions changed. This old confirmation cannot continue. Stop here to keep any saved setup, then review current settings.';
     if (review.state === 'folder_unavailable')
       message.textContent =
         'This attached folder is unavailable. Restore access or choose another folder.';
@@ -3404,12 +3465,20 @@
                 body.message ||
                 'Setup was saved but preparation stopped. Retry this workspace, not creation.'
             );
-          await landOnPreparedReview(body.preparation?.result, ctx);
+          if (
+            !isPreparedResult(body.preparation?.result) ||
+            body.preparation?.workspace_id !== review.workspace_id
+          ) {
+            throw new Error(
+              'The initial result could not be confirmed. Reload this workspace to observe the accepted preparation; do not create again.'
+            );
+          }
+          await landOnPreparedReview(body.preparation.result, ctx);
         } catch (error) {
           busy = false;
           ctx?.setBusy?.(false, '');
           await loadSetupReview();
-          if (setupReview?.state === 'prepared' && setupReview.result) {
+          if (setupReview?.state === 'prepared' && isPreparedResult(setupReview.result)) {
             await landOnPreparedReview(setupReview.result, ctx);
             return;
           }
@@ -3446,6 +3515,49 @@
     });
     change.disabled = busy || Boolean(review.operation_id);
     actions.appendChild(change);
+    if (review.operation_id) {
+      const stop = button('Stop here — keep saved setup', 'fj-btn fj-btn-secondary', async () => {
+        if (busy) return;
+        busy = true;
+        stop.disabled = true;
+        ctx?.setBusy?.(true, 'Stopping unstarted preparation…');
+        try {
+          const response = await fetch(apiBase(wsId()) + '/stop-preparation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ operation_id: review.operation_id })
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok)
+            throw new Error(
+              body.message ||
+                body.error?.message ||
+                'Preparation could not be stopped. Reload its current state.'
+            );
+          busy = false;
+          ctx?.setBusy?.(false, '');
+          await window.SetupWizard?.close?.();
+          await window.SetupWizard?.refresh?.();
+          await refresh();
+        } catch (error) {
+          message.setAttribute('role', 'alert');
+          message.textContent = error.message;
+        } finally {
+          busy = false;
+          stop.disabled = false;
+          ctx?.setBusy?.(false, '');
+        }
+      });
+      stop.disabled = busy;
+      actions.appendChild(stop);
+      card.appendChild(
+        el(
+          'p',
+          'fj-sub',
+          'Stopping pauses monitoring and prevents unstarted preparation. This workspace, saved access, Filed/ and any existing result are kept; nothing already done is undone.'
+        )
+      );
+    }
     card.appendChild(actions);
     host.appendChild(card);
     return true;
@@ -3610,6 +3722,7 @@
         throw new Error((apiError && apiError.message) || 'The scan could not run.');
       }
       linkedBatchID = '';
+      setPreparationRoute('');
       await loadBatch();
       if (!result.created) {
         if (!lastBatch) {
@@ -3839,6 +3952,10 @@
       // Creation links only an operation identity, never counts or success
       // flags. The first-result message comes from its canonical receipt.
       const preparationID = new URLSearchParams(window.location?.search || '').get('preparation');
+      if (setupReview?.state === 'result_unavailable') {
+        reviewStatusMessage =
+          'The accepted initial result cannot be confirmed from retained receipts. Nothing was rescanned. Choose Scan now explicitly if you want another scan.';
+      }
       if (
         preparationID &&
         setupReview?.state === 'prepared' &&
@@ -4112,19 +4229,25 @@
       if (!ownsStep(ctx.step)) return '';
       // Until a folder exists there is nothing to approve; the step's own
       // button is the action.
+      if (setupReview?.state === 'preparation_changed') return 'Stop the changed preparation above';
       if (['review', 'preparation_incomplete'].includes(setupReview?.state)) {
         return 'Confirm the folder review above';
       }
       return chosenRoot() ? 'Continue' : 'Choose a folder to continue';
     },
     disablePrimary(ctx) {
-      return ownsStep(ctx.step) && !chosenRoot();
+      return ownsStep(ctx.step) && (!chosenRoot() || setupReview?.state === 'preparation_changed');
     }
   };
 
   const automationStepRenderer = {
     render(container, ctx) {
       if (!ownsStep(ctx.step)) return;
+      if (
+        ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) &&
+        renderLinkedSetupReview(container, ctx)
+      )
+        return;
       const settings = (lastStatus && lastStatus.settings) || {};
       const list = el('ul', 'fj-disclosure-list');
       [
@@ -4138,7 +4261,17 @@
       container.appendChild(list);
     },
     primaryLabel(ctx) {
-      return ownsStep(ctx.step) ? 'Turn this on' : '';
+      return ownsStep(ctx.step)
+        ? ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state)
+          ? 'Retry or stop the accepted preparation above'
+          : 'Turn this on'
+        : '';
+    },
+    disablePrimary(ctx) {
+      return (
+        ownsStep(ctx.step) &&
+        ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state)
+      );
     }
   };
 

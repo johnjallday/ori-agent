@@ -26,6 +26,8 @@ type PreparationRequest struct {
 	Operation          AssistedAutomationOperation
 	ScanOperationID    string
 	BeforeScan         func() error
+	// Ephemeral proof of a newly persisted dispatch, never reconstructed on replay.
+	FreshScanAttempt func() bool
 }
 
 type PreparationResult struct {
@@ -35,6 +37,7 @@ type PreparationResult struct {
 	MonitoringApplied    bool
 	MonitoringRetryBound bool
 	ScanAttempted        bool
+	ScanConfirmed        bool
 }
 
 // PrepareMetadataReview is the shared canonical seam for assistant-led and
@@ -67,7 +70,7 @@ func (s *Service) PrepareMetadataReview(request PreparationRequest, automation P
 		if receipt.RootID != request.RootID || receipt.PrivacyMode != ContentModeMetadataOnly {
 			return result, ErrScanOperationConflict
 		}
-		result.Status, result.Scan = status, receipt
+		result.Status, result.Scan, result.ScanConfirmed = status, receipt, true
 		result.MonitoringApplied = request.Monitoring && RequireHealthyAutomation(status) == nil
 		if result.MonitoringApplied && automation != nil {
 			result.WatcherID, _, err = automation.WatcherRecord(request.WorkspaceID)
@@ -143,12 +146,14 @@ func (s *Service) PrepareMetadataReview(request PreparationRequest, automation P
 	result.ScanAttempted = true
 	result.Scan, err = s.ScanNowOperation(request.WorkspaceID, ScanSourceAssistantSetup, ScanOperationRequest{
 		OperationID: request.ScanOperationID, RootID: request.RootID, PrivacyMode: ContentModeMetadataOnly,
-		PreparationID: request.Operation.PreparationID,
+		PreparationID:           request.Operation.PreparationID,
+		FreshPreparationAttempt: request.FreshScanAttempt != nil && request.FreshScanAttempt(),
 	})
 	if err != nil {
 		rollback()
 		return result, err
 	}
+	result.ScanConfirmed = true
 	if request.Monitoring && automation != nil {
 		automation.MarkCaughtUp(request.WorkspaceID, workspace.LocalDateKey(status.Settings.Timezone, result.Scan.CompletedAt))
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -154,6 +155,23 @@ func TestWorkspaceBuildPreparation_ExactEditedDraftAndOneInitialResult(t *testin
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
+	}
+	var routeBody map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &routeBody); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := f.h.workspaceStore.GetFolderPath(body.WorkspaceID)
+	if err != nil || routeBody["folder_slug"] != filepath.Base(folder) || routeBody["folder_slug"] == body.WorkspaceID {
+		t.Fatalf("non-canonical route: %+v, %v", routeBody, err)
+	}
+	accepted := f.call("janitor-review", map[string]any{"version": f.build.Version, "monitoring": false})
+	var acceptedBody struct {
+		Review struct {
+			FolderSlug string `json:"folder_slug"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal(accepted.Body.Bytes(), &acceptedBody); err != nil || acceptedBody.Review.FolderSlug != routeBody["folder_slug"] {
+		t.Fatalf("recovery route: %s, %v", accepted.Body.String(), err)
 	}
 	ws, err := f.h.readReviewedWorkspace(body.WorkspaceID)
 	if err != nil || ws.Name != f.build.Draft.Name || ws.Description != f.build.Draft.Description || ws.Mission != f.build.Draft.Mission || ws.ParentID != parentID {
@@ -414,6 +432,103 @@ func TestWorkspaceBuildPreparation_LaterRevocationOrLifecycleChangeStopsReplay(t
 				t.Fatalf("retry scanned again: %+v, %v", batches, err)
 			}
 		})
+	}
+}
+
+func TestWorkspaceBuildPreparation_DeferRetainsUncertainIdentityWithoutRetryingCreation(t *testing.T) {
+	f := newBuildPreparationFixture(t)
+	request := f.review(t)
+	store := &failBuildCreationStore{HybridStore: f.h.store}
+	f.h.store = store
+	if response := f.call("janitor-prepare", request); response.Code < 400 {
+		t.Fatal("expected uncertain creation")
+	}
+	doc, _ := f.builds.Read(context.Background(), "local")
+	claim := doc.Session(f.build.ID).Preparation
+	for range 2 {
+		response := f.call("janitor-defer", request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("defer = %d %s", response.Code, response.Body.String())
+		}
+	}
+	doc, _ = f.builds.Read(context.Background(), "local")
+	if doc.Open() != nil || doc.Session(f.build.ID).Status != personalassistant.WorkspaceBuildAbandoned || doc.Session(f.build.ID).Preparation.WorkspaceID != claim.WorkspaceID {
+		t.Fatal("defer dropped the accepted identity or left the build locked open")
+	}
+	response := f.call("janitor-prepare", request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "preparation_deferred") || store.calls != 1 {
+		t.Fatal("deferred confirmation retried creation")
+	}
+}
+
+func TestWorkspaceBuildPreparation_DeferKeepsCreatedResourcesAndPreservesLaterChoices(t *testing.T) {
+	for _, laterChange := range []bool{false, true} {
+		t.Run(fmt.Sprint(laterChange), func(t *testing.T) {
+			f := newBuildPreparationFixture(t)
+			request := f.review(t)
+			if response := f.call("janitor-prepare", request); response.Code != http.StatusOK {
+				t.Fatalf("prepare: %s", response.Body.String())
+			}
+			doc, _ := f.builds.Read(context.Background(), "local")
+			id := doc.Session(f.build.ID).Preparation.WorkspaceID
+			if laterChange {
+				if _, err := f.janitor.ApproveAutomation(id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			response := f.call("janitor-defer", request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("defer: %s", response.Body.String())
+			}
+			status, err := f.janitor.Status(id)
+			if err != nil || !status.Settings.IsSetUp() || status.Settings.SetupPreparation != nil {
+				t.Fatalf("defer lost setup: %+v, %v", status, err)
+			}
+			if laterChange && (status.Settings.Paused || status.Settings.AutomationApprovedAt.IsZero()) {
+				t.Fatal("old defer undid a later monitoring decision")
+			}
+			batches, err := f.janitor.ListBatches(id)
+			if err != nil || len(batches) != 1 {
+				t.Fatal("defer lost result")
+			}
+			if _, found := f.agents.GetAgent("Reviewed Curator"); !found {
+				t.Fatal("defer deleted a created profile")
+			}
+			if response := f.call("janitor-prepare", request); response.Code != http.StatusConflict {
+				t.Fatal("deferred operation resumed")
+			}
+		})
+	}
+}
+
+func TestWorkspaceBuildPreparation_SeedBoundaryRefusesLateEffectiveConfigurationDrift(t *testing.T) {
+	f := newBuildPreparationFixture(t)
+	tpl, err := f.h.resolveProjectTemplate("file-janitor", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var choices []roleStaffingInput
+	if err := json.Unmarshal(f.build.Draft.RoleStaffing, &choices); err != nil {
+		t.Fatal(err)
+	}
+	staffing, err := normalizeRoleStaffing(choices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withAssistantSetupCreation(context.Background(), AssistantSetupCreationDescriptor{RunID: f.build.ID, OperationID: uuid.NewString(), ProfileConfigDigests: map[string]string{"Reviewed Curator": strings.Repeat("0", 64)}})
+	seed, err := f.h.seedRoleStaffedAgents(ctx, &session.Workspace{ID: uuid.NewString()}, tpl, staffing)
+	if err == nil || len(seed.OwnedNames) != 0 {
+		t.Fatalf("late drift seeded profiles: %+v, %v", seed, err)
+	}
+	if _, found := f.agents.GetAgent("Reviewed Curator"); found {
+		t.Fatal("late drift created an agent")
+	}
+	if err := f.agents.CreateAgent("Saved Curator", &agentstore.CreateAgentConfig{Model: "saved-model", LLMProvider: "ollama"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx = withAssistantSetupCreation(context.Background(), AssistantSetupCreationDescriptor{RunID: f.build.ID, OperationID: uuid.NewString(), AssignedProfileDigests: map[string]string{"Saved Curator": strings.Repeat("0", 64)}})
+	if err := f.h.validateBuildPreparationSavedProfiles(ctx); err == nil {
+		t.Fatal("late saved-profile drift reached workspace creation")
 	}
 }
 

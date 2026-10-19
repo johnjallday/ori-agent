@@ -5678,6 +5678,39 @@ test('draft edits invalidate a displayed permission review but cannot overwrite 
   );
 });
 
+test('malformed preparation success observes the accepted identity instead of claiming readiness', async () => {
+  const { manager } = loadBuildWizard();
+  const build = manager.workspaceBuild;
+  build.session = { id: 'b-1', status: 'open' };
+  build.janitorReview = { version: 4, review_revision: 'reviewed', monitoring: false };
+  manager.workspaceCreatorContext = {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.workspaceBuildPane = () => ({ setBusy() {} });
+  let notifications = 0;
+  manager.notifyWorkspacesChanged = () => {
+    notifications++;
+  };
+  manager.workspaceBuildTransport = {
+    janitorPrepare: async () => ({ ok: true, body: {} }),
+    janitorReview: async () => ({
+      ok: true,
+      body: {
+        review: {
+          state: 'accepted',
+          version: 4,
+          review_revision: 'reviewed',
+          workspace_id: 'exact-workspace'
+        }
+      }
+    })
+  };
+  await manager.confirmWorkspaceBuildPreparation();
+  assert.equal(notifications, 0);
+  assert.equal(build.janitorReview.workspace_id, 'exact-workspace');
+  assert.equal(build.acceptedPreparation, true);
+  assert.equal(build.preparationBusy, false);
+});
+
 test('lost preparation responses recover accepted identity and a double click sends only once', async () => {
   const { manager } = loadBuildWizard();
   const build = manager.workspaceBuild;

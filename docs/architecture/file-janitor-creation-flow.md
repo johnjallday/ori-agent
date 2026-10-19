@@ -54,6 +54,12 @@ under the retained `downloads-janitor` alias):
 - `POST /prepare-review`: `{reference_id, monitoring, review_revision}` confirms
   exactly that review.
   The server claims or replays its stable operation before any domain effect.
+- `POST /stop-preparation`: `{operation_id}` joins any already-started domain
+  stage, pauses monitoring and releases only this operation's unfinished claim.
+  It retains the workspace, adopted access, `Filed/` and saved results. It does
+  not undo filesystem changes or clear an unrelated legacy grant claim.
+- All three POST bodies are closed JSON with a 4 KiB bound; review reads and
+  mutation replies are `no-store`.
 - Retry uses the accepted operation identity and revalidates current authority;
   it does not reinterpret an old request as a new review or widen permissions.
 
@@ -94,6 +100,13 @@ If a partial core/profile write cannot prove completion, report reconciliation
 required and do not run creation again. Once a domain preparation is accepted,
 its own canonical receipts own retry and the initial result.
 
+`POST .../janitor-defer` with the accepted `{version, monitoring, review_revision}`
+settles an accepted build as abandoned,
+retaining its claim/reserved identity so an old request cannot create again.
+Where the exact domain operation can be proven it joins/stops that preparation;
+it preserves later unrelated settings/monitoring decisions. A separate new build
+is then allowed. A deferred claim cannot be retried or reused by ordinary create.
+
 Resolve the unexpired hold and validate the normal create gates **before**
 reserving/creating resources. The path-free observation cannot revive an expired
 hold. Reserve one random workspace ID and stable operation IDs in the accepted
@@ -128,11 +141,16 @@ unproven ownership stops for reconciliation rather than recreating by name.
    from the attachment observation or infer success from the latest batch.
 6. Re-evaluate canonical wizard readiness and existing idempotent completion
    hooks. Land on the existing Review console using canonical workspace route
-   identity and the actual result. Empty and settling results are legitimate.
+   identity and the actual result. Recovery links are emitted only for an
+   owner/operation-proven canonical folder slug, never a reserved UUID or guessed
+   draft name. Empty and settling results are legitimate.
 
 After creation, failure preserves the exact workspace and earlier grants and
-returns `setup_incomplete` with the failed stage, stable operation/workspace ID,
-and repair action. It never sends the user through another create. Scan retry
+returns a bounded stage/domain code with the stable operation/workspace ID and
+repair action. `monitoring_incomplete` distinguishes failed registration from
+`initial_scan_incomplete`; `result_observation_incomplete` means a canonical scan
+result exists but a remaining detail could not be confirmed. A constructed,
+uncommitted scan result is not proof that a result was saved. It never sends the user through another create. Scan retry
 cannot apply grants or change monitoring. Manual settling offers **Scan again**;
 no hidden polling/rescan task. A historical result may be shown after later
 settings changes, but those changes prevent any further old-authority work.
@@ -149,11 +167,20 @@ Selected settings schema: **2 → 3** in the existing domain settings file.
   New explicit folder permission may clear it; mere reads/retries may not.
 - `setup_preparation`: one bounded domain-owned accepted operation with `id`,
   `owner_user_id`, `reference_id`, `review_revision`, `binding_revision`,
-  `capability_revision`, `monitoring`, typed `terms`, and `accepted_at`. Completion
-  stays in the existing grant/decision/scan receipts, not duplicated stage flags. Paths stay in the existing domain pending grant/settings and workspace
+  `capability_revision`, permission-bearing `access_revision`, `monitoring`, typed
+  `terms`, and `accepted_at`. `scan_dispatched_at` records dispatch intent and
+  `scan_receipt_digest` pins an observed receipt. Both are refusal-only fences:
+  neither proves completion, contributes counts, nor replaces a canonical result.
+  Completion stays in existing grant/decision/scan receipts, not duplicated stage flags. Paths stay in the existing domain pending grant/settings and workspace
   directory store, never in generic coordinator receipts or model payloads.
-- Existing scan-state receipt retention remains bounded. An operation older than
-  retained evidence is unresolved, not permission to scan again.
+- Existing scan-state receipt retention remains bounded. A missing, corrupt,
+  changed or pruned receipt after dispatch is unresolved, not permission to scan
+  again. Only the in-memory attempt which just persisted dispatch intent may
+  start its first scan without a receipt; restart cannot reconstruct that proof.
+  An interruption between dispatch intent and result publication therefore
+  requires explicit fresh Scan now, not a guessed initial retry. Fresh manual
+  scanning closes an unconfirmed preparation without changing saved access,
+  mode or monitoring; completed retained operations still replay their receipt.
 
 Build sidecar: **1 → 2** for `BuildPreparationClaim` and the frozen `preparing`
 status. Decode legacy v1 without fabricating consent, then write v2. Keep the
@@ -186,8 +213,15 @@ Bind each consequential continuation to exact owner/workspace/capability install
 root generation and filesystem identity, settings revision, mode/privacy,
 schedule/recipe and disclosure version. Folder/draft/team/blueprint changes stale
 unaccepted reviews. Manual pause/edit/relink/revoke clears continuation authority.
+Initial reviews include the current permission snapshot. At continuation and
+inside canonical workspace-access writes, both primary and folder views must
+match either that original snapshot or the canonical metadata-only resources
+already established by this operation. Changed/disabled/removed bindings or
+ownership associations are not silently repaired, including after a partial
+workspace commit. Such a preparation exposes Stop, not an enabled Retry.
 Known revocation remains distinguishable even if an adopted link survives.
-An older empty/corrupt record is uncertain: require explicit folder repair rather
+An older empty/corrupt record, orphaned scan state, or unexplained owned-access
+resources are uncertain: require explicit folder repair rather
 than granting from a surviving reference. Archive/delete/ownership change,
 capability removal/reinstall and reset cannot be undone by stale pages or retries.
 

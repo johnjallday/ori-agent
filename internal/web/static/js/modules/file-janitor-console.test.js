@@ -99,6 +99,10 @@ class FakeElement {
   get isConnected() {
     return this._connected !== false;
   }
+  querySelector(selector) {
+    if (selector === 'button') return this.all(node => node.tagName === 'BUTTON')[0] || null;
+    return null;
+  }
   // Depth-first collection helpers used by the assertions below.
   all(predicate, out = []) {
     if (predicate(this)) out.push(this);
@@ -265,6 +269,26 @@ test('attached folder review is default-off and discloses its actual filesystem 
   assert.equal(calls, 0);
 });
 
+test('a malformed success response cannot invent a prepared result', async () => {
+  const doc = setup();
+  panel._setSetupReview(attachedReview());
+  const host = doc.createElement('div');
+  globalThis.fetch = async url => ({
+    ok: true,
+    json: async () =>
+      String(url).endsWith('/prepare-review')
+        ? { preparation: { workspace_id: 'ws-1' } }
+        : { review: { state: 'repair_required', workspace_id: 'ws-1' } }
+  });
+  panel._renderSetupReview(host);
+  host
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .click();
+  await settle();
+  assert.match(host.textContent, /initial result could not be confirmed/);
+  assert.doesNotMatch(host.textContent, /Your first review is ready/);
+});
+
 test('ambiguous attached folders require a choice before confirmation', () => {
   const doc = setup();
   panel._setSetupReview(
@@ -286,6 +310,37 @@ test('ambiguous attached folders require a choice before confirmation', () => {
       .disabled,
     true
   );
+});
+
+test('changed preparation exposes Stop but cannot retry or silently re-enable permissions', () => {
+  const doc = setup();
+  panel._setSetupReview(
+    attachedReview({ state: 'preparation_changed', operation_id: 'accepted-op' })
+  );
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  assert.match(host.textContent, /old confirmation cannot continue/);
+  const buttons = host.all(node => node.tagName === 'BUTTON');
+  assert.equal(buttons.find(node => node.textContent === 'Retry preparation').disabled, true);
+  assert.equal(
+    buttons.find(node => node.textContent === 'Stop here — keep saved setup').disabled,
+    false
+  );
+});
+
+test('incomplete preparation offers an explicit stop without promising to undo saved effects', () => {
+  const doc = setup();
+  panel._setSetupReview(
+    attachedReview({ state: 'preparation_incomplete', operation_id: 'accepted-operation' })
+  );
+  const host = doc.createElement('div');
+  panel._renderSetupReview(host);
+  const buttons = host.all(node => node.tagName === 'BUTTON');
+  assert.ok(buttons.some(button => button.textContent === 'Retry preparation'));
+  assert.ok(buttons.some(button => button.textContent === 'Stop here — keep saved setup'));
+  assert.match(host.textContent, /saved access, Filed\/ and any existing result are kept/);
+  assert.match(host.textContent, /nothing already done is undone/);
+  assert.equal(host.all(node => node.tagName === 'INPUT')[0].disabled, true);
 });
 
 test('monitoring review states the server schedule and delay instead of inventing defaults', () => {
@@ -2841,6 +2896,17 @@ test('the console is a labelled modal dialog', () => {
   // drift away from what is on screen.
   const labelledBy = dialog.getAttribute('aria-labelledby');
   assert.equal(doc.getElementById(labelledBy).textContent, 'File Janitor');
+});
+
+test('a late status repaint after closing preserves focus on the live compact opener', () => {
+  const doc = setup();
+  panel.render(statusFixture());
+  const opener = doc.getElementById('fileJanitorCardOpen');
+  opener.focus();
+  panel.render(statusFixture());
+  const replacement = doc.getElementById('fileJanitorCardOpen');
+  assert.notEqual(replacement, opener);
+  assert.equal(doc.activeElement, replacement);
 });
 
 test('closing returns focus to the control that opened it', () => {

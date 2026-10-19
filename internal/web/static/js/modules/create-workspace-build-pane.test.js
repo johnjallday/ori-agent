@@ -199,7 +199,8 @@ function loadPane() {
     'workspace-build-link',
     'workspace-build-link-remove',
     'workspace-build-review',
-    'workspace-build-prepare'
+    'workspace-build-prepare',
+    'workspace-build-defer'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -247,6 +248,38 @@ test('creation permission review is host-rendered, default-off and explicitly co
   assert.equal(events[1].type, 'workspace-build-prepare');
   pane.renderCreationReview(host, { review, busy: true });
   assert.ok(host.querySelectorAll('button').every(button => button.disabled));
+});
+
+test('accepted preparation can be explicitly deferred without offering ordinary recreation', () => {
+  const { pane, document, events } = loadPane();
+  const host = document.createElement('section');
+  const review = {
+    state: 'accepted',
+    review_revision: 'accepted-review',
+    workspace_id: 'reserved-workspace'
+  };
+  pane.renderCreationReview(host, { review, accepted: true });
+  assert.equal(host.querySelectorAll('a').length, 0, 'a reserved ID is not a page route');
+  pane.renderCreationReview(host, {
+    review: { ...review, folder_slug: 'canonical-folder' },
+    accepted: true
+  });
+  assert.equal(
+    host.querySelectorAll('a')[0].href,
+    '/workspaces/canonical-folder?panel=file-janitor'
+  );
+  assert.match(
+    host.textContent,
+    /Any existing workspace, saved access, Filed\/ and results are kept/
+  );
+  host
+    .querySelectorAll('button')
+    .find(button => button.textContent === 'Defer preparation')
+    .click();
+  assert.equal(events[0].type, 'workspace-build-defer');
+  pane.renderCreationReview(host, { review: { ...review, state: 'deferred' }, accepted: true });
+  assert.match(host.textContent, /Preparation deferred/);
+  assert.equal(host.querySelectorAll('button').length, 0);
 });
 
 test('the pane opens with the fixed opening line, the assistant, and a composer', () => {

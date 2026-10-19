@@ -52,7 +52,8 @@ type AssistantSetupCreationDescriptor struct {
 	ConfigDigest        string
 	// Exact edited build plans may create more than one profile. A per-name
 	// digest keeps every marker bound to that profile's effective configuration.
-	ProfileConfigDigests map[string]string
+	ProfileConfigDigests   map[string]string
+	AssignedProfileDigests map[string]string
 }
 
 type ReviewedTemplateCreationRequest struct {

@@ -305,7 +305,7 @@ func (s *Service) ApproveAutomation(workspaceID string) (Status, error) {
 			settings.AutomationApprovedAt = s.clock()
 		}
 		recordMonitoringDecision(settings)
-		settings.SetupPreparation = nil
+		invalidateSetupPreparation(settings)
 		settings.Paused = false
 		settings.LastAssistedAutomation = nil
 		return nil
@@ -324,7 +324,7 @@ func (s *Service) SetPaused(workspaceID string, paused bool) (Status, error) {
 			return err
 		}
 		settings.Paused = paused
-		settings.SetupPreparation = nil
+		invalidateSetupPreparation(settings)
 		settings.LastAssistedAutomation = nil
 		return nil
 	}); err != nil {
@@ -609,6 +609,11 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 	}
 	// These are the first external consequences of an assisted grant. Its
 	// operation/root marker is durable before either one can happen.
+	if operation != nil {
+		if err := s.validatePreparationBoundary(current, operation.PreparationID); err != nil {
+			return Status{}, err
+		}
+	}
 	if req.ExpectedRootIdentity != "" {
 		info, err := os.Stat(root) // #nosec G304 -- previously canonicalized reviewed root; identity rechecked before consequences
 		if err != nil || platformFileID(info) != req.ExpectedRootIdentity {
@@ -640,7 +645,7 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 			}
 		}
 		if operation == nil || operation.PreparationID == "" {
-			settings.SetupPreparation = nil
+			invalidateSetupPreparation(settings)
 		}
 		settings.WorkspaceID = workspaceID
 		settings.RootID = rootID
@@ -821,7 +826,7 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference str
 		if ws == nil {
 			return errors.New("workspace is nil")
 		}
-		if err := validatePreparationWorkspace(ws, preparation); err != nil {
+		if err := validatePreparationWorkspace(ws, preparation, root); err != nil {
 			return err
 		}
 		// Before linking a new folder, make sure the workspace's pre-existing
