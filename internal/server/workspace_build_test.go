@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -74,6 +77,61 @@ func TestWorkspaceBuildSetup_HomesSetupReadsABuildsFolderThroughItsBuild(t *test
 	if path, err := f.builder.personalAssistantFolderDigest.SubjectPath(ctx, "local", offer.ID); err != nil || path != canonical {
 		t.Fatalf("the build's own review reads its folder: %q %v (want %q)", path, err, canonical)
 	}
+}
+
+// fakeProviderSetup stands in for Home's reviewed-release service.
+type fakeProviderSetup struct {
+	preview personalassistanthttp.FolderHomeProviderPreview
+	err     error
+}
+
+func (f fakeProviderSetup) Preview(context.Context, string) (personalassistanthttp.FolderHomeProviderPreview, error) {
+	return f.preview, f.err
+}
+
+func (f fakeProviderSetup) Install(context.Context, string, string) (personalassistanthttp.FolderHomeProviderPreview, error) {
+	return f.preview, f.err
+}
+
+// A build installs its folder's Home plugin through Home's own reviewed-release
+// service; that service's refusals reach the build in the build's own terms.
+func TestBuildHomeProviders_SayHomesReviewedReleaseServiceInTheBuildsTerms(t *testing.T) {
+	ctx := context.Background()
+	release := personalassistanthttp.FolderHomeProviderPreview{
+		PluginID: "music-project-management", Version: "0.3.0", Source: "https://example.test/music@abc", Disclosure: "report",
+	}
+	got, err := buildHomeProviders{setup: fakeProviderSetup{preview: release}}.PreviewHomeProvider(ctx, "music_project_management")
+	if err != nil || got.PluginID != release.PluginID || got.Version != "0.3.0" || got.Source != release.Source || got.Disclosure != "report" {
+		t.Fatalf("preview = %+v %v", got, err)
+	}
+	forgotten := 0
+	forget := func() { forgotten++ }
+	for _, scenario := range []struct {
+		err  error
+		want error
+	}{
+		{personalassistant.ErrFolderWorkspaceRefused, sessionhttp.ErrBuildProviderChanged},
+		{fmt.Errorf("replace: %w", plugin.ErrHomeUpgradeRequired), sessionhttp.ErrBuildProviderHomeUpgrade},
+		{personalassistant.ErrFolderOutcomeUnavailable, sessionhttp.ErrBuildProviderUnavailable},
+	} {
+		_, err := buildHomeProviders{setup: fakeProviderSetup{err: scenario.err}, installed: forget}.InstallHomeProvider(ctx, "music_project_management", "0.3.0")
+		if !errors.Is(err, scenario.want) {
+			t.Fatalf("%v became %v, want %v", scenario.err, err, scenario.want)
+		}
+	}
+	if forgotten != 0 {
+		t.Fatal("a refused install keeps the cached plans")
+	}
+	// A real install drops the cached plans, so the next one says it is installed.
+	if _, err := (buildHomeProviders{setup: fakeProviderSetup{preview: release}, installed: forget}).InstallHomeProvider(ctx, "music_project_management", "0.3.0"); err != nil || forgotten != 1 {
+		t.Fatalf("install err=%v, cached plans forgotten %d times", err, forgotten)
+	}
+	host := &folderSetupHost{cache: map[string]cachedPlanFacts{"local|ori_reaper": {at: time.Now()}}}
+	host.forgetAll()
+	if len(host.cache) != 0 {
+		t.Fatalf("forgetAll left %v", host.cache)
+	}
+	(*folderSetupHost)(nil).forgetAll()
 }
 
 // musicHomeCarrierPlugin is the Music plugin as far as the catalog sees it:

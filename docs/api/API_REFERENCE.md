@@ -1835,7 +1835,8 @@ Besides the stored session, each response reads a few things fresh; none is stor
 - `plan` — a recognized single project's setup plan, exactly as Home's folder card plans the same folder: `lines` (`kind`, `name`, `detail`), `digest`, `needs` (`kind`, `name`, `state` = `ready` | `install` | `enable` | `update`), `home` (`name`, `status` `new` | `existing`), `placement`, `evidence`, `ready`; or `ready: false` with `unavailable` (a reason code such as `provider_not_installed`) and `unavailable_subject` (the plugin it waits on).
 - `folder_expires_at` — when the server stops holding the attached folder's pick.
 - `setup_run` — while Set it up runs or after it stopped: the run's `lines` with their `state`, `status`, `stop_reason`, and `entry_candidates` (project files to choose from).
-- `group_prerequisite` — when the drafted blueprint must be created inside a group and no ready plan sets it up: the form's own group-requirement projection (`state` `home_creation_review_required` with `home.proposed_name`, or `ready_grouped` with `home.workspace_id`/`home.name`, plus `summary` and `actions`).
+- `group_prerequisite` — when the drafted blueprint must be created inside a group and no ready plan sets it up (and no `install_provider` is offered: once installed, the plan sets the group up): the form's own group-requirement projection (`state` `home_creation_review_required` with `home.proposed_name`, or `ready_grouped` with `home.workspace_id`/`home.name`, plus `summary` and `actions`).
+- `install_provider` — `{ "name": "<Home provider name>" }` while the build is open and its plan waits on that plugin (`unavailable` `provider_not_installed` or `provider_unverified`) and the server can install it; the pane then offers Install (see below).
 
 A settled Set it up also stores `home_workspace_id` and `setup_receipt` on the session.
 
@@ -1854,6 +1855,16 @@ Returns `{ "session": … }` for one of this user's builds, read-only; the clien
 ```
 
 Runs the build's ready `plan` as Home's own setup journey on the build's held folder; the build does not post the wizard's create request. `plan_digest` must be the plan the user saw (a different current plan is `409` `plan_changed` with the fresh plan in the session); `entry_name` (optional) answers a stopped run's project-file question; a retry sends the run's own digest. The session becomes `preparing` with a `setup` claim and the response returns it; nothing is installed or created before this call. Refusals are `409` with `code` and an `error` to show: `no_plan`, `name` (the draft has no usable name), `review_pending` (another folder setup is waiting for an answer on Home), `declined`, `build_folder` (the pick is lost), `version`, `closed`. When the run finishes the build is `created` with `created_workspace_id`, `home_workspace_id` and `setup_receipt` ("Created <Home> and <workspace> inside it. Linked folder “<folder>”."), the draft's description, goal and extra teammate are applied to the workspace, and its `build_summary` is written from the plan lines and the receipt. A stopped run leaves the build open with its `setup_run.stop_reason`, ready for a retry.
+
+### Install the Folder's Home Plugin
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/home-provider`
+
+```json
+{ "version": 6, "confirm": false }
+```
+
+For a recognized folder whose `plan` waits on its Home's plugin. The request names only the build: the plugin is the one the folder's recognition names, and the release is the one Home's folder card would install, through the same reviewed-release service. A preview (`confirm` false, no `reviewed_version`) installs nothing and returns `{ "session": …, "home_provider": { "name", "plugin_id", "version", "source", "disclosure", "ready", "installed", "update", "installed_version", "development_copy" } }`, where `disclosure` is the plugin manager's trust report. A confirmation (`"confirm": true, "reviewed_version": "0.3.0"`) installs and enables exactly that release, adds the host line "Installed <name> <version>. Set it up can run the plan now." to the transcript, and returns the same shape with a fresh `plan`. Refusals carry `code` and an `error` to show: `400` for `reviewed_version` without `confirm`; `409` `no_provider` (the plan is not waiting on a plugin), `provider_changed` (the reviewed release is no longer the one the host would install; nothing was installed), `home_upgrade_required` (a Home is pinned to the installed release); `503` `provider_unavailable`; `version`, `closed`, `not_found` as elsewhere.
 
 ### Reviewed File Janitor Creation
 

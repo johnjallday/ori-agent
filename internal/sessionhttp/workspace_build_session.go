@@ -69,6 +69,10 @@ type WorkspaceBuildDeps struct {
 	// Links observes a link the user attaches in the pane. Nil leaves the
 	// pane without Add link.
 	Links WorkspaceBuildLinks
+	// HomeProvider installs the reviewed plugin a recognized folder's Home
+	// comes from, when its plan waits on it. Nil leaves the pane saying only
+	// which plugin to install.
+	HomeProvider WorkspaceBuildHomeProvider
 	// FileJanitor resolves the canonical compiled services at call time. The
 	// optional reviewed create path is unavailable without it; ordinary builds
 	// retain their existing no-grant creation behavior.
@@ -203,7 +207,9 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			h.postWorkspaceBuildLink(w, r, id)
 		case action == "setup" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildSetup(w, r, id)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup":
+		case action == "home-provider" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildHomeProvider(w, r, id)
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "home-provider":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -293,6 +299,13 @@ type buildSessionView struct {
 	// GroupPrerequisite is the group the drafted blueprint must be created
 	// inside (workspaceBuildGroupPrerequisite).
 	GroupPrerequisite *templateGroupRequirementPlan `json:"group_prerequisite,omitempty"`
+	// InstallProvider offers the Home's plugin the plan waits on, when this
+	// build can install it (POST …/home-provider).
+	InstallProvider *buildInstallProvider `json:"install_provider,omitempty"`
+}
+
+type buildInstallProvider struct {
+	Name string `json:"name"`
 }
 
 func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
@@ -308,7 +321,19 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
 			built.FolderExpiresAt = &expires
 		}
-		built.GroupPrerequisite = h.workspaceBuildGroupPrerequisite(ctx, userID, session, built.Plan)
+		if h.workspaceBuild != nil && h.workspaceBuild.HomeProvider != nil && session.Status == personalassistant.WorkspaceBuildOpen &&
+			buildWaitsOnProvider(built.Plan) && session.Folder != nil && session.Folder.Recognition.Recognized() &&
+			session.Folder.Recognition.HomeProviderKey != "" {
+			name := strings.TrimSpace(session.Folder.Recognition.HomeProviderName)
+			if name == "" {
+				name = strings.TrimSpace(built.Plan.UnavailableSubject)
+			}
+			built.InstallProvider = &buildInstallProvider{Name: name}
+		}
+		// A plan one install away sets its group up itself once installed.
+		if built.InstallProvider == nil {
+			built.GroupPrerequisite = h.workspaceBuildGroupPrerequisite(ctx, userID, session, built.Plan)
+		}
 		view = built
 	}
 	body := map[string]any{"session": view}
@@ -542,6 +567,8 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 	}
 	if plan != nil && plan.Ready && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
 		validation.plan = plan
+	} else if buildWaitsOnProvider(plan) && deps.HomeProvider != nil && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
+		validation.waitsOn = strings.TrimSpace(plan.UnavailableSubject)
 	}
 	outcome := h.askWorkspaceBuildModel(ctx, readiness, &staged, validation)
 
@@ -724,6 +751,7 @@ func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildRea
 		Agents:        validation.agents,
 		Groups:        validation.groups,
 		Plan:          validation.plan,
+		WaitsOn:       validation.waitsOn,
 	}
 	messages := buildMessages(session)
 	prompted := cloneBuildSession(*session)

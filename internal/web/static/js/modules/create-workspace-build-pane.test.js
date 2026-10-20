@@ -181,7 +181,7 @@ class FakeElement {
   }
 }
 
-function loadPane() {
+function loadPane(extras = {}) {
   const document = {
     activeElement: null,
     elements: new Map(),
@@ -204,7 +204,7 @@ function loadPane() {
   };
   class CustomEvent extends FakeEvent {}
   // Loaded before the pane, as in base.tmpl.
-  const context = vm.createContext({ window, document, CustomEvent });
+  const context = vm.createContext({ window, document, CustomEvent, ...extras });
   vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
   vm.runInContext(recognitionLinesSource, context, { filename: 'folder-recognition-lines.js' });
   vm.runInContext(source, context, { filename: 'pane.js' });
@@ -224,7 +224,10 @@ function loadPane() {
     'workspace-build-prepare',
     'workspace-build-defer',
     'workspace-build-setup',
-    'workspace-build-prepare-group'
+    'workspace-build-prepare-group',
+    'workspace-build-install-provider',
+    'workspace-build-install-provider-confirm',
+    'workspace-build-install-provider-cancel'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -732,10 +735,14 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-folder-remove');
 
-  // A pick in flight locks the attachments and says what is happening.
+  // A pick in flight locks the attachments and says what is happening; Send
+  // waits for it too, since a turn sent now would be dropped.
+  const send = root.querySelectorAll('button').find(button => button.type === 'submit');
+  assert.equal(send.disabled, false);
   pane.setFolderBusy(true, 'Looking at folder metadata locally…');
   assert.equal(controls.add.disabled, true);
   assert.equal(controls.remove.disabled, true);
+  assert.equal(send.disabled, true);
   assert.equal(controls.summary.textContent, 'Looking at folder metadata locally…');
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-folder-remove'); // the earlier one; nothing new
@@ -744,6 +751,7 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   assert.equal(events.length, count);
   pane.setFolderBusy(false, 'No folder was chosen. Your draft is unchanged.');
   assert.equal(controls.add.disabled, false);
+  assert.equal(send.disabled, false);
   assert.equal(controls.summary.textContent, 'No folder was chosen. Your draft is unchanged.');
 
   // A new folder starts clean; no folder clears the chip.
@@ -1018,6 +1026,113 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
   assert.equal(control('folder-again').hidden, false);
   control('folder-again').click();
   same(events.at(-1), { type: 'workspace-build-folder-open', detail: {} });
+});
+
+// PRD user story 2: a plan waiting on its Home's plugin offers the install,
+// discloses the reviewed release first, and installs only on Install and
+// continue.
+test('a plan waiting on its Home’s plugin offers the reviewed install, disclosed before anything is installed', () => {
+  const drawn = [];
+  const { pane, root, events, document } = loadPane({
+    PluginLifecycle: {
+      renderTrustReport: report => {
+        drawn.push(report);
+        const node = new FakeElement('div', null);
+        node.textContent = 'Adds these Homes: Music Production Home';
+        return node;
+      }
+    }
+  });
+  pane.mount({ assistant, folders: true });
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  const byClass = name => root.querySelectorAll('p').find(node => node.classList.contains(name));
+  const waiting = {
+    status: 'open',
+    transcript: [],
+    draft: {},
+    folder: { observation },
+    plan: {
+      ready: false,
+      lines: [],
+      unavailable: 'provider_not_installed',
+      unavailable_subject: 'Music Project Management'
+    }
+  };
+
+  // Without the server's offer there is nothing to press.
+  const offer = () =>
+    root
+      .querySelectorAll('div')
+      .find(node => node.classList.contains('workspace-build-plan__install'));
+  pane.applySession(waiting);
+  assert.equal(offer().hidden, true);
+
+  pane.applySession({ ...waiting, install_provider: { name: 'Music Project Management' } });
+  assert.equal(control('install-provider').textContent, 'Install Music Project Management');
+  control('install-provider').click();
+  same(events.at(-1), { type: 'workspace-build-install-provider', detail: {} });
+
+  pane.setProviderInstall({ phase: 'previewing' });
+  assert.equal(control('install-provider').disabled, true);
+  assert.equal(
+    byClass('workspace-build-plan__install-status').textContent,
+    'Checking the reviewed release… Nothing is installed yet.'
+  );
+
+  const preview = {
+    version: '0.3.0',
+    source: 'https://github.com/example/music@abc',
+    disclosure: { name: 'music-project-management' }
+  };
+  const planBlock = () =>
+    root.querySelectorAll('section').find(node => node.classList.contains('workspace-build-plan'));
+  const reviewing = () => planBlock().classList.contains('workspace-build-plan--install-review');
+  assert.equal(reviewing(), false);
+  pane.setProviderInstall({ phase: 'review', preview });
+  assert.equal(reviewing(), true, 'the review stands in for the conversation');
+  assert.equal(document.activeElement, control('install-provider-confirm'), 'focus moves into it');
+  assert.equal(control('install-provider').hidden, true);
+  assert.equal(
+    byClass('workspace-build-plan__install-title').textContent,
+    'Install Music Project Management 0.3.0?'
+  );
+  assert.equal(
+    byClass('workspace-build-plan__install-source').textContent,
+    'From https://github.com/example/music@abc'
+  );
+  assert.deepEqual(drawn, [preview.disclosure], 'the Plugins page’s own trust report, drawn once');
+  control('install-provider-confirm').click();
+  same(events.at(-1), { type: 'workspace-build-install-provider-confirm', detail: {} });
+
+  pane.setProviderInstall({ phase: 'installing', preview });
+  assert.equal(control('install-provider-confirm').disabled, true);
+  assert.equal(control('install-provider-cancel').hidden, true);
+  assert.equal(
+    byClass('workspace-build-plan__install-status').textContent,
+    'Installing Music Project Management… Then Ori reads the plan again.'
+  );
+
+  // A refusal is said under it; the offer stays.
+  pane.setProviderInstall({
+    note: 'Music Project Management can’t be installed right now. Nothing was changed.'
+  });
+  assert.equal(control('install-provider').hidden, false);
+  assert.equal(reviewing(), false);
+  assert.equal(document.activeElement, control('install-provider'), 'focus returns to Install');
+  assert.match(byClass('workspace-build-plan__install-status').textContent, /can’t be installed/);
+
+  // Once the plan is ready the offer is gone and Set it up is there.
+  pane.applySession({
+    ...waiting,
+    draft: { name: 'Album-1' },
+    plan: {
+      ready: true,
+      digest: 'd',
+      lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }]
+    }
+  });
+  assert.equal(control('setup').hidden, false);
 });
 
 test('a blueprint’s group is said before Create, with Prepare the group first until it exists', () => {

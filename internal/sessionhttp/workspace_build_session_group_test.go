@@ -94,6 +94,35 @@ func TestWorkspaceBuildPrompt_TheGroupIsPreparedFirstNotSetUpByTheWorkspace(t *t
 	}
 }
 
+// A recognized folder one install away from its plan does not also ask for the
+// group: once its Home's plugin is installed, the plan sets the group up.
+func TestWorkspaceBuildGroupPrerequisite_WaitsWhileTheInstallIsOffered(t *testing.T) {
+	template := groupedPlanTemplate(projecttemplates.GroupPolicyRequired)
+	handler, _, cleanup := newPolicyHandler(t, &template)
+	t.Cleanup(cleanup)
+	installPlanAgentStore(t, handler)
+	f := newBuildFixtureOn(t, handler, true, neutralProjectReply)
+	f.catalog = append(f.catalog, readyEntry(template))
+	f.withFolders(t, &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: waitingPlan()})
+	f.handler.workspaceBuild.HomeProvider = &fakeHomeProvider{release: "0.3.0"}
+
+	build := f.start(t)
+	_, attached := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
+	status, body := f.turn(t, sessionOf(t, attached), map[string]any{"text": "notes from the field"})
+	if status != http.StatusOK || sessionOf(t, body).NeedsHome == nil {
+		t.Fatalf("turn %d: %v", status, body["session"])
+	}
+	if installProviderOf(body) == nil || groupPrerequisiteOf(t, body) != nil {
+		t.Fatalf("while the install is offered, the group waits: %v", body["session"])
+	}
+	// Without an install to offer, the group is said as before.
+	f.handler.workspaceBuild.HomeProvider = nil
+	_, body = f.do(t, http.MethodGet, "/api/workspaces/build-sessions/"+build.ID, nil)
+	if groupPrerequisiteOf(t, body) == nil {
+		t.Fatalf("with no install offered the group prerequisite is said: %v", body["session"])
+	}
+}
+
 func TestWorkspaceBuildGroupPrerequisite_AbsentWhenTheDraftNeedsNoGroup(t *testing.T) {
 	f := newBuildFixture(t, true, describeReply)
 	build := f.start(t)

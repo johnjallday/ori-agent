@@ -184,6 +184,9 @@ type buildPromptInput struct {
 	// Plan is the host's ready setup plan for a recognized folder, when there
 	// is one: the model narrates it and sets only what it leaves open.
 	Plan *personalassistant.BuildFolderPlan
+	// WaitsOn names the plugin a recognized folder's plan waits on, which the
+	// form offers to install; "" when there is nothing to install.
+	WaitsOn string
 }
 
 type buildSavedAgent struct {
@@ -423,7 +426,7 @@ func buildSystemPrompt(input buildPromptInput) string {
 			fmt.Fprintf(&b, "<folder_observation>%s</folder_observation>\n\n", data)
 		}
 		if recognition != nil {
-			b.WriteString(buildRecognitionInstructions(*recognition, suggested, input.Plan != nil))
+			b.WriteString(buildRecognitionInstructions(*recognition, suggested, input.Plan != nil, input.WaitsOn))
 			if recognition.Verdict != personalassistant.BuildFolderUnrecognized {
 				if data, err := buildRecognitionPromptJSON(*recognition, suggested); err == nil {
 					fmt.Fprintf(&b, "<folder_recognition>%s</folder_recognition>\n\n", data)
@@ -577,7 +580,7 @@ func buildRecognitionPromptJSON(recognition personalassistant.BuildFolderRecogni
 // buildRecognitionInstructions says how to use what Ori recognized. The Home
 // a recognized project lives in is Ori's to set up: it is not a blueprint and
 // is never chosen as one, and nothing is said to exist before it does.
-func buildRecognitionInstructions(recognition personalassistant.BuildFolderRecognition, suggested string, planned bool) string {
+func buildRecognitionInstructions(recognition personalassistant.BuildFolderRecognition, suggested string, planned bool, waitsOn string) string {
 	switch recognition.Verdict {
 	case personalassistant.BuildFolderProject:
 		var b strings.Builder
@@ -585,6 +588,13 @@ func buildRecognitionInstructions(recognition personalassistant.BuildFolderRecog
 		switch {
 		case planned:
 			b.WriteString("Its setup plan fixes the blueprint and the group; you do not choose them. ")
+		case waitsOn != "":
+			// The folder's own setup is one install away: settling on another
+			// blueprint would throw it away.
+			b.WriteString("Its setup waits on the " + waitsOn + " plugin, which is not installed here. The form offers Install " + waitsOn +
+				": it shows what the plugin adds before anything is installed, and then Set it up runs the whole plan. Say that in one sentence. " +
+				"Do not choose Blank or another blueprint for this folder unless the user asks for one, and never offer the install as a choice of your own. " +
+				"Until it is installed nothing is ready: do not say it is ready to create, and do not ask about its group, which the plan sets up. ")
 		case suggested != "":
 			b.WriteString("Choose suggested_blueprint_id as the blueprint unless the user asks for something else. ")
 		case recognition.BlueprintLabel != "":

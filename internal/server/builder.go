@@ -376,6 +376,9 @@ type ServerBuilder struct {
 	// personalAssistantFolderDigest is "show me a folder": chooser, scan,
 	// offers, and decisions over the HQ sidecar.
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
+	// folderSetupHost plans and runs the digest's one-card setups; its short
+	// plan cache is dropped when a build installs a plugin a plan depends on.
+	folderSetupHost *folderSetupHost
 	// workspaceBuildStore holds "Build with your assistant" sessions over the
 	// same HQ sidecar directory.
 	workspaceBuildStore *personalassistant.WorkspaceBuildStore

@@ -129,6 +129,9 @@ type buildValidation struct {
 	// plan is the host's ready setup plan for a recognized folder. With one,
 	// the reply may set only what plannedBuildPatch keeps.
 	plan *personalassistant.BuildFolderPlan
+	// waitsOn names the Home's plugin a recognized folder's plan waits on,
+	// when the build can install it (WorkspaceBuildDeps.HomeProvider).
+	waitsOn string
 }
 
 // lookup finds a catalog blueprint by id, including a plugin's namespaced id

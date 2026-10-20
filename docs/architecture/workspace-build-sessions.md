@@ -165,6 +165,18 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   becomes **Plan so far**. With a ready plan the model may set only the name, description, goal
   and one extra saved teammate; everything else is refused as `set by the plan`, and the prompt
   carries `<setup_plan>` instead of the catalog.
+- **A missing Home plugin**: a plan that waits on its Home's plugin (`provider_not_installed`,
+  `provider_unverified`) sets `install_provider` on the response, and the pane offers
+  **Install <plugin>** under the plan. `POST …/{id}/home-provider {version}` previews the release
+  Home's folder card would install (version, source, the plugin manager's trust report), which
+  stands in for the conversation and the composer while it is open; **Install and continue** sends `{confirm: true, reviewed_version}` and installs exactly that release
+  through the same reviewed-release service (`buildHomeProviders` over
+  `folderHomeProviderSetup`). The cached plan facts are dropped (`folderSetupHost.forgetAll`), so
+  the response's plan is ready and says the plugin is installed; the transcript gets "Installed
+  <plugin> <version>. Set it up can run the plan now." The client names only the build. While the
+  plan waits, the prompt tells the model the form offers the install, not to choose Blank or
+  another blueprint unless the user asks, and not to ask about the group, and no
+  `group_prerequisite` is sent (the plan sets the group up once installed).
 - **Review in place**: "Review or edit draft" opens the plan review inside the dialog (the
   lines read-only, name and description editable, "Why this suggestion?"), not the wizard. While
   it is open it stands in for the conversation, with its own Set it up.
@@ -196,7 +208,8 @@ A blueprint whose group policy is `required` sets `needs_home`; the draft bar na
 apart from the workspace (`Group: <label> (new|existing) · Workspace: <name> · …`). Every response
 also carries `group_prerequisite`: the form's own group-requirement projection
 (`grouprequirements.Evaluate` through `buildTemplateGroupRequirementPlan`), only while the build
-is open and when no ready plan sets the group up itself. The pane says it before Create:
+is open and when no ready plan sets the group up itself, nor one waiting on the Home plugin the
+pane offers to install. The pane says it before Create:
 
 - `home_creation_review_required`: "This blueprint needs <Home> first. Ori prepares the group
   with your confirmation, then creates the workspace inside it." and **Prepare the group first**,

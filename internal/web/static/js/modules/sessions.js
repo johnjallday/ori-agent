@@ -11674,6 +11674,7 @@ const sessionManager = {
       detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body),
       read: id => call('GET', `${base}/${encodeURIComponent(String(id || ''))}`),
       setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
+      homeProvider: (id, body) => call('POST', sessionURL(id, 'home-provider'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
       janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
       janitorDefer: (id, body) => call('POST', sessionURL(id, 'janitor-defer'), body)
@@ -11709,6 +11710,15 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-prepare-group', () => {
       void this.prepareWorkspaceBuildGroup();
+    });
+    modal.addEventListener('workspace-build-install-provider', () => {
+      void this.previewWorkspaceBuildProvider();
+    });
+    modal.addEventListener('workspace-build-install-provider-confirm', () => {
+      void this.confirmWorkspaceBuildProvider();
+    });
+    modal.addEventListener('workspace-build-install-provider-cancel', () => {
+      this.cancelWorkspaceBuildProvider();
     });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
@@ -13753,6 +13763,98 @@ const sessionManager = {
         }
       }
     }
+  },
+
+  // ----- The Home's plugin a recognized folder's plan waits on -----
+  //
+  // Install <plugin> asks the server for the reviewed release and its trust
+  // report; nothing is installed until Install and continue, which installs
+  // exactly that release. The server then reads the plan again, so the plan
+  // and Set it up come back with the session.
+
+  workspaceBuildProviderError(result, fallback) {
+    const message = result?.body?.error;
+    return (typeof message === 'string' && message.trim()) || fallback;
+  },
+
+  async previewWorkspaceBuildProvider() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || build.busy || build.providerBusy) return;
+    build.providerBusy = true;
+    build.providerPreview = null;
+    pane.setProviderInstall?.({ phase: 'previewing' });
+    let result;
+    try {
+      result = await this.workspaceBuildApi().homeProvider(build.session.id, {
+        version: Number(build.session.version) || 0,
+        confirm: false
+      });
+    } catch (_) {
+      result = { ok: false, status: 0, body: {} };
+    }
+    if (this.workspaceBuild !== build) return;
+    build.providerBusy = false;
+    if (result?.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+    const preview = result?.ok ? result.body?.home_provider : null;
+    if (!preview) {
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+      }
+      pane.setProviderInstall?.({
+        note: this.workspaceBuildProviderError(
+          result,
+          'The plugin’s reviewed release could not be read. Nothing was installed.'
+        )
+      });
+      return;
+    }
+    build.providerPreview = preview;
+    pane.setProviderInstall?.({ phase: 'review', preview });
+  },
+
+  async confirmWorkspaceBuildProvider() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    const preview = build?.providerPreview;
+    if (!build?.session || !pane || !preview || build.busy || build.providerBusy) return;
+    build.providerBusy = true;
+    pane.setProviderInstall?.({ phase: 'installing', preview });
+    let result;
+    try {
+      // The release the user reviewed, and only that one.
+      result = await this.workspaceBuildApi().homeProvider(build.session.id, {
+        version: Number(build.session.version) || 0,
+        confirm: true,
+        reviewed_version: String(preview.version || '')
+      });
+    } catch (_) {
+      result = { ok: false, status: 0, body: {} };
+    }
+    if (this.workspaceBuild !== build) return;
+    build.providerBusy = false;
+    build.providerPreview = null;
+    if (result?.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+    if (!result?.ok) {
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+      }
+      pane.setProviderInstall?.({
+        note: this.workspaceBuildProviderError(
+          result,
+          'The plugin could not be installed. Nothing was changed.'
+        )
+      });
+      return;
+    }
+    pane.setProviderInstall?.({});
+  },
+
+  cancelWorkspaceBuildProvider() {
+    const build = this.workspaceBuild;
+    if (!build || build.providerBusy) return;
+    build.providerPreview = null;
+    this.workspaceBuildPane()?.setProviderInstall?.({ note: 'Nothing was installed.' });
   },
 
   // setUpWorkspaceBuild is Set it up: the plan the user reviewed runs as Home's

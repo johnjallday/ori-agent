@@ -6469,6 +6469,89 @@ function plannedBuild() {
   };
 }
 
+test('Install <plugin> previews the reviewed release, then installs exactly that one', async () => {
+  const manager = loadSessionManager();
+  const states = [];
+  const adopted = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    setProviderInstall: next => states.push(JSON.parse(JSON.stringify(next))),
+    applySession() {},
+    showLine() {}
+  });
+  manager.adoptWorkspaceBuildSession = session => {
+    adopted.push(session.version);
+    manager.workspaceBuild.session = session;
+  };
+  manager.workspaceBuild = { session: { id: 'b1', version: 4, status: 'open' } };
+  const sent = [];
+  const preview = {
+    name: 'Music Project Management',
+    version: '0.3.0',
+    source: 's',
+    disclosure: {}
+  };
+  manager.workspaceBuildTransport = {
+    homeProvider: async (id, body) => {
+      sent.push([id, body]);
+      if (!body.confirm) {
+        return {
+          ok: true,
+          status: 200,
+          body: { session: { id, version: 4 }, home_provider: preview }
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: { session: { id, version: 5, plan: { ready: true } }, home_provider: preview }
+      };
+    }
+  };
+
+  await manager.previewWorkspaceBuildProvider();
+  assert.deepEqual(states, [{ phase: 'previewing' }, { phase: 'review', preview }]);
+  await manager.confirmWorkspaceBuildProvider();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    ['b1', { version: 4, confirm: false }],
+    ['b1', { version: 4, confirm: true, reviewed_version: '0.3.0' }]
+  ]);
+  assert.deepEqual(states.slice(2), [{ phase: 'installing', preview }, {}]);
+  assert.deepEqual(adopted, [4, 5]);
+  // A second confirm has no reviewed release left to install.
+  await manager.confirmWorkspaceBuildProvider();
+  assert.equal(sent.length, 2);
+});
+
+test('a refused install says why, and Cancel installs nothing', async () => {
+  const manager = loadSessionManager();
+  const states = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    setProviderInstall: next => states.push(JSON.parse(JSON.stringify(next)))
+  });
+  manager.adoptWorkspaceBuildSession = () => {};
+  manager.workspaceBuild = { session: { id: 'b1', version: 4, status: 'open' } };
+  manager.workspaceBuildTransport = {
+    homeProvider: async () => ({
+      ok: false,
+      status: 503,
+      body: {
+        code: 'provider_unavailable',
+        error: 'Music Project Management can’t be installed right now. Nothing was changed.'
+      }
+    })
+  };
+  await manager.previewWorkspaceBuildProvider();
+  assert.deepEqual(states.at(-1), {
+    note: 'Music Project Management can’t be installed right now. Nothing was changed.'
+  });
+  manager.workspaceBuild.providerPreview = { version: '0.3.0' };
+  manager.cancelWorkspaceBuildProvider();
+  assert.equal(manager.workspaceBuild.providerPreview, null);
+  assert.deepEqual(states.at(-1), { note: 'Nothing was installed.' });
+});
+
 test('an open plan review stands in for the conversation, with its own Set it up', async () => {
   const elements = planReviewElements();
   const classes = new Set();

@@ -341,6 +341,17 @@ func (h *folderSetupHost) forget(userID string, entry reviewedintegration.Entry)
 	h.mu.Unlock()
 }
 
+// forgetAll drops every cached plan's facts: an installed plugin changes them
+// for every plan that names it.
+func (h *folderSetupHost) forgetAll() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.cache = nil
+	h.mu.Unlock()
+}
+
 // Plan lists every consequence of Set up for the offer, in the order the card
 // shows them. Every string is plain text and names no path.
 func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.FolderSetupRequest) (personalassistant.FolderSetupPlan, error) {

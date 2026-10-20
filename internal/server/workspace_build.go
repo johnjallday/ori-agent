@@ -90,6 +90,13 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 	// every call. Without a folder digest there is no chooser to offer.
 	if b.personalAssistantFolderDigest != nil {
 		deps.Folders = buildFolderObservations{builder: b}
+		// A recognized folder's Home plugin installs through the same
+		// reviewed-release service Home's folder card uses.
+		deps.HomeProvider = buildHomeProviders{
+			setup: folderHomeProviderSetup{builder: b},
+			// The plan the build reads next must say the plugin is installed.
+			installed: func() { b.folderSetupHost.forgetAll() },
+		}
 	}
 	if b.linkObserver == nil {
 		b.linkObserver = sharedLinkObserver()

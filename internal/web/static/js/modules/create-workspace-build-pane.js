@@ -97,6 +97,17 @@
       }
       return 'Set it up isn’t available for this folder right now. The form still works.';
     },
+    // The Home's plugin a recognized folder's plan waits on, installed from
+    // the reviewed release the host discloses first.
+    installProvider: name => `Install ${name}`,
+    installChecking: 'Checking the reviewed release… Nothing is installed yet.',
+    installReview: (name, version) => `Install ${name}${version ? ` ${version}` : ''}?`,
+    installSource: source => `From ${source}`,
+    installDevelopment: 'Local development copy — not release-verified.',
+    installAdds: 'What it adds to Ori:',
+    installConfirm: 'Install and continue',
+    installCancel: 'Cancel',
+    installing: name => `Installing ${name}… Then Ori reads the plan again.`,
     // The group a drafted blueprint is created inside, from the server's
     // group_prerequisite (grouprequirements.Evaluate).
     groupNeeded: name =>
@@ -345,6 +356,8 @@
     groupBusy: false,
     groupNote: '',
     groupHint: null,
+    // Installing the Home's plugin a plan waits on (setProviderInstall).
+    providerInstall: { phase: 'idle', preview: null, note: '', drawn: false },
     listeners: [],
     els: {}
   };
@@ -446,7 +459,9 @@
     els.status.textContent = view.status;
     els.status.classList.toggle('is-busy', view.busy);
     els.input.disabled = view.composerDisabled;
-    els.send.disabled = view.composerDisabled;
+    // A turn waits for an attachment in flight (submitComposer refuses it), so
+    // Send says so instead of dropping the press.
+    els.send.disabled = view.composerDisabled || state.folderBusy || state.linkBusy;
     state.root.classList.toggle('is-busy', view.busy);
     renderFolder(view);
     renderGroup();
@@ -594,6 +609,7 @@
     const evidence = lines.length && plan ? text(plan.evidence) : '';
     els.planEvidence.textContent = evidence;
     els.planWhy.hidden = !evidence;
+    renderInstall(lines.length > 0);
     renderSetupControls(lines.length > 0);
   }
 
@@ -705,9 +721,11 @@
     actions.appendChild(folderAgain);
     const planExpiry = createElement('p', 'workspace-build-plan__expiry');
     planExpiry.hidden = true;
+    const installEls = renderInstallBlock();
     plan.appendChild(title);
     plan.appendChild(planLines);
     plan.appendChild(planNote);
+    plan.appendChild(installEls.install);
     plan.appendChild(planWhy);
     plan.appendChild(planStatus);
     plan.appendChild(actions);
@@ -723,8 +741,157 @@
       retryButton,
       setupEntries,
       folderAgain,
-      planExpiry
+      planExpiry,
+      ...installEls
     };
+  }
+
+  // renderInstallBlock builds the install offer for the Home's plugin a plan
+  // waits on: the button, then the reviewed release with its trust report and
+  // an explicit confirmation. Hidden until the server offers it.
+  function renderInstallBlock() {
+    const install = createElement('div', 'workspace-build-plan__install');
+    install.hidden = true;
+    const installButton = createElement('button', 'modern-btn modern-btn-primary', '');
+    installButton.type = 'button';
+    installButton.dataset.buildControl = 'install-provider';
+    const installReview = createElement('div', 'workspace-build-plan__install-review');
+    installReview.hidden = true;
+    const installTitle = createElement('p', 'workspace-build-plan__install-title');
+    const installSource = createElement('p', 'workspace-build-plan__install-source');
+    const installDevelopment = createElement(
+      'p',
+      'workspace-build-plan__install-development',
+      COPY.installDevelopment
+    );
+    installDevelopment.hidden = true;
+    const installAdds = createElement('p', 'workspace-build-plan__install-adds', COPY.installAdds);
+    const installTrust = createElement('div', 'workspace-build-plan__install-trust');
+    const installActions = createElement('div', 'workspace-build-plan__actions');
+    const installConfirm = createElement(
+      'button',
+      'modern-btn modern-btn-primary',
+      COPY.installConfirm
+    );
+    installConfirm.type = 'button';
+    installConfirm.dataset.buildControl = 'install-provider-confirm';
+    const installCancel = createElement(
+      'button',
+      'modern-btn modern-btn-secondary',
+      COPY.installCancel
+    );
+    installCancel.type = 'button';
+    installCancel.dataset.buildControl = 'install-provider-cancel';
+    installActions.appendChild(installConfirm);
+    installActions.appendChild(installCancel);
+    installReview.appendChild(installTitle);
+    installReview.appendChild(installSource);
+    installReview.appendChild(installDevelopment);
+    installReview.appendChild(installAdds);
+    installReview.appendChild(installTrust);
+    installReview.appendChild(installActions);
+    const installStatus = createElement('p', 'workspace-build-plan__install-status');
+    installStatus.setAttribute('role', 'status');
+    installStatus.setAttribute('aria-live', 'polite');
+    installStatus.hidden = true;
+    install.appendChild(installButton);
+    install.appendChild(installReview);
+    install.appendChild(installStatus);
+    return {
+      install,
+      installButton,
+      installReview,
+      installTitle,
+      installSource,
+      installDevelopment,
+      installAdds,
+      installTrust,
+      installConfirm,
+      installCancel,
+      installStatus
+    };
+  }
+
+  // renderInstall shows the install offer while the server makes one
+  // (session.install_provider): Install <plugin>, then — once the controller
+  // has the reviewed release — what it is, where it comes from and what it
+  // adds, with Install and continue. Nothing is installed before that press.
+  function renderInstall(hasLines) {
+    const { els } = state;
+    if (!els.install) return;
+    const session = state.session || {};
+    const name = text(session.install_provider?.name);
+    const offered = Boolean(name) && session.status === 'open' && !hasLines;
+    els.install.hidden = !offered;
+    const install = state.providerInstall;
+    const preview =
+      offered && (install.phase === 'review' || install.phase === 'installing')
+        ? install.preview
+        : null;
+    // The review takes more of the pane (workspace-construct.css).
+    els.plan.classList.toggle('workspace-build-plan--install-review', Boolean(preview));
+    if (!offered) return;
+    const working = install.phase === 'previewing' || install.phase === 'installing';
+    els.installButton.textContent = COPY.installProvider(name);
+    els.installButton.hidden = install.phase === 'review' || install.phase === 'installing';
+    els.installButton.disabled = Boolean(state.busy) || working;
+    els.installReview.hidden = !preview;
+    if (preview) {
+      els.installTitle.textContent = COPY.installReview(name, text(preview.version));
+      const source = text(preview.source);
+      els.installSource.textContent = source ? COPY.installSource(source) : '';
+      els.installSource.hidden = !source;
+      els.installDevelopment.hidden = preview.development_copy !== true;
+      // The disclosure is drawn once per preview, in full, by the Plugins
+      // page's own renderer: the user confirms against exactly that.
+      if (!install.drawn) {
+        els.installTrust.textContent = '';
+        const draw = globalThis.PluginLifecycle?.renderTrustReport;
+        if (typeof draw === 'function' && preview.disclosure) {
+          els.installTrust.appendChild(draw(preview.disclosure));
+        }
+        install.drawn = true;
+      }
+      els.installAdds.hidden = !preview.disclosure;
+      els.installConfirm.disabled = Boolean(state.busy) || working;
+      els.installCancel.hidden = install.phase === 'installing';
+    }
+    const status =
+      install.phase === 'previewing'
+        ? COPY.installChecking
+        : install.phase === 'installing'
+          ? COPY.installing(name)
+          : install.note;
+    els.installStatus.textContent = status;
+    els.installStatus.hidden = !status;
+  }
+
+  // setProviderInstall is the controller's report of where the install
+  // stands: idle (with a note when something stopped it), previewing, review
+  // (with the reviewed release), or installing.
+  function setProviderInstall(next = {}) {
+    const before = state.providerInstall?.phase;
+    state.providerInstall = {
+      phase: ['previewing', 'review', 'installing'].includes(next.phase) ? next.phase : 'idle',
+      preview: next.preview && typeof next.preview === 'object' ? next.preview : null,
+      note: text(next.note),
+      drawn: false
+    };
+    render();
+    // The review stands in for the conversation and the composer, so focus
+    // moves into it; leaving it returns focus to Install, or to Set it up once
+    // the plan is ready.
+    const { els } = state;
+    const phase = state.providerInstall.phase;
+    if (phase === 'review' && before !== 'review') {
+      els.installConfirm?.focus();
+    } else if (phase === 'idle' && (before === 'review' || before === 'installing')) {
+      const install = els.install && !els.install.hidden ? els.installButton : null;
+      const target = [els.setupButton, install, els.input].find(
+        node => node && !node.hidden && !node.disabled
+      );
+      target?.focus();
+    }
   }
 
   // groupPrerequisiteView is what the pane says about the group a drafted
@@ -933,6 +1100,7 @@
     state.groupBusy = false;
     state.groupNote = '';
     state.groupHint = null;
+    state.providerInstall = { phase: 'idle', preview: null, note: '', drawn: false };
 
     root.textContent = '';
     root.appendChild(renderHeader());
@@ -1034,6 +1202,12 @@
           emit('workspace-build-folder-open');
         } else if (kind === 'prepare-group' && !control.disabled && !state.groupBusy) {
           emit('workspace-build-prepare-group');
+        } else if (kind === 'install-provider' && !control.disabled) {
+          emit('workspace-build-install-provider');
+        } else if (kind === 'install-provider-confirm' && !control.disabled) {
+          emit('workspace-build-install-provider-confirm');
+        } else if (kind === 'install-provider-cancel') {
+          emit('workspace-build-install-provider-cancel');
         }
         return;
       }
@@ -1667,6 +1841,7 @@
     state.groupBusy = false;
     state.groupNote = '';
     state.groupHint = null;
+    state.providerInstall = { phase: 'idle', preview: null, note: '', drawn: false };
   }
 
   window.WorkspaceBuildPane = {
@@ -1696,6 +1871,7 @@
     linkAttachedDone,
     setGroupBusy,
     noteGroupPrerequisite,
+    setProviderInstall,
     groupPrerequisiteView,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
