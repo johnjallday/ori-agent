@@ -868,6 +868,16 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
     items[1].textContent,
     '•Creates Home “Music Production Home”Your later projects of this kind join it.'
   );
+  // The checklist leads each line with its kind's icon, hidden from assistive tech.
+  assert.deepEqual(
+    items.map(item => item.children[0].className),
+    ['pa-folder__plan-kind', 'pa-folder__plan-kind']
+  );
+  assert.deepEqual(
+    items.map(item => item.children[0].children[0].className),
+    ['bi bi-box-seam', 'bi bi-house-door']
+  );
+  assert.equal(items[1].children[0].getAttribute('aria-hidden'), 'true');
   const why = root.querySelectorAll('details')[0];
   assert.equal(why.hidden, false);
   assert.equal(why.textContent, 'Why this suggestion?Has a REAPER session, edited yesterday');
@@ -909,6 +919,160 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
 
   pane.applySession({ transcript: [], folder: { observation } });
   assert.equal(block().hidden, true);
+});
+
+// The sketch above the lines: the Home and the workspace Set it up leaves
+// behind, from the plan's facts and the kinds of its lines, never the model.
+test('a ready plan is sketched as its Home and workspace, with the parts the lines promise', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const sketch = () =>
+    root
+      .querySelectorAll('div')
+      .find(node => node.classList.contains('workspace-build-plan__sketch'));
+  const byClass = (tag, name) =>
+    root.querySelectorAll(tag).filter(node => node.classList.contains(name));
+  const lines = [
+    { kind: 'integration', name: 'REAPER integration is installed' },
+    { kind: 'home', name: 'Creates Home “Music Production Home”' },
+    { kind: 'workspace', name: 'Creates a REAPER song project workspace named Album-2' },
+    { kind: 'folder', name: 'Links Album-2 where it is', detail: 'Nothing is moved or copied.' },
+    { kind: 'mode', name: 'Uses File-only mode' },
+    { kind: 'agents', name: 'Adds the agents this blueprint requires' },
+    { kind: 'task', name: 'Queues a first read-only task for you to start' }
+  ];
+  const song = {
+    ...observation,
+    projects: [{ id: 'song-1', name: 'Album-2' }]
+  };
+  const folder = { observation: song, recognition: { verdict: 'project', candidate_id: 'song-1' } };
+
+  // Nothing to sketch without a ready plan.
+  assert.equal(sketch().hidden, true);
+  pane.applySession({
+    transcript: [],
+    folder,
+    plan: { ready: false, lines: [], unavailable: 'plan_unavailable' }
+  });
+  assert.equal(sketch().hidden, true);
+
+  // A new Home holds the workspace, which is named after the recognized
+  // project while the draft has no name; its parts come from the lines. The
+  // integration the plan reports as ready is checked off before Set it up.
+  pane.applySession({
+    transcript: [],
+    draft: {},
+    folder,
+    plan: {
+      ready: true,
+      digest: 'd',
+      home: { name: 'Music Production Home', status: 'new' },
+      needs: [{ kind: 'integration', name: 'REAPER integration', state: 'ready' }],
+      lines
+    }
+  });
+  assert.equal(sketch().hidden, false);
+  assert.equal(sketch().getAttribute('aria-hidden'), 'true', 'it says nothing the lines do not');
+  assert.equal(byClass('p', 'workspace-build-plan__kicker')[0].textContent, 'You’ll get');
+  assert.equal(
+    byClass('p', 'workspace-build-plan__kicker')[1].textContent,
+    'Ori will · 7 steps · 1 already done'
+  );
+  assert.equal(byClass('p', 'workspace-build-plan__kicker')[1].hidden, false);
+  const items = root.querySelectorAll('li').filter(node => node.dataset.kind);
+  assert.deepEqual(
+    items.map(item => [item.dataset.kind, item.dataset.state]),
+    [
+      ['integration', 'already'],
+      ['home', undefined],
+      ['workspace', undefined],
+      ['folder', undefined],
+      ['mode', undefined],
+      ['agents', undefined],
+      ['task', undefined]
+    ]
+  );
+  assert.equal(items[0].textContent, '✓REAPER integration is installed — Already in place');
+  const home = byClass('div', 'workspace-build-sketch__home')[0];
+  assert.equal(home.children[0].textContent, 'Home');
+  assert.equal(home.children[0].children[0].className, 'bi bi-house-door');
+  assert.equal(home.children[1].textContent, 'Music Production Homenew');
+  assert.equal(home.children[1].children[0].className, 'workspace-build-sketch__badge');
+  const workspace = home.children[2];
+  assert.equal(workspace.className, 'workspace-build-sketch__workspace');
+  assert.equal(workspace.children[0].textContent, 'Workspace');
+  assert.equal(workspace.children[1].textContent, 'Album-2');
+  assert.deepEqual(
+    workspace.children[2].children.map(part => part.textContent),
+    ['Folder linked', 'Team', 'First task']
+  );
+  assert.deepEqual(
+    workspace.children[2].children.map(part => part.children[0].className),
+    ['bi bi-folder-symlink', 'bi bi-people', 'bi bi-clipboard-check']
+  );
+
+  // The draft's own name wins; an existing Home says so; without a Home the
+  // workspace stands alone, and parts the lines do not promise are not drawn.
+  pane.applySession({
+    transcript: [],
+    draft: { name: 'Ori Music Demo' },
+    folder,
+    plan: {
+      ready: true,
+      digest: 'd',
+      home: { name: 'Music Production Home', status: 'existing' },
+      lines: lines.filter(line => line.kind !== 'task')
+    }
+  });
+  assert.equal(
+    byClass('div', 'workspace-build-sketch__home')[0].children[1].textContent,
+    'Music Production Homeexisting'
+  );
+  assert.equal(
+    byClass('div', 'workspace-build-sketch__workspace')[0].children[1].textContent,
+    'Ori Music Demo'
+  );
+  assert.deepEqual(
+    byClass('div', 'workspace-build-sketch__workspace')[0].children[2].children.map(
+      part => part.textContent
+    ),
+    ['Folder linked', 'Team']
+  );
+  pane.applySession({
+    transcript: [],
+    draft: {},
+    folder: { observation: { ...observation, projects: [] } },
+    plan: { ready: true, digest: 'd', lines: lines.filter(line => line.kind === 'workspace') }
+  });
+  assert.equal(byClass('div', 'workspace-build-sketch__home').length, 0);
+  const alone = byClass('div', 'workspace-build-sketch__workspace')[0];
+  assert.equal(alone.children[1].textContent, observation.folder, 'named after the folder');
+  assert.equal(alone.children.length, 2, 'no parts, no chips');
+  assert.equal(byClass('p', 'workspace-build-plan__kicker')[1].textContent, 'Ori will · 1 step');
+
+  // The sketch stays while Set it up runs: the lines carry the progress.
+  pane.applySession({
+    transcript: [],
+    status: 'preparing',
+    draft: { name: 'Ori Music Demo' },
+    folder,
+    setup: { plan_digest: 'd' },
+    setup_run: { status: 'running', lines: lines.map(line => ({ ...line, state: 'waiting' })) },
+    plan: {
+      ready: true,
+      digest: 'd',
+      home: { name: 'Music Production Home', status: 'new' },
+      lines
+    }
+  });
+  assert.equal(sketch().hidden, false);
+
+  // sketchView itself: no plan, no lines, or an unnamed Home draw nothing of it.
+  assert.equal(pane.sketchView(null, lines), null);
+  assert.equal(pane.sketchView({ ready: true }, []), null);
+  assert.equal(pane.sketchView({ ready: true, home: { name: ' ' } }, lines).home, null);
+  pane.destroy();
+  assert.equal(sketch(), undefined);
 });
 
 test('Set it up is offered on a ready, named plan and follows the run it starts', () => {
