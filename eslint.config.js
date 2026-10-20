@@ -129,6 +129,7 @@ export default defineConfig([
       'internal/web/static/js/modules/home-collections.js',
       'internal/web/static/js/modules/personal-assistant-arrangement.js',
       'internal/web/static/js/modules/home-profile.js',
+      'internal/web/static/js/modules/home-resource-workspaces.js',
       'internal/web/static/js/modules/chat-auto-scroll.js',
       'internal/web/static/js/modules/chat-state-ui.js',
       'internal/web/static/js/modules/chat-state.js',

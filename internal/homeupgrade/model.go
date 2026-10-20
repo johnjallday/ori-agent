@@ -127,6 +127,19 @@ type PlanProgram struct {
 	// opens it.
 	AddsHomeProfile  bool   `json:"adds_home_profile,omitempty"`
 	HomeProfileTitle string `json:"home_profile_title,omitempty"`
+	// AddsResourceAttachments are resource workspaces the newer release lets
+	// this Home have. Nothing is created, staffed or read by the upgrade; the
+	// owner sets one up afterwards.
+	AddsResourceAttachments []PlanResourceAttachment `json:"adds_resource_attachments,omitempty"`
+}
+
+// PlanResourceAttachment is one added resource attachment, in the Home
+// package's own words.
+type PlanResourceAttachment struct {
+	ProviderPluginID string `json:"provider_plugin_id"`
+	BlueprintID      string `json:"blueprint_id"`
+	Label            string `json:"label"`
+	Description      string `json:"description"`
 }
 
 // PlanHome is one affected Home.

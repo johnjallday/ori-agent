@@ -49,6 +49,7 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 	declaresGroupRequirements := false
 	declaresBlueprintIntake := false
 	declaresIndependentHomes := false
+	declaresResourceWorkspaces := false
 	for _, feature := range contribution.RequiresHostFeatures {
 		switch feature {
 		case HostFeatureTemplateGroupRequirementsV1:
@@ -57,7 +58,13 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 			declaresBlueprintIntake = true
 		case HostFeatureIndependentProgramHomesV1:
 			declaresIndependentHomes = true
+		case HostFeatureResourceWorkspacesV1:
+			declaresResourceWorkspaces = true
 		}
+	}
+	resourceCatalog, err := contribution.ResourceCatalogDeclaration()
+	if err != nil {
+		return nil, err
 	}
 	resolved := make([]ResolvedBlueprint, 0, len(contribution.Blueprints))
 	for _, blueprint := range contribution.Blueprints {
@@ -84,6 +91,15 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 		}
 		if template.AssistantProject != nil && !declaresIndependentHomes {
 			return nil, fmt.Errorf("plugin blueprint %q assistant_project requires %s", blueprint.ID, HostFeatureIndependentProgramHomesV1)
+		}
+		if template.AssistantProject.IsResource() && !declaresResourceWorkspaces {
+			return nil, fmt.Errorf("plugin blueprint %q resource workspace requires %s", blueprint.ID, HostFeatureResourceWorkspacesV1)
+		}
+		// A resource team and its catalog come as a pair: a catalog cannot
+		// claim a song blueprint, and a resource workspace without a catalog
+		// would have nothing to hold.
+		if catalogNamesBlueprint := resourceCatalog != nil && resourceCatalog.BlueprintID == blueprint.ID; catalogNamesBlueprint != template.AssistantProject.IsResource() {
+			return nil, fmt.Errorf("plugin blueprint %q must be a resource workspace exactly when the resource catalog names it", blueprint.ID)
 		}
 		owner := &workspace.PluginTemplateOwner{
 			PluginID: descriptor.Name, PluginVersion: descriptor.Version,

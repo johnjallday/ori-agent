@@ -30,7 +30,6 @@
     "schema_version": 2,
     "policy": "required",
     "assistant_project_id": "reaper-studio-team",
-    "missing_home": "existing_only",
-    "default_home_name": "Music Production Home"
+    "missing_home": "existing_only"
   }
 }

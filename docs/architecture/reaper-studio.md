@@ -140,10 +140,11 @@ a changed Home declaration). `requires_host_features`:
                  "system_prompt": "<REAPER-owned, bounded>", "skills": ["reaper-studio-catalog"] } ]
   },
   "group_requirement": { "schema_version": 2, "policy": "required",
-                         "assistant_project_id": "reaper-studio-team", "missing_home": "existing_only",
-                         "default_home_name": "Music Production Home" }
+                         "assistant_project_id": "reaper-studio-team", "missing_home": "existing_only" }
 }
 ```
+
+(`existing_only` takes no `default_home_name`; the group-requirement decoder refuses one.)
 
 For a team whose `workspace_kind` is `"resource"`, Ori **refuses** the blueprint
 when it also declares any of: `project_entry`, `project_connection`, `inputs`,
@@ -345,9 +346,11 @@ described as licensed, loaded, working or tested.
 ### 5.1 Identity and classification
 
 A resource workspace is a child of exactly one Home, linked through the existing
-`AssistantProjectLink`. The link, and the `GroupRequirementSnapshot` it is
-created from, gain `workspace_kind: "resource"`. Absence means a project, so
-every existing song link keeps its meaning. The kind is snapshotted at link
+`AssistantProjectLink`. Its project-provider provenance
+(`workspace.AssistantProjectProviderOwner`, carried by both the link and the
+`GroupRequirementSnapshot` it is created from) gains `workspace_kind:
+"resource"`. Absence means a project, so every existing song link keeps its
+meaning, and a legacy link with no project provider is always a project. The kind is snapshotted at link
 creation from the reciprocal declarations. A link is valid only while the Home
 attachment and the team declaration still agree on it, in addition to every
 IPH §3.5 condition. Mirrors must agree on the field like any other link field.
@@ -398,7 +401,8 @@ flow preselected.
   existing optional reviewed fill. The catalog works without it.
 - The review discloses the Home attachment `description`, the declared
   categories, the Studio role's label, and this host sentence: "Assistants in
-  this Home's songs can look up entries from sources you approve."
+  this Home's projects can look up entries from sources you approve." (Host
+  copy says "projects"; "songs" is the package's word.)
 
 ## 6. Catalog storage and state
 
@@ -691,10 +695,11 @@ entry is still refused (`home_upgrade_not_guidance_only`); the existing refusal
 tests keep passing. Home `version` stays 1, so `HomeProviderUpgrade.valid` and
 every song team's Home range 1–1 are unaffected.
 
-The plan records `adds_resource_attachments: [{label}]`. The review adds: "Adds
-REAPER Studio to this Home. Nothing is created or read until you set it up. Once
-set up, assistants in this Home's songs can look up entries from sources you
-approve." Commit rebinds exactly as today. It does not create, staff or
+The plan records `adds_resource_attachments: [{provider_plugin_id, blueprint_id,
+label, description}]`. The review adds: "Adds REAPER Studio to this Home. Nothing
+is created or read until you set it up. Once set up, assistants in this Home's
+projects can look up entries from sources you approve." Commit rebinds exactly
+as today. It does not create, staff or
 inspect a Studio. Cancel, stale review, incompatible target and failure leave
 everything unchanged.
 

@@ -110,6 +110,7 @@
                 </div>
               </div>
               <div id="assistantProgramProjects" class="assistant-program-projects"></div>
+              <div id="homeResourceWorkspaces" class="home-resource-workspaces" aria-label="Resource workspaces" hidden></div>
               <p id="assistantProgramActionLive" class="sr-only" aria-live="polite"></p>
             </section>
 
@@ -308,6 +309,7 @@
     import { SampleLibraryPanel } from '/js/modules/sample-library.js';
     import { ProjectLibraryPanel } from '/js/modules/project-library.js';
     import { HomeProfilePanel } from '/js/modules/home-profile.js';
+    import { HomeResourceWorkspacesPanel } from '/js/modules/home-resource-workspaces.js';
     const page = new AssistantProgramPage({
       workspaceId: {{.Extra.WorkspaceID}},
       workspaceSlug: {{.Extra.WorkspaceSlug}}
@@ -317,6 +319,9 @@
       void new SampleLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
       void new ProjectLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
       void new HomeProfilePanel({workspaceId: page.workspaceId, program: page.program}).init();
+      if (page.program?.is_station) {
+        void new HomeResourceWorkspacesPanel({workspaceId: page.workspaceId}).init();
+      }
     });
   </script>
 </body>

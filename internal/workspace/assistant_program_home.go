@@ -18,6 +18,11 @@ type AssistantProgramHomeOwner struct {
 
 func (owner AssistantProgramHomeOwner) Clone() AssistantProgramHomeOwner { return owner }
 
+// AssistantWorkspaceKindResource marks a Home child that holds a resource
+// catalog rather than a project. An empty kind is a project, so every link
+// written before resource workspaces existed keeps meaning what it meant.
+const AssistantWorkspaceKindResource = "resource"
+
 // AssistantProjectProviderOwner is immutable project-side provenance for one
 // split team declaration inside a trusted plugin blueprint.
 type AssistantProjectProviderOwner struct {
@@ -31,6 +36,9 @@ type AssistantProjectProviderOwner struct {
 	ProjectTeamDigest    string `json:"project_team_digest"`
 	PluginGeneration     uint64 `json:"plugin_generation"`
 	ComponentFingerprint string `json:"component_fingerprint"`
+	// WorkspaceKind is the team declaration's kind at link time: empty for a
+	// project, AssistantWorkspaceKindResource for a resource workspace.
+	WorkspaceKind string `json:"workspace_kind,omitempty"`
 }
 
 func (owner AssistantProjectProviderOwner) Clone() AssistantProjectProviderOwner { return owner }
@@ -39,7 +47,19 @@ func (owner AssistantProjectProviderOwner) Valid() bool {
 	return strings.TrimSpace(owner.PluginID) != "" && strings.TrimSpace(owner.PluginVersion) != "" &&
 		strings.TrimSpace(owner.BlueprintID) != "" && owner.BlueprintVersion > 0 && strings.TrimSpace(owner.ProjectTeamID) != "" &&
 		owner.ProjectTeamSchema == 1 && owner.ProjectTeamVersion > 0 && lowerHex(owner.ProjectTeamDigest, 64) &&
-		owner.PluginGeneration > 0 && lowerHex(owner.ComponentFingerprint, 64)
+		owner.PluginGeneration > 0 && lowerHex(owner.ComponentFingerprint, 64) &&
+		(owner.WorkspaceKind == "" || owner.WorkspaceKind == AssistantWorkspaceKindResource)
+}
+
+// IsResource reports whether this provenance belongs to a resource workspace.
+func (owner AssistantProjectProviderOwner) IsResource() bool {
+	return owner.WorkspaceKind == AssistantWorkspaceKindResource
+}
+
+// AssistantProjectLinkIsResource reports whether a Home child is a resource
+// workspace. A legacy link has no project provider and is always a project.
+func AssistantProjectLinkIsResource(link *AssistantProjectLink) bool {
+	return link != nil && link.ProjectProvider != nil && link.ProjectProvider.IsResource()
 }
 
 func (owner AssistantProgramHomeOwner) Valid() bool {

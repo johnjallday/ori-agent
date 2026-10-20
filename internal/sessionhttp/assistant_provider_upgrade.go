@@ -91,6 +91,19 @@ func providerUpgradeProfileAddition(title string) string {
 	return "Adds " + article + " " + title + " card to this Home. Nothing is detected or read until you open it."
 }
 
+// providerUpgradeResourceAddition is the review's line for a release that lets
+// the Home have a resource workspace: the Home package's own label for it,
+// that the upgrade creates and reads nothing, and what will be shared once
+// the owner sets it up.
+func providerUpgradeResourceAddition(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = "a resource workspace"
+	}
+	return "Adds " + label + " to this Home. Nothing is created or read until you set it up. " +
+		"Once set up, assistants in this Home's projects can look up entries from sources you approve."
+}
+
 type providerUpgradeCommitRequest struct {
 	Token string `json:"token"`
 }
@@ -190,6 +203,9 @@ func (h *Handler) ReviewAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 		}
 		if program.AddsHomeProfile {
 			view.Additions = append(view.Additions, providerUpgradeProfileAddition(program.HomeProfileTitle))
+		}
+		for _, attachment := range program.AddsResourceAttachments {
+			view.Additions = append(view.Additions, providerUpgradeResourceAddition(attachment.Label))
 		}
 	}
 	for _, home := range plan.Homes {

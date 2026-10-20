@@ -31,11 +31,13 @@
           "blueprint_inputs_v1",
           "blueprint_intake_v1",
           "independent_program_homes_v1",
-          "home_profile_v1"
+          "home_profile_v1",
+          "resource_workspaces_v1"
         ]
       }
     },
     "home_profile_facts": { "$ref": "#/$defs/homeProfileFacts" },
+    "resource_catalog": { "$ref": "#/$defs/resourceCatalog" },
     "setup_quests": {
       "type": "array",
       "maxItems": 8,
@@ -405,7 +407,13 @@
         "project_team_id": { "$ref": "#/$defs/id" },
         "project_team_schema_version": { "const": 1 },
         "min_project_team_version": { "type": "integer", "minimum": 1 },
-        "max_project_team_version": { "type": "integer", "minimum": 1 }
+        "max_project_team_version": { "type": "integer", "minimum": 1 },
+        "workspace_kind": {
+          "description": "project (the default) or resource. A resource entry requires the resource_workspaces_v1 host feature, a label and a description; at most one per Home.",
+          "enum": ["project", "resource"]
+        },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 240 }
       }
     },
     "assistantProgramHome": {
@@ -483,6 +491,63 @@
       "properties": {
         "service_id": { "$ref": "#/$defs/id" },
         "operation": { "$ref": "#/$defs/id" }
+      }
+    },
+    "resourceCatalog": {
+      "description": "A resource workspace's catalog: the resource blueprint it belongs to, two read_only operations without scopes, and the words its owner view is rendered with. Requires the resource_workspaces_v1 host feature. See docs/architecture/reaper-studio.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "version", "blueprint_id", "service_id", "sources_operation", "inventory_operation", "categories"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "const": 1 },
+        "blueprint_id": { "$ref": "#/$defs/id" },
+        "service_id": { "$ref": "#/$defs/id" },
+        "sources_operation": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "inventory_operation": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "description", "kinds", "facts"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "description": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "kinds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" },
+                    "label": { "type": "string", "minLength": 1, "maxLength": 40 }
+                  }
+                }
+              },
+              "facts": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$" },
+                    "label": { "type": "string", "minLength": 1, "maxLength": 40 }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "blueprint": {

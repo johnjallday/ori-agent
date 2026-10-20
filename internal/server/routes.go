@@ -909,6 +909,9 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant", s.Handlers.Session.ReAddAssistantLibrarySharing)
 		// The Home's song-details switch: off clears every stored song fact.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/song-details", s.Handlers.Session.SetAssistantLibrarySongDetails)
+		// The Home's resource workspaces (one optional REAPER Studio): whether
+		// each can be set up and the one that exists. Reads only.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/resource-workspaces", s.Handlers.Session.GetAssistantResourceWorkspaces)
 		// The Home profile card: owner-only on that exact Home.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/profile", s.Handlers.Session.GetAssistantProfile)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/profile/detect", s.Handlers.Session.DetectAssistantProfile)

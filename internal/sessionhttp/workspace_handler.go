@@ -906,6 +906,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// grouped commit must also observe its exact parent and reciprocal link.
 	if err := h.finalizeCreateWorkspaceGroupRequirement(r.Context(), ws.ID, groupPlan, resolvedTemplate); err != nil {
 		_ = h.rollbackIncompleteGroupWorkspace(r.Context(), ws.ID, groupPlan.claim.Operation.OperationDigest, string(groupPlan.claim.Operation.Status), seed)
+		var exists *agentworkspace.ResourceWorkspaceExistsError
+		if errors.As(err, &exists) {
+			// A concurrent request linked the Home's one resource workspace
+			// first; this copy was rolled back, so open that one instead.
+			respondResourceWorkspaceExists(w, exists.WorkspaceID)
+			return
+		}
 		_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"error": "Workspace placement is incomplete; retry the same reviewed operation.",
 			"group_requirement": map[string]any{

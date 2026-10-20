@@ -17,11 +17,20 @@ const AssistantProjectSchemaVersion = 1
 // stage, reflection, portfolio, capability-install, path, command, or source
 // location fields.
 type AssistantProjectDeclaration struct {
-	SchemaVersion int                           `json:"schema_version"`
-	Version       int                           `json:"version"`
-	ID            string                        `json:"id"`
+	SchemaVersion int    `json:"schema_version"`
+	Version       int    `json:"version"`
+	ID            string `json:"id"`
+	// WorkspaceKind is empty for a project team and "resource" for a resource
+	// workspace's team. It is omitted for a project so existing team digests
+	// do not move.
+	WorkspaceKind string                        `json:"workspace_kind,omitempty"`
 	Home          AssistantProjectHomeReference `json:"home"`
 	Roles         []AssistantProjectRole        `json:"roles"`
+}
+
+// IsResource reports whether the team belongs to a resource workspace.
+func (project *AssistantProjectDeclaration) IsResource() bool {
+	return project != nil && project.WorkspaceKind == workspace.AssistantWorkspaceKindResource
 }
 
 type AssistantProjectHomeReference struct {
@@ -70,6 +79,11 @@ func normalizeAssistantProject(raw json.RawMessage) (*AssistantProjectDeclaratio
 	if project.SchemaVersion != AssistantProjectSchemaVersion || project.Version < 1 {
 		return nil, fmt.Errorf("%w: assistant_project schema/version is invalid", ErrInvalidAssistantProgram)
 	}
+	kind, err := normalizeWorkspaceKind(project.WorkspaceKind)
+	if err != nil {
+		return nil, err
+	}
+	project.WorkspaceKind = kind
 	project.ID = normalizeAssistantProgramID(project.ID)
 	project.Home.ProviderPluginID = normalizeAssistantProgramID(project.Home.ProviderPluginID)
 	project.Home.ProgramID = normalizeAssistantProgramID(project.Home.ProgramID)

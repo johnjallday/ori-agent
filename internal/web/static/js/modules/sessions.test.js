@@ -2229,6 +2229,54 @@ test('Details destination describes its Group Template only for the draft that a
   assert.doesNotMatch(elements.get('workspaceGroupDestinationRoute').innerHTML, /Template:/);
 });
 
+test('a Home that already has its resource workspace opens it instead of creating another', async () => {
+  const calls = [];
+  const assigned = [];
+  const manager = loadSessionManager(
+    async (url, options = {}) => {
+      calls.push({ url, body: options.body ? JSON.parse(options.body) : null });
+      if (url === '/api/workspaces/studio-1') {
+        return {
+          ok: true,
+          json: async () => ({ data: { id: 'studio-1', folder_slug: 'reaper-studio' } })
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          group_requirement_review: {
+            state: 'resource_workspace_exists',
+            existing_workspace_id: 'studio-1',
+            summary: 'This Home already has it.',
+            actions: ['open_existing_workspace']
+          }
+        })
+      };
+    },
+    { location: { assign: url => assigned.push(url) } }
+  );
+  const errors = [];
+  manager.showWorkspaceCreateError = message => errors.push(message);
+  manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+  const payload = {
+    name: 'REAPER Studio',
+    template_id: 'plugin:reaper-plugin:reaper-studio',
+    parent_id: 'home-1'
+  };
+
+  // A quiet repaint neither navigates nor reports.
+  assert.equal(
+    await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet: true }),
+    false
+  );
+  assert.deepEqual(assigned, []);
+  // Create: no token is carried and the existing workspace's page opens.
+  assert.equal(await manager.prepareGroupRequirementCommit('/api/workspaces', payload), false);
+  assert.equal(payload.group_review_token, undefined);
+  assert.deepEqual(assigned, ['/workspaces/reaper-studio']);
+  assert.match(errors.at(-1), /already has it/);
+});
+
 test('group requirement creation reviews before committing and reuses only the exact receipt', async () => {
   const calls = [];
   const manager = loadSessionManager(async (url, options) => {

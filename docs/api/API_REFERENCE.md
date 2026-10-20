@@ -2694,9 +2694,33 @@ Every part but `request_id` and `if_revision` is optional; what is absent is lef
 
 **Related.** `POST /api/workspaces/template-agent-plan` adds `group_requirement.home.input_defaults: { values: { tempo, time_signature }, note }` when the destination Home has saved defaults the selected blueprint's own inputs accept; the Create dialog shows them in fields the person has not changed. The Home's agents receive the profile in their context block, and its primary Manager has the read-only tool `home_profile_read`.
 
+## Home Resource Workspaces API
+
+A Home may allow one resource workspace (REAPER Studio; contract `docs/architecture/reaper-studio.md`). It is created through the ordinary Create Workspace flow with the Home locked as its required parent; a second one is refused with `409` and code `resource_workspace_exists`, carrying `existing_workspace_id`. The same state (`resource_workspace_exists`, action `open_existing_workspace`) is returned by the creation review.
+
+### Get Resource Workspaces
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/resource-workspaces`
+
+Owner of that exact Home only (anything else is `404`). Reads installed plugins and the Home's own children; it creates, inspects and calls nothing.
+
+```json
+{
+  "resource_workspaces": [
+    {
+      "attachment": { "provider_plugin_id": "reaper-plugin", "blueprint_id": "reaper-studio", "label": "REAPER Studio", "description": "…" },
+      "state": "not_created",
+      "template_id": "plugin:reaper-plugin:reaper-studio"
+    }
+  ]
+}
+```
+
+`state` is `available` (it exists; `workspace` is `{id, name, url}`), `not_created` (`template_id` opens Create Workspace), `provider_missing`, `provider_disabled`, `provider_incompatible` (the project plugin lacks a matching resource blueprint), or `home_unavailable` (the Home's pinned package is unavailable; existing resource workspaces are still listed with their names). An existing workspace is returned with every state so it can be opened.
+
 ## Home Package Upgrade API
 
-Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Two kinds of change are accepted: guidance (Home role prompts and packaged skill text), and a release that adds a `home_profile` card to a Home that has none (the review then lists it under `additions`). The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Three kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, and a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones. The review lists either addition under `additions`; neither creates, staffs or reads anything. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
 
 | Code | Meaning |
 | --- | --- |

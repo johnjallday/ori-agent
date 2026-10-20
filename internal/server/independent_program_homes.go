@@ -55,6 +55,10 @@ func resolveIndependentProgramHome(installed []plugin.InstalledPlugin, ownerUser
 		ProjectTeamID: project.ID, ProjectTeamSchema: project.SchemaVersion, ProjectTeamVersion: project.Version,
 		ProjectTeamDigest: projecttemplates.AssistantProjectDigest(project),
 		PluginGeneration:  projectInstall.EvidenceGeneration(), ComponentFingerprint: projectInstall.ComponentFingerprint,
+		WorkspaceKind: project.WorkspaceKind,
+	}
+	if project.IsResource() && !requiresFeature(projectInstall.WorkspaceSurfaces, plugin.HostFeatureResourceWorkspacesV1) {
+		return grouprequirements.IndependentHomeResolution{}, errIndependentProgramHomeUnavailable
 	}
 	resolution := grouprequirements.IndependentHomeResolution{ProjectOwner: projectOwner}
 	if !requireHome {
@@ -139,9 +143,7 @@ func assistantProjectSkillsPackaged(installed plugin.InstalledPlugin, project *p
 func homeAllowsProject(home projecttemplates.AssistantProgramHome, project workspace.AssistantProjectProviderOwner) bool {
 	matches := 0
 	for _, allowed := range home.AllowedProjectAttachments {
-		if allowed.ProviderPluginID == project.PluginID && allowed.BlueprintID == project.BlueprintID &&
-			allowed.ProjectTeamID == project.ProjectTeamID && allowed.ProjectTeamSchemaVersion == project.ProjectTeamSchema &&
-			project.ProjectTeamVersion >= allowed.MinProjectTeamVersion && project.ProjectTeamVersion <= allowed.MaxProjectTeamVersion {
+		if allowed.Accepts(project.PluginID, project.BlueprintID, project.ProjectTeamID, project.ProjectTeamSchema, project.ProjectTeamVersion, project.WorkspaceKind) {
 			matches++
 		}
 	}

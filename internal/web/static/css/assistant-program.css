@@ -490,6 +490,40 @@
   flex-wrap: wrap;
   gap: 0.55rem;
 }
+/* The Home's resource workspace (REAPER Studio): one card beside the
+   songs, never one of them. */
+.home-resource-workspaces {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+.home-resource-workspace {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--assistant-line);
+  background: rgba(255, 255, 255, 0.38);
+  color: var(--assistant-ink);
+}
+.home-resource-workspace-title {
+  margin: 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.home-resource-workspace-description,
+.home-resource-workspace-note {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.home-resource-workspace-note {
+  color: var(--assistant-muted);
+}
+.home-resource-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
 .assistant-program-project {
   display: inline-flex;
   align-items: center;
