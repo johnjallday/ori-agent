@@ -537,6 +537,31 @@ type FolderDigestService struct {
 	running  map[string]bool   // offer id → a one-card setup is running in this process
 	// offer id → what a software review copied out of the project; memory only
 	evidence map[string]FolderSoftwareEvidence
+	// setupObservers hear when a one-card setup run stops, finishes or is
+	// resolved: the workspace build follows the run it started this way.
+	setupObservers []func(ctx context.Context, userID string, offer FolderOffer)
+}
+
+// AddSetupObserver adds fn to what hears each settled setup run: a run that
+// stopped, one that finished, and the offer it resolved. fn gets the offer as
+// stored, runs on the run's own goroutine, and must not block.
+func (s *FolderDigestService) AddSetupObserver(fn func(ctx context.Context, userID string, offer FolderOffer)) {
+	if s == nil || fn == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setupObservers = append(s.setupObservers, fn)
+}
+
+func (s *FolderDigestService) notifySetup(ctx context.Context, userID string, offer FolderOffer) {
+	s.mu.Lock()
+	observers := make([]func(context.Context, string, FolderOffer), len(s.setupObservers))
+	copy(observers, s.setupObservers)
+	s.mu.Unlock()
+	for _, observe := range observers {
+		observe(ctx, userID, offer)
+	}
 }
 
 // NewFolderDigestService builds the service.
@@ -647,6 +672,11 @@ type FolderOfferView struct {
 	// Enclosing names the larger repository the subject sits inside, when the
 	// bounded check found one.
 	Enclosing *FolderEnclosingHint `json:"enclosing,omitempty"`
+	// Recognition is what the card says it recognized, and Needs what its plan
+	// needs installed: the same facts, in the same words, as a build's attached
+	// folder (folder-recognition-lines.js renders both). Read, never stored.
+	Recognition *FolderOfferRecognition `json:"recognition,omitempty"`
+	Needs       []BuildFolderNeed       `json:"needs,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
 	Plan                   *FolderSetupPlan `json:"plan,omitempty"`
@@ -667,6 +697,14 @@ type FolderOfferView struct {
 	// FirstTask is where the folder's first look stands, on a resolved project
 	// offer whose workspace has one. It is read live, never stored on the offer.
 	FirstTask *FolderFirstTaskView `json:"first_task,omitempty"`
+}
+
+// FolderOfferRecognition is a single recognized project as a card names it,
+// in BuildFolderRecognition's terms. The card's offer keeps no count of the
+// files that marked it, so only a build's folder says how many there are.
+type FolderOfferRecognition struct {
+	Verdict string `json:"verdict"`
+	Label   string `json:"label"`
 }
 
 // FolderCapabilityHiddenView names a capability a card does not lead with: its
@@ -2189,6 +2227,9 @@ func (s *FolderDigestService) afterOutcome(ctx context.Context, userID string, o
 	if s.deps.OnOutcome != nil {
 		s.deps.OnOutcome(ctx, userID, offer)
 	}
+	if offer.Setup != nil {
+		s.notifySetup(ctx, userID, offer)
+	}
 	return offer
 }
 
@@ -2217,12 +2258,21 @@ func (s *FolderDigestService) blueprintForOffer(offer FolderOffer) (id, label, n
 // acquiring the wrong tool-specific blueprint. Non-audio shapes keep the existing
 // installed-blueprint/blank fallback.
 func (s *FolderDigestService) blueprintForSubject(subject FolderCandidateRecord) (id, label, note string) {
-	if subject.Shape == string(folderdigest.ShapeAudio) {
-		if _, ok := folderdigest.ProjectCapabilityFor(folderdigest.ShapeAudio, subject.MarkerName, subject.DominantExtension); !ok {
-			return "", "", ""
-		}
+	if _, ok := subjectBlueprint(subject); !ok {
+		return "", "", ""
 	}
 	return s.blueprintFor(subject.Shape)
+}
+
+// subjectBlueprint is the shape's blueprint for a subject, whether or not it
+// is installed: none for an audio project no reviewed tool owns.
+func subjectBlueprint(subject FolderCandidateRecord) (folderdigest.ShapeBlueprint, bool) {
+	if subject.Shape == string(folderdigest.ShapeAudio) {
+		if _, ok := folderdigest.ProjectCapabilityFor(folderdigest.ShapeAudio, subject.MarkerName, subject.DominantExtension); !ok {
+			return folderdigest.ShapeBlueprint{}, false
+		}
+	}
+	return folderdigest.BlueprintForShape(folderdigest.Shape(subject.Shape))
 }
 
 // FolderFirstTask is the suggested first task for a workspace created from a
@@ -2417,6 +2467,12 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		v.RequestedDestinationID = offer.ConversationReview.DestinationID
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
+	if offer.Verdict == string(folderdigest.KindProject) && offer.Subject.Kind == FolderChoiceProject &&
+		offer.Portfolio == nil && offer.Structure == nil {
+		if label, ok := recognizedProjectLabel(offer.Subject); ok {
+			v.Recognition = &FolderOfferRecognition{Verdict: BuildFolderProject, Label: label}
+		}
+	}
 	switch folderdigest.Kind(offer.Verdict) {
 	case folderdigest.KindProject, folderdigest.KindMixed, folderdigest.KindAmbiguous:
 		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintForOffer(offer)

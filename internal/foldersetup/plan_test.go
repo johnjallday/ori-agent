@@ -53,7 +53,9 @@ func TestBuildPlanWordsTheIntegrationLine(t *testing.T) {
 	if d := line(BuildPlan(facts), personalassistant.FolderPlanIntegration).Detail; !strings.Contains(d, "johnjallday/reaper-plugin") {
 		t.Errorf("an install must name its reviewed source: %q", d)
 	}
-	if d := line(BuildPlan(baseFacts()), personalassistant.FolderPlanIntegration).Detail; d != "Nothing is installed." {
+	// A ready integration says it is already in place; "Nothing is installed."
+	// read as if it were missing (manual test, 2026-10-20).
+	if d := line(BuildPlan(baseFacts()), personalassistant.FolderPlanIntegration).Detail; d != "Already installed and enabled — nothing to install." {
 		t.Errorf("a ready integration installs nothing: %q", d)
 	}
 }
@@ -295,6 +297,29 @@ func TestBuildPlanSaysWhenTheAppItselfIsNotInstalled(t *testing.T) {
 		if strings.Contains(strings.ToLower(l.Name+l.Detail), "live") {
 			t.Fatalf("a line promises live control: %+v", l)
 		}
+	}
+}
+
+// A workspace named apart from its folder (a build's draft) still links the
+// folder by the folder's own name; one named after it reads exactly as before.
+func TestBuildPlanLinksTheFolderByItsOwnName(t *testing.T) {
+	same := BuildPlan(baseFacts())
+	named := baseFacts()
+	named.FolderName = "My Song"
+	if plan := BuildPlan(named); plan.Digest != same.Digest || line(plan, personalassistant.FolderPlanFolder).Name != "Links My Song where it is" {
+		t.Fatalf("a folder named like its workspace changes nothing: %+v", plan.Lines)
+	}
+	renamed := baseFacts()
+	renamed.WorkspaceName, renamed.FolderName = "Summer Demos", "My Song"
+	plan := BuildPlan(renamed)
+	if got := line(plan, personalassistant.FolderPlanFolder).Name; got != "Links My Song where it is" {
+		t.Fatalf("folder line = %q", got)
+	}
+	if got := line(plan, personalassistant.FolderPlanWorkspace).Name; !strings.Contains(got, "named Summer Demos") {
+		t.Fatalf("workspace line = %q", got)
+	}
+	if plan.Digest == same.Digest {
+		t.Fatal("another workspace name is another consent")
 	}
 }
 

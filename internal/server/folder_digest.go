@@ -30,6 +30,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	}
 	store := personalassistant.NewFolderDigestStore(knowledge)
 	setupHost := &folderSetupHost{builder: b}
+	b.folderSetupHost = setupHost
 	service := personalassistant.NewFolderDigestService(store, personalassistant.FolderDigestDeps{
 		ValidateRoot: validateShownFolder,
 		Picker:       nativeFolderPicker{},

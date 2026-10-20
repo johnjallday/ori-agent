@@ -63,7 +63,7 @@ func TestWorkspaceBuildPreparation_LegacyDecodeNeverFabricatesConsent(t *testing
 		t.Fatal(err)
 	}
 	loaded, err := decodeWorkspaceBuild(data, doc.Owner)
-	if err != nil || loaded.SchemaVersion != 2 || loaded.Open().Preparation != nil {
+	if err != nil || loaded.SchemaVersion != WorkspaceBuildSchemaVersion || loaded.Open().Preparation != nil {
 		t.Fatalf("legacy = %+v, %v", loaded, err)
 	}
 	for _, version := range []int{1, WorkspaceBuildSchemaVersion + 1} {

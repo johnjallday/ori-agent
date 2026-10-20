@@ -666,6 +666,16 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     const question = el('first-mission-offer-question');
     if (question)
       question.textContent = offer.decided && !offer.inRun ? offer.note : offer.question;
+    // What Ori recognized and what the plan needs, in the folder card's words.
+    for (const [role, line] of [
+      ['first-mission-offer-recognition', offer.recognitionLine],
+      ['first-mission-offer-needs', offer.needsLine]
+    ]) {
+      const node = el(role);
+      if (!node) continue;
+      node.textContent = line || '';
+      node.hidden = !line;
+    }
     const planLines = offer.setup?.lines || offer.plan?.lines || [];
     const plan = el('first-mission-offer-plan');
     if (plan) {

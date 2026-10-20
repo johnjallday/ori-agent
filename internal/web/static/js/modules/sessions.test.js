@@ -6099,3 +6099,775 @@ test('an obsolete session cannot roll a completed draft sync back', async () => 
   assert.equal(manager.workspaceBuild.session.version, 7);
   assert.equal(nameInput.value, 'Latest');
 });
+
+test('a blueprint that lives in a group names the group apart from the workspace', () => {
+  const elements = new Map([
+    ['addFolderModal', { dataset: {}, classList: { toggle() {} } }],
+    ['workspaceBuildModeStatus', { hidden: true, textContent: '' }],
+    ['workspaceBuildDraftSummary', { hidden: true }],
+    ['workspaceBuildDraftText', { textContent: '' }],
+    ['folderNameInput', { value: 'Ori Music Demo' }]
+  ]);
+  const manager = loadSessionManager(
+    undefined,
+    { ProjectTemplateCard: { getSelectedTemplate: () => ({ name: 'REAPER song' }) } },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  const draft = () => elements.get('workspaceBuildDraftText').textContent;
+  const status = () => elements.get('workspaceBuildModeStatus').textContent;
+  manager.wizardStep = 2;
+  manager.workspaceBuild = {
+    session: {
+      needs_home: { label: 'Music Production Home' },
+      folder: { observation: { folder: 'Ori Music Demo' } }
+    }
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(
+    draft(),
+    'Group: Music Production Home (new) · Workspace: Ori Music Demo · Details · Folder: Ori Music Demo'
+  );
+  assert.equal(status(), 'Assisted setup · one shared draft · Group: Music Production Home (new)');
+
+  // The user's own Home, as the folder's recognition found it, is not new.
+  manager.workspaceBuild.session.folder.recognition = {
+    verdict: 'project',
+    home_exists: true,
+    home_name: 'Music Production Home'
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.match(draft(), /^Group: Music Production Home \(existing\) · Workspace: Ori Music Demo/);
+
+  // The server's group prerequisite is the authority once it is there.
+  manager.workspaceBuild.session.group_prerequisite = {
+    state: 'home_creation_review_required',
+    home: { exists: false, proposed_name: 'Music Production Home' }
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.match(draft(), /^Group: Music Production Home \(new\) · /);
+  manager.workspaceBuild.session.group_prerequisite = {
+    state: 'ready_grouped',
+    home: { exists: true, workspace_id: 'ws-home', name: 'My Studio' }
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.match(draft(), /^Group: My Studio \(existing\) · Workspace: Ori Music Demo/);
+
+  // Without a group the line is what it always was.
+  manager.workspaceBuild.session.needs_home = null;
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(draft(), 'Ori Music Demo · REAPER song · Details · Folder: Ori Music Demo');
+  assert.equal(status(), 'Assisted setup · one shared draft');
+});
+
+// A build whose drafted blueprint must be created inside a group that does
+// not exist yet.
+function groupNeededBuild() {
+  return {
+    session: {
+      id: 'build-1',
+      version: 3,
+      status: 'open',
+      draft: { name: 'Field Notes', template_id: 'plugin:neutral:project' },
+      needs_home: { label: 'Neutral Program Home' },
+      group_prerequisite: {
+        state: 'home_creation_review_required',
+        home: { exists: false, proposed_name: 'Neutral Program Home' },
+        actions: ['review_create_home']
+      }
+    }
+  };
+}
+
+function groupPane() {
+  const calls = [];
+  return {
+    calls,
+    COPY: {
+      gateFailurePrefix: 'Not yet — ',
+      groupCreateNext: 'Ready to create.',
+      createIt: 'Create it',
+      groupSwitchFolder: 'The attached folder will not be linked to a group.',
+      groupSwitchKeep: 'Keep building the workspace',
+      groupSwitchContinue: 'Continue as a group'
+    },
+    applySession: session => calls.push(['session', session.group_prerequisite?.state]),
+    setGroupBusy: (busy, note = '') => calls.push(['busy', busy, note]),
+    noteGroupPrerequisite: prerequisite => calls.push(['hint', prerequisite.state]),
+    showLine: (text, options = {}) => {
+      calls.push(['line', text, (options.chips || []).map(chip => chip.id)]);
+      return `line-${calls.length}`;
+    },
+    removeLine: id => calls.push(['remove', id]),
+    collapse: options => calls.push(['collapse', Boolean(options?.withdraw)]),
+    expand: () => calls.push(['expand']),
+    focusComposer() {}
+  };
+}
+
+test('Prepare the group first runs the form’s own Home review and commit, then Create follows', async () => {
+  const manager = loadSessionManager();
+  const pane = groupPane();
+  manager.workspaceBuildPane = () => pane;
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.refreshWorkspaceReview = () => {};
+  const order = [];
+  manager.flushWorkspaceBuildDraft = async () => order.push('flush');
+  manager.groupRequirementDraft = { templateKey: 'k', policy: 'required', composition: 'grouped' };
+  manager.refreshTemplateAgentPlan = async () => order.push('plan');
+  manager.prepareRequiredGroupHomeFromCard = async () => (order.push('review'), true);
+  manager.commitRequiredGroupHome = async () => (order.push('commit'), true);
+  manager.workspaceBuildGateProblem = () => '';
+  const build = groupNeededBuild();
+  manager.workspaceBuild = build;
+  manager.workspaceBuildTransport = {
+    read: async id => {
+      order.push(`read:${id}`);
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          session: {
+            ...build.session,
+            version: 4,
+            group_prerequisite: {
+              state: 'ready_grouped',
+              home: { exists: true, workspace_id: 'ws-home', name: 'Neutral Program Home' }
+            }
+          }
+        }
+      };
+    }
+  };
+
+  await manager.prepareWorkspaceBuildGroup();
+  assert.deepEqual(order, ['flush', 'plan', 'review', 'commit', 'read:build-1']);
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls)), [
+    ['busy', true, ''],
+    ['session', 'ready_grouped'],
+    ['busy', false, ''],
+    ['line', 'Ready to create.', ['create_now']]
+  ]);
+  assert.equal(manager.workspaceBuild.session.group_prerequisite.state, 'ready_grouped');
+  // With the Home ready, the chip has nothing left to do.
+  order.length = 0;
+  await manager.prepareWorkspaceBuildGroup();
+  assert.deepEqual(order, []);
+  // Create it is the second confirmation: the build's own Create, pressed.
+  let created = 0;
+  manager.createFromWorkspaceBuild = async () => created++;
+  await manager.performWorkspaceBuildAction(build, pane, 'create_now');
+  assert.equal(created, 1);
+});
+
+test('a group that could not be prepared says why and offers nothing to create', async () => {
+  const message = { textContent: 'The group setup review failed. Nothing was changed.' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'workspaceGroupDestinationMessage' ? message : null)
+    }
+  );
+  const pane = groupPane();
+  manager.workspaceBuildPane = () => pane;
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.groupRequirementDraft = { templateKey: 'k' };
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.prepareRequiredGroupHomeFromCard = async () => false;
+  let committed = 0;
+  manager.commitRequiredGroupHome = async () => (committed++, true);
+  const build = groupNeededBuild();
+  manager.workspaceBuild = build;
+  manager.workspaceBuildTransport = {
+    read: async () => ({ ok: true, status: 200, body: { session: build.session } })
+  };
+  await manager.prepareWorkspaceBuildGroup();
+  assert.equal(committed, 0, 'a review that did not happen is never committed');
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls.filter(call => call[0] !== 'session'))), [
+    ['busy', true, ''],
+    ['busy', false, 'The group setup review failed. Nothing was changed.']
+  ]);
+});
+
+test('Create refuses in the pane while the drafted blueprint’s group is still to prepare', async () => {
+  const manager = loadSessionManager();
+  manager.blueprintSelectionBlocked = () => false;
+  manager.workspaceIdentityProblem = () => '';
+  manager.existingProjectProblem = () => '';
+  manager.blueprintInputsAvailable = () => false;
+  manager.usesTeamRosterCreator = () => false;
+  manager.groupRequirementBlocked = () => false;
+  manager.workspaceBuild = groupNeededBuild();
+  assert.equal(
+    manager.workspaceBuildGateProblem(),
+    'This blueprint needs Neutral Program Home first. Use “Prepare the group first”.'
+  );
+  manager.workspaceBuild.session.group_prerequisite = {
+    state: 'ready_grouped',
+    home: { exists: true, name: 'Neutral Program Home' }
+  };
+  assert.equal(manager.workspaceBuildGateProblem(), '');
+});
+
+test('in build mode the placement review says a missing group in the pane, quiet or not', async () => {
+  for (const quiet of [true, false]) {
+    const manager = loadSessionManager(async () => ({
+      ok: true,
+      json: async () => ({
+        group_requirement_review: {
+          state: 'home_creation_review_required',
+          home_name: 'Neutral Program Home',
+          actions: ['review_create_home']
+        }
+      })
+    }));
+    const pane = groupPane();
+    manager.workspaceBuildPane = () => pane;
+    manager.workspaceBuild = groupNeededBuild();
+    manager.workspaceBuildAssisted = () => true;
+    manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+    let moved = 0;
+    const errors = [];
+    manager.goToWizardStep = () => moved++;
+    manager.showWorkspaceCreateError = text => errors.push(text);
+    const payload = { name: 'Field Notes', template_id: 'plugin:neutral:project' };
+    assert.equal(
+      await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet }),
+      false
+    );
+    assert.equal(moved, 0, 'the hidden wizard is never where the answer goes');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(pane.calls[0], ['hint', 'home_creation_review_required']);
+    const lines = pane.calls.filter(call => call[0] === 'line');
+    assert.equal(lines.length, quiet ? 0 : 1, `quiet=${quiet}`);
+    if (!quiet) {
+      assert.equal(
+        lines[0][1],
+        'Not yet — This blueprint needs Neutral Program Home first. Use “Prepare the group first”.'
+      );
+    }
+  }
+});
+
+test('Group with a folder attached warns first, then keeps the build or drops the folder', async () => {
+  const manager = loadSessionManager();
+  const pane = groupPane();
+  manager.workspaceBuildPane = () => pane;
+  const presented = [];
+  manager.syncWorkspaceBuildPresentation = () => presented.push(manager.workspaceBuild.kindHidden);
+  manager.noteWorkspaceBuildIntent = () => {};
+  // The kind choice is on the wizard, so the build was set up manually.
+  const build = {
+    session: { id: 'build-1', status: 'open', folder: { observation: { folder: 'Field Notes' } } },
+    collapsed: true,
+    withdrawn: false,
+    kindHidden: false
+  };
+  manager.workspaceBuild = build;
+  manager.workspaceCreatorContext = { kind: 'group' };
+
+  manager.syncWorkspaceBuildKind();
+  assert.equal(build.collapsed, false, 'the pane comes back to ask');
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls)), [
+    ['expand'],
+    [
+      'line',
+      'The attached folder will not be linked to a group.',
+      ['group_switch_keep', 'group_switch_continue']
+    ]
+  ]);
+  assert.equal(build.kindHidden, false, 'the pane stays up until the user answers');
+  // A repaint asks nothing twice.
+  manager.syncWorkspaceBuildKind();
+  assert.equal(pane.calls.filter(call => call[0] === 'line').length, 1);
+
+  // Keep building the workspace: back to Workspace, the warning goes away.
+  const switched = [];
+  manager.switchWorkspaceCreatorKind = kind => {
+    switched.push(kind);
+    manager.workspaceCreatorContext = { kind };
+    manager.syncWorkspaceBuildKind();
+    return true;
+  };
+  await manager.performWorkspaceBuildAction(build, pane, 'group_switch_keep');
+  assert.deepEqual(switched, ['workspace']);
+  assert.deepEqual(pane.calls.at(-2), ['remove', 'line-2']);
+  assert.deepEqual(pane.calls.at(-1), ['expand']);
+
+  // Continue as a group: the folder leaves the build, then the pane withdraws.
+  pane.calls.length = 0;
+  manager.workspaceCreatorContext = { kind: 'group' };
+  manager.syncWorkspaceBuildKind();
+  manager.detachWorkspaceBuildFolder = async () => {
+    build.session = { ...build.session, folder: null };
+  };
+  await manager.performWorkspaceBuildAction(build, pane, 'group_switch_continue');
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls.slice(1))), [
+    ['remove', 'line-1'],
+    ['collapse', true]
+  ]);
+  assert.equal(build.kindHidden, true);
+});
+
+function planReviewElements() {
+  const field = (id, value) => ({ id, value, focus() {} });
+  return new Map([
+    ['addFolderModal', { dataset: {}, classList: { toggle() {} } }],
+    ['workspaceBuildModeStatus', { hidden: true, textContent: '' }],
+    ['workspaceBuildDraftSummary', { hidden: true }],
+    ['workspaceBuildDraftTitle', { textContent: 'Draft so far' }],
+    ['workspaceBuildDraftText', { textContent: '' }],
+    [
+      'workspaceBuildEditDraftBtn',
+      {
+        attributes: {},
+        setAttribute(k, v) {
+          this.attributes[k] = v;
+        }
+      }
+    ],
+    ['workspaceBuildPlanReview', { hidden: true }],
+    ['workspaceBuildPlanReviewLines', { rendered: null }],
+    ['workspaceBuildPlanReviewWhy', { hidden: true }],
+    ['workspaceBuildPlanReviewEvidence', { textContent: '' }],
+    ['workspaceBuildPlanName', field('workspaceBuildPlanName', '')],
+    ['workspaceBuildPlanDescription', field('workspaceBuildPlanDescription', '')],
+    ['folderNameInput', field('folderNameInput', '')],
+    ['folderDescriptionInput', field('folderDescriptionInput', 'Demos for the next release.')]
+  ]);
+}
+
+function plannedBuild() {
+  return {
+    session: {
+      draft: {},
+      folder: {
+        observation: {
+          folder: 'Documents',
+          projects: [
+            { id: 'candidate-0', name: 'Documents' },
+            { id: 'candidate-1', name: 'Ori Music Demo' }
+          ]
+        },
+        recognition: { verdict: 'project', candidate_id: 'candidate-1' }
+      },
+      plan: {
+        ready: true,
+        evidence: 'Has a REAPER session, edited yesterday',
+        lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }],
+        home: { name: 'Music Production Home', status: 'new' },
+        needs: [
+          { kind: 'integration', name: 'REAPER integration', state: 'ready' },
+          { kind: 'provider', name: 'Music Project Management', state: 'install' }
+        ]
+      }
+    }
+  };
+}
+
+test('Install <plugin> previews the reviewed release, then installs exactly that one', async () => {
+  const manager = loadSessionManager();
+  const states = [];
+  const adopted = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    setProviderInstall: next => states.push(JSON.parse(JSON.stringify(next))),
+    applySession() {},
+    showLine() {}
+  });
+  manager.adoptWorkspaceBuildSession = session => {
+    adopted.push(session.version);
+    manager.workspaceBuild.session = session;
+  };
+  manager.workspaceBuild = { session: { id: 'b1', version: 4, status: 'open' } };
+  const sent = [];
+  const preview = {
+    name: 'Music Project Management',
+    version: '0.3.0',
+    source: 's',
+    disclosure: {}
+  };
+  manager.workspaceBuildTransport = {
+    homeProvider: async (id, body) => {
+      sent.push([id, body]);
+      if (!body.confirm) {
+        return {
+          ok: true,
+          status: 200,
+          body: { session: { id, version: 4 }, home_provider: preview }
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: { session: { id, version: 5, plan: { ready: true } }, home_provider: preview }
+      };
+    }
+  };
+
+  await manager.previewWorkspaceBuildProvider();
+  assert.deepEqual(states, [{ phase: 'previewing' }, { phase: 'review', preview }]);
+  await manager.confirmWorkspaceBuildProvider();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    ['b1', { version: 4, confirm: false }],
+    ['b1', { version: 4, confirm: true, reviewed_version: '0.3.0' }]
+  ]);
+  assert.deepEqual(states.slice(2), [{ phase: 'installing', preview }, {}]);
+  assert.deepEqual(adopted, [4, 5]);
+  // A second confirm has no reviewed release left to install.
+  await manager.confirmWorkspaceBuildProvider();
+  assert.equal(sent.length, 2);
+});
+
+test('a refused install says why, and Cancel installs nothing', async () => {
+  const manager = loadSessionManager();
+  const states = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    setProviderInstall: next => states.push(JSON.parse(JSON.stringify(next)))
+  });
+  manager.adoptWorkspaceBuildSession = () => {};
+  manager.workspaceBuild = { session: { id: 'b1', version: 4, status: 'open' } };
+  manager.workspaceBuildTransport = {
+    homeProvider: async () => ({
+      ok: false,
+      status: 503,
+      body: {
+        code: 'provider_unavailable',
+        error: 'Music Project Management can’t be installed right now. Nothing was changed.'
+      }
+    })
+  };
+  await manager.previewWorkspaceBuildProvider();
+  assert.deepEqual(states.at(-1), {
+    note: 'Music Project Management can’t be installed right now. Nothing was changed.'
+  });
+  manager.workspaceBuild.providerPreview = { version: '0.3.0' };
+  manager.cancelWorkspaceBuildProvider();
+  assert.equal(manager.workspaceBuild.providerPreview, null);
+  assert.deepEqual(states.at(-1), { note: 'Nothing was installed.' });
+});
+
+test('an open plan review stands in for the conversation, with its own Set it up', async () => {
+  const elements = planReviewElements();
+  const classes = new Set();
+  elements.set('addFolderModal', {
+    dataset: {},
+    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) }
+  });
+  elements.set('workspaceBuildPlanReviewSetup', { disabled: false });
+  const manager = loadSessionManager(
+    undefined,
+    {
+      OriFolderPlanLines: { setupLinesView: lines => lines, renderSetupLines() {} }
+    },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  manager.workspaceBuild = plannedBuild();
+  manager.workspaceBuild.session.status = 'open';
+  const setUp = elements.get('workspaceBuildPlanReviewSetup');
+
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
+  assert.ok(classes.has('workspace-create-modal--plan-review'), 'the pane gives way to the review');
+  assert.equal(setUp.disabled, false, 'an unnamed draft is named after its folder');
+
+  manager.workspaceBuild.session.draft = { name: 'Ori Music Demo' };
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(setUp.disabled, false);
+  // An expired folder pick cannot be set up from the review either.
+  manager.workspaceBuild.session.folder_expires_at = new Date(Date.now() - 1000).toISOString();
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(setUp.disabled, true);
+  delete manager.workspaceBuild.session.folder_expires_at;
+  manager.syncWorkspaceBuildPresentation();
+
+  let ran = 0;
+  manager.setUpWorkspaceBuild = async () => ran++;
+  await manager.setUpFromWorkspaceBuildPlanReview();
+  assert.equal(ran, 1);
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true, 'the pane shows the run');
+  assert.ok(!classes.has('workspace-create-modal--plan-review'));
+});
+
+test('Set it up runs the reviewed plan and follows the run until it made the workspace', async () => {
+  const elements = planReviewElements();
+  const hidden = [];
+  const begun = [];
+  const manager = loadSessionManager(
+    undefined,
+    {
+      bootstrap: { Modal: { getInstance: modal => ({ hide: () => hidden.push(modal) }) } },
+      OriWorkspaceMap: { beginPlacement: spec => (begun.push(spec), true) }
+    },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  const lines = [];
+  const pane = {
+    COPY: {},
+    applySession: session => lines.push(session.status),
+    setBusy() {},
+    showLine: text => lines.push(`line:${text}`)
+  };
+  manager.workspaceBuildPane = () => pane;
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.rememberWorkspaceBuildSession = () => {};
+  const toasts = [];
+  manager.showToast = (message, type) => toasts.push([message, type]);
+  const changed = [];
+  manager.notifyWorkspacesChanged = detail => changed.push(detail.workspaceId);
+  const queue = [];
+  manager.workspaceBuildScheduler = fn => queue.push(fn);
+
+  const build = plannedBuild();
+  build.session.id = 'build-1';
+  build.session.version = 4;
+  build.session.status = 'open';
+  build.session.plan.digest = 'digest-1';
+  build.session.draft = { name: 'Ori Music Demo' };
+  manager.workspaceBuild = build;
+  const calls = [];
+  const reads = [
+    {
+      status: 'preparing',
+      setup: { plan_digest: 'digest-1' },
+      version: 6,
+      setup_run: { status: 'running', lines: [] }
+    },
+    {
+      status: 'created',
+      version: 7,
+      plan: undefined,
+      created_workspace_id: 'ws-song',
+      home_workspace_id: 'ws-home',
+      setup_receipt:
+        'Created Music Production Home and Ori Music Demo inside it. Linked folder “Ori Music Demo”.'
+    }
+  ];
+  manager.workspaceBuildTransport = {
+    setup: async (id, body) => {
+      calls.push(['setup', id, body]);
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          session: {
+            ...build.session,
+            status: 'preparing',
+            version: 5,
+            setup: { plan_digest: 'digest-1' }
+          }
+        }
+      };
+    },
+    read: async id => {
+      calls.push(['read', id]);
+      return { ok: true, status: 200, body: { session: { ...build.session, ...reads.shift() } } };
+    }
+  };
+
+  await manager.setUpWorkspaceBuild({});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), [
+    'setup',
+    'build-1',
+    { version: 4, plan_digest: 'digest-1' }
+  ]);
+  assert.equal(manager.workspaceBuild.session.status, 'preparing');
+  assert.equal(queue.length, 1);
+  // A second follow while one runs adds nothing.
+  manager.followWorkspaceBuildSetup(build);
+  assert.equal(queue.length, 1);
+
+  await queue.shift()();
+  assert.equal(manager.workspaceBuild.session.version, 6);
+  assert.equal(queue.length, 1);
+  await queue.shift()();
+  assert.deepEqual(changed, ['ws-song']);
+  assert.deepEqual(toasts, [
+    [
+      'Created Music Production Home and Ori Music Demo inside it. Linked folder “Ori Music Demo”.',
+      'success'
+    ]
+  ]);
+  assert.equal(hidden.length, 1);
+  assert.equal(queue.length, 0);
+  // The dialog closes onto the Map, which asks where the Home and the song sit.
+  assert.deepEqual(JSON.parse(JSON.stringify(begun)), [
+    {
+      token: 'build:build-1',
+      created: {
+        member: { id: 'ws-song', name: 'Ori Music Demo' },
+        group: { id: 'ws-home', name: 'Music Production Home' }
+      }
+    }
+  ]);
+});
+
+test('the Map asks only once the dialog has hidden, so its canvas keeps the keyboard', () => {
+  const listeners = {};
+  const modal = {
+    classList: { contains: name => name === 'show' },
+    addEventListener: (type, fn, options) => (listeners[type] = { fn, options })
+  };
+  let hidden = 0;
+  const begun = [];
+  const manager = loadSessionManager(
+    undefined,
+    {
+      bootstrap: { Modal: { getInstance: () => ({ hide: () => hidden++ }) } },
+      OriWorkspaceMap: { beginPlacement: spec => (begun.push(spec.token), true) }
+    },
+    { getElementById: id => (id === 'addFolderModal' ? modal : null) }
+  );
+  manager.notifyWorkspacesChanged = () => {};
+  manager.showToast = () => {};
+  manager.finishWorkspaceBuildSetupInDialog(
+    { session: { plan: { home: { name: 'Music Production Home' } } } },
+    { id: 'b1', status: 'created', created_workspace_id: 'ws-song', home_workspace_id: 'ws-home' }
+  );
+  assert.equal(hidden, 1);
+  assert.deepEqual(begun, [], 'nothing is asked while the dialog is still closing');
+  assert.equal(listeners['hidden.bs.modal'].options.once, true);
+  listeners['hidden.bs.modal'].fn();
+  assert.deepEqual(begun, ['build:b1']);
+});
+
+test('without a Map on screen the automatic layout stands and the toast says so', () => {
+  for (const map of [undefined, { beginPlacement: () => false }]) {
+    const manager = loadSessionManager(undefined, map ? { OriWorkspaceMap: map } : {});
+    const toasts = [];
+    manager.showToast = (message, type) => toasts.push([message, type]);
+    assert.equal(
+      manager.placeCreatedOnWorkspaceMap('build:b', { memberId: 'ws-song', memberName: 'Song' }),
+      false
+    );
+    assert.deepEqual(toasts, [['Placed automatically on the Map', 'info']]);
+  }
+  const manager = loadSessionManager();
+  manager.showToast = () => assert.fail('nothing was made, nothing is said');
+  assert.equal(manager.placeCreatedOnWorkspaceMap('build:b', {}), false);
+});
+
+test('a refused Set it up says why and does not follow anything', async () => {
+  const elements = planReviewElements();
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => elements.get(id) || null,
+      querySelector: () => null
+    }
+  );
+  const lines = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    applySession() {},
+    setBusy() {},
+    showLine: text => lines.push(text)
+  });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.rememberWorkspaceBuildSession = () => {};
+  const queue = [];
+  manager.workspaceBuildScheduler = fn => queue.push(fn);
+  const build = plannedBuild();
+  build.session.id = 'build-1';
+  build.session.version = 4;
+  build.session.plan.digest = 'digest-1';
+  manager.workspaceBuild = build;
+  manager.workspaceBuildTransport = {
+    setup: async () => ({
+      ok: false,
+      status: 409,
+      body: {
+        code: 'review_pending',
+        error: 'Another folder setup is waiting for an answer on Home.'
+      }
+    })
+  };
+  await manager.setUpWorkspaceBuild({});
+  assert.deepEqual(lines, ['Another folder setup is waiting for an answer on Home.']);
+  assert.equal(queue.length, 0);
+  // A run's own digest is what a Retry sends, with the chosen project file.
+  const sent = [];
+  manager.workspaceBuildTransport = {
+    setup: async (id, body) => (sent.push(body), { ok: false, status: 409, body: {} })
+  };
+  build.session.setup = { plan_digest: 'run-digest' };
+  await manager.setUpWorkspaceBuild({ entry_name: 'Take Two.rpp' });
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' }
+  ]);
+});
+
+test('a recognized folder’s plan is “Plan so far”, reviewed in place of the wizard', () => {
+  const elements = planReviewElements();
+  const rendered = [];
+  const manager = loadSessionManager(
+    undefined,
+    {
+      OriFolderPlanLines: {
+        setupLinesView: lines => lines,
+        renderSetupLines: (list, lines) => rendered.push([list, lines])
+      }
+    },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  manager.workspaceBuild = plannedBuild();
+  let collapsed = 0;
+  manager.collapseWorkspaceBuild = () => collapsed++;
+  const scheduled = [];
+  manager.scheduleWorkspaceBuildDraft = () => scheduled.push(elements.get('folderNameInput').value);
+  manager.syncWorkspaceBuildPresentation();
+
+  // The plan names the folder it links (the project inside what was attached)
+  // and only what still has to be installed.
+  assert.equal(elements.get('workspaceBuildDraftTitle').textContent, 'Plan so far');
+  assert.equal(
+    elements.get('workspaceBuildDraftText').textContent,
+    'Music Production Home (new) › Ori Music Demo · Folder: Ori Music Demo · Needs: Music Project Management (install)'
+  );
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+
+  // Review or edit draft opens the plan review, never the wizard.
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(collapsed, 0);
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
+  assert.equal(elements.get('workspaceBuildEditDraftBtn').attributes['aria-expanded'], 'true');
+  assert.equal(rendered.at(-1)[0], elements.get('workspaceBuildPlanReviewLines'));
+  assert.equal(rendered.at(-1)[1][0].name, 'Creates Home “Music Production Home”');
+  assert.equal(elements.get('workspaceBuildPlanDescription').value, 'Demos for the next release.');
+  assert.equal(elements.get('workspaceBuildPlanReviewWhy').hidden, false);
+
+  // A name typed there is the wizard's name: the draft is saved as a wizard
+  // edit, and the plan line follows it.
+  elements.get('workspaceBuildPlanName').value = 'Summer Demos';
+  manager.noteWorkspaceBuildPlanEdit(elements.get('workspaceBuildPlanName'), 'folderNameInput');
+  assert.equal(elements.get('folderNameInput').value, 'Summer Demos');
+  assert.deepEqual(scheduled, ['Summer Demos']);
+  assert.match(
+    elements.get('workspaceBuildDraftText').textContent,
+    /› Summer Demos · Folder: Ori Music Demo/
+  );
+
+  // Closing it again; and once every plugin is ready there is nothing to need.
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+  manager.workspaceBuild.session.plan.needs[1].state = 'ready';
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(
+    elements.get('workspaceBuildDraftText').textContent,
+    'Music Production Home (new) › Summer Demos · Folder: Ori Music Demo'
+  );
+
+  // Without a ready plan the button is the wizard again.
+  manager.workspaceBuild.session.plan.ready = false;
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(collapsed, 1);
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(elements.get('workspaceBuildDraftTitle').textContent, 'Draft so far');
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+});

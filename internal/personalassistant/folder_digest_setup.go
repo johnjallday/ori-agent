@@ -90,6 +90,7 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	}
 	plan = plan.Stamped()
 	v.Plan = &plan
+	v.Needs = folderPlanNeeds(offer.Subject, plan.Intent)
 	// The names the plan uses, so the card's fields start from them rather than
 	// from a reading of the plan's wording.
 	if v.Software != nil && plan.Intent.Software != nil {
@@ -100,6 +101,9 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 // setupRequest is what the host needs to plan an offer's setup.
 func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
 	req := FolderSetupRequest{UserID: userID, Offer: offer}
+	if review := offer.ConversationReview; review != nil {
+		req.WorkspaceName = review.WorkspaceName
+	}
 	if isSoftwareOffer(offer) {
 		// A request the service cannot fill in (the folder is no longer held, or
 		// its workspaces cannot be read) carries no software part, and the host
@@ -361,6 +365,9 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	request := FolderSetupRequest{
 		UserID: userID, Offer: offer, Path: path, EntryName: entryName, Plan: plan, Update: update,
 	}
+	if review := offer.ConversationReview; review != nil {
+		request.WorkspaceName = review.WorkspaceName
+	}
 	if isSoftwareOffer(offer) {
 		software, softwareErr := s.softwareRequest(ctx, userID, offer)
 		if softwareErr != nil {
@@ -445,7 +452,7 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 // that is no longer awaiting its outcome, so a late update cannot undo a resolve.
 func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID string, u FolderSetupUpdate) error {
 	now := s.now()
-	_, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
 		offer := d.Offer(offerID)
 		if offer == nil || offer.Setup == nil || offer.Status != FolderOfferAwaitingOutcome {
 			return errFolderReplay
@@ -472,6 +479,13 @@ func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID s
 	})
 	if errors.Is(err, errFolderReplay) {
 		return nil
+	}
+	// A run that stopped is settled; one that finished is settled by its
+	// resolve (afterOutcome), or stopped again when it cannot be verified.
+	if err == nil && u.Status == FolderSetupStopped {
+		if stored := updated.Offer(offerID); stored != nil {
+			s.notifySetup(ctx, userID, *stored)
+		}
 	}
 	return err
 }

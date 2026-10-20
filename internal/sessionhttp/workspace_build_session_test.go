@@ -166,6 +166,12 @@ func newBuildFixture(t *testing.T, structured bool, replies ...string) *buildFix
 	t.Helper()
 	handler, cleanup := createTestHandler(t)
 	t.Cleanup(cleanup)
+	return newBuildFixtureOn(t, handler, structured, replies...)
+}
+
+// newBuildFixtureOn is newBuildFixture on a handler the test set up itself.
+func newBuildFixtureOn(t *testing.T, handler *Handler, structured bool, replies ...string) *buildFixture {
+	t.Helper()
 	f := &buildFixture{
 		handler:  handler,
 		store:    &memoryBuildStore{now: time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC), doc: personalassistant.WorkspaceBuildDocument{SchemaVersion: 1}},

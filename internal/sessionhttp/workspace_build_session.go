@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -68,6 +69,10 @@ type WorkspaceBuildDeps struct {
 	// Links observes a link the user attaches in the pane. Nil leaves the
 	// pane without Add link.
 	Links WorkspaceBuildLinks
+	// HomeProvider installs the reviewed plugin a recognized folder's Home
+	// comes from, when its plan waits on it. Nil leaves the pane saying only
+	// which plugin to install.
+	HomeProvider WorkspaceBuildHomeProvider
 	// FileJanitor resolves the canonical compiled services at call time. The
 	// optional reviewed create path is unavailable without it; ordinary builds
 	// retain their existing no-grant creation behavior.
@@ -168,6 +173,14 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			}
 			return
 		}
+		if len(parts) == 1 && strings.TrimSpace(parts[0]) != "" {
+			if r.Method != http.MethodGet {
+				_ = orihttp.RespondMethodNotAllowed(w)
+				return
+			}
+			h.getWorkspaceBuildSession(w, r, parts[0])
+			return
+		}
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
 			_ = orihttp.RespondNotFound(w, "Build session not found")
 			return
@@ -192,7 +205,11 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			h.postWorkspaceBuildFolder(w, r, id)
 		case action == "link" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildLink(w, r, id)
-		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link":
+		case action == "setup" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildSetup(w, r, id)
+		case action == "home-provider" && r.Method == http.MethodPost:
+			h.postWorkspaceBuildHomeProvider(w, r, id)
+		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "home-provider":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
 			_ = orihttp.RespondNotFound(w, "Build session not found")
@@ -268,8 +285,58 @@ func respondBuildUnavailable(w http.ResponseWriter, reason string) {
 	})
 }
 
-func respondBuildSession(w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
-	body := map[string]any{"session": session}
+// buildSessionView is a session as every response carries it: the stored
+// session plus what is read fresh for it, never stored with it. Plan is the
+// host's setup plan for a recognized folder.
+type buildSessionView struct {
+	*personalassistant.WorkspaceBuildSession
+	Plan *personalassistant.BuildFolderPlan `json:"plan,omitempty"`
+	// SetupRun is the run Set it up started, line by line.
+	SetupRun *buildSetupRunView `json:"setup_run,omitempty"`
+	// FolderExpiresAt is when the server stops holding the attached folder's
+	// pick (foldercontext.SelectionTTL after it was observed).
+	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
+	// GroupPrerequisite is the group the drafted blueprint must be created
+	// inside (workspaceBuildGroupPrerequisite).
+	GroupPrerequisite *templateGroupRequirementPlan `json:"group_prerequisite,omitempty"`
+	// InstallProvider offers the Home's plugin the plan waits on, when this
+	// build can install it (POST …/home-provider).
+	InstallProvider *buildInstallProvider `json:"install_provider,omitempty"`
+}
+
+type buildInstallProvider struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
+	var view any = session
+	if session != nil {
+		userID := h.workspaceBuildUserID(ctx)
+		built := buildSessionView{
+			WorkspaceBuildSession: session,
+			Plan:                  h.workspaceBuildPlan(ctx, userID, nil, session),
+			SetupRun:              h.readBuildSetupRun(ctx, userID, nil, session),
+		}
+		if session.Folder != nil && (session.Status == personalassistant.WorkspaceBuildOpen || session.Status == personalassistant.WorkspaceBuildPreparing) {
+			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
+			built.FolderExpiresAt = &expires
+		}
+		if h.workspaceBuild != nil && h.workspaceBuild.HomeProvider != nil && session.Status == personalassistant.WorkspaceBuildOpen &&
+			buildWaitsOnProvider(built.Plan) && session.Folder != nil && session.Folder.Recognition.Recognized() &&
+			session.Folder.Recognition.HomeProviderKey != "" {
+			name := strings.TrimSpace(session.Folder.Recognition.HomeProviderName)
+			if name == "" {
+				name = strings.TrimSpace(built.Plan.UnavailableSubject)
+			}
+			built.InstallProvider = &buildInstallProvider{Name: name}
+		}
+		// A plan one install away sets its group up itself once installed.
+		if built.InstallProvider == nil {
+			built.GroupPrerequisite = h.workspaceBuildGroupPrerequisite(ctx, userID, session, built.Plan)
+		}
+		view = built
+	}
+	body := map[string]any{"session": view}
 	for key, value := range extra {
 		body[key] = value
 	}
@@ -357,12 +424,12 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if existing != nil {
-		respondBuildSession(w, http.StatusOK, existing, map[string]any{"resumed": true})
+		h.respondBuildSession(r.Context(), w, http.StatusOK, existing, map[string]any{"resumed": true})
 		return
 	}
 	logger.Info("Workspace build started", logger.Fields{"session_id": fresh.ID, "entry_point": entryPoint, "first_message": message != ""})
 	if message == "" {
-		respondBuildSession(w, http.StatusCreated, &fresh, nil)
+		h.respondBuildSession(r.Context(), w, http.StatusCreated, &fresh, nil)
 		return
 	}
 	session, status, code := h.runWorkspaceBuildTurn(ctx, userID, fresh.ID, buildTurnRequest{Text: message, Version: fresh.Version}, readiness)
@@ -370,7 +437,7 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 		_ = orihttp.RespondJSON(w, status, map[string]any{"error": "The build could not continue.", "code": code})
 		return
 	}
-	respondBuildSession(w, http.StatusCreated, session, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusCreated, session, nil)
 }
 
 type buildTurnRequest struct {
@@ -413,7 +480,7 @@ func (h *Handler) postWorkspaceBuildTurn(w http.ResponseWriter, r *http.Request,
 		_ = orihttp.RespondJSON(w, status, map[string]any{"error": buildErrorText(code), "code": code})
 		return
 	}
-	respondBuildSession(w, http.StatusOK, session, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, session, nil)
 }
 
 func buildErrorText(code string) string {
@@ -444,6 +511,17 @@ func (e errBuildTurn) Error() string { return e.code }
 // called, so a failed call never loses it.
 func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, req buildTurnRequest, readiness buildReadiness) (*personalassistant.WorkspaceBuildSession, int, string) {
 	deps := h.workspaceBuild
+	// A recognized folder's plan is read before the turn is staged: a Needs
+	// line whose states changed is part of what the model hears, and a ready
+	// plan fixes what the reply may set.
+	var plan *personalassistant.BuildFolderPlan
+	plannedFor := ""
+	if doc, err := deps.Store.Read(ctx, userID); err == nil {
+		if current := doc.Session(id); current != nil && current.Folder != nil {
+			plan = h.workspaceBuildPlan(ctx, userID, readiness.projection, current)
+			plannedFor = current.Folder.Observation.ID
+		}
+	}
 	var staged personalassistant.WorkspaceBuildSession
 	_, err := deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		session := doc.Session(id)
@@ -457,6 +535,9 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 			return errBuildTurn{http.StatusConflict, "version"}
 		}
 		now := deps.Store.Now()
+		if plan != nil && session.Folder != nil && session.Folder.Observation.ID == plannedFor {
+			noteBuildNeeds(session, plan, now)
+		}
 		if err := stageBuildUserTurn(session, req, now); err != nil {
 			return err
 		}
@@ -483,6 +564,11 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		groups:    h.workspaceBuildGroups(ctx, userID),
 		nameTaken: func(name string) bool { return h.workspaceNameTaken(ctx, name) },
 		modelOK:   deps.ModelAvailable,
+	}
+	if plan != nil && plan.Ready && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
+		validation.plan = plan
+	} else if buildWaitsOnProvider(plan) && deps.HomeProvider != nil && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
+		validation.waitsOn = strings.TrimSpace(plan.UnavailableSubject)
 	}
 	outcome := h.askWorkspaceBuildModel(ctx, readiness, &staged, validation)
 
@@ -633,6 +719,12 @@ func offerableCatalog(catalog []WorkspaceBuildCatalogEntry) []WorkspaceBuildCata
 		if entry.Template.ID == personalhq.PersonalHQTemplateID {
 			continue
 		}
+		// A Home carrier makes the group a workspace lives in, not the
+		// workspace. The server's build catalog leaves them out already; this
+		// keeps any catalog from offering one to the model.
+		if entry.Template.ProgramHomeOwner != nil {
+			continue
+		}
 		out = append(out, entry)
 	}
 	return out
@@ -658,6 +750,8 @@ func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildRea
 		Catalog:       validation.catalog,
 		Agents:        validation.agents,
 		Groups:        validation.groups,
+		Plan:          validation.plan,
+		WaitsOn:       validation.waitsOn,
 	}
 	messages := buildMessages(session)
 	prompted := cloneBuildSession(*session)
@@ -694,10 +788,11 @@ func buildReplyDoesWork(session *personalassistant.WorkspaceBuildSession, reply 
 	if !result.changed() && !asked && !creating {
 		return false, result.rejections
 	}
-	// The first answer to the user's description sets the essentials.
+	// The first answer to the user's description sets the essentials. With a
+	// host plan the blueprint is the plan's, so the name and description are.
 	if session.TurnCount == 1 && !session.Draft.HasBlueprint() {
 		draft := scratch.Draft
-		ok := draft.HasBlueprint() && strings.TrimSpace(draft.Name) != "" && strings.TrimSpace(draft.Description) != ""
+		ok := (draft.HasBlueprint() || validation.plan != nil) && strings.TrimSpace(draft.Name) != "" && strings.TrimSpace(draft.Description) != ""
 		return ok, result.rejections
 	}
 	return true, result.rejections

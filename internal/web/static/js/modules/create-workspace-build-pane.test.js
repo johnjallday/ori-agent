@@ -4,6 +4,11 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./create-workspace-build-pane.js', import.meta.url), 'utf8');
+const planLinesSource = readFileSync(new URL('./folder-plan-lines.js', import.meta.url), 'utf8');
+const recognitionLinesSource = readFileSync(
+  new URL('./folder-recognition-lines.js', import.meta.url),
+  'utf8'
+);
 
 // A small DOM: enough elements, attributes, events, and simple selectors for
 // the pane to render into and be driven the way a user drives it.
@@ -105,6 +110,19 @@ class FakeElement {
     child.parentNode = this;
     this.children.unshift(child);
   }
+  // Text becomes a text node, as it does in the DOM.
+  append(...nodes) {
+    for (const node of nodes) {
+      if (typeof node === 'string') {
+        const textNode = new FakeElement('#text', this.ownerDocument);
+        textNode.textContent = node;
+        this.appendChild(textNode);
+      } else this.appendChild(node);
+    }
+  }
+  replaceChildren() {
+    this.textContent = '';
+  }
   contains(node) {
     for (let current = node; current; current = current.parentNode) {
       if (current === this) return true;
@@ -163,7 +181,7 @@ class FakeElement {
   }
 }
 
-function loadPane() {
+function loadPane(extras = {}) {
   const document = {
     activeElement: null,
     elements: new Map(),
@@ -185,7 +203,11 @@ function loadPane() {
     AgentAvatar: { markup: input => `<span class="agent-avatar">${input.name[0]}</span>` }
   };
   class CustomEvent extends FakeEvent {}
-  vm.runInNewContext(source, { window, document, CustomEvent }, { filename: 'pane.js' });
+  // Loaded before the pane, as in base.tmpl.
+  const context = vm.createContext({ window, document, CustomEvent, ...extras });
+  vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
+  vm.runInContext(recognitionLinesSource, context, { filename: 'folder-recognition-lines.js' });
+  vm.runInContext(source, context, { filename: 'pane.js' });
   const events = [];
   for (const type of [
     'workspace-build-turn',
@@ -200,7 +222,12 @@ function loadPane() {
     'workspace-build-link-remove',
     'workspace-build-review',
     'workspace-build-prepare',
-    'workspace-build-defer'
+    'workspace-build-defer',
+    'workspace-build-setup',
+    'workspace-build-prepare-group',
+    'workspace-build-install-provider',
+    'workspace-build-install-provider-confirm',
+    'workspace-build-install-provider-cancel'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -708,10 +735,14 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-folder-remove');
 
-  // A pick in flight locks the attachments and says what is happening.
+  // A pick in flight locks the attachments and says what is happening; Send
+  // waits for it too, since a turn sent now would be dropped.
+  const send = root.querySelectorAll('button').find(button => button.type === 'submit');
+  assert.equal(send.disabled, false);
   pane.setFolderBusy(true, 'Looking at folder metadata locally…');
   assert.equal(controls.add.disabled, true);
   assert.equal(controls.remove.disabled, true);
+  assert.equal(send.disabled, true);
   assert.equal(controls.summary.textContent, 'Looking at folder metadata locally…');
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-folder-remove'); // the earlier one; nothing new
@@ -720,6 +751,7 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   assert.equal(events.length, count);
   pane.setFolderBusy(false, 'No folder was chosen. Your draft is unchanged.');
   assert.equal(controls.add.disabled, false);
+  assert.equal(send.disabled, false);
   assert.equal(controls.summary.textContent, 'No folder was chosen. Your draft is unchanged.');
 
   // A new folder starts clean; no folder clears the chip.
@@ -732,6 +764,476 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
   assert.equal(controls.hint.hidden, true);
+});
+
+test('the recognition line says what Ori recognized, from server facts only', () => {
+  const { pane } = loadPane();
+  const reaper = {
+    verdict: 'project',
+    label: 'REAPER project',
+    marker_noun: 'session',
+    marker_count: 3,
+    project_count: 1
+  };
+  assert.equal(pane.folderRecognitionText(reaper), 'Recognized: REAPER project · 3 session files');
+  assert.equal(
+    pane.folderRecognitionText({ ...reaper, marker_count: 1 }),
+    'Recognized: REAPER project · 1 session file'
+  );
+  // A marker that is a folder (a repository) has no count to give.
+  assert.equal(
+    pane.folderRecognitionText({ verdict: 'project', label: 'software project', project_count: 1 }),
+    'Recognized: software project'
+  );
+  assert.equal(pane.folderRecognitionText({ verdict: 'none' }), 'Not a project Ori recognizes yet');
+  assert.equal(
+    pane.folderRecognitionText({ verdict: 'collection', project_count: 7 }),
+    'Holds 7 projects · Explore a folder on Home sets them up together'
+  );
+  // Nothing said, or something the pane cannot vouch for, says nothing.
+  for (const silent of [
+    null,
+    undefined,
+    {},
+    { verdict: 'project' },
+    { verdict: 'collection', project_count: 1 },
+    { verdict: 'maybe', label: 'x' }
+  ]) {
+    assert.equal(pane.folderRecognitionText(silent), '');
+  }
+});
+
+test('an attached folder shows its recognition line under the chip', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const line = () =>
+    root.querySelectorAll('p').find(node => node.id === 'workspaceBuildFolderRecognition');
+  assert.equal(line().hidden, true);
+
+  pane.applySession({
+    transcript: [],
+    folder: {
+      observation: { ...observation, folder: 'Ori Music Demo' },
+      recognition: {
+        verdict: 'project',
+        label: 'REAPER project',
+        marker_noun: 'session',
+        marker_count: 3
+      }
+    }
+  });
+  assert.equal(line().hidden, false);
+  assert.equal(line().textContent, 'Recognized: REAPER project · 3 session files');
+  assert.equal(line().classList.contains('is-recognized'), true);
+
+  pane.applySession({ transcript: [], folder: { observation, recognition: { verdict: 'none' } } });
+  assert.equal(line().textContent, 'Not a project Ori recognizes yet');
+  assert.equal(line().classList.contains('is-recognized'), false);
+
+  // An older build kept no recognition: the folder shows without a line.
+  pane.applySession({ transcript: [], folder: { observation } });
+  assert.equal(line().hidden, true);
+  pane.applySession({ transcript: [] });
+  assert.equal(line().hidden, true);
+});
+
+test('a recognized folder’s plan is the host’s lines, with the reason behind it', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const find = (tag, id) => root.querySelectorAll(tag).find(node => node.id === id);
+  const block = () => find('section', 'workspaceBuildPlan');
+  assert.equal(block().hidden, true);
+
+  const plan = {
+    ready: true,
+    digest: 'digest-1',
+    evidence: 'Has a REAPER session, edited yesterday',
+    lines: [
+      { kind: 'provider', name: 'Installs the Music Project Management plugin' },
+      {
+        kind: 'home',
+        name: 'Creates Home “Music Production Home”',
+        detail: 'Your later projects of this kind join it.'
+      },
+      { kind: 'workspace', name: '  ' }
+    ]
+  };
+  pane.applySession({ transcript: [], folder: { observation }, plan });
+  assert.equal(block().hidden, false);
+  const items = find('ul', 'workspaceBuildPlanLines').children;
+  // The card's own normalizer drops a line with no name.
+  assert.equal(items.length, 2);
+  assert.equal(items[1].dataset.kind, 'home');
+  assert.equal(
+    items[1].textContent,
+    '•Creates Home “Music Production Home”Your later projects of this kind join it.'
+  );
+  const why = root.querySelectorAll('details')[0];
+  assert.equal(why.hidden, false);
+  assert.equal(why.textContent, 'Why this suggestion?Has a REAPER session, edited yesterday');
+
+  // A plan that cannot run says so, names what it waits on, and lists nothing.
+  pane.applySession({
+    transcript: [],
+    folder: { observation },
+    plan: {
+      ready: false,
+      lines: [],
+      unavailable: 'provider_unverified',
+      unavailable_subject: 'Music Project Management'
+    }
+  });
+  assert.equal(block().hidden, false);
+  assert.equal(find('ul', 'workspaceBuildPlanLines').hidden, true);
+  assert.equal(why.hidden, true);
+  assert.equal(
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-plan__note'))
+      .textContent,
+    'Set it up isn’t available: the installed Music Project Management isn’t the reviewed release. The form still works.'
+  );
+
+  // Each reason says what it waits on; one the pane does not know says only
+  // that Set it up is unavailable.
+  assert.equal(
+    pane.COPY.planUnavailable('provider_not_installed', 'Music Project Management'),
+    'Set it up needs the Music Project Management plugin installed first: Ori makes the Home from it. The form still works.'
+  );
+  assert.equal(
+    pane.COPY.planUnavailable('integration_not_installed', 'REAPER'),
+    'Set it up isn’t available: REAPER has no reviewed install here. The form still works.'
+  );
+  assert.equal(
+    pane.COPY.planUnavailable('plan_unavailable', 'REAPER'),
+    'Set it up isn’t available for this folder right now. The form still works.'
+  );
+
+  pane.applySession({ transcript: [], folder: { observation } });
+  assert.equal(block().hidden, true);
+});
+
+test('Set it up is offered on a ready, named plan and follows the run it starts', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const buttons = () => root.querySelectorAll('button');
+  const control = kind => buttons().find(button => button.dataset.buildControl === kind);
+  const status = () =>
+    root
+      .querySelectorAll('p')
+      .find(node => node.classList.contains('workspace-build-plan__status'));
+  const expiry = () =>
+    root
+      .querySelectorAll('p')
+      .find(node => node.classList.contains('workspace-build-plan__expiry'));
+  const later = new Date(Date.now() + 20 * 60000).toISOString();
+  const plan = {
+    ready: true,
+    digest: 'd',
+    lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }]
+  };
+  const session = {
+    status: 'open',
+    transcript: [],
+    folder: { observation },
+    folder_expires_at: later,
+    plan,
+    draft: {}
+  };
+
+  // Unnamed, it is named after its folder as the plan says: still pressable.
+  pane.applySession(session);
+  assert.equal(control('setup').hidden, false);
+  assert.equal(control('setup').disabled, false);
+  pane.applySession({ ...session, draft: { name: 'Ori Music Demo' } });
+  assert.equal(control('setup').disabled, false);
+  // Set it up is the plan's action; an empty Send is not offered as one.
+  assert.equal(
+    root
+      .querySelectorAll('span')
+      .find(node => node.classList.contains('workspace-build-folder__hint')).hidden,
+    true
+  );
+  assert.equal(expiry().hidden, true);
+  control('setup').click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: {} });
+
+  // While it runs: the run's own lines, a status, and no action at all.
+  pane.applySession({
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    status: 'preparing',
+    setup: { plan_digest: 'd' },
+    setup_run: {
+      status: 'running',
+      lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”', state: 'working' }]
+    }
+  });
+  assert.equal(control('setup').hidden, true);
+  assert.equal(control('setup-retry').hidden, true);
+  // The build takes no turn while it runs.
+  assert.equal(root.querySelectorAll('textarea')[0].disabled, true);
+  assert.equal(status().hidden, false);
+  assert.equal(status().textContent, 'Setting it up… Ori is running the plan, line by line.');
+  const item = root.querySelectorAll('li').find(node => node.dataset.kind === 'home');
+  assert.equal(item.dataset.state, 'working');
+
+  // Stopped: Retry continues it; a project-file question offers the files.
+  const stopped = {
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    setup: { plan_digest: 'd', stop_reason: 'install_failed' },
+    setup_run: { status: 'stopped', stop_reason: 'install_failed', lines: plan.lines }
+  };
+  pane.applySession(stopped);
+  assert.equal(status().hidden, true);
+  assert.equal(control('setup').hidden, true);
+  assert.equal(control('setup-retry').hidden, false);
+  control('setup-retry').click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: {} });
+  pane.applySession({
+    ...stopped,
+    setup_run: {
+      status: 'stopped',
+      stop_reason: 'needs_choice',
+      entry_candidates: ['Take One.rpp', 'Take Two.rpp'],
+      lines: plan.lines
+    }
+  });
+  assert.equal(control('setup-retry').hidden, true);
+  const entries = buttons().filter(button => button.dataset.buildControl === 'setup-entry');
+  assert.deepEqual(
+    entries.map(button => button.textContent),
+    ['Use Take One.rpp', 'Use Take Two.rpp']
+  );
+  entries[1].click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: { entry_name: 'Take Two.rpp' } });
+
+  // A pick about to expire says so; an expired one asks for the folder again.
+  pane.applySession({
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    folder_expires_at: new Date(Date.now() + 3.5 * 60000).toISOString()
+  });
+  assert.equal(expiry().hidden, false);
+  assert.equal(expiry().textContent, 'Folder pick expires in 4 min');
+  assert.equal(control('folder-again').hidden, true);
+  pane.applySession({
+    ...session,
+    draft: { name: 'Ori Music Demo' },
+    folder_expires_at: new Date(Date.now() - 60000).toISOString()
+  });
+  assert.equal(expiry().textContent, 'The folder pick expired. Add the folder again to set it up.');
+  assert.equal(control('setup').disabled, true);
+  assert.equal(control('folder-again').hidden, false);
+  control('folder-again').click();
+  same(events.at(-1), { type: 'workspace-build-folder-open', detail: {} });
+});
+
+// PRD user story 2: a plan waiting on its Home's plugin offers the install,
+// discloses the reviewed release first, and installs only on Install and
+// continue.
+test('a plan waiting on its Home’s plugin offers the reviewed install, disclosed before anything is installed', () => {
+  const drawn = [];
+  const { pane, root, events, document } = loadPane({
+    PluginLifecycle: {
+      renderTrustReport: report => {
+        drawn.push(report);
+        const node = new FakeElement('div', null);
+        node.textContent = 'Adds these Homes: Music Production Home';
+        return node;
+      }
+    }
+  });
+  pane.mount({ assistant, folders: true });
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  const byClass = name => root.querySelectorAll('p').find(node => node.classList.contains(name));
+  const waiting = {
+    status: 'open',
+    transcript: [],
+    draft: {},
+    folder: { observation },
+    plan: {
+      ready: false,
+      lines: [],
+      unavailable: 'provider_not_installed',
+      unavailable_subject: 'Music Project Management'
+    }
+  };
+
+  // Without the server's offer there is nothing to press.
+  const offer = () =>
+    root
+      .querySelectorAll('div')
+      .find(node => node.classList.contains('workspace-build-plan__install'));
+  pane.applySession(waiting);
+  assert.equal(offer().hidden, true);
+
+  pane.applySession({ ...waiting, install_provider: { name: 'Music Project Management' } });
+  assert.equal(control('install-provider').textContent, 'Install Music Project Management');
+  control('install-provider').click();
+  same(events.at(-1), { type: 'workspace-build-install-provider', detail: {} });
+
+  pane.setProviderInstall({ phase: 'previewing' });
+  assert.equal(control('install-provider').disabled, true);
+  assert.equal(
+    byClass('workspace-build-plan__install-status').textContent,
+    'Checking the reviewed release… Nothing is installed yet.'
+  );
+
+  const preview = {
+    version: '0.3.0',
+    source: 'https://github.com/example/music@abc',
+    disclosure: { name: 'music-project-management' }
+  };
+  const planBlock = () =>
+    root.querySelectorAll('section').find(node => node.classList.contains('workspace-build-plan'));
+  const reviewing = () => planBlock().classList.contains('workspace-build-plan--install-review');
+  assert.equal(reviewing(), false);
+  pane.setProviderInstall({ phase: 'review', preview });
+  assert.equal(reviewing(), true, 'the review stands in for the conversation');
+  assert.equal(document.activeElement, control('install-provider-confirm'), 'focus moves into it');
+  assert.equal(control('install-provider').hidden, true);
+  assert.equal(
+    byClass('workspace-build-plan__install-title').textContent,
+    'Install Music Project Management 0.3.0?'
+  );
+  assert.equal(
+    byClass('workspace-build-plan__install-source').textContent,
+    'From https://github.com/example/music@abc'
+  );
+  assert.deepEqual(drawn, [preview.disclosure], 'the Plugins page’s own trust report, drawn once');
+  control('install-provider-confirm').click();
+  same(events.at(-1), { type: 'workspace-build-install-provider-confirm', detail: {} });
+
+  pane.setProviderInstall({ phase: 'installing', preview });
+  assert.equal(control('install-provider-confirm').disabled, true);
+  assert.equal(control('install-provider-cancel').hidden, true);
+  assert.equal(
+    byClass('workspace-build-plan__install-status').textContent,
+    'Installing Music Project Management… Then Ori reads the plan again.'
+  );
+
+  // A refusal is said under it; the offer stays.
+  pane.setProviderInstall({
+    note: 'Music Project Management can’t be installed right now. Nothing was changed.'
+  });
+  assert.equal(control('install-provider').hidden, false);
+  assert.equal(reviewing(), false);
+  assert.equal(document.activeElement, control('install-provider'), 'focus returns to Install');
+  assert.match(byClass('workspace-build-plan__install-status').textContent, /can’t be installed/);
+
+  // Once the plan is ready the offer is gone and Set it up is there.
+  pane.applySession({
+    ...waiting,
+    draft: { name: 'Album-1' },
+    plan: {
+      ready: true,
+      digest: 'd',
+      lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }]
+    }
+  });
+  assert.equal(control('setup').hidden, false);
+});
+
+test('a blueprint’s group is said before Create, with Prepare the group first until it exists', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant });
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  const block = () =>
+    root.querySelectorAll('section').find(node => node.classList.contains('workspace-build-group'));
+  const line = () =>
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-group__line'));
+  const note = () =>
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-group__note'));
+  const session = {
+    status: 'open',
+    transcript: [],
+    draft: { name: 'Field Notes' },
+    needs_home: { label: 'Music Production Home' }
+  };
+
+  // No prerequisite: nothing is said.
+  pane.applySession(session);
+  assert.equal(block().hidden, true);
+
+  const needed = {
+    state: 'home_creation_review_required',
+    home: { exists: false, proposed_name: 'Music Production Home' },
+    actions: ['review_create_home', 'open_guided_setup']
+  };
+  pane.applySession({ ...session, group_prerequisite: needed });
+  assert.equal(block().hidden, false);
+  assert.equal(
+    line().textContent,
+    'This blueprint needs Music Production Home first. Ori prepares the group with your confirmation, then creates the workspace inside it.'
+  );
+  assert.equal(control('prepare-group').hidden, false);
+  assert.equal(control('prepare-group').textContent, 'Prepare the group first');
+  control('prepare-group').click();
+  same(events.at(-1), { type: 'workspace-build-prepare-group', detail: {} });
+
+  // While it prepares the chip cannot be pressed twice; a stop says why.
+  pane.setGroupBusy(true);
+  assert.equal(control('prepare-group').disabled, true);
+  assert.equal(control('prepare-group').textContent, 'Preparing the group…');
+  const before = events.length;
+  control('prepare-group').click();
+  assert.equal(events.length, before);
+  pane.setGroupBusy(false, 'The group setup review failed. Nothing was changed.');
+  assert.equal(note().hidden, false);
+  assert.equal(note().textContent, 'The group setup review failed. Nothing was changed.');
+
+  // Once the Home exists: Group ready, and no chip.
+  pane.setGroupBusy(false);
+  pane.applySession({
+    ...session,
+    group_prerequisite: {
+      state: 'ready_grouped',
+      home: { exists: true, workspace_id: 'ws-home', name: 'Music Production Home' }
+    }
+  });
+  assert.equal(
+    line().textContent,
+    'Group ready: Music Production Home. The workspace is created inside it.'
+  );
+  assert.equal(control('prepare-group').hidden, true);
+  assert.equal(note().hidden, true);
+
+  // A group Ori may not create here is said, never offered.
+  pane.applySession({
+    ...session,
+    group_prerequisite: { state: 'home_required', home: { exists: false } }
+  });
+  assert.match(line().textContent, /can’t prepare from here/);
+  assert.equal(control('prepare-group').hidden, true);
+
+  // A closed build says nothing about its group.
+  pane.applySession({ ...session, status: 'created', group_prerequisite: needed });
+  assert.equal(block().hidden, true);
+});
+
+test('the form’s own placement review is said in the pane until the session carries it', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant });
+  const line = () =>
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-group__line'));
+  const session = { status: 'open', transcript: [], draft: {} };
+  pane.applySession(session);
+  pane.noteGroupPrerequisite({
+    state: 'home_creation_review_required',
+    home: { exists: false, proposed_name: 'Neutral Program Home' },
+    actions: ['review_create_home']
+  });
+  assert.match(line().textContent, /^This blueprint needs Neutral Program Home first\./);
+  pane.applySession({
+    ...session,
+    group_prerequisite: {
+      state: 'ready_grouped',
+      home: { exists: true, name: 'Neutral Program Home' }
+    }
+  });
+  assert.match(line().textContent, /^Group ready: Neutral Program Home\./);
 });
 
 // ----- Add link -----

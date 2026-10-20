@@ -34,7 +34,9 @@ type PlanFacts struct {
 	// BlueprintLabel names the workspace blueprint.
 	BlueprintLabel string
 	WorkspaceName  string
-	Integration    Plugin
+	// FolderName is the linked folder's own name; empty is the workspace's.
+	FolderName  string
+	Integration Plugin
 	// Provider is the plugin that supplies the Home a split blueprint needs; nil
 	// when the blueprint has none.
 	Provider *Plugin
@@ -217,9 +219,13 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		lines = append(lines, line)
 		intent.SetsProfile, intent.GrantsTemplates = true, grants
 	}
+	folderName := strings.TrimSpace(facts.FolderName)
+	if folderName == "" {
+		folderName = facts.WorkspaceName
+	}
 	lines = append(lines,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: workspaceName},
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.WorkspaceName + " where it is", Detail: "Nothing is moved or copied."},
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + folderName + " where it is", Detail: "Nothing is moved or copied."},
 		mode,
 		agents,
 		// Nothing starts it: the user does, with Start first look, which is when
@@ -299,7 +305,7 @@ func libraryDetailSongDetails(appName string) string {
 func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan {
 	intent := personalassistant.FolderSetupIntent{Portfolio: true, Placement: "grouped", HomeTemplate: facts.HomeTemplate}
 	provider := pluginLine(personalassistant.FolderPlanProvider, "plugin", facts.Provider)
-	if provider.Detail == "Nothing is installed." || provider.Detail == "" {
+	if provider.Detail == pluginDetailReady || provider.Detail == "" {
 		provider.Detail = "It provides the Home these projects are listed in."
 	}
 	lines := []personalassistant.FolderPlanLine{provider}
@@ -415,10 +421,14 @@ func pluginLine(kind, noun string, p Plugin) personalassistant.FolderPlanLine {
 		line.Detail = reviewedSource(p.Source)
 	default:
 		line.Name = "Uses the installed reviewed " + p.Name + " " + noun
-		line.Detail = "Nothing is installed."
+		line.Detail = pluginDetailReady
 	}
 	return line
 }
+
+// pluginDetailReady says a plugin the plan only uses is already in place. It
+// used to read "Nothing is installed.", which said the opposite to the user.
+const pluginDetailReady = "Already installed and enabled — nothing to install."
 
 // pluralLabel names more than one of a blueprint's projects ("Studio songs").
 func pluralLabel(label string) string {

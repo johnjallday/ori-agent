@@ -2493,8 +2493,10 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-pane__earlier:hover {
   color: var(--wc-ink);
 }
+/* The conversation gives way first when the pane is short: it scrolls, while
+   the plan below it keeps its controls (see .workspace-build-plan). */
 .workspace-create-modal .workspace-build-pane__transcript {
-  flex: 1 1 auto;
+  flex: 1 100 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 12px 14px;
@@ -2618,6 +2620,7 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-folder[hidden],
 .workspace-create-modal .workspace-build-folder__hint[hidden],
 .workspace-create-modal .workspace-build-folder__summary[hidden],
+.workspace-create-modal .workspace-build-folder__recognition[hidden],
 .workspace-create-modal .workspace-build-folder-chooser[hidden],
 .workspace-create-modal .workspace-build-folder-chooser__note[hidden],
 .workspace-create-modal .workspace-build-link-field[hidden],
@@ -2681,11 +2684,261 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   cursor: default;
 }
 .workspace-create-modal .workspace-build-folder__hint,
-.workspace-create-modal .workspace-build-folder__summary {
+.workspace-create-modal .workspace-build-folder__summary,
+.workspace-create-modal .workspace-build-folder__recognition {
   margin: 0;
   color: var(--wc-ink-dim);
   font-family: var(--wc-font-mono);
   font-size: 11px;
+}
+.workspace-create-modal .workspace-build-folder__recognition.is-recognized {
+  color: var(--wc-ink-heading);
+}
+/* The group a drafted blueprint is created inside: still to prepare, with
+   Prepare the group first, or ready. */
+.workspace-create-modal .workspace-build-group[hidden],
+.workspace-create-modal .workspace-build-group__note[hidden],
+.workspace-create-modal .workspace-build-group__prepare[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-build-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+}
+.workspace-create-modal .workspace-build-group__line {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.workspace-create-modal .workspace-build-group__note {
+  margin: 0;
+  color: var(--wc-alert);
+  font-size: 12px;
+}
+/* A recognized folder's plan: the folder card's own lines (folder-plan-lines.js)
+   in the pane, and again in the review that stands in for the wizard. The
+   state is a glyph and a hidden word, never colour alone. */
+.workspace-create-modal .workspace-build-plan[hidden],
+.workspace-create-modal .workspace-build-plan-review[hidden],
+.workspace-create-modal .workspace-build-plan__lines[hidden],
+.workspace-create-modal .workspace-build-plan__note[hidden],
+.workspace-create-modal .workspace-build-plan__why[hidden],
+.workspace-create-modal .workspace-build-plan__status[hidden],
+.workspace-create-modal .workspace-build-plan__entries[hidden],
+.workspace-create-modal .workspace-build-plan__expiry[hidden],
+.workspace-create-modal .workspace-build-plan__actions [hidden] {
+  display: none;
+}
+/* Installing the Home's plugin a plan waits on: the offer, then the reviewed
+   release with its full trust report before anything is installed. */
+.workspace-create-modal .workspace-build-plan__install[hidden],
+.workspace-create-modal .workspace-build-plan__install-review[hidden],
+.workspace-create-modal .workspace-build-plan__install [hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-build-plan__install,
+.workspace-create-modal .workspace-build-plan__install-review {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-build-plan__install-review {
+  align-self: stretch;
+  padding: 8px 10px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-deep);
+}
+.workspace-create-modal .workspace-build-plan__install-title {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-weight: 600;
+  font-size: 13px;
+}
+.workspace-create-modal .workspace-build-plan__install-source,
+.workspace-create-modal .workspace-build-plan__install-adds,
+.workspace-create-modal .workspace-build-plan__install-development,
+.workspace-create-modal .workspace-build-plan__install-status {
+  margin: 0;
+  color: var(--wc-ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.workspace-create-modal .workspace-build-plan__install-development {
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-build-plan__install-trust {
+  align-self: stretch;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-plan__actions,
+.workspace-create-modal .workspace-build-plan__entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-build-plan__actions:not(:has(> :not([hidden]))) {
+  display: none;
+}
+.workspace-create-modal .workspace-build-plan__status {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-plan__expiry {
+  margin: 0;
+  color: var(--wc-alert);
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-build-plan,
+.workspace-create-modal .workspace-build-plan-review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+}
+.workspace-create-modal .workspace-build-plan-review {
+  margin: 0 16px 12px;
+}
+/* In the pane the plan shares the room with the conversation: the
+   conversation gives way first, the plan's lines scroll past 45%, so the
+   assistant's narration and Set it up both stay in view. Whatever still does
+   not fit scrolls inside the plan, never under the composer. */
+.workspace-create-modal .workspace-build-pane .workspace-build-plan {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The plugin's install review is a decision: like the plan review it stands
+   in for the conversation and the composer until Install and continue or
+   Cancel, and its trust report scrolls so both stay in view. */
+.workspace-create-modal
+  .workspace-build-pane:has(.workspace-build-plan--install-review)
+  .workspace-build-pane__transcript,
+.workspace-create-modal
+  .workspace-build-pane:has(.workspace-build-plan--install-review)
+  .workspace-build-pane__composer,
+.workspace-create-modal .workspace-build-plan--install-review .workspace-build-plan__note {
+  display: none;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan--install-review {
+  flex: 1 1 auto;
+  max-height: none;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__install,
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__install-review {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__install-trust {
+  flex: 0 1 auto;
+  min-height: 48px;
+  max-height: none;
+}
+/* An open plan review stands in for the conversation: it takes the pane's
+   room and scrolls on its own, with its own Set it up. */
+.workspace-create-modal.workspace-create-modal--plan-review .workspace-build-pane {
+  display: none;
+}
+.workspace-create-modal.workspace-create-modal--plan-review .workspace-build-plan-review {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.workspace-create-modal .workspace-build-plan-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-build-plan__title,
+.workspace-create-modal .workspace-build-plan-review h2 {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-font-display);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-build-plan__lines {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.workspace-create-modal .workspace-build-plan__lines li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-deep);
+  color: var(--wc-ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-icon {
+  flex: none;
+  width: 1.1em;
+  color: var(--wc-ink-faint);
+  font-weight: 750;
+  text-align: center;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-text {
+  min-width: 0;
+}
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-text small {
+  display: block;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="working"] {
+  border-color: var(--wc-line-bright);
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-icon {
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="failed"],
+.workspace-create-modal .workspace-build-plan__lines li[data-state="failed"] .pa-folder__plan-icon {
+  border-color: var(--wc-alert);
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-build-plan__note,
+.workspace-create-modal .workspace-build-plan__evidence {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-plan__why summary {
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-build-plan-review__fields {
+  display: grid;
+  gap: 4px;
+}
+.workspace-create-modal .workspace-build-plan-review__fields label {
+  color: var(--wc-ink-dim);
+  font-size: 12px;
 }
 .workspace-create-modal .workspace-build-folder-chooser {
   display: flex;

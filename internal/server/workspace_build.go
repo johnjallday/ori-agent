@@ -72,14 +72,7 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 			if err != nil {
 				return nil, err
 			}
-			entries := make([]sessionhttp.WorkspaceBuildCatalogEntry, 0, len(snapshot.Entries))
-			for _, entry := range snapshot.Entries {
-				if !snapshot.Active[entry.ID] {
-					continue
-				}
-				entries = append(entries, sessionhttp.WorkspaceBuildCatalogEntry{Template: entry.Template, Readiness: entry.Readiness})
-			}
-			return entries, nil
+			return workspaceBuildCatalogEntries(snapshot), nil
 		},
 		ResolveModel: func(_ context.Context, profileName string) (sessionhttp.WorkspaceBuildModel, error) {
 			return resolveWorkspaceBuildModel(b.st, b.configManager, b.llmFactory, profileName)
@@ -97,6 +90,13 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 	// every call. Without a folder digest there is no chooser to offer.
 	if b.personalAssistantFolderDigest != nil {
 		deps.Folders = buildFolderObservations{builder: b}
+		// A recognized folder's Home plugin installs through the same
+		// reviewed-release service Home's folder card uses.
+		deps.HomeProvider = buildHomeProviders{
+			setup: folderHomeProviderSetup{builder: b},
+			// The plan the build reads next must say the plugin is installed.
+			installed: func() { b.folderSetupHost.forgetAll() },
+		}
 	}
 	if b.linkObserver == nil {
 		b.linkObserver = sharedLinkObserver()
@@ -139,6 +139,46 @@ func (o buildFolderObservations) ResolveRoot(ctx context.Context, target folderc
 		return "", personalassistant.ErrFolderSelection
 	}
 	return service.ResolveRoot(ctx, target, id)
+}
+
+func (o buildFolderObservations) Recognize(ctx context.Context, target foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.Recognize(ctx, target, id)
+}
+
+func (o buildFolderObservations) Plan(ctx context.Context, target foldercontext.Target, observationID, candidateID, workspaceName string) (*personalassistant.BuildFolderPlan, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.BuildPlan(ctx, target, observationID, candidateID, workspaceName)
+}
+
+func (o buildFolderObservations) ReviewSetup(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderSelection
+	}
+	return service.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
+}
+
+func (o buildFolderObservations) StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName string) (personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderOutcomeUnavailable
+	}
+	return service.StartBuildSetup(ctx, userID, offerID, planDigest, requestID, entryName)
+}
+
+func (o buildFolderObservations) ReadSetup(ctx context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderOfferNotFound
+	}
+	return service.ReadBuildSetup(ctx, review, offerID)
 }
 
 // resolveWorkspaceBuildModel picks the model a build talks to (FR30): the

@@ -122,7 +122,7 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		respondBuildUnavailable(w, buildReasonAssistantNotReady)
 		return
 	}
-	respondBuildSession(w, http.StatusOK, &result, map[string]any{"blueprint_changed": blueprintChanged})
+	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, map[string]any{"blueprint_changed": blueprintChanged})
 }
 
 // dropOverriddenWhy forgets the assistant's reason for a section the user has
@@ -377,7 +377,7 @@ func (h *Handler) abandonWorkspaceBuildSession(w http.ResponseWriter, r *http.Re
 		return
 	}
 	logger.Info("Workspace build abandoned", logger.Fields{"session_id": id})
-	respondBuildSession(w, http.StatusOK, &result, nil)
+	h.respondBuildSession(r.Context(), w, http.StatusOK, &result, nil)
 }
 
 func workspaceSlugFor(name string) string {

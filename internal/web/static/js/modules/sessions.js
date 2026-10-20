@@ -1,6 +1,12 @@
 // Session Sidebar Module
 // Handles session management, folders, tags, search, and UI interactions
 
+// The plan review's editable fields and the wizard fields they edit.
+const WORKSPACE_BUILD_PLAN_FIELDS = [
+  ['workspaceBuildPlanName', 'folderNameInput'],
+  ['workspaceBuildPlanDescription', 'folderDescriptionInput']
+];
+
 const sessionManager = {
   // State
   sessions: [],
@@ -10208,6 +10214,23 @@ const sessionManager = {
 
     const review = await requestReview();
     if (review.state === 'home_creation_review_required') {
+      // In build mode the wizard is hidden behind the conversation, so the
+      // pane says it, quiet or not, and offers Prepare the group first.
+      if (this.workspaceBuildAssisted()) {
+        this.workspaceBuildPane()?.noteGroupPrerequisite?.({
+          state: review.state,
+          home: { exists: false, proposed_name: String(review.home_name || '') },
+          actions: Array.isArray(review.actions) ? review.actions : []
+        });
+        if (!quiet) {
+          const pane = this.workspaceBuildPane();
+          const name = String(review.home_name || '').trim() || 'its group';
+          pane?.showLine?.(
+            `${pane.COPY.gateFailurePrefix}This blueprint needs ${name} first. Use “Prepare the group first”.`
+          );
+        }
+        return false;
+      }
       if (quiet) return false;
       this.showWorkspaceCreateError(
         'Prepare the required group from Details before reviewing project creation.'
@@ -11649,6 +11672,9 @@ const sessionManager = {
       detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
       link: (id, body) => call('POST', sessionURL(id, 'link'), body),
       detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body),
+      read: id => call('GET', `${base}/${encodeURIComponent(String(id || ''))}`),
+      setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
+      homeProvider: (id, body) => call('POST', sessionURL(id, 'home-provider'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
       janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
       janitorDefer: (id, body) => call('POST', sessionURL(id, 'janitor-defer'), body)
@@ -11679,11 +11705,39 @@ const sessionManager = {
     modal.addEventListener('workspace-build-defer', () => {
       void this.deferWorkspaceBuildPreparation();
     });
+    modal.addEventListener('workspace-build-setup', event => {
+      void this.setUpWorkspaceBuild(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-prepare-group', () => {
+      void this.prepareWorkspaceBuildGroup();
+    });
+    modal.addEventListener('workspace-build-install-provider', () => {
+      void this.previewWorkspaceBuildProvider();
+    });
+    modal.addEventListener('workspace-build-install-provider-confirm', () => {
+      void this.confirmWorkspaceBuildProvider();
+    });
+    modal.addEventListener('workspace-build-install-provider-cancel', () => {
+      this.cancelWorkspaceBuildProvider();
+    });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
     document.getElementById('workspaceBuildEditDraftBtn')?.addEventListener('click', () => {
-      this.collapseWorkspaceBuild();
+      this.reviewOrEditWorkspaceBuild();
     });
+    document.getElementById('workspaceBuildPlanReviewSetup')?.addEventListener('click', () => {
+      void this.setUpFromWorkspaceBuildPlanReview();
+    });
+    document.getElementById('workspaceBuildPlanReviewBack')?.addEventListener('click', () => {
+      this.reviewOrEditWorkspaceBuild();
+    });
+    // The plan review's fields edit the wizard's own, so the draft is saved
+    // exactly as a wizard edit is.
+    for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
+      document.getElementById(reviewID)?.addEventListener('input', event => {
+        this.noteWorkspaceBuildPlanEdit(event?.target, wizardID);
+      });
+    }
     modal.addEventListener('workspace-build-start-over', () => {
       void this.startOverWorkspaceBuild();
     });
@@ -11936,6 +11990,24 @@ const sessionManager = {
     }
     if (action === 'folder_skip') {
       await this.sendWorkspaceBuildTurn({ text: pane.COPY.noFolder });
+      return;
+    }
+    if (action === 'create_now') {
+      await this.createFromWorkspaceBuild();
+      return;
+    }
+    if (action === 'group_switch_keep') {
+      this.switchWorkspaceCreatorKind('workspace');
+      return;
+    }
+    if (action === 'group_switch_continue') {
+      // Continue as a group: the folder leaves the build first, then the pane
+      // withdraws as for any Group. A folder that could not be removed asks
+      // again.
+      pane.removeLine?.(build.groupSwitchLine);
+      build.groupSwitchLine = '';
+      await this.detachWorkspaceBuildFolder();
+      if (this.workspaceBuild === build) this.syncWorkspaceBuildKind();
     }
   },
 
@@ -12239,12 +12311,37 @@ const sessionManager = {
 
   // Build mode is for a Workspace. Choosing Group hides the pane and its
   // button; choosing Workspace again brings back the same build, unless the
-  // user had already chosen to do it themselves.
+  // user had already chosen to do it themselves. With a folder attached the
+  // pane first says the folder will not be linked to a group, and waits for
+  // the user to keep the workspace build or continue as a group (FR33).
   syncWorkspaceBuildKind() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
     const group = this.creatorKind() === 'group';
+    if (!group && build.groupSwitchLine) {
+      pane.removeLine?.(build.groupSwitchLine);
+      build.groupSwitchLine = '';
+    }
+    // The kind choice is on the wizard, so a build is usually collapsed when
+    // Group is chosen: the pane comes back to ask.
+    if (group && build.session?.folder && !build.withdrawn) {
+      if (build.collapsed) {
+        build.collapsed = false;
+        pane.expand();
+      }
+      if (!build.groupSwitchLine) {
+        build.groupSwitchLine = pane.showLine(pane.COPY.groupSwitchFolder, {
+          chips: [
+            { id: 'group_switch_keep', label: pane.COPY.groupSwitchKeep },
+            { id: 'group_switch_continue', label: pane.COPY.groupSwitchContinue }
+          ]
+        });
+      }
+      build.kindHidden = false;
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     build.kindHidden = group;
     if (group) {
       this.noteWorkspaceBuildIntent();
@@ -12292,6 +12389,129 @@ const sessionManager = {
     );
   },
 
+  // workspaceBuildPlanReady says the build's recognized folder has a host plan
+  // Set it up can run: the plan, not the wizard, then decides the workspace.
+  workspaceBuildPlanReady() {
+    return this.workspaceBuild?.session?.plan?.ready === true;
+  },
+
+  // reviewOrEditWorkspaceBuild is "Review or edit draft": a ready plan is
+  // reviewed in place and the wizard stays hidden; any other build goes to
+  // the wizard, as before.
+  reviewOrEditWorkspaceBuild() {
+    const build = this.workspaceBuild;
+    if (!build || !this.workspaceBuildPlanReady()) {
+      this.collapseWorkspaceBuild();
+      return;
+    }
+    build.planReviewOpen = !build.planReviewOpen;
+    this.syncWorkspaceBuildPresentation();
+    if (build.planReviewOpen) document.getElementById('workspaceBuildPlanName')?.focus?.();
+  },
+
+  // workspaceBuildSetupPressable is when Set it up may be pressed, as the
+  // pane's own button decides it: a ready plan, a named draft, a held folder
+  // pick, and nothing in flight or already running.
+  workspaceBuildSetupPressable() {
+    const build = this.workspaceBuild;
+    const session = build?.session;
+    if (!session || session.status !== 'open' || session.setup || session.plan?.ready !== true) {
+      return false;
+    }
+    // An unnamed draft is named after its folder, as the plan says.
+    if (build.busy || build.setupBusy) return false;
+    const expires = Date.parse(String(session.folder_expires_at || ''));
+    return !(Number.isFinite(expires) && expires <= Date.now());
+  },
+
+  // setUpFromWorkspaceBuildPlanReview is the review's Set it up: the review
+  // closes so the pane shows the run, line by line.
+  async setUpFromWorkspaceBuildPlanReview() {
+    const build = this.workspaceBuild;
+    if (!build || !this.workspaceBuildSetupPressable()) return;
+    build.planReviewOpen = false;
+    this.syncWorkspaceBuildPresentation();
+    await this.setUpWorkspaceBuild({});
+  },
+
+  noteWorkspaceBuildPlanEdit(field, wizardID) {
+    const wizard = document.getElementById(wizardID);
+    if (!field || !wizard || !this.workspaceBuild) return;
+    wizard.value = field.value;
+    this.noteWorkspaceBuildUserEdit({ target: wizard, isTrusted: true });
+    this.syncWorkspaceBuildPresentation();
+  },
+
+  // workspaceBuildPlanFolder is the recognized project's own name: the folder
+  // the plan links, which can sit inside the folder that was attached.
+  workspaceBuildPlanFolder() {
+    const folder = this.workspaceBuild?.session?.folder;
+    const id = folder?.recognition?.candidate_id;
+    const projects = Array.isArray(folder?.observation?.projects)
+      ? folder.observation.projects
+      : [];
+    const project = projects.find(item => item && item.id === id);
+    return String(project?.name || folder?.observation?.folder || '').trim();
+  },
+
+  // workspaceBuildPlanLine is "Plan so far": the Home, the workspace inside
+  // it, the folder it links, and what still has to be installed.
+  workspaceBuildPlanLine() {
+    const session = this.workspaceBuild?.session;
+    const plan = session?.plan || {};
+    const folder = this.workspaceBuildPlanFolder();
+    const name =
+      String(
+        document.getElementById('folderNameInput')?.value || session?.draft?.name || ''
+      ).trim() ||
+      folder ||
+      'Workspace not named yet';
+    const homeName = String(plan.home?.name || '').trim();
+    const home = homeName
+      ? `${homeName} (${plan.home.status === 'existing' ? 'existing' : 'new'}) › `
+      : '';
+    const needs = (Array.isArray(plan.needs) ? plan.needs : [])
+      .filter(
+        need => need && need.state && need.state !== 'ready' && String(need.name || '').trim()
+      )
+      .map(need => `${String(need.name).trim()} (${need.state})`);
+    return `${home}${name}${folder ? ` · Folder: ${folder}` : ''}${needs.length ? ` · Needs: ${needs.join(', ')}` : ''}`;
+  },
+
+  // syncWorkspaceBuildPlanReview fills the in-modal plan review: the host's
+  // lines, read only, and the name and description from the wizard's fields.
+  syncWorkspaceBuildPlanReview(planReady) {
+    const review = document.getElementById('workspaceBuildPlanReview');
+    if (!review) return;
+    const open = Boolean(planReady && this.workspaceBuild?.planReviewOpen);
+    review.hidden = !open;
+    // The open review stands in for the conversation (the pane is hidden).
+    document
+      .getElementById('addFolderModal')
+      ?.classList?.toggle?.('workspace-create-modal--plan-review', open);
+    document
+      .getElementById('workspaceBuildEditDraftBtn')
+      ?.setAttribute?.('aria-expanded', String(open));
+    if (!open) return;
+    const setUp = document.getElementById('workspaceBuildPlanReviewSetup');
+    if (setUp) setUp.disabled = !this.workspaceBuildSetupPressable();
+    const plan = this.workspaceBuild.session.plan;
+    const shared = window.OriFolderPlanLines;
+    const list = document.getElementById('workspaceBuildPlanReviewLines');
+    if (shared && list) shared.renderSetupLines(list, shared.setupLinesView(plan.lines), document);
+    for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
+      const field = document.getElementById(reviewID);
+      const wizard = document.getElementById(wizardID);
+      // Never overwrite what the user is typing.
+      if (field && wizard && document.activeElement !== field) field.value = wizard.value || '';
+    }
+    const evidence = String(plan.evidence || '').trim();
+    const why = document.getElementById('workspaceBuildPlanReviewWhy');
+    if (why) why.hidden = !evidence;
+    const evidenceText = document.getElementById('workspaceBuildPlanReviewEvidence');
+    if (evidenceText) evidenceText.textContent = evidence;
+  },
+
   syncWorkspaceBuildPresentation() {
     const assisted = this.workspaceBuildAssisted();
     const modal = document.getElementById('addFolderModal');
@@ -12314,13 +12534,14 @@ const sessionManager = {
         if (button) button.hidden = true;
       }
     }
+    const groupLine = assisted ? this.workspaceBuildGroupLine() : '';
     const status = document.getElementById('workspaceBuildModeStatus');
     if (status) {
       status.hidden = !this.workspaceBuild;
       status.textContent = this.workspaceBuild?.draftError
         ? 'Draft not saved to the assistant. Your edits are kept here; switch back to retry before closing.'
         : assisted
-          ? 'Assisted setup · one shared draft'
+          ? `Assisted setup · one shared draft${groupLine ? ` · ${groupLine}` : ''}`
           : this.workspaceBuild?.withdrawn
             ? 'Manual setup · assistant unavailable. Your draft is kept.'
             : 'Manual setup · your draft and conversation are kept while this dialog is open.';
@@ -12342,8 +12563,14 @@ const sessionManager = {
     }
     const summary = document.getElementById('workspaceBuildDraftSummary');
     if (summary) summary.hidden = !assisted || Boolean(this.workspaceBuild?.acceptedPreparation);
+    const planReady = assisted && this.workspaceBuildPlanReady();
+    const title = document.getElementById('workspaceBuildDraftTitle');
+    if (title) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
+    this.syncWorkspaceBuildPlanReview(planReady);
     const text = document.getElementById('workspaceBuildDraftText');
-    if (text && assisted) {
+    if (text && planReady) {
+      text.textContent = this.workspaceBuildPlanLine();
+    } else if (text && assisted) {
       const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
@@ -12352,8 +12579,33 @@ const sessionManager = {
       const link = String(
         linkObservation?.title || linkObservation?.repo?.full_name || linkObservation?.host || ''
       ).trim();
-      text.textContent = `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${folder ? ` · Folder: ${folder}` : ''}${link ? ` · Link: ${link}` : ''}`;
+      const attached = `${folder ? ` · Folder: ${folder}` : ''}${link ? ` · Link: ${link}` : ''}`;
+      // A blueprint that lives inside a group names the group apart from the
+      // workspace, so the draft never reads as if the group were the workspace.
+      text.textContent = groupLine
+        ? `${groupLine} · Workspace: ${name || 'not named yet'} · ${step}${attached}`
+        : `${name || 'Workspace not named yet'} · ${template?.name || (template?.blank ? 'Blank' : 'Blueprint not chosen')} · ${step}${attached}`;
     }
+  },
+
+  // workspaceBuildGroupLine names the group the chosen blueprint lives in, from
+  // the session's needs_home: existing when the server's group prerequisite
+  // found that Home (or, without one, the attached folder's recognition says
+  // the user has it), new otherwise. "" when the blueprint needs no group.
+  workspaceBuildGroupLine() {
+    const session = this.workspaceBuild?.session;
+    const label = String(session?.needs_home?.label || '').trim();
+    if (!label) return '';
+    const prerequisite = session?.group_prerequisite;
+    if (prerequisite?.state === 'ready_grouped' && prerequisite.home?.exists === true) {
+      return `Group: ${String(prerequisite.home.name || '').trim() || label} (existing)`;
+    }
+    const recognition = session?.folder?.recognition;
+    const existing =
+      !prerequisite &&
+      recognition?.home_exists === true &&
+      String(recognition.home_name || '').trim() === label;
+    return `Group: ${label} (${existing ? 'existing' : 'new'})`;
   },
 
   teardownWorkspaceBuild() {
@@ -12362,6 +12614,9 @@ const sessionManager = {
     this.workspaceBuild = null;
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = null;
+    // A run keeps going on the server; only this dialog stops following it.
+    if (this.workspaceBuildSetupTimer) clearTimeout(this.workspaceBuildSetupTimer);
+    this.workspaceBuildSetupTimer = null;
     // A manual open never mounted anything, so it has nothing to take down.
     if (!active) return;
     pane?.destroy();
@@ -13440,6 +13695,309 @@ const sessionManager = {
     this.workspaceBuildPane()?.applySession(session);
     this.syncWorkspaceBuildPresentation();
     if (this.isWorkspaceCreator?.()) this.refreshWorkspaceReview();
+    // A run Set it up started is followed until it settles, wherever the
+    // session came from (the press, a resume, another tab).
+    if (session.status === 'preparing' && session.setup) this.followWorkspaceBuildSetup(build);
+  },
+
+  // workspaceBuildGroupNeeded is the group the drafted blueprint still needs
+  // prepared, from the session's group_prerequisite: its name, or ''.
+  workspaceBuildGroupNeeded() {
+    const session = this.workspaceBuild?.session;
+    const prerequisite = session?.group_prerequisite;
+    if (session?.status !== 'open' || prerequisite?.state !== 'home_creation_review_required') {
+      return '';
+    }
+    return (
+      String(prerequisite.home?.proposed_name || session.needs_home?.label || '').trim() ||
+      'its group'
+    );
+  },
+
+  // prepareWorkspaceBuildGroup is Prepare the group first: the form's own Home
+  // review and commit, run from the pane in one press. The press is the
+  // group's confirmation; Create stays its own, so two confirmations remain
+  // and nothing else is created here (FR27).
+  async prepareWorkspaceBuildGroup() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || build.busy || build.groupBusy) return;
+    if (!this.workspaceBuildGroupNeeded()) return;
+    build.groupBusy = true;
+    pane.setGroupBusy?.(true);
+    let note = '';
+    let prepared = false;
+    try {
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
+      // The placement draft follows the blueprint the build selected on the
+      // form; its plan is read fresh so the review binds today's source.
+      if (!this.groupRequirementDraft) this.resetGroupRequirementDraft(this.workspaceTemplate);
+      await this.refreshTemplateAgentPlan();
+      if (this.workspaceBuild !== build) return;
+      const reviewed = await this.prepareRequiredGroupHomeFromCard();
+      prepared =
+        reviewed && this.workspaceBuild === build && (await this.commitRequiredGroupHome());
+      if (!prepared) {
+        note =
+          String(
+            document.getElementById('workspaceGroupDestinationMessage')?.textContent || ''
+          ).trim() || 'The group could not be prepared. Nothing was created.';
+      }
+      // The server's next view names the Home that now exists.
+      const result = await this.workspaceBuildApi().read(build.session.id);
+      if (this.workspaceBuild === build && result?.ok && result.body?.session) {
+        this.adoptWorkspaceBuildSession(result.body.session);
+      }
+    } catch (error) {
+      note = error?.message || 'The group could not be prepared. Nothing was created.';
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.groupBusy = false;
+        pane.setGroupBusy?.(false, note);
+        // Create it is the second confirmation: the Create the model's
+        // create_now would run, pressed by the user.
+        if (prepared && !this.workspaceBuildGateProblem()) {
+          pane.showLine(pane.COPY.groupCreateNext, {
+            chips: [{ id: 'create_now', label: pane.COPY.createIt }]
+          });
+        }
+      }
+    }
+  },
+
+  // ----- The Home's plugin a recognized folder's plan waits on -----
+  //
+  // Install <plugin> asks the server for the reviewed release and its trust
+  // report; nothing is installed until Install and continue, which installs
+  // exactly that release. The server then reads the plan again, so the plan
+  // and Set it up come back with the session.
+
+  workspaceBuildProviderError(result, fallback) {
+    const message = result?.body?.error;
+    return (typeof message === 'string' && message.trim()) || fallback;
+  },
+
+  async previewWorkspaceBuildProvider() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || build.busy || build.providerBusy) return;
+    build.providerBusy = true;
+    build.providerPreview = null;
+    pane.setProviderInstall?.({ phase: 'previewing' });
+    let result;
+    try {
+      result = await this.workspaceBuildApi().homeProvider(build.session.id, {
+        version: Number(build.session.version) || 0,
+        confirm: false
+      });
+    } catch (_) {
+      result = { ok: false, status: 0, body: {} };
+    }
+    if (this.workspaceBuild !== build) return;
+    build.providerBusy = false;
+    if (result?.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+    const preview = result?.ok ? result.body?.home_provider : null;
+    if (!preview) {
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+      }
+      pane.setProviderInstall?.({
+        note: this.workspaceBuildProviderError(
+          result,
+          'The plugin’s reviewed release could not be read. Nothing was installed.'
+        )
+      });
+      return;
+    }
+    build.providerPreview = preview;
+    pane.setProviderInstall?.({ phase: 'review', preview });
+  },
+
+  async confirmWorkspaceBuildProvider() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    const preview = build?.providerPreview;
+    if (!build?.session || !pane || !preview || build.busy || build.providerBusy) return;
+    build.providerBusy = true;
+    pane.setProviderInstall?.({ phase: 'installing', preview });
+    let result;
+    try {
+      // The release the user reviewed, and only that one.
+      result = await this.workspaceBuildApi().homeProvider(build.session.id, {
+        version: Number(build.session.version) || 0,
+        confirm: true,
+        reviewed_version: String(preview.version || '')
+      });
+    } catch (_) {
+      result = { ok: false, status: 0, body: {} };
+    }
+    if (this.workspaceBuild !== build) return;
+    build.providerBusy = false;
+    build.providerPreview = null;
+    if (result?.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+    if (!result?.ok) {
+      if (result?.status === 409 && result.body?.code === 'version') {
+        await this.reloadWorkspaceBuildSession();
+      }
+      pane.setProviderInstall?.({
+        note: this.workspaceBuildProviderError(
+          result,
+          'The plugin could not be installed. Nothing was changed.'
+        )
+      });
+      return;
+    }
+    pane.setProviderInstall?.({});
+  },
+
+  cancelWorkspaceBuildProvider() {
+    const build = this.workspaceBuild;
+    if (!build || build.providerBusy) return;
+    build.providerPreview = null;
+    this.workspaceBuildPane()?.setProviderInstall?.({ note: 'Nothing was installed.' });
+  },
+
+  // setUpWorkspaceBuild is Set it up: the plan the user reviewed runs as Home's
+  // setup journey on the server. A Retry continues the run that stopped; a
+  // project file chosen from the run's own candidates goes with it.
+  async setUpWorkspaceBuild(detail = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || build.busy || build.setupBusy) return;
+    const digest = String(
+      build.session.setup?.plan_digest || build.session.plan?.digest || ''
+    ).trim();
+    if (!digest) return;
+    // The plan's Home name is kept for the Map placement after the run: a
+    // session read mid-run may no longer carry the plan.
+    const homeName = String(build.session.plan?.home?.name || '').trim();
+    if (homeName) build.setupHomeName = homeName;
+    build.setupBusy = true;
+    pane.setBusy?.(true);
+    let result;
+    try {
+      await this.flushWorkspaceBuildDraft();
+      if (this.workspaceBuild !== build || !build.session) return;
+      const body = { version: Number(build.session.version) || 0, plan_digest: digest };
+      const entry = String(detail.entry_name || '').trim();
+      if (entry) body.entry_name = entry;
+      try {
+        result = await this.workspaceBuildApi().setup(build.session.id, body);
+      } catch (_) {
+        result = { ok: false, status: 0, body: {} };
+      }
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.setupBusy = false;
+        pane.setBusy?.(false);
+      }
+    }
+    if (this.workspaceBuild !== build || !result) return;
+    if (result.body?.session) this.adoptWorkspaceBuildSession(result.body.session);
+    if (result.ok) return;
+    if (result.status === 409 && result.body?.code === 'version') {
+      await this.reloadWorkspaceBuildSession();
+      if (this.workspaceBuild === build)
+        pane.showLine('The build moved on in another tab. Try Set it up again.');
+      return;
+    }
+    pane.showLine(
+      String(result.body?.error || '').trim() || 'Set it up could not start. Nothing was changed.'
+    );
+  },
+
+  // followWorkspaceBuildSetup reads the build while its run is preparing, so
+  // the plan's lines turn done one by one, and hands the finished build on.
+  // Calling it again while it follows does nothing.
+  followWorkspaceBuildSetup(build) {
+    if (!build || build.setupFollowing) return;
+    build.setupFollowing = true;
+    const schedule = this.workspaceBuildScheduler || ((fn, ms) => setTimeout(fn, ms));
+    const tick = async () => {
+      if (this.workspaceBuild !== build || !build.session) {
+        build.setupFollowing = false;
+        return;
+      }
+      let session = null;
+      try {
+        session = (await this.workspaceBuildApi().read(build.session.id))?.body?.session || null;
+      } catch (_) {
+        session = null;
+      }
+      if (this.workspaceBuild !== build) {
+        build.setupFollowing = false;
+        return;
+      }
+      if (session?.status === 'created') {
+        build.setupFollowing = false;
+        this.finishWorkspaceBuildSetupInDialog(build, session);
+        return;
+      }
+      if (session && session.status !== 'preparing') {
+        build.setupFollowing = false;
+        this.adoptWorkspaceBuildSession(session);
+        return;
+      }
+      if (session) {
+        build.session = session;
+        this.workspaceBuildPane()?.applySession(session);
+        this.syncWorkspaceBuildPresentation();
+      }
+      this.workspaceBuildSetupTimer = schedule(tick, 1500);
+    };
+    this.workspaceBuildSetupTimer = schedule(tick, 1000);
+  },
+
+  // finishWorkspaceBuildSetupInDialog closes the dialog on a build Set it up
+  // finished: the workspaces it made are announced, what it made is said, and
+  // the Map asks where they sit.
+  finishWorkspaceBuildSetupInDialog(build, session) {
+    // The plan names the Home; the finished session no longer carries one.
+    const homeName =
+      String(build.session?.plan?.home?.name || '').trim() || build.setupHomeName || '';
+    build.session = session;
+    const workspaceId = String(session.created_workspace_id || '').trim();
+    this.notifyWorkspacesChanged?.({ workspaceId });
+    const receipt = String(session.setup_receipt || '').trim();
+    if (receipt) this.showToast?.(receipt, 'success');
+    const place = () =>
+      this.placeCreatedOnWorkspaceMap(`build:${session.id}`, {
+        memberId: workspaceId,
+        memberName: session.draft?.name,
+        homeId: session.home_workspace_id,
+        homeName
+      });
+    const modal = document.getElementById('addFolderModal');
+    const modalAPI = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
+    if (modal?.classList?.contains?.('show') && modalAPI && modal.addEventListener) {
+      // Begin only once Bootstrap has hidden the dialog and handed focus back,
+      // so the Map's canvas keeps the keyboard (Enter, Escape, arrows), as the
+      // wizard's own Map placement does.
+      modal.addEventListener('hidden.bs.modal', place, { once: true });
+      modalAPI.getInstance(modal)?.hide();
+      return;
+    }
+    if (modalAPI) modalAPI.getInstance(modal)?.hide();
+    this.deferWorkspaceMapPlacement(place);
+  },
+
+  // placeCreatedOnWorkspaceMap hands what a folder setup made to the Map: the
+  // user places a new Home and its workspace in one gesture, or the workspace
+  // inside an existing Home. Without a Map on screen (Tree view, another
+  // page) the automatic layout stands, and the toast says so.
+  placeCreatedOnWorkspaceMap(token, { memberId, memberName, homeId, homeName } = {}) {
+    const id = String(memberId || '').trim();
+    if (!id) return false;
+    const home = String(homeId || '').trim();
+    const created = {
+      member: { id, name: String(memberName || '').trim() },
+      group: home ? { id: home, name: String(homeName || '').trim() } : null
+    };
+    const begin = window.OriWorkspaceMap?.beginPlacement;
+    const started = typeof begin === 'function' && begin({ token, created }) === true;
+    if (!started) this.showToast?.('Placed automatically on the Map', 'info');
+    return started;
   },
 
   // Review's statement of the folder attached in the conversation: Create
@@ -13531,6 +14089,8 @@ const sessionManager = {
     if (this.groupRequirementBlocked()) {
       return 'Choose grouped or standalone placement before creating.';
     }
+    const group = this.workspaceBuildGroupNeeded();
+    if (group) return `This blueprint needs ${group} first. Use “Prepare the group first”.`;
     return '';
   },
 

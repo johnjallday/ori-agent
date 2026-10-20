@@ -31,6 +31,111 @@ type fakeBuildFolders struct {
 	modes       []string
 	choices     []string
 	resolved    []string
+	// recognition is what Recognize says about the observation; nil with no
+	// error is a folder service that has nothing to say.
+	recognition  *personalassistant.BuildFolderRecognition
+	recognizeErr error
+	recognized   []string
+	// plan is what Plan reads for a recognized folder; planned records the
+	// workspace name of every read.
+	plan    *personalassistant.BuildFolderPlan
+	planErr error
+	planned []string
+	// The setup seam: what ReviewSetup answers, and every call made.
+	reviewed  []reviewedSetup
+	reviewErr error
+	offerID   string
+	started   []startedSetup
+	startErr  error
+	run       *personalassistant.FolderSetupView
+	reads     []foldercontext.Target
+}
+
+type reviewedSetup struct {
+	draft                                                foldercontext.Target
+	sessionID, observationID, candidateID, workspaceName string
+}
+
+type startedSetup struct{ userID, offerID, digest, requestID, entryName string }
+
+func (f *fakeBuildFolders) ReviewSetup(_ context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
+	f.reviewed = append(f.reviewed, reviewedSetup{draft, sessionID, observationID, candidateID, workspaceName})
+	if f.reviewErr != nil {
+		return personalassistant.FolderOfferView{}, f.reviewErr
+	}
+	id := f.offerID
+	if id == "" {
+		id = "offer-1"
+	}
+	return personalassistant.FolderOfferView{ID: id}, nil
+}
+
+func (f *fakeBuildFolders) StartSetup(_ context.Context, userID, offerID, digest, requestID, entryName string) (personalassistant.FolderOfferView, error) {
+	f.started = append(f.started, startedSetup{userID, offerID, digest, requestID, entryName})
+	if f.startErr != nil {
+		return personalassistant.FolderOfferView{}, f.startErr
+	}
+	return personalassistant.FolderOfferView{ID: offerID}, nil
+}
+
+func (f *fakeBuildFolders) ReadSetup(_ context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error) {
+	f.reads = append(f.reads, review)
+	if f.run == nil {
+		return nil, personalassistant.ErrFolderOfferNotFound
+	}
+	copied := *f.run
+	return &personalassistant.FolderOfferView{ID: offerID, Setup: &copied}, nil
+}
+
+// Plan answers with plan (nil with no error: nothing to plan) and records the
+// workspace name each read was asked for.
+func (f *fakeBuildFolders) Plan(_ context.Context, target foldercontext.Target, observationID, candidateID, workspaceName string) (*personalassistant.BuildFolderPlan, error) {
+	f.planned = append(f.planned, workspaceName)
+	if f.planErr != nil {
+		return nil, f.planErr
+	}
+	if f.plan == nil {
+		return nil, nil
+	}
+	copied := *f.plan
+	copied.Lines = append([]personalassistant.FolderPlanLine(nil), f.plan.Lines...)
+	copied.Needs = append([]personalassistant.BuildFolderNeed(nil), f.plan.Needs...)
+	return &copied, nil
+}
+
+func (f *fakeBuildFolders) Recognize(_ context.Context, _ foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error) {
+	f.recognized = append(f.recognized, id)
+	if f.recognizeErr != nil {
+		return nil, f.recognizeErr
+	}
+	if f.recognition == nil {
+		return nil, nil
+	}
+	copied := *f.recognition
+	return &copied, nil
+}
+
+// reaperObservation is a REAPER song folder as the composer observes it: the
+// root is the project, three session files mark it.
+func reaperObservation() *foldercontext.Observation {
+	return &foldercontext.Observation{
+		Version: foldercontext.Version, ID: "obs-reaper", Folder: "Ori Music Demo",
+		ScannedAt: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), Entries: 5, Files: 5,
+		Kinds:    []foldercontext.Kind{{Name: "rpp", Count: 3}, {Name: "wav", Count: 2}},
+		Projects: []foldercontext.Project{{ID: "candidate-0", Name: "Ori Music Demo", Files: 5, Root: true, Marker: "REAPER session", LastChanged: "2026-10-18"}},
+		Coverage: foldercontext.Coverage{MaxDepth: 3, MaxEntries: 5000, BudgetSeconds: 3},
+	}
+}
+
+// reaperRecognition is what the folder digest says about reaperObservation.
+func reaperRecognition() *personalassistant.BuildFolderRecognition {
+	return &personalassistant.BuildFolderRecognition{
+		Verdict: personalassistant.BuildFolderProject, Shape: "audio", ProjectCount: 1, CandidateID: "candidate-0",
+		Label: "REAPER project", MarkerNoun: "session", MarkerCount: 3,
+		BlueprintID: "reaper-song", BlueprintLabel: "REAPER song",
+		IntegrationKey: "ori_reaper", IntegrationName: "REAPER",
+		HomeProviderKey: "music_project_management", HomeProviderName: "Music Project Management", HomeName: "Music Production Home",
+	}
 }
 
 func (f *fakeBuildFolders) Choices(context.Context, string) (personalassistant.FolderDigestView, error) {
@@ -164,6 +269,64 @@ func TestWorkspaceBuildFolder_AttachKeepsTheObservationAndTheModelReadsIt(t *tes
 	}
 	if !heard {
 		t.Fatalf("the model hears the attach as a form edit: %+v", f.provider.messages[0])
+	}
+}
+
+// The verdict the folder digest reached on the same scan is kept with the
+// folder: a REAPER song folder is a recognized project, anything else says it
+// is not one, and a folder that cannot be recognized right now still attaches.
+func TestWorkspaceBuildFolder_AttachKeepsWhatTheFolderWasRecognizedAs(t *testing.T) {
+	cases := []struct {
+		name        string
+		observation *foldercontext.Observation
+		recognition *personalassistant.BuildFolderRecognition
+		err         error
+		want        string
+	}{
+		{"a REAPER song folder", reaperObservation(), reaperRecognition(), nil, personalassistant.BuildFolderProject},
+		{"an unrecognized folder", testObservation(), &personalassistant.BuildFolderRecognition{Verdict: personalassistant.BuildFolderUnrecognized}, nil, personalassistant.BuildFolderUnrecognized},
+		{"a recognition that failed", testObservation(), nil, personalassistant.ErrFolderSelection, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBuildFixture(t, true)
+			folders := &fakeBuildFolders{observation: tc.observation, recognition: tc.recognition, recognizeErr: tc.err}
+			f.withFolders(t, folders)
+			build := f.start(t)
+			status, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
+			if status != http.StatusOK {
+				t.Fatalf("attach: %d %v", status, body)
+			}
+			if len(folders.recognized) != 1 || folders.recognized[0] != tc.observation.ID {
+				t.Fatalf("recognized %v, want the observation just made", folders.recognized)
+			}
+			attached := sessionOf(t, body)
+			if attached.Folder == nil {
+				t.Fatalf("the folder is attached whatever it was recognized as: %+v", attached)
+			}
+			got := attached.Folder.Recognition
+			switch {
+			case tc.want == "" && got != nil:
+				t.Fatalf("a failed recognition is not guessed: %+v", got)
+			case tc.want != "" && (got == nil || got.Verdict != tc.want):
+				t.Fatalf("recognition = %+v, want %s", got, tc.want)
+			}
+			stored, err := f.store.Read(context.Background(), "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kept := stored.Session(build.ID).Folder.Recognition; (kept == nil) != (tc.want == "") || (kept != nil && *kept != *got) {
+				t.Fatalf("stored recognition %+v, served %+v", kept, got)
+			}
+			if tc.want == personalassistant.BuildFolderProject {
+				session, _ := body["session"].(map[string]any)
+				folder, _ := session["folder"].(map[string]any)
+				served, _ := folder["recognition"].(map[string]any)
+				if served["label"] != "REAPER project" || served["marker_count"] != float64(3) || served["blueprint_id"] != "reaper-song" || served["home_name"] != "Music Production Home" {
+					t.Fatalf("the pane reads the recognition from the session: %v", folder)
+				}
+			}
+		})
 	}
 }
 

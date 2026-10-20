@@ -70,6 +70,61 @@
     folderSendHint: 'Empty Send: “Set it up from the attached folder”',
     folderSummary: (files, partial) =>
       `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`,
+    // What Ori recognized in the attached folder is said by the shared
+    // folder-recognition-lines.js, as Home's card says it; a collection adds
+    // where it is set up.
+    folderCollectionHint: 'Explore a folder on Home sets them up together',
+    // A recognized folder's plan: the host's own lines, never the model's.
+    planTitle: 'What Set it up will do',
+    planWhy: 'Why this suggestion?',
+    setUp: 'Set it up',
+    setupRetry: 'Retry',
+    setupRunning: 'Setting it up… Ori is running the plan, line by line.',
+    setupEntry: name => `Use ${name}`,
+    folderExpiresIn: minutes => `Folder pick expires in ${minutes} min`,
+    folderExpired: 'The folder pick expired. Add the folder again to set it up.',
+    folderAgain: 'Add the folder again',
+    // Why a recognized folder has no plan, by the server's reason code.
+    planUnavailable: (reason, subject) => {
+      if (subject && reason === 'provider_not_installed') {
+        return `Set it up needs the ${subject} plugin installed first: Ori makes the Home from it. The form still works.`;
+      }
+      if (subject && reason === 'provider_unverified') {
+        return `Set it up isn’t available: the installed ${subject} isn’t the reviewed release. The form still works.`;
+      }
+      if (subject && reason === 'integration_not_installed') {
+        return `Set it up isn’t available: ${subject} has no reviewed install here. The form still works.`;
+      }
+      return 'Set it up isn’t available for this folder right now. The form still works.';
+    },
+    // The Home's plugin a recognized folder's plan waits on, installed from
+    // the reviewed release the host discloses first.
+    installProvider: name => `Install ${name}`,
+    installChecking: 'Checking the reviewed release… Nothing is installed yet.',
+    installReview: (name, version) => `Install ${name}${version ? ` ${version}` : ''}?`,
+    installSource: source => `From ${source}`,
+    installDevelopment: 'Local development copy — not release-verified.',
+    installAdds: 'What it adds to Ori:',
+    installConfirm: 'Install and continue',
+    installCancel: 'Cancel',
+    installing: name => `Installing ${name}… Then Ori reads the plan again.`,
+    // The group a drafted blueprint is created inside, from the server's
+    // group_prerequisite (grouprequirements.Evaluate).
+    groupNeeded: name =>
+      `This blueprint needs ${name} first. Ori prepares the group with your confirmation, then creates the workspace inside it.`,
+    groupPrepare: 'Prepare the group first',
+    groupPreparing: 'Preparing the group…',
+    groupReady: name => `Group ready: ${name}. The workspace is created inside it.`,
+    groupExistingOnly: name =>
+      `This blueprint goes inside ${name}, which Ori can’t prepare from here. Set up ${name} first, or choose another blueprint.`,
+    groupUnavailable: summary =>
+      `This blueprint’s group can’t be checked right now${summary ? `: ${summary}` : '.'}`,
+    groupCreateNext: 'Ready to create. Create it makes the workspace inside the group.',
+    createIt: 'Create it',
+    // Group with a folder attached: the folder only links to a workspace.
+    groupSwitchFolder: 'The attached folder will not be linked to a group.',
+    groupSwitchKeep: 'Keep building the workspace',
+    groupSwitchContinue: 'Continue as a group',
     // Add link: one address, read for what it says about itself.
     addLink: 'Add link',
     removeLink: 'Remove link',
@@ -108,6 +163,15 @@
     if (observation.kind === 'document') return `Document · ${host} · not read`;
     if (observation.readable !== true) return `Could only read the address · ${host}`;
     return `Page · ${host}`;
+  }
+
+  // folderRecognitionText is the one line under an attached folder that says
+  // what Ori recognized it as, from server facts only. A folder the server
+  // said nothing about (an older build, a recognition that failed) has none.
+  function folderRecognitionText(recognition) {
+    const shared = globalThis.OriFolderRecognitionLines;
+    if (!shared) return '';
+    return shared.recognitionLine(recognition, { collectionHint: COPY.folderCollectionHint });
   }
 
   // A reason code ("desktop_off") is for code, never for the user; a note
@@ -228,16 +292,18 @@
     }
 
     const hiddenCount = expanded ? 0 : Math.max(0, entries.length - VISIBLE_ENTRIES);
+    // While Set it up runs the build takes no turn: the plan is already decided.
+    const running = session?.status === 'preparing' && Boolean(session?.setup);
     return {
       entries: entries.map((entry, index) => ({
         ...entry,
         index,
         latest: index === latestAssistant,
-        choicesActive: index === activeIndex && !busy
+        choicesActive: index === activeIndex && !busy && !running
       })),
       firstVisible: hiddenCount,
       hiddenCount,
-      composerDisabled: Boolean(busy),
+      composerDisabled: Boolean(busy) || running,
       status: busy ? COPY.busy : latestAssistant >= 0 ? entries[latestAssistant].text : '',
       busy: Boolean(busy)
     };
@@ -285,6 +351,13 @@
     linkBusy: false,
     linkNote: '',
     linkFieldOpen: false,
+    // The group prerequisite: whether Prepare the group first is running, the
+    // note it left, and what the form's own review said before the session did.
+    groupBusy: false,
+    groupNote: '',
+    groupHint: null,
+    // Installing the Home's plugin a plan waits on (setProviderInstall).
+    providerInstall: { phase: 'idle', preview: null, note: '', drawn: false },
     listeners: [],
     els: {}
   };
@@ -386,9 +459,13 @@
     els.status.textContent = view.status;
     els.status.classList.toggle('is-busy', view.busy);
     els.input.disabled = view.composerDisabled;
-    els.send.disabled = view.composerDisabled;
+    // A turn waits for an attachment in flight (submitComposer refuses it), so
+    // Send says so instead of dropping the press.
+    els.send.disabled = view.composerDisabled || state.folderBusy || state.linkBusy;
     state.root.classList.toggle('is-busy', view.busy);
     renderFolder(view);
+    renderGroup();
+    renderPlan();
     if (els.transcript && typeof els.transcript.scrollHeight === 'number') {
       els.transcript.scrollTop = els.transcript.scrollHeight;
     }
@@ -481,8 +558,424 @@
     // the reply box never re-announces the folder.
     if (els.folderSummary.textContent !== summary) els.folderSummary.textContent = summary;
     els.folderSummary.hidden = !summary;
-    // With a link attached too, the link's hint speaks for both.
-    els.folderHint.hidden = !folder || Boolean(attachedLink()) || Boolean(text(els.input?.value));
+    const recognized = folder ? folderRecognitionText(state.session?.folder?.recognition) : '';
+    if (els.folderRecognition.textContent !== recognized) {
+      els.folderRecognition.textContent = recognized;
+    }
+    els.folderRecognition.hidden = !recognized;
+    els.folderRecognition.classList.toggle(
+      'is-recognized',
+      state.session?.folder?.recognition?.verdict === 'project'
+    );
+    // With a link attached too, the link's hint speaks for both. A ready plan
+    // has its own Set it up, so an empty Send is not offered as one.
+    els.folderHint.hidden =
+      !folder ||
+      Boolean(attachedLink()) ||
+      Boolean(text(els.input?.value)) ||
+      state.session?.plan?.ready === true;
+  }
+
+  // renderPlan draws the setup plan the server computed for a recognized
+  // folder, with the folder card's own lines (folder-plan-lines.js), the
+  // digest's reason behind the suggestion, or why there is none. The assistant
+  // narrates the plan; no line here comes from the model.
+  function renderPlan() {
+    const { els } = state;
+    if (!els.plan) return;
+    const session = state.session || {};
+    const plan = session.plan;
+    const run =
+      session.setup_run && typeof session.setup_run === 'object' ? session.setup_run : null;
+    const shared = globalThis.OriFolderPlanLines;
+    // Once Set it up ran, its own lines (with their states) stand in for the plan's.
+    const source =
+      run && Array.isArray(run.lines) && run.lines.length
+        ? run.lines
+        : plan && plan.ready === true
+          ? plan.lines
+          : [];
+    const lines = shared ? shared.setupLinesView(source) : [];
+    const note =
+      !lines.length && plan && plan.ready !== true
+        ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
+        : '';
+    els.plan.hidden = !lines.length && !note;
+    if (lines.length) shared.renderSetupLines(els.planLines, lines, document);
+    else els.planLines.textContent = '';
+    els.planLines.hidden = !lines.length;
+    els.planNote.textContent = note;
+    els.planNote.hidden = !note;
+    const evidence = lines.length && plan ? text(plan.evidence) : '';
+    els.planEvidence.textContent = evidence;
+    els.planWhy.hidden = !evidence;
+    renderInstall(lines.length > 0);
+    renderSetupControls(lines.length > 0);
+  }
+
+  // folderPickMinutes is how long the server still holds the attached folder's
+  // pick, in whole minutes rounded up; Infinity when it did not say.
+  function folderPickMinutes(session) {
+    const at = Date.parse(String(session?.folder_expires_at || ''));
+    if (!Number.isFinite(at)) return Infinity;
+    return Math.ceil((at - Date.now()) / 60000);
+  }
+
+  // renderSetupControls offers the one action the build's state allows: Set it
+  // up on a ready plan, nothing while it runs, Retry (or the project files to
+  // choose from) after it stopped. A pick about to expire says so; an expired
+  // one turns the action into Add the folder again.
+  function renderSetupControls(hasLines) {
+    const { els } = state;
+    const session = state.session || {};
+    const run = session.setup_run || null;
+    const stopped = Boolean(session.setup) && (!run || run.status === 'stopped');
+    const preparing = session.status === 'preparing' && !stopped;
+    const open = session.status === 'open';
+    const minutes = folderPickMinutes(session);
+    const expired = open && session.folder && minutes <= 0;
+    const busy = Boolean(state.busy);
+    els.planStatus.textContent = preparing ? COPY.setupRunning : '';
+    els.planStatus.hidden = !preparing;
+    els.setupButton.hidden = !(hasLines && open && !session.setup && session.plan?.ready === true);
+    // An unnamed draft is named after its folder, as the plan says.
+    els.setupButton.disabled = busy || expired;
+    const candidates =
+      stopped && run?.stop_reason === 'needs_choice' && Array.isArray(run.entry_candidates)
+        ? run.entry_candidates.map(text).filter(Boolean).slice(0, 4)
+        : [];
+    els.retryButton.hidden =
+      !(open || session.status === 'preparing') || !stopped || candidates.length > 0;
+    els.retryButton.disabled = busy || expired;
+    els.setupEntries.textContent = '';
+    candidates.forEach(name => {
+      const button = createElement(
+        'button',
+        'modern-btn modern-btn-secondary',
+        COPY.setupEntry(name)
+      );
+      button.type = 'button';
+      button.dataset.buildControl = 'setup-entry';
+      button.dataset.entryName = name;
+      button.disabled = busy || expired;
+      els.setupEntries.appendChild(button);
+    });
+    els.setupEntries.hidden = !candidates.length;
+    const warning =
+      !open || !session.folder
+        ? ''
+        : expired
+          ? COPY.folderExpired
+          : minutes < 5
+            ? COPY.folderExpiresIn(minutes)
+            : '';
+    els.planExpiry.textContent = warning;
+    els.planExpiry.hidden = !warning;
+    els.folderAgain.hidden = !expired;
+    els.folderAgain.disabled = busy;
+  }
+
+  // renderPlanBlock builds the plan section the pane shows above the
+  // composer. It is hidden until a session carries a plan.
+  function renderPlanBlock() {
+    const plan = createElement('section', 'workspace-build-plan');
+    plan.id = 'workspaceBuildPlan';
+    plan.hidden = true;
+    const title = createElement('h3', 'workspace-build-plan__title', COPY.planTitle);
+    title.id = 'workspaceBuildPlanTitle';
+    plan.setAttribute('aria-labelledby', title.id);
+    const planLines = createElement('ul', 'workspace-build-plan__lines');
+    planLines.id = 'workspaceBuildPlanLines';
+    const planNote = createElement('p', 'workspace-build-plan__note');
+    planNote.hidden = true;
+    const planWhy = createElement('details', 'workspace-build-plan__why');
+    planWhy.hidden = true;
+    planWhy.appendChild(createElement('summary', '', COPY.planWhy));
+    const planEvidence = createElement('p', 'workspace-build-plan__evidence');
+    planWhy.appendChild(planEvidence);
+    const planStatus = createElement('p', 'workspace-build-plan__status');
+    planStatus.setAttribute('role', 'status');
+    planStatus.setAttribute('aria-live', 'polite');
+    planStatus.hidden = true;
+    const actions = createElement('div', 'workspace-build-plan__actions');
+    const setupButton = createElement('button', 'modern-btn modern-btn-primary', COPY.setUp);
+    setupButton.type = 'button';
+    setupButton.dataset.buildControl = 'setup';
+    setupButton.hidden = true;
+    const retryButton = createElement('button', 'modern-btn modern-btn-primary', COPY.setupRetry);
+    retryButton.type = 'button';
+    retryButton.dataset.buildControl = 'setup-retry';
+    retryButton.hidden = true;
+    const setupEntries = createElement('div', 'workspace-build-plan__entries');
+    setupEntries.hidden = true;
+    const folderAgain = createElement(
+      'button',
+      'modern-btn modern-btn-secondary',
+      COPY.folderAgain
+    );
+    folderAgain.type = 'button';
+    folderAgain.dataset.buildControl = 'folder-again';
+    folderAgain.hidden = true;
+    actions.appendChild(setupButton);
+    actions.appendChild(retryButton);
+    actions.appendChild(setupEntries);
+    actions.appendChild(folderAgain);
+    const planExpiry = createElement('p', 'workspace-build-plan__expiry');
+    planExpiry.hidden = true;
+    const installEls = renderInstallBlock();
+    plan.appendChild(title);
+    plan.appendChild(planLines);
+    plan.appendChild(planNote);
+    plan.appendChild(installEls.install);
+    plan.appendChild(planWhy);
+    plan.appendChild(planStatus);
+    plan.appendChild(actions);
+    plan.appendChild(planExpiry);
+    return {
+      plan,
+      planLines,
+      planNote,
+      planWhy,
+      planEvidence,
+      planStatus,
+      setupButton,
+      retryButton,
+      setupEntries,
+      folderAgain,
+      planExpiry,
+      ...installEls
+    };
+  }
+
+  // renderInstallBlock builds the install offer for the Home's plugin a plan
+  // waits on: the button, then the reviewed release with its trust report and
+  // an explicit confirmation. Hidden until the server offers it.
+  function renderInstallBlock() {
+    const install = createElement('div', 'workspace-build-plan__install');
+    install.hidden = true;
+    const installButton = createElement('button', 'modern-btn modern-btn-primary', '');
+    installButton.type = 'button';
+    installButton.dataset.buildControl = 'install-provider';
+    const installReview = createElement('div', 'workspace-build-plan__install-review');
+    installReview.hidden = true;
+    const installTitle = createElement('p', 'workspace-build-plan__install-title');
+    const installSource = createElement('p', 'workspace-build-plan__install-source');
+    const installDevelopment = createElement(
+      'p',
+      'workspace-build-plan__install-development',
+      COPY.installDevelopment
+    );
+    installDevelopment.hidden = true;
+    const installAdds = createElement('p', 'workspace-build-plan__install-adds', COPY.installAdds);
+    const installTrust = createElement('div', 'workspace-build-plan__install-trust');
+    const installActions = createElement('div', 'workspace-build-plan__actions');
+    const installConfirm = createElement(
+      'button',
+      'modern-btn modern-btn-primary',
+      COPY.installConfirm
+    );
+    installConfirm.type = 'button';
+    installConfirm.dataset.buildControl = 'install-provider-confirm';
+    const installCancel = createElement(
+      'button',
+      'modern-btn modern-btn-secondary',
+      COPY.installCancel
+    );
+    installCancel.type = 'button';
+    installCancel.dataset.buildControl = 'install-provider-cancel';
+    installActions.appendChild(installConfirm);
+    installActions.appendChild(installCancel);
+    installReview.appendChild(installTitle);
+    installReview.appendChild(installSource);
+    installReview.appendChild(installDevelopment);
+    installReview.appendChild(installAdds);
+    installReview.appendChild(installTrust);
+    installReview.appendChild(installActions);
+    const installStatus = createElement('p', 'workspace-build-plan__install-status');
+    installStatus.setAttribute('role', 'status');
+    installStatus.setAttribute('aria-live', 'polite');
+    installStatus.hidden = true;
+    install.appendChild(installButton);
+    install.appendChild(installReview);
+    install.appendChild(installStatus);
+    return {
+      install,
+      installButton,
+      installReview,
+      installTitle,
+      installSource,
+      installDevelopment,
+      installAdds,
+      installTrust,
+      installConfirm,
+      installCancel,
+      installStatus
+    };
+  }
+
+  // renderInstall shows the install offer while the server makes one
+  // (session.install_provider): Install <plugin>, then — once the controller
+  // has the reviewed release — what it is, where it comes from and what it
+  // adds, with Install and continue. Nothing is installed before that press.
+  function renderInstall(hasLines) {
+    const { els } = state;
+    if (!els.install) return;
+    const session = state.session || {};
+    const name = text(session.install_provider?.name);
+    const offered = Boolean(name) && session.status === 'open' && !hasLines;
+    els.install.hidden = !offered;
+    const install = state.providerInstall;
+    const preview =
+      offered && (install.phase === 'review' || install.phase === 'installing')
+        ? install.preview
+        : null;
+    // The review takes more of the pane (workspace-construct.css).
+    els.plan.classList.toggle('workspace-build-plan--install-review', Boolean(preview));
+    if (!offered) return;
+    const working = install.phase === 'previewing' || install.phase === 'installing';
+    els.installButton.textContent = COPY.installProvider(name);
+    els.installButton.hidden = install.phase === 'review' || install.phase === 'installing';
+    els.installButton.disabled = Boolean(state.busy) || working;
+    els.installReview.hidden = !preview;
+    if (preview) {
+      els.installTitle.textContent = COPY.installReview(name, text(preview.version));
+      const source = text(preview.source);
+      els.installSource.textContent = source ? COPY.installSource(source) : '';
+      els.installSource.hidden = !source;
+      els.installDevelopment.hidden = preview.development_copy !== true;
+      // The disclosure is drawn once per preview, in full, by the Plugins
+      // page's own renderer: the user confirms against exactly that.
+      if (!install.drawn) {
+        els.installTrust.textContent = '';
+        const draw = globalThis.PluginLifecycle?.renderTrustReport;
+        if (typeof draw === 'function' && preview.disclosure) {
+          els.installTrust.appendChild(draw(preview.disclosure));
+        }
+        install.drawn = true;
+      }
+      els.installAdds.hidden = !preview.disclosure;
+      els.installConfirm.disabled = Boolean(state.busy) || working;
+      els.installCancel.hidden = install.phase === 'installing';
+    }
+    const status =
+      install.phase === 'previewing'
+        ? COPY.installChecking
+        : install.phase === 'installing'
+          ? COPY.installing(name)
+          : install.note;
+    els.installStatus.textContent = status;
+    els.installStatus.hidden = !status;
+  }
+
+  // setProviderInstall is the controller's report of where the install
+  // stands: idle (with a note when something stopped it), previewing, review
+  // (with the reviewed release), or installing.
+  function setProviderInstall(next = {}) {
+    const before = state.providerInstall?.phase;
+    state.providerInstall = {
+      phase: ['previewing', 'review', 'installing'].includes(next.phase) ? next.phase : 'idle',
+      preview: next.preview && typeof next.preview === 'object' ? next.preview : null,
+      note: text(next.note),
+      drawn: false
+    };
+    render();
+    // The review stands in for the conversation and the composer, so focus
+    // moves into it; leaving it returns focus to Install, or to Set it up once
+    // the plan is ready.
+    const { els } = state;
+    const phase = state.providerInstall.phase;
+    if (phase === 'review' && before !== 'review') {
+      els.installConfirm?.focus();
+    } else if (phase === 'idle' && (before === 'review' || before === 'installing')) {
+      const install = els.install && !els.install.hidden ? els.installButton : null;
+      const target = [els.setupButton, install, els.input].find(
+        node => node && !node.hidden && !node.disabled
+      );
+      target?.focus();
+    }
+  }
+
+  // groupPrerequisiteView is what the pane says about the group a drafted
+  // blueprint is created inside, from the server's group_prerequisite: the
+  // line, and whether Prepare the group first is offered. label is the
+  // session's needs_home label, for a prerequisite that names no Home.
+  function groupPrerequisiteView(prerequisite, label) {
+    if (!prerequisite || typeof prerequisite !== 'object') return { line: '', prepare: false };
+    const home =
+      prerequisite.home && typeof prerequisite.home === 'object' ? prerequisite.home : {};
+    const name = text(home.proposed_name) || text(home.name) || text(label) || 'its group';
+    const actions = Array.isArray(prerequisite.actions) ? prerequisite.actions : [];
+    switch (prerequisite.state) {
+      case 'home_creation_review_required':
+        return { line: COPY.groupNeeded(name), prepare: actions.includes('review_create_home') };
+      case 'ready_grouped':
+        return home.exists === true
+          ? { line: COPY.groupReady(text(home.name) || name), prepare: false }
+          : { line: '', prepare: false };
+      case 'home_required':
+        return { line: COPY.groupExistingOnly(name), prepare: false };
+      default:
+        return { line: COPY.groupUnavailable(text(prerequisite.summary)), prepare: false };
+    }
+  }
+
+  // renderGroup states the group the drafted blueprint is created inside:
+  // still to prepare, with Prepare the group first, or ready. A ready plan
+  // sets its group up itself, so the server sends no prerequisite then.
+  function renderGroup() {
+    const { els } = state;
+    if (!els.group) return;
+    const session = state.session || {};
+    const prerequisite =
+      session.status === 'open' ? session.group_prerequisite || state.groupHint : null;
+    const view = groupPrerequisiteView(prerequisite, session.needs_home?.label);
+    if (els.groupLine.textContent !== view.line) els.groupLine.textContent = view.line;
+    els.groupNote.textContent = state.groupNote;
+    els.groupNote.hidden = !state.groupNote;
+    els.groupButton.hidden = !view.prepare;
+    els.groupButton.disabled = Boolean(state.busy) || state.groupBusy;
+    els.groupButton.textContent = state.groupBusy ? COPY.groupPreparing : COPY.groupPrepare;
+    els.group.hidden = !view.line && !state.groupNote;
+  }
+
+  // renderGroupBlock builds the group section above the plan. It is hidden
+  // until a session carries a group prerequisite.
+  function renderGroupBlock() {
+    const group = createElement('section', 'workspace-build-group');
+    group.id = 'workspaceBuildGroup';
+    group.hidden = true;
+    const groupLine = createElement('p', 'workspace-build-group__line');
+    groupLine.setAttribute('role', 'status');
+    groupLine.setAttribute('aria-live', 'polite');
+    const groupNote = createElement('p', 'workspace-build-group__note');
+    groupNote.hidden = true;
+    const groupButton = createElement(
+      'button',
+      'modern-btn modern-btn-primary workspace-build-group__prepare',
+      COPY.groupPrepare
+    );
+    groupButton.type = 'button';
+    groupButton.dataset.buildControl = 'prepare-group';
+    groupButton.hidden = true;
+    group.appendChild(groupLine);
+    group.appendChild(groupButton);
+    group.appendChild(groupNote);
+    return { group, groupLine, groupNote, groupButton };
+  }
+
+  // setGroupBusy locks Prepare the group first while the controller prepares
+  // the group, and leaves a note under it (why it stopped) until the next try.
+  function setGroupBusy(busy, note = '') {
+    state.groupBusy = Boolean(busy);
+    state.groupNote = text(note);
+    render();
+  }
+
+  // noteGroupPrerequisite shows a group prerequisite the controller learned
+  // from the form's own placement review, until the session carries one.
+  function noteGroupPrerequisite(prerequisite) {
+    state.groupHint = prerequisite && typeof prerequisite === 'object' ? prerequisite : null;
+    render();
   }
 
   // setFolderPathBusy locks the path field while the controller has the
@@ -605,6 +1098,10 @@
     state.linkBusy = false;
     state.linkNote = '';
     state.linkFieldOpen = false;
+    state.groupBusy = false;
+    state.groupNote = '';
+    state.groupHint = null;
+    state.providerInstall = { phase: 'idle', preview: null, note: '', drawn: false };
 
     root.textContent = '';
     root.appendChild(renderHeader());
@@ -646,10 +1143,33 @@
     row.appendChild(input);
     row.appendChild(send);
     composer.appendChild(row);
+    const groupEls = renderGroupBlock();
+    const planEls = renderPlanBlock();
     root.appendChild(transcript);
     root.appendChild(status);
+    root.appendChild(groupEls.group);
+    root.appendChild(planEls.plan);
     root.appendChild(composer);
-    state.els = { transcript, showEarlier, log, status, composer, input, send, ...folderEls };
+    state.els = {
+      transcript,
+      showEarlier,
+      log,
+      status,
+      composer,
+      input,
+      send,
+      ...folderEls,
+      ...groupEls,
+      ...planEls
+    };
+    // A folder pick lasts a set time: its warning counts down while the pane
+    // is open, and destroy stops it with the listeners.
+    if (typeof setInterval === 'function') {
+      const timer = setInterval(() => {
+        if (state.root && !state.root.hidden) renderPlan();
+      }, 30000);
+      state.listeners.push(() => clearInterval(timer));
+    }
 
     listen(root, 'click', event => {
       const control = event.target?.closest?.('[data-build-control]');
@@ -675,6 +1195,21 @@
           if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-link-remove');
         } else if (kind === 'link-cancel') closeLinkField();
         else if (kind === 'link-attach') submitLink();
+        else if ((kind === 'setup' || kind === 'setup-retry') && !control.disabled) {
+          emit('workspace-build-setup', {});
+        } else if (kind === 'setup-entry' && !control.disabled) {
+          emit('workspace-build-setup', { entry_name: text(control.dataset.entryName) });
+        } else if (kind === 'folder-again' && !control.disabled) {
+          emit('workspace-build-folder-open');
+        } else if (kind === 'prepare-group' && !control.disabled && !state.groupBusy) {
+          emit('workspace-build-prepare-group');
+        } else if (kind === 'install-provider' && !control.disabled) {
+          emit('workspace-build-install-provider');
+        } else if (kind === 'install-provider-confirm' && !control.disabled) {
+          emit('workspace-build-install-provider-confirm');
+        } else if (kind === 'install-provider-cancel') {
+          emit('workspace-build-install-provider-cancel');
+        }
         return;
       }
       const folderChoice = event.target?.closest?.('[data-build-folder-mode]');
@@ -770,6 +1305,10 @@
     folderSummary.setAttribute('role', 'status');
     folderSummary.setAttribute('aria-live', 'polite');
     folderSummary.hidden = true;
+    // Not a live region: the summary above already announces the attach.
+    const folderRecognition = createElement('p', 'workspace-build-folder__recognition');
+    folderRecognition.id = 'workspaceBuildFolderRecognition';
+    folderRecognition.hidden = true;
 
     const chooser = createElement('section', 'workspace-build-folder-chooser');
     chooser.id = 'workspaceBuildFolderChooser';
@@ -831,6 +1370,7 @@
 
     composer.appendChild(attachments);
     composer.appendChild(folderSummary);
+    composer.appendChild(folderRecognition);
     composer.appendChild(linkEls.linkSummary);
     composer.appendChild(chooser);
     composer.appendChild(linkEls.linkField);
@@ -842,6 +1382,7 @@
       folderRemove,
       folderHint,
       folderSummary,
+      folderRecognition,
       chooser,
       chooserChoices: choices,
       chooserNote,
@@ -1078,6 +1619,8 @@
     // none, starts clean.
     if ((attachedFolder()?.id || '') !== before) state.folderNote = '';
     if ((attachedLink()?.id || '') !== linkBefore) state.linkNote = '';
+    // The server's own prerequisite replaces what the form's review said.
+    if (state.session?.group_prerequisite) state.groupHint = null;
     render();
   }
 
@@ -1296,6 +1839,10 @@
     state.linkBusy = false;
     state.linkNote = '';
     state.linkFieldOpen = false;
+    state.groupBusy = false;
+    state.groupNote = '';
+    state.groupHint = null;
+    state.providerInstall = { phase: 'idle', preview: null, note: '', drawn: false };
   }
 
   window.WorkspaceBuildPane = {
@@ -1323,11 +1870,16 @@
     linkFieldStatus,
     setLinkBusy,
     linkAttachedDone,
+    setGroupBusy,
+    noteGroupPrerequisite,
+    setProviderInstall,
+    groupPrerequisiteView,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),
     paneView,
     folderChooserView,
+    folderRecognitionText,
     linkSummaryText
   };
 })();

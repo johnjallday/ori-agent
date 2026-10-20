@@ -2534,6 +2534,7 @@
       selected +
       multiCls +
       (isHQ ? ' is-hq' : '') +
+      (isBeingPlaced(ws.id) ? ' is-being-placed' : '') +
       '" ' +
       'data-ws-id="' +
       escapeHtml(ws.id) +
@@ -2754,6 +2755,7 @@
       (collapsed ? ' is-collapsed' : '') +
       (conflict ? ' is-conflicted' : '') +
       (ws.id === placementHighlightGroupId ? ' is-placement-highlighted' : '') +
+      (isBeingPlaced(ws.id) ? ' is-being-placed' : '') +
       '" role="group" aria-label="' +
       escapeHtml(conflict ? label + ', needs layout attention' : label) +
       '" ' +
@@ -8134,12 +8136,17 @@
    * in a fixed order at equal distance, so the same drop always resolves the
    * same way. No other building is moved to make room (FR-74).
    */
-  function resolveDropAnchor(id, point) {
+  function resolveDropAnchor(id, point, accept) {
     var occupied = occupiedAnchors(id);
+    // accept, when given, refuses a free anchor for a reason of the caller's
+    // own (a placed member's district may not cover a neighbour).
     function overlapsOccupied(candidate) {
-      return occupied.some(function (anchor) {
-        return footprintsOverlap(candidate, anchor);
-      });
+      return (
+        occupied.some(function (anchor) {
+          return footprintsOverlap(candidate, anchor);
+        }) ||
+        (typeof accept === 'function' && !accept(candidate))
+      );
     }
     if (!overlapsOccupied(point)) return { x: point.x, y: point.y, resolved: false };
 
@@ -9931,8 +9938,9 @@
       variant && art && typeof art.svgForVariant === 'function'
         ? art.svgForVariant(variant, { context: 'map' })
         : structSVG(paletteFor(name));
-    var problem = placementProblem(state.candidate);
+    var problem = candidateProblem(state, state.candidate);
     return (
+      placementDistrictHTML(state, problem) +
       '<div class="ws-map-placement-preview' +
       (problem ? ' is-invalid' : '') +
       '" data-ws-map-placement-preview aria-hidden="true" style="left:' +
@@ -9947,35 +9955,74 @@
     );
   }
 
+  // placementDistrictHTML outlines the district a created member's group would
+  // have at the candidate, so placing the member shows where its group goes.
+  function placementDistrictHTML(state, problem) {
+    var created = state.created;
+    if (!created || !created.group) return '';
+    var frame = createdDistrictFrame(created, state.candidate);
+    return (
+      '<div class="ws-map-placement-district' +
+      (problem ? ' is-invalid' : '') +
+      '" data-ws-map-placement-district aria-hidden="true" style="left:' +
+      frame.x +
+      'px;top:' +
+      frame.y +
+      'px;width:' +
+      frame.width +
+      'px;height:' +
+      frame.height +
+      'px"><span class="ws-map-placement-district-name">' +
+      escapeHtml(created.group.name) +
+      '</span></div>'
+    );
+  }
+
+  // placementConfirmLabel names the confirm button: a created member is only
+  // placed, a reviewed draft is created there.
+  function placementConfirmLabel(state) {
+    if (state.saving) return 'Saving position…';
+    if (state.created) return 'Place here';
+    return state.submitting ? 'Creating workspace…' : 'Create workspace here';
+  }
+
+  function placementInstructionText(state, problem) {
+    if (problem) return problem;
+    if (state.created) return createdInstruction(state.created);
+    var groupName = String((state.payload && state.payload.group_name) || '').trim();
+    return groupName
+      ? 'Reviewed district: ' + groupName + '. Move to preview, click open ground to create.'
+      : 'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.';
+  }
+
   function placementControlsHTML() {
     var state = placementSession;
     if (!state || !state.candidate) return '';
-    var problem = placementProblem(state.candidate);
-    var groupName = String((state.payload && state.payload.group_name) || '').trim();
-    var detail =
-      problem ||
-      (groupName
-        ? 'Reviewed district: ' + groupName + '. Move to preview, click open ground to create.'
-        : 'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.');
+    var problem = candidateProblem(state, state.candidate);
+    var created = state.created;
+    var title =
+      created && createdMovesDistrict(created)
+        ? created.group.name
+        : String((state.payload && state.payload.name) || 'new workspace');
     return (
-      '<div class="ws-map-placement-controls" data-ws-map-placement-controls role="group" aria-label="Place new workspace">' +
+      '<div class="ws-map-placement-controls" data-ws-map-placement-controls role="group" aria-label="' +
+      (created ? 'Place on the Map' : 'Place new workspace') +
+      '">' +
       '<div class="ws-map-placement-copy"><strong>Place ' +
-      escapeHtml(String((state.payload && state.payload.name) || 'new workspace')) +
+      escapeHtml(title) +
       '</strong><span data-ws-map-placement-coordinate>' +
       escapeHtml(candidateLabel(state.candidate)) +
       '</span><small data-ws-map-placement-instruction role="status" aria-live="polite">' +
-      escapeHtml(detail) +
+      escapeHtml(placementInstructionText(state, problem)) +
       '</small></div>' +
       '<div class="ws-map-placement-buttons">' +
-      '<button type="button" class="ws-map-placement-back" data-ws-map-placement-back>Back to review</button>' +
+      '<button type="button" class="ws-map-placement-back" data-ws-map-placement-back>' +
+      (created ? 'Keep automatic layout' : 'Back to review') +
+      '</button>' +
       '<button type="button" class="ws-map-placement-confirm" data-ws-map-placement-confirm' +
       (problem || state.submitting ? ' disabled' : '') +
       '>' +
-      (state.saving
-        ? 'Saving position…'
-        : state.submitting
-          ? 'Creating workspace…'
-          : 'Create workspace here') +
+      placementConfirmLabel(state) +
       '</button></div></div>'
     );
   }
@@ -10044,34 +10091,180 @@
     return point;
   }
 
+  // ---------- placing what a setup already created ----------
+  //
+  // A folder setup (Create Workspace's Set it up, Home's Explore a folder)
+  // creates its workspaces first, so the Map asks afterwards where they sit.
+  // Placing the member is placing its district: a populated district's frame
+  // is its members' bounds (effectiveDistrictFrame), and computeWorldLayout
+  // discards a populated district's own anchor. Only the member's position is
+  // written; Escape writes nothing and keeps the automatic layout.
+
+  // createdPlacementSpec normalizes beginPlacement's `created`:
+  // { member: { id, name }, group: { id, name } }, the group optional.
+  function createdPlacementSpec(options) {
+    var created = options && options.created;
+    var member = created && created.member;
+    var id = String((member && member.id) || '').trim();
+    if (!id) return null;
+    var group = created.group || null;
+    var groupId = String((group && group.id) || '').trim();
+    return {
+      member: { id: id, name: String(member.name || '').trim() || 'New workspace' },
+      group: groupId ? { id: groupId, name: String(group.name || '').trim() || 'its group' } : null
+    };
+  }
+
+  // createdSiblings are the group's other members as the Map draws them now.
+  function createdSiblings(created) {
+    if (!created.group || !lastWorldLayout) return [];
+    return (lastWorldLayout.nodes || [])
+      .concat(lastWorldLayout.hiddenNodes || [])
+      .filter(function (node) {
+        return node.groupId === created.group.id && node.id !== created.member.id;
+      });
+  }
+
+  // createdMovesDistrict: the member is its group's only one, so where it sits
+  // is where the district sits.
+  function createdMovesDistrict(created) {
+    return !!created.group && createdSiblings(created).length === 0;
+  }
+
+  // createdDistrictFrame is the frame the group would have with its member at
+  // point: its other members, the candidate, and a custom frame if it has one.
+  function createdDistrictFrame(created, point) {
+    var district = null;
+    ((lastWorldLayout && lastWorldLayout.districts) || []).forEach(function (candidate) {
+      if (candidate.id === created.group.id) district = candidate;
+    });
+    var presentation =
+      district && district.sizingMode === 'custom' && district.customFrame
+        ? { sizingMode: 'custom', frame: district.customFrame }
+        : { sizingMode: 'auto', frame: null };
+    return effectiveDistrictFrame({
+      anchor: { x: point.x, y: point.y },
+      members: createdSiblings(created)
+        .map(function (node) {
+          return { x: node.x, y: node.y };
+        })
+        .concat([{ x: point.x, y: point.y }]),
+      presentation: presentation
+    });
+  }
+
+  // createdPlacementProblem is placementProblem for the created member, plus
+  // the district rule: the frame its group would get may not cover anything
+  // that is not in the group (frameConflict).
+  function createdPlacementProblem(created, point) {
+    var problem = placementProblem(point, created.member.id);
+    if (problem || !created.group) return problem;
+    var conflict = frameConflict(createdDistrictFrame(created, point), created.group.id);
+    return conflict.blocked
+      ? created.group.name + ' would reach over ' + conflict.name + ' there. Choose open ground.'
+      : '';
+  }
+
+  // candidateProblem is what blocks the placement session's candidate.
+  function candidateProblem(state, point) {
+    return state && state.created
+      ? createdPlacementProblem(state.created, point)
+      : placementProblem(point);
+  }
+
+  function createdInstruction(created) {
+    var tail = ' Click open ground to place; Esc keeps the automatic layout.';
+    if (createdMovesDistrict(created)) {
+      return (
+        'Choose where ' +
+        created.group.name +
+        ' sits. ' +
+        created.member.name +
+        ' goes inside it.' +
+        tail
+      );
+    }
+    if (created.group) {
+      return 'Choose where ' + created.member.name + ' sits in ' + created.group.name + '.' + tail;
+    }
+    return 'Choose where ' + created.member.name + ' sits.' + tail;
+  }
+
+  function createdPlacedLine(created, point) {
+    var at = ' at ' + formatCoordinate(point) + '.';
+    if (createdMovesDistrict(created)) {
+      return created.group.name + ' and ' + created.member.name + ' placed' + at;
+    }
+    if (created.group) return created.member.name + ' placed in ' + created.group.name + at;
+    return created.member.name + ' placed' + at;
+  }
+
+  // createdSuggestedPoint proposes a spot: inside the group beside its other
+  // members, or open ground beside the Personal HQ for a new district.
+  function createdSuggestedPoint(created, spec) {
+    var point = safePoint(spec && (spec.candidate || spec.initialCandidate));
+    if (!point && created.group && !createdMovesDistrict(created)) {
+      point = groupMemberPlacement(created.group.id, created.member.id, lastWorldLayout);
+    }
+    if (!point && lastWorldLayout) {
+      var hq = null;
+      (lastWorldLayout.nodes || []).forEach(function (node) {
+        if (hqWorkspaceId && node.id === hqWorkspaceId) hq = node;
+      });
+      hq = hq || lastWorldLayout.hqSite || null;
+      if (hq) point = { x: hq.x + CELL_W + DISTRICT_PAD_X * 2, y: hq.y };
+    }
+    if (!point) {
+      point = { x: camera.centerX - CELL_W / 2, y: camera.centerY - CELL_H / 2 };
+    }
+    point = snapPoint(point);
+    if (!createdPlacementProblem(created, point)) return point;
+    var safe = resolveDropAnchor(created.member.id, point, function (candidate) {
+      return !createdPlacementProblem(created, candidate);
+    });
+    return { x: safe.x, y: safe.y };
+  }
+
+  // isBeingPlaced dims what the open placement is moving: the created member
+  // and, when it is its group's only one, the district that moves with it.
+  function isBeingPlaced(id) {
+    var created = placementSession && placementSession.created;
+    if (!created || !id) return false;
+    return (
+      id === created.member.id ||
+      (!!created.group && id === created.group.id && createdMovesDistrict(created))
+    );
+  }
+
   function updatePlacementPresentation(container) {
     var state = placementSession;
     if (!container || !state || state.container !== container) return;
     var preview = container.querySelector('[data-ws-map-placement-preview]');
+    var district = container.querySelector('[data-ws-map-placement-district]');
     var controls = container.querySelector('[data-ws-map-placement-controls]');
-    var problem = placementProblem(state.candidate);
+    var problem = candidateProblem(state, state.candidate);
     if (preview && preview.style) {
       preview.style.left = state.candidate.x + 'px';
       preview.style.top = state.candidate.y + 'px';
       if (preview.classList) preview.classList.toggle('is-invalid', !!problem);
+    }
+    if (district && district.style && state.created && state.created.group) {
+      var frame = createdDistrictFrame(state.created, state.candidate);
+      district.style.left = frame.x + 'px';
+      district.style.top = frame.y + 'px';
+      district.style.width = frame.width + 'px';
+      district.style.height = frame.height + 'px';
+      if (district.classList) district.classList.toggle('is-invalid', !!problem);
     }
     if (!controls) return;
     var coordinate = controls.querySelector('[data-ws-map-placement-coordinate]');
     var instruction = controls.querySelector('[data-ws-map-placement-instruction]');
     var confirm = controls.querySelector('[data-ws-map-placement-confirm]');
     if (coordinate) coordinate.textContent = candidateLabel(state.candidate);
-    if (instruction) {
-      instruction.textContent =
-        problem ||
-        'Move to preview, click open ground to create. Drag navigates; Arrow keys nudge.';
-    }
+    if (instruction) instruction.textContent = placementInstructionText(state, problem);
     if (confirm) {
       confirm.disabled = !!problem || !!state.submitting;
-      confirm.textContent = state.saving
-        ? 'Saving position…'
-        : state.submitting
-          ? 'Creating workspace…'
-          : 'Create workspace here';
+      confirm.textContent = placementConfirmLabel(state);
     }
   }
 
@@ -10081,7 +10274,7 @@
     var candidate = safePoint(point);
     if (!candidate) return;
     state.candidate = snapPoint(candidate, bypassSnap);
-    var problem = placementProblem(state.candidate);
+    var problem = candidateProblem(state, state.candidate);
     var status = problem ? 'blocked' : 'available';
     updatePlacementPresentation(container);
     // Pointer hover can emit dozens of events per second. Announce only a
@@ -10118,6 +10311,11 @@
     placementSession = null;
     settleLayout();
     restorePlacementMoveMode(state);
+    // A created member already sits where the automatic layout put it; leaving
+    // keeps that, and nothing is written.
+    if (notifyCancel && state.created) {
+      announce(container, 'Kept the automatic layout. Nothing was moved.');
+    }
     if (notifyCancel) {
       var back = typeof state.onBack === 'function' ? state.onBack : state.onCancel;
       if (typeof back === 'function') back(state.token, 'back');
@@ -10127,10 +10325,16 @@
   function confirmPlacement(container) {
     var state = placementSession;
     if (!state || state.container !== container || state.submitting) return;
-    var problem = placementProblem(state.candidate);
+    var problem = candidateProblem(state, state.candidate);
     if (problem) {
       announce(container, problem);
       updatePlacementPresentation(container);
+      return;
+    }
+    // A created member exists already: confirming only saves its position.
+    if (state.created) {
+      var placed = commitPlacement(state.created.member.id, { token: state.token });
+      if (typeof state.onPlaced === 'function') placed.then(state.onPlaced);
       return;
     }
     if (typeof state.onConfirm !== 'function') return;
@@ -10306,7 +10510,7 @@
       // A primary background click is the one-step pointer confirmation. An
       // invalid point stays visibly blocked for a corrected click or keyboard
       // nudge; it never submits a draft.
-      if (!placementProblem(state.candidate)) confirmPlacement(container);
+      if (!candidateProblem(state, state.candidate)) confirmPlacement(container);
     });
 
     ['pointercancel', 'pointerleave'].forEach(function (type) {
@@ -10336,14 +10540,23 @@
     // A pre-review legacy Build coordinate must not leak into this reviewed
     // submission. The reviewed candidate below is the only site that can save.
     cancelBuild();
+    // `created` places workspaces a setup already made (see createdPlacementSpec);
+    // without it the session previews a reviewed draft the wizard creates.
+    var created = createdPlacementSpec(options);
     placementSession = {
       token: token,
       revision: Number(options.revision) || 1,
-      payload: placementPayload(options),
-      candidate: suggestedPlacementPoint(options),
+      created: created,
+      payload: created
+        ? { name: created.member.name, group_name: created.group ? created.group.name : '' }
+        : placementPayload(options),
+      candidate: created
+        ? createdSuggestedPoint(created, options)
+        : suggestedPlacementPoint(options),
       onConfirm: options.onConfirm,
       onBack: options.onBack,
       onCancel: options.onCancel,
+      onPlaced: options.onPlaced,
       container: container,
       previousMoveMode: previousMoveMode,
       submitting: false
@@ -10351,7 +10564,9 @@
     settleLayout();
     announce(
       container,
-      'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
+      created
+        ? createdInstruction(created)
+        : 'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
     );
     return true;
   }
@@ -10383,7 +10598,10 @@
       return Promise.resolve({ saved: false, reason: 'stale_placement' });
     }
     var point = safePoint(opts.candidate || state.candidate);
-    var problem = placementProblem(point, id);
+    var problem =
+      state.created && point
+        ? createdPlacementProblem(state.created, point)
+        : placementProblem(point, id);
     if (problem) {
       rememberFailedPlacement(id, point || state.candidate);
       placementSession = null;
@@ -10406,7 +10624,12 @@
         selectedId = id;
         pendingPlacementSelectionId = id;
         placementSession = null;
-        announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
+        announce(
+          state.container,
+          state.created
+            ? createdPlacedLine(state.created, point)
+            : 'Workspace placed at ' + formatCoordinate(point)
+        );
         settleLayout();
         restorePlacementMoveMode(state);
         return { saved: true, point: point };

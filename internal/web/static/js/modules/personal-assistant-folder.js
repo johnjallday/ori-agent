@@ -8,6 +8,11 @@
 // location — chips are identifiers the server resolves, and the native picker
 // runs server-side.
 
+// Sets window.OriFolderPlanLines, which the plan line exports below come from.
+import './folder-plan-lines.js';
+// Sets window.OriFolderRecognitionLines: the Recognized and Needs lines, in the
+// build pane's words.
+import './folder-recognition-lines.js';
 import {
   lastSavedLabel,
   libraryOpenAction,
@@ -217,21 +222,10 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
   return { ...base, headline, question, actions, confirming: back };
 }
 
-// The states of one plan line while the server runs the setup.
-const SETUP_LINE_STATES = ['waiting', 'working', 'done', 'failed'];
-
-// setupLinesView normalizes the server's plan or run lines for rendering. Every
-// field is text; an unknown state is shown as a neutral row, never trusted.
-export function setupLinesView(lines) {
-  return (Array.isArray(lines) ? lines : [])
-    .filter(line => line && typeof line === 'object' && String(line.name || '').trim())
-    .map(line => ({
-      kind: String(line.kind || '').trim(),
-      name: String(line.name).trim(),
-      detail: String(line.detail || '').trim(),
-      state: SETUP_LINE_STATES.includes(line.state) ? line.state : ''
-    }));
-}
+// setupLinesView normalizes the server's plan or run lines for rendering, and
+// renderSetupLines draws them: the shared plan lines the Create Workspace build
+// pane draws too (folder-plan-lines.js).
+export const { setupLinesView, renderSetupLines } = globalThis.OriFolderPlanLines;
 
 const SETUP_STOP_COPY = {
   plan_changed:
@@ -496,6 +490,34 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   };
 }
 
+// finishedRunPlacement is what the Map is asked to place once a run this page
+// followed has finished, as Create Workspace's Set it up does: the project
+// workspace the run made and, unless it stands alone, the Home it went
+// inside. `followed` is the offer whose run this page saw going, `placed` the
+// offers already handed on, `covered` whether the run's pop-up or the
+// assistant drawer still covers the Map (closing it is the moment). null when
+// there is nothing to place yet, or nothing at all: a Home or group outcome
+// places nothing.
+export function finishedRunPlacement(offer, { followed = '', placed = [], covered = false } = {}) {
+  const id = String(offer?.id || '');
+  if (!id || id !== followed || placed.includes(id) || covered) return null;
+  if (offer.status !== 'resolved' || offer.outcome?.kind !== 'project') return null;
+  const memberId = String(offer.outcome.workspace_id || '').trim();
+  if (!memberId) return null;
+  const rows = Array.isArray(offer.outcome.receipt) ? offer.outcome.receipt : [];
+  const workspace = rows.find(row => row?.kind === 'workspace');
+  const parent = offer.outcome.parent;
+  const homeId =
+    parent && parent.status !== 'standalone' ? String(parent.workspace_id || '').trim() : '';
+  return {
+    token: `folder:${id}`,
+    memberId,
+    memberName: String(workspace?.name || offer.subject?.name || '').trim(),
+    homeId,
+    homeName: homeId ? String(parent.name || '').trim() : ''
+  };
+}
+
 // Display-only canonical disclosure. The browser never sends this name or any
 // witness fields as a destination; confirmation sends the plan digest only.
 export function folderSetupDestinationLabel(offer) {
@@ -606,10 +628,15 @@ function capabilityConfirmView(offer, base, subject) {
         structureGroup: true
       }
     ];
+  const lines = globalThis.OriFolderRecognitionLines;
   return {
     ...base,
     headline,
     question,
+    // What Ori recognized, and what the plan needs, before the plan: the lines
+    // a build that attached this folder says, in the same words.
+    recognitionLine: run || !lines ? '' : lines.recognitionLine(offer.recognition),
+    needsLine: hasPlan && lines ? lines.needsLine(offer.needs) : '',
     // The plan lists every consequence, so the pre-setup install promise would
     // only repeat it; a run shows its own progress instead.
     capabilityDetail: hasPlan || run ? '' : String(capability.integration || ''),
@@ -2031,46 +2058,6 @@ function announceOffer() {
   );
 }
 
-const SETUP_LINE_GLYPHS = {
-  waiting: ['○', 'Waiting'],
-  working: ['◔', 'In progress'],
-  done: ['✓', 'Done'],
-  failed: ['!', 'Did not finish']
-};
-
-// renderSetupLines draws a plan or a run's lines into a list. The state is a
-// glyph and a visually hidden word, never colour alone. Used by the Home panel
-// card and the mission card, so both show the same lines.
-export function renderSetupLines(list, lines, doc = document) {
-  if (!list) return;
-  list.replaceChildren();
-  lines.forEach(line => {
-    const item = doc.createElement('li');
-    item.dataset.kind = line.kind || 'other';
-    if (line.state) item.dataset.state = line.state;
-    const icon = doc.createElement('span');
-    icon.className = 'pa-folder__plan-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = line.state ? SETUP_LINE_GLYPHS[line.state][0] : '•';
-    const body = doc.createElement('span');
-    body.className = 'pa-folder__plan-text';
-    body.append(line.name);
-    if (line.detail) {
-      const detail = doc.createElement('small');
-      detail.textContent = line.detail;
-      body.append(detail);
-    }
-    if (line.state) {
-      const word = doc.createElement('span');
-      word.className = 'visually-hidden';
-      word.textContent = ` — ${SETUP_LINE_GLYPHS[line.state][1]}`;
-      body.append(word);
-    }
-    item.append(icon, body);
-    list.append(item);
-  });
-}
-
 const RECEIPT_LABELS = {
   workspace: ['Workspace', '◈'],
   folder: ['Folder', '▤'],
@@ -2164,6 +2151,8 @@ function elements() {
     prerequisites: document.getElementById('personalAssistantFolderPrerequisites'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
+    recognitionLine: document.getElementById('personalAssistantFolderOfferRecognition'),
+    needsLine: document.getElementById('personalAssistantFolderOfferNeeds'),
     hidden: document.getElementById('personalAssistantFolderOfferHidden'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
@@ -2385,6 +2374,37 @@ function renderRunSongs(els, view) {
   });
 }
 
+// The run this page saw going, and the runs already handed to the Map.
+const runPlacement = { followed: '', placed: [] };
+
+// placeFinishedRun hands a finished run to the Map once (finishedRunPlacement),
+// through the same placement the build's Set it up uses.
+function placeFinishedRun() {
+  const offer = state.offer;
+  if (offer?.setup && offer.status !== 'resolved') runPlacement.followed = String(offer.id || '');
+  const placement = finishedRunPlacement(offer, {
+    followed: runPlacement.followed,
+    placed: runPlacement.placed,
+    covered: runModal.wanted || Boolean(window.PersonalAssistantPanel?.isOpen?.())
+  });
+  if (!placement) return;
+  runPlacement.placed.push(String(offer.id));
+  const manager = typeof window !== 'undefined' ? window.sessionManager : null;
+  // The Map draws what the run made before it asks where it sits.
+  manager?.notifyWorkspacesChanged?.({ workspaceId: placement.memberId });
+  if (typeof manager?.placeCreatedOnWorkspaceMap === 'function') {
+    manager.placeCreatedOnWorkspaceMap(placement.token, placement);
+    return;
+  }
+  window.OriWorkspaceMap?.beginPlacement?.({
+    token: placement.token,
+    created: {
+      member: { id: placement.memberId, name: placement.memberName },
+      group: placement.homeId ? { id: placement.homeId, name: placement.homeName } : null
+    }
+  });
+}
+
 function openRunModal() {
   const els = runModalElements();
   const Modal = globalThis.bootstrap?.Modal;
@@ -2394,6 +2414,7 @@ function openRunModal() {
   if (!runModal.bound) {
     els.root.addEventListener('hidden.bs.modal', () => {
       runModal.wanted = false;
+      placeFinishedRun();
     });
     runModal.bound = true;
   }
@@ -2743,6 +2764,8 @@ function renderOffer(place) {
     firstLook.visible && firstLook.readiness?.length ? firstLook.readiness : view.prerequisites
   );
   setText(els.capability, view.capabilityDetail);
+  setText(els.recognitionLine, view.recognitionLine);
+  setText(els.needsLine, view.needsLine);
   renderHidden(els.hidden, capabilityHiddenView(state.offer));
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
@@ -2891,6 +2914,7 @@ function render() {
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderRunModal();
+  placeFinishedRun();
   syncSetupPolling();
 }
 
@@ -4202,6 +4226,9 @@ function init() {
     const look = currentFirstLook();
     if (look?.state === 'running') void refreshFirstLook(look.offer_id);
   });
+  // A run that finished inside the drawer is placed once the drawer stops
+  // covering the Map.
+  document.addEventListener('personal-assistant:closed', placeFinishedRun);
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   els.assistantName?.addEventListener('input', () => {

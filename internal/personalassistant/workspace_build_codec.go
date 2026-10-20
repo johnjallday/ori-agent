@@ -25,11 +25,16 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 	if err := decoder.Decode(&struct{}{}); err != io.EOF || doc.Version < 1 || doc.Owner != owner {
 		return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 	}
-	if doc.SchemaVersion == 1 {
-		// Keep the stable filename and decode genuine v1 builds without consent.
-		// New authority in an old schema is malformed, not a migration hint.
+	if doc.SchemaVersion == 1 || doc.SchemaVersion == 2 {
+		// Keep the stable filename and decode genuine older builds as they were.
+		// New authority in an old schema is malformed, not a migration hint:
+		// v1 had no preparation, and neither v1 nor v2 had a folder recognition.
 		for _, session := range doc.Sessions {
-			if session.Preparation != nil || session.Status == WorkspaceBuildPreparing {
+			if doc.SchemaVersion == 1 && (session.Preparation != nil || session.Status == WorkspaceBuildPreparing) {
+				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
+			}
+			if (session.Folder != nil && session.Folder.Recognition != nil) || session.Setup != nil ||
+				session.HomeWorkspaceID != "" || session.SetupReceipt != "" {
 				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 			}
 		}

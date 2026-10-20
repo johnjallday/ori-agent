@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 2
+	WorkspaceBuildSchemaVersion = 3
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -46,6 +46,9 @@ const (
 	workspaceBuildMaxChoices  = 4
 	workspaceBuildMaxWhy      = 8
 	workspaceBuildMaxList     = 32
+	// buildFolderMaxCount bounds a recognition's counts: well past any scan's
+	// entry budget, so only a corrupt document reaches it.
+	buildFolderMaxCount = 1_000_000
 )
 
 // WorkspaceBuildStatus is where a build is in its life.
@@ -75,13 +78,16 @@ type BuildChoice struct {
 
 // BuildTranscriptEntry is one line of the conversation. Fixed marks a line the
 // host wrote from fixed copy (a model failure, a substituted question); fixed
-// lines are shown but never sent to the model as something it said.
+// lines are shown but never sent to the model as something it said. Host marks
+// a form line that states server facts (what a folder needs, what a setup
+// made) rather than the user's own edit; the model hears it as Ori's note.
 type BuildTranscriptEntry struct {
 	Role    string        `json:"role"`
 	Text    string        `json:"text"`
 	Choices []BuildChoice `json:"choices,omitempty"`
 	Chosen  string        `json:"chosen,omitempty"`
 	Fixed   bool          `json:"fixed,omitempty"`
+	Host    bool          `json:"host,omitempty"`
 	At      time.Time     `json:"at"`
 }
 
@@ -114,8 +120,10 @@ type BuildRejection struct {
 	Reason string `json:"reason"`
 }
 
-// BuildNeedsHome says the chosen blueprint lives inside a group it will set
-// up at Create, through the existing group-requirement review.
+// BuildNeedsHome says the chosen blueprint is created inside a group. A group
+// that does not exist yet is prepared first, through the existing
+// group-requirement review and its own confirmation; Create then makes the
+// workspace inside it.
 type BuildNeedsHome struct {
 	Label string `json:"label"`
 }
@@ -155,6 +163,114 @@ type BuildRetry struct {
 // record cannot revive once it expires.
 type BuildFolder struct {
 	Observation foldercontext.Observation `json:"observation"`
+	// Recognition is what the folder digest concluded about the same scan,
+	// kept when the folder is attached. Nil when it could not be read.
+	Recognition *BuildFolderRecognition `json:"recognition,omitempty"`
+}
+
+// What a build's attached folder was recognized as.
+const (
+	// BuildFolderProject is one project Ori knows the kind of.
+	BuildFolderProject = "project"
+	// BuildFolderCollection holds several projects, which Ori sets up together
+	// from Home's Explore a folder, never as one workspace.
+	BuildFolderCollection = "collection"
+	// BuildFolderUnrecognized is everything else.
+	BuildFolderUnrecognized = "none"
+)
+
+// BuildFolderRecognition is the folder digest's verdict on a build's attached
+// folder and the capability row it matched, from the host's own table: no
+// model is involved, and nothing here names a path. The pane says it, the
+// model reads it as reference data, and the plan starts from it.
+type BuildFolderRecognition struct {
+	Verdict string `json:"verdict"`
+	Shape   string `json:"shape,omitempty"`
+	// ProjectCount is 1 for a project and the number of projects a
+	// collection holds.
+	ProjectCount int `json:"project_count"`
+	// CandidateID is the recognized project's id in the observation's own
+	// projects list, never a path.
+	CandidateID string `json:"candidate_id,omitempty"`
+	// Label names the kind of project ("<integration> project"). MarkerNoun and
+	// MarkerCount count the files that say so ("session", 3); a marker that is
+	// a folder, or none, has no count.
+	Label       string `json:"label,omitempty"`
+	MarkerNoun  string `json:"marker_noun,omitempty"`
+	MarkerCount int    `json:"marker_count,omitempty"`
+	// BlueprintID is the project blueprint the shape suggests, by the host
+	// table's own id ("<blueprint>"): a catalog entry is that blueprint when
+	// its id or its plugin's blueprint id is this one. BlueprintLabel names it.
+	BlueprintID    string `json:"blueprint_id,omitempty"`
+	BlueprintLabel string `json:"blueprint_label,omitempty"`
+	// The reviewed integration and Home provider the capability row names.
+	IntegrationKey   string `json:"integration_key,omitempty"`
+	IntegrationName  string `json:"integration_name,omitempty"`
+	HomeProviderKey  string `json:"home_provider_key,omitempty"`
+	HomeProviderName string `json:"home_provider_name,omitempty"`
+	HomeName         string `json:"home_name,omitempty"`
+	// HomeExists says the owner already had that Home when the folder was
+	// attached. The plan re-reads it; this is what the model is told.
+	HomeExists bool `json:"home_exists,omitempty"`
+	// OfferID is the folder digest offer the setup runs on, once there is one.
+	OfferID string `json:"offer_id,omitempty"`
+	// NeedsSaid is the Needs line the host last wrote into the transcript, so
+	// the same states are never said twice.
+	NeedsSaid string `json:"needs_said,omitempty"`
+}
+
+// Recognized reports a single project of a kind Ori knows.
+func (r *BuildFolderRecognition) Recognized() bool {
+	return r != nil && r.Verdict == BuildFolderProject
+}
+
+func validateBuildFolderRecognition(r *BuildFolderRecognition, observation foldercontext.Observation) error {
+	if r == nil {
+		return nil
+	}
+	switch r.Verdict {
+	case BuildFolderProject:
+		if r.ProjectCount != 1 || r.CandidateID == "" || r.Label == "" {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	case BuildFolderCollection:
+		if r.ProjectCount < 2 || r.CandidateID != "" || r.OfferID != "" {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	case BuildFolderUnrecognized:
+		if *r != (BuildFolderRecognition{Verdict: BuildFolderUnrecognized}) {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+	}
+	if r.ProjectCount > buildFolderMaxCount || r.MarkerCount < 0 || r.MarkerCount > buildFolderMaxCount {
+		return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+	}
+	// A recognized project is one the observation disclosed.
+	if r.CandidateID != "" {
+		disclosed := false
+		for _, project := range observation.Projects {
+			disclosed = disclosed || project.ID == r.CandidateID
+		}
+		if !disclosed {
+			return fmt.Errorf("%w: folder recognition candidate", ErrWorkspaceBuildInvalid)
+		}
+	}
+	for _, value := range []string{r.Shape, r.CandidateID, r.BlueprintID, r.IntegrationKey, r.HomeProviderKey, r.OfferID} {
+		if !boundedText(value, 128) || strings.ContainsAny(value, "/\\\r\n") {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	}
+	for _, value := range []string{r.Label, r.MarkerNoun, r.BlueprintLabel, r.IntegrationName, r.HomeProviderName, r.HomeName} {
+		if !boundedText(value, workspaceBuildMaxName) || strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+		}
+	}
+	if !boundedText(r.NeedsSaid, workspaceBuildMaxShort) || strings.ContainsAny(r.NeedsSaid, "\r\n") {
+		return fmt.Errorf("%w: folder recognition", ErrWorkspaceBuildInvalid)
+	}
+	return nil
 }
 
 // BuildLink is the link the user attached to the build from the pane's own
@@ -241,6 +357,40 @@ type WorkspaceBuildSession struct {
 	FirstRequest       string                 `json:"first_request,omitempty"`
 	CreatedWorkspaceID string                 `json:"created_workspace_id,omitempty"`
 	Preparation        *BuildPreparationClaim `json:"preparation,omitempty"`
+	// Setup is the folder setup run Set it up started for a recognized folder:
+	// it holds the build in preparing while it runs, and stays while the build
+	// is open again after a stop, so Retry continues the same run.
+	Setup *BuildSetupClaim `json:"setup,omitempty"`
+	// HomeWorkspaceID is the Home a setup run made or joined, beside the
+	// project workspace in CreatedWorkspaceID; SetupReceipt is what the run
+	// made, in the host's words. Both outlive Settle.
+	HomeWorkspaceID string `json:"home_workspace_id,omitempty"`
+	SetupReceipt    string `json:"setup_receipt,omitempty"`
+}
+
+// BuildSetupClaim is the setup run a build's Set it up started: the folder
+// digest offer it runs on, the plan digest the user confirmed, and the request
+// that started it.
+type BuildSetupClaim struct {
+	OfferID    string    `json:"offer_id"`
+	PlanDigest string    `json:"plan_digest"`
+	RequestID  string    `json:"request_id"`
+	StartedAt  time.Time `json:"started_at"`
+	// StopReason is why the run last stopped (FolderStop*), while the build is
+	// open again; empty while it runs.
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+func (c BuildSetupClaim) validate() error {
+	for _, value := range []string{c.OfferID, c.RequestID} {
+		if strings.TrimSpace(value) == "" || !boundedText(value, 128) || strings.ContainsAny(value, "/\\\r\n") {
+			return fmt.Errorf("%w: setup claim", ErrWorkspaceBuildInvalid)
+		}
+	}
+	if !buildPreparationDigest(c.PlanDigest) || c.StartedAt.IsZero() || !boundedText(c.StopReason, 64) || strings.ContainsAny(c.StopReason, "/\\\r\n") {
+		return fmt.Errorf("%w: setup claim", ErrWorkspaceBuildInvalid)
+	}
+	return nil
 }
 
 // Touch records a write: a new version and a new update time.
@@ -294,6 +444,7 @@ func (s *WorkspaceBuildSession) Settle() {
 	s.Retry = nil
 	s.Folder = nil
 	s.Link = nil
+	s.Setup = nil
 	s.Draft = BuildDraft{Name: s.Draft.Name}
 }
 
@@ -403,6 +554,9 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if session.Preparation != nil && session.Setup != nil {
+		return fmt.Errorf("%w: preparation and setup", ErrWorkspaceBuildInvalid)
+	}
 	if session.Preparation != nil {
 		if err := session.Preparation.Validate(); err != nil {
 			return err
@@ -410,8 +564,23 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildCreated && session.Status != WorkspaceBuildAbandoned {
 			return fmt.Errorf("%w: preparation lifecycle", ErrWorkspaceBuildInvalid)
 		}
+	} else if session.Setup != nil {
+		// A setup run belongs to an open or preparing build; Settle drops it.
+		if err := session.Setup.validate(); err != nil {
+			return err
+		}
+		if session.Status != WorkspaceBuildPreparing && session.Status != WorkspaceBuildOpen {
+			return fmt.Errorf("%w: setup lifecycle", ErrWorkspaceBuildInvalid)
+		}
+		if session.Status == WorkspaceBuildPreparing && session.Setup.StopReason != "" {
+			return fmt.Errorf("%w: setup lifecycle", ErrWorkspaceBuildInvalid)
+		}
 	} else if session.Status == WorkspaceBuildPreparing {
 		return fmt.Errorf("%w: missing preparation", ErrWorkspaceBuildInvalid)
+	}
+	if !boundedText(session.SetupReceipt, workspaceBuildMaxShort) || !boundedText(session.HomeWorkspaceID, 128) ||
+		strings.ContainsAny(session.HomeWorkspaceID, "/\\\r\n") {
+		return fmt.Errorf("%w: setup receipt", ErrWorkspaceBuildInvalid)
 	}
 	if session.Version < 1 || session.FurthestStep < 0 || session.FurthestStep > 4 || session.TurnCount < 0 {
 		return fmt.Errorf("%w: counters", ErrWorkspaceBuildInvalid)
@@ -425,7 +594,8 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 		default:
 			return fmt.Errorf("%w: transcript role", ErrWorkspaceBuildInvalid)
 		}
-		if !boundedText(entry.Text, WorkspaceBuildMaxText) || len(entry.Choices) > workspaceBuildMaxChoices {
+		if !boundedText(entry.Text, WorkspaceBuildMaxText) || len(entry.Choices) > workspaceBuildMaxChoices ||
+			(entry.Host && entry.Role != BuildRoleForm) {
 			return fmt.Errorf("%w: transcript entry", ErrWorkspaceBuildInvalid)
 		}
 		if err := validateBuildChoices(entry.Choices); err != nil {
@@ -459,8 +629,13 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 	}
 	// An attached folder is held to the observation's own bounds: path-free,
 	// at most 8 KiB, names of at most 96 runes.
-	if folder := session.Folder; folder != nil && folder.Observation.Validate() != nil {
-		return fmt.Errorf("%w: folder", ErrWorkspaceBuildInvalid)
+	if folder := session.Folder; folder != nil {
+		if folder.Observation.Validate() != nil {
+			return fmt.Errorf("%w: folder", ErrWorkspaceBuildInvalid)
+		}
+		if err := validateBuildFolderRecognition(folder.Recognition, folder.Observation); err != nil {
+			return err
+		}
 	}
 	return nil
 }
