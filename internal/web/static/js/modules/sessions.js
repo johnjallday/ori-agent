@@ -12499,9 +12499,14 @@ const sessionManager = {
     const shared = window.OriFolderPlanLines;
     const list = document.getElementById('workspaceBuildPlanReviewLines');
     if (shared && list) {
-      shared.renderSetupLines(list, shared.setupLinesView(plan.lines), document, {
-        kindIcons: true
-      });
+      // A plugin the plan reports as ready is checked off, as in the pane.
+      const satisfied = shared.satisfiedLinesView || (lines => lines);
+      shared.renderSetupLines(
+        list,
+        satisfied(shared.setupLinesView(plan.lines), plan.needs),
+        document,
+        { kindIcons: true }
+      );
     }
     for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
       const field = document.getElementById(reviewID);

@@ -144,6 +144,62 @@ test('renderSetupLines draws the state as a glyph and a word; kind icons only wh
   shared.renderSetupLines(null, lines, document);
 });
 
+test('satisfiedLinesView checks off a plugin line whose need is ready, and a run’s own states win', () => {
+  const { shared, document } = load();
+  const plain = value => JSON.parse(JSON.stringify(value));
+  const lines = shared.setupLinesView([
+    { kind: 'integration', name: 'Uses the installed reviewed REAPER integration' },
+    { kind: 'provider', name: 'Installs the Music Project Management plugin' },
+    { kind: 'home', name: 'Creates Home “Music Production Home”' }
+  ]);
+  const needs = [
+    { kind: 'integration', name: 'REAPER integration', state: 'ready' },
+    { kind: 'provider', name: 'Music Project Management', state: 'install' }
+  ];
+  assert.deepEqual(
+    plain(shared.satisfiedLinesView(lines, needs)).map(line => [line.kind, line.state]),
+    [
+      ['integration', 'already'],
+      ['provider', ''],
+      ['home', '']
+    ]
+  );
+  // Nothing ready, nothing marked; the same lines come back.
+  assert.equal(shared.satisfiedLinesView(lines, []), lines);
+  assert.equal(shared.satisfiedLinesView(lines, undefined), lines);
+  assert.equal(shared.satisfiedLinesView(lines, [{ kind: 'integration', state: 'enable' }]), lines);
+
+  // During the run a waiting line is still "already"; working, done and failed
+  // are the run's to say.
+  const running = shared.setupLinesView([
+    { kind: 'integration', name: 'REAPER', state: 'waiting' },
+    { kind: 'provider', name: 'Music', state: 'working' },
+    { kind: 'home', name: 'Home', state: 'done' }
+  ]);
+  const ready = [
+    { kind: 'integration', state: 'ready' },
+    { kind: 'provider', state: 'ready' },
+    { kind: 'home', state: 'ready' }
+  ];
+  assert.deepEqual(
+    plain(shared.satisfiedLinesView(running, ready)).map(line => line.state),
+    ['already', 'working', 'done']
+  );
+
+  // Drawn: a filled check and "Already in place" for assistive tech.
+  const list = document.createElement('ul');
+  shared.renderSetupLines(list, shared.satisfiedLinesView(lines, needs), document, {
+    kindIcons: true
+  });
+  assert.equal(list.children[0].dataset.state, 'already');
+  assert.equal(
+    list.children[0].textContent,
+    '✓Uses the installed reviewed REAPER integration — Already in place'
+  );
+  assert.equal(list.children[1].dataset.state, undefined);
+  assert.equal(list.children[1].textContent, '•Installs the Music Project Management plugin');
+});
+
 test('setupLineKindIcon names an icon for every kind the host plans with', () => {
   const { shared } = load();
   for (const kind of [

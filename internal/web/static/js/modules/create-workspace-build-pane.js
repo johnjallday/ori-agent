@@ -81,6 +81,7 @@
     planGet: 'You’ll get',
     planSteps: 'Ori will',
     planStepCount: count => `${count} ${count === 1 ? 'step' : 'steps'}`,
+    planAlready: count => `${count} already done`,
     planHome: 'Home',
     planHomeNew: 'new',
     planHomeExisting: 'existing',
@@ -608,7 +609,10 @@
         : plan && plan.ready === true
           ? plan.lines
           : [];
-    const lines = shared ? shared.setupLinesView(source) : [];
+    // A plugin the plan reports as ready is checked off before the run.
+    const lines = shared
+      ? shared.satisfiedLinesView(shared.setupLinesView(source), plan?.needs)
+      : [];
     const note =
       !lines.length && plan && plan.ready !== true
         ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
@@ -622,8 +626,11 @@
       });
     } else els.planLines.textContent = '';
     els.planLines.hidden = !lines.length;
+    const already = lines.filter(line => line.state === 'already').length;
     els.linesKicker.textContent = lines.length
-      ? `${COPY.planSteps} · ${COPY.planStepCount(lines.length)}`
+      ? `${COPY.planSteps} · ${COPY.planStepCount(lines.length)}${
+          already ? ` · ${COPY.planAlready(already)}` : ''
+        }`
       : '';
     els.linesKicker.hidden = !lines.length;
     renderSketch(lines.length ? plan : null, lines);

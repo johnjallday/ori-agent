@@ -2981,13 +2981,32 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   color: var(--wc-keeper);
   animation: workspace-build-plan-working 1.2s ease-in-out infinite;
 }
-.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-icon {
+/* Done by the run, or already in place before it: a filled check, and the
+   row steps back so what is still to do stands out. */
+.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-icon,
+.workspace-create-modal
+  .workspace-build-plan__lines
+  li[data-state="already"]
+  .pa-folder__plan-icon {
   border-color: var(--wc-faction);
   background: var(--wc-faction);
   color: var(--wc-bg);
 }
-.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-kind {
+.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-kind,
+.workspace-create-modal
+  .workspace-build-plan__lines
+  li[data-state="already"]
+  .pa-folder__plan-kind {
   opacity: 0.6;
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="already"] {
+  background: transparent;
+}
+.workspace-create-modal
+  .workspace-build-plan__lines
+  li[data-state="already"]
+  .pa-folder__plan-text {
+  color: var(--wc-ink-dim);
 }
 .workspace-create-modal .workspace-build-plan__lines li[data-state="failed"] {
   border-color: var(--wc-alert);

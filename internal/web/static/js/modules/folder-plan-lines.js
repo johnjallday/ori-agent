@@ -8,8 +8,9 @@
 (function () {
   'use strict';
 
-  // The states of one plan line while the server runs the setup.
-  const SETUP_LINE_STATES = ['waiting', 'working', 'done', 'failed'];
+  // The states of one plan line while the server runs the setup, and
+  // "already": a line the plan has nothing to do for, checked before the run.
+  const SETUP_LINE_STATES = ['waiting', 'working', 'done', 'failed', 'already'];
 
   // setupLinesView normalizes the server's plan or run lines for rendering. Every
   // field is text; an unknown state is shown as a neutral row, never trusted.
@@ -28,8 +29,29 @@
     waiting: ['○', 'Waiting'],
     working: ['◔', 'In progress'],
     done: ['✓', 'Done'],
-    failed: ['!', 'Did not finish']
+    failed: ['!', 'Did not finish'],
+    already: ['✓', 'Already in place']
   };
+
+  // satisfiedLinesView marks the lines a plan has nothing left to do for: a
+  // plugin line (integration or provider) whose need the plan reports as
+  // ready is "already", checked before Set it up is pressed. A run's own
+  // states (working, done, failed) win; only an unstated or waiting line is
+  // marked. needs is the plan's needs list ({kind, name, state}).
+  function satisfiedLinesView(lines, needs) {
+    const ready = new Set(
+      (Array.isArray(needs) ? needs : [])
+        .filter(need => need && typeof need === 'object' && need.state === 'ready')
+        .map(need => String(need.kind || '').trim())
+        .filter(Boolean)
+    );
+    if (!ready.size) return lines;
+    return lines.map(line =>
+      ready.has(line.kind) && (!line.state || line.state === 'waiting')
+        ? { ...line, state: 'already' }
+        : line
+    );
+  }
 
   // What each kind of line is about, as a Bootstrap icon (head.tmpl loads the
   // font), so a checklist says "a Home", "a folder", "a team" before its
@@ -103,5 +125,10 @@
     });
   }
 
-  globalThis.OriFolderPlanLines = { setupLinesView, renderSetupLines, setupLineKindIcon };
+  globalThis.OriFolderPlanLines = {
+    setupLinesView,
+    satisfiedLinesView,
+    renderSetupLines,
+    setupLineKindIcon
+  };
 })();

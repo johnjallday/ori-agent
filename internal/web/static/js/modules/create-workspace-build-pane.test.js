@@ -957,7 +957,8 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
   assert.equal(sketch().hidden, true);
 
   // A new Home holds the workspace, which is named after the recognized
-  // project while the draft has no name; its parts come from the lines.
+  // project while the draft has no name; its parts come from the lines. The
+  // integration the plan reports as ready is checked off before Set it up.
   pane.applySession({
     transcript: [],
     draft: {},
@@ -966,14 +967,32 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
       ready: true,
       digest: 'd',
       home: { name: 'Music Production Home', status: 'new' },
+      needs: [{ kind: 'integration', name: 'REAPER integration', state: 'ready' }],
       lines
     }
   });
   assert.equal(sketch().hidden, false);
   assert.equal(sketch().getAttribute('aria-hidden'), 'true', 'it says nothing the lines do not');
   assert.equal(byClass('p', 'workspace-build-plan__kicker')[0].textContent, 'You’ll get');
-  assert.equal(byClass('p', 'workspace-build-plan__kicker')[1].textContent, 'Ori will · 7 steps');
+  assert.equal(
+    byClass('p', 'workspace-build-plan__kicker')[1].textContent,
+    'Ori will · 7 steps · 1 already done'
+  );
   assert.equal(byClass('p', 'workspace-build-plan__kicker')[1].hidden, false);
+  const items = root.querySelectorAll('li').filter(node => node.dataset.kind);
+  assert.deepEqual(
+    items.map(item => [item.dataset.kind, item.dataset.state]),
+    [
+      ['integration', 'already'],
+      ['home', undefined],
+      ['workspace', undefined],
+      ['folder', undefined],
+      ['mode', undefined],
+      ['agents', undefined],
+      ['task', undefined]
+    ]
+  );
+  assert.equal(items[0].textContent, '✓REAPER integration is installed — Already in place');
   const home = byClass('div', 'workspace-build-sketch__home')[0];
   assert.equal(home.children[0].textContent, 'Home');
   assert.equal(home.children[0].children[0].className, 'bi bi-house-door');
