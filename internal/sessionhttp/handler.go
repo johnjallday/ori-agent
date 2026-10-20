@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/resourcecatalog"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -64,6 +65,14 @@ type Handler struct {
 	// homeProfileFacts calls an installed project plugin's declared facts
 	// operation. Nil means no plugin facts can be read.
 	homeProfileFacts func(context.Context, plugin.InstalledPlugin, json.RawMessage) (json.RawMessage, error)
+	// resourceCatalogCall calls a project plugin's declared catalog operation
+	// (sources or inventory); resourceCatalogDataDir is where this computer's
+	// grants live. The catalog service is built on first use from both and
+	// the workspace store, which the builder wires later than the handler.
+	resourceCatalogCall    func(context.Context, plugin.InstalledPlugin, string, json.RawMessage) (json.RawMessage, error)
+	resourceCatalogDataDir string
+	resourceCatalogsMu     sync.Mutex
+	resourceCatalogs       *resourcecatalog.Service
 	// assistantRoleStaffer commits exactly the roles the user filled on an
 	// assistant-program blueprint. Separate from assistantReviewedStaffer,
 	// which staffs every required role: under the vacancy model a role the user

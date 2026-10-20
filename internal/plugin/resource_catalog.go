@@ -1,11 +1,44 @@
 package plugin
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/resourcecatalog"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 )
+
+// ErrResourceCatalogUnavailable means the installed plugin cannot serve its
+// catalog now: no declaration, disabled, or its service artifact is missing.
+var ErrResourceCatalogUnavailable = errors.New("plugin has no usable resource catalog")
+
+// Which catalog operation to call.
+const (
+	ResourceCatalogSources   = "sources"
+	ResourceCatalogInventory = "inventory"
+)
+
+// ResourceCatalogCall calls one of the installed plugin's two declared
+// catalog operations as a machine-level read-only call.
+func (l *SurfaceLifecycle) ResourceCatalogCall(ctx context.Context, installed InstalledPlugin, which string, input json.RawMessage) (json.RawMessage, error) {
+	declaration, err := installed.WorkspaceSurfaces.ResourceCatalogDeclaration()
+	if err != nil || declaration == nil || !installed.Enabled {
+		return nil, ErrResourceCatalogUnavailable
+	}
+	operation := declaration.SourcesOperation
+	if which == ResourceCatalogInventory {
+		operation = declaration.InventoryOperation
+	} else if which != ResourceCatalogSources {
+		return nil, ErrResourceCatalogUnavailable
+	}
+	output, err := l.machineReadOnlyCall(ctx, installed, declaration.ServiceID, operation, input)
+	if errors.Is(err, errMachineOperationUnavailable) {
+		return nil, ErrResourceCatalogUnavailable
+	}
+	return output, err
+}
 
 // declaresResourceWorkspaceFields reports whether the manifest uses anything
 // only resource_workspaces_v1 defines. An explicit "project" kind counts too:

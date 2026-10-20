@@ -20,8 +20,9 @@ export function resourceWorkspaceView(summary, homeId) {
   const label = String(summary?.attachment?.label || '').trim() || 'Resource workspace';
   const description = String(summary?.attachment?.description || '').trim();
   const workspace = summary?.workspace && summary.workspace.url ? summary.workspace : null;
+  // Open lands on the workspace's catalog, which is what it is for.
   const open = workspace
-    ? { text: `Open ${label}`, href: String(workspace.url), primary: true }
+    ? { text: `Open ${label}`, href: `${String(workspace.url)}/catalog`, primary: true }
     : null;
   const plugins = { text: 'Manage plugins', href: '/plugins', primary: false };
   switch (summary?.state) {

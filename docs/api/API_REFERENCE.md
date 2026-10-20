@@ -2718,6 +2718,23 @@ Owner of that exact Home only (anything else is `404`). Reads installed plugins 
 
 `state` is `available` (it exists; `workspace` is `{id, name, url}`), `not_created` (`template_id` opens Create Workspace), `provider_missing`, `provider_disabled`, `provider_incompatible` (the project plugin lacks a matching resource blueprint), or `home_unavailable` (the Home's pinned package is unavailable; existing resource workspaces are still listed with their names). An existing workspace is returned with every state so it can be opened.
 
+### Resource Catalog (the Studio's own page)
+
+Owner of that exact resource workspace only; anything else is `404`. GETs read Ori's own files and call no plugin operation. POSTs take strict JSON (unknown fields, duplicate keys and trailing data are `400`). The page is `/workspaces/<slug>/catalog`, and `?entry=<entry_id>` opens one entry. Contract: `docs/architecture/reaper-studio.md` §6–§8.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/workspaces/{workspaceID}/resource-catalog` | Words, category states and counts, this computer's approved sources with their last read, provider availability, the running or last inspection |
+| `GET …/resource-catalog/entries?q=&category=&kind=&source=&favorites=1&state=&cursor=&limit=` | Rows (default 25, at most 100); `cursor` is bound to both revisions, and a stale one is `409 page_stale` |
+| `GET …/resource-catalog/entries/{entryID}` | One entry with its attributed description, owner-only source location and note |
+| `POST …/resource-catalog/sources/review` `{}` | Calls the plugin's sources operation only; returns `review_token` (10 minutes), the installation and every source with its location |
+| `POST …/resource-catalog/sources/commit` `{review_token, idempotency_key, source_ids}` | Approves those sources on this computer and starts reading them |
+| `POST …/resource-catalog/inspections` `{idempotency_key, mode: "refresh"\|"continue", source_ids?}` | Reads approved sources again, or continues ones a bound stopped |
+| `GET …/resource-catalog/inspections/{operationID}` · `POST …/{operationID}/cancel` `{}` | Progress; cancel keeps finished sources and reports the inspection cancelled |
+| `POST …/resource-catalog/sources/{sourceID}/withdraw/review` `{}` · `…/withdraw/commit` `{review_token}` | Withdraw access on this computer: no further reads or publication of that source, and its entries leave counts and lookups |
+
+Refusals are `409` with `code`: `not_attached`, `provider_unavailable`, `scope_review_required`, `review_stale`, `inspection_active` (carries `operation`), `page_stale`; and `500 catalog_unreadable` for a saved file Ori cannot read (it is left as it is).
+
 ## Home Package Upgrade API
 
 Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Three kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, and a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones. The review lists either addition under `additions`; neither creates, staffs or reads anything. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:

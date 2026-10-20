@@ -49,7 +49,7 @@ test('an existing Studio is opened, never set up again', () => {
   );
   assert.deepEqual(
     view.actions.map(action => [action.text, action.href]),
-    [['Open REAPER Studio', '/workspaces/reaper-studio']]
+    [['Open REAPER Studio', '/workspaces/reaper-studio/catalog']]
   );
 });
 
@@ -72,7 +72,7 @@ test('provider states name what is missing and keep an existing Studio openable'
       { attachment: ATTACHMENT, state, workspace: studio },
       'home-1'
     );
-    assert.equal(withStudio.actions[0].href, '/workspaces/reaper-studio', state);
+    assert.equal(withStudio.actions[0].href, '/workspaces/reaper-studio/catalog', state);
   }
 });
 

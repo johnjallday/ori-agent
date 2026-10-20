@@ -1,0 +1,207 @@
+/* A resource workspace's catalog page (REAPER Studio). Theme colors come
+   from Bootstrap's variables so light and dark both follow the app. */
+
+.resource-catalog-shell {
+  padding: 1.5rem;
+}
+.resource-catalog-page {
+  display: grid;
+  gap: 1rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  color: var(--bs-body-color);
+}
+.resource-catalog-breadcrumb {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.resource-catalog-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.resource-catalog-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  overflow-wrap: anywhere;
+}
+.resource-catalog-provider,
+.resource-catalog-coverage,
+.resource-catalog-status,
+.resource-catalog-empty {
+  margin: 0.25rem 0 0;
+  color: var(--bs-secondary-color);
+}
+.resource-catalog-actions,
+.resource-catalog-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.resource-catalog-operation {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: var(--bs-tertiary-bg);
+}
+.resource-catalog-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+.resource-catalog-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 0.4rem 0.4rem 0 0;
+  background: transparent;
+  color: inherit;
+}
+.resource-catalog-tab[aria-selected="true"] {
+  border-color: var(--bs-border-color);
+  background: var(--bs-body-bg);
+  font-weight: 600;
+}
+.resource-catalog-tab:focus-visible,
+.resource-catalog-row:focus-visible {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: 2px;
+}
+.resource-catalog-tab-count {
+  min-width: 1.5rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--bs-secondary-bg);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.resource-catalog-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+.resource-catalog-field {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+.resource-catalog-field input,
+.resource-catalog-field select {
+  min-width: min(100%, 16rem);
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.3rem;
+  background: var(--bs-body-bg);
+  color: inherit;
+}
+.resource-catalog-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.resource-catalog-browse {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+@media (min-width: 900px) {
+  .resource-catalog-browse {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+.resource-catalog-list,
+.resource-catalog-source-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.resource-catalog-row {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: var(--bs-body-bg);
+  color: inherit;
+  text-align: left;
+}
+.resource-catalog-row-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.resource-catalog-row-context {
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.resource-catalog-row-state {
+  justify-self: start;
+  padding: 0 0.4rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+.resource-catalog-detail {
+  padding: 0.8rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: var(--bs-tertiary-bg);
+  overflow-wrap: anywhere;
+}
+.resource-catalog-detail h2 {
+  font-size: 1.15rem;
+}
+.resource-catalog-detail-note,
+.resource-catalog-dialog-note {
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+}
+.resource-catalog-sources h2 {
+  font-size: 1.05rem;
+}
+.resource-catalog-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  overflow-wrap: anywhere;
+}
+.resource-catalog-dialog {
+  width: min(100% - 2rem, 40rem);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+.resource-catalog-dialog-body {
+  display: grid;
+  gap: 0.75rem;
+}
+.resource-catalog-review-source {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.35rem 0;
+  overflow-wrap: anywhere;
+}
+.resource-catalog-error {
+  min-height: 1.2rem;
+  color: var(--bs-danger);
+}

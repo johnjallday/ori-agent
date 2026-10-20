@@ -62,12 +62,15 @@ type assistantMigrationCommitRequest struct {
 }
 
 type assistantProgramSummary struct {
-	Available                bool                                            `json:"available"`
-	ActivationNeeded         bool                                            `json:"activation_needed,omitempty"`
-	MigrationNeeded          bool                                            `json:"migration_needed,omitempty"`
-	StationID                string                                          `json:"station_id,omitempty"`
-	ProjectID                string                                          `json:"project_id,omitempty"`
-	IsStation                bool                                            `json:"is_station,omitempty"`
+	Available        bool   `json:"available"`
+	ActivationNeeded bool   `json:"activation_needed,omitempty"`
+	MigrationNeeded  bool   `json:"migration_needed,omitempty"`
+	StationID        string `json:"station_id,omitempty"`
+	ProjectID        string `json:"project_id,omitempty"`
+	IsStation        bool   `json:"is_station,omitempty"`
+	// ResourceWorkspace marks a linked child that holds a resource catalog;
+	// its page links to that catalog.
+	ResourceWorkspace        bool                                            `json:"resource_workspace,omitempty"`
 	Hired                    bool                                            `json:"hired,omitempty"`
 	PluginAvailable          bool                                            `json:"plugin_available"`
 	HomeProviderAvailable    bool                                            `json:"home_provider_available"`
@@ -229,6 +232,9 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		PrimaryName: state.PrimaryName, Provider: state.Provider, Model: state.Model,
 		StageID: state.StageID, Level: state.Level, AcceptedTasks: state.AcceptedCompletions,
 		Declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
+	}
+	if project != nil {
+		summary.ResourceWorkspace = workspace.AssistantProjectLinkIsResource(project.GetAssistantProjectLink())
 	}
 	if project != nil {
 		if link := project.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {
