@@ -6138,11 +6138,279 @@ test('a blueprint that lives in a group names the group apart from the workspace
   manager.syncWorkspaceBuildPresentation();
   assert.match(draft(), /^Group: Music Production Home \(existing\) · Workspace: Ori Music Demo/);
 
+  // The server's group prerequisite is the authority once it is there.
+  manager.workspaceBuild.session.group_prerequisite = {
+    state: 'home_creation_review_required',
+    home: { exists: false, proposed_name: 'Music Production Home' }
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.match(draft(), /^Group: Music Production Home \(new\) · /);
+  manager.workspaceBuild.session.group_prerequisite = {
+    state: 'ready_grouped',
+    home: { exists: true, workspace_id: 'ws-home', name: 'My Studio' }
+  };
+  manager.syncWorkspaceBuildPresentation();
+  assert.match(draft(), /^Group: My Studio \(existing\) · Workspace: Ori Music Demo/);
+
   // Without a group the line is what it always was.
   manager.workspaceBuild.session.needs_home = null;
   manager.syncWorkspaceBuildPresentation();
   assert.equal(draft(), 'Ori Music Demo · REAPER song · Details · Folder: Ori Music Demo');
   assert.equal(status(), 'Assisted setup · one shared draft');
+});
+
+// A build whose drafted blueprint must be created inside a group that does
+// not exist yet.
+function groupNeededBuild() {
+  return {
+    session: {
+      id: 'build-1',
+      version: 3,
+      status: 'open',
+      draft: { name: 'Field Notes', template_id: 'plugin:neutral:project' },
+      needs_home: { label: 'Neutral Program Home' },
+      group_prerequisite: {
+        state: 'home_creation_review_required',
+        home: { exists: false, proposed_name: 'Neutral Program Home' },
+        actions: ['review_create_home']
+      }
+    }
+  };
+}
+
+function groupPane() {
+  const calls = [];
+  return {
+    calls,
+    COPY: {
+      gateFailurePrefix: 'Not yet — ',
+      groupCreateNext: 'Ready to create.',
+      createIt: 'Create it',
+      groupSwitchFolder: 'The attached folder will not be linked to a group.',
+      groupSwitchKeep: 'Keep building the workspace',
+      groupSwitchContinue: 'Continue as a group'
+    },
+    applySession: session => calls.push(['session', session.group_prerequisite?.state]),
+    setGroupBusy: (busy, note = '') => calls.push(['busy', busy, note]),
+    noteGroupPrerequisite: prerequisite => calls.push(['hint', prerequisite.state]),
+    showLine: (text, options = {}) => {
+      calls.push(['line', text, (options.chips || []).map(chip => chip.id)]);
+      return `line-${calls.length}`;
+    },
+    removeLine: id => calls.push(['remove', id]),
+    collapse: options => calls.push(['collapse', Boolean(options?.withdraw)]),
+    expand: () => calls.push(['expand']),
+    focusComposer() {}
+  };
+}
+
+test('Prepare the group first runs the form’s own Home review and commit, then Create follows', async () => {
+  const manager = loadSessionManager();
+  const pane = groupPane();
+  manager.workspaceBuildPane = () => pane;
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.refreshWorkspaceReview = () => {};
+  const order = [];
+  manager.flushWorkspaceBuildDraft = async () => order.push('flush');
+  manager.groupRequirementDraft = { templateKey: 'k', policy: 'required', composition: 'grouped' };
+  manager.refreshTemplateAgentPlan = async () => order.push('plan');
+  manager.prepareRequiredGroupHomeFromCard = async () => (order.push('review'), true);
+  manager.commitRequiredGroupHome = async () => (order.push('commit'), true);
+  manager.workspaceBuildGateProblem = () => '';
+  const build = groupNeededBuild();
+  manager.workspaceBuild = build;
+  manager.workspaceBuildTransport = {
+    read: async id => {
+      order.push(`read:${id}`);
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          session: {
+            ...build.session,
+            version: 4,
+            group_prerequisite: {
+              state: 'ready_grouped',
+              home: { exists: true, workspace_id: 'ws-home', name: 'Neutral Program Home' }
+            }
+          }
+        }
+      };
+    }
+  };
+
+  await manager.prepareWorkspaceBuildGroup();
+  assert.deepEqual(order, ['flush', 'plan', 'review', 'commit', 'read:build-1']);
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls)), [
+    ['busy', true, ''],
+    ['session', 'ready_grouped'],
+    ['busy', false, ''],
+    ['line', 'Ready to create.', ['create_now']]
+  ]);
+  assert.equal(manager.workspaceBuild.session.group_prerequisite.state, 'ready_grouped');
+  // With the Home ready, the chip has nothing left to do.
+  order.length = 0;
+  await manager.prepareWorkspaceBuildGroup();
+  assert.deepEqual(order, []);
+  // Create it is the second confirmation: the build's own Create, pressed.
+  let created = 0;
+  manager.createFromWorkspaceBuild = async () => created++;
+  await manager.performWorkspaceBuildAction(build, pane, 'create_now');
+  assert.equal(created, 1);
+});
+
+test('a group that could not be prepared says why and offers nothing to create', async () => {
+  const message = { textContent: 'The group setup review failed. Nothing was changed.' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'workspaceGroupDestinationMessage' ? message : null)
+    }
+  );
+  const pane = groupPane();
+  manager.workspaceBuildPane = () => pane;
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.groupRequirementDraft = { templateKey: 'k' };
+  manager.refreshTemplateAgentPlan = async () => {};
+  manager.prepareRequiredGroupHomeFromCard = async () => false;
+  let committed = 0;
+  manager.commitRequiredGroupHome = async () => (committed++, true);
+  const build = groupNeededBuild();
+  manager.workspaceBuild = build;
+  manager.workspaceBuildTransport = {
+    read: async () => ({ ok: true, status: 200, body: { session: build.session } })
+  };
+  await manager.prepareWorkspaceBuildGroup();
+  assert.equal(committed, 0, 'a review that did not happen is never committed');
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls.filter(call => call[0] !== 'session'))), [
+    ['busy', true, ''],
+    ['busy', false, 'The group setup review failed. Nothing was changed.']
+  ]);
+});
+
+test('Create refuses in the pane while the drafted blueprint’s group is still to prepare', async () => {
+  const manager = loadSessionManager();
+  manager.blueprintSelectionBlocked = () => false;
+  manager.workspaceIdentityProblem = () => '';
+  manager.existingProjectProblem = () => '';
+  manager.blueprintInputsAvailable = () => false;
+  manager.usesTeamRosterCreator = () => false;
+  manager.groupRequirementBlocked = () => false;
+  manager.workspaceBuild = groupNeededBuild();
+  assert.equal(
+    manager.workspaceBuildGateProblem(),
+    'This blueprint needs Neutral Program Home first. Use “Prepare the group first”.'
+  );
+  manager.workspaceBuild.session.group_prerequisite = {
+    state: 'ready_grouped',
+    home: { exists: true, name: 'Neutral Program Home' }
+  };
+  assert.equal(manager.workspaceBuildGateProblem(), '');
+});
+
+test('in build mode the placement review says a missing group in the pane, quiet or not', async () => {
+  for (const quiet of [true, false]) {
+    const manager = loadSessionManager(async () => ({
+      ok: true,
+      json: async () => ({
+        group_requirement_review: {
+          state: 'home_creation_review_required',
+          home_name: 'Neutral Program Home',
+          actions: ['review_create_home']
+        }
+      })
+    }));
+    const pane = groupPane();
+    manager.workspaceBuildPane = () => pane;
+    manager.workspaceBuild = groupNeededBuild();
+    manager.workspaceBuildAssisted = () => true;
+    manager.groupRequirementDraft = { policy: 'required', composition: 'grouped', review: null };
+    let moved = 0;
+    const errors = [];
+    manager.goToWizardStep = () => moved++;
+    manager.showWorkspaceCreateError = text => errors.push(text);
+    const payload = { name: 'Field Notes', template_id: 'plugin:neutral:project' };
+    assert.equal(
+      await manager.prepareGroupRequirementCommit('/api/workspaces', payload, { quiet }),
+      false
+    );
+    assert.equal(moved, 0, 'the hidden wizard is never where the answer goes');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(pane.calls[0], ['hint', 'home_creation_review_required']);
+    const lines = pane.calls.filter(call => call[0] === 'line');
+    assert.equal(lines.length, quiet ? 0 : 1, `quiet=${quiet}`);
+    if (!quiet) {
+      assert.equal(
+        lines[0][1],
+        'Not yet — This blueprint needs Neutral Program Home first. Use “Prepare the group first”.'
+      );
+    }
+  }
+});
+
+test('Group with a folder attached warns first, then keeps the build or drops the folder', async () => {
+  const manager = loadSessionManager();
+  const pane = groupPane();
+  manager.workspaceBuildPane = () => pane;
+  const presented = [];
+  manager.syncWorkspaceBuildPresentation = () => presented.push(manager.workspaceBuild.kindHidden);
+  manager.noteWorkspaceBuildIntent = () => {};
+  // The kind choice is on the wizard, so the build was set up manually.
+  const build = {
+    session: { id: 'build-1', status: 'open', folder: { observation: { folder: 'Field Notes' } } },
+    collapsed: true,
+    withdrawn: false,
+    kindHidden: false
+  };
+  manager.workspaceBuild = build;
+  manager.workspaceCreatorContext = { kind: 'group' };
+
+  manager.syncWorkspaceBuildKind();
+  assert.equal(build.collapsed, false, 'the pane comes back to ask');
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls)), [
+    ['expand'],
+    [
+      'line',
+      'The attached folder will not be linked to a group.',
+      ['group_switch_keep', 'group_switch_continue']
+    ]
+  ]);
+  assert.equal(build.kindHidden, false, 'the pane stays up until the user answers');
+  // A repaint asks nothing twice.
+  manager.syncWorkspaceBuildKind();
+  assert.equal(pane.calls.filter(call => call[0] === 'line').length, 1);
+
+  // Keep building the workspace: back to Workspace, the warning goes away.
+  const switched = [];
+  manager.switchWorkspaceCreatorKind = kind => {
+    switched.push(kind);
+    manager.workspaceCreatorContext = { kind };
+    manager.syncWorkspaceBuildKind();
+    return true;
+  };
+  await manager.performWorkspaceBuildAction(build, pane, 'group_switch_keep');
+  assert.deepEqual(switched, ['workspace']);
+  assert.deepEqual(pane.calls.at(-2), ['remove', 'line-2']);
+  assert.deepEqual(pane.calls.at(-1), ['expand']);
+
+  // Continue as a group: the folder leaves the build, then the pane withdraws.
+  pane.calls.length = 0;
+  manager.workspaceCreatorContext = { kind: 'group' };
+  manager.syncWorkspaceBuildKind();
+  manager.detachWorkspaceBuildFolder = async () => {
+    build.session = { ...build.session, folder: null };
+  };
+  await manager.performWorkspaceBuildAction(build, pane, 'group_switch_continue');
+  assert.deepEqual(JSON.parse(JSON.stringify(pane.calls.slice(1))), [
+    ['remove', 'line-1'],
+    ['collapse', true]
+  ]);
+  assert.equal(build.kindHidden, true);
 });
 
 function planReviewElements() {

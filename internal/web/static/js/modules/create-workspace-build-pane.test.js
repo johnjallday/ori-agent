@@ -218,7 +218,8 @@ function loadPane() {
     'workspace-build-review',
     'workspace-build-prepare',
     'workspace-build-defer',
-    'workspace-build-setup'
+    'workspace-build-setup',
+    'workspace-build-prepare-group'
   ]) {
     modal.addEventListener(type, event => events.push({ type, detail: event.detail }));
   }
@@ -1012,6 +1013,107 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
   assert.equal(control('folder-again').hidden, false);
   control('folder-again').click();
   same(events.at(-1), { type: 'workspace-build-folder-open', detail: {} });
+});
+
+test('a blueprint’s group is said before Create, with Prepare the group first until it exists', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant });
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  const block = () =>
+    root.querySelectorAll('section').find(node => node.classList.contains('workspace-build-group'));
+  const line = () =>
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-group__line'));
+  const note = () =>
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-group__note'));
+  const session = {
+    status: 'open',
+    transcript: [],
+    draft: { name: 'Field Notes' },
+    needs_home: { label: 'Music Production Home' }
+  };
+
+  // No prerequisite: nothing is said.
+  pane.applySession(session);
+  assert.equal(block().hidden, true);
+
+  const needed = {
+    state: 'home_creation_review_required',
+    home: { exists: false, proposed_name: 'Music Production Home' },
+    actions: ['review_create_home', 'open_guided_setup']
+  };
+  pane.applySession({ ...session, group_prerequisite: needed });
+  assert.equal(block().hidden, false);
+  assert.equal(
+    line().textContent,
+    'This blueprint needs Music Production Home first. Ori prepares the group with your confirmation, then creates the workspace inside it.'
+  );
+  assert.equal(control('prepare-group').hidden, false);
+  assert.equal(control('prepare-group').textContent, 'Prepare the group first');
+  control('prepare-group').click();
+  same(events.at(-1), { type: 'workspace-build-prepare-group', detail: {} });
+
+  // While it prepares the chip cannot be pressed twice; a stop says why.
+  pane.setGroupBusy(true);
+  assert.equal(control('prepare-group').disabled, true);
+  assert.equal(control('prepare-group').textContent, 'Preparing the group…');
+  const before = events.length;
+  control('prepare-group').click();
+  assert.equal(events.length, before);
+  pane.setGroupBusy(false, 'The group setup review failed. Nothing was changed.');
+  assert.equal(note().hidden, false);
+  assert.equal(note().textContent, 'The group setup review failed. Nothing was changed.');
+
+  // Once the Home exists: Group ready, and no chip.
+  pane.setGroupBusy(false);
+  pane.applySession({
+    ...session,
+    group_prerequisite: {
+      state: 'ready_grouped',
+      home: { exists: true, workspace_id: 'ws-home', name: 'Music Production Home' }
+    }
+  });
+  assert.equal(
+    line().textContent,
+    'Group ready: Music Production Home. The workspace is created inside it.'
+  );
+  assert.equal(control('prepare-group').hidden, true);
+  assert.equal(note().hidden, true);
+
+  // A group Ori may not create here is said, never offered.
+  pane.applySession({
+    ...session,
+    group_prerequisite: { state: 'home_required', home: { exists: false } }
+  });
+  assert.match(line().textContent, /can’t prepare from here/);
+  assert.equal(control('prepare-group').hidden, true);
+
+  // A closed build says nothing about its group.
+  pane.applySession({ ...session, status: 'created', group_prerequisite: needed });
+  assert.equal(block().hidden, true);
+});
+
+test('the form’s own placement review is said in the pane until the session carries it', () => {
+  const { pane, root } = loadPane();
+  pane.mount({ assistant });
+  const line = () =>
+    root.querySelectorAll('p').find(node => node.classList.contains('workspace-build-group__line'));
+  const session = { status: 'open', transcript: [], draft: {} };
+  pane.applySession(session);
+  pane.noteGroupPrerequisite({
+    state: 'home_creation_review_required',
+    home: { exists: false, proposed_name: 'Neutral Program Home' },
+    actions: ['review_create_home']
+  });
+  assert.match(line().textContent, /^This blueprint needs Neutral Program Home first\./);
+  pane.applySession({
+    ...session,
+    group_prerequisite: {
+      state: 'ready_grouped',
+      home: { exists: true, name: 'Neutral Program Home' }
+    }
+  });
+  assert.match(line().textContent, /^Group ready: Neutral Program Home\./);
 });
 
 // ----- Add link -----

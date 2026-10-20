@@ -100,6 +100,23 @@
       }
       return 'Set it up isn’t available for this folder right now. The form still works.';
     },
+    // The group a drafted blueprint is created inside, from the server's
+    // group_prerequisite (grouprequirements.Evaluate).
+    groupNeeded: name =>
+      `This blueprint needs ${name} first. Ori prepares the group with your confirmation, then creates the workspace inside it.`,
+    groupPrepare: 'Prepare the group first',
+    groupPreparing: 'Preparing the group…',
+    groupReady: name => `Group ready: ${name}. The workspace is created inside it.`,
+    groupExistingOnly: name =>
+      `This blueprint goes inside ${name}, which Ori can’t prepare from here. Set up ${name} first, or choose another blueprint.`,
+    groupUnavailable: summary =>
+      `This blueprint’s group can’t be checked right now${summary ? `: ${summary}` : '.'}`,
+    groupCreateNext: 'Ready to create. Create it makes the workspace inside the group.',
+    createIt: 'Create it',
+    // Group with a folder attached: the folder only links to a workspace.
+    groupSwitchFolder: 'The attached folder will not be linked to a group.',
+    groupSwitchKeep: 'Keep building the workspace',
+    groupSwitchContinue: 'Continue as a group',
     // Add link: one address, read for what it says about itself.
     addLink: 'Add link',
     removeLink: 'Remove link',
@@ -341,6 +358,11 @@
     linkBusy: false,
     linkNote: '',
     linkFieldOpen: false,
+    // The group prerequisite: whether Prepare the group first is running, the
+    // note it left, and what the form's own review said before the session did.
+    groupBusy: false,
+    groupNote: '',
+    groupHint: null,
     listeners: [],
     els: {}
   };
@@ -445,6 +467,7 @@
     els.send.disabled = view.composerDisabled;
     state.root.classList.toggle('is-busy', view.busy);
     renderFolder(view);
+    renderGroup();
     renderPlan();
     if (els.transcript && typeof els.transcript.scrollHeight === 'number') {
       els.transcript.scrollTop = els.transcript.scrollHeight;
@@ -722,6 +745,89 @@
     };
   }
 
+  // groupPrerequisiteView is what the pane says about the group a drafted
+  // blueprint is created inside, from the server's group_prerequisite: the
+  // line, and whether Prepare the group first is offered. label is the
+  // session's needs_home label, for a prerequisite that names no Home.
+  function groupPrerequisiteView(prerequisite, label) {
+    if (!prerequisite || typeof prerequisite !== 'object') return { line: '', prepare: false };
+    const home =
+      prerequisite.home && typeof prerequisite.home === 'object' ? prerequisite.home : {};
+    const name = text(home.proposed_name) || text(home.name) || text(label) || 'its group';
+    const actions = Array.isArray(prerequisite.actions) ? prerequisite.actions : [];
+    switch (prerequisite.state) {
+      case 'home_creation_review_required':
+        return { line: COPY.groupNeeded(name), prepare: actions.includes('review_create_home') };
+      case 'ready_grouped':
+        return home.exists === true
+          ? { line: COPY.groupReady(text(home.name) || name), prepare: false }
+          : { line: '', prepare: false };
+      case 'home_required':
+        return { line: COPY.groupExistingOnly(name), prepare: false };
+      default:
+        return { line: COPY.groupUnavailable(text(prerequisite.summary)), prepare: false };
+    }
+  }
+
+  // renderGroup states the group the drafted blueprint is created inside:
+  // still to prepare, with Prepare the group first, or ready. A ready plan
+  // sets its group up itself, so the server sends no prerequisite then.
+  function renderGroup() {
+    const { els } = state;
+    if (!els.group) return;
+    const session = state.session || {};
+    const prerequisite =
+      session.status === 'open' ? session.group_prerequisite || state.groupHint : null;
+    const view = groupPrerequisiteView(prerequisite, session.needs_home?.label);
+    if (els.groupLine.textContent !== view.line) els.groupLine.textContent = view.line;
+    els.groupNote.textContent = state.groupNote;
+    els.groupNote.hidden = !state.groupNote;
+    els.groupButton.hidden = !view.prepare;
+    els.groupButton.disabled = Boolean(state.busy) || state.groupBusy;
+    els.groupButton.textContent = state.groupBusy ? COPY.groupPreparing : COPY.groupPrepare;
+    els.group.hidden = !view.line && !state.groupNote;
+  }
+
+  // renderGroupBlock builds the group section above the plan. It is hidden
+  // until a session carries a group prerequisite.
+  function renderGroupBlock() {
+    const group = createElement('section', 'workspace-build-group');
+    group.id = 'workspaceBuildGroup';
+    group.hidden = true;
+    const groupLine = createElement('p', 'workspace-build-group__line');
+    groupLine.setAttribute('role', 'status');
+    groupLine.setAttribute('aria-live', 'polite');
+    const groupNote = createElement('p', 'workspace-build-group__note');
+    groupNote.hidden = true;
+    const groupButton = createElement(
+      'button',
+      'modern-btn modern-btn-primary workspace-build-group__prepare',
+      COPY.groupPrepare
+    );
+    groupButton.type = 'button';
+    groupButton.dataset.buildControl = 'prepare-group';
+    groupButton.hidden = true;
+    group.appendChild(groupLine);
+    group.appendChild(groupButton);
+    group.appendChild(groupNote);
+    return { group, groupLine, groupNote, groupButton };
+  }
+
+  // setGroupBusy locks Prepare the group first while the controller prepares
+  // the group, and leaves a note under it (why it stopped) until the next try.
+  function setGroupBusy(busy, note = '') {
+    state.groupBusy = Boolean(busy);
+    state.groupNote = text(note);
+    render();
+  }
+
+  // noteGroupPrerequisite shows a group prerequisite the controller learned
+  // from the form's own placement review, until the session carries one.
+  function noteGroupPrerequisite(prerequisite) {
+    state.groupHint = prerequisite && typeof prerequisite === 'object' ? prerequisite : null;
+    render();
+  }
+
   // setFolderPathBusy locks the path field while the controller has the
   // folder-picker endpoint check a typed path; the sheet stays open so a
   // refusal can be read where it was typed.
@@ -842,6 +948,9 @@
     state.linkBusy = false;
     state.linkNote = '';
     state.linkFieldOpen = false;
+    state.groupBusy = false;
+    state.groupNote = '';
+    state.groupHint = null;
 
     root.textContent = '';
     root.appendChild(renderHeader());
@@ -883,9 +992,11 @@
     row.appendChild(input);
     row.appendChild(send);
     composer.appendChild(row);
+    const groupEls = renderGroupBlock();
     const planEls = renderPlanBlock();
     root.appendChild(transcript);
     root.appendChild(status);
+    root.appendChild(groupEls.group);
     root.appendChild(planEls.plan);
     root.appendChild(composer);
     state.els = {
@@ -897,6 +1008,7 @@
       input,
       send,
       ...folderEls,
+      ...groupEls,
       ...planEls
     };
     // A folder pick lasts a set time: its warning counts down while the pane
@@ -938,6 +1050,8 @@
           emit('workspace-build-setup', { entry_name: text(control.dataset.entryName) });
         } else if (kind === 'folder-again' && !control.disabled) {
           emit('workspace-build-folder-open');
+        } else if (kind === 'prepare-group' && !control.disabled && !state.groupBusy) {
+          emit('workspace-build-prepare-group');
         }
         return;
       }
@@ -1348,6 +1462,8 @@
     // none, starts clean.
     if ((attachedFolder()?.id || '') !== before) state.folderNote = '';
     if ((attachedLink()?.id || '') !== linkBefore) state.linkNote = '';
+    // The server's own prerequisite replaces what the form's review said.
+    if (state.session?.group_prerequisite) state.groupHint = null;
     render();
   }
 
@@ -1566,6 +1682,9 @@
     state.linkBusy = false;
     state.linkNote = '';
     state.linkFieldOpen = false;
+    state.groupBusy = false;
+    state.groupNote = '';
+    state.groupHint = null;
   }
 
   window.WorkspaceBuildPane = {
@@ -1593,6 +1712,9 @@
     linkFieldStatus,
     setLinkBusy,
     linkAttachedDone,
+    setGroupBusy,
+    noteGroupPrerequisite,
+    groupPrerequisiteView,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),

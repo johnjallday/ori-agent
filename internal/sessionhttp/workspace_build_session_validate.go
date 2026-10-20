@@ -28,7 +28,7 @@ const (
 	buildReasonEmpty          = "empty"
 	buildReasonNoInputs       = "this blueprint asks for no inputs"
 	buildReasonNotAGroup      = "not one of the user's groups"
-	buildReasonPlacementFixed = "this blueprint sets up its own group at Create"
+	buildReasonPlacementFixed = "this blueprint is always created inside its own group"
 	buildReasonNoFolder       = "this blueprint cannot link an existing folder"
 	buildReasonNoBlueprint    = "choose a blueprint first"
 	buildReasonUnknownAgent   = "not one of the user's saved agents"

@@ -10214,6 +10214,23 @@ const sessionManager = {
 
     const review = await requestReview();
     if (review.state === 'home_creation_review_required') {
+      // In build mode the wizard is hidden behind the conversation, so the
+      // pane says it, quiet or not, and offers Prepare the group first.
+      if (this.workspaceBuildAssisted()) {
+        this.workspaceBuildPane()?.noteGroupPrerequisite?.({
+          state: review.state,
+          home: { exists: false, proposed_name: String(review.home_name || '') },
+          actions: Array.isArray(review.actions) ? review.actions : []
+        });
+        if (!quiet) {
+          const pane = this.workspaceBuildPane();
+          const name = String(review.home_name || '').trim() || 'its group';
+          pane?.showLine?.(
+            `${pane.COPY.gateFailurePrefix}This blueprint needs ${name} first. Use “Prepare the group first”.`
+          );
+        }
+        return false;
+      }
       if (quiet) return false;
       this.showWorkspaceCreateError(
         'Prepare the required group from Details before reviewing project creation.'
@@ -11690,6 +11707,9 @@ const sessionManager = {
     modal.addEventListener('workspace-build-setup', event => {
       void this.setUpWorkspaceBuild(event?.detail || {});
     });
+    modal.addEventListener('workspace-build-prepare-group', () => {
+      void this.prepareWorkspaceBuildGroup();
+    });
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
     document.getElementById('workspaceBuildEditDraftBtn')?.addEventListener('click', () => {
@@ -11954,6 +11974,24 @@ const sessionManager = {
     }
     if (action === 'folder_skip') {
       await this.sendWorkspaceBuildTurn({ text: pane.COPY.noFolder });
+      return;
+    }
+    if (action === 'create_now') {
+      await this.createFromWorkspaceBuild();
+      return;
+    }
+    if (action === 'group_switch_keep') {
+      this.switchWorkspaceCreatorKind('workspace');
+      return;
+    }
+    if (action === 'group_switch_continue') {
+      // Continue as a group: the folder leaves the build first, then the pane
+      // withdraws as for any Group. A folder that could not be removed asks
+      // again.
+      pane.removeLine?.(build.groupSwitchLine);
+      build.groupSwitchLine = '';
+      await this.detachWorkspaceBuildFolder();
+      if (this.workspaceBuild === build) this.syncWorkspaceBuildKind();
     }
   },
 
@@ -12257,12 +12295,37 @@ const sessionManager = {
 
   // Build mode is for a Workspace. Choosing Group hides the pane and its
   // button; choosing Workspace again brings back the same build, unless the
-  // user had already chosen to do it themselves.
+  // user had already chosen to do it themselves. With a folder attached the
+  // pane first says the folder will not be linked to a group, and waits for
+  // the user to keep the workspace build or continue as a group (FR33).
   syncWorkspaceBuildKind() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
     const group = this.creatorKind() === 'group';
+    if (!group && build.groupSwitchLine) {
+      pane.removeLine?.(build.groupSwitchLine);
+      build.groupSwitchLine = '';
+    }
+    // The kind choice is on the wizard, so a build is usually collapsed when
+    // Group is chosen: the pane comes back to ask.
+    if (group && build.session?.folder && !build.withdrawn) {
+      if (build.collapsed) {
+        build.collapsed = false;
+        pane.expand();
+      }
+      if (!build.groupSwitchLine) {
+        build.groupSwitchLine = pane.showLine(pane.COPY.groupSwitchFolder, {
+          chips: [
+            { id: 'group_switch_keep', label: pane.COPY.groupSwitchKeep },
+            { id: 'group_switch_continue', label: pane.COPY.groupSwitchContinue }
+          ]
+        });
+      }
+      build.kindHidden = false;
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     build.kindHidden = group;
     if (group) {
       this.noteWorkspaceBuildIntent();
@@ -12479,15 +12542,22 @@ const sessionManager = {
   },
 
   // workspaceBuildGroupLine names the group the chosen blueprint lives in, from
-  // the session's needs_home: new unless the attached folder's recognition says
-  // the user already has that Home. "" when the blueprint needs no group.
+  // the session's needs_home: existing when the server's group prerequisite
+  // found that Home (or, without one, the attached folder's recognition says
+  // the user has it), new otherwise. "" when the blueprint needs no group.
   workspaceBuildGroupLine() {
     const session = this.workspaceBuild?.session;
     const label = String(session?.needs_home?.label || '').trim();
     if (!label) return '';
+    const prerequisite = session?.group_prerequisite;
+    if (prerequisite?.state === 'ready_grouped' && prerequisite.home?.exists === true) {
+      return `Group: ${String(prerequisite.home.name || '').trim() || label} (existing)`;
+    }
     const recognition = session?.folder?.recognition;
     const existing =
-      recognition?.home_exists === true && String(recognition.home_name || '').trim() === label;
+      !prerequisite &&
+      recognition?.home_exists === true &&
+      String(recognition.home_name || '').trim() === label;
     return `Group: ${label} (${existing ? 'existing' : 'new'})`;
   },
 
@@ -13583,6 +13653,72 @@ const sessionManager = {
     if (session.status === 'preparing' && session.setup) this.followWorkspaceBuildSetup(build);
   },
 
+  // workspaceBuildGroupNeeded is the group the drafted blueprint still needs
+  // prepared, from the session's group_prerequisite: its name, or ''.
+  workspaceBuildGroupNeeded() {
+    const session = this.workspaceBuild?.session;
+    const prerequisite = session?.group_prerequisite;
+    if (session?.status !== 'open' || prerequisite?.state !== 'home_creation_review_required') {
+      return '';
+    }
+    return (
+      String(prerequisite.home?.proposed_name || session.needs_home?.label || '').trim() ||
+      'its group'
+    );
+  },
+
+  // prepareWorkspaceBuildGroup is Prepare the group first: the form's own Home
+  // review and commit, run from the pane in one press. The press is the
+  // group's confirmation; Create stays its own, so two confirmations remain
+  // and nothing else is created here (FR27).
+  async prepareWorkspaceBuildGroup() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build?.session || !pane || build.busy || build.groupBusy) return;
+    if (!this.workspaceBuildGroupNeeded()) return;
+    build.groupBusy = true;
+    pane.setGroupBusy?.(true);
+    let note = '';
+    let prepared = false;
+    try {
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
+      // The placement draft follows the blueprint the build selected on the
+      // form; its plan is read fresh so the review binds today's source.
+      if (!this.groupRequirementDraft) this.resetGroupRequirementDraft(this.workspaceTemplate);
+      await this.refreshTemplateAgentPlan();
+      if (this.workspaceBuild !== build) return;
+      const reviewed = await this.prepareRequiredGroupHomeFromCard();
+      prepared =
+        reviewed && this.workspaceBuild === build && (await this.commitRequiredGroupHome());
+      if (!prepared) {
+        note =
+          String(
+            document.getElementById('workspaceGroupDestinationMessage')?.textContent || ''
+          ).trim() || 'The group could not be prepared. Nothing was created.';
+      }
+      // The server's next view names the Home that now exists.
+      const result = await this.workspaceBuildApi().read(build.session.id);
+      if (this.workspaceBuild === build && result?.ok && result.body?.session) {
+        this.adoptWorkspaceBuildSession(result.body.session);
+      }
+    } catch (error) {
+      note = error?.message || 'The group could not be prepared. Nothing was created.';
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.groupBusy = false;
+        pane.setGroupBusy?.(false, note);
+        // Create it is the second confirmation: the Create the model's
+        // create_now would run, pressed by the user.
+        if (prepared && !this.workspaceBuildGateProblem()) {
+          pane.showLine(pane.COPY.groupCreateNext, {
+            chips: [{ id: 'create_now', label: pane.COPY.createIt }]
+          });
+        }
+      }
+    }
+  },
+
   // setUpWorkspaceBuild is Set it up: the plan the user reviewed runs as Home's
   // setup journey on the server. A Retry continues the run that stopped; a
   // project file chosen from the run's own candidates goes with it.
@@ -13771,6 +13907,8 @@ const sessionManager = {
     if (this.groupRequirementBlocked()) {
       return 'Choose grouped or standalone placement before creating.';
     }
+    const group = this.workspaceBuildGroupNeeded();
+    if (group) return `This blueprint needs ${group} first. Use “Prepare the group first”.`;
     return '';
   },
 

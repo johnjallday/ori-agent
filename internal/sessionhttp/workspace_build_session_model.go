@@ -501,7 +501,7 @@ func writeBuildRules(b *strings.Builder) {
 	b.WriteString("- When the user names a saved agent for a role (\"make Luna the lead\"), that is an assignment: {\"role_id\":\"<the role's id>\",\"mode\":\"assign\",\"agent_name\":\"Luna\"}. Only say you assigned someone when your patch assigns them.\n")
 	b.WriteString("- patch.team.saved_agents is only for extra teammates beyond the blueprint's roles. A saved agent who fills a role goes in patch.team.roles, never in saved_agents.\n")
 	b.WriteString("- Use only the blueprint ids, input ids and option values, agent names, role ids, and group ids listed below. The form refuses anything else, and you will see each refusal next turn.\n")
-	b.WriteString("- A blueprint with needs_home lives inside a group it sets up when the user creates the workspace. Say so when you choose one.\n")
+	b.WriteString("- A blueprint with needs_home is created inside that group. When the group does not exist yet, Ori prepares it first, only after the user confirms, and then creates the workspace inside it. Say that when you choose one; never say the workspace sets up its own group. The form offers its own Prepare the group first for that confirmation, so never ask whether to create the group and never offer it as a choice.\n")
 	b.WriteString("- Never claim the workspace is created. When the user tells you to create it, set create_now to true.\n")
 	b.WriteString("- When blueprint, name, description, and team are decided, set ready to true and say: Ready to create. Use Review & create to check the current setup.\n")
 	b.WriteString("- File Janitor needs the host's explicit folder permission review. create_now may open that review but never supplies consent to configure, scan or monitor.\n")

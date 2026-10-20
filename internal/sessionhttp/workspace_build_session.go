@@ -290,6 +290,9 @@ type buildSessionView struct {
 	// FolderExpiresAt is when the server stops holding the attached folder's
 	// pick (foldercontext.SelectionTTL after it was observed).
 	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
+	// GroupPrerequisite is the group the drafted blueprint must be created
+	// inside (workspaceBuildGroupPrerequisite).
+	GroupPrerequisite *templateGroupRequirementPlan `json:"group_prerequisite,omitempty"`
 }
 
 func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter, status int, session *personalassistant.WorkspaceBuildSession, extra map[string]any) {
@@ -305,6 +308,7 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
 			built.FolderExpiresAt = &expires
 		}
+		built.GroupPrerequisite = h.workspaceBuildGroupPrerequisite(ctx, userID, session, built.Plan)
 		view = built
 	}
 	body := map[string]any{"session": view}

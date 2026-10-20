@@ -120,8 +120,10 @@ type BuildRejection struct {
 	Reason string `json:"reason"`
 }
 
-// BuildNeedsHome says the chosen blueprint lives inside a group it will set
-// up at Create, through the existing group-requirement review.
+// BuildNeedsHome says the chosen blueprint is created inside a group. A group
+// that does not exist yet is prepared first, through the existing
+// group-requirement review and its own confirmation; Create then makes the
+// workspace inside it.
 type BuildNeedsHome struct {
 	Label string `json:"label"`
 }
