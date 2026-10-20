@@ -5056,6 +5056,15 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
+      if (data.group_requirement?.state === 'resource_workspace_exists') {
+        // The Home already has its one resource workspace: open it rather
+        // than ask for a team for a second one.
+        this.showWorkspaceCreateError(
+          `${String(data.group_requirement.summary || 'This Home already has it.')} Opening it…`
+        );
+        if (await this.openExistingResourceWorkspace(data.group_requirement.existing_workspace_id))
+          return;
+      }
       this.applyHomeInputDefaults(data.group_requirement?.home?.input_defaults || null);
       if (draft && api) api.setPlanReady(draft, blueprintKey, data);
       await this.ensureEditAgentModelOptions();

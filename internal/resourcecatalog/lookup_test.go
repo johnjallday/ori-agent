@@ -108,7 +108,7 @@ func TestLookup_ALinkedSongAssistantFindsBoundedCitedEntries(t *testing.T) {
 		t.Fatalf("answer = %+v", answer)
 	}
 	result := answer.Results[0]
-	if result.Name != "Lyrics" || !result.Favorite || len(result.Note) > lookupNoteExcerpt+4 ||
+	if result.Name != "Lyrics" || !result.Favorite || len(result.Note) > noteExcerptBytes+4 ||
 		!strings.HasPrefix(result.StudioURL, "/workspaces/") || !strings.Contains(result.StudioURL, "/catalog?entry="+lyrics) {
 		t.Fatalf("result = %+v", result)
 	}

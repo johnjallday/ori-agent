@@ -66,7 +66,7 @@ export class AssistantProgramEntry {
     this.renderCatalogLink(switcher, plans);
   }
 
-  // A resource workspace (REAPER Studio) holds a catalog on its own page.
+  // A resource workspace holds a catalog on its own page.
   renderCatalogLink(switcher, plans) {
     if (
       !this.program?.resource_workspace ||

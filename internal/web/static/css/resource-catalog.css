@@ -1,8 +1,9 @@
-/* A resource workspace's catalog page (REAPER Studio). Theme colors come
+/* A resource workspace's catalog page. Theme colors come
    from Bootstrap's variables so light and dark both follow the app. */
 
+/* The bottom padding keeps the last rows clear of the floating assistant chip. */
 .resource-catalog-shell {
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem 6rem;
 }
 .resource-catalog-page {
   display: grid;
@@ -103,11 +104,27 @@
   background: var(--bs-body-bg);
   color: inherit;
 }
+/* The label is the touch target, so the box itself stays a box. Without the
+   minimums reset, the app's small-screen rule for bare checkboxes (44px each
+   way) turns it into a slab. */
+.resource-catalog-check,
+.resource-catalog-review-source {
+  min-height: 44px;
+}
 .resource-catalog-check {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   font-size: 0.85rem;
+}
+.resource-catalog-page input[type="checkbox"],
+.resource-catalog-dialog input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  min-height: 0;
+  margin: 0.15rem 0 0;
 }
 .resource-catalog-browse {
   display: grid;
@@ -137,6 +154,10 @@
   background: var(--bs-body-bg);
   color: inherit;
   text-align: left;
+}
+.resource-catalog-row[aria-current="true"] {
+  border-color: var(--bs-primary);
+  box-shadow: inset 3px 0 0 var(--bs-primary);
 }
 .resource-catalog-row-name {
   font-weight: 600;

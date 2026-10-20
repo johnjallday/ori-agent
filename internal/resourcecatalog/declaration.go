@@ -1,8 +1,9 @@
 // Package resourcecatalog holds the host side of a resource workspace's
 // catalog: the declaration a project plugin names it with, the wire answers of
 // its two read-only operations, and (later) the Studio-owned catalog files.
-// The contract is docs/architecture/reaper-studio.md. Host code here is
-// domain-neutral: every word a person reads comes from the declaration.
+// The contract is the resource catalog contract in docs/architecture. Host
+// code here is domain-neutral: every word a person reads comes from the
+// declaration.
 package resourcecatalog
 
 import (

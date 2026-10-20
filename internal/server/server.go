@@ -762,7 +762,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// A resource workspace's catalog (REAPER Studio). The page reads the
+	// A resource workspace's catalog. The page reads the
 	// catalog API; a workspace without a catalog shows that it has none.
 	if len(parts) == 2 && parts[1] == "catalog" {
 		s.serveWorkspaceCatalog(w, workspaceID, workspaceSlug)

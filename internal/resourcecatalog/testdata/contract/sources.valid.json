@@ -47,7 +47,7 @@
       "label": "REAPER plugin list",
       "location": "REAPER (running)",
       "access": "live",
-      "state": "reaper_closed",
+      "state": "app_closed",
       "detail": "Open REAPER to read its plugin list."
     }
   ]

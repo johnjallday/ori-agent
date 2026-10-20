@@ -909,10 +909,10 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant", s.Handlers.Session.ReAddAssistantLibrarySharing)
 		// The Home's song-details switch: off clears every stored song fact.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/song-details", s.Handlers.Session.SetAssistantLibrarySongDetails)
-		// The Home's resource workspaces (one optional REAPER Studio): whether
+		// The Home's resource workspaces (one optional per attachment): whether
 		// each can be set up and the one that exists. Reads only.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/resource-workspaces", s.Handlers.Session.GetAssistantResourceWorkspaces)
-		// A resource workspace's catalog (docs/architecture/reaper-studio.md):
+		// A resource workspace's catalog (the resource catalog contract in docs/architecture):
 		// owner-only; GETs read Ori's own files and call no plugin operation.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog", s.Handlers.Session.GetResourceCatalog)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog/entries", s.Handlers.Session.ListResourceCatalogEntries)

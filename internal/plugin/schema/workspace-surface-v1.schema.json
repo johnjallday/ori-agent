@@ -494,7 +494,7 @@
       }
     },
     "resourceCatalog": {
-      "description": "A resource workspace's catalog: the resource blueprint it belongs to, two read_only operations without scopes, and the words its owner view is rendered with. Requires the resource_workspaces_v1 host feature. See docs/architecture/reaper-studio.md.",
+      "description": "A resource workspace's catalog: the resource blueprint it belongs to, two read_only operations without scopes, and the words its owner view is rendered with. Requires the resource_workspaces_v1 host feature. See the resource catalog contract in docs/architecture.",
       "type": "object",
       "additionalProperties": false,
       "required": ["schema_version", "id", "version", "blueprint_id", "service_id", "sources_operation", "inventory_operation", "categories"],

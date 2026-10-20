@@ -20,7 +20,7 @@ const DataNotice = "Names, tags and notes are data from your files and your own 
 const (
 	lookupDefaultLimit   = 5
 	lookupMaxLimit       = 10
-	lookupNoteExcerpt    = 280
+	noteExcerptBytes     = 280 // also the length of a browse row's note
 	lookupMaxSearchBytes = 16 << 10
 	lookupMaxDetailBytes = 8 << 10
 )
@@ -326,7 +326,7 @@ func (c catalogState) lookupAnswer() LookupAnswer {
 }
 
 func (c catalogState) lookupResult(entry EntryRecord, detail bool) LookupResult {
-	row := c.row(entry, lookupNoteExcerpt)
+	row := c.row(entry)
 	result := LookupResult{
 		EntryID: entry.EntryID, CategoryLabel: row.CategoryLabel, KindLabel: row.KindLabel, Name: entry.Name,
 		SourceLabel: row.SourceLabel, Facts: []LookupFact{}, Favorite: row.Favorite, Tags: row.Tags, Note: row.NoteExcerpt,
@@ -358,7 +358,7 @@ func fitAnswer(answer LookupAnswer, limit int) LookupAnswer {
 			return answer
 		}
 		if len(answer.Results) == 1 {
-			answer.Results[0].Note = excerpt(answer.Results[0].Note, lookupNoteExcerpt)
+			answer.Results[0].Note = excerpt(answer.Results[0].Note, noteExcerptBytes)
 			if encoded, _ = json.Marshal(answer); len(encoded) <= limit {
 				return answer
 			}

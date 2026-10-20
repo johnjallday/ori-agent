@@ -348,6 +348,10 @@ type EntryRow struct {
 	Favorite      bool       `json:"favorite"`
 	Tags          []string   `json:"tags"`
 	NoteExcerpt   string     `json:"note_excerpt,omitempty"`
+	// IdentityHint is the plugin's own identity, set on an owner's list row
+	// only when another entry of the same setup, source and kind has the same
+	// name, so the two can be told apart. Lookups never carry it.
+	IdentityHint string `json:"identity_hint,omitempty"`
 }
 
 // EntryPage is one page of rows.
@@ -396,13 +400,20 @@ func (s *Service) Entries(owner, studioID string, query Query) (EntryPage, error
 
 func (c catalogState) matching(query Query) []EntryRow {
 	needle := strings.ToLower(strings.TrimSpace(query.Q))
+	sameName := func(entry EntryRecord) string {
+		return strings.Join([]string{entry.InstallationID, entry.SourceID, entry.Kind, strings.ToLower(entry.Name)}, "\x00")
+	}
+	named := map[string]int{}
+	for _, entry := range c.observations.Entries {
+		named[sameName(entry)]++
+	}
 	rows := []EntryRow{}
 	for _, entry := range c.observations.Entries {
 		if (query.Category != "" && entry.Category != query.Category) || (query.Kind != "" && entry.Kind != query.Kind) ||
 			(query.Source != "" && entry.SourceID != query.Source) {
 			continue
 		}
-		row := c.row(entry, 280)
+		row := c.row(entry)
 		if query.FavoritesOnly && !row.Favorite {
 			continue
 		}
@@ -411,6 +422,9 @@ func (c catalogState) matching(query Query) []EntryRow {
 		}
 		if needle != "" && !c.matches(entry, needle) {
 			continue
+		}
+		if named[sameName(entry)] > 1 {
+			row.IdentityHint = entry.NativeID
 		}
 		rows = append(rows, row)
 	}
@@ -438,7 +452,7 @@ func (c catalogState) matches(entry EntryRecord, needle string) bool {
 	return strings.Contains(strings.ToLower(annotation.Note), needle)
 }
 
-func (c catalogState) row(entry EntryRecord, noteBytes int) EntryRow {
+func (c catalogState) row(entry EntryRecord) EntryRow {
 	row := EntryRow{
 		EntryID: entry.EntryID, Category: entry.Category, Kind: entry.Kind, Name: entry.Name, SourceID: entry.SourceID,
 		ObservedAt: entry.LastObservedAt, Facts: []FactView{}, Tags: []string{},
@@ -471,7 +485,7 @@ func (c catalogState) row(entry EntryRecord, noteBytes int) EntryRow {
 	}
 	if annotation, ok := c.annotations.Annotations[entry.EntryID]; ok {
 		row.Favorite, row.Tags = annotation.Favorite, slices.Clone(annotation.Tags)
-		row.NoteExcerpt = excerpt(annotation.Note, noteBytes)
+		row.NoteExcerpt = excerpt(annotation.Note, noteExcerptBytes)
 	}
 	return row
 }
@@ -505,7 +519,7 @@ func (s *Service) Entry(owner, studioID, entryID string) (EntryDetail, error) {
 			continue
 		}
 		detail := EntryDetail{
-			EntryRow: state.row(entry, 280), Description: entry.Description, ModifiedAt: entry.ModifiedAt,
+			EntryRow: state.row(entry), Description: entry.Description, ModifiedAt: entry.ModifiedAt,
 			FirstObservedAt: entry.FirstObservedAt, NoLongerFoundAt: entry.NoLongerFoundAt, Identity: entry.NativeID,
 		}
 		if state.hasGrants && state.grants.InstallationID == entry.InstallationID {
@@ -517,7 +531,7 @@ func (s *Service) Entry(owner, studioID, entryID string) (EntryDetail, error) {
 			detail.Note, detail.AnnotationRevision = annotation.Note, annotation.Revision
 		}
 		if replacement, ok := state.suggestedReplacement(entry); ok {
-			row := state.row(replacement, 280)
+			row := state.row(replacement)
 			detail.SuggestedReplacement = &row
 		}
 		return detail, nil

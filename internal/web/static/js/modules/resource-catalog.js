@@ -1,4 +1,4 @@
-// A resource workspace's catalog page (REAPER Studio). The provider's
+// A resource workspace's catalog page. The provider's
 // declaration names the categories, kinds and facts; this module words the
 // states only. Opening the page reads Ori's own files; nothing is read from a
 // source until the owner reviews and approves it.
@@ -34,7 +34,7 @@ const SOURCE_STATES = {
   absent: 'Not found on this computer',
   denied: 'Ori is not allowed to read it',
   unsupported: 'Not supported here',
-  reaper_closed: 'Needs the application open',
+  app_closed: 'Needs the application open',
   reader_missing: 'Needs a reader the plugin sets up separately',
   reader_outdated: 'Needs a newer reader',
   web_remote_off: "Needs the application's remote access on"
@@ -70,8 +70,9 @@ export function categoryStateLine(category, options = {}) {
 }
 
 // emptyCategoryLine explains an empty list without implying anything must be
-// installed.
-export function emptyCategoryLine(category, filtered) {
+// installed. Given the category's sources, an unread one says why it was not
+// read (for example that the application was closed).
+export function emptyCategoryLine(category, filtered, sources = []) {
   if (filtered) return 'Nothing matches this search.';
   switch (category?.state) {
     case 'inspected':
@@ -79,8 +80,14 @@ export function emptyCategoryLine(category, filtered) {
     case 'access_withdrawn':
       return 'Access to its sources was withdrawn.';
     case 'unavailable':
-    case 'refresh_failed':
-      return 'Its sources could not be read. Review them, then try again.';
+    case 'refresh_failed': {
+      const reasons = sources
+        .filter(source => source.category === category.id && source.approved && !source.withdrawn)
+        .map(source => `${source.label}: ${attemptLine(source)}.`);
+      return reasons.length
+        ? `Nothing could be read. ${reasons.join(' ')} Refresh once that changes.`
+        : 'Its sources could not be read. Review them, then try again.';
+    }
     default:
       return 'Not inspected yet. Nothing is read until you review its sources.';
   }
@@ -97,6 +104,27 @@ export function sourceStateWords(state) {
   return SOURCE_STATES[state] || '';
 }
 
+const SKIP_REASONS = {
+  symlink: 'links',
+  outside_source: 'outside the folder',
+  unreadable: 'unreadable',
+  unsupported_name: 'unsupported names',
+  too_large: 'too large',
+  hidden: 'hidden',
+  external_registration: 'registered from outside the folder',
+  depth_limit: 'nested too deeply'
+};
+
+// skippedLine is what a read passed over, by reason: "1 skipped: links".
+export function skippedLine(skipped) {
+  const parts = (skipped || [])
+    .filter(skip => Number(skip.count) > 0)
+    .map(skip => `${Number(skip.count)} ${SKIP_REASONS[skip.reason] || 'other'}`);
+  if (!parts.length) return '';
+  const total = (skipped || []).reduce((sum, skip) => sum + (Number(skip.count) || 0), 0);
+  return `${total} skipped: ${parts.join(', ')}`;
+}
+
 // attemptLine is one source's last read on this computer.
 export function attemptLine(source, options = {}) {
   if (source?.withdrawn) return 'Access withdrawn';
@@ -104,9 +132,10 @@ export function attemptLine(source, options = {}) {
   if (!attempt) return 'Approved; not read yet';
   const at = formatDate(attempt.finished_at, options.locale, options.timeZone);
   const read = Number(attempt.entries_read) || 0;
+  const skipped = skippedLine(attempt.skipped);
   switch (attempt.outcome) {
     case 'complete':
-      return `Read ${at} · ${read} found`;
+      return [`Read ${at}`, `${read} found`, skipped].filter(Boolean).join(' · ');
     case 'partial':
       return attempt.reason === 'deadline'
         ? `Partial: time ran out after ${read} · Continue reading for the rest`
@@ -140,10 +169,14 @@ export function splitTags(value) {
     .filter(Boolean);
 }
 
-// rowContext keeps same-named entries apart: kind, source and known facts.
+// rowContext keeps same-named entries apart: kind, source and known facts,
+// and the plugin's own identity when another entry of that source and kind
+// has the same name.
 export function rowContext(row) {
   const facts = (row?.facts || []).filter(fact => fact.known).map(fact => fact.value);
-  return [row?.kind_label, row?.source_label, ...facts].filter(Boolean).join(' · ');
+  return [row?.kind_label, row?.source_label, ...facts, row?.identity_hint]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 // catalogActions are the page's primary buttons for the catalog's state.
@@ -460,6 +493,7 @@ export class ResourceCatalogPage {
       button.type = 'button';
       button.className = 'resource-catalog-row';
       button.dataset.entryId = row.entry_id;
+      if (row.entry_id === this.detail?.entry_id) button.setAttribute('aria-current', 'true');
       const name = this.document.createElement('span');
       name.className = 'resource-catalog-row-name';
       name.textContent = row.favorite ? `★ ${row.name}` : row.name;
@@ -484,7 +518,11 @@ export class ResourceCatalogPage {
     }
     const empty = this.el('resourceCatalogEmpty');
     if (empty) {
-      empty.textContent = emptyCategoryLine(this.currentCategory(), filtered);
+      empty.textContent = emptyCategoryLine(
+        this.currentCategory(),
+        filtered,
+        this.view?.sources || []
+      );
       empty.hidden = this.rows.length > 0;
     }
     const more = this.el('resourceCatalogMore');
@@ -502,6 +540,12 @@ export class ResourceCatalogPage {
       return;
     }
     this.detail = result.body;
+    for (const button of this.el('resourceCatalogList')?.querySelectorAll?.(
+      '.resource-catalog-row'
+    ) || []) {
+      if (button.dataset.entryId === entryId) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    }
     this.renderDetail(panel, result.body);
   }
 

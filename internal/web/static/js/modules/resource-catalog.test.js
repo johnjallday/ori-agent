@@ -47,6 +47,19 @@ test('an empty category says why, never that something must be installed', () =>
     assert.doesNotMatch(line, /install/i, state);
   }
   assert.equal(emptyCategoryLine({ state: 'inspected' }, true), 'Nothing matches this search.');
+  // An unread category says why each approved source was not read.
+  const sources = [
+    {
+      category: 'audio_plugins',
+      label: 'REAPER plugin list',
+      approved: true,
+      last_attempt: { outcome: 'unavailable', reason: 'app_closed' }
+    },
+    { category: 'templates', label: 'Project templates', approved: true }
+  ];
+  const line = emptyCategoryLine({ id: 'audio_plugins', state: 'unavailable' }, false, sources);
+  assert.match(line, /REAPER plugin list: Needs the application open\./);
+  assert.doesNotMatch(line, /Project templates|install/i);
 });
 
 test('provider and entry states have their own words', () => {
@@ -75,10 +88,24 @@ test('a source line says how its last read ended', () => {
     /first 20000 · Continue/
   );
   assert.match(
-    attemptLine({ last_attempt: { outcome: 'unavailable', reason: 'reaper_closed' } }),
+    attemptLine({ last_attempt: { outcome: 'unavailable', reason: 'app_closed' } }),
     /application open/
   );
   assert.match(attemptLine({ last_attempt: { outcome: 'failed' } }), /earlier results kept/);
+  // What a complete read passed over is part of its coverage.
+  assert.match(
+    attemptLine({
+      last_attempt: {
+        outcome: 'complete',
+        entries_read: 3,
+        skipped: [
+          { reason: 'external_registration', count: 1 },
+          { reason: 'symlink', count: 2 }
+        ]
+      }
+    }),
+    /3 found · 3 skipped: 1 registered from outside the folder, 2 links$/
+  );
 });
 
 test('rows keep same-named entries apart by kind, source and known facts', () => {
@@ -91,6 +118,15 @@ test('rows keep same-named entries apart by kind, source and known facts', () =>
     ]
   };
   assert.equal(rowContext(row), 'Script · REAPER Scripts · Lua');
+  // The server adds the plugin's identity only when the name repeats.
+  assert.equal(
+    rowContext({
+      kind_label: 'Project template',
+      source_label: 'Project templates',
+      identity_hint: 'Band/Vocals.RPP'
+    }),
+    'Project template · Project templates · Band/Vocals.RPP'
+  );
 });
 
 test('actions follow the catalog state', () => {

@@ -234,7 +234,7 @@ Policy `read_only`, timeout class `fast`, `max_output_bytes` 32768. Input:
     { "id": "project_templates", "category": "templates", "label": "Project templates",
       "location": "~/Library/Application Support/REAPER/ProjectTemplates",
       "access": "file" | "live",
-      "state": "ready" | "absent" | "denied" | "unsupported" | "reaper_closed" | "reader_missing" | "reader_outdated" | "web_remote_off",
+      "state": "ready" | "absent" | "denied" | "unsupported" | "app_closed" | "reader_missing" | "reader_outdated" | "web_remote_off",
       "detail": "<optional one line, ≤240>" }
   ]
 }
@@ -273,7 +273,7 @@ Output:
 ```json
 {
   "schema_version": 1, "installation_id": "inst_…", "source_id": "reaper_scripts",
-  "state": "ok" | "absent" | "denied" | "unsupported" | "reaper_closed" | "reader_missing"
+  "state": "ok" | "absent" | "denied" | "unsupported" | "app_closed" | "reader_missing"
          | "reader_outdated" | "web_remote_off" | "installation_changed" | "cursor_reset",
   "entries": [
     { "native_id": "Cockos/Lyrics.lua", "kind": "script", "name": "Lyrics",
@@ -340,7 +340,7 @@ evidence, which one REAPER ships, and records it in this section:
   bounded metadata when REAPER is closed.
 
 If neither is reliable with REAPER closed, the source is `access: "live"` and a
-closed REAPER reports `reaper_closed` (FR 17, AC 8). Inventory presence is never
+closed REAPER reports `app_closed` (FR 17, AC 8). Inventory presence is never
 described as licensed, loaded, working or tested.
 
 ## 5. Resource workspace identity, creation and classification
@@ -584,7 +584,9 @@ name, tags and note; filters `category`, `kind`, `source`, `favorite`, `state`;
 sort by name, then `entry_id`. Pages default to 25 (maximum 100), with an opaque
 cursor bound to the observations and annotations revisions; a stale cursor is
 `409 page_stale`. Each row returns source label and kind so duplicate names
-stay distinguishable (FR 19). Detail returns one entry, its annotation, source
+stay distinguishable (FR 19). When another entry of the same setup, source and
+kind has the same name (case-insensitive), the owner's row also carries
+`identity_hint`, that entry's `native_id`. Lookups never carry it. Detail returns one entry, its annotation, source
 label and location (owner only), facts with "Unknown" for undeclared values,
 an attributed description, and coverage.
 
@@ -595,10 +597,11 @@ per resource attachment the pinned Home declares:
 
 ```text
 { attachment: {provider_plugin_id, blueprint_id, label, description},
-  state: available | not_created | provider_missing | provider_incompatible | provider_disabled,
+  state: available | not_created | provider_missing | provider_incompatible | provider_disabled | home_unavailable,
+  template_id?,   // only while the provider can create one
   workspace?: {id, name, url},
-  catalog?: {revision, published_at, categories: [{id, label, present_count, state, inspected_at?}]},
-  availability: ready | unavailable }
+  catalog?: {revision, published_at?, approved, provider,
+             categories: [{id, label, present, state, inspected_at?, profile_row?}]} }
 ```
 
 Counts include only `present` entries from currently approved, non-withdrawn

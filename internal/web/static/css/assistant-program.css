@@ -490,7 +490,7 @@
   flex-wrap: wrap;
   gap: 0.55rem;
 }
-/* The Home's resource workspace (REAPER Studio): one card beside the
+/* The Home's resource workspace: one card beside the
    songs, never one of them. */
 .home-resource-workspaces {
   display: grid;

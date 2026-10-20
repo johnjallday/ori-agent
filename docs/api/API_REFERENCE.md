@@ -2725,7 +2725,7 @@ Owner of that exact resource workspace only; anything else is `404`. GETs read O
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/workspaces/{workspaceID}/resource-catalog` | Words, category states and counts, this computer's approved sources with their last read, provider availability, the running or last inspection |
-| `GET …/resource-catalog/entries?q=&category=&kind=&source=&favorites=1&state=&cursor=&limit=` | Rows (default 25, at most 100); `cursor` is bound to both revisions, and a stale one is `409 page_stale` |
+| `GET …/resource-catalog/entries?q=&category=&kind=&source=&favorites=1&state=&cursor=&limit=` | Rows (default 25, at most 100); `cursor` is bound to both revisions, and a stale one is `409 page_stale`. A row whose name repeats within its source and kind carries `identity_hint` (the plugin's native identity) |
 | `GET …/resource-catalog/entries/{entryID}` | One entry with its attributed description, owner-only source location and note |
 | `POST …/resource-catalog/sources/review` `{}` | Calls the plugin's sources operation only; returns `review_token` (10 minutes), the installation and every source with its location |
 | `POST …/resource-catalog/sources/commit` `{review_token, idempotency_key, source_ids}` | Approves those sources on this computer and starts reading them |

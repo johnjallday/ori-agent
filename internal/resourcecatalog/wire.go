@@ -55,7 +55,7 @@ const (
 	SourceAbsent         = "absent"
 	SourceDenied         = "denied"
 	SourceUnsupported    = "unsupported"
-	SourceAppClosed      = "reaper_closed"
+	SourceAppClosed      = "app_closed"
 	SourceReaderMissing  = "reader_missing"
 	SourceReaderOutdated = "reader_outdated"
 	SourceRemoteOff      = "web_remote_off"

@@ -89,6 +89,8 @@
   </dialog>
 
   {{template "scripts-dx-utils.tmpl" .}}
+  <script defer src="/js/modules/themeManager.js"></script>
+  {{template "theme-init.tmpl" .}}
   <script type="module">
     import { ResourceCatalogPage } from '/js/modules/resource-catalog.js';
     const page = new ResourceCatalogPage({

@@ -1,4 +1,4 @@
-// A Home's resource workspaces (one optional REAPER Studio in v1): whether
+// A Home's resource workspaces (at most one per attachment): whether
 // it can be set up, the one that exists, and what its plugin lacks. Every
 // name and description comes from the Home package's declaration; this
 // module only words the states. Setting one up opens the ordinary Create

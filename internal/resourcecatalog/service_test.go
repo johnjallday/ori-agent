@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -326,8 +327,13 @@ func TestInspection_ReviewApproveAndPublishOneRevision(t *testing.T) {
 	if len(rows) != 2 || rows[0].Name != "Vocals" || rows[1].Name != "Vocals" || rows[0].EntryID == rows[1].EntryID || rows[0].SourceLabel != "Project templates" {
 		t.Fatalf("template rows = %+v", rows)
 	}
+	// Same source, kind and name: each row carries its own identity so the
+	// owner can tell them apart. A name of its own carries none.
+	if hints := []string{rows[0].IdentityHint, rows[1].IdentityHint}; !slices.Contains(hints, "Vocals.RPP") || !slices.Contains(hints, "Band/Vocals.RPP") {
+		t.Fatalf("same-name rows are not told apart: %+v", rows)
+	}
 	scripts := f.rows(t, Query{Category: "scripts"})
-	if len(scripts) != 1 || scripts[0].Facts[0].Value != "Lua" || scripts[0].Facts[1].Value != "Unknown" || scripts[0].Facts[1].Known {
+	if len(scripts) != 1 || scripts[0].Facts[0].Value != "Lua" || scripts[0].Facts[1].Value != "Unknown" || scripts[0].Facts[1].Known || scripts[0].IdentityHint != "" {
 		t.Fatalf("script facts = %+v", scripts)
 	}
 	// The Studio's own files hold no location; this computer's grants do.
