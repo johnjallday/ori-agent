@@ -939,10 +939,10 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
     draft: {}
   };
 
-  // Unnamed: offered but not yet pressable.
+  // Unnamed, it is named after its folder as the plan says: still pressable.
   pane.applySession(session);
   assert.equal(control('setup').hidden, false);
-  assert.equal(control('setup').disabled, true);
+  assert.equal(control('setup').disabled, false);
   pane.applySession({ ...session, draft: { name: 'Ori Music Demo' } });
   assert.equal(control('setup').disabled, false);
   // Set it up is the plan's action; an empty Send is not offered as one.

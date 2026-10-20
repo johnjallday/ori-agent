@@ -44,7 +44,6 @@ type buildSetupRequest struct {
 const (
 	buildCopySetupReviewPending = "Another folder setup is waiting for an answer on Home. Finish or close it there, then Set it up."
 	buildCopySetupDeclined      = "Setup suggestions for this folder were declined earlier, so Set it up is not available for it."
-	buildCopySetupNameFirst     = "Name the workspace first."
 	buildCopySetupUnavailable   = "Set it up is not available for this folder right now. The form still works."
 	buildCopySetupReceiptNew    = "Created %s and %s inside it. Linked folder “%s”."
 	buildCopySetupReceiptJoined = "Added %s to your %s. Linked folder “%s”."
@@ -227,6 +226,8 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 		respondBuildSetupRefusal(w, http.StatusConflict, "no_plan", buildCopySetupUnavailable)
 		return
 	}
+	// An unnamed draft is named after its folder, as the plan the user saw
+	// says and as Home's card does.
 	name := strings.TrimSpace(current.Draft.Name)
 	digest := req.PlanDigest
 	if retry {
@@ -240,9 +241,6 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 			return
 		case plan == nil || !plan.Ready:
 			respondBuildSetupRefusal(w, http.StatusConflict, "no_plan", buildCopySetupUnavailable)
-			return
-		case name == "":
-			respondBuildSetupRefusal(w, http.StatusConflict, "name", buildCopySetupNameFirst)
 			return
 		case plan.Digest != digest:
 			h.respondBuildSession(ctx, w, http.StatusConflict, current, map[string]any{"code": "plan_changed", "error": buildSetupStopCopy[personalassistant.FolderStopPlanChanged]})
@@ -369,11 +367,6 @@ func (h *Handler) WorkspaceBuildSetupSettled(ctx context.Context, userID string,
 // and the linked folder.
 func buildSetupReceipt(offer personalassistant.FolderOffer, workspaceName string) (receipt, homeID string) {
 	folder := strings.TrimSpace(offer.Subject.Name)
-	for _, row := range offer.Outcome.Receipt {
-		if row.Kind == "workspace" && strings.TrimSpace(row.Name) != "" {
-			workspaceName = strings.TrimSpace(row.Name)
-		}
-	}
 	home := offer.Outcome.Parent
 	if home == nil || strings.TrimSpace(home.Name) == "" || home.Status == "standalone" {
 		return fmt.Sprintf(buildCopySetupReceiptAlone, workspaceName, folder), ""
@@ -383,6 +376,19 @@ func buildSetupReceipt(offer personalassistant.FolderOffer, workspaceName string
 		return fmt.Sprintf(buildCopySetupReceiptNew, home.Name, workspaceName, folder), home.WorkspaceID
 	}
 	return fmt.Sprintf(buildCopySetupReceiptJoined, workspaceName, home.Name, folder), home.WorkspaceID
+}
+
+// buildSetupWorkspaceName is the name the run gave the project workspace: its
+// own receipt row, else the draft's name, else the folder's (the journey names
+// an unnamed workspace after its folder).
+func buildSetupWorkspaceName(offer personalassistant.FolderOffer, draftName string) string {
+	name := firstNonEmpty(draftName, offer.Subject.Name)
+	for _, row := range offer.Outcome.Receipt {
+		if row.Kind == "workspace" && strings.TrimSpace(row.Name) != "" {
+			name = strings.TrimSpace(row.Name)
+		}
+	}
+	return name
 }
 
 // finishWorkspaceBuildSetup closes the build a run finished, the way a create
@@ -402,7 +408,13 @@ func (h *Handler) finishWorkspaceBuildSetup(ctx context.Context, userID, session
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
 		now := deps.Store.Now()
-		receipt, homeID := buildSetupReceipt(offer, firstNonEmpty(session.Draft.Name, offer.Subject.Name))
+		name := buildSetupWorkspaceName(offer, session.Draft.Name)
+		receipt, homeID := buildSetupReceipt(offer, name)
+		// An unnamed build keeps the name the run gave it: the Map, Today and
+		// the summary say it.
+		if strings.TrimSpace(session.Draft.Name) == "" {
+			session.Draft.Name = name
+		}
 		session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: receipt, Host: true, At: now})
 		session.Status = personalassistant.WorkspaceBuildCreated
 		session.CreatedWorkspaceID = workspaceID

@@ -245,7 +245,7 @@ func TestWorkspaceBuildSetup_RefusesWhatItCannotRunAndCreatesNothing(t *testing.
 		t.Fatalf("plan changed at start: %d %+v", status, reopened)
 	}
 
-	// An unnamed draft and a folder with no plan are not set up.
+	// A folder with no plan is not set up.
 	g := newBuildFixture(t, true, talkOnlyReply, talkOnlyReply)
 	other := &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan()}
 	g.withMusicCatalog()
@@ -253,12 +253,28 @@ func TestWorkspaceBuildSetup_RefusesWhatItCannotRunAndCreatesNothing(t *testing.
 	unnamed := g.start(t)
 	_, body = g.attachFolder(t, unnamed, map[string]any{"mode": "chip", "chip": "documents"})
 	unnamed = sessionOf(t, body)
-	if status, body := g.setUp(t, unnamed, map[string]any{"plan_digest": songDigest}); status != http.StatusConflict || body["code"] != "name" {
-		t.Fatalf("unnamed: %d %v", status, body)
-	}
 	other.plan = &personalassistant.BuildFolderPlan{Unavailable: "plan_unavailable"}
 	if status, body := g.setUp(t, unnamed, map[string]any{"plan_digest": songDigest}); status != http.StatusConflict || body["code"] != "no_plan" {
 		t.Fatalf("no plan: %d %v", status, body)
+	}
+
+	// On 2026-10-20 a Codex model never named the draft, and Set it up stayed
+	// disabled under a plan that said it names the workspace after its folder.
+	// An unnamed draft is set up, and the journey names it after the folder.
+	other.plan = songPlan()
+	status, body = g.setUp(t, unnamed, map[string]any{"plan_digest": songDigest})
+	if status != http.StatusOK || sessionOf(t, body).Status != personalassistant.WorkspaceBuildPreparing {
+		t.Fatalf("unnamed: %d %v", status, body)
+	}
+	if len(other.reviewed) != 1 || other.reviewed[0].workspaceName != "" {
+		t.Fatalf("the journey names an unnamed workspace itself: %+v", other.reviewed)
+	}
+	// The finished build keeps the name the run gave it, so the Map's
+	// placement and Today say it rather than "New workspace".
+	g.handler.WorkspaceBuildSetupSettled(context.Background(), "local", resolvedSongOffer(unnamed.ID))
+	if done := g.read(t, unnamed.ID); done.Status != personalassistant.WorkspaceBuildCreated || done.Draft.Name != "Ori Music Demo" ||
+		done.SetupReceipt != "Created Music Production Home and Ori Music Demo inside it. Linked folder “Ori Music Demo”." {
+		t.Fatalf("finished unnamed build %+v", done)
 	}
 }
 

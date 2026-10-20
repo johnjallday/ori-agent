@@ -6574,7 +6574,7 @@ test('an open plan review stands in for the conversation, with its own Set it up
   manager.reviewOrEditWorkspaceBuild();
   assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
   assert.ok(classes.has('workspace-create-modal--plan-review'), 'the pane gives way to the review');
-  assert.equal(setUp.disabled, true, 'an unnamed draft cannot be set up yet');
+  assert.equal(setUp.disabled, false, 'an unnamed draft is named after its folder');
 
   manager.workspaceBuild.session.draft = { name: 'Ori Music Demo' };
   manager.syncWorkspaceBuildPresentation();

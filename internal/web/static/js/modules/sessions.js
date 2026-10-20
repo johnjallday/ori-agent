@@ -12418,7 +12418,8 @@ const sessionManager = {
     if (!session || session.status !== 'open' || session.setup || session.plan?.ready !== true) {
       return false;
     }
-    if (build.busy || build.setupBusy || !String(session.draft?.name || '').trim()) return false;
+    // An unnamed draft is named after its folder, as the plan says.
+    if (build.busy || build.setupBusy) return false;
     const expires = Date.parse(String(session.folder_expires_at || ''));
     return !(Number.isFinite(expires) && expires <= Date.now());
   },

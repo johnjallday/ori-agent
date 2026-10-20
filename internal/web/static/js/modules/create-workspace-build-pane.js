@@ -638,7 +638,8 @@
     els.planStatus.textContent = preparing ? COPY.setupRunning : '';
     els.planStatus.hidden = !preparing;
     els.setupButton.hidden = !(hasLines && open && !session.setup && session.plan?.ready === true);
-    els.setupButton.disabled = busy || expired || !text(session.draft?.name);
+    // An unnamed draft is named after its folder, as the plan says.
+    els.setupButton.disabled = busy || expired;
     const candidates =
       stopped && run?.stop_reason === 'needs_choice' && Array.isArray(run.entry_candidates)
         ? run.entry_candidates.map(text).filter(Boolean).slice(0, 4)

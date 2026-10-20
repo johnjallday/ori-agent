@@ -186,8 +186,9 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   folder only while this build stands behind it (`ConfigureBuildReviews`). The session is
   `preparing`; `GET …/{id}` returns `setup_run` (the run's lines with their states, a stop reason,
   project-file candidates). Refusals: `plan_changed` (the plan the user confirmed is no longer
-  the host's), `name`, `no_plan`, `review_pending` (another folder setup waits on Home),
-  `declined`, and `build_folder` (the pick is lost). A stopped run leaves the build open with
+  the host's), `no_plan`, `review_pending` (another folder setup waits on Home),
+  `declined`, and `build_folder` (the pick is lost). An unnamed draft is named after its folder,
+  as the plan says (the model never has to name it first). A stopped run leaves the build open with
   **Retry**; a finished one closes it as `created` with `created_workspace_id`,
   `home_workspace_id` and the host's `setup_receipt` ("Created <Home> and <workspace> inside it.
   Linked folder “<folder>”."), applies the draft's description, goal and extra teammate, and
