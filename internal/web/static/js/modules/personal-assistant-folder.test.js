@@ -25,9 +25,65 @@ import {
   portfolioProviderAction,
   profileReceiptLine,
   setupModalView,
+  finishedRunPlacement,
   arrangedStructure,
   conversationFolderOfferView
 } from './personal-assistant-folder.js';
+
+// A finished Explore run is placed on the Map once, as the build's Set it up
+// is: the song workspace and the Home it went inside.
+test('a run this page followed is placed once it finished and its pop-up closed', () => {
+  const offer = {
+    id: 'offer-1',
+    status: 'resolved',
+    subject: { name: 'Ori Music Demo' },
+    outcome: {
+      kind: 'project',
+      workspace_id: 'ws-song',
+      receipt: [{ kind: 'workspace', name: 'Ori Music Demo' }],
+      parent: { status: 'new', workspace_id: 'ws-home', name: 'Music Production Home' }
+    }
+  };
+  const followed = { followed: 'offer-1' };
+  assert.deepEqual(finishedRunPlacement(offer, followed), {
+    token: 'folder:offer-1',
+    memberId: 'ws-song',
+    memberName: 'Ori Music Demo',
+    homeId: 'ws-home',
+    homeName: 'Music Production Home'
+  });
+  // The done pop-up or the assistant drawer still covers the Map, it was
+  // placed already, or this page never saw the run going (a reload of a run
+  // finished long ago): nothing.
+  assert.equal(finishedRunPlacement(offer, { ...followed, covered: true }), null);
+  assert.equal(finishedRunPlacement(offer, { ...followed, placed: ['offer-1'] }), null);
+  assert.equal(finishedRunPlacement(offer, {}), null);
+  // Still running.
+  assert.equal(finishedRunPlacement({ ...offer, status: 'pending' }, followed), null);
+  // A standalone project places only itself; a Home or group outcome nothing.
+  assert.deepEqual(
+    finishedRunPlacement(
+      {
+        ...offer,
+        outcome: { ...offer.outcome, parent: { status: 'standalone', workspace_id: 'x' } }
+      },
+      followed
+    ),
+    {
+      token: 'folder:offer-1',
+      memberId: 'ws-song',
+      memberName: 'Ori Music Demo',
+      homeId: '',
+      homeName: ''
+    }
+  );
+  for (const kind of ['home', 'group']) {
+    assert.equal(
+      finishedRunPlacement({ ...offer, outcome: { ...offer.outcome, kind } }, followed),
+      null
+    );
+  }
+});
 
 test('setup busy text names the reviewed project, not its observation root', () => {
   const offer = { folder: 'Documents', subject: { name: 'Album-5' } };

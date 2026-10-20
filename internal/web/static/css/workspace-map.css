@@ -655,6 +655,33 @@
   border-color: var(--ws-danger, #d9534f);
   box-shadow: 0 0 24px rgba(217, 83, 79, 0.36);
 }
+/* Placing what a setup already created: the district the member's group would
+   have at the candidate, and the member and district that move with it. */
+.ws-map-placement-district {
+  position: absolute;
+  z-index: 11;
+  border: 2px dashed var(--ws-faction);
+  border-radius: 14px;
+  background: rgba(70, 211, 154, 0.06);
+  pointer-events: none;
+}
+.ws-map-placement-district.is-invalid {
+  border-color: var(--ws-danger, #d9534f);
+  background: rgba(217, 83, 79, 0.05);
+}
+.ws-map-placement-district-name {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.ws-map-tile.is-being-placed,
+.ws-map-district.is-being-placed {
+  opacity: 0.3;
+}
 .ws-map-placement-preview-name {
   max-width: 142px;
   overflow: hidden;

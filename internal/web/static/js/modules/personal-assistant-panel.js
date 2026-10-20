@@ -846,6 +846,11 @@ function close(options = {}) {
   const trigger = state.lastTrigger;
   state.lastTrigger = null;
   if (options?.restoreFocus !== false) restoreAssistantPanelFocus(trigger, document);
+  try {
+    document.dispatchEvent(new CustomEvent('personal-assistant:closed'));
+  } catch (_) {
+    // Listeners only act on what the drawer no longer covers; none is required.
+  }
 }
 
 /** The first control in the drawer, in reading order, that can take focus. */

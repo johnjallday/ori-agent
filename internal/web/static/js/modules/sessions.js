@@ -13730,6 +13730,10 @@ const sessionManager = {
       build.session.setup?.plan_digest || build.session.plan?.digest || ''
     ).trim();
     if (!digest) return;
+    // The plan's Home name is kept for the Map placement after the run: a
+    // session read mid-run may no longer carry the plan.
+    const homeName = String(build.session.plan?.home?.name || '').trim();
+    if (homeName) build.setupHomeName = homeName;
     build.setupBusy = true;
     pane.setBusy?.(true);
     let result;
@@ -13807,15 +13811,54 @@ const sessionManager = {
   },
 
   // finishWorkspaceBuildSetupInDialog closes the dialog on a build Set it up
-  // finished: the workspaces it made are announced, and what it made is said.
+  // finished: the workspaces it made are announced, what it made is said, and
+  // the Map asks where they sit.
   finishWorkspaceBuildSetupInDialog(build, session) {
+    // The plan names the Home; the finished session no longer carries one.
+    const homeName =
+      String(build.session?.plan?.home?.name || '').trim() || build.setupHomeName || '';
     build.session = session;
     const workspaceId = String(session.created_workspace_id || '').trim();
     this.notifyWorkspacesChanged?.({ workspaceId });
     const receipt = String(session.setup_receipt || '').trim();
     if (receipt) this.showToast?.(receipt, 'success');
+    const place = () =>
+      this.placeCreatedOnWorkspaceMap(`build:${session.id}`, {
+        memberId: workspaceId,
+        memberName: session.draft?.name,
+        homeId: session.home_workspace_id,
+        homeName
+      });
     const modal = document.getElementById('addFolderModal');
-    if (typeof bootstrap !== 'undefined') bootstrap.Modal.getInstance(modal)?.hide();
+    const modalAPI = typeof bootstrap !== 'undefined' ? bootstrap.Modal : window.bootstrap?.Modal;
+    if (modal?.classList?.contains?.('show') && modalAPI && modal.addEventListener) {
+      // Begin only once Bootstrap has hidden the dialog and handed focus back,
+      // so the Map's canvas keeps the keyboard (Enter, Escape, arrows), as the
+      // wizard's own Map placement does.
+      modal.addEventListener('hidden.bs.modal', place, { once: true });
+      modalAPI.getInstance(modal)?.hide();
+      return;
+    }
+    if (modalAPI) modalAPI.getInstance(modal)?.hide();
+    this.deferWorkspaceMapPlacement(place);
+  },
+
+  // placeCreatedOnWorkspaceMap hands what a folder setup made to the Map: the
+  // user places a new Home and its workspace in one gesture, or the workspace
+  // inside an existing Home. Without a Map on screen (Tree view, another
+  // page) the automatic layout stands, and the toast says so.
+  placeCreatedOnWorkspaceMap(token, { memberId, memberName, homeId, homeName } = {}) {
+    const id = String(memberId || '').trim();
+    if (!id) return false;
+    const home = String(homeId || '').trim();
+    const created = {
+      member: { id, name: String(memberName || '').trim() },
+      group: home ? { id: home, name: String(homeName || '').trim() } : null
+    };
+    const begin = window.OriWorkspaceMap?.beginPlacement;
+    const started = typeof begin === 'function' && begin({ token, created }) === true;
+    if (!started) this.showToast?.('Placed automatically on the Map', 'info');
+    return started;
   },
 
   // Review's statement of the folder attached in the conversation: Create

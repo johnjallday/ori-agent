@@ -4489,6 +4489,141 @@ test('reviewed placement keyboard controls share exact candidate state and Escap
   assert.equal(map.endPlacement('escape'), false, 'Escape already ended the preview');
 });
 
+// ----- placing what a folder setup already created -----
+
+const createdHome = {
+  member: { id: 'song', name: 'Ori Music Demo' },
+  group: { id: 'home', name: 'Music Production Home' }
+};
+
+test('a new Home and its workspace are placed in one gesture, beside the HQ', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, revision: 1, positions: { hq: { x: 380, y: 228 } } }
+  });
+  map._setHQWorkspaceIdForTest('hq');
+  mountWithCamera(map, harness, [
+    { id: 'hq', name: 'My HQ' },
+    { id: 'home', kind: 'group', name: 'Music Production Home' },
+    { id: 'song', name: 'Ori Music Demo', parent_id: 'home' }
+  ]);
+  await flush();
+  const placed = [];
+  assert.equal(
+    map.beginPlacement({ token: 'build:b1', created: createdHome, onPlaced: r => placed.push(r) }),
+    true
+  );
+  const html = harness.container.innerHTML;
+  const sentence =
+    'Choose where Music Production Home sits. Ori Music Demo goes inside it. Click open ground to place; Esc keeps the automatic layout.';
+  assert.ok(html.includes(sentence), 'the instruction is the placement sentence');
+  assert.equal(harness.control('[data-map-live]').textContent, sentence);
+  assert.match(html, /<strong>Place Music Production Home<\/strong>/);
+  assert.match(html, />Keep automatic layout</);
+  assert.match(html, />Place here</);
+  assert.doesNotMatch(html, /Create workspace here|Back to review/);
+  assert.match(
+    html,
+    /data-ws-map-placement-district/,
+    'the district the member brings is outlined'
+  );
+  assert.match(html, /ws-map-tile is-being-placed|is-being-placed" data-ws-id="song"/);
+  assert.equal(patches.length, 0, 'beginning writes nothing');
+
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.equal(patches.length, 1);
+  const saved = patches[0].operations[0].positions.song;
+  assert.ok(saved.x > 380, 'the suggestion is open ground beside the HQ');
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].saved, true);
+  assert.match(
+    harness.control('[data-map-live]').textContent,
+    /^Music Production Home and Ori Music Demo placed at /
+  );
+  assert.equal(map.endPlacement('build:b1'), false, 'placing ended the session');
+});
+
+test('Escape keeps the automatic layout and writes nothing', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, revision: 1, positions: {} }
+  });
+  mountWithCamera(map, harness, [
+    { id: 'home', kind: 'group', name: 'Music Production Home' },
+    { id: 'song', name: 'Ori Music Demo', parent_id: 'home' }
+  ]);
+  await flush();
+  let back = null;
+  map.beginPlacement({
+    token: 'build:b2',
+    created: createdHome,
+    onBack: (token, reason) => (back = { token, reason })
+  });
+  harness.fire('keydown', keyEvent('Escape'));
+  await flush();
+  assert.equal(patches.length, 0);
+  assert.deepEqual(back, { token: 'build:b2', reason: 'back' });
+  assert.equal(
+    harness.control('[data-map-live]').textContent,
+    'Kept the automatic layout. Nothing was moved.'
+  );
+  assert.doesNotMatch(
+    harness.container.innerHTML,
+    /data-ws-map-placement-district|is-being-placed/
+  );
+});
+
+test('an existing Home places only its new workspace, and never over a neighbour', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: {
+      schema_version: 1,
+      revision: 1,
+      positions: { older: { x: 114, y: 114 }, alpha: { x: 456, y: 114 } },
+      snap_to_grid: false
+    }
+  });
+  mountWithCamera(map, harness, [
+    { id: 'home', kind: 'group', name: 'Music Production Home' },
+    { id: 'older', name: 'First Song', parent_id: 'home' },
+    { id: 'alpha', name: 'Alpha' },
+    { id: 'song', name: 'Ori Music Demo', parent_id: 'home' }
+  ]);
+  await flush();
+
+  // Far past Alpha, the stretched district would reach over it.
+  map.beginPlacement({ token: 'build:b3', created: createdHome });
+  assert.match(harness.container.innerHTML, /<strong>Place Ori Music Demo<\/strong>/);
+  const far = map.camera.worldToScreen({ x: 800, y: 114 }, map.getCamera(), {
+    width: 1000,
+    height: 600
+  });
+  harness.fire('pointermove', pointerEvent(far.x, far.y));
+  assert.equal(
+    harness.control('[data-map-live]').textContent,
+    'Music Production Home would reach over Alpha there. Choose open ground.'
+  );
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.equal(patches.length, 0, 'a blocked spot is never written');
+  assert.equal(map.endPlacement('build:b3'), true);
+
+  // Without a chosen spot the suggestion sits with the group's members.
+  map.beginPlacement({ token: 'build:b4', created: createdHome });
+  assert.ok(
+    harness.container.innerHTML.includes(
+      'Choose where Ori Music Demo sits in Music Production Home. Click open ground to place; Esc keeps the automatic layout.'
+    )
+  );
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.equal(patches.length, 1);
+  const saved = patches[0].operations[0].positions.song;
+  assert.ok(saved.x < 456, 'the new member stays on the group’s side of Alpha');
+  assert.match(
+    harness.control('[data-map-live]').textContent,
+    /^Ori Music Demo placed in Music Production Home at /
+  );
+});
+
 test('reviewed placement blocks full visible and collapsed footprints without writing a position', async () => {
   const { map, harness, patches } = buildHarness({
     layout: {

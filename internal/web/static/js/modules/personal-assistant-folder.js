@@ -487,6 +487,34 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   };
 }
 
+// finishedRunPlacement is what the Map is asked to place once a run this page
+// followed has finished, as Create Workspace's Set it up does: the project
+// workspace the run made and, unless it stands alone, the Home it went
+// inside. `followed` is the offer whose run this page saw going, `placed` the
+// offers already handed on, `covered` whether the run's pop-up or the
+// assistant drawer still covers the Map (closing it is the moment). null when
+// there is nothing to place yet, or nothing at all: a Home or group outcome
+// places nothing.
+export function finishedRunPlacement(offer, { followed = '', placed = [], covered = false } = {}) {
+  const id = String(offer?.id || '');
+  if (!id || id !== followed || placed.includes(id) || covered) return null;
+  if (offer.status !== 'resolved' || offer.outcome?.kind !== 'project') return null;
+  const memberId = String(offer.outcome.workspace_id || '').trim();
+  if (!memberId) return null;
+  const rows = Array.isArray(offer.outcome.receipt) ? offer.outcome.receipt : [];
+  const workspace = rows.find(row => row?.kind === 'workspace');
+  const parent = offer.outcome.parent;
+  const homeId =
+    parent && parent.status !== 'standalone' ? String(parent.workspace_id || '').trim() : '';
+  return {
+    token: `folder:${id}`,
+    memberId,
+    memberName: String(workspace?.name || offer.subject?.name || '').trim(),
+    homeId,
+    homeName: homeId ? String(parent.name || '').trim() : ''
+  };
+}
+
 // Display-only canonical disclosure. The browser never sends this name or any
 // witness fields as a destination; confirmation sends the plan digest only.
 export function folderSetupDestinationLabel(offer) {
@@ -2336,6 +2364,37 @@ function renderRunSongs(els, view) {
   });
 }
 
+// The run this page saw going, and the runs already handed to the Map.
+const runPlacement = { followed: '', placed: [] };
+
+// placeFinishedRun hands a finished run to the Map once (finishedRunPlacement),
+// through the same placement the build's Set it up uses.
+function placeFinishedRun() {
+  const offer = state.offer;
+  if (offer?.setup && offer.status !== 'resolved') runPlacement.followed = String(offer.id || '');
+  const placement = finishedRunPlacement(offer, {
+    followed: runPlacement.followed,
+    placed: runPlacement.placed,
+    covered: runModal.wanted || Boolean(window.PersonalAssistantPanel?.isOpen?.())
+  });
+  if (!placement) return;
+  runPlacement.placed.push(String(offer.id));
+  const manager = typeof window !== 'undefined' ? window.sessionManager : null;
+  // The Map draws what the run made before it asks where it sits.
+  manager?.notifyWorkspacesChanged?.({ workspaceId: placement.memberId });
+  if (typeof manager?.placeCreatedOnWorkspaceMap === 'function') {
+    manager.placeCreatedOnWorkspaceMap(placement.token, placement);
+    return;
+  }
+  window.OriWorkspaceMap?.beginPlacement?.({
+    token: placement.token,
+    created: {
+      member: { id: placement.memberId, name: placement.memberName },
+      group: placement.homeId ? { id: placement.homeId, name: placement.homeName } : null
+    }
+  });
+}
+
 function openRunModal() {
   const els = runModalElements();
   const Modal = globalThis.bootstrap?.Modal;
@@ -2345,6 +2404,7 @@ function openRunModal() {
   if (!runModal.bound) {
     els.root.addEventListener('hidden.bs.modal', () => {
       runModal.wanted = false;
+      placeFinishedRun();
     });
     runModal.bound = true;
   }
@@ -2842,6 +2902,7 @@ function render() {
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderRunModal();
+  placeFinishedRun();
   syncSetupPolling();
 }
 
@@ -4153,6 +4214,9 @@ function init() {
     const look = currentFirstLook();
     if (look?.state === 'running') void refreshFirstLook(look.offer_id);
   });
+  // A run that finished inside the drawer is placed once the drawer stops
+  // covering the Map.
+  document.addEventListener('personal-assistant:closed', placeFinishedRun);
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   els.assistantName?.addEventListener('input', () => {
