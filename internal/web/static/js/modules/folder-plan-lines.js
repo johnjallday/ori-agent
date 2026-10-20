@@ -31,15 +31,55 @@
     failed: ['!', 'Did not finish']
   };
 
+  // What each kind of line is about, as a Bootstrap icon (head.tmpl loads the
+  // font), so a checklist says "a Home", "a folder", "a team" before its
+  // sentence is read. The kinds are personalassistant's FolderPlan* constants;
+  // one the pane does not know gets a plain dot.
+  const SETUP_LINE_KIND_ICONS = {
+    integration: 'bi-plug',
+    provider: 'bi-box-seam',
+    home: 'bi-house-door',
+    group: 'bi-houses',
+    workspace: 'bi-building',
+    workspaces: 'bi-buildings',
+    member: 'bi-building',
+    folder: 'bi-folder-symlink',
+    mode: 'bi-eye',
+    agents: 'bi-people',
+    assistant: 'bi-person-badge',
+    task: 'bi-clipboard-check',
+    library: 'bi-collection',
+    songs: 'bi-music-note-list',
+    profile: 'bi-sliders',
+    unavailable: 'bi-dash-circle',
+    arrangement: 'bi-bookmark-check'
+  };
+
+  // setupLineKindIcon is the Bootstrap icon class for one line kind.
+  function setupLineKindIcon(kind) {
+    return SETUP_LINE_KIND_ICONS[String(kind || '').trim()] || 'bi-dot';
+  }
+
   // renderSetupLines draws a plan or a run's lines into a list. The state is a
-  // glyph and a visually hidden word, never colour alone.
-  function renderSetupLines(list, lines, doc = document) {
+  // glyph and a visually hidden word, never colour alone. With
+  // options.kindIcons each row also leads with its kind's icon (the build
+  // pane's checklist); Home's card and the mission card keep their plain rows.
+  function renderSetupLines(list, lines, doc = document, options = {}) {
     if (!list) return;
     list.replaceChildren();
     lines.forEach(line => {
       const item = doc.createElement('li');
       item.dataset.kind = line.kind || 'other';
       if (line.state) item.dataset.state = line.state;
+      if (options.kindIcons) {
+        const kind = doc.createElement('span');
+        kind.className = 'pa-folder__plan-kind';
+        kind.setAttribute('aria-hidden', 'true');
+        const glyph = doc.createElement('i');
+        glyph.className = `bi ${setupLineKindIcon(line.kind)}`;
+        kind.append(glyph);
+        item.append(kind);
+      }
       const icon = doc.createElement('span');
       icon.className = 'pa-folder__plan-icon';
       icon.setAttribute('aria-hidden', 'true');
@@ -63,5 +103,5 @@
     });
   }
 
-  globalThis.OriFolderPlanLines = { setupLinesView, renderSetupLines };
+  globalThis.OriFolderPlanLines = { setupLinesView, renderSetupLines, setupLineKindIcon };
 })();

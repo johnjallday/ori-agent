@@ -76,6 +76,19 @@
     folderCollectionHint: 'Explore a folder on Home sets them up together',
     // A recognized folder's plan: the host's own lines, never the model's.
     planTitle: 'What Set it up will do',
+    // The sketch above the lines: the Home and the workspace Set it up leaves
+    // behind, drawn from the plan's own facts, then the lines as a checklist.
+    planGet: 'You’ll get',
+    planSteps: 'Ori will',
+    planStepCount: count => `${count} ${count === 1 ? 'step' : 'steps'}`,
+    planHome: 'Home',
+    planHomeNew: 'new',
+    planHomeExisting: 'existing',
+    planWorkspace: 'Workspace',
+    planWorkspaceUnnamed: 'Named after the folder',
+    planPartFolder: 'Folder linked',
+    planPartTeam: 'Team',
+    planPartTask: 'First task',
     planWhy: 'Why this suggestion?',
     setUp: 'Set it up',
     setupRetry: 'Retry',
@@ -601,9 +614,19 @@
         ? COPY.planUnavailable(text(plan.unavailable), text(plan.unavailable_subject))
         : '';
     els.plan.hidden = !lines.length && !note;
-    if (lines.length) shared.renderSetupLines(els.planLines, lines, document);
-    else els.planLines.textContent = '';
+    if (lines.length) {
+      shared.renderSetupLines(els.planLines, lines, document, { kindIcons: true });
+      // The line the run is on stays in view while the checklist scrolls.
+      els.planLines.querySelector?.('li[data-state="working"]')?.scrollIntoView?.({
+        block: 'nearest'
+      });
+    } else els.planLines.textContent = '';
     els.planLines.hidden = !lines.length;
+    els.linesKicker.textContent = lines.length
+      ? `${COPY.planSteps} · ${COPY.planStepCount(lines.length)}`
+      : '';
+    els.linesKicker.hidden = !lines.length;
+    renderSketch(lines.length ? plan : null, lines);
     els.planNote.textContent = note;
     els.planNote.hidden = !note;
     const evidence = lines.length && plan ? text(plan.evidence) : '';
@@ -611,6 +634,90 @@
     els.planWhy.hidden = !evidence;
     renderInstall(lines.length > 0);
     renderSetupControls(lines.length > 0);
+  }
+
+  // planWorkspaceName is the name Set it up gives the workspace, as the draft
+  // summary says it: the draft's name, else the recognized project's own name,
+  // else the attached folder's. '' when none is known.
+  function planWorkspaceName() {
+    const session = state.session || {};
+    const folder = session.folder || {};
+    const id = folder.recognition?.candidate_id;
+    const projects = Array.isArray(folder.observation?.projects) ? folder.observation.projects : [];
+    const project = projects.find(item => item && item.id === id);
+    return text(session.draft?.name) || text(project?.name) || text(folder.observation?.folder);
+  }
+
+  // sketchView is what the sketch above the lines draws, from the plan's own
+  // facts and the kinds of its lines: the Home the workspace goes into (when
+  // the plan names one), the workspace, and the parts the lines promise it.
+  // null when there is no ready plan to draw.
+  function sketchView(plan, lines) {
+    if (!plan || !Array.isArray(lines) || !lines.length) return null;
+    const kinds = new Set(lines.map(line => line.kind));
+    const home = plan.home && typeof plan.home === 'object' ? plan.home : null;
+    const parts = [];
+    if (kinds.has('folder')) parts.push({ kind: 'folder', label: COPY.planPartFolder });
+    if (kinds.has('agents') || kinds.has('assistant')) {
+      parts.push({ kind: 'agents', label: COPY.planPartTeam });
+    }
+    if (kinds.has('task')) parts.push({ kind: 'task', label: COPY.planPartTask });
+    return {
+      home:
+        home && text(home.name)
+          ? {
+              name: text(home.name),
+              status: home.status === 'existing' ? COPY.planHomeExisting : COPY.planHomeNew
+            }
+          : null,
+      workspace: planWorkspaceName() || COPY.planWorkspaceUnnamed,
+      parts
+    };
+  }
+
+  // renderSketch draws the sketch: a Home box (when the plan names one) with
+  // the workspace box inside it, and the workspace's parts as chips. Every
+  // fact in it is also in the lines, so it is decoration for sighted readers.
+  function renderSketch(plan, lines) {
+    const { els } = state;
+    if (!els.sketch) return;
+    const view = sketchView(plan, lines);
+    els.sketchBody.textContent = '';
+    els.sketch.hidden = !view;
+    if (!view) return;
+    const shared = globalThis.OriFolderPlanLines;
+    const iconFor = kind => (shared?.setupLineKindIcon ? shared.setupLineKindIcon(kind) : 'bi-dot');
+    const box = (className, kind, label) => {
+      const node = createElement('div', className);
+      const caption = createElement('span', 'workspace-build-sketch__label');
+      const icon = createElement('i', `bi ${iconFor(kind)}`);
+      caption.appendChild(icon);
+      caption.append(label);
+      node.appendChild(caption);
+      return node;
+    };
+    const workspace = box('workspace-build-sketch__workspace', 'workspace', COPY.planWorkspace);
+    workspace.appendChild(createElement('strong', 'workspace-build-sketch__name', view.workspace));
+    if (view.parts.length) {
+      const parts = createElement('ul', 'workspace-build-sketch__parts');
+      view.parts.forEach(part => {
+        const item = createElement('li');
+        item.appendChild(createElement('i', `bi ${iconFor(part.kind)}`));
+        item.append(part.label);
+        parts.appendChild(item);
+      });
+      workspace.appendChild(parts);
+    }
+    if (view.home) {
+      const home = box('workspace-build-sketch__home', 'home', COPY.planHome);
+      const name = createElement('strong', 'workspace-build-sketch__name', view.home.name);
+      name.appendChild(createElement('span', 'workspace-build-sketch__badge', view.home.status));
+      home.appendChild(name);
+      home.appendChild(workspace);
+      els.sketchBody.appendChild(home);
+    } else {
+      els.sketchBody.appendChild(workspace);
+    }
   }
 
   // folderPickMinutes is how long the server still holds the attached folder's
@@ -684,6 +791,16 @@
     const title = createElement('h3', 'workspace-build-plan__title', COPY.planTitle);
     title.id = 'workspaceBuildPlanTitle';
     plan.setAttribute('aria-labelledby', title.id);
+    // The sketch says nothing the lines do not, so assistive tech skips it.
+    const sketch = createElement('div', 'workspace-build-plan__sketch');
+    sketch.setAttribute('aria-hidden', 'true');
+    sketch.hidden = true;
+    sketch.appendChild(createElement('p', 'workspace-build-plan__kicker', COPY.planGet));
+    const sketchBody = createElement('div', 'workspace-build-sketch');
+    sketch.appendChild(sketchBody);
+    const linesKicker = createElement('p', 'workspace-build-plan__kicker', COPY.planSteps);
+    linesKicker.setAttribute('aria-hidden', 'true');
+    linesKicker.hidden = true;
     const planLines = createElement('ul', 'workspace-build-plan__lines');
     planLines.id = 'workspaceBuildPlanLines';
     const planNote = createElement('p', 'workspace-build-plan__note');
@@ -723,16 +840,26 @@
     const planExpiry = createElement('p', 'workspace-build-plan__expiry');
     planExpiry.hidden = true;
     const installEls = renderInstallBlock();
+    // The body scrolls as one page beside the conversation; the title, the
+    // run's status and Set it up stay put (workspace-construct.css).
+    const body = createElement('div', 'workspace-build-plan__body');
+    body.appendChild(sketch);
+    body.appendChild(linesKicker);
+    body.appendChild(planLines);
+    body.appendChild(planNote);
+    body.appendChild(installEls.install);
+    body.appendChild(planWhy);
     plan.appendChild(title);
-    plan.appendChild(planLines);
-    plan.appendChild(planNote);
-    plan.appendChild(installEls.install);
-    plan.appendChild(planWhy);
+    plan.appendChild(body);
     plan.appendChild(planStatus);
     plan.appendChild(actions);
     plan.appendChild(planExpiry);
     return {
       plan,
+      body,
+      sketch,
+      sketchBody,
+      linesKicker,
       planLines,
       planNote,
       planWhy,
@@ -1874,6 +2001,7 @@
     noteGroupPrerequisite,
     setProviderInstall,
     groupPrerequisiteView,
+    sketchView,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),

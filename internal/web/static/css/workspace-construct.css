@@ -23,6 +23,9 @@
   --wc-bg-2: #121317;
   --wc-panel: #16181d;
   --wc-panel-2: #1a1d23;
+  /* The recessed surface rows sit on (the plan's lines, the install review);
+     the light theme sets its own. */
+  --wc-panel-deep: #101216;
   --wc-line: #262931;
   --wc-line-bright: #363a45;
   --wc-ink: #d6d9de;
@@ -2811,20 +2814,39 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-plan-review {
   margin: 0 16px 12px;
 }
-/* In the pane the plan shares the room with the conversation: the
+/* In a narrow pane the plan shares the column with the conversation: the
    conversation gives way first, the plan's lines scroll past 45%, so the
    assistant's narration and Set it up both stay in view. Whatever still does
-   not fit scrolls inside the plan, never under the composer. */
+   not fit scrolls inside the plan, never under the composer. A wide pane
+   gives the plan its own column instead (see "the plan beside the
+   conversation" below). */
 .workspace-create-modal .workspace-build-pane .workspace-build-plan {
   flex: 0 1 auto;
   min-height: 0;
   max-height: 45%;
   overflow-y: auto;
 }
+/* The body holds the sketch, the lines, the note, the install offer and the
+   reason; the title, the run's status and Set it up sit outside it. */
+.workspace-create-modal .workspace-build-plan__body {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
 .workspace-create-modal .workspace-build-pane .workspace-build-plan__lines {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+/* The sketch is for the wide pane; narrow, the lines and Set it up come first. */
+.workspace-create-modal .workspace-build-plan__sketch[hidden],
+.workspace-create-modal .workspace-build-plan__kicker[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__sketch {
+  display: none;
 }
 /* The plugin's install review is a decision: like the plan review it stands
    in for the conversation and the composer until Install and continue or
@@ -2876,6 +2898,18 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* The kickers over the sketch ("You'll get") and the lines ("Ori will"). */
+.workspace-create-modal .workspace-build-plan__kicker {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+/* The lines as a checklist: what each line is about (its kind's icon), the
+   sentence, and a ring on the right that fills as the run reaches it. The
+   state is still said in words for assistive tech (folder-plan-lines.js). */
 .workspace-create-modal .workspace-build-plan__lines {
   display: grid;
   gap: 6px;
@@ -2885,24 +2919,33 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   overflow-wrap: anywhere;
 }
 .workspace-create-modal .workspace-build-plan__lines li {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 6px 9px;
   border: 1px solid var(--wc-line);
   background: var(--wc-panel-deep);
   color: var(--wc-ink);
   font-size: 12px;
   line-height: 1.35;
 }
-.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-icon {
-  flex: none;
-  width: 1.1em;
-  color: var(--wc-ink-faint);
-  font-weight: 750;
-  text-align: center;
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-kind {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--wc-faction-deep);
+  color: var(--wc-faction);
+  font-size: 14px;
 }
 .workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-text {
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
 }
 .workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-text small {
@@ -2910,16 +2953,249 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   color: var(--wc-ink-dim);
   font-size: 11px;
 }
+/* The ring: empty until the run reaches the line (its glyph is hidden), then
+   its glyph in the state's colour, then filled on done. */
+.workspace-create-modal .workspace-build-plan__lines .pa-folder__plan-icon {
+  grid-column: 3;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--wc-line-bright);
+  border-radius: 50%;
+  color: transparent;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+}
 .workspace-create-modal .workspace-build-plan__lines li[data-state="working"] {
   border-color: var(--wc-line-bright);
 }
-.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-icon {
-  color: var(--wc-faction);
+.workspace-create-modal
+  .workspace-build-plan__lines
+  li[data-state="working"]
+  .pa-folder__plan-icon {
+  border-color: var(--wc-keeper);
+  color: var(--wc-keeper);
+  animation: workspace-build-plan-working 1.2s ease-in-out infinite;
 }
-.workspace-create-modal .workspace-build-plan__lines li[data-state="failed"],
+.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-icon {
+  border-color: var(--wc-faction);
+  background: var(--wc-faction);
+  color: var(--wc-bg);
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="done"] .pa-folder__plan-kind {
+  opacity: 0.6;
+}
+.workspace-create-modal .workspace-build-plan__lines li[data-state="failed"] {
+  border-color: var(--wc-alert);
+}
 .workspace-create-modal .workspace-build-plan__lines li[data-state="failed"] .pa-folder__plan-icon {
   border-color: var(--wc-alert);
   color: var(--wc-alert);
+}
+@keyframes workspace-build-plan-working {
+  50% {
+    opacity: 0.35;
+  }
+}
+/* The sketch: the Home box with the workspace box inside it (or the
+   workspace alone), and the workspace's parts as chips. Its words come from
+   the plan's facts and the kinds of its lines, never from the model. */
+.workspace-create-modal .workspace-build-plan__sketch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workspace-create-modal .workspace-build-sketch__home,
+.workspace-create-modal .workspace-build-sketch__workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.workspace-create-modal .workspace-build-sketch__home {
+  padding: 8px 9px;
+  border: 1px dashed var(--wc-line-bright);
+  background: var(--wc-panel-2);
+}
+.workspace-create-modal .workspace-build-sketch__workspace {
+  padding: 8px 10px;
+  border: 1px solid var(--wc-faction-deep);
+  background: var(--wc-panel-deep);
+  box-shadow: inset 3px 0 0 var(--wc-faction);
+}
+.workspace-create-modal .workspace-build-sketch__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-build-sketch__label .bi {
+  color: var(--wc-faction);
+  font-size: 13px;
+}
+.workspace-create-modal .workspace-build-sketch__name {
+  color: var(--wc-ink-heading);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.workspace-create-modal .workspace-build-sketch__badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  vertical-align: 1px;
+}
+.workspace-create-modal .workspace-build-sketch__parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-create-modal .workspace-build-sketch__parts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel);
+  color: var(--wc-ink);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-build-sketch__parts .bi {
+  color: var(--wc-faction);
+  font-size: 12px;
+}
+/* ---------- the plan beside the conversation ----------
+   A wide pane with a plan gives it its own column, the full height of the
+   pane, so the conversation keeps the room it had before the plan arrived.
+   The dialog widens for it. The plugin install review is a decision that
+   stands in for the conversation, so it keeps the one-column pane; the plan
+   review and the creation review hide the pane altogether, and must win. */
+@media (min-width: 1024px) {
+  .workspace-create-modal.workspace-create-modal--build:has(.workspace-build-plan:not([hidden]))
+    .workspace-create-modal-dialog {
+    width: min(1140px, calc(100vw - 2rem));
+    max-width: min(1140px, calc(100vw - 2rem));
+  }
+  .workspace-create-modal:not(.workspace-create-modal--plan-review):not(
+      .workspace-create-modal--review
+    )
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    ) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+    grid-template-areas:
+      "head plan"
+      "transcript plan"
+      "status plan"
+      "group plan"
+      "composer plan";
+  }
+  /* grid-area is inert while the pane is still one column, so the children
+     need no guard of their own. */
+  .workspace-create-modal .workspace-build-pane > .workspace-build-pane__head {
+    grid-area: head;
+  }
+  .workspace-create-modal .workspace-build-pane > .workspace-build-pane__transcript {
+    grid-area: transcript;
+  }
+  .workspace-create-modal .workspace-build-pane > .workspace-build-pane__status {
+    grid-area: status;
+  }
+  .workspace-create-modal .workspace-build-pane > .workspace-build-group {
+    grid-area: group;
+  }
+  .workspace-create-modal .workspace-build-pane > .workspace-build-pane__composer {
+    grid-area: composer;
+  }
+  .workspace-create-modal .workspace-build-pane > .workspace-build-plan {
+    grid-area: plan;
+  }
+  /* The plan as a column: the sketch shows, the body (sketch, lines, reason)
+     scrolls as one page, and the title, the run's status and Set it up stay
+     put, the button full width at the bottom. */
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    > .workspace-build-plan {
+    gap: 10px;
+    min-height: 0;
+    max-height: none;
+    padding: 12px 14px 14px;
+    border: 0;
+    border-left: 1px solid var(--wc-line);
+    background: var(--wc-panel);
+    overflow: hidden;
+  }
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    .workspace-build-plan__body {
+    flex: 1 1 auto;
+    gap: 10px;
+    min-height: 0;
+    padding-right: 2px;
+    overflow-y: auto;
+  }
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    .workspace-build-plan__sketch {
+    display: flex;
+  }
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    .workspace-build-plan__title {
+    font-size: 13px;
+  }
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    .workspace-build-plan__lines {
+    flex: none;
+    min-height: 0;
+    overflow: visible;
+  }
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    .workspace-build-plan__actions {
+    margin-top: auto;
+  }
+  .workspace-create-modal
+    .workspace-build-pane:has(> .workspace-build-plan:not([hidden])):not(
+      :has(> .workspace-build-plan--install-review)
+    )
+    .workspace-build-plan__actions
+    > .modern-btn-primary {
+    flex: 1 1 100%;
+    padding: 10px 16px;
+    font-size: 14px;
+  }
 }
 .workspace-create-modal .workspace-build-plan__note,
 .workspace-create-modal .workspace-build-plan__evidence {

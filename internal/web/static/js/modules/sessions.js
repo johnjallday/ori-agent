@@ -12498,7 +12498,11 @@ const sessionManager = {
     const plan = this.workspaceBuild.session.plan;
     const shared = window.OriFolderPlanLines;
     const list = document.getElementById('workspaceBuildPlanReviewLines');
-    if (shared && list) shared.renderSetupLines(list, shared.setupLinesView(plan.lines), document);
+    if (shared && list) {
+      shared.renderSetupLines(list, shared.setupLinesView(plan.lines), document, {
+        kindIcons: true
+      });
+    }
     for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
       const field = document.getElementById(reviewID);
       const wizard = document.getElementById(wizardID);
