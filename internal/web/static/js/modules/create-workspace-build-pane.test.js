@@ -5,6 +5,10 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('./create-workspace-build-pane.js', import.meta.url), 'utf8');
 const planLinesSource = readFileSync(new URL('./folder-plan-lines.js', import.meta.url), 'utf8');
+const recognitionLinesSource = readFileSync(
+  new URL('./folder-recognition-lines.js', import.meta.url),
+  'utf8'
+);
 
 // A small DOM: enough elements, attributes, events, and simple selectors for
 // the pane to render into and be driven the way a user drives it.
@@ -202,6 +206,7 @@ function loadPane() {
   // Loaded before the pane, as in base.tmpl.
   const context = vm.createContext({ window, document, CustomEvent });
   vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
+  vm.runInContext(recognitionLinesSource, context, { filename: 'folder-recognition-lines.js' });
   vm.runInContext(source, context, { filename: 'pane.js' });
   const events = [];
   for (const type of [

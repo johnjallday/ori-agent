@@ -11715,6 +11715,12 @@ const sessionManager = {
     document.getElementById('workspaceBuildEditDraftBtn')?.addEventListener('click', () => {
       this.reviewOrEditWorkspaceBuild();
     });
+    document.getElementById('workspaceBuildPlanReviewSetup')?.addEventListener('click', () => {
+      void this.setUpFromWorkspaceBuildPlanReview();
+    });
+    document.getElementById('workspaceBuildPlanReviewBack')?.addEventListener('click', () => {
+      this.reviewOrEditWorkspaceBuild();
+    });
     // The plan review's fields edit the wizard's own, so the draft is saved
     // exactly as a wizard edit is.
     for (const [reviewID, wizardID] of WORKSPACE_BUILD_PLAN_FIELDS) {
@@ -12393,6 +12399,30 @@ const sessionManager = {
     if (build.planReviewOpen) document.getElementById('workspaceBuildPlanName')?.focus?.();
   },
 
+  // workspaceBuildSetupPressable is when Set it up may be pressed, as the
+  // pane's own button decides it: a ready plan, a named draft, a held folder
+  // pick, and nothing in flight or already running.
+  workspaceBuildSetupPressable() {
+    const build = this.workspaceBuild;
+    const session = build?.session;
+    if (!session || session.status !== 'open' || session.setup || session.plan?.ready !== true) {
+      return false;
+    }
+    if (build.busy || build.setupBusy || !String(session.draft?.name || '').trim()) return false;
+    const expires = Date.parse(String(session.folder_expires_at || ''));
+    return !(Number.isFinite(expires) && expires <= Date.now());
+  },
+
+  // setUpFromWorkspaceBuildPlanReview is the review's Set it up: the review
+  // closes so the pane shows the run, line by line.
+  async setUpFromWorkspaceBuildPlanReview() {
+    const build = this.workspaceBuild;
+    if (!build || !this.workspaceBuildSetupPressable()) return;
+    build.planReviewOpen = false;
+    this.syncWorkspaceBuildPresentation();
+    await this.setUpWorkspaceBuild({});
+  },
+
   noteWorkspaceBuildPlanEdit(field, wizardID) {
     const wizard = document.getElementById(wizardID);
     if (!field || !wizard || !this.workspaceBuild) return;
@@ -12444,10 +12474,16 @@ const sessionManager = {
     if (!review) return;
     const open = Boolean(planReady && this.workspaceBuild?.planReviewOpen);
     review.hidden = !open;
+    // The open review stands in for the conversation (the pane is hidden).
+    document
+      .getElementById('addFolderModal')
+      ?.classList?.toggle?.('workspace-create-modal--plan-review', open);
     document
       .getElementById('workspaceBuildEditDraftBtn')
       ?.setAttribute?.('aria-expanded', String(open));
     if (!open) return;
+    const setUp = document.getElementById('workspaceBuildPlanReviewSetup');
+    if (setUp) setUp.disabled = !this.workspaceBuildSetupPressable();
     const plan = this.workspaceBuild.session.plan;
     const shared = window.OriFolderPlanLines;
     const list = document.getElementById('workspaceBuildPlanReviewLines');

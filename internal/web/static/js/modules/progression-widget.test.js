@@ -770,6 +770,28 @@ test('firstMissionOfferView: the folder mission shows a pending offer inline', (
   assert.equal(firstMissionOfferView(view, dump, 'tidy').actions[0].id, 'setup');
 });
 
+// A first folder is shown on the mission card, which says the folder card's
+// Recognized and Needs lines too.
+test('firstMissionOfferView: a recognized song says what it is and what its plan needs', () => {
+  const view = firstMissionView({ missions: [folderMission] });
+  const offer = firstMissionOfferView(view, {
+    ...pendingProjectOffer,
+    subject: { name: 'Ori Music Demo', kind: 'project' },
+    capability: { recognized: 'REAPER', workspace: 'REAPER Song workspace' },
+    recognition: { verdict: 'project', label: 'REAPER project' },
+    needs: [
+      { kind: 'integration', name: 'REAPER integration', state: 'ready' },
+      { kind: 'provider', name: 'Music Project Management', state: 'install' }
+    ],
+    plan: { digest: 'd', lines: [{ kind: 'home', name: 'Creates Home “Music Production Home”' }] }
+  });
+  assert.equal(offer.recognitionLine, 'Recognized: REAPER project');
+  assert.equal(
+    offer.needsLine,
+    'Needs: REAPER integration (installed) · Music Project Management (install)'
+  );
+});
+
 test('firstMissionOfferView: a decided offer keeps its note and drops the buttons', () => {
   const view = firstMissionView({ missions: [folderMission] });
   const offer = firstMissionOfferView(view, {

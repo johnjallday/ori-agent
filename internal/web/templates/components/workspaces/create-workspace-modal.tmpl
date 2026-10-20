@@ -36,6 +36,12 @@
           <summary>Why this suggestion?</summary>
           <p id="workspaceBuildPlanReviewEvidence" class="workspace-build-plan__evidence"></p>
         </details>
+        <!-- The review stands in for the conversation while it is open, so
+             Set it up is here too; the pane's own returns with Back. -->
+        <div class="workspace-build-plan-review__actions">
+          <button type="button" id="workspaceBuildPlanReviewSetup" class="modern-btn modern-btn-primary">Set it up</button>
+          <button type="button" id="workspaceBuildPlanReviewBack" class="modern-btn modern-btn-secondary">Back to the conversation</button>
+        </div>
       </section>
       <section id="workspaceBuildCreationReview" class="workspace-build-review" aria-label="Review File Janitor creation" hidden></section>
       <div class="modal-body workspace-create-modal-body">

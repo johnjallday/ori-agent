@@ -1961,10 +1961,26 @@ sys.exit(3 if s.get("status") == "running" else 0)
 #                        server shows, and follow the run until it settles; prints the
 #                        plan, each poll's line states, and what the build ended with.
 #   show <session-id>    print one build's status, run and host lines.
+#   accept <sandbox> [mode]
+#                        run tests/narrated-folder-setup.spec.ts on this sandbox:
+#                        seed "Second Song" beside the demo's "Ori Music Demo" and pass
+#                        both to Playwright (mode installed, or integration-missing for
+#                        that sandbox mode, which runs the build half only). Use a
+#                        fresh sandbox: the spec sets both folders up.
 # Run it on a sandbox from scripts/narrated-folder-demo.sh.
 smoke_narrated() {
   local stage="${3:-}"
   case "$stage" in
+  accept)
+    local sandbox="${4:-}" mode="${5:-installed}"
+    [[ -d "$sandbox/Documents/Ori Music Demo" ]] || fail "usage: $0 narrated <base-url> accept <sandbox> [installed|integration-missing]"
+    local args=(--url "$BASE_URL" --env "NARRATED_SONG=$sandbox/Documents/Ori Music Demo" --env "NARRATED_MODE=$mode")
+    if [[ "$mode" == "installed" ]]; then
+      smoke_show_folder showfolder "$BASE_URL" seed-song "$sandbox" Documents "Second Song"
+      args+=(--env "NARRATED_SECOND_SONG=$sandbox/Documents/Second Song")
+    fi
+    "$(dirname "${BASH_SOURCE[0]}")/e2e.sh" "${args[@]}" tests/narrated-folder-setup.spec.ts -- --workers=1
+    ;;
   setup)
     local chip="${4:-documents}" text="${5:-music production demos}"
     python3 - "$BASE_URL" "$chip" "$text" <<'PY'
@@ -2018,7 +2034,7 @@ PY
     [[ -n "$id" ]] || fail "usage: $0 narrated <base-url> show <session-id>"
     curl -s "$BASE_URL/api/workspaces/build-sessions/$id" | python3 -c 'import json,sys; s=json.load(sys.stdin).get("session") or {}; r=s.get("setup_run") or {}; print(s.get("status"), r.get("status","-"), r.get("stop_reason","")); [print(" ", e["text"]) for e in s.get("transcript") or [] if e.get("host")]'
     ;;
-  *) fail "usage: $0 narrated <base-url> <setup [chip] [text]|show <session-id>>" ;;
+  *) fail "usage: $0 narrated <base-url> <setup [chip] [text]|show <session-id>|accept <sandbox> [mode]>" ;;
   esac
 }
 

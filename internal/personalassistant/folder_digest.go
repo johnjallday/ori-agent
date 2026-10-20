@@ -672,6 +672,11 @@ type FolderOfferView struct {
 	// Enclosing names the larger repository the subject sits inside, when the
 	// bounded check found one.
 	Enclosing *FolderEnclosingHint `json:"enclosing,omitempty"`
+	// Recognition is what the card says it recognized, and Needs what its plan
+	// needs installed: the same facts, in the same words, as a build's attached
+	// folder (folder-recognition-lines.js renders both). Read, never stored.
+	Recognition *FolderOfferRecognition `json:"recognition,omitempty"`
+	Needs       []BuildFolderNeed       `json:"needs,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
 	Plan                   *FolderSetupPlan `json:"plan,omitempty"`
@@ -692,6 +697,14 @@ type FolderOfferView struct {
 	// FirstTask is where the folder's first look stands, on a resolved project
 	// offer whose workspace has one. It is read live, never stored on the offer.
 	FirstTask *FolderFirstTaskView `json:"first_task,omitempty"`
+}
+
+// FolderOfferRecognition is a single recognized project as a card names it,
+// in BuildFolderRecognition's terms. The card's offer keeps no count of the
+// files that marked it, so only a build's folder says how many there are.
+type FolderOfferRecognition struct {
+	Verdict string `json:"verdict"`
+	Label   string `json:"label"`
 }
 
 // FolderCapabilityHiddenView names a capability a card does not lead with: its
@@ -2454,6 +2467,12 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		v.RequestedDestinationID = offer.ConversationReview.DestinationID
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
+	if offer.Verdict == string(folderdigest.KindProject) && offer.Subject.Kind == FolderChoiceProject &&
+		offer.Portfolio == nil && offer.Structure == nil {
+		if label, ok := recognizedProjectLabel(offer.Subject); ok {
+			v.Recognition = &FolderOfferRecognition{Verdict: BuildFolderProject, Label: label}
+		}
+	}
 	switch folderdigest.Kind(offer.Verdict) {
 	case folderdigest.KindProject, folderdigest.KindMixed, folderdigest.KindAmbiguous:
 		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintForOffer(offer)

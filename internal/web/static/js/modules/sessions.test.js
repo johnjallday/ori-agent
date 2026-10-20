@@ -6469,6 +6469,48 @@ function plannedBuild() {
   };
 }
 
+test('an open plan review stands in for the conversation, with its own Set it up', async () => {
+  const elements = planReviewElements();
+  const classes = new Set();
+  elements.set('addFolderModal', {
+    dataset: {},
+    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) }
+  });
+  elements.set('workspaceBuildPlanReviewSetup', { disabled: false });
+  const manager = loadSessionManager(
+    undefined,
+    {
+      OriFolderPlanLines: { setupLinesView: lines => lines, renderSetupLines() {} }
+    },
+    { getElementById: id => elements.get(id) || null, querySelector: () => null }
+  );
+  manager.workspaceBuild = plannedBuild();
+  manager.workspaceBuild.session.status = 'open';
+  const setUp = elements.get('workspaceBuildPlanReviewSetup');
+
+  manager.reviewOrEditWorkspaceBuild();
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
+  assert.ok(classes.has('workspace-create-modal--plan-review'), 'the pane gives way to the review');
+  assert.equal(setUp.disabled, true, 'an unnamed draft cannot be set up yet');
+
+  manager.workspaceBuild.session.draft = { name: 'Ori Music Demo' };
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(setUp.disabled, false);
+  // An expired folder pick cannot be set up from the review either.
+  manager.workspaceBuild.session.folder_expires_at = new Date(Date.now() - 1000).toISOString();
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(setUp.disabled, true);
+  delete manager.workspaceBuild.session.folder_expires_at;
+  manager.syncWorkspaceBuildPresentation();
+
+  let ran = 0;
+  manager.setUpWorkspaceBuild = async () => ran++;
+  await manager.setUpFromWorkspaceBuildPlanReview();
+  assert.equal(ran, 1);
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true, 'the pane shows the run');
+  assert.ok(!classes.has('workspace-create-modal--plan-review'));
+});
+
 test('Set it up runs the reviewed plan and follows the run until it made the workspace', async () => {
   const elements = planReviewElements();
   const hidden = [];

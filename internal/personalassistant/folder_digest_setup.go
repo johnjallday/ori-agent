@@ -90,6 +90,7 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	}
 	plan = plan.Stamped()
 	v.Plan = &plan
+	v.Needs = folderPlanNeeds(offer.Subject, plan.Intent)
 	// The names the plan uses, so the card's fields start from them rather than
 	// from a reading of the plan's wording.
 	if v.Software != nil && plan.Intent.Software != nil {

@@ -447,6 +447,7 @@ observed.
 | `GET/POST /api/workspaces/group-templates[/{review,commit}]` | Create Group's owner-free projection of eligible declarations; separately consented, named Home-only create/reuse ([Group Templates](group-templates.md)). |
 | `POST /api/workspaces` and legacy `/api/folders` | Shared evaluator/review-commit owner for policy-bearing templates; missing grouped Home blocks rather than being created in the project commit. |
 | `/api/workspaces/{id}/project`, map/group creator | Same effective resolver and evaluator; no arbitrary-parent or combined Home/project bypass. |
+| Create Workspace build ("Build with your assistant") | Each build response carries `group_prerequisite`, the form's own projection of this evaluator for the drafted blueprint; the pane's Prepare the group first runs the Home-only review/commit above, and Create stays the project's own confirmation. A recognized folder's Set it up instead runs the setup journey below, whose plan sets the Home up. ([Workspace build sessions](workspace-build-sessions.md)) |
 | Setup quest/journey new/existing project | Existing project-connection owner plus the same group review; exact external file remains unchanged. |
 | Chat list/create project tools | Unified catalog/resolver; use supported owner or return bounded guided-create action. |
 | Capability/runtime/surface/plugin routes | Unrelated unless the concrete feature genuinely depends on live reciprocal membership; grouping grants nothing. |

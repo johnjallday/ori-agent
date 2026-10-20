@@ -70,13 +70,10 @@
     folderSendHint: 'Empty Send: “Set it up from the attached folder”',
     folderSummary: (files, partial) =>
       `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`,
-    // What Ori recognized in the attached folder, from the host's own table.
-    folderRecognized: (label, evidence) =>
-      `Recognized: ${label}${evidence ? ` · ${evidence}` : ''}`,
-    folderEvidence: (count, noun) => `${count} ${noun} ${count === 1 ? 'file' : 'files'}`,
-    folderUnrecognized: 'Not a project Ori recognizes yet',
-    folderCollection: count =>
-      `Holds ${count} projects · Explore a folder on Home sets them up together`,
+    // What Ori recognized in the attached folder is said by the shared
+    // folder-recognition-lines.js, as Home's card says it; a collection adds
+    // where it is set up.
+    folderCollectionHint: 'Explore a folder on Home sets them up together',
     // A recognized folder's plan: the host's own lines, never the model's.
     planTitle: 'What Set it up will do',
     planWhy: 'Why this suggestion?',
@@ -161,24 +158,9 @@
   // what Ori recognized it as, from server facts only. A folder the server
   // said nothing about (an older build, a recognition that failed) has none.
   function folderRecognitionText(recognition) {
-    if (!recognition || typeof recognition !== 'object') return '';
-    switch (recognition.verdict) {
-      case 'project': {
-        const label = text(recognition.label);
-        if (!label) return '';
-        const count = Math.max(0, Math.floor(Number(recognition.marker_count) || 0));
-        const noun = text(recognition.marker_noun);
-        return COPY.folderRecognized(label, count && noun ? COPY.folderEvidence(count, noun) : '');
-      }
-      case 'collection': {
-        const count = Math.max(0, Math.floor(Number(recognition.project_count) || 0));
-        return count >= 2 ? COPY.folderCollection(count) : '';
-      }
-      case 'none':
-        return COPY.folderUnrecognized;
-      default:
-        return '';
-    }
+    const shared = globalThis.OriFolderRecognitionLines;
+    if (!shared) return '';
+    return shared.recognitionLine(recognition, { collectionHint: COPY.folderCollectionHint });
   }
 
   // A reason code ("desktop_off") is for code, never for the user; a note

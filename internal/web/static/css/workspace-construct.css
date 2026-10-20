@@ -2765,6 +2765,33 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-plan-review {
   margin: 0 16px 12px;
 }
+/* In the pane the plan shares the room with the conversation: its lines
+   scroll, so the assistant's narration and Set it up both stay in view. */
+.workspace-create-modal .workspace-build-pane .workspace-build-plan {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 45%;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* An open plan review stands in for the conversation: it takes the pane's
+   room and scrolls on its own, with its own Set it up. */
+.workspace-create-modal.workspace-create-modal--plan-review .workspace-build-pane {
+  display: none;
+}
+.workspace-create-modal.workspace-create-modal--plan-review .workspace-build-plan-review {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.workspace-create-modal .workspace-build-plan-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .workspace-create-modal .workspace-build-plan__title,
 .workspace-create-modal .workspace-build-plan-review h2 {
   margin: 0;

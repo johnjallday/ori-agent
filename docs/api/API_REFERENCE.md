@@ -1827,6 +1827,34 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 
 When the named build has an attached folder, Create links that folder to the new workspace in place — as a linked directory reference, and as its primary directory unless the create already set one outside the workspace folder — and the summary gains a `folder` decision. The folder is resolved through the server's own hold on the pick (the same 30-minute window the assistant's composer has) before anything is created: a pick the server no longer holds is `409` with `conflict.type: "build_folder"` and an `error` to show, and nothing is created. Nothing is copied, moved, or read in the linked folder.
 
+### What Every Session Response Also Carries
+
+Besides the stored session, each response reads a few things fresh; none is stored:
+
+- `folder.recognition` (stored with the folder): `verdict` `project`, `collection` or `none`; for a project its `label` ("<integration> project"), `marker_noun`/`marker_count` (the session files that say so), the suggested `blueprint_id`/`blueprint_label`, the integration and Home provider (`integration_name`, `home_provider_name`, `home_name`) and `home_exists`; for a collection `project_count`. Read from the attach's own scan; nothing is rescanned.
+- `plan` — a recognized single project's setup plan, exactly as Home's folder card plans the same folder: `lines` (`kind`, `name`, `detail`), `digest`, `needs` (`kind`, `name`, `state` = `ready` | `install` | `enable` | `update`), `home` (`name`, `status` `new` | `existing`), `placement`, `evidence`, `ready`; or `ready: false` with `unavailable` (a reason code such as `provider_not_installed`) and `unavailable_subject` (the plugin it waits on).
+- `folder_expires_at` — when the server stops holding the attached folder's pick.
+- `setup_run` — while Set it up runs or after it stopped: the run's `lines` with their `state`, `status`, `stop_reason`, and `entry_candidates` (project files to choose from).
+- `group_prerequisite` — when the drafted blueprint must be created inside a group and no ready plan sets it up: the form's own group-requirement projection (`state` `home_creation_review_required` with `home.proposed_name`, or `ready_grouped` with `home.workspace_id`/`home.name`, plus `summary` and `actions`).
+
+A settled Set it up also stores `home_workspace_id` and `setup_receipt` on the session.
+
+### Read a Build
+
+**Endpoint:** `GET /api/workspaces/build-sessions/{id}`
+
+Returns `{ "session": … }` for one of this user's builds, read-only; the client follows a running Set it up with it. `404` for any other id.
+
+### Set It Up (a Recognized Folder)
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/setup`
+
+```json
+{ "version": 6, "plan_digest": "9b1c…", "entry_name": "Take Two.rpp" }
+```
+
+Runs the build's ready `plan` as Home's own setup journey on the build's held folder; the build does not post the wizard's create request. `plan_digest` must be the plan the user saw (a different current plan is `409` `plan_changed` with the fresh plan in the session); `entry_name` (optional) answers a stopped run's project-file question; a retry sends the run's own digest. The session becomes `preparing` with a `setup` claim and the response returns it; nothing is installed or created before this call. Refusals are `409` with `code` and an `error` to show: `no_plan`, `name` (the draft has no usable name), `review_pending` (another folder setup is waiting for an answer on Home), `declined`, `build_folder` (the pick is lost), `version`, `closed`. When the run finishes the build is `created` with `created_workspace_id`, `home_workspace_id` and `setup_receipt` ("Created <Home> and <workspace> inside it. Linked folder “<folder>”."), the draft's description, goal and extra teammate are applied to the workspace, and its `build_summary` is written from the plan lines and the receipt. A stopped run leaves the build open with its `setup_run.stop_reason`, ready for a retry.
+
 ### Reviewed File Janitor Creation
 
 For built-in `file-janitor` (and legacy `downloads-janitor`) with a live attached
@@ -1975,7 +2003,7 @@ or
 { "selection_token": "<token from POST /api/folder-picker/select-path>" }
 ```
 
-Exactly one of `chip`, `picker`, `file` or `selection_token`. Chips are `music`, `documents`, `desktop` and `downloads`, offered in that order for the folders that exist. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. A `selection_token` names a folder the folder-picker endpoint already accepted, which is how a path the user typed gets here: `POST /api/folder-picker/select-path` with `{ "path": "~/Music/Projects" }` checks the path on a same-origin request (absolute or `~/`, an existing directory, not the home folder itself, not Ori's data or workspace root, not a credential folder) and answers `{ "success": true, "selected": true, "path": "…", "selection_token": "…" }`, with `warning: "outside_home"` and a `warning_note` sentence for a folder outside the home folder, or `422` with the refusal's sentence in `error`. The scan route itself still answers `400` to any `path` or `folder` key; an expired or unknown token is `400` with "That folder selection expired. Paste the path again." The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
+Exactly one of `chip`, `picker`, `file` or `selection_token`. Chips are `music`, `documents`, `desktop` and `downloads`, offered in that order for the folders that exist. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. A `selection_token` names a folder the folder-picker endpoint already accepted, which is how a path the user typed gets here: `POST /api/folder-picker/select-path` with `{ "path": "~/Music/Projects" }` checks the path on a same-origin request (absolute or `~/`, an existing directory, not the home folder itself, not Ori's data or workspace root, not a credential folder) and answers `{ "success": true, "selected": true, "path": "…", "selection_token": "…" }`, with `warning: "outside_home"` and a `warning_note` sentence for a folder outside the home folder, or `422` with the refusal's sentence in `error`. The scan route itself still answers `400` to any `path` or `folder` key; an expired or unknown token is `400` with "That folder selection expired. Paste the path again." The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A single recognized project also carries `recognition` (`verdict: "project"`, `label`) and, with its `plan`, the `needs` that plan has (`kind`, `name`, `state`): the same facts and words a Create Workspace build says for the same folder; both are read, never stored. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
 
 ### Open the Picker
 

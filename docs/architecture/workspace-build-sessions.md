@@ -141,6 +141,76 @@ becomes the primary directory unless the create already set one outside the work
 runs after the scaffold or attached project and before the template's tool step, which reads
 and saves the workspace itself. The `BuildSummary` records it as a `folder` decision.
 
+### A recognized folder (narrated setup)
+
+An attached folder is also **recognized**, read-only from the scan the attach already made
+(`FolderObservationService.Recognize`, `internal/personalassistant/folder_build_recognition.go`):
+`folder.recognition` says `project` (with the capability row's label, e.g. "<integration>
+project", the session-file count, the suggested project blueprint, the Home provider and whether
+that Home exists), `collection` (several projects: set up from Home's Explore a folder), or
+`none`. A folder the user said never to ask about again is `none`. The pane says one line from
+it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt carries it as
+`<folder_recognition>` reference data.
+
+- **Catalog**: the build catalog never contains a Home carrier (a template with
+  `ProgramHomeOwner`; `workspaceBuildCatalogEntries`, `offerableCatalog`). The Group creator keeps
+  them.
+- **Plan**: for a recognized single project every response carries `plan`
+  (`FolderObservationService.BuildPlan`): the host's own `FolderSetupPlan` lines and digest, as
+  Home's card plans the same folder (one plan, one digest from either entry,
+  `folder_plan_identity_test.go`), the `needs` (integration and Home provider, each `ready`,
+  `install`, `enable` or `update`), the Home (`new`/`existing`), the placement and the evidence —
+  or `unavailable` with the reason and the plugin it waits on. Never stored. The host writes the
+  needs once into the transcript (`Needs: … (installed) · … (install)`), and the pane's draft bar
+  becomes **Plan so far**. With a ready plan the model may set only the name, description, goal
+  and one extra saved teammate; everything else is refused as `set by the plan`, and the prompt
+  carries `<setup_plan>` instead of the catalog.
+- **Review in place**: "Review or edit draft" opens the plan review inside the dialog (the
+  lines read-only, name and description editable, "Why this suggestion?"), not the wizard. While
+  it is open it stands in for the conversation, with its own Set it up.
+- **Set it up**: `POST …/{id}/setup {version, plan_digest, entry_name?}` writes the build's
+  `setup` claim (offer, digest, request id) and runs **Home's own setup journey** on the build's
+  held folder: the build's review target is `build:<session id>`, and Home's setup reads that
+  folder only while this build stands behind it (`ConfigureBuildReviews`). The session is
+  `preparing`; `GET …/{id}` returns `setup_run` (the run's lines with their states, a stop reason,
+  project-file candidates). Refusals: `plan_changed` (the plan the user confirmed is no longer
+  the host's), `name`, `no_plan`, `review_pending` (another folder setup waits on Home),
+  `declined`, and `build_folder` (the pick is lost). A stopped run leaves the build open with
+  **Retry**; a finished one closes it as `created` with `created_workspace_id`,
+  `home_workspace_id` and the host's `setup_receipt` ("Created <Home> and <workspace> inside it.
+  Linked folder “<folder>”."), applies the draft's description, goal and extra teammate, and
+  writes "How this was set up" from the plan lines and the receipt. The journey links the folder
+  as a directory reference, as on Home (it does not mark it primary).
+- **Pick lifetime**: `folder_expires_at` is when the server stops holding the pick (30
+  minutes after the look). Under 5 minutes the pane counts down; once expired, Set it up is
+  disabled and **Add the folder again** is offered.
+- **Map**: when the run finishes the dialog closes and, once it has hidden, the Map asks where
+  the result sits (`beginPlacement({ token, created: { member, group } })`, see the Map's
+  placement docs): a new Home is placed with its first workspace in one gesture; Escape keeps the
+  automatic layout. No Map on screen: "Placed automatically on the Map". Home's Explore a folder
+  ends the same way once its pop-up and the assistant drawer no longer cover the Map.
+
+### A blueprint that needs a group
+
+A blueprint whose group policy is `required` sets `needs_home`; the draft bar names the group
+apart from the workspace (`Group: <label> (new|existing) · Workspace: <name> · …`). Every response
+also carries `group_prerequisite`: the form's own group-requirement projection
+(`grouprequirements.Evaluate` through `buildTemplateGroupRequirementPlan`), only while the build
+is open and when no ready plan sets the group up itself. The pane says it before Create:
+
+- `home_creation_review_required`: "This blueprint needs <Home> first. Ori prepares the group
+  with your confirmation, then creates the workspace inside it." and **Prepare the group first**,
+  which runs the form's Home review and commit (`/api/workspaces/group-requirement/home/…`) in one
+  press, then "Group ready: <Home>." and a **Create it** chip. Create refuses in the pane until the
+  group is ready. Two confirmations, nothing else created by the first.
+- `ready_grouped`: "Group ready: <Home>. The workspace is created inside it."
+- `home_required` and other states are said, never offered.
+
+The prompt rule says the same; a `parent_id` for such a blueprint is refused as `this blueprint is
+always created inside its own group`. Choosing **Group** while a folder is attached brings the
+pane back with "The attached folder will not be linked to a group." and **Keep building the
+workspace** / **Continue as a group** (which removes the folder from the build).
+
 ### Reviewed File Janitor preparation
 
 `janitor-review` reads the canonical edited draft/team and live folder hold;
@@ -164,9 +234,10 @@ an unconfirmed reservation ID. Full request/recovery details live in the
 
 ### Storage
 
-Schema **2** retains the filename `workspace-build-v1.json`. Genuine v1 data
-migrates without inventing preparation consent; v1 carrying v2 authority and
-unknown schemas are refused conservatively. One sidecar file per HQ: `<HQ folder>/.ori/workspace-build-v1.json`, written through the
+Schema **3** retains the filename `workspace-build-v1.json`. Genuine v1 and v2 data
+load without inventing preparation consent; v1 carrying v2 authority, a v1 or v2 file
+carrying a folder recognition, a setup claim, a Home id or a setup receipt, and unknown
+schemas are refused conservatively. One sidecar file per HQ: `<HQ folder>/.ori/workspace-build-v1.json`, written through the
 Personal Assistant knowledge store (locked, atomic replace, a Windows variant). Bounds:
 
 - at most **one open or preparing build** per user; creating while one exists
@@ -191,15 +262,16 @@ and cannot be bypassed through ordinary create.
 
 ## Client
 
-| Piece                                                         | File                                                                      |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| The pane (transcript, chips, composer, status line, collapse) | `internal/web/static/js/modules/create-workspace-build-pane.js`           |
-| Transport, apply-to-wizard, tags, draft sync, create          | `internal/web/static/js/modules/sessions.js` (the `WorkspaceBuild` block) |
-| Eligibility, step math, patch extraction                      | `internal/web/static/js/modules/workspace-creator-state.js`               |
-| Team patch apply / serialize / restore                        | `internal/web/static/js/modules/create-workspace-team-draft.js`           |
-| Today "Finish building …"                                     | `internal/web/static/js/modules/personal-assistant-home.js`               |
-| Assistant composer / home-assistant hand-off                  | `internal/web/static/js/modules/dashboard.js` (`openBuildWithAssistant`)  |
-| "How this was set up"                                         | `internal/web/static/js/modules/workspace-command.js`                     |
+| Piece                                                          | File                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| The pane (transcript, chips, composer, status line, collapse)  | `internal/web/static/js/modules/create-workspace-build-pane.js`           |
+| Plan lines and the Recognized / Needs lines (shared with Home) | `folder-plan-lines.js`, `folder-recognition-lines.js`                     |
+| Transport, apply-to-wizard, tags, draft sync, create           | `internal/web/static/js/modules/sessions.js` (the `WorkspaceBuild` block) |
+| Eligibility, step math, patch extraction                       | `internal/web/static/js/modules/workspace-creator-state.js`               |
+| Team patch apply / serialize / restore                         | `internal/web/static/js/modules/create-workspace-team-draft.js`           |
+| Today "Finish building …"                                      | `internal/web/static/js/modules/personal-assistant-home.js`               |
+| Assistant composer / home-assistant hand-off                   | `internal/web/static/js/modules/dashboard.js` (`openBuildWithAssistant`)  |
+| "How this was set up"                                          | `internal/web/static/js/modules/workspace-command.js`                     |
 
 - **Eligible openers**: Home "New Workspace" (`home_cockpit_create`), the Map's create
   pad (`workspace_map_build`, placement preserved), the Workspaces hub
@@ -250,13 +322,19 @@ counts, and field or section names, never message text, draft values, or folder 
   `internal/personalassistant/workspace_build_store_test.go` (persistence, bounds, expiry,
   the attached folder), `folder_observation_test.go` (`ResolveRoot`),
   `internal/agenthttp/home_assistant_ask_test.go` (`build_workspace` replaces
-  `create_workspace` without writing the store).
+  `create_workspace` without writing the store). Narrated setup:
+  `workspace_build_session_recognition_test.go`, `workspace_build_session_setup_test.go`,
+  `workspace_build_session_group_test.go`, `internal/personalassistant/folder_build_*_test.go`,
+  `folder_plan_identity_test.go`, `internal/server/workspace_build_test.go`.
 - JS: `create-workspace-build-pane.test.js`, `sessions.test.js`,
   `workspace-creator-state.test.js`, `create-workspace-team-draft.test.js`,
   `personal-assistant-home.test.js`, `workspace-command.test.js`.
 - Playwright: `tests/create-workspace-build-mode.spec.ts` with a scripted fake of the
   build endpoints (golden path, form-edit acknowledgement, resume, manual fallbacks, the
   `build_workspace` hand-off). Run it against a fresh sandbox.
+  `tests/narrated-folder-setup.spec.ts` fakes nothing and sends no model turn: both entries on
+  a song folder, through Set it up and the Map placement, against
+  `scripts/narrated-folder-demo.sh` (its header has the commands).
 - Live demos: `scripts/demo-build-assistant.mjs` drives the real pane against a demo
   server with a real model; `scripts/smoke.sh build-session <url> seed` hires an assistant
   and seeds two saved agents and a system model (by default the Codex CLI with

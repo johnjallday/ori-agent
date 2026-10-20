@@ -84,19 +84,18 @@ func buildNeedsLine(plan *personalassistant.BuildFolderPlan) string {
 }
 
 // noteBuildNeeds writes the Needs line for plan into the transcript as a host
-// line, when it differs from the one last said, and reports whether it did.
-// The plan must be for the session's current folder.
-func noteBuildNeeds(session *personalassistant.WorkspaceBuildSession, plan *personalassistant.BuildFolderPlan, now time.Time) bool {
+// line, when it differs from the one last said. The plan must be for the
+// session's current folder.
+func noteBuildNeeds(session *personalassistant.WorkspaceBuildSession, plan *personalassistant.BuildFolderPlan, now time.Time) {
 	if session.Folder == nil || !session.Folder.Recognition.Recognized() {
-		return false
+		return
 	}
 	line := buildNeedsLine(plan)
 	if line == "" || line == session.Folder.Recognition.NeedsSaid {
-		return false
+		return
 	}
 	session.Folder.Recognition.NeedsSaid = line
 	session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: line, Host: true, At: now})
-	return true
 }
 
 // workspaceBuildPlan reads the setup plan for a build's recognized folder: a

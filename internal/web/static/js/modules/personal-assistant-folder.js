@@ -10,6 +10,9 @@
 
 // Sets window.OriFolderPlanLines, which the plan line exports below come from.
 import './folder-plan-lines.js';
+// Sets window.OriFolderRecognitionLines: the Recognized and Needs lines, in the
+// build pane's words.
+import './folder-recognition-lines.js';
 import {
   lastSavedLabel,
   libraryOpenAction,
@@ -625,10 +628,15 @@ function capabilityConfirmView(offer, base, subject) {
         structureGroup: true
       }
     ];
+  const lines = globalThis.OriFolderRecognitionLines;
   return {
     ...base,
     headline,
     question,
+    // What Ori recognized, and what the plan needs, before the plan: the lines
+    // a build that attached this folder says, in the same words.
+    recognitionLine: run || !lines ? '' : lines.recognitionLine(offer.recognition),
+    needsLine: hasPlan && lines ? lines.needsLine(offer.needs) : '',
     // The plan lists every consequence, so the pre-setup install promise would
     // only repeat it; a run shows its own progress instead.
     capabilityDetail: hasPlan || run ? '' : String(capability.integration || ''),
@@ -2143,6 +2151,8 @@ function elements() {
     prerequisites: document.getElementById('personalAssistantFolderPrerequisites'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
+    recognitionLine: document.getElementById('personalAssistantFolderOfferRecognition'),
+    needsLine: document.getElementById('personalAssistantFolderOfferNeeds'),
     hidden: document.getElementById('personalAssistantFolderOfferHidden'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
@@ -2754,6 +2764,8 @@ function renderOffer(place) {
     firstLook.visible && firstLook.readiness?.length ? firstLook.readiness : view.prerequisites
   );
   setText(els.capability, view.capabilityDetail);
+  setText(els.recognitionLine, view.recognitionLine);
+  setText(els.needsLine, view.needsLine);
   renderHidden(els.hidden, capabilityHiddenView(state.offer));
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;

@@ -73,7 +73,6 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 	if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(subject.Shape), subject.MarkerName, subject.DominantExtension); ok {
 		offer := row.Offer
 		integrationName = offer.IntegrationName
-		recognition.Label = offer.IntegrationName + " project"
 		recognition.IntegrationKey, recognition.IntegrationName = offer.IntegrationKey, offer.IntegrationName
 		recognition.HomeProviderKey, recognition.HomeProviderName, recognition.HomeName = offer.HomeProviderKey, offer.HomeProviderName, offer.HomeName
 		if offer.HomeProviderKey != "" && d.deps.HomeExists != nil {
@@ -82,8 +81,9 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 				recognition.HomeExists = exists
 			}
 		}
-	} else if row, ok := softwareCapability(subject); ok {
-		recognition.Label = row.Builtin.DisplayName
+	}
+	if label, ok := recognizedProjectLabel(subject); ok {
+		recognition.Label = label
 	} else if project.Marker != nil {
 		recognition.Label = project.Marker.Label
 	} else if recognition.BlueprintLabel != "" {
@@ -104,4 +104,17 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 		}
 	}
 	return recognition, nil
+}
+
+// recognizedProjectLabel names a recognized project the way both entries say
+// it: "<integration> project" for a host capability row, or the software
+// table's own name. ok is false for any other project.
+func recognizedProjectLabel(subject FolderCandidateRecord) (string, bool) {
+	if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(subject.Shape), subject.MarkerName, subject.DominantExtension); ok && row.Offer != nil {
+		return row.Offer.IntegrationName + " project", true
+	}
+	if row, ok := softwareCapability(subject); ok {
+		return row.Builtin.DisplayName, true
+	}
+	return "", false
 }

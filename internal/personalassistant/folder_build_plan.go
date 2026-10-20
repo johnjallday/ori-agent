@@ -95,17 +95,29 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	plan := &BuildFolderPlan{
 		Lines: append([]FolderPlanLine(nil), view.Plan.Lines...), Digest: view.Plan.Digest,
 		Placement: view.Plan.Intent.Placement, Evidence: view.Reason, Ready: true,
-	}
-	if capability {
-		if state := view.Plan.Intent.Integration; state != "" {
-			plan.Needs = append(plan.Needs, BuildFolderNeed{Kind: FolderPlanIntegration, Name: row.Offer.IntegrationName + " integration", State: state})
-		}
-		if state := view.Plan.Intent.Provider; state != "" && row.Offer.HomeProviderName != "" {
-			plan.Needs = append(plan.Needs, BuildFolderNeed{Kind: FolderPlanProvider, Name: row.Offer.HomeProviderName, State: state})
-		}
+		Needs: folderPlanNeeds(offer.Subject, view.Plan.Intent),
 	}
 	if destination := view.Plan.Destination; destination != nil && (destination.Status == "new" || destination.Status == "existing") {
 		plan.Home = &BuildFolderHome{Name: destination.Name, Status: destination.Status}
 	}
 	return plan, nil
+}
+
+// folderPlanNeeds are the plugins a host plan needs, as both entries say them:
+// the project's integration and its Home's provider, each in the state the
+// plan's intent gives it (ready, install, enable, update). None for a project
+// without a host capability row.
+func folderPlanNeeds(subject FolderCandidateRecord, intent FolderSetupIntent) []BuildFolderNeed {
+	row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(subject.Shape), subject.MarkerName, subject.DominantExtension)
+	if !ok || row.Offer == nil {
+		return nil
+	}
+	var needs []BuildFolderNeed
+	if intent.Integration != "" {
+		needs = append(needs, BuildFolderNeed{Kind: FolderPlanIntegration, Name: row.Offer.IntegrationName + " integration", State: intent.Integration})
+	}
+	if intent.Provider != "" && row.Offer.HomeProviderName != "" {
+		needs = append(needs, BuildFolderNeed{Kind: FolderPlanProvider, Name: row.Offer.HomeProviderName, State: intent.Provider})
+	}
+	return needs
 }
