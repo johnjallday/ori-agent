@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 )
 
 type contractVector struct {
@@ -177,6 +179,39 @@ func TestNewInventoryRequest_RefusesWhatThePluginMustNeverBeAsked(t *testing.T) 
 		if _, err := NewInventoryRequest(request.InstallationID, request.SourceID, request.Cursor, request.Limit); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// The operation declarations a provider copies into its manifest must accept
+// every valid vector, so the host's schema check and its strict decoder agree.
+func TestOperationSchemas_AcceptTheContractVectors(t *testing.T) {
+	var declared []struct {
+		ID           string          `json:"id"`
+		InputSchema  json.RawMessage `json:"input_schema"`
+		OutputSchema json.RawMessage `json:"output_schema"`
+	}
+	if err := json.Unmarshal(readContractFile(t, "operations.json"), &declared); err != nil {
+		t.Fatal(err)
+	}
+	operations := map[string]workspacesurface.Operation{}
+	for _, operation := range declared {
+		operations[operation.ID] = workspacesurface.Operation{ID: operation.ID, InputSchema: operation.InputSchema, OutputSchema: operation.OutputSchema}
+	}
+	sources, inventory := operations["studio.sources.read"], operations["studio.inventory.read"]
+	if err := workspacesurface.ValidateOperationInput(sources, json.RawMessage(`{"schema_version":1}`)); err != nil {
+		t.Fatalf("sources input: %v", err)
+	}
+	if err := workspacesurface.ValidateOperationOutput(sources, readContractFile(t, "sources.valid.json")); err != nil {
+		t.Fatalf("sources output: %v", err)
+	}
+	if err := workspacesurface.ValidateOperationInput(inventory, readContractFile(t, "inventory.request.valid.json")); err != nil {
+		t.Fatalf("inventory input: %v", err)
+	}
+	if err := workspacesurface.ValidateOperationOutput(inventory, readContractFile(t, "inventory.valid.json")); err != nil {
+		t.Fatalf("inventory output: %v", err)
+	}
+	if err := workspacesurface.ValidateOperationInput(inventory, json.RawMessage(`{"schema_version":1,"installation_id":"inst_abc123","source_id":"x","cursor":"","limit":257}`)); err == nil {
+		t.Fatal("the inventory schema accepts a page larger than the contract")
 	}
 }
 

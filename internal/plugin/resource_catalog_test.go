@@ -18,23 +18,6 @@ func resourceContractFile(t *testing.T, name string) []byte {
 	return data
 }
 
-// catalogOperationJSON is a minimal closed read-only operation; the catalog
-// contract's wire shapes are checked by internal/resourcecatalog.
-func catalogOperationJSON(id string) map[string]any {
-	return map[string]any{
-		"id": id,
-		"input_schema": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []any{"schema_version"},
-			"properties": map[string]any{"schema_version": map[string]any{"type": "integer", "minimum": 1, "maximum": 1}},
-		},
-		"output_schema": map[string]any{
-			"type": "object", "additionalProperties": false, "required": []any{"schema_version"},
-			"properties": map[string]any{"schema_version": map[string]any{"type": "integer", "minimum": 1, "maximum": 1}},
-		},
-		"max_output_bytes": 32768, "timeout_class": "fast", "policy": "read_only",
-	}
-}
-
 // resourceCatalogContributionJSON is the canonical fixture as a project
 // plugin that also contributes a resource workspace and its catalog.
 func resourceCatalogContributionJSON(t *testing.T, mutate func(root map[string]any)) []byte {
@@ -44,8 +27,13 @@ func resourceCatalogContributionJSON(t *testing.T, mutate func(root map[string]a
 		t.Fatal(err)
 	}
 	service := root["services"].([]any)[0].(map[string]any)
-	service["operations"] = append(service["operations"].([]any),
-		catalogOperationJSON("studio.sources.read"), catalogOperationJSON("studio.inventory.read"))
+	// The canonical declarations a provider copies, so the plugin validator
+	// checks the same schemas the contract vectors pass.
+	var operations []any
+	if err := json.Unmarshal(resourceContractFile(t, "operations.json"), &operations); err != nil {
+		t.Fatal(err)
+	}
+	service["operations"] = append(service["operations"].([]any), operations...)
 	root["blueprints"] = append(root["blueprints"].([]any), map[string]any{
 		"id": "reaper-studio", "version": 1, "manifest": "blueprints/reaper-studio/template.json",
 		"skeleton": "blueprints/reaper-studio/workspace", "capabilities": []any{},
