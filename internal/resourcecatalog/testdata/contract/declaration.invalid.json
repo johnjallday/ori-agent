@@ -35,6 +35,15 @@
     "answer": { "schema_version": 1, "id": "reaper-studio", "version": 1, "blueprint_id": "reaper-studio", "service_id": "reaper-service",
       "sources_operation": "studio.sources.read", "inventory_operation": "studio.inventory.read", "roots": ["/Users"],
       "categories": [{ "id": "templates", "label": "Templates", "description": "Templates.", "kinds": [{ "id": "project_template", "label": "Project template" }], "facts": [] }] } },
+  { "name": "unknown profile row",
+    "answer": { "schema_version": 1, "id": "reaper-studio", "version": 1, "blueprint_id": "reaper-studio", "service_id": "reaper-service",
+      "sources_operation": "studio.sources.read", "inventory_operation": "studio.inventory.read",
+      "categories": [{ "id": "templates", "label": "Templates", "description": "Templates.", "kinds": [{ "id": "project_template", "label": "Project template" }], "facts": [], "profile_row": "defaults" }] } },
+  { "name": "profile row twice",
+    "answer": { "schema_version": 1, "id": "reaper-studio", "version": 1, "blueprint_id": "reaper-studio", "service_id": "reaper-service",
+      "sources_operation": "studio.sources.read", "inventory_operation": "studio.inventory.read",
+      "categories": [{ "id": "templates", "label": "Templates", "description": "Templates.", "kinds": [{ "id": "project_template", "label": "Project template" }], "facts": [], "profile_row": "templates" },
+                     { "id": "track_templates", "label": "Track templates", "description": "Tracks.", "kinds": [{ "id": "track_template", "label": "Track template" }], "facts": [], "profile_row": "templates" }] } },
   { "name": "case alias of a key",
     "raw": "{\"schema_version\":1,\"ID\":\"reaper-studio\",\"version\":1,\"blueprint_id\":\"reaper-studio\",\"service_id\":\"reaper-service\",\"sources_operation\":\"studio.sources.read\",\"inventory_operation\":\"studio.inventory.read\",\"categories\":[{\"id\":\"templates\",\"label\":\"Templates\",\"description\":\"Templates.\",\"kinds\":[{\"id\":\"project_template\",\"label\":\"Project template\"}],\"facts\":[]}]}" }
 ]

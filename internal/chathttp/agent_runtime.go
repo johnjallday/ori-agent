@@ -155,6 +155,7 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, 
 	wtp.SetHQVisibilityDeps(h.hqVisibility)
 	wtp.SetExecutingInstanceID(instanceID)
 	wtp.SetProjectLibraryEvidence(h.projectLibraryEvidence)
+	wtp.SetResourceCatalogs(h.resourceCatalogs)
 	if name := strings.TrimSpace(agentName); name != "" {
 		wtp.SetExecutingAgent(name)
 	}

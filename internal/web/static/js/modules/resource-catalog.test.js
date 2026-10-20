@@ -9,7 +9,8 @@ import {
   entryStateLabel,
   operationLine,
   providerLine,
-  rowContext
+  rowContext,
+  splitTags
 } from './resource-catalog.js';
 
 const DATE = { locale: 'en-US', timeZone: 'UTC' };
@@ -295,4 +296,65 @@ test('the page loads, offers Inspect, and approves only the sources the owner ke
   assert.deepEqual(body.source_ids, ['project_templates']);
   assert.equal(body.review_token, 'rv-1');
   assert.equal(review.open, false);
+});
+
+test('tags split on commas and drop blanks', () => {
+  assert.deepEqual(splitTags(' live, vocals ,, '), ['live', 'vocals']);
+  assert.deepEqual(splitTags(''), []);
+});
+
+test('saving notes sends the read revision and a conflict keeps the owner text', async () => {
+  const doc = fakeDocument();
+  const writes = [];
+  let conflict = true;
+  const detail = {
+    entry_id: 'rc_1',
+    name: 'Lyrics',
+    kind_label: 'Script',
+    facts: [],
+    favorite: false,
+    tags: [],
+    note: 'Old',
+    annotation_revision: 3
+  };
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/entries/rc_1')) return { ok: true, status: 200, json: async () => detail };
+    if (url.endsWith('/entries/rc_1/annotation')) {
+      writes.push(JSON.parse(options.body));
+      if (conflict) {
+        conflict = false;
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code: 'annotation_conflict',
+            current: { note: 'From another tab', revision: 4 }
+          })
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ annotation: { revision: 5 } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ rows: [] }) };
+  };
+  const page = new ResourceCatalogPage({
+    workspaceId: 's1',
+    fetchImpl,
+    documentImpl: doc,
+    locationImpl: { search: '' }
+  });
+  page.view = { categories: [], sources: [] };
+  await page.showDetail('rc_1');
+  const panel = doc.getElementById('resourceCatalogDetail');
+  const form = panel.children.find(child => child.className === 'resource-catalog-annotation');
+  const note = form.children[3].children[1];
+  const status = form.children[5];
+  note.value = 'Mine';
+  await form.listeners.submit({ preventDefault() {} });
+  assert.equal(writes[0].base_revision, 3);
+  assert.equal(writes[0].note, 'Mine');
+  assert.match(status.textContent, /From another tab/);
+  assert.equal(note.value, 'Mine', 'the owner text stays in the field');
+  await form.listeners.submit({ preventDefault() {} });
+  assert.equal(writes[1].base_revision, 4, 'saving again replaces knowingly');
+  assert.equal(status.textContent, 'Saved.');
 });

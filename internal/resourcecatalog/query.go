@@ -488,6 +488,10 @@ type EntryDetail struct {
 	SourceLocation     string       `json:"source_location,omitempty"`
 	Note               string       `json:"note"`
 	AnnotationRevision int64        `json:"annotation_revision"`
+	// SuggestedReplacement is one present entry that looks like this one
+	// (same category, kind and name) when this one is gone, withdrawn or from
+	// another setup and has notes. Moving them is the owner's choice.
+	SuggestedReplacement *EntryRow `json:"suggested_replacement,omitempty"`
 }
 
 // Entry returns one entry for its owner.
@@ -511,6 +515,10 @@ func (s *Service) Entry(owner, studioID, entryID string) (EntryDetail, error) {
 		}
 		if annotation, ok := state.annotations.Annotations[entryID]; ok {
 			detail.Note, detail.AnnotationRevision = annotation.Note, annotation.Revision
+		}
+		if replacement, ok := state.suggestedReplacement(entry); ok {
+			row := state.row(replacement, 280)
+			detail.SuggestedReplacement = &row
 		}
 		return detail, nil
 	}

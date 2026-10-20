@@ -6,6 +6,44 @@
 // decides everything; nothing here creates, inspects or reads a resource.
 
 import { PROVIDER_UPGRADED_EVENT } from './assistant-program.js';
+import { categoryStateLine } from './resource-catalog.js';
+
+// catalogLines are the Home's view of the Studio's catalog: one line per
+// declared category, with the count of what was found and how fresh it is.
+export function catalogLines(catalog, options = {}) {
+  if (!catalog || !Array.isArray(catalog.categories)) return [];
+  const lines = catalog.categories.map(category => {
+    const state = categoryStateLine(category, options);
+    const found =
+      category.state === 'not_inspected' ? '' : `${Number(category.present) || 0} found · `;
+    return `${category.label}: ${found}${state}`;
+  });
+  if (catalog.provider && !catalog.provider.available) {
+    lines.push('Unavailable now; the last saved counts are shown.');
+  }
+  return lines;
+}
+
+// templatesEvidence is the Studio category that stands for the Home profile's
+// templates row, once it has a current read. Until then the row keeps its
+// own list.
+export function templatesEvidence(summaries = []) {
+  for (const summary of summaries) {
+    const workspace = summary?.workspace;
+    for (const category of summary?.catalog?.categories || []) {
+      if (category.profile_row !== 'templates' || !workspace?.url) continue;
+      if (category.state !== 'inspected' && category.state !== 'partial') continue;
+      return {
+        label: String(summary.attachment?.label || workspace.name || ''),
+        url: `${workspace.url}/catalog`,
+        present: Number(category.present) || 0,
+        state: category.state,
+        inspectedAt: category.inspected_at || ''
+      };
+    }
+  }
+  return null;
+}
 
 // setUpURL opens the shared Create Workspace wizard (it lives on pages with
 // the create dialog) preselected with the blueprint and this Home.
@@ -25,6 +63,12 @@ export function resourceWorkspaceView(summary, homeId) {
     ? { text: `Open ${label}`, href: `${String(workspace.url)}/catalog`, primary: true }
     : null;
   const plugins = { text: 'Manage plugins', href: '/plugins', primary: false };
+  const view = resourceWorkspaceStateView(summary, homeId, { label, description, open, plugins });
+  view.catalog = workspace ? catalogLines(summary.catalog) : [];
+  return view;
+}
+
+function resourceWorkspaceStateView(summary, homeId, { label, description, open, plugins }) {
   switch (summary?.state) {
     case 'available':
       return { label, description, note: '', actions: open ? [open] : [] };
@@ -81,13 +125,15 @@ export class HomeResourceWorkspacesPanel {
     workspaceId,
     root = null,
     fetchImpl = globalThis.fetch?.bind(globalThis),
-    documentImpl = globalThis.document
+    documentImpl = globalThis.document,
+    onLoad = null
   } = {}) {
     this.workspaceId = String(workspaceId || '');
     this.fetchImpl = fetchImpl;
     this.document = documentImpl;
     this.root = root || this.document?.getElementById('homeResourceWorkspaces') || null;
     this.summaries = [];
+    this.onLoad = onLoad;
   }
 
   async init() {
@@ -113,6 +159,7 @@ export class HomeResourceWorkspacesPanel {
       this.summaries = [];
     }
     this.render();
+    this.onLoad?.(this.summaries);
   }
 
   render() {
@@ -138,6 +185,21 @@ export class HomeResourceWorkspacesPanel {
       description.className = 'home-resource-workspace-description';
       description.textContent = view.description;
       card.append(description);
+    }
+    if (view.catalog?.length) {
+      const list = doc.createElement('ul');
+      list.className = 'home-resource-workspace-catalog';
+      for (const line of view.catalog) {
+        const item = doc.createElement('li');
+        item.textContent = line;
+        list.append(item);
+      }
+      card.append(list);
+      const caveat = doc.createElement('p');
+      caveat.className = 'home-resource-workspace-note';
+      caveat.textContent =
+        'Counts are what was found in approved sources, not everything installed.';
+      card.append(caveat);
     }
     if (view.note) {
       const note = doc.createElement('p');

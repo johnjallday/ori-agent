@@ -544,6 +544,10 @@
                     "label": { "type": "string", "minLength": 1, "maxLength": 40 }
                   }
                 }
+              },
+              "profile_row": {
+                "description": "The Home profile row this category stands for once it has evidence; on one category at most.",
+                "enum": ["templates"]
               }
             }
           }

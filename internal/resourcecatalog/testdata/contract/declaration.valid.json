@@ -15,7 +15,8 @@
         { "id": "project_template", "label": "Project template" },
         { "id": "track_template", "label": "Track template" }
       ],
-      "facts": []
+      "facts": [],
+      "profile_row": "templates"
     },
     {
       "id": "scripts",

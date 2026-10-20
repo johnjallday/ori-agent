@@ -663,6 +663,8 @@ func (b *ServerBuilder) initializeHandlers() {
 			b.sessionHandler.SetInstalledPluginLister(b.pluginHandler.Manager())
 			if b.chatHandler != nil {
 				b.chatHandler.SetProjectLibraryEvidence(b.sessionHandler.AssistantLibraryProviderEvidence)
+				// Catalog lookups from a linked song or the Studio itself.
+				b.chatHandler.SetResourceCatalogs(b.sessionHandler.ResourceCatalogs)
 			}
 		}
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))

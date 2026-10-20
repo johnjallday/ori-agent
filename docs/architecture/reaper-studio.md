@@ -177,7 +177,7 @@ action (§5.2), never as a second creation path.
       "description": "Project and track templates in your REAPER resource folder.",
       "kinds": [ { "id": "project_template", "label": "Project template" },
                  { "id": "track_template",   "label": "Track template" } ],
-      "facts": [] },
+      "facts": [], "profile_row": "templates" },
     { "id": "scripts", "label": "Scripts",
       "description": "Lua, EEL and Python scripts in REAPER's Scripts folder and Ori's script library.",
       "kinds": [ { "id": "script", "label": "Script" } ],
@@ -198,7 +198,9 @@ must be declared by `service_id` with policy `read_only`. Categories number
 1–8, kinds 1–8 per category, facts 0–8 per category. IDs are lower-case
 `[a-z0-9_]{1,40}`. Labels are 1–40 characters and descriptions 1–240, each one
 plain line. Declared words are inert; no path, URL, command or operation appears
-in them.
+in them. Optional `profile_row` (only `"templates"`, on one category at most)
+says the category stands for the Home profile's templates row (§12); the host
+never infers it from an ID.
 
 The declaration is part of the plugin's trusted fingerprint. A change to its
 `id`, `version`, categories, kinds or facts is a catalog version change (§13).
@@ -707,9 +709,11 @@ everything unchanged.
 
 `profile.read`, the profile's closed shape, its consent and the existing
 templates row stay as they are. Once the Home's Studio has a published
-`templates` category whose state is Inspected or Partial, the row shows the
-Studio's count, freshness and an **Open** link instead of the old list. The old
-list stays available as "Earlier list (read <date>)", labelled historical. No
+category declaring `profile_row: "templates"` whose state is Inspected or
+Partial, the row shows the Studio's count, freshness and an **Open** link
+instead of the old list, with only **Forget earlier list** left of its own
+actions. The old list stays available as "Earlier list (read <date>)", labelled
+historical. No
 template name becomes a catalog ID and no consent is widened. `home_profile_read`
 keeps returning the profile's own facts. Until then the row is unchanged.
 

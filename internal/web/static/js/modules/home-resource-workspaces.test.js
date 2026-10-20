@@ -2,9 +2,64 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HomeResourceWorkspacesPanel,
+  catalogLines,
   resourceWorkspaceView,
-  setUpURL
+  setUpURL,
+  templatesEvidence
 } from './home-resource-workspaces.js';
+import { catalogTemplatesNote } from './home-profile.js';
+
+const CATALOG = {
+  revision: 3,
+  provider: { available: true },
+  categories: [
+    {
+      id: 'templates',
+      label: 'Templates',
+      present: 12,
+      state: 'inspected',
+      inspected_at: '2026-10-21T09:00:00Z',
+      profile_row: 'templates'
+    },
+    { id: 'scripts', label: 'Scripts', present: 0, state: 'access_withdrawn' },
+    { id: 'audio_plugins', label: 'Audio Plugins', present: 0, state: 'not_inspected' }
+  ]
+};
+
+test('the Home card counts what was found and how fresh it is', () => {
+  const lines = catalogLines(CATALOG, { locale: 'en-US', timeZone: 'UTC' });
+  assert.match(lines[0], /^Templates: 12 found · Inspected Oct 21, 2026/);
+  assert.equal(lines[1], 'Scripts: 0 found · Access withdrawn');
+  assert.equal(lines[2], 'Audio Plugins: Not inspected');
+  const offline = catalogLines({ ...CATALOG, provider: { available: false } });
+  assert.match(offline.at(-1), /Unavailable now/);
+});
+
+test('the profile templates row defers to the Studio only after a current read', () => {
+  const studio = {
+    attachment: { label: 'REAPER Studio' },
+    workspace: { id: 's1', url: '/workspaces/reaper-studio' },
+    catalog: CATALOG
+  };
+  const evidence = templatesEvidence([studio]);
+  assert.deepEqual(evidence, {
+    label: 'REAPER Studio',
+    url: '/workspaces/reaper-studio/catalog',
+    present: 12,
+    state: 'inspected',
+    inspectedAt: '2026-10-21T09:00:00Z'
+  });
+  assert.match(
+    catalogTemplatesNote(evidence, { locale: 'en-US', timeZone: 'UTC' }),
+    /^12 templates in REAPER Studio, inspected Oct 21, 2026\.$/
+  );
+  const notYet = {
+    ...studio,
+    catalog: { ...CATALOG, categories: [{ ...CATALOG.categories[0], state: 'not_inspected' }] }
+  };
+  assert.equal(templatesEvidence([notYet]), null);
+  assert.equal(templatesEvidence([{ ...studio, workspace: null }]), null);
+});
 
 const ATTACHMENT = {
   provider_plugin_id: 'reaper-plugin',

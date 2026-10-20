@@ -917,6 +917,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog", s.Handlers.Session.GetResourceCatalog)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog/entries", s.Handlers.Session.ListResourceCatalogEntries)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog/entries/{entryID}", s.Handlers.Session.GetResourceCatalogEntry)
+		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/resource-catalog/entries/{entryID}/annotation", s.Handlers.Session.SetResourceCatalogAnnotation)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/entries/{entryID}/annotation/move", s.Handlers.Session.MoveResourceCatalogAnnotation)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/review", s.Handlers.Session.ReviewResourceCatalogSources)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/commit", s.Handlers.Session.CommitResourceCatalogSources)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/{sourceID}/withdraw/review", s.Handlers.Session.ReviewResourceCatalogWithdrawal)

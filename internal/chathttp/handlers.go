@@ -29,6 +29,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/resourcecatalog"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -75,6 +76,7 @@ type Handler struct {
 	externalMemoryGate     PersonalAssistantGate // verifies the responding instance is that assistant
 	runtimeResolver        chatRuntimeResolver
 	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
+	resourceCatalogs       func() *resourcecatalog.Service
 	toolCallStore          session.ToolCallStore
 	calendarOpsPreference  chatCalendarOpsPreference
 	backupAdvisorReader    backupAdvisorReader

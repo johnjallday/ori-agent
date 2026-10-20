@@ -309,7 +309,7 @@
     import { SampleLibraryPanel } from '/js/modules/sample-library.js';
     import { ProjectLibraryPanel } from '/js/modules/project-library.js';
     import { HomeProfilePanel } from '/js/modules/home-profile.js';
-    import { HomeResourceWorkspacesPanel } from '/js/modules/home-resource-workspaces.js';
+    import { HomeResourceWorkspacesPanel, templatesEvidence } from '/js/modules/home-resource-workspaces.js';
     const page = new AssistantProgramPage({
       workspaceId: {{.Extra.WorkspaceID}},
       workspaceSlug: {{.Extra.WorkspaceSlug}}
@@ -318,9 +318,13 @@
     void page.init().then(() => {
       void new SampleLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
       void new ProjectLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
-      void new HomeProfilePanel({workspaceId: page.workspaceId, program: page.program}).init();
+      const profile = new HomeProfilePanel({workspaceId: page.workspaceId, program: page.program});
+      void profile.init();
       if (page.program?.is_station) {
-        void new HomeResourceWorkspacesPanel({workspaceId: page.workspaceId}).init();
+        void new HomeResourceWorkspacesPanel({
+          workspaceId: page.workspaceId,
+          onLoad: summaries => profile.setCatalogTemplates(templatesEvidence(summaries))
+        }).init();
       }
     });
   </script>

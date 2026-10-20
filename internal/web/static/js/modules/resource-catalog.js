@@ -132,6 +132,14 @@ export function entryStateLabel(state) {
   return ENTRY_STATES[state] || '';
 }
 
+// splitTags turns the comma-separated field into the list the server checks.
+export function splitTags(value) {
+  return String(value || '')
+    .split(',')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+}
+
 // rowContext keeps same-named entries apart: kind, source and known facts.
 export function rowContext(row) {
   const facts = (row?.facts || []).filter(fact => fact.known).map(fact => fact.value);
@@ -525,6 +533,112 @@ export class ResourceCatalogPage {
     note.textContent =
       'Listed means seen during inspection. It does not mean licensed, loaded, working or tested.';
     panel.append(note);
+    this.renderAnnotationForm(panel, detail);
+  }
+
+  // The owner's notes sit apart from what was observed: a refresh never
+  // touches them, and a write against older notes is refused, not merged.
+  renderAnnotationForm(panel, detail) {
+    const doc = this.document;
+    const form = doc.createElement('form');
+    form.className = 'resource-catalog-annotation';
+    const heading = doc.createElement('h3');
+    heading.textContent = 'Your notes';
+    form.append(heading);
+    const favoriteLabel = doc.createElement('label');
+    favoriteLabel.className = 'resource-catalog-check';
+    const favorite = doc.createElement('input');
+    favorite.type = 'checkbox';
+    favorite.checked = Boolean(detail.favorite);
+    const favoriteText = doc.createElement('span');
+    favoriteText.textContent = 'Favorite';
+    favoriteLabel.append(favorite, favoriteText);
+    const tagsLabel = doc.createElement('label');
+    tagsLabel.className = 'resource-catalog-field';
+    const tagsText = doc.createElement('span');
+    tagsText.textContent = 'Tags, separated by commas';
+    const tags = doc.createElement('input');
+    tags.type = 'text';
+    tags.maxLength = 700;
+    tags.value = (detail.tags || []).join(', ');
+    tagsLabel.append(tagsText, tags);
+    const noteLabel = doc.createElement('label');
+    noteLabel.className = 'resource-catalog-field';
+    const noteText = doc.createElement('span');
+    noteText.textContent = 'Note';
+    const noteInput = doc.createElement('textarea');
+    noteInput.rows = 4;
+    noteInput.maxLength = 4000;
+    noteInput.value = detail.note || '';
+    noteLabel.append(noteText, noteInput);
+    const status = doc.createElement('p');
+    status.className = 'resource-catalog-annotation-status';
+    status.setAttribute('role', 'status');
+    const save = doc.createElement('button');
+    save.type = 'submit';
+    save.className = 'modern-btn modern-btn-primary';
+    save.textContent = 'Save notes';
+    form.append(favoriteLabel, tagsLabel, noteLabel, save, status);
+    let baseRevision = Number(detail.annotation_revision) || 0;
+    form.addEventListener('submit', async event => {
+      event.preventDefault?.();
+      const result = await this.request(
+        this.api(`/entries/${encodeURIComponent(detail.entry_id)}/annotation`),
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            favorite: favorite.checked,
+            tags: splitTags(tags.value),
+            note: noteInput.value,
+            base_revision: baseRevision
+          })
+        }
+      );
+      if (result.ok) {
+        baseRevision = Number(result.body?.annotation?.revision) || 0;
+        status.textContent = 'Saved.';
+        void this.loadEntries();
+        return;
+      }
+      if (result.body?.code === 'annotation_conflict') {
+        // Keep the owner's text; show what is saved now. Saving again
+        // replaces it knowingly.
+        baseRevision = Number(result.body.current?.revision) || 0;
+        status.textContent = `These notes changed somewhere else. Saved now: “${result.body.current?.note || ''}”. Save again to replace it with yours.`;
+        return;
+      }
+      status.textContent =
+        result.body?.message || result.body?.error || 'The notes could not be saved.';
+    });
+    panel.append(form);
+    const replacement = detail.suggested_replacement;
+    if (replacement && detail.annotation_revision) {
+      const offer = doc.createElement('p');
+      offer.className = 'resource-catalog-replacement';
+      offer.textContent = `This looks like ${replacement.name} in ${replacement.source_label || 'another source'}. `;
+      const move = doc.createElement('button');
+      move.type = 'button';
+      move.className = 'modern-btn modern-btn-secondary';
+      move.textContent = 'Move my notes there';
+      move.addEventListener('click', async () => {
+        const result = await this.request(
+          this.api(`/entries/${encodeURIComponent(detail.entry_id)}/annotation/move`),
+          {
+            method: 'POST',
+            body: JSON.stringify({ to_entry_id: replacement.entry_id, base_revision: baseRevision })
+          }
+        );
+        if (result.ok) {
+          await this.loadEntries();
+          await this.showDetail(replacement.entry_id);
+          return;
+        }
+        status.textContent =
+          result.body?.message || result.body?.error || 'The notes could not be moved.';
+      });
+      offer.append(move);
+      panel.append(offer);
+    }
   }
 
   async openReview() {

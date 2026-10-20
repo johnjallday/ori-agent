@@ -151,6 +151,8 @@ var nativeToolSideEffects = map[string]SideEffect{
 	"home_library_sessions":               SideEffectRead,
 	"home_library_handoff_receipts":       SideEffectRead,
 	"home_profile_read":                   SideEffectRead,
+	"resource_catalog_search":             SideEffectRead,
+	"resource_catalog_detail":             SideEffectRead,
 	"time":                                SideEffectRead,
 	"workspace_save_note":                 SideEffectWrite,
 	"github_propose_change":               SideEffectWrite,

@@ -9,6 +9,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/resourcecatalog"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -58,6 +59,9 @@ type resourceWorkspaceSummary struct {
 	// It is present only while the provider can create one.
 	TemplateID string                `json:"template_id,omitempty"`
 	Workspace  *resourceWorkspaceRef `json:"workspace,omitempty"`
+	// Catalog is the existing workspace's catalog as its Home sees it: counts
+	// and freshness from the same published revision, never an annotation.
+	Catalog *resourcecatalog.CatalogSummary `json:"catalog,omitempty"`
 }
 
 // GetAssistantResourceWorkspaces handles
@@ -90,6 +94,18 @@ func (h *Handler) GetAssistantResourceWorkspaces(w http.ResponseWriter, r *http.
 	if err != nil {
 		_ = orihttp.RespondInternalError(w, "The Home's workspaces could not be read")
 		return
+	}
+	if catalogs := h.ResourceCatalogs(); catalogs != nil {
+		for index := range summaries {
+			if summaries[index].Workspace == nil {
+				continue
+			}
+			// A catalog that cannot be read leaves the card without counts;
+			// the Studio page says why.
+			if catalog, err := catalogs.HomeSummary(owner, summaries[index].Workspace.ID); err == nil {
+				summaries[index].Catalog = &catalog
+			}
+		}
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"resource_workspaces": summaries})
 }

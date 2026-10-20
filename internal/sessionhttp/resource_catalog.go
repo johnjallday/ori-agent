@@ -55,7 +55,8 @@ func (h *Handler) ResourceCatalogs() *resourcecatalog.Service {
 	}
 	h.resourceCatalogs = resourcecatalog.NewService(resourcecatalog.Deps{
 		Workspaces: h.workspaceTaskStore, Folders: folders, DataDir: dataDir,
-		Provider: resourceCatalogProvider{list: h.installedPluginLister.List, call: h.resourceCatalogCall},
+		Provider:              resourceCatalogProvider{list: h.installedPluginLister.List, call: h.resourceCatalogCall},
+		HomeProviderAvailable: h.assistantHomeProviderAvailable,
 	})
 	return h.resourceCatalogs
 }
@@ -352,6 +353,66 @@ func (h *Handler) CancelResourceCatalogInspection(w http.ResponseWriter, r *http
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"operation": op})
+}
+
+// SetResourceCatalogAnnotation handles PUT .../entries/{entryID}/annotation:
+// the owner's favorite, tags and note, written against base_revision.
+func (h *Handler) SetResourceCatalogAnnotation(w http.ResponseWriter, r *http.Request) {
+	service, owner, studioID, ok := h.catalogRequest(w, r)
+	if !ok {
+		return
+	}
+	var request resourcecatalog.AnnotationInput
+	if !decodeStrictAction(w, r, &request, "The notes are invalid") {
+		return
+	}
+	saved, err := service.SetAnnotation(owner, studioID, strings.TrimSpace(r.PathValue("entryID")), request)
+	if respondAnnotationConflict(w, err) {
+		return
+	}
+	if err != nil {
+		respondCatalogError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"annotation": saved})
+}
+
+// MoveResourceCatalogAnnotation handles POST .../entries/{entryID}/annotation/move.
+func (h *Handler) MoveResourceCatalogAnnotation(w http.ResponseWriter, r *http.Request) {
+	service, owner, studioID, ok := h.catalogRequest(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		ToEntryID    string `json:"to_entry_id"`
+		BaseRevision int64  `json:"base_revision"`
+	}
+	if !decodeStrictAction(w, r, &request, "The move request is invalid") {
+		return
+	}
+	moved, err := service.MoveAnnotation(owner, studioID, strings.TrimSpace(r.PathValue("entryID")), strings.TrimSpace(request.ToEntryID), request.BaseRevision)
+	if respondAnnotationConflict(w, err) {
+		return
+	}
+	if err != nil {
+		respondCatalogError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"annotation": moved})
+}
+
+// respondAnnotationConflict answers a stale annotation write with the current
+// value, so the page can show both rather than lose either.
+func respondAnnotationConflict(w http.ResponseWriter, err error) bool {
+	var conflict *resourcecatalog.AnnotationConflictError
+	if !errors.As(err, &conflict) {
+		return false
+	}
+	_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+		"error": "These notes changed somewhere else. Your text was not saved; compare and save again.",
+		"code":  "annotation_conflict", "current": conflict.Current,
+	})
+	return true
 }
 
 // ReviewResourceCatalogWithdrawal handles POST .../sources/{sourceID}/withdraw/review.

@@ -70,8 +70,12 @@ type Deps struct {
 	// never in a workspace folder.
 	DataDir  string
 	Provider Provider
-	Now      func() time.Time
-	NewID    func() string
+	// HomeProviderAvailable reports whether a Home's own package is installed,
+	// enabled and still the one it is pinned to. Lookups need it; nil means
+	// lookups are unavailable.
+	HomeProviderAvailable func(home *workspace.Workspace) bool
+	Now                   func() time.Time
+	NewID                 func() string
 }
 
 // Service owns every Studio catalog: reviews, inspection, publication,

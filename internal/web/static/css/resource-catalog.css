@@ -169,6 +169,31 @@
   color: var(--bs-secondary-color);
   font-size: 0.85rem;
 }
+.resource-catalog-annotation {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--bs-border-color);
+}
+.resource-catalog-annotation h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.resource-catalog-annotation textarea,
+.resource-catalog-annotation input[type="text"] {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.3rem;
+  background: var(--bs-body-bg);
+  color: inherit;
+}
+.resource-catalog-annotation-status,
+.resource-catalog-replacement {
+  margin: 0;
+  font-size: 0.85rem;
+}
 .resource-catalog-sources h2 {
   font-size: 1.05rem;
 }

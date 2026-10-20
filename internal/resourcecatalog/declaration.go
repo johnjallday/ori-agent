@@ -64,7 +64,14 @@ type Category struct {
 	Description string      `json:"description"`
 	Kinds       []Kind      `json:"kinds"`
 	Facts       []FactField `json:"facts"`
+	// ProfileRow names the Home profile row this category stands for, once
+	// it has evidence. Only ProfileRowTemplates exists.
+	ProfileRow string `json:"profile_row,omitempty"`
 }
+
+// ProfileRowTemplates is the Home profile's templates row. A category that
+// declares it takes over that row's current list (contract §12).
+const ProfileRowTemplates = "templates"
 
 // Kind is one type of entry inside a category.
 type Kind struct {
@@ -117,11 +124,18 @@ func (d *Declaration) validate() error {
 		return fmt.Errorf("categories must number 1 to %d", MaxCategories)
 	}
 	seen := make(map[string]bool, len(d.Categories))
+	profileRows := map[string]bool{}
 	for _, category := range d.Categories {
 		if !localIDPattern.MatchString(category.ID) || seen[category.ID] {
 			return errors.New("category ids must be unique identifiers")
 		}
 		seen[category.ID] = true
+		if category.ProfileRow != "" {
+			if category.ProfileRow != ProfileRowTemplates || profileRows[category.ProfileRow] {
+				return errors.New("profile_row must be templates, on one category at most")
+			}
+			profileRows[category.ProfileRow] = true
+		}
 		if !plainLine(category.Label, maxLabelChars) || !plainLine(category.Description, maxDescriptionChars) {
 			return errors.New("category label or description is not one plain line within its limit")
 		}

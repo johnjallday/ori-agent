@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/resourcecatalog"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -48,6 +49,9 @@ type WorkspaceToolProvider struct {
 	// a global agent fallback with the same name cannot substitute for it.
 	executingInstanceID    string
 	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
+	// resourceCatalogs reaches the resource catalog service for the two
+	// lookup tools; authority comes only from this provider's bound context.
+	resourceCatalogs func() *resourcecatalog.Service
 	// managerRun is set only by the host's scan-review runner.
 	managerRun projectlibrary.ManagerRunContext
 
@@ -287,6 +291,12 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		if p.managerRun.ScanID != "" && p.managerRun.Brief {
 			tools = append(tools, p.librarySaveBriefTool())
 		}
+	}
+
+	// A song or the Studio itself may look up the Home's resource catalog
+	// when its executing role is bound there; each call checks again.
+	if p.resourceCatalogLookupEnabled() {
+		tools = append(tools, p.resourceCatalogSearchTool(), p.resourceCatalogDetailTool())
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.

@@ -146,6 +146,9 @@ type catalogFixture struct {
 	home     *workspace.Workspace
 	dataDir  string
 	clock    time.Time
+	// homeAvailable stands for the Home's own package being installed and
+	// pinned; lookups read it at call time.
+	homeAvailable bool
 }
 
 func newCatalogFixture(t *testing.T) *catalogFixture {
@@ -216,6 +219,11 @@ func (f *catalogFixture) newService(dataDir string) *Service {
 	var mu sync.Mutex
 	return NewService(Deps{
 		Workspaces: f.store, Folders: f.store, DataDir: dataDir, Provider: f.provider,
+		HomeProviderAvailable: func(*workspace.Workspace) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return f.homeAvailable
+		},
 		Now: func() time.Time {
 			mu.Lock()
 			defer mu.Unlock()
