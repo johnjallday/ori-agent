@@ -1,0 +1,11 @@
+{
+  "provider_plugin_id": "reaper-plugin",
+  "blueprint_id": "reaper-studio",
+  "project_team_id": "reaper-studio-team",
+  "project_team_schema_version": 1,
+  "min_project_team_version": 1,
+  "max_project_team_version": 1,
+  "workspace_kind": "resource",
+  "label": "REAPER Studio",
+  "description": "One place for the templates, scripts and audio plugins your REAPER setup already has."
+}

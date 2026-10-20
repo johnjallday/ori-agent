@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "installation_id": "inst_8f3c2a91d4e7b605",
+  "source_id": "reaper_scripts",
+  "state": "ok",
+  "entries": [
+    {
+      "native_id": "Cockos/Lyrics.lua",
+      "kind": "script",
+      "name": "Lyrics",
+      "modified_at": "2026-09-01T10:00:00Z",
+      "facts": [
+        { "id": "language", "value": "Lua" },
+        { "id": "registration", "value": "Yes" }
+      ],
+      "description": { "text": "Shows the lyrics of the current item.", "source": "Script header" }
+    },
+    {
+      "native_id": "Vocals/Lyrics.lua",
+      "kind": "script",
+      "name": "Lyrics",
+      "facts": [{ "id": "language", "value": "Lua" }]
+    },
+    {
+      "native_id": "ReaTeam Scripts/Items/Split at grid.eel",
+      "kind": "script",
+      "name": "Split at grid",
+      "facts": [
+        { "id": "language", "value": "EEL" },
+        { "id": "package", "value": "ReaTeam Scripts" }
+      ]
+    }
+  ],
+  "next_cursor": "after:ReaTeam%20Scripts/Items/Split%20at%20grid.eel",
+  "coverage": {
+    "visited": 7,
+    "skipped": [
+      { "reason": "symlink", "count": 1 },
+      { "reason": "external_registration", "count": 2 }
+    ]
+  }
+}
