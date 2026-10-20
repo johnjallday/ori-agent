@@ -53,7 +53,9 @@ func TestBuildPlanWordsTheIntegrationLine(t *testing.T) {
 	if d := line(BuildPlan(facts), personalassistant.FolderPlanIntegration).Detail; !strings.Contains(d, "johnjallday/reaper-plugin") {
 		t.Errorf("an install must name its reviewed source: %q", d)
 	}
-	if d := line(BuildPlan(baseFacts()), personalassistant.FolderPlanIntegration).Detail; d != "Nothing is installed." {
+	// A ready integration says it is already in place; "Nothing is installed."
+	// read as if it were missing (manual test, 2026-10-20).
+	if d := line(BuildPlan(baseFacts()), personalassistant.FolderPlanIntegration).Detail; d != "Already installed and enabled — nothing to install." {
 		t.Errorf("a ready integration installs nothing: %q", d)
 	}
 }

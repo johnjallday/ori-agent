@@ -305,7 +305,7 @@ func libraryDetailSongDetails(appName string) string {
 func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan {
 	intent := personalassistant.FolderSetupIntent{Portfolio: true, Placement: "grouped", HomeTemplate: facts.HomeTemplate}
 	provider := pluginLine(personalassistant.FolderPlanProvider, "plugin", facts.Provider)
-	if provider.Detail == "Nothing is installed." || provider.Detail == "" {
+	if provider.Detail == pluginDetailReady || provider.Detail == "" {
 		provider.Detail = "It provides the Home these projects are listed in."
 	}
 	lines := []personalassistant.FolderPlanLine{provider}
@@ -421,10 +421,14 @@ func pluginLine(kind, noun string, p Plugin) personalassistant.FolderPlanLine {
 		line.Detail = reviewedSource(p.Source)
 	default:
 		line.Name = "Uses the installed reviewed " + p.Name + " " + noun
-		line.Detail = "Nothing is installed."
+		line.Detail = pluginDetailReady
 	}
 	return line
 }
+
+// pluginDetailReady says a plugin the plan only uses is already in place. It
+// used to read "Nothing is installed.", which said the opposite to the user.
+const pluginDetailReady = "Already installed and enabled — nothing to install."
 
 // pluralLabel names more than one of a blueprint's projects ("Studio songs").
 func pluralLabel(label string) string {
