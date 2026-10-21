@@ -162,6 +162,9 @@ type LookItem struct {
 	// InDecision says the item's note marks an open decision, so it becomes
 	// a needs-decision follow-up.
 	InDecision bool `json:"in_decision,omitempty"`
+	// Link opens the note in Obsidian (FR26); "" for a plain Markdown folder.
+	// It is built from the vault's name and the note's path, never read.
+	Link string `json:"link,omitempty"`
 }
 
 // Receipt remembers a write by its request_id, so a replay returns what the
@@ -416,7 +419,9 @@ func validateItem(item LookItem) error {
 		item.Text == "" || utf8.RuneCountInString(item.Text) > MaxTaskTextRunes || strings.ContainsAny(item.Text, "\r\n"),
 		note == "" || path.IsAbs(note) || path.Clean(note) != note || note == ".." || strings.HasPrefix(note, "../") || strings.Contains(note, "\\"),
 		item.Line < 1,
-		item.Due != "" && (!isoDayPattern.MatchString(item.Due) || !validDate(item.Due)):
+		item.Due != "" && (!isoDayPattern.MatchString(item.Due) || !validDate(item.Due)),
+		item.Link != "" && (!strings.HasPrefix(item.Link, "obsidian://open?vault=") || len(item.Link) > 2048 ||
+			strings.ContainsAny(item.Link, " \r\n\"<>")):
 		return ErrInvalidRecord
 	}
 	return nil

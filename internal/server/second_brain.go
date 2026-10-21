@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
@@ -34,6 +35,10 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 			return folderpath.Check(path, filejanitor.DefaultRootGuards())
 		},
 		FollowUps: lateFollowUps{builder: b},
+		// The headline is written by the system model, through the same path as
+		// the Daily Brief and email triage, resolved on every look so a model set
+		// later is used without a restart (FR23).
+		Looker: secondbrain.Looker{Model: systemHeadlineModel{builder: b}},
 	})
 	b.personalAssistantSecondBrain = service
 	b.personalAssistantHandler.SetSecondBrain(service, connectionshttp.NewOriginGuard().Check)
@@ -66,4 +71,36 @@ func (f lateFollowUps) FindBySource(ctx context.Context, userID, sourceType, sou
 		return nil, err
 	}
 	return service.FindBySource(ctx, userID, sourceType, sourceID)
+}
+
+func (f lateFollowUps) Edit(ctx context.Context, userID, id, title, detail string, dueAt *time.Time) (*followup.FollowUp, error) {
+	service, err := f.service()
+	if err != nil {
+		return nil, err
+	}
+	return service.Edit(ctx, userID, id, title, detail, dueAt)
+}
+
+func (f lateFollowUps) Complete(ctx context.Context, userID, id string) (*followup.FollowUp, error) {
+	service, err := f.service()
+	if err != nil {
+		return nil, err
+	}
+	return service.Complete(ctx, userID, id)
+}
+
+var errNoSystemModel = errors.New("server: no system model is set")
+
+// systemHeadlineModel is the configured system model, read on every look.
+type systemHeadlineModel struct{ builder *ServerBuilder }
+
+func (m systemHeadlineModel) Complete(ctx context.Context, system, user string) (string, error) {
+	if m.builder == nil {
+		return "", errNoSystemModel
+	}
+	model := systemModelCompleter(m.builder.configManager, m.builder.llmFactory)
+	if model == nil {
+		return "", errNoSystemModel
+	}
+	return model.Complete(ctx, system, user)
 }

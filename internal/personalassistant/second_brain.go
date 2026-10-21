@@ -48,9 +48,9 @@ func (e *SecondBrainTooSoonError) Error() string {
 const (
 	// SecondBrainLookAgainAfter is the rate limit on Look again (FR36).
 	SecondBrainLookAgainAfter = 10 * time.Minute
-	// secondBrainLookTimeout bounds one look end to end. The read has its own
-	// five-second budget; the rest is the record write.
-	secondBrainLookTimeout = 30 * time.Second
+	// secondBrainLookTimeout bounds one look end to end: the read's own
+	// five-second budget, the headline model's 45 seconds, and the writes.
+	secondBrainLookTimeout = 75 * time.Second
 
 	secondBrainActionConnect    = "connect"
 	secondBrainActionLook       = "look"
@@ -97,6 +97,47 @@ type SecondBrainService struct {
 	looks   sync.WaitGroup
 	mu      sync.Mutex
 	running map[string]string // user id → the look this process is running
+
+	// Hooks for the mission and the learned fact, bound at startup.
+	onConnected    []func(ctx context.Context, userID string, source secondbrain.Source)
+	onDisconnected []func(ctx context.Context, userID string, source secondbrain.Source)
+	onDeclined     []func(ctx context.Context, userID string)
+}
+
+// OnConnected runs fn after every connect that was not a replay, the same
+// folder again included: the starter mission and the learned fact observe it
+// (FR16, FR34). Startup wiring only.
+func (s *SecondBrainService) OnConnected(fn func(ctx context.Context, userID string, source secondbrain.Source)) {
+	if s != nil && fn != nil {
+		s.onConnected = append(s.onConnected, fn)
+	}
+}
+
+// OnDisconnected runs fn with the folder a disconnect removed (FR37).
+func (s *SecondBrainService) OnDisconnected(fn func(ctx context.Context, userID string, source secondbrain.Source)) {
+	if s != nil && fn != nil {
+		s.onDisconnected = append(s.onDisconnected, fn)
+	}
+}
+
+// OnDeclined runs fn when the user answers "I don't keep notes" (FR8).
+func (s *SecondBrainService) OnDeclined(fn func(ctx context.Context, userID string)) {
+	if s != nil && fn != nil {
+		s.onDeclined = append(s.onDeclined, fn)
+	}
+}
+
+// ConnectedSource reads the connected folder, for the learned fact's
+// revalidation.
+func (s *SecondBrainService) ConnectedSource(ctx context.Context, userID string) (secondbrain.Source, bool, error) {
+	doc, err := s.read(ctx, userID)
+	if err != nil {
+		return secondbrain.Source{}, false, err
+	}
+	if connected := doc.Connected(); connected != nil {
+		return *connected, true, nil
+	}
+	return secondbrain.Source{}, false, nil
 }
 
 // NewSecondBrainService builds the service.
@@ -232,6 +273,11 @@ func (s *SecondBrainService) DecideAsk(ctx context.Context, userID, decision, re
 	if err != nil {
 		return SecondBrainView{}, err
 	}
+	if decision == secondbrain.DecisionNone {
+		for _, fn := range s.onDeclined {
+			fn(ctx, userID)
+		}
+	}
 	return s.view(doc), nil
 }
 
@@ -285,6 +331,11 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 	}
 	if started != nil {
 		s.startLook(userID, *doc.Connected(), nil, started.ID, input.RequestID)
+	}
+	if connected := doc.Connected(); connected != nil {
+		for _, fn := range s.onConnected {
+			fn(ctx, userID, *connected)
+		}
 	}
 	view := s.view(doc)
 	view.LookID = lookID
@@ -536,7 +587,11 @@ func (s *SecondBrainService) Disconnect(ctx context.Context, userID, requestID s
 	if _, replayed, err := current.Replay(requestID, secondBrainActionDisconnect); err != nil || replayed {
 		return s.view(current), err
 	}
+	var removed secondbrain.Source
 	doc, err := s.store.Update(ctx, userID, ifVersion, func(doc *SecondBrainDocument) error {
+		if connected := doc.Connected(); connected != nil {
+			removed = *connected
+		}
 		if err := doc.Disconnect(s.deps.Now()); err != nil {
 			if errors.Is(err, secondbrain.ErrNotConnected) {
 				return ErrSecondBrainNotConnected
@@ -548,6 +603,9 @@ func (s *SecondBrainService) Disconnect(ctx context.Context, userID, requestID s
 	})
 	if err != nil {
 		return SecondBrainView{}, err
+	}
+	for _, fn := range s.onDisconnected {
+		fn(ctx, userID, removed)
 	}
 	return s.view(doc), nil
 }
@@ -595,6 +653,9 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 		ctx, cancel := context.WithTimeout(context.Background(), secondBrainLookTimeout)
 		defer cancel()
 		run := s.deps.Looker.Run(ctx, source, previous, lookID, requestID)
+		if note := run.HeadlineNote; note != "" && note != "no model" && note != "no open items" {
+			logger.Info("A look kept the rules-only headline", logger.Fields{"look_id": lookID, "reason": note})
+		}
 		_, err := s.store.Mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 			connected := doc.Connected()
 			if connected == nil || connected.ID != source.ID || connected.Current == nil || connected.Current.ID != lookID {
@@ -608,8 +669,18 @@ func (s *SecondBrainService) startLook(userID string, source secondbrain.Source,
 			}
 			return nil
 		})
-		if err != nil && !errors.Is(err, errSecondBrainLookSuperseded) {
-			logger.Warn("A look at the notes could not be saved", logger.Fields{"look_id": lookID, "error": err.Error()})
+		if err != nil {
+			if !errors.Is(err, errSecondBrainLookSuperseded) {
+				logger.Warn("A look at the notes could not be saved", logger.Fields{"look_id": lookID, "error": err.Error()})
+			}
+			return
+		}
+		// Items finished in the notes close their follow-ups (FR29). The notes
+		// are never edited to match a follow-up closed in Ori.
+		if closer, ok := s.deps.FollowUps.(secondbrain.FollowUpCloser); ok && run.Look.State == secondbrain.LookFinished && len(run.Gone) > 0 {
+			if _, err := secondbrain.CompleteGone(ctx, closer, userID, run.Gone); err != nil {
+				logger.Warn("Follow-ups done in the notes could not be closed", logger.Fields{"look_id": lookID, "error": err.Error()})
+			}
 		}
 	}()
 }

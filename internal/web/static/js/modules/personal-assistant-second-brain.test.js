@@ -195,6 +195,7 @@ test('show everything groups the items by note, suggested ones checked', () => {
     {
       note: 'Projects/Album Release.md',
       label: 'Projects/Album Release',
+      link: '',
       items: [
         { id: 'a', text: 'Master track 7', due: '2026-10-24', checked: true },
         { id: 'b', text: 'Upload stems', due: '', checked: true }
@@ -203,9 +204,29 @@ test('show everything groups the items by note, suggested ones checked', () => {
     {
       note: 'Reading List.md',
       label: 'Reading List',
+      link: '',
       items: [{ id: 'c', text: 'Read Making Music', due: '', checked: false }]
     }
   ]);
+});
+
+test('an Obsidian note heading carries only an obsidian:// link the server built', () => {
+  const link = 'obsidian://open?vault=Second%20Brain&file=Projects%2FAlbum%20Release';
+  const [album, other] = secondBrainItemGroups([
+    { id: 'a', text: 'Master track 7', note: 'Projects/Album Release.md', link },
+    { id: 'b', text: 'Sneaky', note: 'Inbox.md', link: 'javascript:alert(1)' }
+  ]);
+  assert.equal(album.link, link);
+  assert.equal(other.link, '');
+});
+
+test('look again is offered once a result has been acted on', () => {
+  assert.equal(secondBrainLookView(finished).again, null);
+  assert.deepEqual(secondBrainLookView(finished, { acted: true }).again, {
+    id: 'again',
+    label: 'Look again',
+    style: 'link'
+  });
 });
 
 test('the receipt says what was added and what was already there', () => {

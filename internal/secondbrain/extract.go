@@ -163,7 +163,7 @@ func ExtractNote(note Note) NoteFacts {
 		}
 		if decisionLine == "" {
 			if words := strings.TrimSpace(listMarker.ReplaceAllString(line, "")); decideLine.MatchString(words) {
-				decisionLine = words
+				decisionLine = strings.Join(strings.Fields(plainInline(words)), " ")
 			}
 		}
 	}
@@ -231,7 +231,28 @@ func cleanTaskText(raw string) string {
 	text = tasksRecurring.ReplaceAllString(text, "")
 	text = tasksPriority.ReplaceAllString(text, "")
 	text = inlineField.ReplaceAllString(text, "")
-	return truncateRunes(strings.Join(strings.Fields(text), " "), MaxTaskTextRunes)
+	return truncateRunes(strings.Join(strings.Fields(plainInline(text)), " "), MaxTaskTextRunes)
+}
+
+var (
+	inlineWikilink = regexp.MustCompile(`!?\[\[([^\[\]|#^]+)(?:[#^][^\[\]|]*)?(?:\|([^\[\]]*))?\]\]`)
+	inlineMDLink   = regexp.MustCompile(`!?\[([^\[\]]+)\]\([^()]*\)`)
+	inlineEmphasis = regexp.MustCompile("\\*\\*|__|`")
+)
+
+// plainInline reads a line the way a person sees it rendered: a wikilink is
+// its alias or the linked note's name, a Markdown link its text, and bold or
+// code marks are dropped. "Call [[People/Marco|Marco]]" is "Call Marco".
+func plainInline(text string) string {
+	text = inlineWikilink.ReplaceAllStringFunc(text, func(link string) string {
+		match := inlineWikilink.FindStringSubmatch(link)
+		if alias := strings.TrimSpace(match[2]); alias != "" {
+			return alias
+		}
+		return path.Base(strings.TrimSpace(match[1]))
+	})
+	text = inlineMDLink.ReplaceAllString(text, "$1")
+	return inlineEmphasis.ReplaceAllString(text, "")
 }
 
 func truncateRunes(text string, limit int) string {

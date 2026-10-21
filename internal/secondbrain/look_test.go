@@ -133,6 +133,43 @@ func newFollowUps(t *testing.T) *followup.Service {
 	return followup.NewService(followup.NewSQLiteStore(db))
 }
 
+func TestCompleteGone_ClosesOnlyOpenFollowUpsAndSaysDoneInYourNotes(t *testing.T) {
+	ctx := context.Background()
+	source, _ := musicSource(t)
+	service := newFollowUps(t)
+	look := fixedLooker().Run(ctx, source, nil, "look-1", "").Look
+	in := Acceptance{UserID: "local", WorkspaceID: "hq-local", Source: source, Items: look.Items[:3], Location: time.UTC}
+	if _, _, err := Accept(ctx, service, in); err != nil {
+		t.Fatal(err)
+	}
+	dismissed, err := service.FindBySource(ctx, "local", FollowUpSourceType, look.Items[2].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Dismiss(ctx, "local", dismissed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	gone := []string{look.Items[0].ID, look.Items[2].ID, ItemID(source.ID, "Gone.md", "never accepted")}
+	completed, err := CompleteGone(ctx, service, "local", gone)
+	if err != nil || completed != 1 {
+		t.Fatalf("completed = %d, %v; want only the open one", completed, err)
+	}
+	done, _ := service.FindBySource(ctx, "local", FollowUpSourceType, look.Items[0].ID)
+	if done.Status != followup.StatusCompleted || !strings.Contains(done.Detail, DoneInNotes) || !strings.Contains(done.Detail, "Open in Obsidian: obsidian://") {
+		t.Fatalf("done follow-up = %+v", done)
+	}
+	if still, _ := service.FindBySource(ctx, "local", FollowUpSourceType, look.Items[2].ID); still.Status != followup.StatusDismissed {
+		t.Fatalf("a dismissed follow-up was changed: %+v", still)
+	}
+	if open, _ := service.FindBySource(ctx, "local", FollowUpSourceType, look.Items[1].ID); open.Status != followup.StatusActive {
+		t.Fatalf("an item still open in the notes was closed: %+v", open)
+	}
+	if again, err := CompleteGone(ctx, service, "local", gone); err != nil || again != 0 {
+		t.Fatalf("a second pass = %d, %v", again, err)
+	}
+}
+
 func TestAccept_CreatesFollowUpsOnceAcrossTwoAcceptancesAndALaterLook(t *testing.T) {
 	ctx := context.Background()
 	source, _ := musicSource(t)

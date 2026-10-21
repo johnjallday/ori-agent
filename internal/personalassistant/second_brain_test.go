@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,6 +257,42 @@ func TestSecondBrain_LookAgainIsRateLimitedAndComparesWithTheLastLook(t *testing
 	look, err := h.service.Look(ctx, "local")
 	if err != nil || look.LookID != "look-2" || look.Result.DoneSince != 1 || look.Result.NewSince != 0 || look.Result.Counts.OpenItems != 11 {
 		t.Fatalf("look again = %+v, %v", look.Result, err)
+	}
+}
+
+// A follow-up whose line is ticked in the notes is completed by the next look
+// with "Done in your notes"; the note itself is never edited (FR29).
+func TestSecondBrain_LookAgainClosesFollowUpsDoneInTheNotes(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	h.connectVault(t)
+	look, _ := h.service.Look(ctx, "local")
+	var reading secondbrain.LookItem
+	for _, item := range look.Result.Items {
+		if item.Note == "Reading List.md" {
+			reading = item
+		}
+	}
+	if _, err := h.service.AcceptFollowUps(ctx, "local", look.LookID, SecondBrainAcceptInput{ItemIDs: []string{reading.ID}, RequestID: "accept-1"}); err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(h.music.Path, "Reading List.md")
+	ticked := []byte("# Reading List\n\n- [x] Read Making Music by Dennis DeSantis\n- [x] Read All You Need to Know About the Music Business\n")
+	if err := os.WriteFile(note, ticked, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	*h.clock = h.clock.Add(SecondBrainLookAgainAfter)
+	if _, err := h.service.LookAgain(ctx, "local", "look-again-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.service.Wait()
+	f, err := h.followUps.FindBySource(ctx, "local", secondbrain.FollowUpSourceType, reading.ID)
+	if err != nil || f.Status != followup.StatusCompleted || !strings.Contains(f.Detail, secondbrain.DoneInNotes) {
+		t.Fatalf("follow-up after the tick = %+v, %v", f, err)
+	}
+	after, err := os.ReadFile(note) // #nosec G304 -- the test's own fixture
+	if err != nil || string(after) != string(ticked) {
+		t.Fatal("the look edited the note")
 	}
 }
 

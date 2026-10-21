@@ -17,9 +17,10 @@ import {
 export const SECOND_BRAIN_ENDPOINT = '/api/personal-assistant/second-brain';
 const SYSTEM_MODEL_ENDPOINT = '/api/settings/system-model';
 const LOOK_POLL_MS = 1000;
-// A look reads within five seconds; the poll gives up well after that and
-// says so, so the turn never hangs.
-const LOOK_POLL_LIMIT = 30;
+// A look reads within five seconds and its headline model has 45 more; the
+// poll gives up after the server's own bound and says so, so the turn never
+// hangs.
+const LOOK_POLL_LIMIT = 75;
 
 // secondBrainAvailable: the ask belongs to an active relationship only. A
 // paused assistant does not start a conversation.
@@ -124,7 +125,9 @@ export function suggestedLabel(count) {
 }
 
 // secondBrainItemGroups groups a look's items by note, for Show everything.
-// Suggested items start checked.
+// Suggested items start checked. For an Obsidian vault each note's heading is
+// the obsidian:// link the server built (FR26); a plain folder shows the
+// relative path as text. Ori never opens the app itself.
 export function secondBrainItemGroups(items) {
   const groups = [];
   const byNote = new Map();
@@ -132,7 +135,8 @@ export function secondBrainItemGroups(items) {
     if (!item?.id || !item?.text) continue;
     const note = String(item.note || '');
     if (!byNote.has(note)) {
-      const group = { note, label: note.replace(/\.(md|markdown)$/i, ''), items: [] };
+      const link = String(item.link || '').startsWith('obsidian://open?') ? item.link : '';
+      const group = { note, label: note.replace(/\.(md|markdown)$/i, ''), link, items: [] };
       byNote.set(note, group);
       groups.push(group);
     }
@@ -180,7 +184,10 @@ export function secondBrainLookView(look, { name = '', acted = false } = {}) {
         : null,
     showAll: items.length ? `Show everything (${items.length})` : '',
     groups: secondBrainItemGroups(items),
-    acted: acted === true
+    acted: acted === true,
+    // Look again once this result has been acted on (FR36); the server
+    // holds the rate limit.
+    again: acted === true ? { id: 'again', label: 'Look again', style: 'link' } : null
   };
 }
 
@@ -436,10 +443,12 @@ function renderLook(body) {
   if (view.primary) actions.push(view.primary);
   if (state.pinned && !state.receipt)
     actions.push({ id: 'dismiss', label: 'Not now', style: 'link' });
+  if (view.again) actions.push(view.again);
   if (actions.length) {
     body.append(
       actionRow(actions, action => {
         if (action.id === 'add') void addFollowUps('suggested');
+        else if (action.id === 'again') void lookAgain();
         else void dismiss();
       })
     );
@@ -453,7 +462,16 @@ function renderEverything(view) {
   const form = node('div', 'pa-second-brain__groups');
   view.groups.forEach(group => {
     const fieldset = node('fieldset', 'pa-second-brain__group');
-    fieldset.append(node('legend', 'pa-second-brain__note', group.label));
+    const legend = node('legend', 'pa-second-brain__note');
+    if (group.link) {
+      const open = node('a', 'pa-second-brain__open', group.label);
+      open.href = group.link;
+      open.title = `Open ${group.label} in Obsidian`;
+      legend.append(open);
+    } else {
+      legend.textContent = group.label;
+    }
+    fieldset.append(legend);
     group.items.forEach(item => {
       const label = node('label', 'pa-second-brain__item');
       const box = node('input');
@@ -732,6 +750,31 @@ async function addFollowUps(items) {
   state.focusNext = true;
   render();
   announce();
+}
+
+// lookAgain re-reads the connected folder without a new consent (FR36). The
+// result then says what is new and what was done since the last look.
+async function lookAgain() {
+  if (state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  const { ok, payload } = await request('/look', {
+    method: 'POST',
+    body: { request_id: newRequestID('look') }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    render();
+    return;
+  }
+  state.receipt = '';
+  if (state.secondBrain?.last_look) state.secondBrain.last_look.acted = false;
+  state.look = payload.look || { state: 'running' };
+  state.polls = 0;
+  setPhase(state.look.state === 'running' ? 'reading' : 'result', { focus: false });
+  if (state.look.state === 'running') schedulePoll();
 }
 
 async function dismiss() {

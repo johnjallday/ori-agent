@@ -20,6 +20,9 @@ const maxStoredItemBytes = 300 * 1024
 type Looker struct {
 	// Options bounds the read; zero values take the reader's bounds.
 	Options ReadOptions
+	// Model writes the headline from the signals; nil keeps the rules-only
+	// headline (FR23).
+	Model HeadlineModel
 	// Now defaults to time.Now.
 	Now func() time.Time
 
@@ -35,6 +38,9 @@ type LookRun struct {
 	// Gone are the ids of the previous look's items that are no longer open:
 	// ticked, marked DONE, or removed (FR29).
 	Gone []string
+	// HeadlineNote says why the rules-only headline stands ("" when the
+	// model wrote it), for the server log. It never holds the model's answer.
+	HeadlineNote string
 }
 
 func (l Looker) now() time.Time {
@@ -54,24 +60,32 @@ func (l Looker) Run(ctx context.Context, source Source, previous *Look, lookID, 
 		read = Read
 	}
 	reading, err := read(ctx, source.Path, l.Options)
-	finished := l.now().UTC()
-	look.FinishedAt = &finished
 	if err != nil {
+		finished := l.now().UTC()
+		look.FinishedAt = &finished
 		look.State = LookFailed
 		look.Failure = FailureSentence(source.Name, err)
 		return LookRun{Look: look}
 	}
 
-	signals := Extract(reading, finished)
+	now := l.now().UTC()
+	signals := Extract(reading, now)
 	look.State = LookFinished
 	look.Counts = LookCounts{
 		Notes: signals.Notes, OpenItems: len(signals.OpenLoops), NotesWithOpen: signals.NotesWithOpen,
 		Dated: signals.Dated, Done: signals.Done, Partial: reading.Partial,
 	}
-	look.Items = lookItems(source.ID, signals.OpenLoops)
+	look.Items = lookItems(source, signals.OpenLoops)
 	look.Headline, look.HeadlineBy = RulesHeadline(source.Name, look.Counts), HeadlineByRules
+	headline, note := modelHeadline(ctx, l.Model, source.Name, look.Counts, signals, look.Items, now)
+	if note == "" {
+		look.Headline, look.HeadlineBy = headline, HeadlineByModel
+	}
+	look.AlsoNoticed = AlsoNoticed(signals, now)
+	finished := l.now().UTC()
+	look.FinishedAt = &finished
 
-	run := LookRun{Look: look, Signals: signals}
+	run := LookRun{Look: look, Signals: signals, HeadlineNote: note}
 	if previous != nil {
 		run.Look.NewSince, run.Gone = compareLooks(previous.Items, run.Look.Items, reading)
 		run.Look.DoneSince = len(run.Gone)
@@ -82,7 +96,7 @@ func (l Looker) Run(ctx context.Context, source Source, previous *Look, lookID, 
 // lookItems turns open loops into the items a look keeps, marking the
 // suggested set, within MaxLookItems and the stored-bytes budget. Two
 // identical lines in one note are one item.
-func lookItems(sourceID string, loops []OpenLoop) []LookItem {
+func lookItems(source Source, loops []OpenLoop) []LookItem {
 	suggested := Suggest(loops)
 	items := make([]LookItem, 0, min(len(loops), MaxLookItems))
 	seen := make(map[string]bool, len(loops))
@@ -92,8 +106,11 @@ func lookItems(sourceID string, loops []OpenLoop) []LookItem {
 			break
 		}
 		item := LookItem{
-			ID: ItemID(sourceID, loop.Note, loop.Text), Text: loop.Text, Note: loop.Note, Line: loop.Line,
+			ID: ItemID(source.ID, loop.Note, loop.Text), Text: loop.Text, Note: loop.Note, Line: loop.Line,
 			Due: loop.Due, Suggested: suggested[index], InDecision: loop.InDecision,
+		}
+		if source.Kind == KindObsidian {
+			item.Link = ObsidianLink(source.Name, loop.Note)
 		}
 		if seen[item.ID] {
 			continue

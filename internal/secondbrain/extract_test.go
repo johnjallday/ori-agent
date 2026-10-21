@@ -119,6 +119,30 @@ func TestExtractNote_Dates(t *testing.T) {
 	}
 }
 
+func TestExtractNote_ItemTextReadsAsRendered(t *testing.T) {
+	cases := map[string]string{
+		"- [ ] Call [[Marco]] about the release date":                 "Call Marco about the release date",
+		"- [ ] Brief [[People/Sarah Kim|Sarah]] on the cover":         "Brief Sarah on the cover",
+		"- [ ] Read [[People/Sarah Kim]] notes":                       "Read Sarah Kim notes",
+		"- [ ] Check [[Album#Mix]] before Friday":                     "Check Album before Friday",
+		"- [ ] Read [the brief](https://example.com/brief) **today**": "Read the brief today",
+		"- [ ] Run `make test`":                                       "Run make test",
+	}
+	for line, want := range cases {
+		facts := extract("Note.md", line)
+		if len(facts.Open) != 1 || facts.Open[0].Text != want {
+			t.Errorf("%q → %v, want %q", line, taskTexts(facts.Open), want)
+		}
+	}
+	// The links are still read from the line itself.
+	if facts := extract("Note.md", "- [ ] Call [[Marco]]"); len(facts.Links) != 1 || facts.Links[0] != "Marco" {
+		t.Errorf("links = %v", facts.Links)
+	}
+	if facts := extract("Note.md", "Decide with [[Marco|the label]] by Oct 25\n"); facts.DecisionText != "Decide with the label by Oct 25" {
+		t.Errorf("decision text = %q", facts.DecisionText)
+	}
+}
+
 func TestExtractNote_CapsTheTextAt200Runes(t *testing.T) {
 	facts := extract("Note.md", "- [ ] "+strings.Repeat("é", 250))
 	if got := len([]rune(facts.Open[0].Text)); got != MaxTaskTextRunes {
