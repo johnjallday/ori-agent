@@ -1889,13 +1889,31 @@
     host.appendChild(choices);
   }
 
+  const creationReviews = new WeakMap();
+
   // The controller owns authority and requests; this host renderer displays
   // server facts only, never model-authored permission prose or HTML.
   function renderCreationReview(
     host,
-    { review = null, busy = false, message = '', accepted = false, compact = false } = {}
+    {
+      review = null,
+      busy = false,
+      message = '',
+      accepted = false,
+      uncertain = false,
+      compact = false,
+      monitoring,
+      actionsHost = null
+    } = {}
   ) {
     if (!host) return;
+    const key = JSON.stringify({ review, busy, message, accepted, uncertain, compact, monitoring });
+    const previous = creationReviews.get(host);
+    if (previous?.key === key && previous.actionsHost === actionsHost) return;
+    const previousMonitor = host.querySelectorAll('input')[0];
+    const monitorFocused = Boolean(previousMonitor && document.activeElement === previousMonitor);
+    const detailsOpen = host.querySelectorAll('details')[0]?.open ?? previous?.detailsOpen;
+    creationReviews.set(host, { key, actionsHost, detailsOpen });
     host.textContent = '';
     host.hidden = false;
     host.setAttribute('aria-busy', busy ? 'true' : 'false');
@@ -1904,11 +1922,13 @@
       'workspace-build-review__title',
       review?.state === 'deferred'
         ? 'Preparation deferred'
-        : accepted
-          ? 'Resume accepted preparation'
-          : compact
-            ? 'Folder permissions'
-            : 'Review & create'
+        : uncertain
+          ? 'Check previous confirmation'
+          : accepted
+            ? 'Resume accepted preparation'
+            : compact
+              ? 'Folder permissions'
+              : 'Review & create'
     );
     heading.tabIndex = -1;
     host.appendChild(heading);
@@ -1924,7 +1944,7 @@
       return button;
     };
     if (review?.workspace) {
-      if (!compact || accepted) {
+      if (!compact || accepted || uncertain) {
         host.appendChild(createElement('strong', '', review.workspace.name));
         if (review.workspace.description)
           host.appendChild(createElement('p', '', review.workspace.description));
@@ -1948,6 +1968,7 @@
       }
       host.appendChild(createElement('strong', '', 'Folder: ' + review.folder.name));
       const details = createElement('details', 'workspace-build-review__details');
+      details.open = Boolean(detailsOpen);
       details.appendChild(createElement('summary', '', 'Folder details'));
       details.appendChild(createElement('p', '', review.folder.path));
       host.appendChild(details);
@@ -1959,32 +1980,38 @@
       ])
         disclosure.appendChild(createElement('li', '', line));
       host.appendChild(disclosure);
+    }
+    if (review?.workspace || (compact && !accepted && !uncertain)) {
       const label = createElement('label', 'workspace-build-review__monitor');
       const checkbox = createElement('input');
       checkbox.type = 'checkbox';
-      checkbox.checked = Boolean(review.monitoring);
-      checkbox.disabled = busy || accepted;
+      checkbox.checked =
+        accepted || uncertain
+          ? Boolean(review?.monitoring)
+          : Boolean(monitoring ?? review?.monitoring);
+      checkbox.disabled = busy || accepted || uncertain;
       checkbox.addEventListener('change', () =>
         emit('workspace-build-review', { monitoring: checkbox.checked })
       );
       label.appendChild(checkbox);
       label.appendChild(createElement('span', '', 'Also watch new arrivals and run a daily scan'));
       host.appendChild(label);
-      const terms = review.terms;
-      host.appendChild(
-        createElement(
-          'p',
-          '',
-          review.monitoring
-            ? `Watch top-level ${(terms.watch_events || []).join(' / ')} events after a ${terms.debounce_seconds}-second delay; skip Filed/. Daily scan at ${terms.daily_scan_local_time} (${terms.timezone}). Files still settling are excluded. Nothing moves automatically.`
-            : 'Manual scans only. No watcher or daily scan will run.'
-        )
-      );
+      const terms = review?.terms;
+      if (terms)
+        host.appendChild(
+          createElement(
+            'p',
+            '',
+            checkbox.checked
+              ? `Watch top-level ${(terms.watch_events || []).join(' / ')} events after a ${terms.debounce_seconds}-second delay; skip Filed/. Daily scan at ${terms.daily_scan_local_time} (${terms.timezone}). Files still settling are excluded. Nothing moves automatically.`
+              : 'Manual scans only. No watcher or daily scan will run.'
+          )
+        );
     }
     const actions = createElement('div', 'workspace-build-review__actions');
-    if (review?.review_revision && review.state !== 'deferred') {
+    if (!compact && review?.review_revision && review.state !== 'deferred') {
       const confirm = action(
-        accepted ? 'Retry preparation' : 'Create & prepare review',
+        accepted || uncertain ? 'Retry preparation' : 'Create & scan folder',
         'workspace-build-prepare'
       );
       confirm.className = 'modern-btn modern-btn-primary';
@@ -2011,7 +2038,11 @@
       open.href = '/workspaces/' + encodeURIComponent(review.folder_slug) + '?panel=file-janitor';
       actions.appendChild(open);
     }
-    host.appendChild(actions);
+    if (actionsHost) {
+      actionsHost.textContent = '';
+      actionsHost.appendChild(actions);
+    } else host.appendChild(actions);
+    if (monitorFocused) host.querySelectorAll('input')[0]?.focus?.({ preventScroll: true });
   }
 
   function destroy() {

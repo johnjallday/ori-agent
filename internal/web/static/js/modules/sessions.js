@@ -11699,6 +11699,7 @@ const sessionManager = {
       !build?.session ||
       build.closeReady ||
       build.acceptedPreparation ||
+      build.preparationUncertain ||
       build.session.status !== 'open'
     )
       return;
@@ -12016,10 +12017,19 @@ const sessionManager = {
     modal.addEventListener('workspace-build-link-remove', () => {
       void this.detachWorkspaceBuildLink();
     });
-    // Bootstrap focuses the dialog once it is shown; in build mode the
-    // conversation is where the user starts, so focus moves to the composer.
+    // A late Bootstrap shown event must not pull an attachment/review back
+    // into conversation (or steal focus from the folder/link sheet).
     modal.addEventListener('shown.bs.modal', () => {
-      if (this.workspaceBuild) this.workspaceBuildPane()?.focusComposer?.();
+      const pane = this.workspaceBuildPane();
+      if (
+        !this.workspaceBuild ||
+        this.workspaceBuildFolderReviewAvailable() ||
+        this.workspaceBuildAttachmentPending() ||
+        pane?.folderChooserOpen?.() ||
+        pane?.linkFieldOpen?.()
+      )
+        return;
+      pane?.focusComposer?.();
     });
     // The user's own edits take the "Chosen by" tag off that field. Captured,
     // so a field's own handler cannot stop it first.
@@ -12065,6 +12075,30 @@ const sessionManager = {
     );
   },
 
+  newWorkspaceBuildState(context, assistant, availability = {}) {
+    this.workspaceBuildGeneration += 1;
+    return {
+      generation: this.workspaceBuildGeneration,
+      context,
+      assistant,
+      session: null,
+      busy: false,
+      collapsed: false,
+      kindHidden: false,
+      lastTurn: null,
+      resumeLine: '',
+      chosen: new Map(),
+      chosenRoles: new Set(),
+      editedFields: new Set(context.buildEditedFields || []),
+      folders: availability.folders === true,
+      folderPending: false,
+      folderGeneration: 0,
+      links: availability.links === true,
+      linkPending: false,
+      janitorMonitoring: false
+    };
+  },
+
   // maybeStartWorkspaceBuild runs on every open. Build mode is offered only
   // from its openers, and only once the two reads it depends on answer: the
   // assistant's relationship and whether a model is reachable for it. Both are
@@ -12103,29 +12137,7 @@ const sessionManager = {
     if (!api.buildModeEligible({ ...facts, assistantState: assistant?.state, availability })) {
       return false;
     }
-    this.workspaceBuildGeneration += 1;
-    this.workspaceBuild = {
-      generation: this.workspaceBuildGeneration,
-      context,
-      assistant,
-      session: null,
-      busy: false,
-      collapsed: false,
-      kindHidden: false,
-      lastTurn: null,
-      resumeLine: '',
-      chosen: new Map(),
-      chosenRoles: new Set(),
-      editedFields: new Set(context.buildEditedFields || []),
-      // Add folder is offered only when the server wires the composer's
-      // folder chooser for builds.
-      folders: availability?.folders === true,
-      folderPending: false,
-      folderGeneration: 0,
-      // Add link likewise, when the server wires the link observer.
-      links: availability?.links === true,
-      linkPending: false
-    };
+    this.workspaceBuild = this.newWorkspaceBuildState(context, assistant, availability);
     this.mountWorkspaceBuildPane();
     // A slow availability read must not replace the wizard the user is already using.
     if ((Number(context.buildRevision) || 0) !== revision) {
@@ -12199,7 +12211,11 @@ const sessionManager = {
     }
     // A new session joins the form, including edits made before it was opened.
     await this.applyWorkspaceBuildSession(session, { revision });
-    this.scheduleWorkspaceBuildDraft({ user: true });
+    // Finishing the opening read is not a human team decision. A late Blank
+    // roster default must not claim ownership and block the folder proposal.
+    this.scheduleWorkspaceBuildDraft({
+      user: Boolean(build.editedFields?.size || (!fresh && this.workspaceBuildRevision()))
+    });
   },
 
   rememberWorkspaceBuildSession(session) {
@@ -12257,6 +12273,10 @@ const sessionManager = {
       return;
     }
     if (action === 'create_now') {
+      if (this.workspaceBuildFolderReviewAvailable()) {
+        this.reviewOrEditWorkspaceBuild();
+        return;
+      }
       await this.createFromWorkspaceBuild();
       return;
     }
@@ -12281,7 +12301,18 @@ const sessionManager = {
   async startOverWorkspaceBuild() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
-    if (!build || !pane || build.busy) return;
+    if (
+      !build ||
+      !pane ||
+      build.busy ||
+      build.preparationBusy ||
+      build.acceptedPreparation ||
+      build.preparationUncertain ||
+      build.groupBusy ||
+      build.providerBusy ||
+      build.setupBusy
+    )
+      return;
     this.setWorkspaceBuildBusy(true);
     const revision = this.workspaceBuildRevision();
     const firstMessage = build.pendingFirstMessage || '';
@@ -12309,12 +12340,11 @@ const sessionManager = {
     build.session = null;
     this.rememberWorkspaceBuildSession(null);
     if (!this.workspaceBuildCanApply(build, revision)) return;
-    build.lastTurn = null;
-    build.pendingFirstMessage = '';
-    build.resumeLine = '';
-    build.chosenBlueprint = undefined;
-    build.chosen = new Map();
-    build.chosenRoles = new Set();
+    clearTimeout(build.janitorReviewTimer);
+    build.context.buildEditedFields = new Set();
+    // New object identity fences outstanding draft/observation/preview replies.
+    // A new setup also starts with no monitoring consent or field ownership.
+    this.workspaceBuild = this.newWorkspaceBuildState(build.context, build.assistant, build);
     this.rememberWorkspaceBuildSession(null);
     this.workspaceBuildApplyDepth += 1;
     try {
@@ -12345,6 +12375,9 @@ const sessionManager = {
       build.turnPending ||
       build.folderPending ||
       build.linkPending ||
+      build.preparationBusy ||
+      build.acceptedPreparation ||
+      build.preparationUncertain ||
       !this.workspaceBuildAssisted()
     )
       return;
@@ -12489,7 +12522,7 @@ const sessionManager = {
       return;
     const revision = options.revision ?? this.workspaceBuildRevision();
     const current = () => this.workspaceBuildCanApply(build, revision);
-    if (build.acceptedPreparation && !session.preparation) return;
+    if ((build.acceptedPreparation || build.preparationUncertain) && !session.preparation) return;
     if (build.janitorReview && !session.preparation) {
       build.janitorReview = null;
       build.janitorReviewSequence = (build.janitorReviewSequence || 0) + 1;
@@ -12585,7 +12618,7 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
-    if (build.preparationBusy || build.acceptedPreparation) return;
+    if (build.preparationBusy || build.acceptedPreparation || build.preparationUncertain) return;
     void this.pauseWorkspaceBuildSuggestion();
     this.noteWorkspaceBuildIntent();
     build.collapsed = true;
@@ -12680,7 +12713,11 @@ const sessionManager = {
   noteWorkspaceBuildIntent() {
     const context = this.workspaceCreatorContext;
     if (context) context.buildRevision = (Number(context.buildRevision) || 0) + 1;
-    if (this.workspaceBuild && !this.workspaceBuild.acceptedPreparation) {
+    if (
+      this.workspaceBuild &&
+      !this.workspaceBuild.acceptedPreparation &&
+      !this.workspaceBuild.preparationUncertain
+    ) {
       this.workspaceBuild.janitorReview = null;
       this.workspaceBuild.preparationReviewActive = false;
       this.workspaceBuild.janitorReviewSequence =
@@ -12693,6 +12730,7 @@ const sessionManager = {
       this.workspaceBuild === build &&
       !build.closing &&
       !build.acceptedPreparation &&
+      !build.preparationUncertain &&
       !build.preparationBusy &&
       this.workspaceBuildAssisted() &&
       this.workspaceBuildRevision() === revision
@@ -12702,7 +12740,7 @@ const sessionManager = {
   workspaceBuildFolderReviewAvailable() {
     const build = this.workspaceBuild;
     const session = build?.session;
-    if (build?.acceptedPreparation) return true;
+    if (build?.acceptedPreparation || build?.preparationUncertain) return true;
     if (!session?.folder || build.resumeLine || build.groupSwitchLine || session.setup)
       return false;
     const verdict = session.folder.recognition?.verdict;
@@ -12721,10 +12759,30 @@ const sessionManager = {
   },
 
   async actOnWorkspaceBuildFolderReview() {
-    if (this.workspaceBuildPlanReady()) await this.setUpFromWorkspaceBuildPlanReview();
-    else if (this.workspaceBuild?.session?.folder?.recognition?.verdict === 'project')
+    const build = this.workspaceBuild;
+    if (this.workspaceBuildPlanReady()) {
+      await this.setUpFromWorkspaceBuildPlanReview();
+      return;
+    }
+    if (build?.session?.folder?.recognition?.verdict === 'project') {
       this.refineWorkspaceBuildFolder({ focus: false });
-    else await this.createFromWorkspaceBuild();
+      return;
+    }
+    if (this.workspaceBuildPreparationEligible()) {
+      if (
+        build.acceptedPreparation ||
+        build.preparationUncertain ||
+        this.workspaceBuildPreparationCurrent()
+      )
+        await this.confirmWorkspaceBuildPreparation();
+      else await this.reviewWorkspaceBuildPreparation();
+      return;
+    }
+    if (this.workspaceBuildGroupNeeded()) {
+      this.refineWorkspaceBuildFolder(); // existing, separately confirmed Home review
+      return;
+    }
+    await this.createFromWorkspaceBuild();
   },
 
   refineWorkspaceBuildFolder({ focus = true } = {}) {
@@ -12905,6 +12963,8 @@ const sessionManager = {
       build.busy ||
       build.preparationBusy ||
       build.setupBusy ||
+      build.groupBusy ||
+      build.providerBusy ||
       suggesting ||
       this.workspaceBuildAttachmentPending(build)
     );
@@ -12927,7 +12987,10 @@ const sessionManager = {
       'workspaceBuildPlanReviewTitle',
       recognized ? 'Review recognized setup' : 'Review your workspace'
     );
-    hide('workspaceBuildPlanReview', Boolean(build.acceptedPreparation));
+    hide(
+      'workspaceBuildPlanReview',
+      Boolean(build.acceptedPreparation || build.preparationUncertain)
+    );
     hide('workspaceBuildFolderGoalField', recognized);
     for (const id of [
       'workspaceBuildFolderPurposeEdit',
@@ -12976,12 +13039,47 @@ const sessionManager = {
     hide('workspaceBuildFolderLinkRow', !link);
     setText('workspaceBuildFolderLink', link?.title || link?.repo?.full_name || link?.host || '');
     const janitor = this.workspaceBuildPreparationEligible();
+    const groupNeeded = !recognized && this.workspaceBuildGroupNeeded();
+    const frozen = Boolean(build.acceptedPreparation || build.preparationUncertain);
+    const reviewed = janitor && this.workspaceBuildPreparationCurrent();
+    const previewFailed =
+      janitor && build.janitorReviewFailureKey === this.workspaceBuildPreparationKey();
+    for (const [id] of WORKSPACE_BUILD_PLAN_FIELDS) {
+      const field = document.getElementById(id);
+      if (field) field.disabled = frozen || Boolean(build.preparationBusy);
+    }
+    for (const id of [
+      'workspaceBuildFolderPurposeEdit',
+      'workspaceBuildFolderTeamEdit',
+      'workspaceBuildFolderPlacementEdit',
+      'workspaceBuildFolderChange'
+    ]) {
+      const control = document.getElementById(id);
+      if (control) control.disabled = frozen || Boolean(build.preparationBusy);
+    }
+    hide('workspaceBuildPlanReviewBack', frozen);
+    const refine = document.getElementById('workspaceBuildPlanReviewBack');
+    if (refine) refine.disabled = Boolean(build.preparationBusy);
+    if (reviewed) {
+      const actual = build.janitorReview.team || [];
+      setText(
+        'workspaceBuildFolderTeam',
+        actual.length
+          ? actual
+              .map(
+                member =>
+                  `${member.name} · ${member.action === 'attach' ? 'saved agent' : 'new agent'}${member.model ? ' · ' + member.model : ''}`
+              )
+              .join(' · ')
+          : 'No agents will be created or attached.'
+      );
+    }
     setText(
       'workspaceBuildFolderEffects',
       recognized
         ? 'Only Set it up runs these host-owned steps. To use another purpose, change the attached folder.'
         : janitor
-          ? 'File Janitor needs a separate, exact permission review for Filed/ creation and a metadata-only scan. Moves and Trash always need separate approval.'
+          ? 'Creating makes Filed/ and scans top-level metadata once. Review the folder permissions below. Moves and Trash always need separate approval.'
           : 'Creating links this folder in place. No files are moved or changed by attaching it.'
     );
     hide(
@@ -13002,38 +13100,49 @@ const sessionManager = {
     );
     const expires = Date.parse(String(session.folder_expires_at || ''));
     const expired = Number.isFinite(expires) && expires <= Date.now();
-    const problem = build.draftError
-      ? 'Save the current draft before continuing.'
-      : expired
-        ? 'The folder selection expired. Change folder to attach it again.'
-        : recognized
-          ? planReady
-            ? ''
-            : prerequisite
-          : this.workspaceBuildGateProblem();
+    const problem = frozen
+      ? ''
+      : build.draftError
+        ? 'Save the current draft before continuing.'
+        : expired
+          ? 'The folder selection expired. Change folder to attach it again.'
+          : recognized
+            ? planReady
+              ? ''
+              : prerequisite
+            : this.workspaceBuildGateProblem();
     setText('workspaceBuildFolderProblem', problem);
     const action = document.getElementById('workspaceBuildPlanReviewSetup');
     if (action) {
-      action.hidden = Boolean(
-        build.acceptedPreparation || (janitor && build.janitorReview?.review_revision)
-      );
+      action.hidden = build.janitorReview?.state === 'deferred';
       action.textContent = recognized
         ? planReady
           ? 'Set it up'
           : 'Review prerequisites'
         : janitor
-          ? 'Review folder permissions'
-          : 'Create workspace';
+          ? frozen
+            ? 'Retry preparation'
+            : reviewed
+              ? 'Create & scan folder'
+              : previewFailed
+                ? 'Refresh permissions'
+                : 'Checking permissions…'
+          : groupNeeded
+            ? 'Review required group'
+            : 'Create workspace';
       action.disabled =
         busy ||
-        Boolean(build.draftError) ||
-        expired ||
-        (!recognized && Boolean(problem)) ||
+        (!frozen &&
+          (Boolean(build.draftError) ||
+            expired ||
+            (!recognized && !groupNeeded && Boolean(problem)) ||
+            (janitor && !reviewed && !previewFailed))) ||
         (planReady && !this.workspaceBuildSetupPressable());
     }
   },
 
   syncWorkspaceBuildPresentation() {
+    this.scheduleWorkspaceBuildPreparationReview();
     const assisted = this.workspaceBuildAssisted();
     const folderReview = this.workspaceBuildFolderReviewActive();
     const folderAvailable = assisted && this.workspaceBuildFolderReviewAvailable();
@@ -13088,16 +13197,32 @@ const sessionManager = {
       preparationHost.hidden = !offered;
       if (offered) {
         this.workspaceBuildPane()?.renderCreationReview?.(preparationHost, {
-          review: this.workspaceBuild.janitorReview,
+          review:
+            this.workspaceBuild.acceptedPreparation ||
+            this.workspaceBuild.preparationUncertain ||
+            this.workspaceBuild.preparationBusy ||
+            this.workspaceBuildPreparationCurrent()
+              ? this.workspaceBuild.janitorReview
+              : null,
           busy: Boolean(this.workspaceBuild.preparationBusy || this.workspaceBuild.busy),
           accepted: Boolean(this.workspaceBuild.acceptedPreparation),
+          uncertain: Boolean(
+            this.workspaceBuild.preparationUncertain && !this.workspaceBuild.acceptedPreparation
+          ),
+          monitoring: Boolean(this.workspaceBuild.janitorMonitoring),
           compact: folderReview,
+          actionsHost: folderReview
+            ? document.getElementById('workspaceBuildPreparationActions')
+            : null,
           message:
             this.workspaceBuild.preparationMessage ||
             'Ready to create? Review the current draft and folder permissions.'
         });
       }
     }
+    const preparationActions = document.getElementById('workspaceBuildPreparationActions');
+    if (preparationActions)
+      preparationActions.hidden = !folderReview || !this.workspaceBuildPreparationEligible();
     const summary = document.getElementById('workspaceBuildDraftSummary');
     if (summary)
       summary.hidden =
@@ -13152,6 +13277,8 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     const active = Boolean(this.workspaceBuild) || Boolean(pane?.isMounted?.());
     void this.pauseWorkspaceBuildSuggestion();
+    if (this.workspaceBuild?.janitorReviewTimer)
+      clearTimeout(this.workspaceBuild.janitorReviewTimer);
     this.workspaceBuild = null;
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = null;
@@ -13729,7 +13856,13 @@ const sessionManager = {
   // edit in the same window wins, so it is never mistaken for a sync.
   scheduleWorkspaceBuildDraft(options = {}) {
     const build = this.workspaceBuild;
-    if (!build?.session || build.session.status !== 'open') return;
+    if (
+      !build?.session ||
+      build.session.status !== 'open' ||
+      build.acceptedPreparation ||
+      build.preparationUncertain
+    )
+      return;
     // Until the user answers Resume or Start over, the form is not this
     // build's form, and nothing on it may overwrite the paused draft.
     if (build.resumeLine) return;
@@ -13763,6 +13896,8 @@ const sessionManager = {
     if (
       !build?.session ||
       build.draftConflict ||
+      build.acceptedPreparation ||
+      build.preparationUncertain ||
       build.session.status !== 'open' ||
       ((build.busy || build.suggestionRequest) && !force)
     )
@@ -13778,7 +13913,10 @@ const sessionManager = {
       step: body.step,
       edited: body.edited_fields
     });
-    if (key === build.lastDraftKey) return;
+    if (key === build.lastDraftKey) {
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
     const fail = () => {
       if (this.workspaceBuild !== build) return;
       build.draftUser = Boolean(user || build.draftUser);
@@ -13848,7 +13986,10 @@ const sessionManager = {
     try {
       await build.draftInFlight;
     } finally {
-      if (this.workspaceBuild === build) build.draftInFlight = null;
+      if (this.workspaceBuild === build) {
+        build.draftInFlight = null;
+        this.syncWorkspaceBuildPresentation();
+      }
     }
   },
 
@@ -13930,7 +14071,8 @@ const sessionManager = {
       build.folderPending ||
       build.linkPending ||
       build.preparationBusy ||
-      build.acceptedPreparation
+      build.acceptedPreparation ||
+      build.preparationUncertain
     );
   },
 
@@ -14344,7 +14486,12 @@ const sessionManager = {
         // create_now would run, pressed by the user.
         if (prepared && !this.workspaceBuildGateProblem()) {
           pane.showLine(pane.COPY.groupCreateNext, {
-            chips: [{ id: 'create_now', label: pane.COPY.createIt }]
+            chips: [
+              {
+                id: 'create_now',
+                label: build.session.folder ? 'Review workspace' : pane.COPY.createIt
+              }
+            ]
           });
         }
       }
@@ -14714,76 +14861,189 @@ const sessionManager = {
     return Boolean(
       build?.acceptedPreparation ||
       (build?.session?.folder &&
+        !build.session.plan?.ready &&
+        (!build.session.folder.recognition?.verdict ||
+          build.session.folder.recognition.verdict === 'none') &&
         ['file-janitor', 'downloads-janitor'].includes(build.session.draft?.template_id))
     );
   },
 
-  async reviewWorkspaceBuildPreparation({ monitoring = false } = {}) {
+  // Preview identity includes the effective create payload, not focus, render
+  // count or wizard step. The server also binds its version and live terms.
+  workspaceBuildPreparationKey() {
+    const build = this.workspaceBuild;
+    if (!build?.session) return '';
+    return JSON.stringify({
+      id: build.session.id,
+      version: build.session.version,
+      folder: build.session.folder?.observation?.id,
+      draft: this.workspaceBuildDraftBody(true).draft,
+      monitoring: Boolean(build.janitorMonitoring)
+    });
+  },
+
+  workspaceBuildPreparationCanReview() {
     const build = this.workspaceBuild;
     if (
-      !build?.session ||
-      build.preparationBusy ||
+      !this.workspaceBuildPreparationEligible() ||
+      this.workspaceBuildApplyDepth > 0 ||
+      !this.workspaceBuildAssisted() ||
+      build.session?.status !== 'open' ||
+      build.closing ||
+      build.resumeLine ||
+      build.groupSwitchLine ||
       build.busy ||
-      !this.workspaceBuildPreparationEligible()
+      build.preparationBusy ||
+      build.acceptedPreparation ||
+      build.preparationUncertain ||
+      build.suggestionRequest ||
+      build.suggestionStarting ||
+      build.draftError ||
+      build.draftConflict ||
+      ['pending', 'running'].includes(build.session.proposal?.status) ||
+      this.workspaceBuildAttachmentPending(build) ||
+      this.workspaceBuildPane()?.folderChooserOpen?.() ||
+      this.workspaceBuildPane()?.linkFieldOpen?.()
+    )
+      return false;
+    const draft = this.workspaceBuildDraftBody(true).draft;
+    return (
+      !draft.blank &&
+      ['file-janitor', 'downloads-janitor'].includes(draft.template_id) &&
+      !this.workspaceBuildGateProblem()
+    );
+  },
+
+  workspaceBuildPreparationCurrent() {
+    const build = this.workspaceBuild;
+    const review = build?.janitorReview;
+    return Boolean(
+      review?.state === 'review' &&
+      review.review_revision?.length === 64 &&
+      review.version === build.session?.version &&
+      review.monitoring === Boolean(build.janitorMonitoring) &&
+      !build.draftInFlight &&
+      build.draftUser === undefined &&
+      this.workspaceBuildPreparationCanReview() &&
+      build.janitorReviewKey === this.workspaceBuildPreparationKey()
+    );
+  },
+
+  // Rendering may schedule a read, never confirmation. One debounce and one
+  // in-flight read coalesce edits; a failed key needs deliberate retry.
+  scheduleWorkspaceBuildPreparationReview() {
+    const build = this.workspaceBuild;
+    if (!build) return;
+    if (!this.workspaceBuildPreparationCanReview()) {
+      clearTimeout(build.janitorReviewTimer);
+      build.janitorReviewTimer = null;
+      return;
+    }
+    const key = this.workspaceBuildPreparationKey();
+    if (
+      this.workspaceBuildPreparationCurrent() ||
+      build.janitorReviewFailureKey === key ||
+      build.janitorReviewRequest ||
+      (build.janitorReviewTimer && build.janitorReviewScheduledKey === key)
     )
       return;
-    if (build.acceptedPreparation) {
-      this.syncWorkspaceBuildPresentation();
+    clearTimeout(build.janitorReviewTimer);
+    build.preparationReviewActive = true;
+    build.preparationMessage = 'Checking the current draft, team and held folder…';
+    build.janitorReviewScheduledKey = key;
+    build.janitorReviewTimer = setTimeout(() => {
+      build.janitorReviewTimer = null;
+      if (this.workspaceBuild === build && key === this.workspaceBuildPreparationKey())
+        void this.reviewWorkspaceBuildPreparation();
+    }, 600);
+  },
+
+  async reviewWorkspaceBuildPreparation({ monitoring } = {}) {
+    const build = this.workspaceBuild;
+    if (!build || build.acceptedPreparation || build.preparationUncertain || build.preparationBusy)
       return;
-    }
-    const problem = this.workspaceBuildGateProblem();
-    if (problem) {
-      build.preparationReviewActive = true;
-      build.preparationMessage = 'Not yet — ' + problem + ' Use Edit setup to repair the draft.';
-      this.syncWorkspaceBuildPresentation();
-      return;
-    }
-    if (this.workspaceBuildAttachmentPending(build)) return;
-    build.preparationBusy = true;
+    if (typeof monitoring === 'boolean') build.janitorMonitoring = monitoring;
+    clearTimeout(build.janitorReviewTimer);
+    build.janitorReviewTimer = null;
+    if (!this.workspaceBuildPreparationCanReview() || build.janitorReviewRequest) return;
+    if (this.workspaceBuildPreparationCurrent()) return;
+    const request = { key: this.workspaceBuildPreparationKey() };
+    build.janitorReviewRequest = request; // before the first await
+    build.janitorReviewFailureKey = '';
     build.preparationReviewActive = true;
     build.preparationMessage = 'Checking the current draft, team and held folder…';
     this.syncWorkspaceBuildPresentation();
     const revision = this.workspaceBuildRevision();
     try {
-      this.scheduleWorkspaceBuildDraft({ user: true });
+      // Flush existing derived/user writes without turning a suggestion into
+      // an explicit user edit or changing monitoring's separate consent.
       await this.flushWorkspaceBuildDraft({ force: true });
       if (
         this.workspaceBuild !== build ||
-        build.draftError ||
+        !this.workspaceBuildPreparationCanReview() ||
         revision !== this.workspaceBuildRevision()
       )
         return;
-      const sequence = (build.janitorReviewSequence || 0) + 1;
-      build.janitorReviewSequence = sequence;
+      request.key = this.workspaceBuildPreparationKey();
       const result = await this.workspaceBuildApi().janitorReview(build.session.id, {
         version: build.session.version,
-        monitoring
+        monitoring: Boolean(build.janitorMonitoring)
       });
       if (
         this.workspaceBuild !== build ||
-        sequence !== build.janitorReviewSequence ||
-        revision !== this.workspaceBuildRevision()
+        build.closing ||
+        build.acceptedPreparation ||
+        request.key !== this.workspaceBuildPreparationKey() ||
+        revision !== this.workspaceBuildRevision() ||
+        !this.workspaceBuildPreparationCanReview()
       )
         return;
-      if (!result?.ok)
+      if (!result?.ok) {
+        if (result?.body?.code === 'review_changed') {
+          const latest = await this.workspaceBuildApi().create({
+            entry_point: build.context.entryPoint
+          });
+          if (this.workspaceBuild !== build || build.closing) return;
+          if (
+            latest?.body?.session?.id === build.session.id &&
+            latest.body.session.version !== build.session.version
+          )
+            this.adoptWorkspaceBuildConflict(latest.body.session);
+        }
         throw new Error(
           result?.body?.error?.message ||
             result?.body?.message ||
             result?.body?.error ||
-            'The current review could not be prepared. Your draft is kept.'
+            'The current permissions could not be checked. Your draft is kept.'
         );
-      build.janitorReview = result.body.review;
-      build.acceptedPreparation = result.body.review?.state === 'accepted';
+      }
+      const review = result.body?.review;
+      if (
+        !['review', 'accepted'].includes(review?.state) ||
+        review.review_revision?.length !== 64 ||
+        (review.state === 'review' &&
+          (review.version !== build.session.version ||
+            review.monitoring !== Boolean(build.janitorMonitoring)))
+      )
+        throw new Error(
+          'The permission review was incomplete. Refresh permissions before creating.'
+        );
+      build.janitorReview = review;
+      build.janitorReviewKey = request.key;
+      build.janitorReviewFailureKey = '';
+      build.acceptedPreparation = review.state === 'accepted';
       build.preparationMessage = build.acceptedPreparation
         ? 'An earlier confirmation was saved. Resume that exact workspace.'
-        : 'Review these permissions, then explicitly confirm below.';
+        : 'Review these permissions. Only the Create & scan folder button starts this work.';
     } catch (error) {
-      build.preparationMessage = error.message;
+      if (this.workspaceBuild === build && request.key === this.workspaceBuildPreparationKey()) {
+        build.janitorReviewFailureKey = request.key;
+        build.preparationMessage = error.message;
+      }
     } finally {
-      if (this.workspaceBuild === build) {
-        build.preparationBusy = false;
+      if (this.workspaceBuild === build && build.janitorReviewRequest === request) {
+        build.janitorReviewRequest = null;
         this.syncWorkspaceBuildPresentation();
-        document.querySelector('#workspaceBuildCreationReview h3')?.focus();
       }
     }
   },
@@ -14799,7 +15059,40 @@ const sessionManager = {
       this.isCreatingFolder
     )
       return;
+    if (
+      !build.acceptedPreparation &&
+      !build.preparationUncertain &&
+      !this.workspaceBuildPreparationCurrent()
+    ) {
+      this.syncWorkspaceBuildPresentation();
+      return;
+    }
+    // A refusal of a retry does not settle an earlier request's unknown result.
+    const alreadyUncertain = Boolean(build.preparationUncertain);
+    const refusedBeforeAdmission = result => {
+      const code = result?.body?.code;
+      const details = result?.body?.details || result?.body?.error?.details || {};
+      return Boolean(
+        !details.workspace_id &&
+        code !== 'preparation_deferred' &&
+        ((result?.status >= 400 && result.status < 500) ||
+          [
+            'invalid_review',
+            'review_changed',
+            'folder_review_unavailable',
+            'blueprint_changed',
+            'invalid_draft',
+            'selection_expired',
+            'team_review_required',
+            'folder_unavailable',
+            'team_changed',
+            'placement_changed'
+          ].includes(code))
+      );
+    };
     // The click is the consent boundary; no conversational flag calls here.
+    // Freeze this exact request even when both POST and recovery reads fail.
+    build.preparationUncertain = true;
     build.preparationBusy = true;
     build.preparationMessage =
       'Creating the reviewed workspace and preparing one metadata-only scan…';
@@ -14811,17 +15104,21 @@ const sessionManager = {
       monitoring: Boolean(review.monitoring),
       review_revision: review.review_revision
     };
+    let refusedBeforeAcceptance = false;
     try {
       const result = await this.workspaceBuildApi().janitorPrepare(build.session.id, request);
       if (this.workspaceBuild !== build) return;
       if (!result?.ok) {
         const details = result?.body?.details || result?.body?.error?.details || {};
-        if (result?.body?.code === 'preparation_deferred') review.state = 'deferred';
+        refusedBeforeAcceptance =
+          !alreadyUncertain && !build.acceptedPreparation && refusedBeforeAdmission(result);
+        if (result?.body?.code === 'preparation_deferred') {
+          review.state = 'deferred';
+          build.acceptedPreparation = true;
+        }
         if (details.workspace_id) {
           build.acceptedPreparation = true;
           build.janitorReview = { ...review, workspace_id: details.workspace_id };
-        } else {
-          build.janitorReview = null;
         }
         throw new Error(
           result?.body?.error?.message ||
@@ -14882,9 +15179,40 @@ const sessionManager = {
           recovered.body.review?.state === 'accepted'
         ) {
           build.acceptedPreparation = true;
+          build.janitorReview =
+            recovered.body.review.review_revision === request.review_revision
+              ? { ...review, ...recovered.body.review }
+              : recovered.body.review;
+          build.preparationMessage = `${error.message || 'The response was lost.'} Your confirmation is saved. Retry preparation to observe its exact result; no second workspace will be created.`;
+        } else if (
+          this.workspaceBuild === build &&
+          refusedBeforeAcceptance &&
+          recovered?.ok &&
+          recovered.body.review?.state === 'review'
+        ) {
+          // A definite pre-admission refusal plus a current read permits a
+          // new review, never automatic confirmation of its changed terms.
+          build.preparationUncertain = false;
           build.janitorReview = recovered.body.review;
+          build.janitorReviewKey = this.workspaceBuildPreparationKey();
+          build.janitorReviewFailureKey = '';
           build.preparationMessage =
-            'Your confirmation was saved, but the response was lost. Retry preparation to observe its exact result; no second workspace will be created.';
+            'Nothing was created. The review changed; check the refreshed permissions before confirming again.';
+        } else if (
+          this.workspaceBuild === build &&
+          refusedBeforeAcceptance &&
+          refusedBeforeAdmission(recovered)
+        ) {
+          build.preparationUncertain = false;
+          build.janitorReview = null;
+          build.janitorReviewFailureKey = this.workspaceBuildPreparationKey();
+          if (recovered.body?.code === 'review_changed') {
+            const latest = await this.workspaceBuildApi().create({
+              entry_point: build.context.entryPoint
+            });
+            if (this.workspaceBuild === build && latest?.body?.session?.id === build.session.id)
+              this.adoptWorkspaceBuildConflict(latest.body.session);
+          }
         }
       } catch (_) {
         /* Keep the exact confirmation available for bounded retry. */
@@ -15111,7 +15439,8 @@ const sessionManager = {
     if (
       this.isCreatingFolder ||
       this.workspaceBuild?.preparationBusy ||
-      this.workspaceBuild?.acceptedPreparation
+      this.workspaceBuild?.acceptedPreparation ||
+      this.workspaceBuild?.preparationUncertain
     )
       return;
     // A folder or link still being attached would be lost by a create that

@@ -37,7 +37,9 @@ function loadSessionManager(
       bootstrap: windowOverrides.bootstrap,
       fetch: fetchImpl,
       console,
-      crypto: { randomUUID: () => 'review-key' }
+      crypto: { randomUUID: () => 'review-key' },
+      setTimeout,
+      clearTimeout
     },
     { filename: 'sessions.js' }
   );
@@ -5392,7 +5394,7 @@ class BuildNode {
   }
 }
 
-function loadBuildWizard() {
+function loadBuildWizard(timers = { setTimeout, clearTimeout }) {
   const nodes = new Map();
   const add = (tag, id) => {
     const node = new BuildNode(tag, id);
@@ -5435,7 +5437,7 @@ function loadBuildWizard() {
   }
   vm.runInNewContext(
     source,
-    { window, document, Event, setTimeout, clearTimeout, console, fetch: async () => ({}) },
+    { window, document, Event, ...timers, console, fetch: async () => ({}) },
     { filename: 'sessions.js' }
   );
   const manager = window.sessionManager;
@@ -5678,8 +5680,355 @@ test('draft edits invalidate a displayed permission review but cannot overwrite 
   );
 });
 
+test('opening a new build records late defaults as synchronization, not human team ownership', async () => {
+  for (const { edited, fresh, revision } of [
+    { edited: false, fresh: false, revision: 0 },
+    { edited: true, fresh: false, revision: 1 },
+    { edited: false, fresh: true, revision: 9 },
+    { edited: true, fresh: true, revision: 10 }
+  ]) {
+    const { manager } = loadBuildWizard();
+    manager.workspaceCreatorContext = { buildRevision: revision };
+    const build = manager.workspaceBuild;
+    build.context = { entryPoint: 'home_cockpit_create' };
+    build.editedFields = new Set(edited ? ['name'] : []);
+    manager.workspaceBuildPane = () => ({});
+    manager.setWorkspaceBuildBusy = () => {};
+    manager.workspaceBuildTransport = {
+      create: async () => ({ ok: true, body: { session: { id: 'fresh', version: 1 } } })
+    };
+    manager.applyWorkspaceBuildSession = async () => {};
+    const scheduled = [];
+    manager.scheduleWorkspaceBuildDraft = options => scheduled.push(options);
+    await manager.openWorkspaceBuildSession({ fresh });
+    assert.equal(scheduled.at(-1).user, edited || (!fresh && Boolean(revision)));
+  }
+});
+
+function permissionReviewFixture() {
+  const timers = new Map();
+  let timerID = 0;
+  const fixture = loadBuildWizard({
+    setTimeout: fn => {
+      timers.set(++timerID, fn);
+      return timerID;
+    },
+    clearTimeout: id => timers.delete(id)
+  });
+  const { manager } = fixture;
+  const payload = { template_id: 'file-janitor', name: 'Reviewed inbox', role_staffing: [] };
+  const build = manager.workspaceBuild;
+  build.session = {
+    id: 'build-review',
+    version: 7,
+    status: 'open',
+    draft: { ...payload },
+    folder: { observation: { id: 'folder-1' } }
+  };
+  manager.workspaceCreatorContext = { buildRevision: 0 };
+  manager.collectCreatePayload = () => ({ payload });
+  manager.workspaceBuildGateProblem = () => (payload.name ? '' : 'Workspace name is required');
+  manager.workspaceBuildPane = () => ({ setBusy() {} });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.scheduleWorkspaceBuildDraft = () => {
+    throw new Error('preview must not fabricate an edit');
+  };
+  manager.syncWorkspaceBuildPresentation = () => manager.scheduleWorkspaceBuildPreparationReview();
+  const requests = [];
+  let confirms = 0;
+  const review = (monitoring = false) => ({
+    state: 'review',
+    version: build.session.version,
+    review_revision: 'a'.repeat(64),
+    monitoring,
+    workspace: { name: payload.name },
+    team: [],
+    folder: { name: 'Inbox', path: '/synthetic/inbox' },
+    terms: {}
+  });
+  manager.workspaceBuildTransport = {
+    janitorReview: async (_id, body) => {
+      requests.push(body);
+      return { ok: true, body: { review: review(body.monitoring) } };
+    },
+    janitorPrepare: async () => {
+      confirms++;
+      throw new Error('unrequested confirmation');
+    }
+  };
+  return {
+    ...fixture,
+    build,
+    payload,
+    timers,
+    requests,
+    review,
+    confirms: () => confirms,
+    tick: async () => {
+      const pending = [...timers.values()];
+      timers.clear();
+      pending.forEach(fn => fn());
+      await new Promise(setImmediate);
+    }
+  };
+}
+
+test('automatic permissions coalesce edits, preserve monitoring, and never confirm or mark a user edit', async () => {
+  const f = permissionReviewFixture();
+  const { manager, build, payload, timers, requests } = f;
+  manager.syncWorkspaceBuildPresentation();
+  const timer = [...timers.keys()][0];
+  manager.syncWorkspaceBuildPresentation();
+  assert.deepEqual([...timers.keys()], [timer], 'identical renders do not reset the debounce');
+  payload.name = 'Edited once';
+  manager.syncWorkspaceBuildPresentation();
+  payload.name = 'Edited twice';
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(timers.size, 1);
+  await f.tick();
+  assert.equal(requests.length, 1);
+  assert.equal(build.janitorReview.workspace.name, payload.name);
+  assert.equal(manager.workspaceBuildPreparationCurrent(), true);
+  manager.syncWorkspaceBuildPresentation();
+  assert.equal(timers.size, 0);
+  await manager.reviewWorkspaceBuildPreparation({ monitoring: true });
+  payload.name = 'Kept monitoring';
+  manager.noteWorkspaceBuildIntent();
+  manager.syncWorkspaceBuildPresentation();
+  await f.tick();
+  assert.deepEqual(
+    requests.map(request => request.monitoring),
+    [false, true, true]
+  );
+  assert.equal(f.confirms(), 0);
+  assert.equal(build.draftUser, undefined);
+});
+
+test('Start over uses a new client identity with default-off monitoring and no old ownership or review', async () => {
+  const f = permissionReviewFixture();
+  const { manager, build } = f;
+  build.context = manager.workspaceCreatorContext;
+  build.context.buildEditedFields = new Set(['team']);
+  build.editedFields = new Set(['team']);
+  build.janitorMonitoring = true;
+  build.janitorReview = { review_revision: 'old' };
+  build.janitorReviewRequest = { key: 'old in-flight read' };
+  manager.workspaceBuildTransport.abandon = async () => ({ ok: true });
+  manager.setWorkspaceBuildBusy = busy => {
+    manager.workspaceBuild.busy = busy;
+  };
+  manager.resetAddWorkspaceModalForm = () => {};
+  manager.refreshWizardChrome = () => {};
+  manager.mountWorkspaceBuildPane = () => {};
+  manager.openWorkspaceBuildSession = async ({ fresh }) => {
+    assert.equal(fresh, true);
+  };
+  await manager.startOverWorkspaceBuild();
+  const next = manager.workspaceBuild;
+  assert.notEqual(next, build, 'old request callbacks cannot adopt into the new build');
+  assert.equal(next.janitorMonitoring, false);
+  assert.equal(next.janitorReview, undefined);
+  assert.equal(next.janitorReviewRequest, undefined);
+  assert.equal(next.editedFields.size, 0);
+  assert.equal(next.context.buildEditedFields.size, 0);
+});
+
+test('permission reads discard late results for edited, replaced, closed, manual and accepted drafts', async t => {
+  for (const change of ['edit', 'folder', 'close', 'manual', 'accepted', 'monitoring']) {
+    await t.test(change, async () => {
+      const f = permissionReviewFixture();
+      let release;
+      const old = f.review();
+      f.manager.workspaceBuildTransport.janitorReview = () =>
+        new Promise(resolve => {
+          release = resolve;
+        });
+      const reading = f.manager.reviewWorkspaceBuildPreparation();
+      await new Promise(setImmediate);
+      if (change === 'edit') {
+        f.payload.name = 'New name';
+        f.manager.noteWorkspaceBuildIntent();
+      }
+      if (change === 'folder') f.build.session.folder.observation.id = 'folder-2';
+      if (change === 'close') f.build.closing = true;
+      if (change === 'manual') f.build.collapsed = true;
+      if (change === 'accepted') {
+        f.build.acceptedPreparation = true;
+        f.build.janitorReview = { state: 'accepted', review_revision: 'kept' };
+      }
+      if (change === 'monitoring')
+        await f.manager.reviewWorkspaceBuildPreparation({ monitoring: true });
+      release({ ok: true, body: { review: old } });
+      await reading;
+      assert.notEqual(f.build.janitorReview?.review_revision, old.review_revision);
+      if (change === 'accepted') assert.equal(f.build.janitorReview.review_revision, 'kept');
+      assert.equal(f.confirms(), 0);
+    });
+  }
+});
+
+test('permission replies cannot substitute monitoring consent or an incomplete review identity', async () => {
+  for (const patch of [{ monitoring: true }, { review_revision: 'incomplete' }]) {
+    const f = permissionReviewFixture();
+    f.manager.workspaceBuildTransport.janitorReview = async () => ({
+      ok: true,
+      body: { review: { ...f.review(false), ...patch } }
+    });
+    await f.manager.reviewWorkspaceBuildPreparation();
+    assert.equal(f.manager.workspaceBuildPreparationCurrent(), false);
+    assert.equal(f.timers.size, 0, 'malformed replies do not start an automatic retry loop');
+    await f.manager.confirmWorkspaceBuildPreparation();
+    assert.equal(f.confirms(), 0);
+  }
+});
+
+test('failed permission keys require deliberate retry, and stale local fields cannot confirm', async () => {
+  const f = permissionReviewFixture();
+  const transport = f.manager.workspaceBuildTransport;
+  const succeed = transport.janitorReview;
+  let failed = 0;
+  transport.janitorReview = async () => {
+    failed++;
+    return { ok: false, body: { error: 'Offline' } };
+  };
+  f.manager.syncWorkspaceBuildPresentation();
+  await f.tick();
+  f.manager.syncWorkspaceBuildPresentation();
+  assert.equal(f.timers.size, 0);
+  assert.equal(failed, 1);
+  transport.janitorReview = succeed;
+  await f.manager.reviewWorkspaceBuildPreparation();
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), true);
+  f.payload.name = 'Not yet reviewed';
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(f.confirms(), 0);
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), false);
+  f.build.draftError = true;
+  f.manager.syncWorkspaceBuildPresentation();
+  assert.equal(f.timers.size, 0, 'a conflict cannot start another preview/save loop');
+});
+
+test('a recognized plan outranks an earlier File Janitor draft, including missing prerequisites', async () => {
+  const f = permissionReviewFixture();
+  f.build.session.folder.recognition = { verdict: 'project' };
+  f.build.session.plan = { ready: true };
+  let setups = 0,
+    prerequisites = 0;
+  f.manager.workspaceBuildPlanReady = () => f.build.session.plan.ready;
+  f.manager.setUpFromWorkspaceBuildPlanReview = async () => {
+    setups++;
+  };
+  f.manager.refineWorkspaceBuildFolder = () => {
+    prerequisites++;
+  };
+  f.manager.createFromWorkspaceBuild = () => {
+    throw new Error('recognized plan used generic create');
+  };
+  f.manager.syncWorkspaceBuildPresentation();
+  assert.equal(f.timers.size, 0);
+  await f.manager.actOnWorkspaceBuildFolderReview();
+  f.build.session.plan.ready = false;
+  await f.manager.actOnWorkspaceBuildFolderReview();
+  assert.equal(setups, 1);
+  assert.equal(prerequisites, 1);
+  assert.equal(f.confirms(), 0);
+});
+
+test('folder create chips and required groups lead to the current review, not an implicit create', async () => {
+  const f = permissionReviewFixture();
+  f.build.session.draft.template_id = f.payload.template_id = 'content-production';
+  f.build.session.group_prerequisite = {
+    state: 'home_creation_review_required',
+    home: { proposed_name: 'Required Home' }
+  };
+  let reviews = 0,
+    prerequisites = 0,
+    creates = 0;
+  f.manager.reviewOrEditWorkspaceBuild = () => {
+    reviews++;
+  };
+  f.manager.refineWorkspaceBuildFolder = () => {
+    prerequisites++;
+  };
+  f.manager.createFromWorkspaceBuild = async () => {
+    creates++;
+  };
+  await f.manager.actOnWorkspaceBuildFolderReview();
+  await f.manager.performWorkspaceBuildAction(f.build, {}, 'create_now');
+  assert.equal(prerequisites, 1);
+  assert.equal(reviews, 1);
+  assert.equal(creates, 0);
+  f.build.session.folder = null;
+  await f.manager.performWorkspaceBuildAction(f.build, {}, 'create_now');
+  assert.equal(creates, 1, 'the no-folder flow keeps its existing explicit-create behavior');
+});
+
+test('an uncertain confirmation freezes its exact request even when a read sees no accepted operation yet', async () => {
+  const f = permissionReviewFixture();
+  await f.manager.reviewWorkspaceBuildPreparation();
+  const exact = f.build.janitorReview;
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(f.build.preparationUncertain, true);
+  assert.equal(f.build.acceptedPreparation, false);
+  f.manager.noteWorkspaceBuildIntent();
+  await f.manager.reviewWorkspaceBuildPreparation({ monitoring: true });
+  assert.equal(f.build.janitorReview, exact);
+  assert.notEqual(f.build.janitorMonitoring, true);
+  assert.equal(f.timers.size, 0);
+  assert.equal(f.confirms(), 1);
+});
+
+test('an upstream error or a refused retry cannot settle an earlier uncertain confirmation', async () => {
+  for (const priorUnknown of [false, true]) {
+    const f = permissionReviewFixture();
+    await f.manager.reviewWorkspaceBuildPreparation();
+    const exact = f.build.janitorReview;
+    if (priorUnknown) await f.manager.confirmWorkspaceBuildPreparation();
+    f.manager.workspaceBuildTransport.janitorPrepare = async (_id, request) => {
+      assert.equal(request.review_revision, exact.review_revision);
+      return {
+        ok: false,
+        status: priorUnknown ? 409 : 503,
+        body: {
+          code: priorUnknown ? 'review_changed' : 'upstream_timeout',
+          error: 'Could not confirm'
+        }
+      };
+    };
+    f.manager.workspaceBuildTransport.janitorReview = async () => ({
+      ok: true,
+      body: { review: { ...f.review(false), review_revision: 'b'.repeat(64) } }
+    });
+    await f.manager.confirmWorkspaceBuildPreparation();
+    assert.equal(f.build.preparationUncertain, true);
+    assert.equal(f.build.janitorReview, exact);
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('a definite stale-terms refusal reads a new review but never confirms it automatically', async () => {
+  const f = permissionReviewFixture();
+  await f.manager.reviewWorkspaceBuildPreparation({ monitoring: true });
+  let confirms = 0;
+  f.manager.workspaceBuildTransport.janitorPrepare = async () => {
+    confirms++;
+    return { ok: false, body: { code: 'review_changed', error: 'Terms changed' } };
+  };
+  f.manager.workspaceBuildTransport.janitorReview = async () => ({
+    ok: true,
+    body: { review: { ...f.review(true), review_revision: 'b'.repeat(64) } }
+  });
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(confirms, 1);
+  assert.equal(f.build.preparationUncertain, false);
+  assert.equal(f.build.janitorReview.review_revision, 'b'.repeat(64));
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), true);
+  assert.equal(f.timers.size, 0);
+});
+
 test('malformed preparation success observes the accepted identity instead of claiming readiness', async () => {
   const { manager } = loadBuildWizard();
+  manager.workspaceBuildPreparationCurrent = () => true;
   const build = manager.workspaceBuild;
   build.session = { id: 'b-1', status: 'open' };
   build.janitorReview = { version: 4, review_revision: 'reviewed', monitoring: false };
@@ -5713,6 +6062,7 @@ test('malformed preparation success observes the accepted identity instead of cl
 
 test('lost preparation responses recover accepted identity and a double click sends only once', async () => {
   const { manager } = loadBuildWizard();
+  manager.workspaceBuildPreparationCurrent = () => true;
   const build = manager.workspaceBuild;
   build.session = { id: 'b-1', status: 'open' };
   build.janitorReview = { version: 4, review_revision: 'reviewed', monitoring: false };

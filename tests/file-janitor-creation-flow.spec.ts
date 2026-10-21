@@ -94,6 +94,23 @@ test.describe('attached creation with a scripted local model', () => {
     return composer;
   }
 
+  async function editDraftTeam(page: Page, name: string) {
+    await page.getByRole('button', { name: 'Edit team', exact: true }).click();
+    const roster = page.locator('#workspaceRoleRoster');
+    const clear = roster.getByRole('button', { name: 'Clear File Curator', exact: true });
+    if (await clear.isVisible()) await clear.click();
+    await roster
+      .getByRole('button', { name: 'Create an agent for File Curator', exact: true })
+      .click();
+    const agent = page.locator('#addAgentModal');
+    await expect(agent).toBeVisible();
+    await agent.locator('[data-agent-create-field=name]').fill(name);
+    await agent.locator('[data-agent-create-field=model]').selectOption('ori-synthetic-model');
+    await agent.getByRole('button', { name: 'Add to team', exact: true }).click();
+    await expect(agent).toBeHidden();
+    await page.locator('#workspaceBuildWithBtn').click();
+  }
+
   async function resources(request: APIRequestContext) {
     const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
     const permissions = await Promise.all(
@@ -335,19 +352,7 @@ test.describe('attached creation with a scripted local model', () => {
     await expect(page.locator('#workspaceBuildFolderTeam')).toContainText('Synthetic Curator');
     const folder = (await currentBuild(request)).folder.observation.id;
     await page.locator('#workspaceBuildPlanName').fill('Reviewed folder draft');
-    await page.getByRole('button', { name: 'Edit team', exact: true }).click();
-    const roster = page.locator('#workspaceRoleRoster');
-    await roster.getByRole('button', { name: 'Clear File Curator', exact: true }).click();
-    await roster
-      .getByRole('button', { name: 'Create an agent for File Curator', exact: true })
-      .click();
-    const agent = page.locator('#addAgentModal');
-    await expect(agent).toBeVisible();
-    await agent.locator('[data-agent-create-field=name]').fill('Reviewed Curator');
-    await agent.locator('[data-agent-create-field=model]').selectOption('ori-synthetic-model');
-    await agent.getByRole('button', { name: 'Add to team', exact: true }).click();
-    await expect(agent).toBeHidden();
-    await page.locator('#workspaceBuildWithBtn').click();
+    await editDraftTeam(page, 'Reviewed Curator');
     await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
     await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('Reviewed folder draft');
     await expect(page.locator('#workspaceBuildFolderTeam')).toContainText('Reviewed Curator');
@@ -355,7 +360,12 @@ test.describe('attached creation with a scripted local model', () => {
       .poll(async () => (await currentBuild(request)).draft.role_staffing?.[0]?.name)
       .toBe('Reviewed Curator');
     expect((await currentBuild(request)).folder.observation.id).toBe(folder);
+    await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Create & scan folder');
+    await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeEnabled();
     expect(await resources(request)).toEqual(before);
+    // The mode button can leave the pointer over the toast (which pauses its
+    // expiry). Move away before waiting for a clean screenshot.
+    await page.mouse.move(20, 880);
     await page
       .getByText('Reviewed Curator added to the workspace draft.', { exact: true })
       .waitFor({ state: 'hidden', timeout: 10_000 });
@@ -368,93 +378,83 @@ test.describe('attached creation with a scripted local model', () => {
       request
     }, testInfo) => {
       await page.setViewportSize({ width: 1280, height: 900 });
-      const root = inbox();
-      const resumed = await request.post('/api/workspaces/build-sessions', {
-        data: { entry_point: 'home_cockpit_create' }
-      });
-      const oldBuild = (await resumed.json()).session;
-      if (oldBuild?.status === 'open')
-        await request.post(`/api/workspaces/build-sessions/${oldBuild.id}/abandon`, {
-          data: { version: oldBuild.version }
-        });
-      await request.post('/api/onboarding/skip');
-      await page.goto('/');
-      await page.locator('#cockpitCreateWorkspaceBtn').click();
-      const composer = page.locator('#workspaceBuildComposerInput');
-      await expect(composer).toBeEnabled();
-      await composer.fill('Prepare a File Janitor for my synthetic inbox.');
-      await composer.press('Enter');
-      await expect(page.locator('#folderNameInput')).toHaveValue(/Synthetic Janitor/);
-      await expect(composer).toBeEnabled();
-      await page
-        .locator('#workspaceBuildPane')
-        .getByRole('button', { name: 'Add folder', exact: true })
-        .click();
-      await page.getByPlaceholder('~/Projects/my-app').fill(root);
-      await page.getByRole('button', { name: 'Use this path', exact: true }).click();
-      await expect(page.locator('#workspaceBuildPane')).toContainText('Folder attached');
+      const root = inbox('Downloads');
+      const before = await resources(request);
+      const modelCalls = stopModel!.calls();
+      await attachFirst(page, request, root);
       const offer = page.locator('#workspaceBuildCreationReview');
-      await expect(
-        offer.getByRole('button', { name: 'Review & create', exact: true })
-      ).toBeVisible();
-      await offer.getByRole('button', { name: 'Review & create', exact: true }).click();
-      await expect(
-        offer.getByRole('button', { name: 'Create & prepare review', exact: true })
-      ).toBeVisible();
+      const confirm = page.locator('#workspaceBuildPlanReviewSetup');
+      await expect(confirm).toHaveText('Create & scan folder');
+      await expect(confirm).toBeEnabled();
       await expect(offer.getByRole('checkbox')).not.toBeChecked();
-      expect(existsSync(join(root, 'Filed'))).toBeFalsy();
-      await expect(offer).toContainText('Synthetic Curator');
-      if (!monitoring) {
-        await offer.getByRole('button', { name: 'Change folder', exact: true }).click();
-        await expect(page.getByPlaceholder('~/Projects/my-app')).toBeVisible();
-        await page
-          .locator('#workspaceBuildPane')
-          .getByRole('button', { name: 'Cancel', exact: true })
-          .click();
-        await page
-          .locator('#workspaceBuildPane')
-          .getByRole('button', { name: /^Remove folder / })
-          .click();
-        await expect(offer).not.toBeVisible();
-        await page
-          .locator('#workspaceBuildPane')
-          .getByRole('button', { name: 'Add folder', exact: true })
-          .click();
-        await page.getByPlaceholder('~/Projects/my-app').fill(root);
-        await page.getByRole('button', { name: 'Use this path', exact: true }).click();
-        await offer.getByRole('button', { name: 'Review & create', exact: true }).click();
-        await expect(
-          offer.getByRole('button', { name: 'Create & prepare review', exact: true })
-        ).toBeVisible();
+      const original = await currentBuild(request);
+      const staleReview = (
+        await (
+          await request.post(`/api/workspaces/build-sessions/${original.id}/janitor-review`, {
+            data: { version: original.version, monitoring: false }
+          })
+        ).json()
+      ).review;
+      if (monitoring) {
+        const unreviewedMode = await request.post(
+          `/api/workspaces/build-sessions/${original.id}/janitor-prepare`,
+          {
+            data: {
+              version: staleReview.version,
+              review_revision: staleReview.review_revision,
+              monitoring: true
+            }
+          }
+        );
+        expect(unreviewedMode.status()).toBe(409);
+        expect((await unreviewedMode.json()).code).toBe('review_changed');
       }
-      await offer.getByRole('button', { name: 'Edit setup', exact: true }).click();
-      await page.locator('#wizardStep4').getByRole('button', { name: 'Edit', exact: true }).click();
       const editedName = `Reviewed inbox ${monitoring ? 'watch' : 'manual'} ${Date.now()}`;
-      await page.locator('#folderNameInput').fill(editedName);
-      await page.locator('#workspaceBuildWithBtn').click();
-      await offer.getByRole('button', { name: 'Review & create', exact: true }).click();
-      await expect(offer).toContainText(editedName);
+      const editedAgent = `Reviewed Curator ${Date.now()}`;
+      await page.locator('#workspaceBuildPlanName').fill(editedName);
+      if (!monitoring) await editDraftTeam(page, editedAgent);
       if (monitoring) {
         await offer.getByRole('checkbox').check();
         await expect(offer).toContainText('Daily scan at');
       }
+      await expect(confirm).toHaveText('Create & scan folder');
+      await expect(confirm).toBeEnabled();
+      await expect(page.locator('#workspaceBuildPlanName')).toHaveValue(editedName);
+      if (!monitoring)
+        await expect(page.locator('#workspaceBuildFolderTeam')).toContainText(editedAgent);
+      expect((await currentBuild(request)).folder.observation.id).toBe(
+        original.folder.observation.id
+      );
+      // The old name/team/version cannot be confirmed after these edits.
+      const stale = await request.post(
+        `/api/workspaces/build-sessions/${original.id}/janitor-prepare`,
+        {
+          data: {
+            version: staleReview.version,
+            monitoring: false,
+            review_revision: staleReview.review_revision
+          }
+        }
+      );
+      expect(stale.status()).toBe(409);
+      expect(await resources(request)).toEqual(before);
+      expect(existsSync(join(root, 'Filed'))).toBeFalsy();
+      expect(stopModel!.calls() - modelCalls).toBe(1);
       await offer.getByText('Folder details', { exact: true }).click();
       await expect(offer).toContainText(root);
+      await expect(offer).toContainText('No file contents are opened');
       await page.screenshot({ path: testInfo.outputPath('create-permission-review.png') });
       if (monitoring) {
         await page.setViewportSize({ width: 390, height: 844 });
-        await offer
-          .getByRole('button', { name: 'Create & prepare review', exact: true })
-          .scrollIntoViewIfNeeded();
         expect((await offer.boundingBox())!.width).toBeLessThanOrEqual(390);
-        await expect(
-          offer.getByRole('button', { name: 'Change folder', exact: true })
-        ).toBeVisible();
+        await expect(confirm).toBeInViewport();
         await page.screenshot({ path: testInfo.outputPath('create-permission-narrow.png') });
       }
-      let pickerCalls = 0;
+      let pickerCalls = 0,
+        confirmations = 0;
       page.on('request', r => {
         if (r.url().includes('/api/folder-picker/')) pickerCalls++;
+        if (r.url().endsWith('/janitor-prepare')) confirmations++;
       });
       let lostResponse = false;
       if (!monitoring) {
@@ -469,24 +469,27 @@ test.describe('attached creation with a scripted local model', () => {
           await route.abort('failed'); // Real server committed; discard transport response only.
         });
       }
-      const confirm = offer.getByRole('button', { name: 'Create & prepare review', exact: true });
       await confirm.focus();
-      await confirm.press('Enter');
+      await page.keyboard.down('Enter');
+      await page.keyboard.down('Enter');
+      await page.keyboard.up('Enter');
       if (!monitoring) {
-        await expect(
-          offer.getByRole('button', { name: 'Retry preparation', exact: true })
-        ).toBeVisible();
+        await expect(confirm).toHaveText('Retry preparation');
+        await expect(confirm).toBeEnabled();
         expect(lostResponse).toBeTruthy();
+        await expect(page.locator('#workspaceBuildPlanName')).toBeHidden();
         await page.screenshot({ path: testInfo.outputPath('lost-response-recovery.png') });
-        await offer.getByRole('button', { name: 'Retry preparation', exact: true }).click();
+        await confirm.click();
       }
       await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20000 });
       await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
       await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
       expect(pickerCalls).toBe(0);
+      expect(confirmations).toBe(monitoring ? 1 : 2); // one initial admission, plus explicit recovery only
       const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
       const created = workspaces.filter((ws: { name: string }) => ws.name === editedName);
       expect(created).toHaveLength(1);
+      if (!monitoring) expect(created[0].agents).toContain(editedAgent);
       const status = (
         await (await request.get(`/api/workspaces/${created[0].id}/file-janitor`)).json()
       ).status;
@@ -507,52 +510,147 @@ test.describe('attached creation with a scripted local model', () => {
       await page.screenshot({ path: testInfo.outputPath('created-initial-review.png') });
     });
   }
+  test('an accepted preparation failure resumes the same workspace and scan after repair', async ({
+    page,
+    request
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const root = inbox('Downloads');
+    const before = await resources(request);
+    const calls = stopModel!.calls();
+    await attachFirst(page, request, root);
+    const confirm = page.locator('#workspaceBuildPlanReviewSetup');
+    await expect(confirm).toHaveText('Create & scan folder');
+    await expect(confirm).toBeEnabled();
+    const build = await currentBuild(request);
+    // A real filesystem conflict after the read-only review. Do not mock the
+    // grant, creation, preparation or scan endpoints.
+    writeFileSync(join(root, 'Filed'), 'synthetic filing-root blocker', { mode: 0o600 });
+    const response = page.waitForResponse(r => r.url().endsWith('/janitor-prepare'));
+    await confirm.click();
+    const failed = await response;
+    expect(failed.status()).toBe(409);
+    const failure = await failed.json();
+    const workspaceID = failure.details.workspace_id;
+    expect(workspaceID).toBeTruthy();
+    await expect(confirm).toHaveText('Retry preparation');
+    await expect(confirm).toBeEnabled();
+    await expect(page.locator('#workspaceBuildCreationReview')).toContainText(/Filed|filing/i);
+    const accepted = (
+      await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json()
+    ).session;
+    expect(accepted.preparation.workspace_id).toBe(workspaceID);
+    expect((await resources(request)).workspaces).toEqual(
+      [...before.workspaces, workspaceID].sort()
+    );
+    await page.screenshot({ path: testInfo.outputPath('accepted-preparation-failure.png') });
+    renameSync(join(root, 'Filed'), join(root, 'kept-blocker.txt'));
+    await confirm.click();
+    await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20_000 });
+    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
+    const after = (await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json())
+      .session;
+    expect(after.preparation.id).toBe(accepted.preparation.id);
+    expect(after.preparation.workspace_id).toBe(workspaceID);
+    const batches = (
+      await (await request.get(`/api/workspaces/${workspaceID}/file-janitor/batches`)).json()
+    ).batches;
+    expect(batches).toHaveLength(1);
+    expect((await resources(request)).workspaces).toEqual(
+      [...before.workspaces, workspaceID].sort()
+    );
+    expect(stopModel!.calls() - calls).toBe(1);
+    expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
+    await page.screenshot({ path: testInfo.outputPath('accepted-preparation-resumed.png') });
+  });
+
+  test('a late automatic reply cannot change an explicitly created and prepared workspace', async ({
+    page,
+    request
+  }) => {
+    test.setTimeout(60_000);
+    const root = inbox('Downloads');
+    stopModel!.scenario({ createNow: true, name: 'Late suggestion must not return' });
+    const held = stopModel!.hold();
+    let responded = false;
+    let replied!: () => void;
+    const replyFinished = new Promise<void>(resolve => {
+      replied = resolve;
+    });
+    await page.route('**/api/workspaces/build-sessions/*/turns', async route => {
+      try {
+        const real = await route.fetch({ timeout: 60_000 });
+        responded = true;
+        await route.fulfill({ response: real }).catch(() => {}); // old page may have navigated
+      } finally {
+        replied();
+      }
+    });
+    try {
+      await attachFirst(page, request, root);
+      await held.started;
+      await page.getByRole('button', { name: 'Change purpose', exact: true }).click();
+      await page
+        .locator('#templatePicker .workspace-template-card')
+        .filter({
+          has: page.locator('.workspace-template-card-label', { hasText: /^File Janitor$/ })
+        })
+        .click();
+      await page.locator('#workspaceBuildWithBtn').click();
+      const name = `Manual delayed inbox ${Date.now()}`;
+      await page.locator('#workspaceBuildPlanName').fill(name);
+      await editDraftTeam(page, `Manual delayed curator ${Date.now()}`);
+      const confirm = page.locator('#workspaceBuildPlanReviewSetup');
+      await expect(confirm).toHaveText('Create & scan folder');
+      await expect(confirm).toBeEnabled();
+      const build = await currentBuild(request);
+      await confirm.click();
+      await expect(page).toHaveURL(/panel=file-janitor/, { timeout: 20_000 });
+      const accepted = (
+        await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json()
+      ).session;
+      expect(accepted.draft.name).toBe(name);
+      expect(accepted.preparation.workspace_id).toBeTruthy();
+      const beforeLate = await resources(request);
+      held.release();
+      await replyFinished;
+      expect(responded).toBe(true);
+      const after = (await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json())
+        .session;
+      expect(after.draft).toEqual(accepted.draft);
+      expect(after.preparation).toEqual(accepted.preparation);
+      expect((await resources(request)).workspaces).toEqual(beforeLate.workspaces);
+      expect((await resources(request)).agents).toEqual(beforeLate.agents);
+      expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
+    } finally {
+      held.release();
+      stopModel!.scenario();
+    }
+  });
+
   test('a lost held selection refuses before creating resources and offers explicit repair', async ({
     page,
     request
   }, testInfo) => {
     const root = inbox();
-    const resumed = await request.post('/api/workspaces/build-sessions', {
-      data: { entry_point: 'home_cockpit_create' }
-    });
-    const oldBuild = (await resumed.json()).session;
-    if (oldBuild?.status === 'open')
-      await request.post(`/api/workspaces/build-sessions/${oldBuild.id}/abandon`, {
-        data: { version: oldBuild.version }
-      });
-    await request.post('/api/onboarding/skip');
-    await page.goto('/');
-    await page.locator('#cockpitCreateWorkspaceBtn').click();
-    const composer = page.locator('#workspaceBuildComposerInput');
-    await expect(composer).toBeEnabled();
-    await composer.fill('Prepare File Janitor for a temporary inbox.');
-    await composer.press('Enter');
-    await expect(page.locator('#folderNameInput')).toHaveValue(/Synthetic Janitor/);
-    await expect(composer).toBeEnabled();
+    await attachFirst(page, request, root);
     const offer = page.locator('#workspaceBuildCreationReview');
-    await expect(offer).not.toBeVisible();
-    await page
-      .locator('#workspaceBuildPane')
-      .getByRole('button', { name: 'Add folder', exact: true })
-      .click();
-    await page.getByPlaceholder('~/Projects/my-app').fill(root);
-    await page.getByRole('button', { name: 'Use this path', exact: true }).click();
-    await offer.getByRole('button', { name: 'Review & create', exact: true }).click();
-    await expect(
-      offer.getByRole('button', { name: 'Create & prepare review', exact: true })
-    ).toBeVisible();
+    const confirm = page.locator('#workspaceBuildPlanReviewSetup');
+    await expect(confirm).toHaveText('Create & scan folder');
+    await expect(confirm).toBeEnabled();
     const before = (await (await request.get('/api/workspaces')).json()).folders
       .map((ws: { id: string }) => ws.id)
       .sort();
     renameSync(root, root + '-moved');
-    await offer.getByRole('button', { name: 'Create & prepare review', exact: true }).click();
+    await confirm.click();
     await expect(offer).toContainText(/folder attached.*no longer available|attach.*again/i);
     const after = (await (await request.get('/api/workspaces')).json()).folders
       .map((ws: { id: string }) => ws.id)
       .sort();
     expect(after).toEqual(before);
     expect(existsSync(join(root + '-moved', 'Filed'))).toBeFalsy();
-    await expect(offer.getByRole('button', { name: 'Edit setup', exact: true })).toBeVisible();
+    await expect(page.locator('#workspaceBuildFolderChange')).toBeVisible();
+    await expect(page.locator('#workspaceBuildPlanName')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('lost-selection-repair.png') });
   });
   test('explicit defer keeps the saved workspace/result and allows a separate build', async ({
@@ -560,34 +658,10 @@ test.describe('attached creation with a scripted local model', () => {
     request
   }, testInfo) => {
     const root = inbox();
-    const resumed = await request.post('/api/workspaces/build-sessions', {
-      data: { entry_point: 'home_cockpit_create' }
-    });
-    const oldBuild = (await resumed.json()).session;
-    if (oldBuild?.status === 'open')
-      await request.post(`/api/workspaces/build-sessions/${oldBuild.id}/abandon`, {
-        data: { version: oldBuild.version }
-      });
-    await request.post('/api/onboarding/skip');
-    await page.goto('/');
-    await page.locator('#cockpitCreateWorkspaceBtn').click();
-    const composer = page.locator('#workspaceBuildComposerInput');
-    await expect(composer).toBeEnabled();
-    await composer.fill('Prepare a synthetic File Janitor.');
-    await composer.press('Enter');
-    await expect(page.locator('#folderNameInput')).toHaveValue(/Synthetic Janitor/);
-    await expect(composer).toBeEnabled();
-    await page
-      .locator('#workspaceBuildPane')
-      .getByRole('button', { name: 'Add folder', exact: true })
-      .click();
-    await page.getByPlaceholder('~/Projects/my-app').fill(root);
-    await page.getByRole('button', { name: 'Use this path', exact: true }).click();
-    const offer = page.locator('#workspaceBuildCreationReview');
-    await offer.getByRole('button', { name: 'Review & create', exact: true }).click();
-    await expect(
-      offer.getByRole('button', { name: 'Create & prepare review', exact: true })
-    ).toBeVisible();
+    await attachFirst(page, request, root);
+    const confirm = page.locator('#workspaceBuildPlanReviewSetup');
+    await expect(confirm).toHaveText('Create & scan folder');
+    await expect(confirm).toBeEnabled();
     let accepted:
       | { workspace_id: string; folder_slug: string; preparation: { result: { batch_id: string } } }
       | undefined;
@@ -601,16 +675,16 @@ test.describe('attached creation with a scripted local model', () => {
       accepted = await real.json();
       await route.abort('failed');
     });
-    await offer.getByRole('button', { name: 'Create & prepare review', exact: true }).click();
+    await confirm.click();
     await expect(
-      offer.getByRole('button', { name: 'Defer preparation', exact: true })
+      page.getByRole('button', { name: 'Defer preparation', exact: true })
     ).toBeVisible();
-    await expect(offer.getByRole('link', { name: 'Open workspace', exact: true })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'Open workspace', exact: true })).toHaveAttribute(
       'href',
       `/workspaces/${accepted!.folder_slug}?panel=file-janitor`
     );
     await page.screenshot({ path: testInfo.outputPath('explicit-defer.png') });
-    await offer.getByRole('button', { name: 'Defer preparation', exact: true }).click();
+    await page.getByRole('button', { name: 'Defer preparation', exact: true }).click();
     await expect(page.locator('#addFolderModal')).not.toBeVisible();
     const oldRetry = await request.post(path, { data: confirmation });
     expect(oldRetry.status()).toBe(409);
@@ -634,7 +708,7 @@ test.describe('attached creation with a scripted local model', () => {
     await page.screenshot({ path: testInfo.outputPath('deferred-saved-review.png') });
     await page.goto('/');
     await page.locator('#cockpitCreateWorkspaceBtn').click();
-    await expect(composer).toBeEnabled();
+    await expect(page.locator('#workspaceBuildComposerInput')).toBeEnabled();
     await expect(page.locator('#workspaceBuildCreationReview')).not.toBeVisible();
   });
 });

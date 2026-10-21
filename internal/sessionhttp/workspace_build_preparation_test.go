@@ -303,6 +303,40 @@ func TestWorkspaceBuildPreparation_StaleReviewAndExpiredSelectionWriteNothing(t 
 	}
 }
 
+func TestWorkspaceBuildPreparation_ChangedPermissionTermsRequireAnotherReview(t *testing.T) {
+	f := newBuildPreparationFixture(t)
+	request := f.review(t)
+	tpl, err := f.h.resolveProjectTemplate("file-janitor", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl.AutomationRecipes = append([]workspace.AutomationRecipe(nil), tpl.AutomationRecipes...)
+	if len(tpl.AutomationRecipes) == 0 || tpl.AutomationRecipes[0].Watch == nil {
+		t.Fatal("fixture has no watch terms")
+	}
+	watch := *tpl.AutomationRecipes[0].Watch
+	watch.DebounceSeconds = 777
+	tpl.AutomationRecipes[0].Watch = &watch
+	f.h.SetProjectTemplateResolver(func(string, string) (projecttemplates.Template, error) { return tpl, nil })
+	changed := f.call("janitor-review", buildPreparationRequest{Version: request.Version})
+	if changed.Code != http.StatusOK || !strings.Contains(changed.Body.String(), `"debounce_seconds":777`) {
+		t.Fatalf("new permission terms not shown: %d %s", changed.Code, changed.Body.String())
+	}
+	refused := f.call("janitor-prepare", request)
+	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "review_changed") {
+		t.Fatalf("old permission terms accepted: %d %s", refused.Code, refused.Body.String())
+	}
+	if ids, _ := f.workspaces.List(); len(ids) != 0 {
+		t.Fatalf("created workspaces: %v", ids)
+	}
+	if _, found := f.agents.GetAgent("Reviewed Curator"); found {
+		t.Fatal("created an agent")
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "Filed")); !os.IsNotExist(err) {
+		t.Fatal("created Filed")
+	}
+}
+
 func TestWorkspaceBuildPreparation_ConcurrentTabsShareTheAcceptedIdentity(t *testing.T) {
 	f := newBuildPreparationFixture(t)
 	request := f.review(t)
@@ -534,7 +568,7 @@ func TestWorkspaceBuildPreparation_SeedBoundaryRefusesLateEffectiveConfiguration
 
 func TestWorkspaceBuildPreparation_ModelPromptNamesTheHostReviewNotPermission(t *testing.T) {
 	prompt := buildSystemPrompt(buildPromptInput{Session: &personalassistant.WorkspaceBuildSession{}})
-	for _, required := range []string{"Ready to create", "Review & create", "never supplies consent"} {
+	for _, required := range []string{"Ready to create", "automatically prepares the current permission review", "Create & scan folder", "never supplies consent"} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("missing reviewed-create copy %q", required)
 		}

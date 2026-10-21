@@ -295,11 +295,48 @@ test('creation permission review is host-rendered, default-off and explicitly co
   assert.equal(events[0].detail.monitoring, true);
   const confirm = host
     .querySelectorAll('button')
-    .find(button => button.textContent === 'Create & prepare review');
+    .find(button => button.textContent === 'Create & scan folder');
   confirm.click();
   assert.equal(events[1].type, 'workspace-build-prepare');
   pane.renderCreationReview(host, { review, busy: true });
   assert.ok(host.querySelectorAll('button').every(button => button.disabled));
+});
+
+test('compact permissions retain focused monitoring and open details without a duplicate primary action', () => {
+  const { pane, document, events } = loadPane();
+  const host = document.createElement('section');
+  const actionsHost = document.createElement('div');
+  const review = {
+    workspace: { name: 'Inbox' },
+    folder: { name: 'Inbox', path: '/synthetic/inbox' },
+    terms: {},
+    review_revision: 'current'
+  };
+  pane.renderCreationReview(host, { review, compact: true, actionsHost });
+  const checkbox = host.querySelectorAll('input')[0];
+  checkbox.focus();
+  host.querySelectorAll('details')[0].open = true;
+  pane.renderCreationReview(host, { review, compact: true, actionsHost });
+  assert.equal(host.querySelectorAll('input')[0], checkbox, 'a repaint retains controls');
+  pane.renderCreationReview(host, {
+    review: null,
+    compact: true,
+    actionsHost,
+    monitoring: true,
+    message: 'Checking current terms'
+  });
+  assert.equal(document.activeElement, host.querySelectorAll('input')[0]);
+  assert.equal(host.querySelectorAll('input')[0].checked, true);
+  assert.equal(host.querySelectorAll('button').length, 0);
+  assert.equal(actionsHost.querySelectorAll('button').length, 0);
+  pane.renderCreationReview(host, { review, compact: true, actionsHost });
+  assert.equal(
+    host.querySelectorAll('details')[0].open,
+    true,
+    'details stay open through a preview refresh'
+  );
+  assert.equal(document.activeElement, host.querySelectorAll('input')[0]);
+  assert.equal(events.length, 0, 'rendering cannot request or confirm anything');
 });
 
 test('accepted preparation can be explicitly deferred without offering ordinary recreation', () => {
