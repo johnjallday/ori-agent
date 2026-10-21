@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -70,8 +71,9 @@ func (h *Handler) ResourceCatalogs() *resourcecatalog.Service {
 	if err != nil {
 		return nil
 	}
+	home, _ := os.UserHomeDir()
 	h.resourceCatalogs = resourcecatalog.NewService(resourcecatalog.Deps{
-		Workspaces: h.workspaceTaskStore, Folders: folders, DataDir: dataDir,
+		Workspaces: h.workspaceTaskStore, Folders: folders, DataDir: dataDir, HomeDir: home,
 		Provider:              resourceCatalogProvider{list: h.installedPluginLister.List, call: h.resourceCatalogCall},
 		HomeProviderAvailable: h.assistantHomeProviderAvailable,
 	})

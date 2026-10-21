@@ -63,6 +63,9 @@ type ReviewSource struct {
 	Detail        string `json:"detail,omitempty"`
 	Approved      bool   `json:"approved"`
 	Withdrawn     bool   `json:"withdrawn"`
+	// Folder marks an owner folder added on this computer. One added again
+	// after its removal is withdrawn until this review approves it.
+	Folder bool `json:"folder,omitempty"`
 }
 
 // SourceReview is the scope review: the installation, every source and what
@@ -90,6 +93,10 @@ func (s *Service) ReviewSources(ctx context.Context, owner, studioID string) (So
 	if err != nil {
 		return SourceReview{}, err
 	}
+	folders, err := readFolders(ref.paths)
+	if err != nil {
+		return SourceReview{}, err
+	}
 	review := pendingReview{
 		kind: reviewScope, owner: normalizedOwner(owner), studioID: ref.workspace.ID,
 		linkID: ref.link.ID, linkRevision: ref.link.StateRevision, catalog: status.Catalog,
@@ -111,6 +118,7 @@ func (s *Service) ReviewSources(ctx context.Context, owner, studioID string) (So
 		item := ReviewSource{
 			SourceID: source.ID, Category: source.Category, CategoryLabel: category.Label, Label: source.Label,
 			Location: source.Location, Access: source.Access, State: source.State, Detail: source.Detail,
+			Folder: ownerFolder(folders, source.ID) != nil,
 		}
 		if hasGrants && grants.InstallationID == answer.Installation.ID {
 			if granted := grantSource(grants, source.ID); granted != nil {

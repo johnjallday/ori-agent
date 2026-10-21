@@ -78,6 +78,20 @@ func validFolderPath(path string) bool {
 
 func (p paths) folders() string { return filepath.Join(p.dataDir, foldersFile) }
 
+// displayPath shows a folder the way providers show their own locations:
+// under the home folder as ~/…, anywhere else as it is.
+func (s *Service) displayPath(path string) string {
+	home := s.deps.HomeDir
+	if home == "" {
+		return path
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return "~/" + filepath.ToSlash(rel)
+}
+
 func readFolders(p paths) ([]OwnerFolder, error) {
 	var document foldersDocument
 	found, err := readDocument(p.folders(), maxFoldersBytes, &document)

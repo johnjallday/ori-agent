@@ -130,9 +130,35 @@ func TestOwnerFolders_RemovingWithdrawsKeepsHistoryAndReAddingFindsIt(t *testing
 		t.Fatal(err)
 	}
 	for _, source := range review.Sources {
-		if source.SourceID == folder.ID && (!source.Withdrawn || source.Approved) {
-			t.Fatalf("a re-added folder skipped its review: %+v", source)
+		if source.SourceID == folder.ID && (!source.Withdrawn || source.Approved || !source.Folder) {
+			t.Fatalf("a re-added folder skipped its review or lost its folder mark: %+v", source)
 		}
+	}
+}
+
+// A folder waiting for review is shown under the home folder as ~/…, like
+// the locations providers report.
+func TestOwnerFolders_AWaitingFolderIsShownFromHome(t *testing.T) {
+	f := newCatalogFixture(t)
+	f.service.deps.HomeDir = "/Users/me"
+	inside, err := f.service.AddFolder("local", f.studio.ID, "templates", archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, err := f.service.AddFolder("local", f.studio.ID, "scripts", "/Volumes/Archive/Scripts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := f.overview(t)
+	if got := sourceNamed(view, inside.ID).Location; got != "~/Music/Templates Archive" {
+		t.Errorf("a folder under home = %q", got)
+	}
+	if got := sourceNamed(view, outside.ID).Location; got != "/Volumes/Archive/Scripts" {
+		t.Errorf("a folder elsewhere = %q", got)
+	}
+	f.service.deps.HomeDir = "/Users/me/Music/Templates Archive"
+	if got := sourceNamed(f.overview(t), inside.ID).Location; got != archivePath {
+		t.Errorf("the home folder itself = %q", got)
 	}
 }
 

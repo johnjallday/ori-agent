@@ -159,14 +159,21 @@ export function attemptLine(source, options = {}) {
 }
 
 // sourceLine is one source's row: its words and how its last read went. A
-// folder the owner added waits for review before anything is read in it.
+// folder the owner added waits for review before anything is read in it; one
+// added again after its removal waits the same way.
 export function sourceLine(source, options = {}) {
-  const status =
-    source?.folder && !source.approved && !source.withdrawn && !source.last_attempt
-      ? 'Added; read once you approve it in Review sources'
-      : attemptLine(source, options);
+  let status = attemptLine(source, options);
+  if (source?.folder && !source.approved) {
+    status = source.withdrawn
+      ? 'Added again; read once you approve it in Review sources'
+      : 'Added; read once you approve it in Review sources';
+  }
   return [source?.label, source?.location, status].filter(Boolean).join(' · ');
 }
+
+// FOLDER_LIMIT_NOTE explains a disabled Add a folder.
+export const FOLDER_LIMIT_NOTE =
+  'This Studio has as many folders as it can hold on this computer. Remove one to add another.';
 
 export function entryStateLabel(state) {
   return ENTRY_STATES[state] || '';
@@ -479,8 +486,11 @@ export class ResourceCatalogPage {
       all.value = '';
       all.textContent = 'All sources';
       select.append(all);
+      // A source nothing was ever read from has no entries to filter by.
       for (const source of (this.view?.sources || []).filter(
-        source => source.category === this.category
+        source =>
+          source.category === this.category &&
+          (source.approved || source.withdrawn || source.last_attempt)
       )) {
         const option = this.document.createElement('option');
         option.value = source.source_id;
@@ -748,7 +758,9 @@ export class ResourceCatalogPage {
       const box = this.document.createElement('input');
       box.type = 'checkbox';
       box.value = source.source_id;
-      box.checked = source.approved || !source.withdrawn;
+      // A withdrawn source stays unread unless chosen again; an owner folder
+      // the owner just added again is that choice.
+      box.checked = source.approved || !source.withdrawn || Boolean(source.folder);
       const text = this.document.createElement('span');
       const state = sourceStateWords(source.state);
       text.textContent = [
@@ -819,8 +831,19 @@ export class ResourceCatalogPage {
   }
 
   renderSources() {
+    // At the limit the button stays, disabled, beside the reason.
+    const offered = (this.view?.folder_categories || []).length > 0;
+    const atLimit = offered && !this.view?.can_add_folder;
     const add = this.el('resourceCatalogAddFolder');
-    if (add) add.hidden = !this.view?.can_add_folder;
+    if (add) {
+      add.hidden = !offered;
+      add.disabled = atLimit;
+    }
+    const limit = this.el('resourceCatalogFolderLimit');
+    if (limit) {
+      limit.textContent = atLimit ? FOLDER_LIMIT_NOTE : '';
+      limit.hidden = !atLimit;
+    }
     const root = this.el('resourceCatalogSources');
     if (!root) return;
     root.replaceChildren();
@@ -889,6 +912,8 @@ export class ResourceCatalogPage {
   // the owner types the path instead.
   async chooseFolder() {
     const note = this.el('resourceCatalogFolderNote');
+    const error = this.el('resourceCatalogFolderError');
+    if (error) error.textContent = '';
     const result = await this.request('/api/folder-picker/select-path', {
       method: 'POST',
       body: JSON.stringify({ title: 'Choose a folder for this catalog' })

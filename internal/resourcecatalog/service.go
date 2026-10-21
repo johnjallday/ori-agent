@@ -3,6 +3,7 @@ package resourcecatalog
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -75,8 +76,11 @@ type Deps struct {
 	// enabled and still the one it is pinned to. Lookups need it; nil means
 	// lookups are unavailable.
 	HomeProviderAvailable func(home *workspace.Workspace) bool
-	Now                   func() time.Time
-	NewID                 func() string
+	// HomeDir is the user's home folder; an owner folder under it is shown
+	// as ~/…, the way providers show their own locations.
+	HomeDir string
+	Now     func() time.Time
+	NewID   func() string
 }
 
 // Service owns every Studio catalog: reviews, inspection, publication,
@@ -95,6 +99,14 @@ func NewService(deps Deps) *Service {
 	}
 	if deps.NewID == nil {
 		deps.NewID = uuid.NewString
+	}
+	// Owner folders are stored canonical, so the home they are shown against
+	// is resolved the same way.
+	if home := strings.TrimSpace(deps.HomeDir); home != "" {
+		if resolved, err := filepath.EvalSymlinks(home); err == nil {
+			home = resolved
+		}
+		deps.HomeDir = filepath.Clean(home)
 	}
 	return &Service{deps: deps, reviews: map[string]pendingReview{}, running: map[string]*runningOperation{}}
 }

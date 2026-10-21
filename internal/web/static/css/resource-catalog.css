@@ -72,7 +72,8 @@
 }
 .resource-catalog-tab:focus-visible,
 .resource-catalog-row:focus-visible,
-.resource-catalog-detail h2:focus-visible {
+.resource-catalog-detail h2:focus-visible,
+.resource-catalog-dialog button:focus-visible {
   outline: 2px solid var(--bs-primary);
   outline-offset: 2px;
 }

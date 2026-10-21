@@ -376,7 +376,42 @@ test('a folder the owner added waits for review before anything is read', () => 
     'Templates Archive · /Users/me/Music/Templates Archive · Added; read once you approve it in Review sources'
   );
   assert.match(sourceLine({ ...folder, approved: true }), /Approved; not read yet$/);
-  assert.match(sourceLine({ ...folder, withdrawn: true }), /Access withdrawn$/);
+  // Added again after its removal: withdrawn until a review approves it.
+  assert.match(
+    sourceLine({ ...folder, withdrawn: true, last_attempt: { outcome: 'complete' } }),
+    /Added again; read once you approve it in Review sources$/
+  );
+  // A source that is not an owner folder keeps its withdrawn words.
+  assert.match(sourceLine({ ...folder, folder: false, withdrawn: true }), /Access withdrawn$/);
+});
+
+test('at the folder limit the button stays, disabled, with the reason', async () => {
+  const doc = fakeDocument();
+  const respond = body => ({ ok: true, status: 200, json: async () => body });
+  const fetchImpl = async url =>
+    respond(
+      url.endsWith('/resource-catalog')
+        ? {
+            ...OVERVIEW,
+            folder_categories: [{ id: 'templates', label: 'Templates' }],
+            can_add_folder: false,
+            sources: []
+          }
+        : { rows: [], total: 0 }
+    );
+  const page = new ResourceCatalogPage({
+    workspaceId: 'studio-1',
+    fetchImpl,
+    documentImpl: doc,
+    locationImpl: { search: '' }
+  });
+  await page.init();
+  const add = doc.getElementById('resourceCatalogAddFolder');
+  assert.equal(add.hidden, false);
+  assert.equal(add.disabled, true);
+  const limit = doc.getElementById('resourceCatalogFolderLimit');
+  assert.equal(limit.hidden, false);
+  assert.match(limit.textContent, /Remove one to add another/);
 });
 
 test('adding a folder goes through the server check, then opens the review; removing asks first', async () => {

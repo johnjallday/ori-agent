@@ -224,7 +224,7 @@ func (s *Service) Overview(owner, studioID string) (OwnerView, error) {
 			continue
 		}
 		view.Sources = append(view.Sources, SourceView{
-			SourceID: folder.ID, Category: folder.Category, Label: filepath.Base(folder.Path), Location: folder.Path,
+			SourceID: folder.ID, Category: folder.Category, Label: filepath.Base(folder.Path), Location: s.displayPath(folder.Path),
 			Access: AccessFile, Folder: true,
 		})
 	}
