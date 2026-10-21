@@ -827,6 +827,18 @@ function reviewFrom(trigger, candidateId, placement = {}) {
   void review(candidateId, false, undefined, placement);
 }
 
+// reviewCandidate opens the review of the one project an attached folder is,
+// as Review setup would: the attach named it (hire_candidate), so the hire card
+// answers the attach. false when there is nothing current to review.
+export function reviewCandidate(candidateId) {
+  if (!elements || !candidateId || !current?.observation || current.pending || current.authority)
+    return false;
+  if (!setupCandidates(current.observation).some(candidate => candidate.id === candidateId))
+    return false;
+  reviewFrom(elements.open, candidateId);
+  return true;
+}
+
 function reviewStructure(trigger) {
   if (currentStructure()) reviewFrom(trigger, rootCandidate());
 }
@@ -1086,6 +1098,7 @@ if (typeof window !== 'undefined')
     park,
     structure: currentStructure,
     reviewStructure,
+    reviewCandidate,
     adjustStructure,
     // Just discuss: the reply's proposal leaves this conversation's view. It
     // writes nothing; the folder can be proposed again by attaching it.

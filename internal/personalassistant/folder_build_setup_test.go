@@ -174,6 +174,83 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 	}
 }
 
+// An attached song with a plan is the review the composer opens as soon as the
+// folder is attached; a folder the user said no to and a project no reviewed
+// tool owns are not.
+func TestFolderHireCandidate_ARecognizedProjectWithAPlanIsReviewedOnAttach(t *testing.T) {
+	fx := newBuildSetupFixture(t)
+	ctx := context.Background()
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{CandidateID: fx.candidate}) || fx.candidate == "" {
+		t.Fatalf("song: %+v, want %q", got, fx.candidate)
+	}
+	// Reading created nothing: no offer and no review.
+	if doc, err := fx.store.Read(ctx, "local"); err != nil || len(doc.Offers) != 0 {
+		t.Fatalf("the candidate was read with a write: %+v %v", doc.Offers, err)
+	}
+
+	// Another card waiting for its answer keeps the review away, and says why.
+	waiting, err := fx.service.digest.ScanChip(ctx, "local", "documents")
+	if err != nil || waiting.ID == "" || waiting.Status != FolderOfferPending {
+		t.Fatalf("a card waiting on Home: %+v %v", waiting, err)
+	}
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{Unavailable: FolderStructureReviewPending}) {
+		t.Fatalf("while a card waits: %+v", got)
+	}
+	if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+		for i := range d.Offers {
+			if d.Offers[i].ID == waiting.ID {
+				d.Offers[i].Status = FolderOfferClosed
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A folder the user said never to ask about again stays unasked.
+	if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+		d.Tombstones = append(d.Tombstones, FolderTombstone{Key: FolderKey(fx.song), Name: "Ori Music Demo", CreatedAt: fx.now})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{}) {
+		t.Fatalf("declined: %+v", got)
+	}
+
+	// An Ableton set is a project, but no reviewed tool sets it up.
+	bounce := filepath.Join(fx.home, "Music", "Bounce")
+	writeFolderFiles(t, bounce, "Bounce.als", "Samples/kick.wav")
+	ableton := observeSelected(t, fx.folderDigestFixture, fx.service, fx.draft, bounce)
+	if got := fx.service.HireCandidate(ctx, fx.draft, ableton.ID); got != (FolderHireCandidate{}) {
+		t.Fatalf("unowned project: %+v", got)
+	}
+}
+
+// The review this conversation already has open is retired by the next one it
+// opens (Review), so it does not keep a newly attached folder's card away;
+// a card on Home or in another conversation does.
+func TestFolderHireCandidate_OnlyThisConversationsOwnReviewGivesWay(t *testing.T) {
+	conversation := foldercontext.Target{UserID: "local", WorkspaceID: "hq-1", AgentName: "Atlas", ConversationID: "c-1"}
+	own := &FolderOffer{Status: FolderOfferPending, ConversationReview: &FolderConversationReview{Target: conversation}}
+	if !ownConversationReview(own, conversation) {
+		t.Fatal("this conversation's own review gives way")
+	}
+	other := conversation
+	other.ConversationID = "c-2"
+	if ownConversationReview(own, other) {
+		t.Fatal("another conversation's review waits for its answer")
+	}
+	draft := conversation
+	draft.ConversationID, draft.DraftID = "", "draft-1"
+	if ownConversationReview(own, draft) {
+		t.Fatal("a draft has no review of its own")
+	}
+	if ownConversationReview(&FolderOffer{Status: FolderOfferPending}, conversation) {
+		t.Fatal("a card on Home waits for its answer")
+	}
+}
+
 func TestFolderBuildSetup_AGuardThatNoLongerVouchesStopsTheSetup(t *testing.T) {
 	fx := newBuildSetupFixture(t)
 	ctx := context.Background()

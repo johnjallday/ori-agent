@@ -715,6 +715,12 @@ assistant makes one explained offer.
   (`FolderPathNamed`): a leading `/` would otherwise read as a command. The path
   is cut out of the text the turn binds its workspace from, so a folder named
   like a workspace does not move the turn.
+- **Attaching one project goes to its hire.** When the attached folder is one
+  project Ori sets up as a hire (`hire_candidate` on the attach response), the
+  drawer opens its review at once and the hire card is the reply; the folder
+  tree is not opened. A collection still shows its group, and any other folder
+  its tree. While another setup review waits, one line says so
+  (`hire_unavailable`).
 - **Presentation.** The turn reads as a conversation: the user's request
   ("Explore a folder"), then the assistant's replies in order — the chooser
   ("Which folder should I explore?", the folder buttons, "A read-only peek.
