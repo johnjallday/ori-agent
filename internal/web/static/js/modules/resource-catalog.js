@@ -104,18 +104,19 @@ export function sourceStateWords(state) {
   return SOURCE_STATES[state] || '';
 }
 
+// Each reason reads after any count: "1 symlinked", "3 symlinked".
 const SKIP_REASONS = {
-  symlink: 'links',
+  symlink: 'symlinked',
   outside_source: 'outside the folder',
   unreadable: 'unreadable',
-  unsupported_name: 'unsupported names',
+  unsupported_name: 'with an unusable name',
   too_large: 'too large',
   hidden: 'hidden',
   external_registration: 'registered from outside the folder',
   depth_limit: 'nested too deeply'
 };
 
-// skippedLine is what a read passed over, by reason: "1 skipped: links".
+// skippedLine is what a read passed over, by reason: "1 skipped: 1 symlinked".
 export function skippedLine(skipped) {
   const parts = (skipped || [])
     .filter(skip => Number(skip.count) > 0)
@@ -173,7 +174,11 @@ export function splitTags(value) {
 // and the plugin's own identity when another entry of that source and kind
 // has the same name.
 export function rowContext(row) {
-  const facts = (row?.facts || []).filter(fact => fact.known).map(fact => fact.value);
+  // A bare "Yes" or "No" says nothing in a row: a yes shows what is true by
+  // its label, and a no is left to the detail.
+  const facts = (row?.facts || [])
+    .filter(fact => fact.known && fact.value !== 'No')
+    .map(fact => (fact.value === 'Yes' ? fact.label : fact.value));
   return [row?.kind_label, row?.source_label, ...facts, row?.identity_hint]
     .filter(Boolean)
     .join(' · ');

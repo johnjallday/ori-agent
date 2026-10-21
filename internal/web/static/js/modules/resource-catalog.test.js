@@ -104,7 +104,21 @@ test('a source line says how its last read ended', () => {
         ]
       }
     }),
-    /3 found · 3 skipped: 1 registered from outside the folder, 2 links$/
+    /3 found · 3 skipped: 1 registered from outside the folder, 2 symlinked$/
+  );
+  // Every reason reads after a count of one.
+  assert.match(
+    attemptLine({
+      last_attempt: {
+        outcome: 'complete',
+        entries_read: 1,
+        skipped: [
+          { reason: 'symlink', count: 1 },
+          { reason: 'unsupported_name', count: 1 }
+        ]
+      }
+    }),
+    /1 found · 2 skipped: 1 symlinked, 1 with an unusable name$/
   );
 });
 
@@ -118,6 +132,16 @@ test('rows keep same-named entries apart by kind, source and known facts', () =>
     ]
   };
   assert.equal(rowContext(row), 'Script · REAPER Scripts · Lua');
+  // A yes reads as what is true; a no stays in the detail.
+  const registered = value => ({
+    ...row,
+    facts: [...row.facts, { label: 'Registered in REAPER', value, known: true }]
+  });
+  assert.equal(
+    rowContext(registered('Yes')),
+    'Script · REAPER Scripts · Lua · Registered in REAPER'
+  );
+  assert.equal(rowContext(registered('No')), 'Script · REAPER Scripts · Lua');
   // The server adds the plugin's identity only when the name repeats.
   assert.equal(
     rowContext({
