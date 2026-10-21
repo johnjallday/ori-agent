@@ -716,7 +716,10 @@ test.describe('fresh Home', () => {
   });
 });
 
-test('restart keeps the catalog, notes and lookups', async ({ page, request }) => {
+test('restart keeps the catalog, notes and lookups; detaching then stops them', async ({
+  page,
+  request
+}) => {
   test.skip(
     !restartCheck || !reaperHasStudio,
     'run by the harness after a controlled restart of a Studio run'
@@ -734,6 +737,34 @@ test('restart keeps the catalog, notes and lookups', async ({ page, request }) =
   expect(found.success, found.text).toBe(true);
   expect(found.answer.results[0]).toMatchObject({ favorite: true });
   await shot(page, '13-after-restart');
+
+  // The Home's reviewed disconnect detaches the Studio: songs lose the lookup,
+  // the Studio keeps its catalog and notes, and Set up would make a new one.
+  const program = await json(
+    await request.get(`/api/workspaces/${saved.homeID}/assistant-program`)
+  );
+  const review = await json(
+    await request.post(`/api/workspaces/${saved.homeID}/assistant-program/disconnect/review`, {
+      data: { project_workspace_id: saved.studioID, state_revision: program.state_revision },
+      headers: HEADERS
+    })
+  );
+  await json(
+    await request.post(`/api/workspaces/${saved.homeID}/assistant-program/disconnect/commit`, {
+      data: { token: review.token, idempotency_key: `detach-${RUN}` },
+      headers: HEADERS
+    })
+  );
+  const detached = await lookup(request, saved.songID, 'resource_catalog_search', {
+    query: 'vocal'
+  });
+  expect(detached.success).toBe(false);
+  expect(await studioSummary(request)).toMatchObject({ state: 'not_created' });
+  await openCatalog(page);
+  await expect(page.locator('#resourceCatalogProvider')).toContainText('no longer attached');
+  await openTab(page, /Templates/);
+  await expect(page.locator('#resourceCatalogList')).toContainText('★ Vocals');
+  await shot(page, '14-detached');
   expect(sourceSnapshot()).toEqual(saved.sources);
 });
 
