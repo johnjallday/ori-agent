@@ -11,6 +11,7 @@ import {
   dailyBriefStripStatus
 } from './daily-brief-station.js';
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+import { FIRST_LOOK_REPORT_KIND, mountFirstLookReports } from './first-look-report.js';
 
 // The drawer's shared link check lives with the drawer; it is re-exported here
 // for the callers and tests that have always read it from Home.
@@ -609,6 +610,24 @@ function renderUnfinishedBuild(els, rows) {
   renderCompactRows(list, builds);
 }
 
+// A hired agent's finished first look is news the user acts on in place, so its
+// report is a card at the top of Needs you, after any unfinished build, never a
+// row in the collapsed queue. items are the section's raw Today items.
+function renderFirstLookReports(els, items) {
+  const host = els?.needsCards;
+  if (!host) return;
+  let list = document.getElementById('personalAssistantNeedsYouReports');
+  if (!list) {
+    list = document.createElement('div');
+    list.id = 'personalAssistantNeedsYouReports';
+    list.className = 'personal-assistant-today__reports';
+  }
+  const build = document.getElementById('personalAssistantNeedsYouBuild');
+  if (build?.parentElement === host) build.after(list);
+  else host.prepend(list);
+  mountFirstLookReports(list, items, { onDone: () => void loadToday() });
+}
+
 function renderCompactRows(list, rows, skipCards = false) {
   if (!list) return;
   list.replaceChildren();
@@ -842,8 +861,13 @@ function syncNeedsYou(els = elements()) {
   const queued = syncNeedsQueue(els);
   const cards = Array.from(els.needsCards?.children || []).reduce((count, card) => {
     if (card.hidden) return count;
-    // The unfinished-build list is one element holding one row per build.
-    if (card.id === 'personalAssistantNeedsYouBuild') return count + card.childElementCount;
+    // The unfinished-build list is one element holding one row per build, and
+    // the reports list one card per hired agent's report.
+    if (
+      card.id === 'personalAssistantNeedsYouBuild' ||
+      card.id === 'personalAssistantNeedsYouReports'
+    )
+      return count + card.childElementCount;
     return count + 1;
   }, 0);
   const count = cards + queued;
@@ -1032,9 +1056,12 @@ function renderToday(today) {
   } else if (els.setup) els.needsQueueCards?.append(els.setup);
   renderCompactRows(els.workingItems, sections.working);
   renderUnfinishedBuild(els, sections.needs);
+  renderFirstLookReports(els, today?.needs_you?.items);
   renderCompactRows(
     els.needsItems,
-    sections.needs.filter(row => row.kind !== 'workspace_build'),
+    sections.needs.filter(
+      row => row.kind !== 'workspace_build' && row.kind !== FIRST_LOOK_REPORT_KIND
+    ),
     true
   );
   renderCompactRows(els.doneItems, sections.done);

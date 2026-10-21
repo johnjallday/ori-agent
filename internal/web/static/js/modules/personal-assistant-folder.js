@@ -26,6 +26,7 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
+import { hiredLine, reportedLine } from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import {
   declinedLine,
@@ -3413,6 +3414,9 @@ async function startOneCardSetup(action) {
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
+      // The assistant says, in its own words and once, that the hire is made.
+      const hire = offer.plan?.hire;
+      if (hire) sayInConversation(hiredLine(hire.agent_name || hire.role_label));
       // Show the run in a pop-up so it is plain that the assistant is working.
       openRunModal();
       return;
@@ -3535,6 +3539,29 @@ async function refreshFirstLook(offerID) {
   render();
   announceOffer();
   if (before !== after) firstLookMoved();
+  // A hired agent's look that this page watched finish: the assistant points
+  // at its report.
+  if (
+    before === 'running' &&
+    after === 'finished' &&
+    state.offer?.id === id &&
+    state.offer?.outcome?.first_look
+  ) {
+    const look = state.offer.first_task;
+    sayInConversation(reportedLine(look?.agent, state.offer.subject?.name || look?.folder_name));
+  }
+}
+
+// sayInConversation adds one line the host wrote to the assistant's
+// conversation on this page. No model turn is spent on it, and it is not part
+// of the stored history.
+function sayInConversation(line) {
+  if (typeof window === 'undefined' || !line) return;
+  try {
+    window.OriAskRouting?.appendMessage?.('assistant', line);
+  } catch (_) {
+    // A page without the conversation shows the card alone.
+  }
 }
 
 // startFirstLook is the one click that spends model tokens on a folder's first

@@ -105,8 +105,14 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			detail += " · Last result " + last.UTC().Format("Jan 2")
 		}
 		route := "/workspaces/" + url.PathEscape(ws.FolderSlug)
-		// The first look while it runs, and its result once it has finished.
-		if item, ok := firstLookTodayItem(offer, ws, route, now); ok {
+		// A hired agent reports its finished first look back under Needs you,
+		// then follows the task the user started from it.
+		if reports, started, finished, handled := firstLookReportItems(offer, ws, route, now); handled {
+			needs = append(needs, reports...)
+			working = append(working, started...)
+			folderResults = append(folderResults, finished...)
+		} else if item, ok := firstLookTodayItem(offer, ws, route, now); ok {
+			// The first look while it runs, and its result once it has finished.
 			if item.Kind == "folder_result" {
 				folderResults = append(folderResults, item)
 			} else {

@@ -61,6 +61,13 @@ type TodayItem struct {
 	// place rather than by opening a route ("resume", "discard" for an
 	// unfinished build). Absent for every other item.
 	Actions []string `json:"actions,omitempty"`
+	// Workspace names the workspace the item's work lives in, beside the
+	// agent in Attribution (a hired agent's report).
+	Workspace string `json:"workspace,omitempty"`
+	// Suggestion is the one task a hired agent's first look suggests first,
+	// and ReportRoute the page of its full report.
+	Suggestion  *FirstLookSuggestion `json:"suggestion,omitempty"`
+	ReportRoute string               `json:"report_route,omitempty"`
 }
 
 type TodaySection struct {

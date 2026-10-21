@@ -11,6 +11,7 @@ import {
   recipientMenuRows,
   switchLockMessage
 } from './personal-assistant-recipient.js';
+import { mountFirstLookReports } from './first-look-report.js';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
 const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
@@ -735,6 +736,15 @@ function renderNeedsLine(line) {
   if (!els?.needsLine) return;
   els.needsLine.hidden = !recipientChromeView(identity(), state.needsLine).needsLine;
   if (els.needsLineText) els.needsLineText.textContent = state.needsLine.text;
+  // A hired agent's report is drawn in full under the line, with its actions,
+  // while the hired assistant is the one the drawer speaks for.
+  const reports = document.getElementById('personalAssistantNeedsReports');
+  if (reports) {
+    const personal = recipientChromeView(identity(), { visible: true }).needsLine;
+    mountFirstLookReports(reports, personal ? state.today?.needs_you?.items : [], {
+      onDone: () => void readTodayForThisPage()
+    });
+  }
 }
 
 let todayRead = 0;

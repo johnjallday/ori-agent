@@ -9,11 +9,29 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// firstLookRecord waits for what the hire did about its agent's first look,
+// which is written just after the offer resolves.
+func (f *softwareCardFixture) firstLookRecord(t *testing.T) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		outcome, _ := f.read(t)["outcome"].(map[string]any)
+		if look, _ := outcome["first_look"].(map[string]any); look != nil {
+			return look
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the hire recorded nothing about its first look")
+	return nil
+}
 
 // hireAndStart presses Hire and start on the plan the offer shows now, with the
 // brief the user typed.
-func (f *softwareCardFixture) hireAndStart(t *testing.T, requestID, brief string) (int, map[string]any) {
+func (f *softwareCardFixture) hireAndStart(t *testing.T, brief string) (int, map[string]any) {
+	const requestID = "hire-1"
 	t.Helper()
 	digest, _ := f.read(t)["plan"].(map[string]any)["digest"].(string)
 	return f.post(t, "setup", map[string]any{"request_id": requestID, "plan_digest": digest, "brief": brief})
@@ -26,7 +44,7 @@ func TestFolderHire_TheTypedBriefBecomesTheWorkspaceGoal(t *testing.T) {
 	f := newSoftwareCardFixture(t, "widget")
 	f.setModel(t)
 	f.review(t)
-	if status, body := f.hireAndStart(t, "hire-1", "Add a CI workflow\nthat runs the existing tests."); status != http.StatusOK {
+	if status, body := f.hireAndStart(t, "Add a CI workflow\nthat runs the existing tests."); status != http.StatusOK {
 		t.Fatalf("hire and start: %d %v", status, body)
 	}
 	if offer := f.settled(t); offer["status"] != "resolved" {
@@ -61,22 +79,14 @@ func TestFolderHire_ALookTheModelCannotRunIsLeftWithItsReason(t *testing.T) {
 	f := newSoftwareCardFixture(t, "widget")
 	f.setModel(t)
 	f.review(t)
-	if status, body := f.hireAndStart(t, "hire-1", "Find the risky parts."); status != http.StatusOK {
+	if status, body := f.hireAndStart(t, "Find the risky parts."); status != http.StatusOK {
 		t.Fatalf("hire and start: %d %v", status, body)
 	}
 	offer := f.settled(t)
 	if offer["status"] != "resolved" {
 		t.Fatalf("the setup stopped: %v", offer["setup"])
 	}
-	var look map[string]any
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		outcome, _ := f.read(t)["outcome"].(map[string]any)
-		if look, _ = outcome["first_look"].(map[string]any); look != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	look := f.firstLookRecord(t)
 	if look == nil || look["started"] != false || look["reason"] != personalassistant.FolderFirstTaskReasonModelUnsupported {
 		t.Fatalf("first look record = %v", look)
 	}
@@ -91,13 +101,75 @@ func TestFolderHire_ALookTheModelCannotRunIsLeftWithItsReason(t *testing.T) {
 	}
 }
 
+// Start this, through the wired route: the finished look's suggestion becomes a
+// Ready task in its workspace, assigned to the hired agent, under the
+// workspace's own autonomy, and a second click makes nothing more.
+func TestFolderHire_StartThisMakesTheSuggestionTheHiredAgentsTask(t *testing.T) {
+	f := newSoftwareCardFixture(t, "widget")
+	f.setModel(t)
+	f.review(t)
+	if status, body := f.hireAndStart(t, "Find the risky parts."); status != http.StatusOK {
+		t.Fatalf("hire and start: %d %v", status, body)
+	}
+	if offer := f.settled(t); offer["status"] != "resolved" {
+		t.Fatalf("the setup stopped: %v", offer["setup"])
+	}
+	f.firstLookRecord(t)
+	ws := f.softwareWorkspaces(t)[0]
+	look := firstTasks(ws)[0]
+	// The fixture's model cannot run the assessment; its report is written here
+	// as a finished run leaves it.
+	finished := time.Now().Add(-time.Minute)
+	if err := workspace.CanonicalUpdate(f.builder.workspaceStore, ws.ID, func(current *workspace.Workspace) error {
+		for i := range current.Tasks {
+			if current.Tasks[i].ID == look.ID {
+				task := &current.Tasks[i]
+				task.Status, task.TicketState, task.CompletedAt = workspace.TaskStatusCompleted, workspace.TicketStateReview, &finished
+				task.Result = "## What it is\nWidget counts widgets.\n\n## Suggested first task\nAdd a health check endpoint.\n\nNext task: Add a health check endpoint."
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	route := "/api/personal-assistant/first-look/" + look.ID + "/start-suggestion"
+	status, body := f.call(t, http.MethodPost, route, map[string]any{})
+	if status != http.StatusOK {
+		t.Fatalf("start this: %d %v", status, body)
+	}
+	created, _ := body["task"].(map[string]any)
+	taskID, _ := created["task_id"].(string)
+	current, err := f.builder.workspaceStore.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var task *workspace.Task
+	for i := range current.Tasks {
+		if current.Tasks[i].ID == taskID {
+			task = &current.Tasks[i]
+		}
+	}
+	if task == nil || task.Description != "Add a health check endpoint." || task.To != "Development Assistant" ||
+		task.SourceType != workspace.TicketSourceFirstLookSuggestion || task.SourceID != look.ID ||
+		task.Context[workspace.TaskContextAutonomyGate] != workspace.TaskAutonomyGateWorkspace {
+		t.Fatalf("task = %+v", task)
+	}
+	if status, again := f.call(t, http.MethodPost, route, map[string]any{}); status != http.StatusConflict || again["code"] != "already_acted" {
+		t.Fatalf("second click: %d %v", status, again)
+	}
+	if status, gone := f.call(t, http.MethodPost, "/api/personal-assistant/first-look/not-a-look/dismiss", map[string]any{}); status != http.StatusNotFound {
+		t.Fatalf("a look that is not the user's: %d %v", status, gone)
+	}
+}
+
 // A cleared field takes the blueprint's goal: a workspace is never created
 // without one.
 func TestFolderHire_AClearedBriefCreatesTheBlueprintGoal(t *testing.T) {
 	f := newSoftwareCardFixture(t, "widget")
 	f.setModel(t)
 	f.review(t)
-	if status, body := f.hireAndStart(t, "hire-1", "   "); status != http.StatusOK {
+	if status, body := f.hireAndStart(t, "   "); status != http.StatusOK {
 		t.Fatalf("hire and start: %d %v", status, body)
 	}
 	if offer := f.settled(t); offer["status"] != "resolved" {
