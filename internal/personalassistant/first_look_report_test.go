@@ -119,6 +119,15 @@ func TestFirstLookReport_AFinishedHiredLookNeedsYou(t *testing.T) {
 // The evidence is the agent's reason only: not the task named again (with or
 // without code marks), not the closing line, and not Ori's own note on what
 // the report was based on.
+// A report whose lead is a list is summarized in sentences, without the list
+// markers (seen live: "- A small service … - A multi-language project …").
+func TestFirstLookSummary_DropsListMarkers(t *testing.T) {
+	look := &workspace.Task{Result: "## What it is\n- A small service that counts widgets (README.md).\n- A Go service with a Node.js frontend.\n- No CI runs it.\n\nNext task: Add CI."}
+	if got := firstLookSummary(look); got != "A small service that counts widgets (README.md). A Go service with a Node.js frontend." {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
 func TestFirstLookEvidence_IsTheReasonAlone(t *testing.T) {
 	for name, tc := range map[string]struct{ result, suggestion, want string }{
 		"plain": {assessmentReport, "Add a CI workflow that runs the existing pytest suite on every push.",

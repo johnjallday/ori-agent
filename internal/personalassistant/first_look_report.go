@@ -116,7 +116,11 @@ func firstLookEvidence(result, suggestion string) string {
 // firstLookSummary is at most two sentences of what the look found, from the
 // first paragraph of its report (headings skipped).
 func firstLookSummary(task *workspace.Task) string {
-	excerpt := strings.TrimSuffix(FolderFirstTaskRecipeExcerpt(task.Result), "…")
+	excerpt := strings.TrimSpace(strings.TrimSuffix(FolderFirstTaskRecipeExcerpt(task.Result), "…"))
+	// A lead written as a list keeps its sentences, not its list markers.
+	for _, marker := range []string{"- ", "* ", "• "} {
+		excerpt = strings.ReplaceAll(strings.TrimPrefix(excerpt, marker), ". "+marker, ". ")
+	}
 	sentences := 0
 	for i, r := range excerpt {
 		if r == '.' || r == '!' || r == '?' {

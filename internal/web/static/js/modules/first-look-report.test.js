@@ -170,6 +170,14 @@ test('Home draws reports as Needs you cards that count, and the drawer draws the
   assert.match(home, /renderFirstLookReports\(els, today\?\.needs_you\?\.items\)/);
   assert.match(home, /row\.kind !== FIRST_LOOK_REPORT_KIND/);
   assert.match(home, /card\.id === 'personalAssistantNeedsYouReports'/);
+  // Opening the drawer shows a report (FR20): while Today is folded behind its
+  // summary line, the cards wait right under that line, and still count.
+  assert.match(
+    home,
+    /if \(list\.previousElementSibling !== els\.summary\) els\.summary\.after\(list\);/
+  );
+  assert.match(home, /placeFirstLookReports\(els\);\n\}/);
+  assert.match(home, /const count = cards \+ reported \+ queued;/);
   const panel = read('personal-assistant-panel.js');
   assert.match(
     panel,

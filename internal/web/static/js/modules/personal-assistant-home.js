@@ -622,10 +622,27 @@ function renderFirstLookReports(els, items) {
     list.id = 'personalAssistantNeedsYouReports';
     list.className = 'personal-assistant-today__reports';
   }
-  const build = document.getElementById('personalAssistantNeedsYouBuild');
-  if (build?.parentElement === host) build.after(list);
-  else host.prepend(list);
+  placeFirstLookReports(els, list);
   mountFirstLookReports(list, items, { onDone: () => void loadToday() });
+}
+
+// placeFirstLookReports keeps a report in view (FR20: opening the drawer shows
+// it). While Today rests behind its summary line the report cards sit right
+// under that line; shown, they are at the top of Needs you again.
+function placeFirstLookReports(
+  els,
+  list = document.getElementById('personalAssistantNeedsYouReports')
+) {
+  const host = els?.needsCards;
+  if (!host || !list) return;
+  if (els.sections?.hidden && els.summary && !els.summary.hidden) {
+    if (list.previousElementSibling !== els.summary) els.summary.after(list);
+    return;
+  }
+  const build = document.getElementById('personalAssistantNeedsYouBuild');
+  if (build?.parentElement === host) {
+    if (build.nextElementSibling !== list) build.after(list);
+  } else if (host.firstElementChild !== list) host.prepend(list);
 }
 
 function renderCompactRows(list, rows, skipCards = false) {
@@ -860,17 +877,16 @@ function syncNeedsYou(els = elements()) {
   if (!els?.needsSection) return 0;
   const queued = syncNeedsQueue(els);
   const cards = Array.from(els.needsCards?.children || []).reduce((count, card) => {
-    if (card.hidden) return count;
-    // The unfinished-build list is one element holding one row per build, and
-    // the reports list one card per hired agent's report.
-    if (
-      card.id === 'personalAssistantNeedsYouBuild' ||
-      card.id === 'personalAssistantNeedsYouReports'
-    )
-      return count + card.childElementCount;
+    if (card.hidden || card.id === 'personalAssistantNeedsYouReports') return count;
+    // The unfinished-build list is one element holding one row per build.
+    if (card.id === 'personalAssistantNeedsYouBuild') return count + card.childElementCount;
     return count + 1;
   }, 0);
-  const count = cards + queued;
+  // One card per hired agent's report, wherever the list sits (it waits under
+  // the summary line while Today is folded).
+  const reports = document.getElementById('personalAssistantNeedsYouReports');
+  const reported = reports && !reports.hidden ? reports.childElementCount : 0;
+  const count = cards + reported + queued;
   const hidden = count === 0;
   if (els.needsSection.hidden !== hidden) els.needsSection.hidden = hidden;
   if (els.needsCount && els.needsCount.textContent !== String(count)) {
@@ -919,6 +935,7 @@ function syncSummary(els = elements()) {
     }
     els.summaryToggle.setAttribute('aria-expanded', strip.expanded ? 'true' : 'false');
   }
+  placeFirstLookReports(els);
 }
 
 function applyFold(event) {

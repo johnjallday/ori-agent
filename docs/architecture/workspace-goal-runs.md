@@ -6,6 +6,14 @@ goal) or in Goal Settings, and it is injected into every workspace prompt: the
 chat snapshot, the protected task header (`GoalPromptLine`), Plans and the Home
 summary.
 
+A folder setup presented as a hire (**Hire and start**, on Home's card, the
+assistant's folder card and the Create Workspace build) asks one question,
+"What should it do with it?". The answer, the **brief**, is the new workspace's
+goal (at most 300 characters, line breaks folded; an empty answer takes the
+plan's `brief_default`, the blueprint's goal or one per folder shape). The
+setup writes it with `GoalFirstRunPending` like any created goal and starts no
+goal run; the hired agent's first look is told it as the user's intent.
+
 ## What a goal run does
 
 A goal run reads the workspace and answers with one JSON object whose `items`
@@ -46,9 +54,17 @@ Code Project, ordinary copies retaining its software-project behavior profile,
 and consent-gated folder assessment workspaces require **Run now** for goal
 suggestions. Opening a page or saving text starts no model or project-content
 read. **Start first look** starts only the separate assessment task, preserving
-its recipe/tool restrictions. Neither action chains the other. An explicitly
-enabled cadence remains a separate automation choice, not something a default
-goal enables.
+its recipe/tool restrictions. Neither action chains the other. **Hire and start**
+is the consent for exactly one such look: the setup starts it once when it
+finishes (create or bind the agent, create the workspace, link the folder
+read-only, run the first look read-only, under Watch) and covers no goal run,
+cadence or write into the folder. A look can be stopped and started again by
+hand. When it finishes, its suggested next task waits under the assistant's
+Needs you; **Start this** creates and starts it as a Ready task assigned to the
+same agent, held to the workspace's autonomy gate (context
+`autonomy_gate: workspace`, Watch by default), and **Not now** adds its title to
+`DismissedSuggestions`. An explicitly enabled cadence remains a separate
+automation choice, not something a default goal enables.
 
 ### Bounded attempts and recovery
 

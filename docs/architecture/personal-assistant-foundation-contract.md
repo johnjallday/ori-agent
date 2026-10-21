@@ -538,12 +538,18 @@ Personal HQ before showing a folder") remains the backstop.
 ### The first look
 
 A folder set up as a project is seeded with one read-only first task
-(`template_id: folder-digest`, `template_starter_task: true`). Nothing starts
-it but a click on **Start first look**, so model tokens are spent only on that
-click: on the Home receipt (`personal-assistant-folder.js`), on the mission card
-(an in-place action, `/?quest=folder-first-look`), or on the workspace page's
-banner. Each posts `POST /api/workspaces/{id}/folder-first-task/start`; a retry
-after a failure uses the ordinary manual run. One reader,
+(`template_id: folder-digest`, `template_starter_task: true`). A setup presented
+as a hire (**Hire and start**: the agent, the brief that becomes the goal, and
+the plan's lines) is the consent for that look: when the run finishes the
+server starts it once (`FolderDigestService.settleSetup` → `startHiredLook`,
+recorded as `outcome.first_look`), and it reads the folder only, under Watch.
+**Stop** (`POST …/folder-first-task/stop`) puts it back to Ready. Otherwise
+nothing starts it but a click on **Start first look**, so model tokens are spent
+only on that click: on the Home receipt (`personal-assistant-folder.js`), on the
+mission card (an in-place action, `/?quest=folder-first-look`), or on the
+workspace page's banner. Each posts
+`POST /api/workspaces/{id}/folder-first-task/start`; a retry after a failure
+uses the ordinary manual run. One reader,
 `personalassistant.FolderFirstTaskStateAt`, says where a look stands
 (`seeded`, `running`, `waiting`, `finished`, `failed`), and the receipt row, the
 digest's `first_task`/`first_look`, the mission card and Today all use it. A
@@ -552,6 +558,23 @@ start the executor refused is marked at once. The receipt stays pinned in Needs
 you while a look is open or has just finished (an hour), so a reload keeps
 **Running…**. Today lists "First look at <folder>" under Working on while it
 runs and a `folder_result` under Done for seven days after it finishes.
+
+A look a hire started reports back instead (`first_look_report.go`): once it
+finishes, Today's Needs you carries one `folder_first_look` item, drawn as a
+card on Home's Today and in the assistant drawer on every page and counted in
+its Needs you number. While Home's Today is folded behind its summary line
+(after a conversation started), the report cards wait right under that line,
+so opening the drawer always shows them. The card says who looked and where, at most two
+sentences of what it found, **Suggests first** (the report's `Next:` line and
+its reason), an "On the Map" row with **Move**, and **Start this**, **Not now**
+and **Read the full report**. Start this creates the suggestion as a Ready task
+assigned to the same agent and starts it (`POST
+/api/personal-assistant/first-look/{taskID}/start-suggestion`); the item then
+follows that task under Working on and Done. Not now (`…/dismiss`) records the
+suggestion as dismissed and removes the item. The assistant's conversation gets
+two host-written lines, never a model turn: "Hired. <agent> is on it. I'll tell
+you here when it has something." after Hire and start, and a pointer to Needs
+you when the page sees the look finish.
 
 Mission 03 completes only from the server. Installs that already ran a first
 look are grandfathered once, silently and without Craft, under

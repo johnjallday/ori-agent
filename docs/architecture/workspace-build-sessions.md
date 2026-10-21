@@ -173,14 +173,25 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   through the same reviewed-release service (`buildHomeProviders` over
   `folderHomeProviderSetup`). The cached plan facts are dropped (`folderSetupHost.forgetAll`), so
   the response's plan is ready and says the plugin is installed; the transcript gets "Installed
-  <plugin> <version>. Set it up can run the plan now." The client names only the build. While the
+  <plugin> <version>. Hire and start can run the plan now." The client names only the build. While the
   plan waits, the prompt tells the model the form offers the install, not to choose Blank or
   another blueprint unless the user asks, and not to ask about the group, and no
   `group_prerequisite` is sent (the plan sets the group up once installed).
 - **Review in place**: "Review or edit draft" opens the plan review inside the dialog (the
   lines read-only, name and description editable, "Why this suggestion?"), not the wizard. While
-  it is open it stands in for the conversation, with its own Set it up.
-- **Set it up**: `POST …/{id}/setup {version, plan_digest, entry_name?}` writes the build's
+  it is open it stands in for the conversation, with its own Hire and start.
+- **The hire**: a ready plan carries `hire` (who the setup hires: `create`, `bind` or `pending`,
+  the agent's name, role and model) and `brief_default`, outside its digest, read from the same
+  host plan as Home's card. The pane's plan column is titled by the hire ("Hire <agent> for
+  <project>"), with the agent's badge and role and the one question "What should it do with
+  it?" above the "You'll get" sketch; the folder review, which a recognized folder opens
+  directly, shows the same block (`renderReviewHire`, `#workspaceBuildPlanReviewHire`), titled the
+  same, and both fields edit one brief. The field starts from the draft's goal, else
+  `brief_default`, and keeps what was typed for this build. The button is **Hire and start**
+  (**Set it up** for a plan that names no hire). The model is told the plan column answers the
+  setup request: it never names the hired agent, counts the plan's steps or describes its
+  controls, and its `<setup_plan>` carries no hire or brief.
+- **Hire and start**: `POST …/{id}/setup {version, plan_digest, entry_name?, brief?}` writes the build's
   `setup` claim (offer, digest, request id) and runs **Home's own setup journey** on the build's
   held folder: the build's review target is `build:<session id>`, and Home's setup reads that
   folder only while this build stands behind it (`ConfigureBuildReviews`). The session is
@@ -191,17 +202,22 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   as the plan says (the model never has to name it first). A stopped run leaves the build open with
   **Retry**; a finished one closes it as `created` with `created_workspace_id`,
   `home_workspace_id` and the host's `setup_receipt` ("Created <Home> and <workspace> inside it.
-  Linked folder “<folder>”."), applies the draft's description, goal and extra teammate, and
-  writes "How this was set up" from the plan lines and the receipt. The journey links the folder
-  as a directory reference, as on Home (it does not mark it primary).
+  Linked folder “<folder>”."), applies the draft's description and extra teammate (and its goal
+  only when the run had no brief: the brief is the workspace's goal), and writes "How this was set
+  up" from the plan lines and the receipt. The brief goes to the run as on Home's card
+  (`FolderSetupInput.Brief`), and the hired agent's first look starts when the run finishes, under
+  the same consent. The journey links the folder as a directory reference, as on Home (it does
+  not mark it primary).
 - **Pick lifetime**: `folder_expires_at` is when the server stops holding the pick (30
-  minutes after the look). Under 5 minutes the pane counts down; once expired, Set it up is
+  minutes after the look). Under 5 minutes the pane counts down; once expired, Hire and start is
   disabled and **Add the folder again** is offered.
-- **Map**: when the run finishes the dialog closes and, once it has hidden, the Map asks where
-  the result sits (`beginPlacement({ token, created: { member, group } })`, see the Map's
-  placement docs): a new Home is placed with its first workspace in one gesture; Escape keeps the
-  automatic layout. No Map on screen: "Placed automatically on the Map". Home's Explore a folder
-  ends the same way once its pop-up and the assistant drawer no longer cover the Map.
+- **Map**: when the run finishes the dialog closes with the receipt as a toast, and the Map's
+  automatic layout places the result (a new Home as a new district with the workspace inside, a
+  workspace joining an existing Home inside it); nothing is asked and nothing is written to the
+  layout. The setup's receipt and the hired agent's report say where the building sits in an
+  "On the Map" row whose **Move** opens Home with that building selected and Move on
+  (`/?move=<workspace id>`, `OriWorkspaceMap.beginMove`); Escape or leaving keeps the automatic
+  layout. Home's Explore a folder and the assistant's Add folder end the same way.
 
 ### A blueprint that needs a group
 
@@ -347,7 +363,7 @@ counts, and field or section names, never message text, draft values, or folder 
   build endpoints (golden path, form-edit acknowledgement, resume, manual fallbacks, the
   `build_workspace` hand-off). Run it against a fresh sandbox.
   `tests/narrated-folder-setup.spec.ts` fakes nothing and sends no model turn: both entries on
-  a song folder, through Set it up and the Map placement, against
+  a song folder, through Hire and start, the automatic Map placement and its Move link, against
   `scripts/narrated-folder-demo.sh` (its header has the commands).
 - Live demos: `scripts/demo-build-assistant.mjs` drives the real pane against a demo
   server with a real model; `scripts/smoke.sh build-session <url> seed` hires an assistant

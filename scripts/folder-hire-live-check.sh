@@ -83,5 +83,5 @@ if [[ -n "$workspace" ]]; then
 	echo "GOAL=$(curl -fsS "http://localhost:${port}/api/workspaces/${workspace}" | python3 -c 'import json,sys
 d=json.load(sys.stdin)
 w=d.get("workspace") or d.get("folder") or d
-print(w.get("mission") or (w.get("shared_data") or {}).get("workspace_bootstrap",{}).get("goal",""))')"
+print(w.get("mission") or (w.get("mission_state") or {}).get("mission") or (w.get("shared_data") or {}).get("workspace_bootstrap",{}).get("goal",""))')"
 fi
