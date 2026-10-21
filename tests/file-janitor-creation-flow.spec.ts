@@ -50,6 +50,77 @@ test.describe('attached creation with a scripted local model', () => {
     await page.locator('#workspaceBuildWithBtn').click();
   }
 
+  test('an ordinary folder suggestion creates only the edited notebook and its folder link', async ({
+    page,
+    request
+  }, testInfo) => {
+    stopModel!.scenario({ mode: 'ordinary', createNow: true });
+    try {
+      const root = inbox('Notebook source');
+      const before = await resources(request),
+        calls = stopModel!.calls();
+      let preparations = 0;
+      page.on('request', request => {
+        if (/\/janitor-(review|prepare)$/.test(request.url())) preparations++;
+      });
+      await attachFirst(page, request, root);
+      const primary = page.locator('#workspaceBuildPlanReviewSetup');
+      await expect(primary).toHaveText('Create workspace');
+      await expect(primary).toBeEnabled();
+      const name = `Reviewed notebook ${Date.now()}`;
+      await page.locator('#workspaceBuildPlanName').fill(name);
+      await expect.poll(async () => (await currentBuild(request)).draft.name).toBe(name);
+      await expect(primary).toBeEnabled();
+      await expect(page.locator('#workspaceBuildCreationReview')).toBeHidden();
+      expect(await resources(request)).toEqual(before);
+      const build = await currentBuild(request);
+      const response = page.waitForResponse(
+        r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/workspaces'
+      );
+      await page.screenshot({ path: testInfo.outputPath('folder-ordinary-review.png') });
+      await primary.click();
+      const preview = page.locator('[data-ws-map-placement-preview]');
+      await expect(preview).toBeVisible();
+      await page.locator('[data-ws-map-viewport]').focus();
+      for (
+        let n = 0;
+        n < 60 && /\bis-invalid\b/.test((await preview.getAttribute('class')) || '');
+        n++
+      )
+        await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      const result = await response;
+      expect(result.ok(), await result.text()).toBeTruthy();
+      await expect(preview).toBeHidden();
+      const created = (await result.json()).folder;
+      expect(created.name).toBe(name);
+      const final = (await (await request.get(`/api/workspaces/build-sessions/${build.id}`)).json())
+        .session;
+      expect(final.status).toBe('created');
+      const after = await resources(request);
+      expect(after.workspaces).toHaveLength(before.workspaces.length + 1);
+      expect(after.agents).toEqual(before.agents);
+      const linked = (await (await request.get(`/api/workspaces/${created.id}/directories`)).json())
+        .directories;
+      // Ordinary creation also owns its native workspace directory. The
+      // external source is linked once, not imported into that directory.
+      expect(linked).toHaveLength(2);
+      expect(linked.filter((reference: { path: string }) => reference.path === root)).toHaveLength(
+        1
+      );
+      const janitor = after.permissions.find(item => item.id === created.id)!;
+      expect(janitor.readiness.state).toBe('setup_required');
+      expect(janitor.batches.total).toBe(0);
+      expect(janitor.settings.automation_approved_at || '').toMatch(/^$|^0001-/);
+      expect(preparations).toBe(0);
+      expect(stopModel!.calls()).toBe(calls + 1);
+      expect(existsSync(join(root, 'Filed'))).toBe(false);
+      expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
+    } finally {
+      stopModel!.scenario();
+    }
+  });
+
   test('folder-first suggestion uses one draft-only operation even with create_now and unsent text', async ({
     page,
     request

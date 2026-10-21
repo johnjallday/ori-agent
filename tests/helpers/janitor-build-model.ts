@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 
 type Scenario = {
-  mode?: 'success' | 'failure' | 'ambiguous';
+  mode?: 'success' | 'failure' | 'ambiguous' | 'ordinary';
   createNow?: boolean;
   name?: string;
 };
@@ -41,10 +41,13 @@ export async function startJanitorBuildModel() {
     if (held) await held.wait;
     const suffix = `${Date.now()}-${sequence}`;
     const ambiguous = selected.mode === 'ambiguous';
+    const ordinary = selected.mode === 'ordinary';
     const reply = {
       say: ambiguous
         ? 'The metadata does not establish what you want to do.'
-        : 'Suggested a File Janitor workspace. Review and edit it before creating.',
+        : ordinary
+          ? 'Suggested a blank notebook workspace. Review and edit it before creating.'
+          : 'Suggested a File Janitor workspace. Review and edit it before creating.',
       ask: {
         question: ambiguous ? 'What would you like to do with this folder?' : '',
         choices: ambiguous
@@ -57,7 +60,7 @@ export async function startJanitorBuildModel() {
       },
       patch: {
         set: ambiguous ? ['none'] : ['blueprint_id', 'name', 'description', 'goal', 'team'],
-        blueprint_id: 'file-janitor',
+        blueprint_id: ordinary ? '' : 'file-janitor',
         name: selected.name || `Synthetic Janitor ${suffix}`,
         description: 'Synthetic folder review fixture',
         goal: 'Review synthetic inbox files',
@@ -67,19 +70,21 @@ export async function startJanitorBuildModel() {
         tags: [],
         color: '',
         team: {
-          mode: 'staffed',
+          mode: ordinary ? 'agentless' : 'staffed',
           roles: [],
           saved_agents: [],
-          agents: [
-            {
-              name: 'File Curator',
-              action: 'create',
-              rename: `Synthetic Curator ${suffix}`,
-              provider: 'lmstudio',
-              model: 'ori-synthetic-model',
-              system_prompt: 'Synthetic edited curator prompt.'
-            }
-          ]
+          agents: ordinary
+            ? []
+            : [
+                {
+                  name: 'File Curator',
+                  action: 'create',
+                  rename: `Synthetic Curator ${suffix}`,
+                  provider: 'lmstudio',
+                  model: 'ori-synthetic-model',
+                  system_prompt: 'Synthetic edited curator prompt.'
+                }
+              ]
         }
       },
       why: [],

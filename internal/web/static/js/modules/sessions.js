@@ -4988,6 +4988,9 @@ const sessionManager = {
   },
 
   async refreshTemplateAgentPlan() {
+    // A model-applied blueprint is a draft, not permission to leave the review.
+    // Capture this before awaiting: application may finish before the plan read.
+    const mayOpenExisting = !this.workspaceBuildAssisted() && !this.workspaceBuildApplyDepth;
     const groupRoster = this.usesGroupRosterCreator();
     const fields = groupRoster ? {} : window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
@@ -5057,7 +5060,11 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
-      if (data.group_requirement?.state === 'resource_workspace_exists') {
+      if (
+        mayOpenExisting &&
+        !this.workspaceBuildAssisted() &&
+        data.group_requirement?.state === 'resource_workspace_exists'
+      ) {
         // The Home already has its one resource workspace: open it rather
         // than ask for a team for a second one.
         this.showWorkspaceCreateError(

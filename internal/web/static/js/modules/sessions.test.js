@@ -2231,6 +2231,54 @@ test('Details destination describes its Group Template only for the draft that a
   assert.doesNotMatch(elements.get('workspaceGroupDestinationRoute').innerHTML, /Template:/);
 });
 
+test('assistant plan reads cannot navigate to an existing resource workspace after draft application', async () => {
+  for (const scenario of [
+    { assisted: true, depth: 1, laterAssisted: false, opens: 0 },
+    { assisted: false, depth: 1, laterAssisted: false, opens: 0 },
+    { assisted: false, depth: 0, laterAssisted: true, opens: 0 },
+    { assisted: false, depth: 0, laterAssisted: false, opens: 1 }
+  ]) {
+    const reply = deferredBuildResult();
+    const plan = {
+      group_requirement: { state: 'resource_workspace_exists', existing_workspace_id: 'studio-1' }
+    };
+    const manager = loadSessionManager(() => reply.promise, {
+      ProjectTemplateCard: {
+        getPayloadFields: () => ({ template_id: 'plugin:reaper-plugin:reaper-studio' })
+      }
+    });
+    let assisted = scenario.assisted,
+      opens = 0,
+      rendered = 0;
+    manager.workspaceBuildAssisted = () => assisted;
+    manager.workspaceBuildApplyDepth = scenario.depth;
+    manager.usesGroupRosterCreator = () => false;
+    manager.currentBlueprintKey = () => 'studio';
+    manager.ensureWorkspaceTeamDraft = () => null;
+    manager.setTemplateAgentReviewLoading = () => {};
+    manager.showWorkspaceCreateError = () => {};
+    manager.applyHomeInputDefaults = () => {};
+    manager.ensureEditAgentModelOptions = async () => {};
+    manager.renderTemplateAgentPlan = () => {
+      rendered++;
+    };
+    manager.renderTemplateAgentPlanError = message => {
+      assert.fail(message);
+    };
+    manager.openExistingResourceWorkspace = async () => {
+      opens++;
+      return true;
+    };
+    const pending = manager.refreshTemplateAgentPlan();
+    manager.workspaceBuildApplyDepth = 0;
+    assisted = scenario.laterAssisted;
+    reply.resolve({ ok: true, json: async () => plan });
+    await pending;
+    assert.equal(opens, scenario.opens);
+    assert.equal(rendered, scenario.opens ? 0 : 1);
+  }
+});
+
 test('a Home that already has its resource workspace opens it instead of creating another', async () => {
   const calls = [];
   const assigned = [];
