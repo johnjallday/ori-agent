@@ -12,6 +12,39 @@ const REPORT_ACTIONS = ['start_this', 'not_now'];
 // A task's own page in a workspace, and nothing else.
 const REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
 const LOOK_ID = /^[A-Za-z0-9_-]{1,200}$/;
+const WORKSPACE_ID = /^[A-Za-z0-9_-]{1,200}$/;
+
+// mapPlacementView is a folder setup's "On the Map" row (FR23): where the
+// automatic layout put the hired agent's building, in words, and Move, which
+// opens Home's Map with that building selected and Move on. null without a
+// workspace to move.
+export function mapPlacementView({ agent, home, workspaceId } = {}) {
+  const id = String(workspaceId || '').trim();
+  if (!WORKSPACE_ID.test(id)) return null;
+  const who = String(agent || '').trim();
+  const building = who ? `${who}'s building` : 'Its building';
+  const where = String(home || '').trim();
+  return {
+    label: 'On the Map',
+    text: where ? `${building} sits inside ${where}.` : `${building} was placed automatically.`,
+    move: { label: 'Move', href: `/?move=${encodeURIComponent(id)}` }
+  };
+}
+
+// renderMapPlacement draws the "On the Map" row: its label, the sentence and
+// the Move link.
+export function renderMapPlacement(view, doc = document, className = 'first-look-report__map') {
+  const row = doc.createElement('p');
+  row.className = className;
+  const label = doc.createElement('span');
+  label.className = `${className}-label`;
+  label.textContent = view.label;
+  const link = doc.createElement('a');
+  link.href = view.move.href;
+  link.textContent = view.move.label;
+  row.append(label, ` ${view.text} `, link);
+  return row;
+}
 
 function initialsOf(name) {
   return String(name || '')
@@ -67,7 +100,8 @@ export function firstLookReportView(item, now = new Date()) {
     summary: String(item.detail || '').trim(),
     suggestion,
     actions,
-    report: REPORT_ROUTE.test(route) ? { label: 'Read the full report', href: route } : null
+    report: REPORT_ROUTE.test(route) ? { label: 'Read the full report', href: route } : null,
+    map: mapPlacementView({ agent, home: item.home, workspaceId: item.ref?.workspace_id })
   };
 }
 
@@ -158,6 +192,7 @@ export function renderFirstLookReport(view, doc = document, { onAction } = {}) {
     }
     card.append(box);
   }
+  if (view.map) card.append(renderMapPlacement(view.map, doc));
   if (view.actions.length) {
     const actions = doc.createElement('div');
     actions.className = 'first-look-report__actions';

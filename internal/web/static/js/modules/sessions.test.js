@@ -7169,61 +7169,10 @@ test('Set it up runs the reviewed plan and follows the run until it made the wor
   ]);
   assert.equal(hidden.length, 1);
   assert.equal(queue.length, 0);
-  // The dialog closes onto the Map, which asks where the Home and the song sit.
-  assert.deepEqual(JSON.parse(JSON.stringify(begun)), [
-    {
-      token: 'build:build-1',
-      created: {
-        member: { id: 'ws-song', name: 'Ori Music Demo' },
-        group: { id: 'ws-home', name: 'Music Production Home' }
-      }
-    }
-  ]);
-});
-
-test('the Map asks only once the dialog has hidden, so its canvas keeps the keyboard', () => {
-  const listeners = {};
-  const modal = {
-    classList: { contains: name => name === 'show' },
-    addEventListener: (type, fn, options) => (listeners[type] = { fn, options })
-  };
-  let hidden = 0;
-  const begun = [];
-  const manager = loadSessionManager(
-    undefined,
-    {
-      bootstrap: { Modal: { getInstance: () => ({ hide: () => hidden++ }) } },
-      OriWorkspaceMap: { beginPlacement: spec => (begun.push(spec.token), true) }
-    },
-    { getElementById: id => (id === 'addFolderModal' ? modal : null) }
-  );
-  manager.notifyWorkspacesChanged = () => {};
-  manager.showToast = () => {};
-  manager.finishWorkspaceBuildSetupInDialog(
-    { session: { plan: { home: { name: 'Music Production Home' } } } },
-    { id: 'b1', status: 'created', created_workspace_id: 'ws-song', home_workspace_id: 'ws-home' }
-  );
-  assert.equal(hidden, 1);
-  assert.deepEqual(begun, [], 'nothing is asked while the dialog is still closing');
-  assert.equal(listeners['hidden.bs.modal'].options.once, true);
-  listeners['hidden.bs.modal'].fn();
-  assert.deepEqual(begun, ['build:b1']);
-});
-
-test('without a Map on screen the automatic layout stands and the toast says so', () => {
-  for (const map of [undefined, { beginPlacement: () => false }]) {
-    const manager = loadSessionManager(undefined, map ? { OriWorkspaceMap: map } : {});
-    const toasts = [];
-    manager.showToast = (message, type) => toasts.push([message, type]);
-    assert.equal(
-      manager.placeCreatedOnWorkspaceMap('build:b', { memberId: 'ws-song', memberName: 'Song' }),
-      false
-    );
-    assert.deepEqual(toasts, [['Placed automatically on the Map', 'info']]);
-  }
-  const manager = loadSessionManager();
-  manager.showToast = () => assert.fail('nothing was made, nothing is said');
-  assert.equal(manager.placeCreatedOnWorkspaceMap('build:b', {}), false);
+  // The dialog closes onto the Map, whose automatic layout places what the
+  // run made: nothing asks where it sits (FR22).
+  assert.deepEqual(begun, []);
+  assert.equal(typeof manager.placeCreatedOnWorkspaceMap, 'undefined');
 });
 
 test('a refused Set it up says why and does not follow anything', async () => {

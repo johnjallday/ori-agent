@@ -187,6 +187,9 @@ func firstLookReportItems(offer FolderOffer, ws *workspace.Workspace, route stri
 		item.Suggestion = suggestion
 		item.Actions = []string{FirstLookActionStartThis, FirstLookActionNotNow}
 	}
+	if parent := offer.Outcome.Parent; parent != nil {
+		item.Home = truncateRunes(strings.TrimSpace(parent.Name), 120)
+	}
 	return []TodayItem{item}, nil, nil, true
 }
 

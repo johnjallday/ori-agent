@@ -101,6 +101,19 @@ func TestFirstLookReport_AFinishedHiredLookNeedsYou(t *testing.T) {
 	if strings.Join(item.Actions, ",") != "start_this,not_now" {
 		t.Fatalf("actions = %v", item.Actions)
 	}
+	// "On the Map" says the Home the workspace sits inside, from the verified
+	// outcome; none when the automatic layout placed it on its own.
+	if item.Home != "" || item.Ref.WorkspaceID != "quest-project" {
+		t.Fatalf("home = %q, ref %+v", item.Home, item.Ref)
+	}
+	offer := r.stored(t)
+	outcome := *offer.Outcome
+	outcome.Parent = &FolderSetupDestination{Status: "existing", WorkspaceID: "home-1", Name: "Music Production Home"}
+	offer.Outcome = &outcome
+	ws, _ := r.workspaces.Get("quest-project")
+	if inHome, _, _, _ := firstLookReportItems(offer, ws, "/workspaces/my-song", r.now); len(inHome) != 1 || inHome[0].Home != "Music Production Home" {
+		t.Fatalf("in a Home: %+v", inHome)
+	}
 }
 
 // The evidence is the agent's reason only: not the task named again (with or

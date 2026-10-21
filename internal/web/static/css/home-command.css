@@ -504,6 +504,22 @@ body.home-command-page .home-command-bridge * {
   justify-self: start;
 }
 
+/* Where the hired agent's building sits on the Map, and Move (FR23). The same
+   row closes a folder setup's receipt. */
+.first-look-report__map,
+.pa-folder__map {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.first-look-report__map-label,
+.pa-folder__map-label {
+  color: var(--hc-ink);
+  font-weight: 650;
+}
+
 /* The one-card setup's plan: one row per consequence, with a state glyph that
    is also said in words for assistive tech (never colour alone). */
 .pa-folder__plan {

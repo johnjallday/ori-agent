@@ -26,7 +26,12 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
-import { hiredLine, reportedLine } from './first-look-report.js';
+import {
+  hiredLine,
+  mapPlacementView,
+  renderMapPlacement,
+  reportedLine
+} from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import {
   declinedLine,
@@ -456,6 +461,7 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       lines: settled,
       profile: receipt.profile || null,
       receiptRows: receipt.rows,
+      map: receipt.map || null,
       route: receipt.route,
       openLabel: receipt.openLabel,
       actions: []
@@ -498,32 +504,17 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   };
 }
 
-// finishedRunPlacement is what the Map is asked to place once a run this page
-// followed has finished, as Create Workspace's Set it up does: the project
-// workspace the run made and, unless it stands alone, the Home it went
-// inside. `followed` is the offer whose run this page saw going, `placed` the
-// offers already handed on, `covered` whether the run's pop-up or the
-// assistant drawer still covers the Map (closing it is the moment). null when
-// there is nothing to place yet, or nothing at all: a Home or group outcome
-// places nothing.
-export function finishedRunPlacement(offer, { followed = '', placed = [], covered = false } = {}) {
+// finishedRunWorkspace is the project workspace a run this page followed made,
+// once it has finished, so the Map draws it where its automatic layout puts
+// it (nothing asks where it sits; the receipt's "On the Map" row offers
+// Move). `followed` is the offer whose run this page saw going, `announced`
+// the offers already handed on. '' when there is nothing to draw yet, or at
+// all: a Home or group outcome is drawn by its own path.
+export function finishedRunWorkspace(offer, { followed = '', announced = [] } = {}) {
   const id = String(offer?.id || '');
-  if (!id || id !== followed || placed.includes(id) || covered) return null;
-  if (offer.status !== 'resolved' || offer.outcome?.kind !== 'project') return null;
-  const memberId = String(offer.outcome.workspace_id || '').trim();
-  if (!memberId) return null;
-  const rows = Array.isArray(offer.outcome.receipt) ? offer.outcome.receipt : [];
-  const workspace = rows.find(row => row?.kind === 'workspace');
-  const parent = offer.outcome.parent;
-  const homeId =
-    parent && parent.status !== 'standalone' ? String(parent.workspace_id || '').trim() : '';
-  return {
-    token: `folder:${id}`,
-    memberId,
-    memberName: String(workspace?.name || offer.subject?.name || '').trim(),
-    homeId,
-    homeName: homeId ? String(parent.name || '').trim() : ''
-  };
+  if (!id || id !== followed || announced.includes(id)) return '';
+  if (offer.status !== 'resolved' || offer.outcome?.kind !== 'project') return '';
+  return String(offer.outcome.workspace_id || '').trim();
 }
 
 // Display-only canonical disclosure. The browser never sends this name or any
@@ -1650,6 +1641,14 @@ export function folderReceiptView(offer, options = {}) {
       },
       ...firstLook.actions
     ];
+  // The automatic layout placed the workspace; the receipt says where, with
+  // Move (FR23).
+  const parent = offer.outcome.parent;
+  const map = mapPlacementView({
+    agent: offer.setup?.hire?.agent_name || offer.first_task?.agent,
+    home: parent && parent.status !== 'standalone' ? parent.name : '',
+    workspaceId: offer.outcome.workspace_id
+  });
   return {
     visible: true,
     rows: rows.map(row => ({
@@ -1660,6 +1659,7 @@ export function folderReceiptView(offer, options = {}) {
     route,
     homeRoute: verifiedHomeRoute,
     openLabel,
+    ...(map ? { map } : {}),
     ...(hireLook.visible ? { hireLook } : {}),
     ...(firstLook.visible ? { firstLook } : {})
   };
@@ -2211,6 +2211,15 @@ function renderProfileLine(node, line, doc = document) {
 
 // renderReceiptRows draws the receipt's rows (what Set up made) into a list.
 // Shared by the card and the run pop-up so both say the same thing.
+// renderMapRow draws a receipt's "On the Map" row (mapPlacementView) into its
+// host, or empties and hides it.
+function renderMapRow(host, view) {
+  if (!host) return;
+  host.hidden = !view;
+  if (view) host.replaceChildren(renderMapPlacement(view, document, 'pa-folder__map'));
+  else host.replaceChildren();
+}
+
 function renderReceiptRows(list, rows, doc = document) {
   if (!list) return;
   list.replaceChildren();
@@ -2287,6 +2296,7 @@ function elements() {
     hidden: document.getElementById('personalAssistantFolderOfferHidden'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
+    map: document.getElementById('personalAssistantFolderMap'),
     result: document.getElementById('personalAssistantFolderFirstLookResult'),
     plan: document.getElementById('personalAssistantFolderPlan'),
     lookNote: document.getElementById('personalAssistantFolderLookNote'),
@@ -2382,6 +2392,7 @@ function runModalElements() {
     songs: document.getElementById('folderSetupRunSongs'),
     more: document.getElementById('folderSetupRunMore'),
     receipt: document.getElementById('folderSetupRunReceipt'),
+    map: document.getElementById('folderSetupRunMap'),
     error: document.getElementById('folderSetupRunError'),
     actions: document.getElementById('folderSetupRunActions')
   };
@@ -2507,34 +2518,17 @@ function renderRunSongs(els, view) {
 }
 
 // The run this page saw going, and the runs already handed to the Map.
-const runPlacement = { followed: '', placed: [] };
+const finishedRuns = { followed: '', announced: [] };
 
-// placeFinishedRun hands a finished run to the Map once (finishedRunPlacement),
-// through the same placement the build's Set it up uses.
-function placeFinishedRun() {
+// announceFinishedRun tells the Map once that a run made its workspace
+// (finishedRunWorkspace), so it is drawn where the automatic layout puts it.
+function announceFinishedRun() {
   const offer = state.offer;
-  if (offer?.setup && offer.status !== 'resolved') runPlacement.followed = String(offer.id || '');
-  const placement = finishedRunPlacement(offer, {
-    followed: runPlacement.followed,
-    placed: runPlacement.placed,
-    covered: runModal.wanted || Boolean(window.PersonalAssistantPanel?.isOpen?.())
-  });
-  if (!placement) return;
-  runPlacement.placed.push(String(offer.id));
-  const manager = typeof window !== 'undefined' ? window.sessionManager : null;
-  // The Map draws what the run made before it asks where it sits.
-  manager?.notifyWorkspacesChanged?.({ workspaceId: placement.memberId });
-  if (typeof manager?.placeCreatedOnWorkspaceMap === 'function') {
-    manager.placeCreatedOnWorkspaceMap(placement.token, placement);
-    return;
-  }
-  window.OriWorkspaceMap?.beginPlacement?.({
-    token: placement.token,
-    created: {
-      member: { id: placement.memberId, name: placement.memberName },
-      group: placement.homeId ? { id: placement.homeId, name: placement.homeName } : null
-    }
-  });
+  if (offer?.setup && offer.status !== 'resolved') finishedRuns.followed = String(offer.id || '');
+  const workspaceId = finishedRunWorkspace(offer, finishedRuns);
+  if (!workspaceId) return;
+  finishedRuns.announced.push(String(offer.id));
+  window.sessionManager?.notifyWorkspacesChanged?.({ workspaceId });
 }
 
 function openRunModal() {
@@ -2546,7 +2540,6 @@ function openRunModal() {
   if (!runModal.bound) {
     els.root.addEventListener('hidden.bs.modal', () => {
       runModal.wanted = false;
-      placeFinishedRun();
     });
     runModal.bound = true;
   }
@@ -2592,6 +2585,7 @@ function renderRunModal() {
   els.steps.hidden = done || !view.lines.length;
   renderReceiptRows(els.receipt, view.receiptRows);
   els.receipt.hidden = !done || !view.receiptRows.length;
+  renderMapRow(els.map, done ? view.map : null);
   renderRunSongs(els, view);
   els.error.textContent = runModal.error;
   els.error.hidden = !runModal.error;
@@ -2933,6 +2927,7 @@ function renderOffer(place) {
     els.receipt.dataset.layout = receipt.visible && receipt.group ? 'list' : 'grid';
     renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
+  renderMapRow(els.map, receipt.visible ? receipt.map : null);
   // What the agent found, once its first look has finished, and for an
   // assessment the one next request it suggested. Both are text the model
   // wrote: they are set as text, never as markup.
@@ -3111,7 +3106,7 @@ function render() {
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderRunModal();
-  placeFinishedRun();
+  announceFinishedRun();
   syncSetupPolling();
 }
 
@@ -4496,9 +4491,6 @@ function init() {
     const look = currentFirstLook();
     if (look?.state === 'running') void refreshFirstLook(look.offer_id);
   });
-  // A run that finished inside the drawer is placed once the drawer stops
-  // covering the Map.
-  document.addEventListener('personal-assistant:closed', placeFinishedRun);
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   els.assistantName?.addEventListener('input', () => {

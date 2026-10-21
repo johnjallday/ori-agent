@@ -3,11 +3,13 @@ import { startJanitorBuildModel } from './helpers/janitor-build-model';
 
 /**
  * Acceptance for narrated folder setup (tasks/prd-narrated-folder-setup.md):
- * a recognized song folder is set up from both entries and placed on the Map.
+ * a recognized song folder is set up from both entries as a hire with a brief
+ * (tasks/prd-folder-hire-brief.md), and the Map places it by itself, with Move.
  *
- * Nothing here is faked and no model turn is sent: attaching a recognized
- * folder already gives the build its host plan, the in-pane review names the
- * workspace, and Set it up runs Home's real setup journey. Run it against the
+ * No folder turn is sent: attaching a recognized folder already gives the build
+ * its host plan, the in-pane review names the workspace, and Hire and start
+ * runs Home's real setup journey (the hired agent's first look then runs on the
+ * sandbox's model). Run it against the
  * narrated demo sandbox, which installs the plugins and seeds the folders:
  *
  *   ./scripts/narrated-folder-demo.sh installed --reaper-source DIR --music-source DIR --port 8955
@@ -54,10 +56,31 @@ async function layoutPositions(page: Page): Promise<Record<string, { x: number; 
   return body.layout?.positions || {};
 }
 
-async function placement(page: Page) {
-  const controls = page.locator('[data-ws-map-placement-controls]');
-  await expect(controls).toBeVisible({ timeout: 60_000 });
-  return controls;
+// Nothing asks where a folder setup's result sits (folder-hire-brief FR22):
+// the Map's placement controls stay away for a while after the run.
+async function expectNoPlacementAsk(page: Page) {
+  await page.waitForTimeout(3_000);
+  await expect(page.locator('[data-ws-map-placement-controls]')).toHaveCount(0);
+}
+
+// Move (FR23) opens Home with the building selected and Move on; Escape keeps
+// the automatic layout and writes nothing.
+async function moveThenKeep(page: Page, href: string, name: string) {
+  const before = await layoutPositions(page);
+  await page.goto(href);
+  await expect(page.locator('[data-map-live]')).toHaveText(
+    new RegExp(`^Move is on for ${name}\\.`),
+    {
+      timeout: 30_000
+    }
+  );
+  await expect(page.locator('[data-map-drag]').first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(page).not.toHaveURL(/move=/);
+  // The keyboard is on the canvas: an arrow key starts the move at once.
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('[data-map-live]')).toHaveText(/^(Moving from|Candidate) /);
+  await page.keyboard.press('Escape');
+  expect(await layoutPositions(page)).toEqual(before);
 }
 
 test('folder-first recognized plan needs no model or setup action on attachment', async ({
@@ -109,7 +132,7 @@ test('folder-first recognized plan needs no model or setup action on attachment'
   }
 });
 
-test('the build path recognizes the song, runs one Set it up, and places the new Home', async ({
+test('the build path recognizes the song, hires with a brief, and the Map places it itself', async ({
   page
 }) => {
   test.skip(!SONG, 'NARRATED_SONG names a seeded song folder in the sandbox');
@@ -146,33 +169,36 @@ test('the build path recognizes the song, runs one Set it up, and places the new
   await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
   await expect(page.locator('#workspaceBuildPane')).toBeHidden();
   await page.fill('#workspaceBuildPlanName', 'Ori Music Demo');
+  // The plan is a hire: titled by it, with the one question.
+  await expect(page.locator('#workspaceBuildPlanReviewTitle')).toHaveText(
+    /^(Hire|Assign) .+ (for|to) Ori Music Demo$/
+  );
+  const brief = page.locator('#workspaceBuildPlanReviewBrief');
+  await expect(brief).toHaveValue(/\S/);
+  await brief.fill('Mix the chorus first.');
   const setUp = page.locator('#workspaceBuildPlanReviewSetup');
+  await expect(setUp).toHaveText('Hire and start');
   await expect(setUp).toBeEnabled({ timeout: 15_000 });
+  const positions = await layoutPositions(page);
   await setUp.click();
 
-  // The run finishes, the dialog closes, and the Map asks where the Home sits.
+  // The run finishes and the dialog closes; the Map's automatic layout places
+  // the Home and the song, and nothing asks or writes a position.
   await expect(page.locator('#addFolderModal')).toBeHidden({ timeout: 180_000 });
-  const controls = await placement(page);
-  await expect(controls).toContainText(`Place ${HOME}`);
-  await expect(controls).toContainText(
-    `Choose where ${HOME} sits. Ori Music Demo goes inside it. Click open ground to place; Esc keeps the automatic layout.`
-  );
-  await expect(page.locator('[data-ws-map-placement-district]')).toBeVisible();
-  await page.keyboard.press('Enter');
-  await expect(controls).toBeHidden({ timeout: 30_000 });
-  await expect(page.locator('[data-map-live]')).toHaveText(
-    new RegExp(`^${HOME} and Ori Music Demo placed at -?\\d+, -?\\d+\\.$`)
-  );
+  await expectNoPlacementAsk(page);
 
   const all = await workspaces(page);
   const home = all.find(item => item.name === HOME && item.kind === 'group');
   const song = all.find(item => item.name === 'Ori Music Demo');
   expect(home, 'the Home was made').toBeTruthy();
   expect(song?.parent_id, 'the song went inside it').toBe(home?.id);
-  expect(Object.keys(await layoutPositions(page))).toContain(song!.id);
+  expect(await layoutPositions(page)).toEqual(positions);
+  const goal = await (await page.request.get(`/api/workspaces/${song!.id}`)).json();
+  expect(JSON.stringify(goal)).toContain('Mix the chorus first.');
+  await moveThenKeep(page, `/?move=${encodeURIComponent(song!.id)}`, 'Ori Music Demo');
 });
 
-test('Home’s Explore says the same lines, joins the existing Home, and Keep automatic layout writes nothing', async ({
+test('Home’s Explore says the same lines, joins the existing Home, and Move keeps the automatic layout', async ({
   page
 }) => {
   test.skip(!SECOND_SONG || MODE !== 'installed', 'NARRATED_SECOND_SONG on an installed sandbox');
@@ -221,27 +247,24 @@ test('Home’s Explore says the same lines, joins the existing Home, and Keep au
     .first()
     .click();
 
-  // The run ends on its pop-up; nothing is asked while the drawer covers the Map.
+  // The run ends on its pop-up, which says where the building sits, with
+  // Move; nothing asks where to place it, before or after the drawer closes.
+  const before = await layoutPositions(page);
   const runModal = page.locator('#folderSetupRunModal');
   await expect(runModal).toHaveAttribute('data-phase', 'done', { timeout: 180_000 });
+  const onMap = runModal.locator('#folderSetupRunMap');
+  await expect(onMap).toContainText(`building sits inside ${HOME}.`);
+  const move = await onMap.getByRole('link', { name: 'Move' }).getAttribute('href');
+  expect(move).toMatch(/^\/\?move=/);
   await runModal.locator('.btn-close, [data-bs-dismiss=modal]').first().click();
-  await expect(page.locator('[data-ws-map-placement-controls]')).toHaveCount(0);
   await page.click('#personalAssistantClose');
-
-  const controls = await placement(page);
-  await expect(controls).toContainText(
-    `Choose where Second Song sits in ${HOME}. Click open ground to place; Esc keeps the automatic layout.`
-  );
-  const before = await layoutPositions(page);
-  await controls.getByRole('button', { name: 'Keep automatic layout' }).click();
-  await expect(controls).toBeHidden();
-  await expect(page.locator('[data-map-live]')).toHaveText(
-    'Kept the automatic layout. Nothing was moved.'
-  );
+  await expectNoPlacementAsk(page);
 
   const all = await workspaces(page);
   const home = all.find(item => item.name === HOME && item.kind === 'group');
   const second = all.find(item => item.name === 'Second Song');
   expect(second?.parent_id, 'the second song joined the existing Home').toBe(home?.id);
+  expect(move).toBe(`/?move=${encodeURIComponent(second!.id)}`);
   expect(await layoutPositions(page)).toEqual(before);
+  await moveThenKeep(page, move!, 'Second Song');
 });

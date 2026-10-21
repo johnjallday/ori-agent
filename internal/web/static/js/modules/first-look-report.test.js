@@ -7,6 +7,7 @@ import {
   firstLookReportAction,
   firstLookReportView,
   hiredLine,
+  mapPlacementView,
   reportedLine
 } from './first-look-report.js';
 
@@ -84,6 +85,33 @@ test('only a finished look report with a safe report link is drawn', () => {
       action => action.id
     ),
     ['start_this']
+  );
+});
+
+test('On the Map says where the building sits and Move opens Home with it in move mode', () => {
+  assert.deepEqual(firstLookReportView(report(), now).map, {
+    label: 'On the Map',
+    text: "Development Assistant's building was placed automatically.",
+    move: { label: 'Move', href: '/?move=ws-1' }
+  });
+  assert.equal(
+    firstLookReportView(report({ home: 'Music Production Home' }), now).map.text,
+    "Development Assistant's building sits inside Music Production Home."
+  );
+  // Without a workspace, or with one that is not an id, there is nothing to move.
+  assert.equal(
+    firstLookReportView(report({ ref: { entity_type: 'task', entity_id: 'look-1' } }), now).map,
+    null
+  );
+  assert.equal(
+    mapPlacementView({ agent: '', home: '', workspaceId: '../ws' }),
+    null,
+    'a forged id is not a link'
+  );
+  assert.equal(mapPlacementView({ workspaceId: 'ws 1' }), null);
+  assert.equal(
+    mapPlacementView({ workspaceId: 'ws-2' }).text,
+    'Its building was placed automatically.'
   );
 });
 

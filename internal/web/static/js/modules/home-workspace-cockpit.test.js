@@ -24,6 +24,7 @@ import {
   contextModalShouldShow,
   cockpitFolderActionView,
   parseViewFromQuery,
+  moveDeepLinkTarget,
   searchForView,
   readCount,
   formatCount,
@@ -111,6 +112,13 @@ test('parseViewFromQuery: the query is authoritative when it carries a valid vie
   // Case and surrounding whitespace must not defeat a legitimate deep link.
   assert.equal(parseViewFromQuery('?view=TREE'), VIEW_TREE);
   assert.equal(parseViewFromQuery('?view=%20tree%20'), VIEW_TREE);
+});
+
+test('moveDeepLinkTarget: a folder setup’s Move link names the workspace to move', () => {
+  assert.equal(moveDeepLinkTarget('?move=ws-song'), 'ws-song');
+  assert.equal(moveDeepLinkTarget('?view=tree&move=%20ws-song%20'), 'ws-song');
+  assert.equal(moveDeepLinkTarget('?move='), '');
+  assert.equal(moveDeepLinkTarget(''), '');
 });
 
 test('parseViewFromQuery: missing, empty, and invalid values normalize to Map', () => {
