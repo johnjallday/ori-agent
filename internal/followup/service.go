@@ -141,6 +141,17 @@ func initialStatus(prov Provenance, conf Confidence) Status {
 	return StatusActive
 }
 
+// FindBySource returns the follow-up captured from a source, in any status, or
+// ErrNotFound. It is how a caller tells a new capture from one the source
+// dedup would fold into an existing row.
+func (s *Service) FindBySource(ctx context.Context, userID, sourceType, sourceID string) (*FollowUp, error) {
+	key := DedupKey(userID, sourceType, sourceID)
+	if key == "" {
+		return nil, ErrNotFound
+	}
+	return s.store.GetByDedupKey(ctx, userID, key)
+}
+
 // Get / List pass through to the store.
 func (s *Service) Get(ctx context.Context, userID, id string) (*FollowUp, error) {
 	return s.store.Get(ctx, userID, id)

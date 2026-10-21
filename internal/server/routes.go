@@ -1251,6 +1251,17 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/existing-home", s.Handlers.PersonalAssistant.ResolveFolderExistingHome)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/home-provider", s.Handlers.PersonalAssistant.SetupFolderHomeProvider)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/project-selection", s.Handlers.PersonalAssistant.FolderProjectSelection)
+		// Connect your second brain: vault ids and selection tokens, never a
+		// path; every route refuses a request from outside Ori's own page.
+		const secondBrain = "/api/personal-assistant/second-brain"
+		mux.HandleFunc("GET "+secondBrain, s.Handlers.PersonalAssistant.GetSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/prompted", s.Handlers.PersonalAssistant.PromptedSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/ask", s.Handlers.PersonalAssistant.AskSecondBrain)
+		mux.HandleFunc("POST "+secondBrain+"/connect", s.Handlers.PersonalAssistant.ConnectSecondBrain)
+		mux.HandleFunc("GET "+secondBrain+"/look", s.Handlers.PersonalAssistant.GetSecondBrainLook)
+		mux.HandleFunc("POST "+secondBrain+"/look", s.Handlers.PersonalAssistant.LookSecondBrainAgain)
+		mux.HandleFunc("POST "+secondBrain+"/look/{lookID}/follow-ups", s.Handlers.PersonalAssistant.AcceptSecondBrainFollowUps)
+		mux.HandleFunc("POST "+secondBrain+"/disconnect", s.Handlers.PersonalAssistant.DisconnectSecondBrain)
 		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
 		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)
 		mux.HandleFunc("POST /api/personal-assistant/resume", s.Handlers.PersonalAssistant.Resume)

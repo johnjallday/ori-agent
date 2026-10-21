@@ -126,6 +126,13 @@
 /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/setup
 /api/personal-assistant/folder-digest/picker
 /api/personal-assistant/folder-digest/scan
+/api/personal-assistant/second-brain
+/api/personal-assistant/second-brain/ask
+/api/personal-assistant/second-brain/connect
+/api/personal-assistant/second-brain/disconnect
+/api/personal-assistant/second-brain/look
+/api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/follow-ups
+/api/personal-assistant/second-brain/prompted
 /api/personal-assistant/specialist
 /api/personal-assistant/setup/file-janitor
 /api/personal-assistant/setup/file-janitor/accept
