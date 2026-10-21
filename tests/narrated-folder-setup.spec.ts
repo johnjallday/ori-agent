@@ -207,22 +207,11 @@ test('Home’s Explore says the same lines, joins the existing Home, and Move ke
   await page.locator('.folder-path-entry__input:visible').first().fill(SECOND_SONG);
   await page.locator('button:visible', { hasText: 'Use this path' }).first().click();
   // A first folder goes straight to Home's card; a later one is attached to
-  // the conversation, whose Review setup asks which observed folder it is
-  // about (the song itself). Both end on the same card.
-  const reviewSetup = page.getByText('Review setup', { exact: true }).first();
-  const attached = await reviewSetup.waitFor({ state: 'visible', timeout: 10_000 }).then(
-    () => true,
-    () => false
-  );
-  if (attached) {
-    await reviewSetup.click();
-    const scope = page
-      .locator('select:visible', { has: page.locator('option', { hasText: 'Choose a folder' }) })
-      .first();
-    await scope.waitFor({ state: 'visible', timeout: 30_000 });
-    await scope.selectOption({ index: 1 });
-    await page.getByRole('button', { name: 'Review selection' }).first().click();
-  }
+  // the conversation, whose attach opens the song's own review at once
+  // (hire_candidate). Both end on the same card, with no chooser.
+  await expect(
+    page.locator('select:visible', { has: page.locator('option', { hasText: 'Choose a folder' }) })
+  ).toHaveCount(0);
 
   // The card speaks the build pane's lines, in the drawer or, for a first
   // folder, on the mission card.

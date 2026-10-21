@@ -192,6 +192,8 @@ test('one project Ori can hire for is reviewed on attach; a group or any other f
   );
   assert.match(setup, /export function reviewCandidate\(candidateId\)/);
   assert.match(setup, /reviewFrom\(elements\.open, candidateId\);/);
+  // Review setup on such a folder brings the same review back, with no chooser.
+  assert.match(setup, /else if \(!reviewCandidate\(current\?\.hireCandidate\)\) openChoices\(\);/);
 });
 
 test('cancel and failed replacement retain the exact previous selection', async () => {

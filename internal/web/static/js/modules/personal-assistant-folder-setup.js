@@ -1046,10 +1046,13 @@ function init() {
   choicesMarker = document.createComment('single setup chooser parking slot');
   elements.choices.after(choicesMarker);
   // A folder Ori proposed a group for is reviewed as that group; choosing one
-  // of its folders instead is in Adjust.
-  open.addEventListener('click', () =>
-    currentStructure() ? reviewStructure(open) : openChoices()
-  );
+  // of its folders instead is in Adjust. A folder the attach named one project
+  // for (hire_candidate) is reviewed as that project, with no chooser: it
+  // brings its hire card back after Keep chatting.
+  open.addEventListener('click', () => {
+    if (currentStructure()) reviewStructure(open);
+    else if (!reviewCandidate(current?.hireCandidate)) openChoices();
+  });
   elements.candidate.addEventListener('change', renderChoicePreview);
   elements.choices.addEventListener('focusout', () =>
     queueMicrotask(() => {
