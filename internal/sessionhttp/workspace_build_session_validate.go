@@ -121,11 +121,12 @@ const (
 // this user's catalog, saved agents, and groups, the create path's own name
 // rule, and the models the app can resolve.
 type buildValidation struct {
-	catalog   []WorkspaceBuildCatalogEntry
-	agents    []buildSavedAgent
-	groups    []buildGroup
-	nameTaken func(name string) bool
-	modelOK   func(provider, model string) bool
+	proposalOnly bool
+	catalog      []WorkspaceBuildCatalogEntry
+	agents       []buildSavedAgent
+	groups       []buildGroup
+	nameTaken    func(name string) bool
+	modelOK      func(provider, model string) bool
 	// plan is the host's ready setup plan for a recognized folder. With one,
 	// the reply may set only what plannedBuildPatch keeps.
 	plan *personalassistant.BuildFolderPlan

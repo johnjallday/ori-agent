@@ -195,6 +195,10 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			h.postWorkspaceBuildPreparation(w, r, id, action == "janitor-prepare")
 		case action == "janitor-review" || action == "janitor-prepare":
 			_ = orihttp.RespondMethodNotAllowed(w)
+		case action == "pause" && r.Method == http.MethodPost:
+			h.pauseWorkspaceBuild(w, r, id)
+		case action == "pause":
+			_ = orihttp.RespondMethodNotAllowed(w)
 		case action == "turns" && r.Method == http.MethodPost:
 			h.postWorkspaceBuildTurn(w, r, id)
 		case action == "draft" && r.Method == http.MethodPatch:
@@ -296,6 +300,9 @@ type buildSessionView struct {
 	// FolderExpiresAt is when the server stops holding the attached folder's
 	// pick (foldercontext.SelectionTTL after it was observed).
 	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
+	// FolderPath identifies the owner's current held root in the local UI only.
+	// It is never part of the stored session or the model's folder observation.
+	FolderPath string `json:"folder_path,omitempty"`
 	// GroupPrerequisite is the group the drafted blueprint must be created
 	// inside (workspaceBuildGroupPrerequisite).
 	GroupPrerequisite *templateGroupRequirementPlan `json:"group_prerequisite,omitempty"`
@@ -319,6 +326,20 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 		}
 		if session.Folder != nil && (session.Status == personalassistant.WorkspaceBuildOpen || session.Status == personalassistant.WorkspaceBuildPreparing) {
 			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
+			deps := h.workspaceBuild
+			if deps != nil && deps.Folders != nil && deps.Assistant != nil {
+				projection, err := deps.Assistant(ctx, userID)
+				if err == nil && projection != nil {
+					root, resolveErr := deps.Folders.ResolveRoot(ctx, buildFolderTarget(userID, projection, session.ID), session.Folder.Observation.ID)
+					if resolveErr != nil || strings.TrimSpace(root) == "" {
+						// The TTL is an upper bound: restart, removal or a changed
+						// assistant scope can lose the held selection sooner.
+						expires = time.Unix(0, 0).UTC()
+					} else {
+						built.FolderPath = root
+					}
+				}
+			}
 			built.FolderExpiresAt = &expires
 		}
 		if h.workspaceBuild != nil && h.workspaceBuild.HomeProvider != nil && session.Status == personalassistant.WorkspaceBuildOpen &&
@@ -411,7 +432,8 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 	_, err := deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		existing = nil
 		if open := doc.Open(); open != nil {
-			copied := *open
+			copied := cloneBuildSession(*open)
+			copied.CreateNow = false // Resume observes state, never replays an action.
 			existing = &copied
 			return nil
 		}
@@ -441,9 +463,13 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 }
 
 type buildTurnRequest struct {
-	Text     string `json:"text,omitempty"`
-	ChoiceID string `json:"choice_id,omitempty"`
-	Version  int64  `json:"version"`
+	Intent        string `json:"intent,omitempty"`
+	ProposalID    string `json:"proposal_id,omitempty"`
+	Attempt       int    `json:"attempt,omitempty"`
+	RetryProposal bool   `json:"retry,omitempty"`
+	Text          string `json:"text,omitempty"`
+	ChoiceID      string `json:"choice_id,omitempty"`
+	Version       int64  `json:"version"`
 	// Auto marks a turn the client sends on the user's behalf (after they
 	// switched the blueprint on the form); it is never their request.
 	Auto bool `json:"auto,omitempty"`
@@ -456,8 +482,8 @@ func (h *Handler) postWorkspaceBuildTurn(w http.ResponseWriter, r *http.Request,
 	}
 	req.Text = strings.TrimSpace(req.Text)
 	req.ChoiceID = strings.TrimSpace(req.ChoiceID)
-	if (req.Text == "") == (req.ChoiceID == "") {
-		_ = orihttp.RespondBadRequest(w, "Send either a message or a choice")
+	if !validBuildTurnRequest(req) {
+		_ = orihttp.RespondBadRequest(w, "Send a message, a choice, or a current folder proposal request")
 		return
 	}
 	if utf8.RuneCountInString(req.Text) > personalassistant.WorkspaceBuildMaxText {
@@ -474,6 +500,13 @@ func (h *Handler) postWorkspaceBuildTurn(w http.ResponseWriter, r *http.Request,
 	if !readiness.available {
 		respondBuildUnavailable(w, readiness.reason)
 		return
+	}
+	if req.Intent != "" {
+		owner, err := h.buildPreparationOwner(ctx)
+		if err != nil || owner != userID {
+			respondBuildUnavailable(w, buildReasonAssistantNotReady)
+			return
+		}
 	}
 	session, status, code := h.runWorkspaceBuildTurn(ctx, userID, id, req, readiness)
 	if session == nil {
@@ -493,6 +526,10 @@ func buildErrorText(code string) string {
 		return "This build is no longer open."
 	case "choice":
 		return "That choice is no longer offered."
+	case "proposal":
+		return "This suggestion is no longer current. Review the attached folder, or retry its current suggestion."
+	case "selection":
+		return "The folder selection expired. Attach it again; your draft is kept."
 	default:
 		return "The build could not continue."
 	}
@@ -522,7 +559,22 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 			plannedFor = current.Folder.Observation.ID
 		}
 	}
+	automatic := req.Intent == buildIntentSuggestFolder
+	if automatic {
+		doc, err := deps.Store.Read(ctx, userID)
+		if err != nil {
+			return nil, http.StatusServiceUnavailable, "unavailable"
+		}
+		if doc.Session(id) == nil {
+			return nil, http.StatusNotFound, "not_found"
+		}
+		if !h.buildProposalSelectionCurrent(ctx, userID, readiness.projection, doc.Session(id)) {
+			return nil, http.StatusConflict, "selection"
+		}
+	}
 	var staged personalassistant.WorkspaceBuildSession
+	inferenceID := uuid.NewString()
+	admitted := false
 	_, err := deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		session := doc.Session(id)
 		if session == nil {
@@ -531,18 +583,39 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		if session.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
-		if session.Version != req.Version {
-			return errBuildTurn{http.StatusConflict, "version"}
-		}
+		admitted = false
 		now := deps.Store.Now()
-		if plan != nil && session.Folder != nil && session.Folder.Observation.ID == plannedFor {
-			noteBuildNeeds(session, plan, now)
+		if automatic {
+			var err error
+			admitted, err = stageBuildProposal(session, req, now)
+			if err != nil {
+				return err
+			}
+			if !admitted {
+				staged = cloneBuildSession(*session)
+				staged.CreateNow = false
+				return nil
+			}
+		} else {
+			if session.Version != req.Version {
+				return errBuildTurn{http.StatusConflict, "version"}
+			}
+			if plan != nil && session.Folder != nil && session.Folder.Observation.ID == plannedFor {
+				noteBuildNeeds(session, plan, now)
+			}
+			// A retry retains its original authority; Auto cannot become a
+			// user confirmation merely because it was retried without Auto.
+			if err := stageBuildUserTurn(session, req, now); err != nil {
+				return err
+			}
+			retry := session.Retry
+			session.InvalidateBuildInference(true)
+			session.Retry = retry
+			admitted = true
 		}
-		if err := stageBuildUserTurn(session, req, now); err != nil {
-			return err
-		}
+		session.InferenceID = inferenceID
 		session.Touch(now)
-		staged = *session
+		staged = cloneBuildSession(*session)
 		return nil
 	})
 	if err != nil {
@@ -554,16 +627,20 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		return nil, http.StatusServiceUnavailable, "unavailable"
 	}
 
+	if !admitted {
+		return &staged, http.StatusOK, ""
+	}
 	catalog, catalogErr := deps.Catalog(ctx, userID)
 	if catalogErr != nil {
 		logger.Warn("Workspace build catalog unavailable", logger.Fields{"session_id": id, "error": catalogErr})
 	}
 	validation := buildValidation{
-		catalog:   offerableCatalog(catalog),
-		agents:    h.workspaceBuildAgents(),
-		groups:    h.workspaceBuildGroups(ctx, userID),
-		nameTaken: func(name string) bool { return h.workspaceNameTaken(ctx, name) },
-		modelOK:   deps.ModelAvailable,
+		catalog:      offerableCatalog(catalog),
+		agents:       h.workspaceBuildAgents(),
+		groups:       h.workspaceBuildGroups(ctx, userID),
+		nameTaken:    func(name string) bool { return h.workspaceNameTaken(ctx, name) },
+		modelOK:      deps.ModelAvailable,
+		proposalOnly: automatic || req.Auto || (staged.Retry != nil && staged.Retry.Auto) || staged.Folder != nil,
 	}
 	if plan != nil && plan.Ready && staged.Folder != nil && staged.Folder.Observation.ID == plannedFor {
 		validation.plan = plan
@@ -571,6 +648,7 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		validation.waitsOn = strings.TrimSpace(plan.UnavailableSubject)
 	}
 	outcome := h.askWorkspaceBuildModel(ctx, readiness, &staged, validation)
+	selectionCurrent := !automatic || h.buildProposalSelectionCurrent(ctx, userID, readiness.projection, &staged)
 
 	var result personalassistant.WorkspaceBuildSession
 	_, err = deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
@@ -581,10 +659,34 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		if session.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
-		// The user may have edited the form while the model was thinking;
-		// their edit stands over a reply written without it.
-		finishBuildTurn(session, withoutFormEdits(outcome, staged.Draft, session.Draft), validation, deps.Store.Now())
-		result = *session
+		if session.InferenceID != staged.InferenceID || session.ContextVersion != staged.ContextVersion {
+			result = cloneBuildSession(*session)
+			result.CreateNow = false
+			return nil
+		}
+		if !selectionCurrent {
+			outcome = buildOutcome{kind: "failure"}
+		}
+		// Explicit edits, including empty/back-to-original values, win.
+		filtered := withoutOwnedBuildFields(withoutFormEdits(outcome, staged.Draft, session.Draft), staged, *session, automatic)
+		finishBuildTurn(session, filtered, validation, deps.Store.Now())
+		session.InferenceID = ""
+		if automatic {
+			session.CreateNow, session.Retry = false, nil
+			switch outcome.kind {
+			case "failure":
+				session.Proposal.Status = "failed"
+				// Proposal Retry is not an ordinary transcript choice.
+				session.PendingQuestion = nil
+				session.Transcript[len(session.Transcript)-1].Choices = nil
+			default:
+				session.Proposal.Status = "ready"
+				if session.PendingQuestion != nil {
+					session.Proposal.Status = "clarifying"
+				}
+			}
+		}
+		result = cloneBuildSession(*session)
 		return nil
 	})
 	if err != nil {
@@ -614,7 +716,7 @@ func stageBuildUserTurn(session *personalassistant.WorkspaceBuildSession, req bu
 		return nil
 	}
 	text := req.Text
-	retry := &personalassistant.BuildRetry{Text: req.Text}
+	retry := &personalassistant.BuildRetry{Text: req.Text, Auto: req.Auto}
 	if req.ChoiceID != "" {
 		question := session.PendingQuestion
 		label := ""
@@ -632,9 +734,13 @@ func stageBuildUserTurn(session *personalassistant.WorkspaceBuildSession, req bu
 		text = label
 		retry = &personalassistant.BuildRetry{ChoiceID: req.ChoiceID, Text: label}
 	}
-	session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleUser, Text: text, At: now})
+	if req.Auto {
+		session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: text, Host: true, At: now})
+	} else {
+		session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleUser, Text: text, At: now})
+		session.TurnCount++
+	}
 	session.PendingQuestion = nil
-	session.TurnCount++
 	if session.FirstRequest == "" && req.ChoiceID == "" && !req.Auto {
 		session.FirstRequest = truncateRunes(text, personalassistant.WorkspaceBuildMaxFirstRequest)
 	}
@@ -752,6 +858,7 @@ func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildRea
 		Groups:        validation.groups,
 		Plan:          validation.plan,
 		WaitsOn:       validation.waitsOn,
+		ProposalOnly:  validation.proposalOnly,
 	}
 	messages := buildMessages(session)
 	prompted := cloneBuildSession(*session)
@@ -762,6 +869,9 @@ func (h *Handler) askWorkspaceBuildModel(ctx context.Context, readiness buildRea
 		if err != nil {
 			logger.Warn("Workspace build model call failed", logger.Fields{"session_id": session.ID, "attempt": attempt + 1, "error": err})
 			return buildOutcome{kind: "failure"}
+		}
+		if validation.proposalOnly {
+			reply.CreateNow = false
 		}
 		works, refused := buildReplyDoesWork(session, reply, validation)
 		if works {
@@ -784,7 +894,7 @@ func buildReplyDoesWork(session *personalassistant.WorkspaceBuildSession, reply 
 	// "Create it" is work of its own once the user has seen the form: the
 	// flag alone, with nothing left to set, is the user's instruction carried
 	// out, not talk to be retried and replaced.
-	creating := reply.CreateNow && session.TurnCount > 1
+	creating := reply.CreateNow && session.TurnCount > 1 && !validation.proposalOnly
 	if !result.changed() && !asked && !creating {
 		return false, result.rejections
 	}
@@ -866,7 +976,7 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	// "Create it" counts only once the user has seen a filled form: never on
 	// the first turn, even when that first message says to create (the Ask
 	// tab's confirmation promises a check before anything is created).
-	session.CreateNow = reply.CreateNow && session.TurnCount > 1
+	session.CreateNow = reply.CreateNow && session.TurnCount > 1 && !validation.proposalOnly
 	session.Retry = nil
 	mergeBuildWhy(session, reply.Why)
 	session.Alternatives = buildAlternatives(reply.Alternatives, validation, session.Draft.TemplateID)

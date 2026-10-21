@@ -240,6 +240,31 @@ function entries(root) {
   return root.querySelectorAll('li');
 }
 
+test('folder review clarification is text-only, does not touch unsent text, and sends one choice', () => {
+  const { pane, document, events, root } = loadPane();
+  pane.mount({ assistant: { display_name: 'Atlas' } });
+  const host = document.createElement('section');
+  const input = root.querySelectorAll('textarea')[0];
+  input.value = 'Unsent thought';
+  const question = {
+    question: 'What should this folder do?',
+    choices: [{ id: 'choice-1', label: '<img src=x>' }]
+  };
+  pane.renderFolderQuestion(host, question);
+  const choice = host.querySelectorAll('button')[0];
+  assert.equal(choice.textContent, '<img src=x>');
+  pane.renderFolderQuestion(host, question);
+  assert.equal(
+    host.querySelectorAll('button')[0],
+    choice,
+    'unchanged projection keeps the focused control'
+  );
+  choice.click();
+  choice.click();
+  assert.equal(events.filter(event => event.type === 'workspace-build-turn').length, 1);
+  assert.equal(input.value, 'Unsent thought');
+});
+
 test('creation permission review is host-rendered, default-off and explicitly confirmed', () => {
   const { pane, document, events } = loadPane();
   const host = document.createElement('section');
@@ -270,11 +295,76 @@ test('creation permission review is host-rendered, default-off and explicitly co
   assert.equal(events[0].detail.monitoring, true);
   const confirm = host
     .querySelectorAll('button')
-    .find(button => button.textContent === 'Create & prepare review');
+    .find(button => button.textContent === 'Create & scan folder');
   confirm.click();
   assert.equal(events[1].type, 'workspace-build-prepare');
   pane.renderCreationReview(host, { review, busy: true });
   assert.ok(host.querySelectorAll('button').every(button => button.disabled));
+});
+
+test('compact permissions retain focused monitoring and open details without a duplicate primary action', () => {
+  const { pane, document, events } = loadPane();
+  const host = document.createElement('section');
+  const actionsHost = document.createElement('div');
+  const review = {
+    workspace: { name: 'Inbox' },
+    folder: { name: 'Inbox', path: '/synthetic/inbox' },
+    terms: {},
+    review_revision: 'current'
+  };
+  pane.renderCreationReview(host, { review, compact: true, actionsHost });
+  const checkbox = host.querySelectorAll('input')[0];
+  checkbox.focus();
+  host.querySelectorAll('details')[0].open = true;
+  pane.renderCreationReview(host, { review, compact: true, actionsHost });
+  assert.equal(host.querySelectorAll('input')[0], checkbox, 'a repaint retains controls');
+  pane.renderCreationReview(host, {
+    review: null,
+    compact: true,
+    actionsHost,
+    monitoring: true,
+    message: 'Checking current terms'
+  });
+  assert.equal(document.activeElement, host.querySelectorAll('input')[0]);
+  assert.equal(host.querySelectorAll('input')[0].checked, true);
+  assert.equal(host.querySelectorAll('button').length, 0);
+  assert.equal(actionsHost.querySelectorAll('button').length, 0);
+  pane.renderCreationReview(host, { review, compact: true, actionsHost });
+  assert.equal(
+    host.querySelectorAll('details')[0].open,
+    true,
+    'details stay open through a preview refresh'
+  );
+  assert.equal(document.activeElement, host.querySelectorAll('input')[0]);
+  host.querySelectorAll('summary')[0].focus();
+  pane.renderCreationReview(host, { review, compact: true, actionsHost, message: 'Updated terms' });
+  assert.equal(document.activeElement, host.querySelectorAll('summary')[0]);
+  const otherControl = document.createElement('button');
+  otherControl.focus();
+  pane.renderCreationReview(host, { review, compact: true, actionsHost, message: 'Current terms' });
+  assert.equal(
+    document.activeElement,
+    otherControl,
+    'no focus change outside the refreshed review'
+  );
+  assert.equal(events.length, 0, 'rendering cannot request or confirm anything');
+});
+
+test('a refreshed recovery retains focus on its existing workspace link', () => {
+  const { pane, document } = loadPane();
+  const host = document.createElement('section');
+  const actionsHost = document.createElement('div');
+  const review = { state: 'accepted', review_revision: 'accepted', folder_slug: 'kept-workspace' };
+  pane.renderCreationReview(host, { review, compact: true, accepted: true, actionsHost });
+  actionsHost.querySelectorAll('a')[0].focus();
+  pane.renderCreationReview(host, {
+    review,
+    compact: true,
+    accepted: true,
+    actionsHost,
+    busy: true
+  });
+  assert.equal(document.activeElement, actionsHost.querySelectorAll('a')[0]);
 });
 
 test('accepted preparation can be explicitly deferred without offering ordinary recreation', () => {
@@ -692,7 +782,7 @@ test('a typed path is reported as a path for the controller to check, never as a
   assert.equal(document.activeElement, controls.add);
 });
 
-test('the attached folder comes from the session: chip, summary, empty Send, and remove', () => {
+test('the attached folder shows metadata without inventing an empty Send turn', () => {
   const { pane, root, events } = loadPane();
   pane.mount({ assistant, folders: true });
   const controls = folderControls(root);
@@ -717,20 +807,20 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
     controls.summary.textContent,
     '42 files observed · partial look · contents not read'
   );
-  assert.equal(controls.hint.hidden, false);
+  assert.equal(controls.hint, undefined);
 
   input.value = 'a thing';
   input.dispatchEvent(new FakeEvent('input'));
-  assert.equal(controls.hint.hidden, true);
+  assert.equal(controls.hint, undefined);
   input.value = '';
   input.dispatchEvent(new FakeEvent('input'));
-  assert.equal(controls.hint.hidden, false);
+  assert.equal(controls.hint, undefined);
 
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
-  same(events.at(-1), {
-    type: 'workspace-build-turn',
-    detail: { text: 'Set it up from the attached folder.' }
-  });
+  assert.equal(
+    events.some(event => event.type === 'workspace-build-turn'),
+    false
+  );
 
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-folder-remove');
@@ -763,7 +853,7 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
   pane.applySession({ transcript: [] });
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
-  assert.equal(controls.hint.hidden, true);
+  assert.equal(controls.hint, undefined);
 });
 
 test('the recognition line says what Ori recognized, from server facts only', () => {
@@ -785,7 +875,10 @@ test('the recognition line says what Ori recognized, from server facts only', ()
     pane.folderRecognitionText({ verdict: 'project', label: 'software project', project_count: 1 }),
     'Recognized: software project'
   );
-  assert.equal(pane.folderRecognitionText({ verdict: 'none' }), 'Not a project Ori recognizes yet');
+  assert.equal(
+    pane.folderRecognitionText({ verdict: 'none' }),
+    'Folder metadata attached. Choose the purpose that fits.'
+  );
   assert.equal(
     pane.folderRecognitionText({ verdict: 'collection', project_count: 7 }),
     'Holds 7 projects · Explore a folder on Home sets them up together'
@@ -827,7 +920,7 @@ test('an attached folder shows its recognition line under the chip', () => {
   assert.equal(line().classList.contains('is-recognized'), true);
 
   pane.applySession({ transcript: [], folder: { observation, recognition: { verdict: 'none' } } });
-  assert.equal(line().textContent, 'Not a project Ori recognizes yet');
+  assert.equal(line().textContent, 'Folder metadata attached. Choose the purpose that fits.');
   assert.equal(line().classList.contains('is-recognized'), false);
 
   // An older build kept no recognition: the folder shows without a line.
@@ -1113,8 +1206,8 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
   assert.equal(
     root
       .querySelectorAll('span')
-      .find(node => node.classList.contains('workspace-build-folder__hint')).hidden,
-    true
+      .find(node => node.classList.contains('workspace-build-folder__hint')),
+    undefined
   );
   assert.equal(expiry().hidden, true);
   control('setup').click();
@@ -1418,7 +1511,7 @@ function linkControls(root) {
     chip: spans.find(node => node.id === 'workspaceBuildLink'),
     name: spans.find(node => node.id === 'workspaceBuildLinkName'),
     summary: root.querySelectorAll('p').find(node => node.id === 'workspaceBuildLinkSummary'),
-    hints: spans.filter(node => node.classList.contains('workspace-build-folder__hint'))
+    hints: spans.filter(node => node.classList.contains('workspace-build-link__hint'))
   };
 }
 
@@ -1572,7 +1665,7 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
   assert.equal(controls.name.textContent, 'acme/widgets');
   assert.equal(controls.remove.getAttribute('aria-label'), 'Remove link acme/widgets');
   assert.equal(controls.summary.textContent, 'GitHub repository · Go · 12 open issues');
-  const [, linkHint] = controls.hints;
+  const [linkHint] = controls.hints;
   assert.equal(linkHint.hidden, false);
   assert.equal(linkHint.textContent, 'Empty Send: “Set it up from the attached link”');
 
@@ -1583,24 +1676,58 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
     detail: { text: 'Set it up from the attached link.' }
   });
 
-  // With a folder too, one hint and one sentence speak for both.
+  // A folder proposal includes both observations without a synthetic user turn.
   pane.applySession({ transcript: [], link: { observation: repoLink }, folder: { observation } });
-  assert.equal(folder.hint.hidden, true);
-  assert.equal(linkHint.hidden, false);
-  assert.equal(linkHint.textContent, 'Empty Send: “Set it up from what I attached”');
+  assert.equal(folder.hint, undefined);
+  assert.equal(linkHint.hidden, true);
+  const count = events.length;
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
-  same(events.at(-1), {
-    type: 'workspace-build-turn',
-    detail: { text: 'Set it up from what I attached.' }
-  });
+  assert.equal(events.length, count);
 
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-link-remove');
 
-  // No link: the folder's own hint is back, and the link's chip is gone.
+  // No link: the folder still needs no empty Send, and the link's chip is gone.
   pane.applySession({ transcript: [], folder: { observation } });
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
   assert.equal(linkHint.hidden, true);
-  assert.equal(folder.hint.hidden, false);
+  assert.equal(folder.hint, undefined);
+});
+
+test('suggestion activity keeps unsent text and focus, and retry is a system action', () => {
+  const { pane, root, events, document } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const input = root.querySelectorAll('textarea')[0];
+  input.value = 'A thought I have not sent';
+  input.focus();
+  pane.applySession({
+    transcript: [],
+    folder: { observation },
+    proposal: { id: 'p', status: 'running', attempt: 1 }
+  });
+  pane.setSuggestion({ message: 'Suggesting a workspace from folder metadata…' });
+  assert.equal(input.value, 'A thought I have not sent');
+  assert.equal(input.disabled, false);
+  assert.equal(document.activeElement, input);
+  assert.equal(events.length, 0);
+  pane.setSuggestion(null);
+  pane.applySession({
+    transcript: [],
+    folder: { observation },
+    proposal: { id: 'p', status: 'failed', attempt: 1 }
+  });
+  const retry = root
+    .querySelectorAll('button')
+    .find(button => button.dataset.buildControl === 'suggest-retry');
+  assert.equal(retry.hidden, false);
+  retry.click();
+  same(events.at(-1), { type: 'workspace-build-action', detail: { action: 'suggest_again' } });
+  assert.equal(input.value, 'A thought I have not sent');
+  input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-turn',
+    detail: { text: 'A thought I have not sent' }
+  });
+  assert.equal(input.value, '');
 });

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ type fakeBuildFolders struct {
 	modes       []string
 	choices     []string
 	resolved    []string
+	resolvedMu  sync.Mutex
 	// recognition is what Recognize says about the observation; nil with no
 	// error is a folder service that has nothing to say.
 	recognition  *personalassistant.BuildFolderRecognition
@@ -157,6 +159,8 @@ func (f *fakeBuildFolders) Observe(_ context.Context, target foldercontext.Targe
 }
 
 func (f *fakeBuildFolders) ResolveRoot(_ context.Context, _ foldercontext.Target, id string) (string, error) {
+	f.resolvedMu.Lock()
+	defer f.resolvedMu.Unlock()
 	f.resolved = append(f.resolved, id)
 	if f.rootErr != nil {
 		return "", f.rootErr
@@ -230,7 +234,7 @@ func TestWorkspaceBuildFolder_AttachKeepsTheObservationAndTheModelReadsIt(t *tes
 		t.Fatalf("attach: %d %v", status, body)
 	}
 	attached := sessionOf(t, body)
-	if attached.Folder == nil || attached.Folder.Observation.Folder != "Elite School" || attached.Version != build.Version+1 {
+	if attached.Folder == nil || attached.Folder.Observation.Folder != "Elite School" || attached.Version != build.Version+2 {
 		t.Fatalf("attached session %+v", attached)
 	}
 	if last := lastEntry(attached); last.Role != personalassistant.BuildRoleForm || !strings.Contains(last.Text, "You attached the folder “Elite School”") {
@@ -363,10 +367,12 @@ func TestWorkspaceBuildFolder_ACancelledDialogChangesNothingAndDetachClearsIt(t 
 
 	status, body := f.attachFolder(t, build, map[string]any{"mode": "picker"})
 	cancelled := sessionOf(t, body)
-	if status != http.StatusOK || body["cancelled"] != true || cancelled.Folder != nil || cancelled.Version != build.Version || len(cancelled.Transcript) != 0 {
+	if status != http.StatusOK || body["cancelled"] != true || cancelled.Folder != nil || cancelled.Version != build.Version+2 || len(cancelled.Transcript) != 0 {
 		t.Fatalf("cancelled pick: %d %v %+v", status, body, cancelled)
 	}
 
+	// Admission and cancellation fence old asynchronous work, but retain the draft.
+	build = cancelled
 	folders.observation = testObservation()
 	_, body = f.attachFolder(t, build, map[string]any{"mode": "selection", "selection_token": "tok-1"})
 	attached := sessionOf(t, body)
@@ -412,10 +418,12 @@ func TestWorkspaceBuildFolder_RefusalsAreSaidInTheUsersWords(t *testing.T) {
 	if status != http.StatusConflict || body["code"] != "folder" || body["error"] != "That is your whole home folder." {
 		t.Fatalf("root refusal: %d %v", status, body)
 	}
+	build = readProposalBuild(t, f, build.ID)
 	folders.observeErr = personalassistant.ErrFolderScanBusy
 	if _, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"}); !strings.Contains(body["error"].(string), "still being looked at") {
 		t.Fatalf("busy: %v", body)
 	}
+	build = readProposalBuild(t, f, build.ID)
 	folders.observeErr = personalassistant.ErrFolderPickerUnavailable
 	if _, body := f.attachFolder(t, build, map[string]any{"mode": "picker"}); !strings.Contains(body["error"].(string), "dialog is unavailable") {
 		t.Fatalf("picker off: %v", body)
@@ -445,6 +453,7 @@ func TestWorkspaceBuildFolder_CreatePlansTheHeldRootAndRefusesALostPick(t *testi
 	}
 	_, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
 	attached := sessionOf(t, body)
+	resolvedBeforeCreate := len(folders.resolved) // the response also reads current UI folder details
 	if plan, err := f.handler.planCreateWorkspaceBuildFolder(ctx, createWorkspaceRequest{BuildSessionID: build.ID}, session.WorkspaceKindGroup); plan != nil || err != nil {
 		t.Fatalf("a group never links: %+v %v", plan, err)
 	}
@@ -452,7 +461,7 @@ func TestWorkspaceBuildFolder_CreatePlansTheHeldRootAndRefusesALostPick(t *testi
 	if err != nil || plan == nil || plan.root != "/Users/me/elite_school" || plan.name != "Elite School" || plan.sessionID != build.ID {
 		t.Fatalf("plan %+v %v", plan, err)
 	}
-	if len(folders.resolved) != 1 || folders.resolved[0] != "obs-1" {
+	if len(folders.resolved) != resolvedBeforeCreate+1 || folders.resolved[resolvedBeforeCreate] != "obs-1" {
 		t.Fatalf("resolved %v", folders.resolved)
 	}
 	folders.rootErr = personalassistant.ErrFolderSelection

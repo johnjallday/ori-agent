@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 3
+	WorkspaceBuildSchemaVersion = 4
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -151,6 +151,7 @@ type BuildTeamPatch struct {
 
 // BuildRetry is the user turn a "Try again" replays after a model failure.
 type BuildRetry struct {
+	Auto     bool   `json:"auto,omitempty"`
 	Text     string `json:"text,omitempty"`
 	ChoiceID string `json:"choice_id,omitempty"`
 }
@@ -346,6 +347,14 @@ type WorkspaceBuildSession struct {
 	// AskFolder offers the folder chip; the browser never sends a path.
 	AskFolder bool        `json:"ask_folder,omitempty"`
 	Retry     *BuildRetry `json:"retry,omitempty"`
+	// EditedFields records the last explicit edit version, including clears.
+	// ContextVersion fences inference; attachment claims fence slow observers.
+	EditedFields    map[string]int64 `json:"edited_fields,omitempty"`
+	ContextVersion  int64            `json:"context_version,omitempty"`
+	InferenceID     string           `json:"inference_id,omitempty"`
+	FolderRequestID string           `json:"folder_request_id,omitempty"`
+	LinkRequestID   string           `json:"link_request_id,omitempty"`
+	Proposal        *BuildProposal   `json:"proposal,omitempty"`
 	// Folder is the folder the user attached in the pane, if any.
 	Folder *BuildFolder `json:"folder,omitempty"`
 	// Link is the link the user attached in the pane, if any. One at a time:
@@ -433,6 +442,9 @@ func transcriptBytes(entries []BuildTranscriptEntry) int {
 // settled build keeps its id, status, and counters, so the file stays small
 // however many builds a user finishes.
 func (s *WorkspaceBuildSession) Settle() {
+	s.InvalidateBuildInference(true)
+	s.Proposal = nil
+	s.EditedFields = nil
 	s.Transcript = []BuildTranscriptEntry{}
 	s.TeamState = nil
 	s.TeamPatch = nil
@@ -511,6 +523,8 @@ func (d *WorkspaceBuildDocument) ExpireStale(now time.Time) bool {
 			d.Sessions[i].Settle()
 			d.Sessions[i].Touch(now)
 			changed = true
+		} else if d.Sessions[i].ExpireBuildProposal(now) {
+			changed = true
 		}
 	}
 	return changed
@@ -554,6 +568,9 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if err := validateBuildProposalState(session); err != nil {
+		return err
+	}
 	if session.Preparation != nil && session.Setup != nil {
 		return fmt.Errorf("%w: preparation and setup", ErrWorkspaceBuildInvalid)
 	}

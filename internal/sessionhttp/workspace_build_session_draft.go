@@ -27,6 +27,8 @@ type patchBuildDraftRequest struct {
 	// turn did to the form (the team keys it derived, the step it reached).
 	// It is recorded, but never said back as the user's edit.
 	Sync bool `json:"sync,omitempty"`
+	// Explicit fields also record clear-to-empty or change-back edits.
+	EditedFields []string `json:"edited_fields,omitempty"`
 }
 
 const buildMaxTeamState = 32 * 1024
@@ -39,6 +41,16 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 	var req patchBuildDraftRequest
 	if !decodeBuildBody(w, r, &req) {
 		return
+	}
+	if len(req.EditedFields) > 9 || (req.Sync && len(req.EditedFields) > 0) {
+		_ = orihttp.RespondBadRequest(w, "Invalid edited fields")
+		return
+	}
+	for _, field := range req.EditedFields {
+		if !personalassistant.ValidBuildEditField(field) {
+			_ = orihttp.RespondBadRequest(w, "Invalid edited field")
+			return
+		}
 	}
 	if len(req.TeamState) > buildMaxTeamState || req.Step < 0 || req.Step > 4 {
 		_ = orihttp.RespondBadRequest(w, "Invalid build draft")
@@ -84,6 +96,18 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		before := session.Draft
 		var lines []string
 		if !req.Sync {
+			team := session.TeamState
+			if len(req.TeamState) > 0 {
+				team = req.TeamState
+			}
+			fields := append(changedBuildFields(before, draft, session.TeamState, team), req.EditedFields...)
+			if session.EditedFields == nil {
+				session.EditedFields = map[string]int64{}
+			}
+			for _, field := range fields {
+				session.EditedFields[field] = session.Version + 1
+			}
+			session.CreateNow = false
 			lines = describeFormEdit(before, draft, validation)
 			blueprintChanged = before.Blank != draft.Blank || before.TemplateID != draft.TemplateID
 			dropOverriddenWhy(session, before, draft)
@@ -93,6 +117,7 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 			session.TeamState = append(json.RawMessage(nil), req.TeamState...)
 		}
 		if blueprintChanged {
+			session.InvalidateBuildInference(true)
 			// The assistant's team belonged to the previous blueprint.
 			session.TeamPatch = nil
 			template, ok := validation.currentTemplate(draft)

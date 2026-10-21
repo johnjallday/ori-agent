@@ -51,7 +51,7 @@
     removeFolder: 'Remove folder',
     folderTitle: 'Add a folder',
     folderDisclosure:
-      'Ori records file and folder names, kinds, counts and project markers locally. File contents are not read. Send shares this metadata with your configured model. Ordinary creation only links the folder. File Janitor offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
+      'Choosing a folder records file and folder names, kinds, counts and project markers. File contents are not read. Ori first checks for a supported setup plan; otherwise this metadata, and any attached link metadata, is shared with your configured model to suggest a draft. Ordinary creation only links the folder. File Janitor offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
     folderLoading: 'Loading folder choices…',
     folderPickerLabel: 'Pick another folder…',
     folderPathLabel: 'or paste a folder path',
@@ -63,11 +63,7 @@
     folderNoChoices: 'No folder can be chosen here.',
     folderListOnly: 'Pick a folder from the list for now.',
     folderLooking: 'Looking at folder metadata locally… No file contents are read.',
-    folderAttached:
-      'Folder attached — I can see its file and folder names, not their contents. Tell me what this workspace should do, or use Review & create when the draft is ready.',
     folderCancelled: 'No folder was chosen. Your draft is unchanged.',
-    folderSend: 'Set it up from the attached folder.',
-    folderSendHint: 'Empty Send: “Set it up from the attached folder”',
     folderSummary: (files, partial) =>
       `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`,
     // What Ori recognized in the attached folder is said by the shared
@@ -149,7 +145,7 @@
     linkCancel: 'Cancel',
     linkEmpty: 'Paste a link first.',
     linkDisclosure:
-      'Ori fetches the page’s title and description once, or a GitHub repository’s public details. Nothing else is read. Send shares that with your configured model.',
+      'Ori fetches the page’s title and description once, or a GitHub repository’s public details. Nothing else is read. Send, or a later folder suggestion, shares that metadata with your configured model.',
     linkAttached:
       'Link attached — I can see what it says about itself, not the page. Tell me what this workspace should do, or just press Send.',
     linkSend: 'Set it up from the attached link.',
@@ -183,6 +179,8 @@
   // what Ori recognized it as, from server facts only. A folder the server
   // said nothing about (an older build, a recognition that failed) has none.
   function folderRecognitionText(recognition) {
+    if (recognition?.verdict === 'none')
+      return 'Folder metadata attached. Choose the purpose that fits.';
     const shared = globalThis.OriFolderRecognitionLines;
     if (!shared) return '';
     return shared.recognitionLine(recognition, { collectionHint: COPY.folderCollectionHint });
@@ -470,8 +468,34 @@
       els.log.appendChild(renderEntry(entry, index));
     });
     els.showEarlier.hidden = view.hiddenCount === 0;
-    els.status.textContent = view.status;
-    els.status.classList.toggle('is-busy', view.busy);
+    const proposal = state.session?.proposal;
+    const suggestion =
+      state.suggestion ||
+      (proposal
+        ? {
+            message:
+              {
+                pending: 'Folder attached. Review its setup or request a suggestion.',
+                running: 'Suggesting a workspace from folder metadata…',
+                ready: 'Suggested setup — review and edit before creating.',
+                clarifying:
+                  state.session.pending_question?.question || 'Choose a purpose for this folder.',
+                failed:
+                  'The suggestion could not finish. Your draft is kept; edit it manually or retry.',
+                invalidated:
+                  'The context changed. Your draft is kept; review it or request a fresh suggestion.'
+              }[proposal.status] || '',
+            retry:
+              ['pending', 'failed', 'invalidated'].includes(proposal.status) && proposal.attempt < 3
+          }
+        : null);
+    const statusText = suggestion?.message || view.status;
+    if (els.status.textContent !== statusText) els.status.textContent = statusText;
+    els.status.classList.toggle('is-busy', view.busy || proposal?.status === 'running');
+    if (els.suggestionRetry) {
+      els.suggestionRetry.hidden = !suggestion?.retry;
+      els.suggestionRetry.disabled = view.busy || state.folderBusy || state.linkBusy;
+    }
     els.input.disabled = view.composerDisabled;
     // A turn waits for an attachment in flight (submitComposer refuses it), so
     // Send says so instead of dropping the press.
@@ -505,9 +529,8 @@
   function emptySendText() {
     const folder = attachedFolder();
     const link = attachedLink();
-    if (folder && link) return COPY.bothSend;
+    if (folder) return '';
     if (link) return COPY.linkSend;
-    if (folder) return COPY.folderSend;
     return '';
   }
 
@@ -535,7 +558,7 @@
     els.linkSummary.hidden = !summary;
     const empty = !text(els.input?.value);
     els.linkHint.textContent = attachedFolder() ? COPY.bothSendHint : COPY.linkSendHint;
-    els.linkHint.hidden = !link || !empty;
+    els.linkHint.hidden = !link || !empty || Boolean(attachedFolder());
     els.linkInput.disabled = state.linkBusy;
     els.linkAttach.disabled = state.linkBusy;
     els.linkAttach.textContent = state.linkBusy ? COPY.linkChecking : COPY.linkAttach;
@@ -583,11 +606,6 @@
     );
     // With a link attached too, the link's hint speaks for both. A ready plan
     // has its own Set it up, so an empty Send is not offered as one.
-    els.folderHint.hidden =
-      !folder ||
-      Boolean(attachedLink()) ||
-      Boolean(text(els.input?.value)) ||
-      state.session?.plan?.ready === true;
   }
 
   // renderPlan draws the setup plan the server computed for a recognized
@@ -1281,6 +1299,15 @@
     const planEls = renderPlanBlock();
     root.appendChild(transcript);
     root.appendChild(status);
+    const suggestionRetry = createElement(
+      'button',
+      'modern-btn modern-btn-secondary',
+      'Retry suggestion'
+    );
+    suggestionRetry.type = 'button';
+    suggestionRetry.dataset.buildControl = 'suggest-retry';
+    suggestionRetry.hidden = true;
+    root.appendChild(suggestionRetry);
     root.appendChild(groupEls.group);
     root.appendChild(planEls.plan);
     root.appendChild(composer);
@@ -1289,6 +1316,7 @@
       showEarlier,
       log,
       status,
+      suggestionRetry,
       composer,
       input,
       send,
@@ -1321,7 +1349,7 @@
           }
         } else if (kind === 'remove-folder') {
           if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-folder-remove');
-        } else if (kind === 'folder-cancel') closeFolderChooser();
+        } else if (kind === 'folder-cancel') cancelFolderChooser();
         else if (kind === 'folder-path') submitFolderPath();
         else if (kind === 'add-link') {
           if (!attachmentsLocked(state) && !control.disabled) openLinkField();
@@ -1333,6 +1361,8 @@
           emit('workspace-build-setup', {});
         } else if (kind === 'setup-entry' && !control.disabled) {
           emit('workspace-build-setup', { entry_name: text(control.dataset.entryName) });
+        } else if (kind === 'suggest-retry' && !control.disabled) {
+          emit('workspace-build-action', { action: 'suggest_again' });
         } else if (kind === 'folder-again' && !control.disabled) {
           emit('workspace-build-folder-open');
         } else if (kind === 'prepare-group' && !control.disabled && !state.groupBusy) {
@@ -1376,7 +1406,7 @@
       if (event.key !== 'Escape') return;
       event.preventDefault?.();
       event.stopPropagation?.();
-      closeFolderChooser();
+      cancelFolderChooser();
     });
     // Enter in the link field attaches; it must never submit the reply form
     // around it. Escape closes only the field.
@@ -1428,11 +1458,8 @@
     folderRemove.setAttribute('aria-label', COPY.removeFolder);
     folderChip.appendChild(folderName);
     folderChip.appendChild(folderRemove);
-    const folderHint = createElement('span', 'workspace-build-folder__hint', COPY.folderSendHint);
-    folderHint.hidden = true;
     attachments.appendChild(addFolder);
     attachments.appendChild(folderChip);
-    attachments.appendChild(folderHint);
     const linkEls = renderLinkAttachment(attachments);
     const folderSummary = createElement('p', 'workspace-build-folder__summary');
     folderSummary.id = 'workspaceBuildFolderSummary';
@@ -1514,7 +1541,6 @@
       folderChip,
       folderName,
       folderRemove,
-      folderHint,
       folderSummary,
       folderRecognition,
       chooser,
@@ -1555,7 +1581,7 @@
     linkChip.appendChild(linkIcon);
     linkChip.appendChild(linkName);
     linkChip.appendChild(linkRemove);
-    const linkHint = createElement('span', 'workspace-build-folder__hint', COPY.linkSendHint);
+    const linkHint = createElement('span', 'workspace-build-link__hint', COPY.linkSendHint);
     linkHint.hidden = true;
     attachments.appendChild(addLink);
     attachments.appendChild(linkChip);
@@ -1712,6 +1738,11 @@
     return true;
   }
 
+  function cancelFolderChooser() {
+    closeFolderChooser();
+    emit('workspace-build-folder-cancel');
+  }
+
   function closeFolderChooser({ focus = true } = {}) {
     const { els } = state;
     state.chooserOpen = false;
@@ -1755,6 +1786,11 @@
     if ((attachedLink()?.id || '') !== linkBefore) state.linkNote = '';
     // The server's own prerequisite replaces what the form's review said.
     if (state.session?.group_prerequisite) state.groupHint = null;
+    render();
+  }
+
+  function setSuggestion(value) {
+    state.suggestion = value || null;
     render();
   }
 
@@ -1827,13 +1863,61 @@
     render();
   }
 
+  function renderFolderQuestion(host, question, busy = false) {
+    if (!host) return;
+    const key = JSON.stringify([question, busy]);
+    if (host.dataset.questionKey === key) return;
+    host.dataset.questionKey = key;
+    host.textContent = '';
+    host.hidden = !question;
+    if (!question) return;
+    host.appendChild(createElement('p', 'workspace-build-folder-question', question.question));
+    const choices = createElement('div', 'workspace-build-chips');
+    for (const choice of question.choices || []) {
+      const button = createElement('button', 'workspace-build-chip', choice.label);
+      button.type = 'button';
+      button.disabled = busy;
+      button.addEventListener('click', () => {
+        if (button.disabled) return;
+        for (const sibling of choices.children) sibling.disabled = true;
+        emit('workspace-build-turn', { choiceId: choice.id, label: choice.label });
+      });
+      choices.appendChild(button);
+    }
+    host.appendChild(choices);
+  }
+
+  const creationReviews = new WeakMap();
+
   // The controller owns authority and requests; this host renderer displays
   // server facts only, never model-authored permission prose or HTML.
   function renderCreationReview(
     host,
-    { review = null, busy = false, message = '', accepted = false } = {}
+    {
+      review = null,
+      busy = false,
+      message = '',
+      accepted = false,
+      uncertain = false,
+      compact = false,
+      monitoring,
+      actionsHost = null
+    } = {}
   ) {
     if (!host) return;
+    const key = JSON.stringify({ review, busy, message, accepted, uncertain, compact, monitoring });
+    const previous = creationReviews.get(host);
+    if (previous?.key === key && previous.actionsHost === actionsHost) return;
+    const active = document.activeElement;
+    const previousMonitor = host.querySelectorAll('input')[0];
+    const monitorFocused = Boolean(previousMonitor && active === previousMonitor);
+    const detailsFocused = Boolean(active && host.querySelectorAll('summary')[0] === active);
+    const focusedAction =
+      host.contains(active) || actionsHost?.contains(active)
+        ? active?.dataset?.buildReviewAction
+        : '';
+    const detailsOpen = host.querySelectorAll('details')[0]?.open ?? previous?.detailsOpen;
+    creationReviews.set(host, { key, actionsHost, detailsOpen });
     host.textContent = '';
     host.hidden = false;
     host.setAttribute('aria-busy', busy ? 'true' : 'false');
@@ -1842,9 +1926,13 @@
       'workspace-build-review__title',
       review?.state === 'deferred'
         ? 'Preparation deferred'
-        : accepted
-          ? 'Resume accepted preparation'
-          : 'Review & create'
+        : uncertain
+          ? 'Check previous confirmation'
+          : accepted
+            ? 'Continue workspace setup'
+            : compact
+              ? 'Folder permissions'
+              : 'Review & create'
     );
     heading.tabIndex = -1;
     host.appendChild(heading);
@@ -1856,32 +1944,36 @@
       const button = createElement('button', 'modern-btn modern-btn-secondary', label);
       button.type = 'button';
       button.disabled = busy;
+      button.dataset.buildReviewAction = type;
       button.addEventListener('click', () => emit(type, detail));
       return button;
     };
     if (review?.workspace) {
-      host.appendChild(createElement('strong', '', review.workspace.name));
-      if (review.workspace.description)
-        host.appendChild(createElement('p', '', review.workspace.description));
-      host.appendChild(createElement('p', '', review.workspace.mission || 'No goal specified'));
-      host.appendChild(
-        createElement('p', '', 'Placement: ' + (review.placement_label || 'Workspace root'))
-      );
-      const team = createElement('ul', 'workspace-build-review__team');
-      for (const member of review.team || []) {
-        team.appendChild(
-          createElement(
-            'li',
-            '',
-            member.name + ' · ' + member.action + (member.model ? ' · ' + member.model : '')
-          )
+      if (!compact || accepted || uncertain) {
+        host.appendChild(createElement('strong', '', review.workspace.name));
+        if (review.workspace.description)
+          host.appendChild(createElement('p', '', review.workspace.description));
+        host.appendChild(createElement('p', '', review.workspace.mission || 'No goal specified'));
+        host.appendChild(
+          createElement('p', '', 'Placement: ' + (review.placement_label || 'Workspace root'))
         );
+        const team = createElement('ul', 'workspace-build-review__team');
+        for (const member of review.team || []) {
+          team.appendChild(
+            createElement(
+              'li',
+              '',
+              member.name + ' · ' + member.action + (member.model ? ' · ' + member.model : '')
+            )
+          );
+        }
+        if (!(review.team || []).length)
+          team.appendChild(createElement('li', '', 'No agents will be created or attached.'));
+        host.appendChild(team);
       }
-      if (!(review.team || []).length)
-        team.appendChild(createElement('li', '', 'No agents will be created or attached.'));
-      host.appendChild(team);
       host.appendChild(createElement('strong', '', 'Folder: ' + review.folder.name));
       const details = createElement('details', 'workspace-build-review__details');
+      details.open = Boolean(detailsOpen);
       details.appendChild(createElement('summary', '', 'Folder details'));
       details.appendChild(createElement('p', '', review.folder.path));
       host.appendChild(details);
@@ -1893,37 +1985,44 @@
       ])
         disclosure.appendChild(createElement('li', '', line));
       host.appendChild(disclosure);
+    }
+    if (review?.workspace || (compact && !accepted && !uncertain)) {
       const label = createElement('label', 'workspace-build-review__monitor');
       const checkbox = createElement('input');
       checkbox.type = 'checkbox';
-      checkbox.checked = Boolean(review.monitoring);
-      checkbox.disabled = busy || accepted;
+      checkbox.name = 'monitor_folder';
+      checkbox.checked =
+        accepted || uncertain
+          ? Boolean(review?.monitoring)
+          : Boolean(monitoring ?? review?.monitoring);
+      checkbox.disabled = busy || accepted || uncertain;
       checkbox.addEventListener('change', () =>
         emit('workspace-build-review', { monitoring: checkbox.checked })
       );
       label.appendChild(checkbox);
       label.appendChild(createElement('span', '', 'Also watch new arrivals and run a daily scan'));
       host.appendChild(label);
-      const terms = review.terms;
-      host.appendChild(
-        createElement(
-          'p',
-          '',
-          review.monitoring
-            ? `Watch top-level ${(terms.watch_events || []).join(' / ')} events after a ${terms.debounce_seconds}-second delay; skip Filed/. Daily scan at ${terms.daily_scan_local_time} (${terms.timezone}). Files still settling are excluded. Nothing moves automatically.`
-            : 'Manual scans only. No watcher or daily scan will run.'
-        )
-      );
+      const terms = review?.terms;
+      if (terms)
+        host.appendChild(
+          createElement(
+            'p',
+            '',
+            checkbox.checked
+              ? `Watch top-level ${(terms.watch_events || []).join(' / ')} events after a ${terms.debounce_seconds}-second delay; skip Filed/. Daily scan at ${terms.daily_scan_local_time} (${terms.timezone}). Files still settling are excluded. Nothing moves automatically.`
+              : 'Manual scans only. No watcher or daily scan will run.'
+          )
+        );
     }
     const actions = createElement('div', 'workspace-build-review__actions');
-    if (review?.review_revision && review.state !== 'deferred') {
+    if (!compact && review?.review_revision && review.state !== 'deferred') {
       const confirm = action(
-        accepted ? 'Retry preparation' : 'Create & prepare review',
+        accepted || uncertain ? 'Retry preparation' : 'Create & scan folder',
         'workspace-build-prepare'
       );
       confirm.className = 'modern-btn modern-btn-primary';
       actions.appendChild(confirm);
-    } else if (!accepted) {
+    } else if (!accepted && !compact) {
       actions.appendChild(action('Review & create', 'workspace-build-review'));
     }
     if (accepted && review?.state !== 'deferred') {
@@ -1936,16 +2035,32 @@
         )
       );
     }
-    if (!accepted) {
+    if (!accepted && !compact) {
       actions.appendChild(action('Edit setup', 'workspace-build-collapse'));
       actions.appendChild(action('Change folder', 'workspace-build-folder-open'));
     }
     if (accepted && review?.folder_slug) {
       const open = createElement('a', 'modern-btn modern-btn-secondary', 'Open workspace');
       open.href = '/workspaces/' + encodeURIComponent(review.folder_slug) + '?panel=file-janitor';
+      open.dataset.buildReviewAction = 'open';
       actions.appendChild(open);
     }
-    host.appendChild(actions);
+    if (actionsHost) {
+      actionsHost.textContent = '';
+      actionsHost.appendChild(actions);
+    } else host.appendChild(actions);
+    const restore = monitorFocused
+      ? host.querySelectorAll('input')[0]
+      : detailsFocused
+        ? host.querySelectorAll('summary')[0]
+        : focusedAction
+          ? [...(actionsHost || host).querySelectorAll('[data-build-review-action]')].find(
+              node => node.dataset.buildReviewAction === focusedAction
+            )
+          : null;
+    // Preserve the same control, scrolling it into view if the async result
+    // moved it behind the footer. Never move focus from another active control.
+    if (restore && !restore.disabled) restore.focus?.();
   }
 
   function destroy() {
@@ -1961,6 +2076,7 @@
     state.session = null;
     state.localLines = [];
     state.pendingText = '';
+    state.suggestion = null;
     state.els = {};
     state.busy = false;
     state.collapsed = false;
@@ -1984,6 +2100,7 @@
     VISIBLE_ENTRIES,
     mount,
     applySession,
+    setSuggestion,
     setBusy,
     focusComposer,
     showLine,
@@ -1992,6 +2109,7 @@
     expand,
     destroy,
     renderCreationReview,
+    renderFolderQuestion,
     openFolderChooser,
     closeFolderChooser,
     folderChooserOpen: () => Boolean(state.root && state.chooserOpen),

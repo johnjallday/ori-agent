@@ -144,7 +144,9 @@ func (h *Handler) getWorkspaceBuildSession(w http.ResponseWriter, r *http.Reques
 		_ = orihttp.RespondJSON(w, http.StatusNotFound, map[string]any{"error": buildErrorText("not_found"), "code": "not_found"})
 		return
 	}
-	h.respondBuildSession(ctx, w, http.StatusOK, session, nil)
+	view := cloneBuildSession(*session)
+	view.CreateNow = false
+	h.respondBuildSession(ctx, w, http.StatusOK, &view, nil)
 }
 
 // readBuildSetupRun reads the run a build's claim names, or nil.
@@ -275,6 +277,7 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 			return errBuildTurn{http.StatusConflict, "version"}
 		}
 		now := deps.Store.Now()
+		session.InvalidateBuildInference(true)
 		session.Status = personalassistant.WorkspaceBuildPreparing
 		session.Setup = &personalassistant.BuildSetupClaim{OfferID: offer.ID, PlanDigest: digest, RequestID: requestID, StartedAt: now}
 		session.Folder.Recognition.OfferID = offer.ID

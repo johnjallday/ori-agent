@@ -181,6 +181,7 @@ type buildPromptInput struct {
 	Agents        []buildSavedAgent
 	Groups        []buildGroup
 	Nudge         bool
+	ProposalOnly  bool
 	// Plan is the host's ready setup plan for a recognized folder, when there
 	// is one: the model narrates it and sets only what it leaves open.
 	Plan *personalassistant.BuildFolderPlan
@@ -449,6 +450,12 @@ func buildSystemPrompt(input buildPromptInput) string {
 	if len(session.Rejections) > 0 {
 		fmt.Fprintf(&b, "The form refused these from your last reply:\n%s\n\n", rejectionsJSON)
 	}
+	if input.ProposalOnly {
+		b.WriteString("Draft-only review: NEVER set create_now, even if older messages asked to create. No creation, installation, grants, scans, monitoring or setup is authorized. Suggest editable fields only; the host requires a separate explicit action.\n")
+	}
+	if session.Proposal != nil && session.Proposal.Status == "running" {
+		b.WriteString("This is automatic folder suggestion activity, NOT a user message. Prepare a useful tentative draft from the bounded metadata, or ask ONE focused purpose question with choices. Downloads may suggest File Janitor but its name does not establish filing intent. Preserve explicitly_edited_fields, including empty values and the effective team. Do not invent contents or confidence. Describe your choice as a suggestion the user can change.\n")
+	}
 	if input.Nudge {
 		b.WriteString("Your last reply neither set a field nor asked a question. This time, set at least one field or ask one clear question.\n\n")
 	}
@@ -506,8 +513,8 @@ func writeBuildRules(b *strings.Builder) {
 	b.WriteString("- Use only the blueprint ids, input ids and option values, agent names, role ids, and group ids listed below. The form refuses anything else, and you will see each refusal next turn.\n")
 	b.WriteString("- A blueprint with needs_home is created inside that group. When the group does not exist yet, Ori prepares it first, only after the user confirms, and then creates the workspace inside it. Say that when you choose one; never say the workspace sets up its own group. The form offers its own Prepare the group first for that confirmation, so never ask whether to create the group and never offer it as a choice.\n")
 	b.WriteString("- Never claim the workspace is created. When the user tells you to create it, set create_now to true.\n")
-	b.WriteString("- When blueprint, name, description, and team are decided, set ready to true and say: Ready to create. Use Review & create to check the current setup.\n")
-	b.WriteString("- File Janitor needs the host's explicit folder permission review. create_now may open that review but never supplies consent to configure, scan or monitor.\n")
+	b.WriteString("- When blueprint, name, description, and team are decided, set ready to true and say: Ready to create. Review the current workspace setup.\n")
+	b.WriteString("- For an attached File Janitor folder, the host automatically prepares the current permission review. Only the user's explicit Create & scan folder action may configure and scan it, with monitoring off unless opted in. create_now never supplies consent to configure, scan or monitor.\n")
 	b.WriteString("- When the user changed the form themselves, acknowledge it in a few words and re-decide what depended on it (a new blueprint needs a new team).\n")
 	b.WriteString("- \"say\" is plain text, at most 600 characters, no markdown. Say what you did, not what you will do. Put your question only in ask.question, never in say as well; the form shows them together.\n")
 	b.WriteString("- Choice labels are short answers (at most 60 characters), such as \"Assign Luna\" or \"Make a new one\".\n\n")
@@ -637,6 +644,9 @@ func buildPromptDraft(session *personalassistant.WorkspaceBuildSession) map[stri
 			inputs[id] = strings.Trim(string(raw), "\"")
 		}
 		out["inputs"] = inputs
+	}
+	if len(session.EditedFields) > 0 {
+		out["explicitly_edited_fields"] = session.EditedFields
 	}
 	if team := session.TeamPatch; team != nil {
 		out["team"] = team
