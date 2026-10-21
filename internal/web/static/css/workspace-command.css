@@ -6469,11 +6469,22 @@ button.ws-cmd-rpg-class-card:focus-visible {
     flex: 1 1 calc(50% - 8px);
     justify-content: center;
   }
+  /* Five views (with Dashboard and Plans) are wider than a phone: the tabs
+     wrap onto a second row instead of pushing the page sideways. */
   .ws-cmd-view-switch {
     flex: 1 1 100%;
+    flex-wrap: wrap;
   }
+  /* The name gets its own line rather than being squeezed to nothing by the
+     badges and the status chip beside it. */
+  .ws-cmd-title-row {
+    flex-wrap: wrap;
+  }
+  /* Equal widths when they fit, but never narrower than the label: a tab that
+     does not fit wraps rather than cutting its word in half. */
   .ws-cmd-view-btn {
     flex: 1 1 0;
+    min-width: max-content;
   }
   .ws-cmd-opmap {
     min-height: 560px;
