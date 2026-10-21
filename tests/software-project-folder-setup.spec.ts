@@ -521,7 +521,8 @@ test.describe('a fresh server', () => {
     expect(await buttons(page)).not.toContain('Set up');
 
     await review(page);
-    await expect(headline(page)).toHaveText('Here is what I found in widget.');
+    await expect(headline(page)).toHaveText('Hire Development Assistant for widget');
+    await expect(question(page)).toHaveText('What I read in widget:');
     const evidence = await list(page, '#personalAssistantFolderEvidence');
     expect(evidence.join('\n')).toMatch(/Built with .*Go/);
     expect(evidence.join('\n')).toMatch(/It declares .*None of these was run\./);
@@ -655,7 +656,7 @@ test.describe('a fresh server', () => {
     await review(page);
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan[2]).toContain('has no model yet');
-    await press(page, 'Set up');
+    await press(page, 'Hire and start');
 
     const run = page.locator('#folderSetupRunModal');
     await expect(run).toBeVisible({ timeout: 30_000 });
@@ -680,7 +681,7 @@ test.describe('a fresh server', () => {
 test.describe('after the server was restarted', () => {
   test.skip(phase !== 'restarted', 'runs in the restarted phase');
 
-  test('the paused setup is still there, and finishes once a model is chosen', async ({
+  test('the paused setup is still there, finishes once a model is chosen, and the hire starts the assessment', async ({
     page,
     request
   }) => {
@@ -705,86 +706,44 @@ test.describe('after the server was restarted', () => {
     expect(await buttons(page)).toEqual(['Set up a model', 'Continue']);
     expect(await workspaceCount(request)).toBe(before.workspaces);
 
-    // Choose a model the way Settings does. It is the fixture provider's.
+    // Choose a model the way Settings does. It is the fixture provider's. The
+    // hire's consent covers the first look, so the assessment starts once the
+    // workspace is verified; its first reply asks to run a command.
     await ok(
       await request.post('/api/settings/system-model', {
         data: { provider: 'lmstudio', model: fixtureModel }
       })
     );
+    provider.replies = ['tool', 'report'];
     await press(page, 'Continue');
     await expect(page.locator('#folderSetupRunTitle')).toContainText('is ready', {
       timeout: 60_000
     });
-    await expect(page.locator('#folderSetupRunStatus')).toContainText(
-      'Nothing in the project was run or changed'
-    );
+    await expect(page.locator('#folderSetupRunEyebrow')).toHaveText('Hired', { timeout: 30_000 });
     const receipt = (await list(page, '#folderSetupRunReceipt')).join(' | ');
     expect(receipt).toContain('widget (created)');
     expect(receipt).toContain('linked where it is, read-only');
     expect(receipt).toContain('Code Project (planning first; approved work waits for you');
     expect(receipt).toContain('Development Assistant (development assistant, added)');
-    expect(receipt).toContain(
-      'Assess this project and suggest a first task (Starts when you press Start assessment)'
-    );
-    expect(receipt).not.toContain('Ready to start');
+    expect(receipt).toContain('Assess this project and suggest a first task');
+    expect(receipt).not.toContain('Starts when you press Start assessment');
 
     const resolved = await currentOffer(request);
     expect(resolved.status).toBe('resolved');
-    expect(resolved.first_task.state).toBe('seeded');
     expect(resolved.first_task.recipe).toBe('software_assessment');
-    // Setup spent nothing: the model was never called.
-    expect(provider.calls, 'setup called the model').toHaveLength(0);
-    writeCarried({
-      ...before,
-      resolved: resolved.id,
-      workspace: resolved.first_task.workspace_id,
-      task: resolved.first_task.task_id
-    });
-    await settled(request, before);
-  });
-
-  test('the assessment runs on a click, a reply that asks for a tool is refused, and Try again finishes the same task', async ({
-    page,
-    request
-  }) => {
-    const before = readCarried();
-    expect(before.resolved && before.task, 'the setup test must pass first').toBeTruthy();
-    const tasks = await taskIDs(request, before.workspace!);
-    expect(tasks).toEqual([before.task]);
-
-    // Looking at the card starts nothing and calls no model.
-    const writes = watchWrites(page);
-    await comeBack(page);
-    expect((await buttons(page))[0]).toBe('Start assessment');
-    await expect(page.locator('#personalAssistantFolderOfferNote')).toContainText('no tools');
-    const ready = await list(page, '#personalAssistantFolderPrerequisites');
-    expect(ready.some(line => /^Project folder · Ready/.test(line))).toBeTruthy();
-    // A model that was never called is "set", not "ready".
-    expect(ready.some(line => /^Assistant's model · Set, not checked/.test(line))).toBeTruthy();
-    expect(ready.some(line => /^GitHub · Not set \(optional\)/.test(line))).toBeTruthy();
-    await page.waitForTimeout(3000);
-    expect(writes).toEqual([]);
-    expect(provider.calls).toHaveLength(0);
-    const goalBefore = await ok(await request.get(`/api/workspaces/${before.workspace}/mission`));
-    expect(goalBefore.mission_runs).toHaveLength(0);
-    await card(page).screenshot({ path: join(sandbox, 'first-assessment-needs-click.png') });
-
-    // The first reply asks to run a command. Nothing is run; the reply is thrown
-    // away, and the run did not finish.
-    provider.replies = ['tool', 'report'];
-    await press(page, 'Start assessment');
-    const refused = await lookIs(request, before.resolved!, ['failed', 'finished']);
+    expect(resolved.first_task.agent).toBe('Development Assistant');
+    expect(resolved.outcome.first_look.started).toBe(true);
+    // Nothing is run in the project: the reply that asked for a tool is thrown
+    // away, and the look did not finish.
+    const refused = await lookIs(request, resolved.id, ['failed', 'finished']);
     expect(refused.state).toBe('failed');
     expect(refused.reason).toBe('tool_call_refused');
     expect(refused.message).toContain('asked to use a tool');
     expect(refused.can_retry).toBe(true);
-    expect(refused.task_id).toBe(before.task);
-    await expect(card(page).getByRole('button', { name: 'Try again', exact: true })).toBeVisible({
-      timeout: 30_000
-    });
 
     // Exactly what "the model" was sent: two messages and nothing else. No
     // tools, no agent prompt, no path, and nothing from a file Ori must not open.
+    // The owner's goal rides inside the evidence as their request.
     expect(provider.calls).toHaveLength(1);
     const sent = provider.calls[0];
     expect(sent.model).toBe(fixtureModel);
@@ -802,10 +761,47 @@ test.describe('after the server was restarted', () => {
     expect(body).not.toContain(sandbox);
     expect(body).not.toMatch(/\/Users\/|\/private\/var\/|left-pad/);
     expect(body).not.toContain('You help with this software project');
+    // No brief was typed, so the goal is the blueprint's default.
+    expect(sent.messages[1].content).toContain('--- What the user asked for (');
+    expect(sent.messages[1].content).toContain('identify evidence-backed risks');
+    expect(sent.messages[0].content).not.toContain('identify evidence-backed risks');
 
-    // Nothing runs it again by itself.
+    // Nothing runs it again by itself, and no goal run was started.
     await page.waitForTimeout(3000);
     expect(provider.calls).toHaveLength(1);
+    const goal = await ok(
+      await request.get(`/api/workspaces/${resolved.first_task.workspace_id}/mission`)
+    );
+    expect(goal.mission_runs).toHaveLength(0);
+    writeCarried({
+      ...before,
+      resolved: resolved.id,
+      workspace: resolved.first_task.workspace_id,
+      task: resolved.first_task.task_id
+    });
+    await settled(request, before);
+  });
+
+  test('a look that asked for a tool is tried again on the same task and finishes', async ({
+    page,
+    request
+  }) => {
+    const before = readCarried();
+    expect(before.resolved && before.task, 'the setup test must pass first').toBeTruthy();
+    const tasks = await taskIDs(request, before.workspace!);
+    expect(tasks).toEqual([before.task]);
+    const goalBefore = await ok(await request.get(`/api/workspaces/${before.workspace}/mission`));
+
+    // Looking at the card starts nothing and calls no model.
+    const writes = watchWrites(page);
+    await comeBack(page);
+    await expect(card(page).getByRole('button', { name: 'Try again', exact: true })).toBeVisible({
+      timeout: 30_000
+    });
+    await page.waitForTimeout(3000);
+    expect(writes).toEqual([]);
+    expect(provider.calls).toHaveLength(1);
+    await card(page).screenshot({ path: join(sandbox, 'first-assessment-refused.png') });
 
     // Try again is the same task, run once more by the user. The task reads
     // "failed" until the new run is picked up, so the run's arrival at the
@@ -823,12 +819,11 @@ test.describe('after the server was restarted', () => {
     expect(writes.some(write => /\/mission\/(first-open|trigger|baseline)$/.test(write))).toBe(
       false
     );
+    // The hire started the look on the server; the page only ever asked to
+    // run it again.
     expect(
       writes.filter(write => /folder-first-task\/start$|\/tasks\/execute$/.test(write))
-    ).toEqual([
-      `POST /api/workspaces/${before.workspace}/folder-first-task/start`,
-      'POST /api/orchestration/tasks/execute'
-    ]);
+    ).toEqual(['POST /api/orchestration/tasks/execute']);
 
     await expect(
       card(page).getByRole('link', { name: 'Open the assessment', exact: true })
@@ -1101,11 +1096,13 @@ test.describe('a repository attached to the conversation', () => {
     await expect(status).not.toContainText('not available');
 
     await review(page);
-    await expect(headline(page)).toHaveText('Here is what I found in Downloads.');
+    await expect(headline(page)).toHaveText(
+      /^(Hire Development Assistant for|Assign Development Assistant to) Downloads$/
+    );
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan).toHaveLength(5);
     expect(plan[0]).toContain('Creates a Code project workspace named Downloads');
-    expect(await buttons(page)).toContain('Set up');
+    expect(await buttons(page)).toContain('Hire and start');
     await expect(status).not.toContainText('not available');
 
     // Nothing private and no path reaches the card; nothing was created, the

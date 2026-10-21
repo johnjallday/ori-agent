@@ -202,11 +202,20 @@ test('Set up without a model stops with one plain sentence and a way forward', a
   modelReady = await modelAvailable(request);
 });
 
-test('Try again after a model is set finishes the run on the same card, then Start first look starts the first task', async ({
+test('Try again after a model is set finishes the run on the same card, and the hire starts the first look', async ({
   page,
   request
 }) => {
   test.skip(!modelReady, 'no model provider is available on this machine');
+  const startCalls: string[] = [];
+  page.on('response', async response => {
+    if (
+      response.url().endsWith('/folder-first-task/start') &&
+      response.request().method() === 'POST'
+    ) {
+      startCalls.push(JSON.stringify(await response.json().catch(() => ({}))));
+    }
+  });
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Try again' }).click();
   const receipt = card.locator('#personalAssistantFolderReceipt li');
@@ -217,40 +226,28 @@ test('Try again after a model is set finishes the run on the same card, then Sta
   // The song's agent is the Home's one shared assistant, not "<label> · <song>".
   expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
   expect(rows).toMatch(/First task/);
-  expect(rows).toMatch(/Starts when you press Start first look/);
 
-  const startCalls: string[] = [];
-  page.on('response', async response => {
-    if (
-      response.url().endsWith('/folder-first-task/start') &&
-      response.request().method() === 'POST'
-    ) {
-      startCalls.push(JSON.stringify(await response.json().catch(() => ({}))));
-    }
-  });
-  // The pop-up that watched the run ends on the same receipt and Open link.
+  // The pop-up that watched the run ends on the hired agent at work.
   const runModal = page.locator('#folderSetupRunModal');
   await expect(runModal).toBeVisible();
-  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('All set');
+  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('Hired', {
+    timeout: 30_000
+  });
   await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', '100');
-  // The receipt offers the click that spends tokens, and the workspace beside it.
-  // Nothing has started yet: opening a page never starts the look.
+  // The hire's consent started the look on the server; the page never asked to.
   const receiptCard = page.locator('#personalAssistantFolderOffer');
-  const start = receiptCard.getByRole('button', { name: 'Start first look' });
-  await expect(start).toBeVisible();
+  await expect(receiptCard.locator('#personalAssistantFolderPlan')).toContainText(
+    'Reading the project, read-only'
+  );
+  await expect(receiptCard.getByRole('button', { name: 'Start first look' })).toHaveCount(0);
   expect(startCalls).toEqual([]);
   const open = receiptCard.getByRole('link', { name: /^Open / });
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
-
-  await start.click();
-  await expect
-    .poll(() => startCalls.some(call => call.includes('"started":true')), { timeout: 60_000 })
-    .toBe(true);
-  // The card follows the run on Home, with no page change.
+  // The card follows the look on Home, with no page change.
   await expect(receiptCard.locator('#personalAssistantFolderReceipt')).toContainText(
-    /Running…|Done/,
+    /Running…|Done|Did not finish/,
     {
       timeout: 60_000
     }
@@ -267,7 +264,7 @@ test('Try again after a model is set finishes the run on the same card, then Sta
   expect(startCalls.length).toBe(before);
 });
 
-test('keyboard only: Set up runs from the focused button and the card announces its progress', async ({
+test('keyboard only: Hire and start runs from the focused button and the card announces its progress', async ({
   page,
   request
 }) => {
@@ -275,6 +272,10 @@ test('keyboard only: Set up runs from the focused button and the card announces 
   seedProject('Documents', 'Fourth');
   await scan(request, 'documents');
   const card = await openCard(page);
+  // A later song in the same Home is assigned the Home's one shared assistant.
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    'Assign REAPER Assistant to Fourth'
+  );
   // The status line is a polite live region, so progress is spoken, not just shown.
   await expect(card.locator('#personalAssistantFolderOfferNote')).toHaveAttribute(
     'aria-live',

@@ -46,7 +46,7 @@ func TestBuildSoftwarePlanListsEveryConsequenceAndInstallsNothing(t *testing.T) 
 	if got := line(plan, personalassistant.FolderPlanMode).Detail; !strings.Contains(got, "runs no code") || !strings.HasSuffix(got, "Its instructions were found in AGENTS.md.") {
 		t.Errorf("mode detail = %q", got)
 	}
-	if got := line(plan, personalassistant.FolderPlanTask); !strings.Contains(got.Name, "for you to start") || !strings.Contains(got.Detail, "only then") {
+	if got := line(plan, personalassistant.FolderPlanTask); got.Name != FirstLookLine || !strings.Contains(got.Detail, "Model tokens are spent then") {
 		t.Errorf("task line = %+v", got)
 	}
 

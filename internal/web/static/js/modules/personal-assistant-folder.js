@@ -431,18 +431,25 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       state: line.state === 'failed' ? 'failed' : line.state ? 'done' : ''
     }));
     const unfinished = settled.filter(line => line.state === 'failed').length;
+    // A hire ends on its agent at work: the look it started, or why it waits.
+    const hired = receipt.hireLook?.visible ? offer.first_task : null;
+    const agent = String(hired?.agent || '').trim();
     const done = {
       visible: true,
       phase: 'done',
-      eyebrow: 'All set',
+      eyebrow: hired ? 'Hired' : 'All set',
       title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
-      status: receipt.home
-        ? 'Here is what I set up. Open a project from the library when you want to work on it.'
-        : software
-          ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
-          : receipt.group
-            ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
-            : 'Here is what I set up. The first task starts when you open the workspace.',
+      status: hired
+        ? hired.state === 'running' || hired.state === 'finished'
+          ? `${agent || 'Your agent'} is reading ${subject}, read-only. I'll tell you here when it has something.`
+          : `Here is what I set up. ${String(hired.message || '').trim() || 'Its first look has not started.'}`
+        : receipt.home
+          ? 'Here is what I set up. Open a project from the library when you want to work on it.'
+          : software
+            ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
+            : receipt.group
+              ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
+              : 'Here is what I set up. The first task starts when you open the workspace.',
       count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
       percent: 100,
       lines: settled,
@@ -1688,6 +1695,19 @@ export function folderReceiptView(offer, options = {}) {
     message: options.message
   });
   const liveDetail = firstLook.visible ? String(offer.first_task.detail || '').trim() : '';
+  const hireLook = hireLookView(offer);
+  // A look the hire started can be stopped from the card while it runs.
+  if (firstLook.visible && hireLook.stoppable)
+    firstLook.actions = [
+      {
+        id: 'stop-first-look',
+        label: 'Stop',
+        style: 'outline',
+        stop: true,
+        busy: options.busy === true
+      },
+      ...firstLook.actions
+    ];
   return {
     visible: true,
     rows: rows.map(row => ({
@@ -1698,7 +1718,68 @@ export function folderReceiptView(offer, options = {}) {
     route,
     homeRoute: verifiedHomeRoute,
     openLabel,
+    ...(hireLook.visible ? { hireLook } : {}),
     ...(firstLook.visible ? { firstLook } : {})
+  };
+}
+
+// The footnote under a hired agent's first look while it reads.
+export const FIRST_LOOK_FOOTNOTE =
+  'Reads only. Nothing in the folder is run or changed. Stop at any time.';
+
+// hireLookView is a hired agent's first look as two more lines under the
+// hire's receipt: reading the project, then writing its first suggestion. It
+// is shown only for a setup that hired someone (the outcome records what the
+// hire did about the look), and every state is read from where the look stands
+// now: running, waiting on the user with its question, finished, did not
+// finish with its reason, or not started (stopped, or waiting on a repair).
+export function hireLookView(offer) {
+  const record = offer?.outcome?.first_look;
+  const look = offer?.first_task;
+  const state = String(look?.state || '');
+  if (!record || typeof record !== 'object' || !look || !FIRST_LOOK_STATES.includes(state))
+    return { visible: false, lines: [], footnote: '', stoppable: false };
+  const said = String(look.message || '').trim();
+  const read = {
+    kind: 'first_look_read',
+    name: 'Reading the project, read-only',
+    detail: '',
+    state: 'waiting'
+  };
+  const suggest = {
+    kind: 'first_look_suggest',
+    name: 'Writes its first suggestion',
+    detail: '',
+    state: 'waiting'
+  };
+  switch (state) {
+    case 'running':
+      read.state = 'working';
+      break;
+    case 'waiting':
+      read.detail = said || 'Waiting for your answer.';
+      break;
+    case 'finished': {
+      read.state = 'done';
+      suggest.state = 'done';
+      const next = String(look.next_request || '').trim();
+      suggest.detail = next ? `Suggests: ${next}` : 'It did not name one next task.';
+      break;
+    }
+    case 'failed':
+      read.state = 'failed';
+      read.detail = said;
+      break;
+    default:
+      // Not started: put back by Stop, or waiting on what its reason names.
+      read.detail =
+        said || (record.started === true ? 'Stopped. Nothing in the folder was changed.' : '');
+  }
+  return {
+    visible: true,
+    lines: [read, suggest],
+    footnote: state === 'running' ? FIRST_LOOK_FOOTNOTE : '',
+    stoppable: state === 'running'
   };
 }
 
@@ -2266,6 +2347,7 @@ function elements() {
     receipt: document.getElementById('personalAssistantFolderReceipt'),
     result: document.getElementById('personalAssistantFolderFirstLookResult'),
     plan: document.getElementById('personalAssistantFolderPlan'),
+    lookNote: document.getElementById('personalAssistantFolderLookNote'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
     error: document.getElementById('personalAssistantFolderOfferError')
@@ -2920,10 +3002,13 @@ function renderOffer(place) {
     els.result.hidden = false;
   }
   if (els.plan) {
-    const lines = view.setup?.lines || view.plan?.lines || [];
+    // After a hire, its agent's first look follows the receipt as two lines.
+    const look = !view.setup && !view.plan && receipt.visible ? receipt.hireLook : null;
+    const lines = view.setup?.lines || view.plan?.lines || (look?.visible ? look.lines : []);
     renderSetupLines(els.plan, lines);
     els.plan.hidden = !lines.length;
-    els.plan.dataset.mode = view.setup ? view.setup.status : 'plan';
+    els.plan.dataset.mode = view.setup ? view.setup.status : look?.visible ? 'look' : 'plan';
+    setText(els.lookNote, look?.visible ? look.footnote : '');
     // A hire's lines are what happens besides the hire, under their heading.
     const heading = !view.setup && lines.length ? view.hire?.linesHeading || '' : '';
     els.plan.setAttribute('aria-label', heading || 'What Set up does');
@@ -2945,14 +3030,28 @@ function renderOffer(place) {
     }
   }
   if (els.actions) {
-    els.actions.replaceChildren();
     els.actions.hidden =
       view.decided &&
       !receipt.route &&
       !receipt.homeRoute &&
       !(firstLook.visible && firstLook.actions.length) &&
       (!view.resume || !(view.actions || []).length);
-    if (firstLook.visible) {
+    const showView = !receipt.route && !receipt.homeRoute && (!view.decided || view.resume);
+    // The row is rebuilt only when what it offers changes: a poll that redraws
+    // a running look's card must not swap Stop out from under a click.
+    const signature = JSON.stringify({
+      offer: state.offer?.id || '',
+      look: firstLook.visible ? firstLook.actions : null,
+      route: receipt.route || '',
+      open: receipt.openLabel || '',
+      home: receipt.homeRoute || '',
+      actions: showView ? view.actions : null,
+      busy: state.busy
+    });
+    const rebuild = els.actions.dataset.signature !== signature;
+    els.actions.dataset.signature = signature;
+    if (rebuild) els.actions.replaceChildren();
+    if (rebuild && firstLook.visible) {
       // The first look's own actions: its one primary (Start first look, Try
       // again, or the report) and the workspace as the other.
       firstLook.actions.forEach(action => {
@@ -2966,25 +3065,28 @@ function renderOffer(place) {
         } else {
           control.type = 'button';
           control.disabled = action.busy === true;
-          control.addEventListener('click', () => void startFirstLook());
+          control.addEventListener(
+            'click',
+            () => void (action.stop ? stopFirstLook() : startFirstLook())
+          );
         }
         els.actions.append(control);
       });
-    } else if (receipt.route) {
+    } else if (rebuild && receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = receipt.route;
       open.textContent = receipt.openLabel;
       els.actions.append(open);
     }
-    if (receipt.homeRoute) {
+    if (rebuild && receipt.homeRoute) {
       const home = document.createElement('a');
       home.className = 'btn btn-sm btn-outline-secondary';
       home.href = receipt.homeRoute;
       home.textContent = 'Review this link in the Home library';
       els.actions.append(home);
     }
-    if (!receipt.route && !receipt.homeRoute && (!view.decided || view.resume)) {
+    if (rebuild && showView) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -3505,6 +3607,46 @@ async function startFirstLook() {
   // already running, or finished, somewhere else: the card then shows that.
   await refreshFirstLook(look.offer_id);
   return { started, message };
+}
+
+// FIRST_LOOK_NOT_STOPPED is what a Stop the server could not carry out says.
+const FIRST_LOOK_NOT_STOPPED = 'The first look could not be stopped. Try again.';
+
+// stopFirstLook is Stop on a running first look: the run is stopped and the
+// same look is put back to wait for Start first look. The workspace, its agent
+// and the folder link stay as they are.
+async function stopFirstLook() {
+  const look = currentFirstLook();
+  if (!look || look.state !== 'running' || state.firstLookBusy) return false;
+  const workspaceID = String(look.workspace_id || '').trim();
+  if (!workspaceID) return false;
+  state.firstLookBusy = true;
+  state.firstLookMessage = '';
+  render();
+  let stopped = false;
+  try {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspaceID)}/folder-first-task/stop`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      }
+    );
+    const payload = await readJSON(response);
+    // A look that already ended is not running to stop: the read below says so.
+    stopped = response.ok && (payload?.stopped === true || payload?.reason === 'not_running');
+  } catch (_) {
+    stopped = false;
+  }
+  state.firstLookBusy = false;
+  await refreshFirstLook(look.offer_id);
+  if (stopped) firstLookMoved();
+  else {
+    state.firstLookMessage = FIRST_LOOK_NOT_STOPPED;
+    render();
+  }
+  return stopped;
 }
 
 async function pollSetup() {

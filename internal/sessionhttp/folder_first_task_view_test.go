@@ -149,7 +149,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok = handler.FolderFirstTaskView(ctx, stalled)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed || view.CanStart ||
 		view.Reason != personalassistant.FolderFirstTaskReasonStartFailed ||
-		view.Message != "The first look could not start. Try again." || view.Detail != "Did not finish" {
+		view.Message != "Producer's first look could not start. Try again." || view.Detail != "Did not finish" {
 		t.Fatalf("stalled view = %+v ok=%t", view, ok)
 	}
 
@@ -161,7 +161,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok = handler.FolderFirstTaskView(ctx, paused)
 	if !ok || view.State != personalassistant.FolderFirstTaskWaiting || view.CanStart ||
 		view.Reason != personalassistant.FolderFirstTaskReasonNeedsInput ||
-		view.Message != "The first look is waiting for your answer. Open Paused to continue." {
+		view.Message != "Producer is waiting for your answer. Open Paused to continue." {
 		t.Fatalf("paused view = %+v ok=%t", view, ok)
 	}
 
@@ -173,7 +173,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok = handler.FolderFirstTaskView(ctx, failed)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed ||
 		view.Reason != personalassistant.FolderFirstTaskReasonRunFailed ||
-		view.Message != "The first look did not finish. Try again." {
+		view.Message != "Producer's first look did not finish. Try again." {
 		t.Fatalf("failed view = %+v ok=%t", view, ok)
 	}
 	// The run's own error text is never shown on Home.

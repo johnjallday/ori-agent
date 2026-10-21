@@ -125,13 +125,14 @@ func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, o
 }
 
 // withFirstTask returns the receipt of a verified project with its first task
-// seeded and described. Every other row is kept as the host reported it.
-func (s *FolderDigestService) withFirstTask(ctx context.Context, userID, shape string, verified FolderCreateResult) []FolderReceiptRow {
+// seeded and described. Every other row is kept as the host reported it. brief
+// is what the user asked the hire to do, given to the look as their intent.
+func (s *FolderDigestService) withFirstTask(ctx context.Context, userID, shape, brief string, verified FolderCreateResult) []FolderReceiptRow {
 	if s.deps.FirstTask == nil {
 		return verified.Receipt
 	}
 	task, err := s.deps.FirstTask.SeedFirstTask(ctx, FolderFirstTaskRequest{
-		UserID: userID, WorkspaceID: verified.WorkspaceID, Shape: folderdigest.Shape(shape),
+		UserID: userID, WorkspaceID: verified.WorkspaceID, Shape: folderdigest.Shape(shape), Brief: brief,
 	})
 	rows := make([]FolderReceiptRow, 0, len(verified.Receipt)+1)
 	for _, row := range verified.Receipt {
@@ -462,7 +463,9 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 		if err := s.resolveSoftware(ctx, userID, offerID); err != nil {
 			logger.Warn("Software project setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
 			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+			return
 		}
+		s.startHiredLook(ctx, userID, offerID)
 		return
 	}
 	_, err = s.ResolveJourney(ctx, userID, offerID, FolderJourneyInput{
@@ -471,7 +474,11 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 	if err != nil {
 		logger.Warn("One-card folder setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
 		_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+		return
 	}
+	// The workspace is verified and its first look seeded: the hire's consent
+	// covers starting it now.
+	s.startHiredLook(ctx, userID, offerID)
 }
 
 // recordSetup writes a run snapshot onto the offer. It never touches an offer

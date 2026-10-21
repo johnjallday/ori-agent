@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { folderOfferView, hireView } from './personal-assistant-folder.js';
+import {
+  FIRST_LOOK_FOOTNOTE,
+  folderOfferView,
+  folderReceiptView,
+  hireLookView,
+  hireView,
+  setupModalView
+} from './personal-assistant-folder.js';
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
 const template = readFileSync(
@@ -224,4 +231,146 @@ test('the brief field is a real labelled control, bounded like a workspace goal'
     /<textarea id="personalAssistantFolderBrief"[^>]*maxlength="300"[\s\S]*?aria-describedby="personalAssistantFolderBriefHint"/
   );
   assert.match(template, /This becomes the workspace goal\. You can change it later\./);
+});
+
+// A set-up folder whose hire started its agent's first look, as the server
+// sends it once the outcome is verified.
+const hiredOffer = (look = {}, record = { started: true, task_id: 'look-1' }) => ({
+  id: 'offer-3',
+  status: 'resolved',
+  verdict: 'project',
+  subject: { name: 'elite_school' },
+  outcome: {
+    kind: 'project',
+    route: '/workspaces/elite-school',
+    receipt: [
+      { kind: 'workspace', name: 'elite_school', route: '/workspaces/elite-school' },
+      { kind: 'task', name: 'Assess this project and suggest a first task' }
+    ],
+    ...(record ? { first_look: record } : {})
+  },
+  first_task: {
+    state: 'running',
+    offer_id: 'offer-3',
+    task_id: 'look-1',
+    workspace_id: 'ws-1',
+    workspace_name: 'elite_school',
+    workspace_route: '/workspaces/elite-school',
+    agent: 'Development Assistant',
+    detail: 'Running…',
+    ...look
+  }
+});
+
+const lineStates = view => view.lines.map(line => [line.kind, line.state]);
+
+test('a hired look follows the receipt as two lines whose states come from where it stands', () => {
+  const running = hireLookView(hiredOffer());
+  assert.deepEqual(lineStates(running), [
+    ['first_look_read', 'working'],
+    ['first_look_suggest', 'waiting']
+  ]);
+  assert.deepEqual(
+    running.lines.map(line => line.name),
+    ['Reading the project, read-only', 'Writes its first suggestion']
+  );
+  assert.equal(running.footnote, FIRST_LOOK_FOOTNOTE);
+  assert.equal(
+    FIRST_LOOK_FOOTNOTE,
+    'Reads only. Nothing in the folder is run or changed. Stop at any time.'
+  );
+  assert.equal(running.stoppable, true);
+
+  const finished = hireLookView(
+    hiredOffer({ state: 'finished', next_request: 'Add a CI workflow for pytest.' })
+  );
+  assert.deepEqual(lineStates(finished), [
+    ['first_look_read', 'done'],
+    ['first_look_suggest', 'done']
+  ]);
+  assert.equal(finished.lines[1].detail, 'Suggests: Add a CI workflow for pytest.');
+  assert.equal(finished.footnote, '');
+  assert.equal(finished.stoppable, false);
+  assert.equal(
+    hireLookView(hiredOffer({ state: 'finished' })).lines[1].detail,
+    'It did not name one next task.'
+  );
+
+  const waiting = hireLookView(
+    hiredOffer({ state: 'waiting', message: 'Development Assistant is waiting for your answer.' })
+  );
+  assert.equal(waiting.lines[0].detail, 'Development Assistant is waiting for your answer.');
+  const failed = hireLookView(
+    hiredOffer({ state: 'failed', message: "Development Assistant's first look did not finish." })
+  );
+  assert.deepEqual(lineStates(failed)[0], ['first_look_read', 'failed']);
+  assert.match(failed.lines[0].detail, /did not finish/);
+});
+
+test('a look the hire could not start, or that was stopped, says so on its line', () => {
+  const blocked = hireLookView(
+    hiredOffer(
+      { state: 'seeded', can_start: false, message: 'Choose a model that can read without tools.' },
+      { started: false, reason: 'model_unsupported' }
+    )
+  );
+  assert.deepEqual(lineStates(blocked), [
+    ['first_look_read', 'waiting'],
+    ['first_look_suggest', 'waiting']
+  ]);
+  assert.equal(blocked.lines[0].detail, 'Choose a model that can read without tools.');
+  const stopped = hireLookView(hiredOffer({ state: 'seeded', can_start: true, message: '' }));
+  assert.equal(stopped.lines[0].detail, 'Stopped. Nothing in the folder was changed.');
+  // A setup that hired no one keeps the plain receipt.
+  assert.equal(hireLookView(hiredOffer({}, null)).visible, false);
+  assert.equal('hireLook' in folderReceiptView(hiredOffer({}, null)), false);
+});
+
+test('a running hired look can be stopped from the receipt, and Start first look comes back after', () => {
+  const receipt = folderReceiptView(hiredOffer());
+  assert.equal(receipt.hireLook.visible, true);
+  assert.deepEqual(
+    receipt.firstLook.actions.map(action => [action.id, action.label]),
+    [
+      ['stop-first-look', 'Stop'],
+      ['open', 'Open elite_school']
+    ]
+  );
+  assert.equal(receipt.firstLook.actions[0].stop, true);
+  const after = folderReceiptView(hiredOffer({ state: 'seeded', can_start: true }));
+  assert.equal(after.firstLook.actions[0].label, 'Start first look');
+  assert.ok(!after.firstLook.actions.some(action => action.stop));
+  // Stop posts to the look's own stop route, and nothing else.
+  const body = source.slice(
+    source.indexOf('async function stopFirstLook('),
+    source.indexOf('async function pollSetup(')
+  );
+  assert.match(body, /\/folder-first-task\/stop/);
+  assert.match(body, /look\.state !== 'running'/);
+  assert.match(template, /id="personalAssistantFolderLookNote"/);
+  // A poll that redraws the card keeps the same Stop button under the pointer:
+  // the action row is rebuilt only when what it offers changes.
+  assert.match(source, /const rebuild = els\.actions\.dataset\.signature !== signature;/);
+  assert.match(source, /if \(rebuild && firstLook\.visible\)/);
+  assert.match(source, /\} else if \(rebuild && receipt\.route\)/);
+});
+
+test('the run pop-up ends a hire on its agent at work, or on why the look waits', () => {
+  const running = setupModalView(hiredOffer());
+  assert.equal(running.eyebrow, 'Hired');
+  assert.equal(
+    running.status,
+    "Development Assistant is reading elite_school, read-only. I'll tell you here when it has something."
+  );
+  const blocked = setupModalView(
+    hiredOffer(
+      { state: 'seeded', can_start: false, message: 'Choose a model that can read without tools.' },
+      { started: false, reason: 'model_unsupported' }
+    )
+  );
+  assert.equal(
+    blocked.status,
+    'Here is what I set up. Choose a model that can read without tools.'
+  );
+  assert.equal(setupModalView(hiredOffer({}, null)).eyebrow, 'All set');
 });

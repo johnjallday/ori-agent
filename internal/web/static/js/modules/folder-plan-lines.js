@@ -74,7 +74,9 @@
     songs: 'bi-music-note-list',
     profile: 'bi-sliders',
     unavailable: 'bi-dash-circle',
-    arrangement: 'bi-bookmark-check'
+    arrangement: 'bi-bookmark-check',
+    first_look_read: 'bi-search',
+    first_look_suggest: 'bi-lightbulb'
   };
 
   // setupLineKindIcon is the Bootstrap icon class for one line kind.

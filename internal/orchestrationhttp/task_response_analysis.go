@@ -10,7 +10,10 @@ import (
 
 func isFilesystemReadVerificationTool(toolName string) bool {
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "list_directory", "list_directory_with_sizes", "search_files", "get_file_info", "read_file":
+	case "list_directory", "list_directory_with_sizes", "search_files", "get_file_info", "read_file",
+		// The read-only tools over a workspace's linked folders, which a
+		// folder's first look is told to use.
+		"workspace_directory_list", "workspace_directory_read":
 		return true
 	default:
 		return false

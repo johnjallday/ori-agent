@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
@@ -48,6 +49,45 @@ func TestFolderHire_TheTypedBriefBecomesTheWorkspaceGoal(t *testing.T) {
 	// leaves only its own first look.
 	if len(ws.Tasks) != 1 || len(firstTasks(ws)) != 1 || len(f.provider.requests) != 0 {
 		t.Fatalf("tasks = %d, model calls = %d", len(ws.Tasks), len(f.provider.requests))
+	}
+}
+
+// The hire starts its agent's first look once the workspace is verified, but
+// only a look that could start: on a model the assessment cannot hold to a
+// tool-free call, the workspace is still made, the look is left with that
+// reason and its repair, and nothing is sent to a model. The look is the
+// hired agent's.
+func TestFolderHire_ALookTheModelCannotRunIsLeftWithItsReason(t *testing.T) {
+	f := newSoftwareCardFixture(t, "widget")
+	f.setModel(t)
+	f.review(t)
+	if status, body := f.hireAndStart(t, "hire-1", "Find the risky parts."); status != http.StatusOK {
+		t.Fatalf("hire and start: %d %v", status, body)
+	}
+	offer := f.settled(t)
+	if offer["status"] != "resolved" {
+		t.Fatalf("the setup stopped: %v", offer["setup"])
+	}
+	var look map[string]any
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		outcome, _ := f.read(t)["outcome"].(map[string]any)
+		if look, _ = outcome["first_look"].(map[string]any); look != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if look == nil || look["started"] != false || look["reason"] != personalassistant.FolderFirstTaskReasonModelUnsupported {
+		t.Fatalf("first look record = %v", look)
+	}
+	first, _ := f.read(t)["first_task"].(map[string]any)
+	if first == nil || first["state"] != string(personalassistant.FolderFirstTaskSeeded) || first["agent"] != "Development Assistant" ||
+		first["reason"] != personalassistant.FolderFirstTaskReasonModelUnsupported || first["repair_route"] == "" {
+		t.Fatalf("first_task = %v", first)
+	}
+	ws := f.softwareWorkspaces(t)[0]
+	if tasks := firstTasks(ws); len(tasks) != 1 || tasks[0].To != "Development Assistant" || len(f.provider.requests) != 0 {
+		t.Fatalf("first look = %+v, model calls = %d", tasks, len(f.provider.requests))
 	}
 }
 

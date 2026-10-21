@@ -119,6 +119,9 @@ type FolderOutcome struct {
 	Receipt  []FolderReceiptRow `json:"receipt,omitempty"`
 	// Parent is a verified resulting-parent receipt, never a read grant.
 	Parent *FolderSetupDestination `json:"parent,omitempty"`
+	// FirstLook is what a hire did about the agent's first look once this
+	// outcome was verified; nil for a setup that hired no one.
+	FirstLook *FolderFirstLookRecord `json:"first_look,omitempty"`
 }
 
 // FolderPortfolioEvidence is the bounded, path-free count seen at scan time.
@@ -461,6 +464,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			}
 			if len(offer.Outcome.Receipt) > 32 {
 				return fmt.Errorf("%w: receipt rows", errFolderDigestInvalid)
+			}
+			if err := offer.Outcome.FirstLook.validate(); err != nil {
+				return err
 			}
 			// A finished one-card run's receipt is copied here whole, so every
 			// kind its host writes must be listed, or the run cannot resolve.

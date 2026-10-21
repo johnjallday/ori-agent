@@ -117,7 +117,7 @@ func TestFolderFirstTaskIsNeverRetriedAfterAFailedStart(t *testing.T) {
 	view, ok := handler.FolderFirstTaskView(context.Background(), wsID)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed ||
 		view.Reason != personalassistant.FolderFirstTaskReasonStartFailed ||
-		view.Message != "The first look could not start. Try again." {
+		view.Message != "Producer's first look could not start. Try again." {
 		t.Fatalf("view after a refused start = %+v ok=%t", view, ok)
 	}
 	if second := postFolderFirstTaskStart(t, handler, wsID); second["reason"] != "already_consumed" {

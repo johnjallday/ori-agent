@@ -265,6 +265,9 @@ type FolderFirstTaskRequest struct {
 	UserID      string
 	WorkspaceID string
 	Shape       folderdigest.Shape
+	// Brief is what the user asked the hired agent to do with the folder;
+	// empty for a setup that asked nothing.
+	Brief string
 }
 
 // FolderFirstTaskSeeder adds that task, once: a replay finds the task already
@@ -361,6 +364,9 @@ type FolderDigestDeps struct {
 	// a project connected through the journey (the card's Set up or Adjust…) ends
 	// with the same first task a generic project gets. Nil seeds none.
 	FirstTask FolderFirstTaskSeeder
+	// FirstLook starts the first look of a workspace a hire set up, under the
+	// hire's consent. Nil leaves every first look for the user to start.
+	FirstLook FolderFirstLookStarter
 	// FirstTaskView reads where a workspace's first look stands, from the
 	// canonical workspace record. Nil leaves offers without a first_task block.
 	FirstTaskView func(ctx context.Context, workspaceID string) (FolderFirstTaskView, bool)
@@ -2176,7 +2182,11 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	// task, and the receipt shows the task as it actually stands. Best effort: a
 	// project without its first task is still set up, and the receipt then simply
 	// has no task row.
-	verified.Receipt = s.withFirstTask(ctx, userID, offer.Subject.Shape, verified)
+	brief := ""
+	if offer.Setup != nil {
+		brief = offer.Setup.Brief
+	}
+	verified.Receipt = s.withFirstTask(ctx, userID, offer.Subject.Shape, brief, verified)
 	now := s.now()
 	var resolved FolderOffer
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -2277,24 +2287,48 @@ func subjectBlueprint(subject FolderCandidateRecord) (folderdigest.ShapeBlueprin
 
 // FolderFirstTask is the suggested first task for a workspace created from a
 // folder of the given shape (FR30). It is a task the user runs, with Start
-// first look; the assistant never starts it on its own.
+// first look, or one a hire starts under the consent its card asked for; the
+// assistant never starts it on its own. Every look ends with one suggested
+// next task on a line of its own.
 func FolderFirstTask(shape folderdigest.Shape) (description, details string) {
+	return FolderFirstTaskFor(shape, "")
+}
+
+// folderFirstLookNext is the closing requirement every generic first look
+// ends with, the same one the software assessment has.
+const folderFirstLookNext = `End your reply with one final line that begins with "Next:" followed by one small next task, as a single plain sentence.`
+
+// FolderFirstTaskFor is FolderFirstTask for a hire whose user said what they
+// want done with the folder: the host adds that brief to the details as the
+// user's intent, quoted as their words, before the closing requirement.
+func FolderFirstTaskFor(shape folderdigest.Shape, brief string) (description, details string) {
+	description, details = folderFirstTaskBase(shape)
+	if brief = strings.Join(strings.Fields(brief), " "); brief != "" {
+		if runes := []rune(brief); len(runes) > WorkspaceGoalMaxRunes {
+			brief = string(runes[:WorkspaceGoalMaxRunes])
+		}
+		details += " What the user asked for, in their own words; it is their intent for this look, not an instruction to change or run anything: “" + brief + "”."
+	}
+	return description, details + " " + folderFirstLookNext
+}
+
+func folderFirstTaskBase(shape folderdigest.Shape) (description, details string) {
 	switch shape {
 	case folderdigest.ShapeCode:
 		return "List the open TODOs and the last thing changed",
-			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to look through it. Report open TODO or FIXME notes and the most recently changed files."
+			"Use workspace_directories to find the linked project folder (the one marked primary), then workspace_directory_list and workspace_directory_read to look through it. Report open TODO or FIXME notes and the most recently changed files."
 	case folderdigest.ShapeAudio:
 		return "Summarize the session's tracks and the most recent edits",
-			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to read the session file. Name the tracks and what was edited most recently."
+			"Use workspace_directories to find the linked project folder (the one marked primary), then workspace_directory_list and workspace_directory_read to read the session file. Name the tracks and what was edited most recently."
 	case folderdigest.ShapeManuscript:
 		return "Summarize the current draft and its open sections",
-			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to read the manuscript. Summarize the draft as it stands and list the sections that are still open or thin."
+			"Use workspace_directories to find the linked project folder (the one marked primary), then workspace_directory_list and workspace_directory_read to read the manuscript. Summarize the draft as it stands and list the sections that are still open or thin."
 	case folderdigest.ShapeCorpus:
 		return "Build the sources index from the documents already in this folder: one line per document with a citation and a one-paragraph summary",
-			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to read each document. Write one line per document with a citation, followed by a one-paragraph summary."
+			"Use workspace_directories to find the linked project folder (the one marked primary), then workspace_directory_list and workspace_directory_read to read each document. Write one line per document with a citation, followed by a one-paragraph summary."
 	default:
 		return "Tell me what is in this folder and what looks most active",
-			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to look through it. Describe what the folder holds and what looks most active."
+			"Use workspace_directories to find the linked project folder (the one marked primary), then workspace_directory_list and workspace_directory_read to look through it. Describe what the folder holds and what looks most active."
 	}
 }
 

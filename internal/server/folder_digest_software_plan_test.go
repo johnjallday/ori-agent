@@ -204,7 +204,7 @@ func TestSoftwareReview_RealPlanAndPrerequisitesWithNoSideEffects(t *testing.T) 
 		{"folder", "Linked where it is; nothing is moved, copied or run"},
 		{"agents", "Adds one development assistant, Development Assistant"},
 		{"mode", "Starts with understanding and planning"},
-		{"task", "Queues a first assessment for you to start"},
+		{"task", "A first read-only look, started right away"},
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("plan lines = %v", lines)
@@ -219,7 +219,7 @@ func TestSoftwareReview_RealPlanAndPrerequisitesWithNoSideEffects(t *testing.T) 
 		}
 	}
 	if !strings.Contains(lines[1]["detail"].(string), "Read-only.") || !strings.Contains(lines[3]["detail"].(string), "AGENTS.md") ||
-		!strings.Contains(lines[4]["detail"].(string), "Model tokens are spent only then.") {
+		!strings.Contains(lines[4]["detail"].(string), "Model tokens are spent then; nothing in the project is run.") {
 		t.Fatalf("plan details: %v", lines)
 	}
 	// With no model set, the assistant's line and the prerequisite both say so.
