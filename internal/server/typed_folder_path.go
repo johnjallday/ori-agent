@@ -37,3 +37,17 @@ func (t typedFolderPaths) Check(raw string) (workspace.TypedFolderPath, error) {
 		Path: checked.Path, Warning: checked.Warning, WarningNote: folderpath.WarningNote(checked.Warning),
 	}, nil
 }
+
+// catalogFolder is the same decision for a folder the owner adds to a
+// resource catalog: Ori's own page, then the shared typed-path rules. It
+// returns the canonical folder and the sentence to show beside it.
+func (t typedFolderPaths) catalogFolder(r *http.Request, raw string) (string, string, error) {
+	if err := t.Allow(r); err != nil {
+		return "", "", &folderpath.Error{Message: "This request did not come from Ori's own page."}
+	}
+	checked, err := t.Check(raw)
+	if err != nil {
+		return "", "", err
+	}
+	return checked.Path, checked.WarningNote, nil
+}

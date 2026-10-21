@@ -78,6 +78,9 @@ func (s *Store) legacySnapshot(scope Scope, home *workspace.Workspace, state *wo
 			link.StateRevision < 1 {
 			return legacySnapshot{}, ErrConflict
 		}
+		if workspace.AssistantProjectLinkIsResource(link) {
+			continue // A resource workspace is a Home child, never a song in the library.
+		}
 		item := legacyProject{ID: child.ID, Name: child.Name, LinkID: link.ID,
 			LinkRevision: link.StateRevision, LinkedAt: link.LinkedAt}
 		if !validText(child.Name, 160) || child.Name == "" {

@@ -22,7 +22,13 @@ import (
 var transientContinuityPrefixes = []string{
 	".tmp-", ".ori-config-", ".ori-project-fallback-", ".assistant-learning-",
 	".memory-exact-", ".triggers-", ".personal-assistant-knowledge-", ".workspace_allowlist-",
+	".resource-catalog-", // resourcecatalog.ScratchPrefix
 }
+
+// resourceCatalogLock is the resource catalog's lock file
+// (resourcecatalog.CatalogDir + LockFile). Its two JSON files are workspace
+// content and are carried by checkpoints like any other file.
+const resourceCatalogLock = ".ori/resource-catalog/.lock"
 
 // continuityInventoryOwned reports paths that a typed collector declares
 // itself (workspace.json and scoped agent profiles) or that are never part of
@@ -55,7 +61,7 @@ func continuityNeverCovered(rel string, dir bool) bool {
 		return true
 	case top == SubWorkspacesDir || top == "sub_workspaces":
 		return true
-	case folded == ".ori/personal-assistant-knowledge.lock":
+	case folded == ".ori/personal-assistant-knowledge.lock", folded == resourceCatalogLock:
 		return true
 	case folded == MemoryContextDir || strings.HasPrefix(folded, MemoryContextDir+"/"):
 		// Rendered from MEMORY.md, which the checkpoint already carries.

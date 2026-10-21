@@ -62,12 +62,15 @@ type assistantMigrationCommitRequest struct {
 }
 
 type assistantProgramSummary struct {
-	Available                bool                                            `json:"available"`
-	ActivationNeeded         bool                                            `json:"activation_needed,omitempty"`
-	MigrationNeeded          bool                                            `json:"migration_needed,omitempty"`
-	StationID                string                                          `json:"station_id,omitempty"`
-	ProjectID                string                                          `json:"project_id,omitempty"`
-	IsStation                bool                                            `json:"is_station,omitempty"`
+	Available        bool   `json:"available"`
+	ActivationNeeded bool   `json:"activation_needed,omitempty"`
+	MigrationNeeded  bool   `json:"migration_needed,omitempty"`
+	StationID        string `json:"station_id,omitempty"`
+	ProjectID        string `json:"project_id,omitempty"`
+	IsStation        bool   `json:"is_station,omitempty"`
+	// ResourceWorkspace marks a linked child that holds a resource catalog;
+	// its page links to that catalog.
+	ResourceWorkspace        bool                                            `json:"resource_workspace,omitempty"`
 	Hired                    bool                                            `json:"hired,omitempty"`
 	PluginAvailable          bool                                            `json:"plugin_available"`
 	HomeProviderAvailable    bool                                            `json:"home_provider_available"`
@@ -231,6 +234,9 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		Declaration: workspace.CloneAssistantProgramDeclaration(state.Declaration),
 	}
 	if project != nil {
+		summary.ResourceWorkspace = workspace.AssistantProjectLinkIsResource(project.GetAssistantProjectLink())
+	}
+	if project != nil {
 		if link := project.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {
 			summary.Declaration.Roles = append(summary.Declaration.Roles, link.ProjectRoles...)
 		}
@@ -333,7 +339,9 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		summary.ProviderUpgrade = h.providerUpgradeSummary(ctx, station.OwnerUserID, station)
 		cancel()
 	}
-	projects, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).LinkedProjects(station.ID)
+	// The Home lists its songs here; its resource workspace has its own
+	// summary (assistant-program/resource-workspaces).
+	projects, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).LinkedSongProjects(station.ID)
 	if err != nil {
 		return assistantProgramSummary{}, err
 	}
@@ -645,6 +653,13 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondInternalError(w, "Linked projects could not be read")
 		return
 	}
+	// Reflection arms on songs; a resource workspace never counts toward it.
+	resourceChildren := 0
+	for _, linked := range projects {
+		if workspace.AssistantProjectLinkIsResource(linked.GetAssistantProjectLink()) {
+			resourceChildren++
+		}
+	}
 	type previousRoster struct {
 		workspaceID string
 		instances   []workspace.AgentInstance
@@ -698,7 +713,7 @@ func (h *Handler) HireAssistantProgram(w http.ResponseWriter, r *http.Request) {
 		currentState.StageID = currentState.Declaration.Stages[0].ID
 		currentState.Level = 1
 		currentState.StageEnteredAt = map[string]time.Time{currentState.StageID: now}
-		if len(currentState.LinkedProjectIDs) >= currentState.Declaration.Reflection.MinimumProjects {
+		if len(currentState.LinkedProjectIDs)-resourceChildren >= currentState.Declaration.Reflection.MinimumProjects {
 			currentState.Reflection.ScheduleTaskID = workspace.AssistantReflectionScheduleID(station.ID)
 			nextReflection := now.Add(time.Duration(currentState.Declaration.Reflection.CadenceHours) * time.Hour)
 			currentState.Reflection.NextEligibleAt = &nextReflection

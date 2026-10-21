@@ -119,7 +119,8 @@ func (a *personalAssistantSetupReportingAdapter) linkedProjects(homeID string) (
 	if err != nil || home == nil || home.Status == workspace.StatusTrashed || home.Status == workspace.StatusMissing || home.GetAssistantProgramState() == nil {
 		return []*workspace.Workspace{}, nil, errors.New("assistant program Home is unavailable")
 	}
-	projects, err := workspace.NewAssistantProgramStore(a.workspaces).LinkedProjects(home.ID)
+	// "Connected projects" are songs; a resource workspace is not one.
+	projects, err := workspace.NewAssistantProgramStore(a.workspaces).LinkedSongProjects(home.ID)
 	if err != nil {
 		return []*workspace.Workspace{}, home, err
 	}

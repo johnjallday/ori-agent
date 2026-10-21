@@ -791,6 +791,12 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if groupRequirementErr == nil {
 		groupRequirementErr = validateGroupComposition(groupRequirement, standaloneComposition, assistantProgram, assistantProject)
 	}
+	if assistantProjectErr == nil && assistantProject.IsResource() {
+		if err := validateResourceWorkspaceTemplate(m, groupRequirement); err != nil {
+			t.AssistantProject = nil
+			t.AssistantProjectError = err.Error()
+		}
+	}
 	t.GroupRequirement = groupRequirement
 	if groupRequirementErr != nil {
 		t.GroupRequirement = nil

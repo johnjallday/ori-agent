@@ -10,6 +10,7 @@
 #   ./scripts/reaper-demo.sh test --music-source DIR --install-order music-first
 #   ./scripts/reaper-demo.sh test --install-order reaper-only -- --headed
 #   ./scripts/reaper-demo.sh test --suite arrangement --music-source DIR --install-order music-first
+#   ./scripts/reaper-demo.sh test --suite studio --music-source DIR --install-order reaper-first
 
 set -euo pipefail
 
@@ -32,17 +33,22 @@ Options:
   --reaper-source DIR   Clean REAPER plugin candidate worktree.
   --music-source DIR    Clean Music Project Management candidate worktree.
   --music-upgrade-source DIR
-                        Arrangement suite only: a newer clean Music commit. The
-                        Home is populated on --music-source and plans once with
-                        that older guidance, then is upgraded to this one through
-                        its reviewed Home upgrade, which must keep the library
-                        and the saved proposal and plan with the new guidance.
+                        Arrangement or studio suite: a newer clean Music commit.
+                        Arrangement: the Home is populated on --music-source and
+                        plans once with that older guidance, then is upgraded to
+                        this one through its reviewed Home upgrade, which must
+                        keep the library and the saved proposal and plan with the
+                        new guidance. Studio: a Home with a song on the older
+                        commit is upgraded through review, then sets up the Studio.
   --install-order MODE  music-first, reaper-first, or reaper-only. Providing a
                         music source defaults to music-first.
-  --suite NAME          legacy (default), guidance, awareness (drawer baseline), or
+  --suite NAME          legacy (default), guidance, awareness (drawer baseline),
                         arrangement (populated Home: Organize library, collection
                         review, one queued activation; only the model is a
-                        scripted loopback fixture, so this is not live judgment).
+                        scripted loopback fixture, so this is not live judgment),
+                        or studio (REAPER Studio: the candidate's own readers
+                        inspect disposable REAPER folders seeded in the sandbox
+                        HOME, then a linked song looks entries up; no model).
   --restart-before-staffing  For guidance: restart after the unstaffed child,
                              then staff/associate and restart once more.
   --port PORT           Server port (default: 8931).
@@ -61,6 +67,10 @@ Environment:
                                     spec's scripted OpenAI-compatible model
                                     (default 18965). Refused if already listening;
                                     the server gets LM_STUDIO_BASE_URL for it.
+  ORI_STUDIO_CLOSED_REAPER_PORT=PORT Studio suite only: the Web Remote port the
+                                    sandbox's reaper.ini names (default 18967).
+                                    Refused if anything listens there, so the
+                                    plugin list reads as REAPER closed.
 
 The refreshed binary is written to ./reaper-plugin-darwin-arm64. Candidate
 commits are exported into disposable plugin-source paths; only the staged REAPER
@@ -117,7 +127,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--suite)
-		[[ $# -ge 2 ]] || fail "--suite needs legacy, guidance, awareness or arrangement"
+		[[ $# -ge 2 ]] || fail "--suite needs legacy, guidance, awareness, arrangement or studio"
 		test_suite="$2"
 		shift 2
 		;;
@@ -178,8 +188,16 @@ fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
-[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" || "$test_suite" == "arrangement" ]] || fail "--suite needs legacy, guidance, awareness or arrangement"
-if [[ "$test_suite" != "legacy" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
+[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" || "$test_suite" == "arrangement" || "$test_suite" == "studio" ]] || fail "--suite needs legacy, guidance, awareness, arrangement or studio"
+# Studio also serves a manual demo over the same seeded folders.
+if [[ "$test_suite" == "studio" ]]; then
+	if [[ "$mode" == "artifact" || -z "$music_source" || "$install_order" == "reaper-only" ]]; then
+		fail "studio suite requires serve or test with --music-source and a paired installation order"
+	fi
+	if [[ "$mode" == "serve" && -n "$music_upgrade_source" ]]; then
+		fail "--music-upgrade-source is only valid with test"
+	fi
+elif [[ "$test_suite" != "legacy" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
 	fail "$test_suite suite requires test with --music-source and a paired installation order"
 fi
 # The arrangement suite's spec serves a scripted OpenAI-compatible model on a
@@ -194,11 +212,23 @@ if [[ "$test_suite" == "arrangement" ]]; then
 		fail "model fixture port $model_port is occupied; refusing to contact it (set ORI_ARRANGEMENT_MODEL_PORT)"
 	fi
 fi
+# The Studio suite's sandbox reaper.ini names a Web Remote port that must stay
+# silent, so the plugin list reads as REAPER closed. Never contact a real one.
+closed_reaper_port=""
+if [[ "$test_suite" == "studio" ]]; then
+	closed_reaper_port="${ORI_STUDIO_CLOSED_REAPER_PORT:-18967}"
+	[[ "$closed_reaper_port" =~ ^[0-9]+$ ]] || fail "ORI_STUDIO_CLOSED_REAPER_PORT must be numeric"
+	((closed_reaper_port >= 1 && closed_reaper_port <= 65535)) || fail "ORI_STUDIO_CLOSED_REAPER_PORT must be between 1 and 65535"
+	[[ "$closed_reaper_port" != "$port" ]] || fail "the closed REAPER port must differ from the Ori port"
+	if lsof -nP -t -iTCP:"$closed_reaper_port" -sTCP:LISTEN >/dev/null 2>&1; then
+		fail "closed REAPER port $closed_reaper_port is occupied (set ORI_STUDIO_CLOSED_REAPER_PORT)"
+	fi
+fi
 if [[ "$restart_before_staffing" == "1" && "$test_suite" != "guidance" ]]; then
 	fail "--restart-before-staffing requires the guidance test suite"
 fi
-if [[ -n "$music_upgrade_source" && "$test_suite" != "arrangement" ]]; then
-	fail "--music-upgrade-source requires the arrangement test suite"
+if [[ -n "$music_upgrade_source" && "$test_suite" != "arrangement" && "$test_suite" != "studio" ]]; then
+	fail "--music-upgrade-source requires the arrangement or studio test suite"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
@@ -371,6 +401,24 @@ if [[ -n "$upgrade_root" ]]; then
 	"$bundled_upgrade/scripts/validate-package.py" "$bundled_upgrade" \
 		| tee "$sandbox/evidence/music-upgrade-validation.txt"
 	printf '%s\n' "$upgrade_revision" >"$sandbox/evidence/music-upgrade-revision.txt"
+	git -C "$upgrade_root" rev-parse HEAD^{tree} >"$sandbox/evidence/music-upgrade-tree.txt"
+fi
+
+# The Studio suite's readers see only these disposable folders in the sandbox
+# HOME. Git carries neither a symlink nor a machine port, so both are made here.
+if [[ "$test_suite" == "studio" ]]; then
+	studio_fixture="$repo_root/tests/fixtures/resource-studio/reaper-folders"
+	studio_resource="$sandbox/Library/Application Support/REAPER"
+	studio_library="$sandbox/Ori Scripts/reaper"
+	[[ ! -e "$studio_resource" && ! -e "$studio_library" ]] || \
+		fail "the sandbox already has REAPER folders; use a fresh sandbox"
+	mkdir -p "$sandbox/Library/Application Support" "$sandbox/Ori Scripts" "$sandbox/outside"
+	cp -R "$studio_fixture/resource" "$studio_resource"
+	cp -R "$studio_fixture/ori-scripts" "$studio_library"
+	install -m 0644 "$studio_fixture/resource/Scripts/Tools/export_markers.py" "$sandbox/outside/Linked tool.lua"
+	ln -s "$sandbox/outside/Linked tool.lua" "$studio_resource/Scripts/Linked tool.lua"
+	printf "[reaper]\ncsurf_cnt=1\ncsurf_0=HTTP 0 %s '' 'index.html' 0 ''\n" "$closed_reaper_port" \
+		>"$studio_resource/reaper.ini"
 fi
 
 cd "$repo_root"
@@ -527,6 +575,8 @@ if [[ "$mode" == "test" ]]; then
 			fi
 		elif [[ "$test_suite" == "arrangement" ]]; then
 			playwright_file="tests/music-home-arrangement-populated.spec.ts"
+		elif [[ "$test_suite" == "studio" ]]; then
+			playwright_file="tests/reaper-studio-candidate.spec.ts"
 		fi
 		suite_env=()
 		if [[ -n "$model_port" ]]; then
@@ -534,8 +584,15 @@ if [[ "$mode" == "test" ]]; then
 		fi
 		# With an upgrade source, the installed package is the older one: the
 		# main test plans once with its guidance, saves the proposal and stops.
-		if [[ -n "$bundled_upgrade" ]]; then
+		if [[ -n "$bundled_upgrade" && "$test_suite" == "arrangement" ]]; then
 			suite_env+=(ORI_ARRANGEMENT_OLD_GUIDANCE=1)
+		fi
+		# Studio: the older Home with a song is upgraded to this export in place.
+		if [[ "$test_suite" == "studio" ]]; then
+			suite_env+=(ORI_STUDIO_CANDIDATE=1)
+			if [[ -n "$bundled_upgrade" ]]; then
+				suite_env+=(ORI_STUDIO_UPGRADE_PATH="$bundled_upgrade")
+			fi
 		fi
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			${suite_env[@]+"${suite_env[@]}"} \
@@ -607,7 +664,7 @@ if [[ "$mode" == "test" ]]; then
 	fi
 	# The owner upgrades the Home populated on the older package to the newer
 	# Music commit through its own review, then plans with the new guidance.
-	if ((test_status == 0)) && [[ -n "$bundled_upgrade" ]]; then
+	if ((test_status == 0)) && [[ -n "$bundled_upgrade" && "$test_suite" == "arrangement" ]]; then
 		printf 'Upgrading the Home to the newer Music commit...\n'
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			${suite_env[@]+"${suite_env[@]}"} \
@@ -621,10 +678,32 @@ if [[ "$mode" == "test" ]]; then
 			--project=chromium --workers=1 --grep 'upgrade keeps' ${playwright_args[@]+"${playwright_args[@]}"}
 		test_status=$?
 	fi
-	# The drawer baseline and the arrangement suite own different fixtures and
-	# do not substitute for legacy/paired-guidance completed-project and restart
-	# acceptance, so neither re-runs that restart check.
-	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" && "$test_suite" != "arrangement" ]]; then
+	# The Studio comes back from canonical state: the same catalog revision,
+	# notes and song lookups, and the seeded folders still unchanged.
+	if ((test_status == 0)) && [[ "$test_suite" == "studio" && -z "$bundled_upgrade" ]]; then
+		printf 'Restarting Ori to reopen the Studio catalog...\n'
+		kill "$server_pid"
+		wait "$server_pid" 2>/dev/null || true
+		server_pid=""
+		printf '\n--- controlled studio restart ---\n' >>"$server_log"
+		start_server
+		env PLAYWRIGHT_BASE_URL="$base_url" \
+			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
+			ORI_STUDIO_CANDIDATE=1 \
+			ORI_STUDIO_RESTART_CHECK=1 \
+			ORI_MUSIC_REAPER_INSTALL_ORDER="$install_order" \
+			ORI_REAPER_PLUGIN_PATH="$bundled_plugin" \
+			ORI_MUSIC_PLUGIN_PATH="$bundled_music" \
+			ORI_MUSIC_REAPER_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
+			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
+			npx playwright test "$playwright_file" \
+			--project=chromium --workers=1 --grep 'restart keeps' ${playwright_args[@]+"${playwright_args[@]}"}
+		test_status=$?
+	fi
+	# The drawer baseline, the arrangement and the Studio suites own different
+	# fixtures and do not substitute for legacy/paired-guidance completed-project
+	# and restart acceptance, so none re-runs that restart check.
+	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" && "$test_suite" != "arrangement" && "$test_suite" != "studio" ]]; then
 		printf 'Restarting Ori against the same isolated candidate state...\n'
 		kill "$server_pid"
 		wait "$server_pid" 2>/dev/null || true
@@ -651,7 +730,10 @@ fi
 
 printf '\nREAPER local demo is ready.\n'
 printf 'Open: %s\n' "$base_url"
-if [[ "$install_order" == "music-first" || "$install_order" == "reaper-first" ]]; then
+if [[ "$test_suite" == "studio" ]]; then
+	printf 'Create a Music Production Home, then Set up REAPER Studio from its card and Inspect resources.\n'
+	printf 'The readers see only the sandbox folders: %s and %s.\n' "$studio_resource" "$studio_library"
+elif [[ "$install_order" == "music-first" || "$install_order" == "reaper-first" ]]; then
 	printf 'Create a Reaper Song workspace and review its independently owned Music Production Home and project team.\n'
 elif [[ "$install_order" == "reaper-only" ]]; then
 	printf 'Customize Reaper Song for a Home-free standalone project.\n'

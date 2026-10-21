@@ -1,0 +1,35 @@
+{
+  "behavior_profile": "general",
+  "tools": { "skills": ["reaper-studio-catalog"] },
+  "assistant_project": {
+    "schema_version": 1,
+    "version": 1,
+    "id": "reaper-studio-team",
+    "workspace_kind": "resource",
+    "home": {
+      "provider_plugin_id": "music-project-management",
+      "program_id": "music-producer-assistant",
+      "home_schema_version": 1,
+      "min_home_version": 1,
+      "max_home_version": 1
+    },
+    "roles": [
+      {
+        "id": "reaper-studio-assistant",
+        "label": "REAPER Studio Assistant",
+        "description": "Explains the studio catalog; changes nothing in REAPER.",
+        "required": true,
+        "primary": true,
+        "role": "orchestrator",
+        "system_prompt": "You explain the REAPER Studio catalog: templates, scripts and audio plugins observed during inspection. You change nothing in REAPER and never run, apply or install a resource.",
+        "skills": ["reaper-studio-catalog"]
+      }
+    ]
+  },
+  "group_requirement": {
+    "schema_version": 2,
+    "policy": "required",
+    "assistant_project_id": "reaper-studio-team",
+    "missing_home": "existing_only"
+  }
+}

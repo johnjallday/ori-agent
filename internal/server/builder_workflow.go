@@ -107,12 +107,13 @@ func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolF
 		provider.SetExecutingAgent(agentName)
 		provider.SetExecutingInstanceID(agentInstanceID)
 		provider.SetProjectLibraryEvidence(b.sessionHandler.AssistantLibraryProviderEvidence)
+		provider.SetResourceCatalogs(b.sessionHandler.ResourceCatalogs)
 		// The ordinary task factory only knows an agent name. It must not
 		// present a Home read through a global fallback; this runtime factory
 		// receives the exact task instance and reapplies policy at tool call.
 		for _, candidate := range provider.Tools() {
 			switch candidate.Definition().Name {
-			case "home_library_search", "home_library_detail":
+			case "home_library_search", "home_library_detail", "resource_catalog_search", "resource_catalog_detail":
 				tools = append(tools, candidate)
 			}
 		}
@@ -944,6 +945,8 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	// picker issued, so both must share one store. Later phases (the guided
 	// journey, sample libraries) reuse it rather than creating their own.
 	if b.sessionHandler != nil {
+		// A folder the owner adds to a resource catalog passes the same checks.
+		b.sessionHandler.SetResourceCatalogFolderCheck(newTypedFolderPaths(guards).catalogFolder)
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
 		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
 	}

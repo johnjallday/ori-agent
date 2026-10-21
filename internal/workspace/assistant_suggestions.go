@@ -57,7 +57,9 @@ func (service *AssistantSuggestionService) stationAndProject(stationID, projectI
 		return nil, nil, err
 	}
 	link := project.GetAssistantProjectLink()
-	if link == nil || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
+	// Suggestions apply cross-song patterns to one song; a resource workspace
+	// is never their target.
+	if link == nil || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() || AssistantProjectLinkIsResource(link) {
 		return nil, nil, ErrAssistantProgramUnavailable
 	}
 	return state, project, nil

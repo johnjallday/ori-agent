@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // The seams below let the folder card's one-consent collection setup drive, in
@@ -177,7 +178,8 @@ func (h *Handler) PortfolioLibraryState(ownerUserID, homeID, folder string) (Por
 		if getErr != nil || station == nil {
 			return PortfolioLibraryState{}, ErrPortfolioSetupUnavailable
 		}
-		return PortfolioLibraryState{Linked: len(station.GetAssistantProgramState().LinkedProjectIDs)}, nil
+		// Songs waiting for the library; a resource workspace is not one.
+		return PortfolioLibraryState{Linked: len(agentworkspace.SongProjectIDs(h.workspaceTaskStore, station.GetAssistantProgramState().LinkedProjectIDs))}, nil
 	}
 	if err != nil {
 		return PortfolioLibraryState{}, err

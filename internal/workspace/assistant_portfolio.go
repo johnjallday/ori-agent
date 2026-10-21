@@ -124,7 +124,10 @@ func (service *AssistantPortfolioService) List(stationID string) ([]AssistantPor
 			continue
 		}
 		link := project.GetAssistantProjectLink()
-		if link == nil || link.ID == "" || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
+		// The portfolio tracks songs; a resource workspace has no stage,
+		// status or release to coordinate.
+		if link == nil || link.ID == "" || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() ||
+			AssistantProjectLinkIsResource(link) {
 			continue
 		}
 		fields := defaultAssistantPortfolioUpdate()
@@ -408,7 +411,8 @@ func (service *AssistantPortfolioService) linkedProject(station *Workspace, stat
 			continue
 		}
 		link := project.GetAssistantProjectLink()
-		if link == nil || link.ID != linkID || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
+		if link == nil || link.ID != linkID || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() ||
+			AssistantProjectLinkIsResource(link) {
 			continue
 		}
 		if foundProject != nil {

@@ -1,0 +1,145 @@
+{{define "workspace-catalog"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+<link rel="stylesheet" href="/css/resource-catalog.css">
+<body class="bg-light resource-catalog-body" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  {{template "navbar.tmpl" .}}
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+    <main class="main-content resource-catalog-shell">
+      <div id="resourceCatalogPage" class="resource-catalog-page" aria-busy="true">
+        <nav class="resource-catalog-breadcrumb" aria-label="Breadcrumb">
+          <a id="resourceCatalogWorkspaceLink" href="#">Workspace</a>
+          <span aria-hidden="true">/</span>
+          <span>Catalog</span>
+        </nav>
+        <p id="resourceCatalogStatus" class="resource-catalog-status" role="status">Loading the catalog…</p>
+        <div id="resourceCatalogContent" hidden>
+          <header class="resource-catalog-header">
+            <div>
+              <h1 id="resourceCatalogTitle">Catalog</h1>
+              <p id="resourceCatalogProvider" class="resource-catalog-provider"></p>
+            </div>
+            <div id="resourceCatalogActions" class="resource-catalog-actions"></div>
+          </header>
+          <section id="resourceCatalogOperation" class="resource-catalog-operation" aria-live="polite" hidden></section>
+          <div id="resourceCatalogTabs" class="resource-catalog-tabs" role="tablist" aria-label="Categories"></div>
+          <section id="resourceCatalogCategory" class="resource-catalog-category" role="tabpanel">
+            <p id="resourceCatalogCoverage" class="resource-catalog-coverage"></p>
+            <form id="resourceCatalogFilters" class="resource-catalog-filters" role="search">
+              <label class="resource-catalog-field">
+                <span>Search names, tags and notes</span>
+                <input id="resourceCatalogSearch" type="search" maxlength="120" autocomplete="off">
+              </label>
+              <label class="resource-catalog-field">
+                <span>Source</span>
+                <select id="resourceCatalogSource"></select>
+              </label>
+              <label class="resource-catalog-check">
+                <input id="resourceCatalogFavorites" type="checkbox">
+                <span>Favorites only</span>
+              </label>
+            </form>
+            <div class="resource-catalog-browse">
+              <div>
+                <ul id="resourceCatalogList" class="resource-catalog-list" aria-label="Entries"></ul>
+                <p id="resourceCatalogEmpty" class="resource-catalog-empty" hidden></p>
+                <button id="resourceCatalogMore" class="modern-btn modern-btn-secondary" type="button" hidden>Show more</button>
+              </div>
+              <aside id="resourceCatalogDetail" class="resource-catalog-detail" aria-live="polite" hidden></aside>
+            </div>
+          </section>
+          <section class="resource-catalog-sources" aria-labelledby="resourceCatalogSourcesTitle">
+            <div class="resource-catalog-sources-header">
+              <h2 id="resourceCatalogSourcesTitle">Sources on this computer</h2>
+              <button id="resourceCatalogAddFolder" class="modern-btn modern-btn-secondary" type="button" aria-describedby="resourceCatalogFolderLimit" hidden>Add a folder</button>
+            </div>
+            <p id="resourceCatalogFolderLimit" class="resource-catalog-dialog-note" hidden></p>
+            <ul id="resourceCatalogSources" class="resource-catalog-source-list"></ul>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="resourceCatalogReview" class="resource-catalog-dialog" aria-labelledby="resourceCatalogReviewTitle">
+    <form method="dialog" class="resource-catalog-dialog-body">
+      <h2 id="resourceCatalogReviewTitle">Review sources</h2>
+      <p id="resourceCatalogReviewIntro"></p>
+      <fieldset>
+        <legend>Sources Ori may read</legend>
+        <div id="resourceCatalogReviewSources"></div>
+      </fieldset>
+      <p class="resource-catalog-dialog-note">Ori reads names and bounded details only. It does not open, run, load or change anything, and creates no folder. Assistants in this Home's projects can then look up what was found.</p>
+      <p id="resourceCatalogReviewError" class="resource-catalog-error" role="alert"></p>
+      <div class="resource-catalog-dialog-actions">
+        <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Not now</button>
+        <button id="resourceCatalogReviewCommit" class="modern-btn modern-btn-primary" type="button">Approve and inspect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resourceCatalogWithdraw" class="resource-catalog-dialog" aria-labelledby="resourceCatalogWithdrawTitle">
+    <form method="dialog" class="resource-catalog-dialog-body">
+      <h2 id="resourceCatalogWithdrawTitle">Withdraw access</h2>
+      <p id="resourceCatalogWithdrawText"></p>
+      <p id="resourceCatalogWithdrawError" class="resource-catalog-error" role="alert"></p>
+      <div class="resource-catalog-dialog-actions">
+        <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Keep access</button>
+        <button id="resourceCatalogWithdrawCommit" class="modern-btn modern-btn-danger" type="button">Withdraw access</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resourceCatalogFolder" class="resource-catalog-dialog" aria-labelledby="resourceCatalogFolderTitle">
+    <form method="dialog" class="resource-catalog-dialog-body">
+      <h2 id="resourceCatalogFolderTitle">Add a folder</h2>
+      <fieldset>
+        <legend>What it holds</legend>
+        <div id="resourceCatalogFolderCategories" class="resource-catalog-folder-categories"></div>
+      </fieldset>
+      <div class="resource-catalog-field">
+        <label for="resourceCatalogFolderPath">Folder path</label>
+        <div class="resource-catalog-folder-path">
+          <input id="resourceCatalogFolderPath" type="text" maxlength="1024" autocomplete="off" spellcheck="false" placeholder="~/Music/My Templates">
+          <button id="resourceCatalogFolderChoose" class="modern-btn modern-btn-secondary" type="button">Choose…</button>
+        </div>
+      </div>
+      <p class="resource-catalog-dialog-note">Ori reads nothing in it until you approve it in Review sources, and then only names and bounded details. The path stays on this computer.</p>
+      <p id="resourceCatalogFolderNote" class="resource-catalog-dialog-note" role="status"></p>
+      <p id="resourceCatalogFolderError" class="resource-catalog-error" role="alert"></p>
+      <div class="resource-catalog-dialog-actions">
+        <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Cancel</button>
+        <button id="resourceCatalogFolderCommit" class="modern-btn modern-btn-primary" type="button">Add folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resourceCatalogRemoveFolder" class="resource-catalog-dialog" aria-labelledby="resourceCatalogRemoveFolderTitle">
+    <form method="dialog" class="resource-catalog-dialog-body">
+      <h2 id="resourceCatalogRemoveFolderTitle">Remove folder</h2>
+      <p id="resourceCatalogRemoveFolderText"></p>
+      <p id="resourceCatalogRemoveFolderError" class="resource-catalog-error" role="alert"></p>
+      <div class="resource-catalog-dialog-actions">
+        <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Keep it</button>
+        <button id="resourceCatalogRemoveFolderCommit" class="modern-btn modern-btn-danger" type="button">Remove folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  {{template "scripts-dx-utils.tmpl" .}}
+  <script defer src="/js/modules/themeManager.js"></script>
+  {{template "theme-init.tmpl" .}}
+  <script type="module">
+    import { ResourceCatalogPage } from '/js/modules/resource-catalog.js';
+    const page = new ResourceCatalogPage({
+      workspaceId: {{.Extra.WorkspaceID}},
+      workspaceSlug: {{.Extra.WorkspaceSlug}}
+    });
+    window.resourceCatalogPage = page;
+    void page.init();
+  </script>
+</body>
+</html>
+{{end}}

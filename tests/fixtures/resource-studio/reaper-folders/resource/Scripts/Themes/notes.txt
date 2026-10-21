@@ -1,0 +1,1 @@
+Not a script: the catalog passes this file over.

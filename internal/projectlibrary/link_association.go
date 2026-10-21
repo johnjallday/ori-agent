@@ -54,8 +54,11 @@ func (s *Store) exactLinkedChild(scope Scope, state *workspace.AssistantProgramS
 	}
 	link := child.GetAssistantProjectLink()
 	key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID, PluginID: scope.ProviderID, ProgramID: scope.ProgramID}
+	// A resource workspace is a Home child but never a song the library can
+	// adopt, review or associate.
 	if link == nil || link.ID != workspace.AssistantProjectLinkID(scope.HomeID, projectID) ||
-		link.StationWorkspaceID != scope.HomeID || link.Key.Normalize() != key.Normalize() || link.StateRevision < 1 {
+		link.StationWorkspaceID != scope.HomeID || link.Key.Normalize() != key.Normalize() || link.StateRevision < 1 ||
+		workspace.AssistantProjectLinkIsResource(link) {
 		return nil, nil, nil, ExactLink{}, ErrConflict
 	}
 	portable := child

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -65,6 +67,83 @@ type AssistantProgramAllowedProjectAttachment struct {
 	ProjectTeamSchemaVersion int    `json:"project_team_schema_version"`
 	MinProjectTeamVersion    int    `json:"min_project_team_version"`
 	MaxProjectTeamVersion    int    `json:"max_project_team_version"`
+	// WorkspaceKind is empty for a project and "resource" for a resource
+	// workspace. A resource entry carries the Home's own words for it; the
+	// host builds every sentence about the attachment from Label and
+	// Description. All three are omitted for a project so existing Home
+	// declarations keep their digests.
+	WorkspaceKind string `json:"workspace_kind,omitempty"`
+	Label         string `json:"label,omitempty"`
+	Description   string `json:"description,omitempty"`
+}
+
+const (
+	// AssistantProgramHomeMaxResourceAttachments is v1's one optional
+	// resource workspace per Home.
+	AssistantProgramHomeMaxResourceAttachments = 1
+
+	resourceAttachmentLabelLimit       = 60
+	resourceAttachmentDescriptionLimit = 240
+)
+
+// IsResource reports whether the entry authorizes a resource workspace.
+func (allowed AssistantProgramAllowedProjectAttachment) IsResource() bool {
+	return allowed.WorkspaceKind == workspace.AssistantWorkspaceKindResource
+}
+
+// Accepts reports whether this entry authorizes one exact team of one
+// provider blueprint. The workspace kind must agree on both sides, so a Home
+// never takes a resource workspace it listed as a project, or the reverse.
+func (allowed AssistantProgramAllowedProjectAttachment) Accepts(providerPluginID, blueprintID, teamID string, teamSchema, teamVersion int, workspaceKind string) bool {
+	return allowed.ProviderPluginID == providerPluginID && allowed.BlueprintID == blueprintID &&
+		allowed.ProjectTeamID == teamID && allowed.ProjectTeamSchemaVersion == teamSchema &&
+		teamVersion >= allowed.MinProjectTeamVersion && teamVersion <= allowed.MaxProjectTeamVersion &&
+		allowed.WorkspaceKind == workspaceKind
+}
+
+// ResourceAttachment returns the Home's resource attachment, if it has one.
+func (home AssistantProgramHome) ResourceAttachment() (AssistantProgramAllowedProjectAttachment, bool) {
+	for _, allowed := range home.AllowedProjectAttachments {
+		if allowed.IsResource() {
+			return allowed, true
+		}
+	}
+	return AssistantProgramAllowedProjectAttachment{}, false
+}
+
+// normalizeWorkspaceKind accepts the two declared kinds and stores a project
+// as empty, which is how every declaration written before the field reads.
+func normalizeWorkspaceKind(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "project":
+		return "", nil
+	case workspace.AssistantWorkspaceKindResource:
+		return workspace.AssistantWorkspaceKindResource, nil
+	default:
+		return "", fmt.Errorf("%w: workspace_kind must be project or resource", ErrInvalidAssistantProgram)
+	}
+}
+
+// resourceAttachmentText is one plain line of a Home's own words, within
+// limit characters: no URL, control character or text-reordering mark.
+func resourceAttachmentText(field, value string, limit int) (string, error) {
+	value = strings.TrimSpace(value)
+	invalid := func(what string) error {
+		return fmt.Errorf("%w: resource attachment %s %s", ErrInvalidAssistantProgram, field, what)
+	}
+	switch {
+	case value == "":
+		return "", invalid("is required")
+	case !utf8.ValidString(value):
+		return "", invalid("is not valid UTF-8")
+	case utf8.RuneCountInString(value) > limit:
+		return "", invalid(fmt.Sprintf("exceeds %d characters", limit))
+	case strings.Contains(value, "://") || strings.ContainsFunc(value, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) || r == 0x2028 || r == 0x2029
+	}):
+		return "", invalid("contains a URL, a control character or a text-reordering mark")
+	}
+	return value, nil
 }
 
 func CloneAssistantProgramHome(source AssistantProgramHome) AssistantProgramHome {
@@ -136,6 +215,7 @@ func NormalizeAssistantProgramHome(home *AssistantProgramHome) error {
 	}
 
 	seen := make(map[string]struct{}, len(home.AllowedProjectAttachments))
+	resources := 0
 	for index := range home.AllowedProjectAttachments {
 		attachment := &home.AllowedProjectAttachments[index]
 		attachment.ProviderPluginID = normalizeAssistantProgramID(attachment.ProviderPluginID)
@@ -153,6 +233,27 @@ func NormalizeAssistantProgramHome(home *AssistantProgramHome) error {
 			return fmt.Errorf("%w: duplicate allowed project attachment", ErrInvalidAssistantProgram)
 		}
 		seen[key] = struct{}{}
+		kind, err := normalizeWorkspaceKind(attachment.WorkspaceKind)
+		if err != nil {
+			return err
+		}
+		attachment.WorkspaceKind = kind
+		if !attachment.IsResource() {
+			if strings.TrimSpace(attachment.Label) != "" || strings.TrimSpace(attachment.Description) != "" {
+				return fmt.Errorf("%w: only a resource attachment carries a label and description", ErrInvalidAssistantProgram)
+			}
+			attachment.Label, attachment.Description = "", ""
+			continue
+		}
+		if resources++; resources > AssistantProgramHomeMaxResourceAttachments {
+			return fmt.Errorf("%w: a Home declares at most %d resource attachment", ErrInvalidAssistantProgram, AssistantProgramHomeMaxResourceAttachments)
+		}
+		if attachment.Label, err = resourceAttachmentText("label", attachment.Label, resourceAttachmentLabelLimit); err != nil {
+			return err
+		}
+		if attachment.Description, err = resourceAttachmentText("description", attachment.Description, resourceAttachmentDescriptionLimit); err != nil {
+			return err
+		}
 	}
 	return normalizeHomeProfileDeclaration(home.HomeProfile)
 }

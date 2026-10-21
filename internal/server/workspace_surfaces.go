@@ -132,6 +132,11 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 		// through that plugin's one declared read-only operation.
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetHomeProfileFacts(lifecycle.HomeProfileFacts)
+			// A resource workspace's catalog reads its project plugin's two
+			// declared read-only operations; this computer's grants live in
+			// the data directory, never in the workspace folder.
+			b.sessionHandler.SetResourceCatalogCall(lifecycle.ResourceCatalogCall)
+			b.sessionHandler.SetResourceCatalogDataDir(config.DefaultDataDir())
 		}
 		installed, err := b.pluginHandler.Manager().List()
 		if err != nil {

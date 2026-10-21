@@ -1,0 +1,3 @@
+desc: Fade the item edges
+// Fixture only: never run by the catalog.
+x = 0;

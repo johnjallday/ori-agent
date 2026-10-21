@@ -300,15 +300,36 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 		}
 	}
 
+	var resourceOwner *AssistantProjectProviderOwner
+	if snapshot != nil && snapshot.ProjectProvider != nil && snapshot.ProjectProvider.IsResource() {
+		resourceOwner = snapshot.ProjectProvider
+	}
 	liveProjectIDs := make([]string, 0)
+	// Reflection arms on songs only; a resource workspace never counts.
+	liveSongs := 0
 	if !created {
 		linked, linkedErr := service.LinkedProjects(station.ID)
 		if linkedErr != nil {
 			return nil, false, linkedErr
 		}
 		for _, existingProject := range linked {
+			// One resource workspace per attachment: a second one, from a
+			// retry with a new key or a concurrent request, loses here under
+			// the provision lock and its creator rolls it back.
+			if resourceOwner != nil && existingProject.ID != project.ID {
+				if link := existingProject.GetAssistantProjectLink(); link != nil && SameResourceAttachment(link.ProjectProvider, resourceOwner) {
+					return nil, false, &ResourceWorkspaceExistsError{WorkspaceID: existingProject.ID}
+				}
+			}
 			liveProjectIDs = append(liveProjectIDs, existingProject.ID)
+			if existingProject.ID != project.ID && !AssistantProjectLinkIsResource(existingProject.GetAssistantProjectLink()) {
+				liveSongs++
+			}
 		}
+	}
+	songsWithProject := liveSongs
+	if resourceOwner == nil {
+		songsWithProject++
 	}
 	now := service.now()
 	if err := service.store.Update(station.ID, func(current *Workspace) error {
@@ -318,7 +339,8 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 		}
 		state.LinkedProjectIDs = NormalizeAssistantProjectIDs(append(liveProjectIDs, project.ID))
 		state.PluginAvailable = true
-		if state.Hired && state.Declaration != nil && len(state.LinkedProjectIDs) >= state.Declaration.Reflection.MinimumProjects && state.Reflection.ScheduleTaskID == "" {
+		if state.Hired && state.Declaration != nil && resourceOwner == nil &&
+			songsWithProject >= state.Declaration.Reflection.MinimumProjects && state.Reflection.ScheduleTaskID == "" {
 			state.Reflection.ScheduleTaskID = AssistantReflectionScheduleID(current.ID)
 			next := service.now().Add(time.Duration(state.Declaration.Reflection.CadenceHours) * time.Hour)
 			state.Reflection.NextEligibleAt = &next
@@ -385,7 +407,7 @@ func (service *AssistantProgramStore) EnsureProjectStation(projectID string) (*W
 					}
 				}
 				state.LinkedProjectIDs = NormalizeAssistantProjectIDs(filtered)
-				if state.Declaration != nil && len(state.LinkedProjectIDs) < state.Declaration.Reflection.MinimumProjects {
+				if state.Declaration != nil && liveSongs < state.Declaration.Reflection.MinimumProjects {
 					state.Reflection.ScheduleTaskID = ""
 					state.Reflection.NextEligibleAt = nil
 				}
@@ -469,7 +491,9 @@ func (service *AssistantProgramStore) RecordAcceptedCompletion(projectID, finger
 	}
 	link := project.GetAssistantProjectLink()
 	fingerprint = strings.TrimSpace(fingerprint)
-	if link == nil || fingerprint == "" {
+	// Progression counts work on songs. A resource workspace's accepted task
+	// is not song evidence, so it advances nothing.
+	if link == nil || fingerprint == "" || AssistantProjectLinkIsResource(link) {
 		return nil, false, ErrAssistantProgramUnavailable
 	}
 	linkedStation, stationErr := service.store.Get(link.StationWorkspaceID)

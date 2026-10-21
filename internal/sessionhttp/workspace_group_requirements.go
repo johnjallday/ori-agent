@@ -559,6 +559,11 @@ func respondGroupRequirementUnavailable(w http.ResponseWriter) {
 }
 
 func respondGroupRequirementError(w http.ResponseWriter, err error) {
+	var exists *agentworkspace.ResourceWorkspaceExistsError
+	if errors.As(err, &exists) {
+		respondResourceWorkspaceExists(w, exists.WorkspaceID)
+		return
+	}
 	status := http.StatusConflict
 	reason := "review_stale"
 	summary := "The placement review changed or expired. Review the destination again."

@@ -1,0 +1,6 @@
+{
+  "name": "music-project-management",
+  "version": "0.4.0-fixture",
+  "description": "Test fixture: a content-only Music Production Home that allows one REAPER Studio. Not the published package.",
+  "author": "Ori contributors"
+}

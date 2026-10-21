@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "installation": {
+    "id": "inst_8f3c2a91d4e7b605",
+    "label": "REAPER 7.28",
+    "layout": "per_user",
+    "app_installed": true,
+    "app_version": "7.28"
+  },
+  "sources": [
+    {
+      "id": "project_templates",
+      "category": "templates",
+      "label": "Project templates",
+      "location": "~/Library/Application Support/REAPER/ProjectTemplates",
+      "access": "file",
+      "state": "ready"
+    },
+    {
+      "id": "track_templates",
+      "category": "templates",
+      "label": "Track templates",
+      "location": "~/Library/Application Support/REAPER/TrackTemplates",
+      "access": "file",
+      "state": "absent",
+      "detail": "There is no TrackTemplates folder yet."
+    },
+    {
+      "id": "reaper_scripts",
+      "category": "scripts",
+      "label": "REAPER Scripts",
+      "location": "~/Library/Application Support/REAPER/Scripts",
+      "access": "file",
+      "state": "ready"
+    },
+    {
+      "id": "ori_scripts",
+      "category": "scripts",
+      "label": "Ori script library",
+      "location": "~/Ori Scripts/reaper",
+      "access": "file",
+      "state": "ready"
+    },
+    {
+      "id": "audio_plugins",
+      "category": "audio_plugins",
+      "label": "REAPER plugin list",
+      "location": "REAPER (running)",
+      "access": "live",
+      "state": "app_closed",
+      "detail": "Open REAPER to read its plugin list."
+    }
+  ]
+}

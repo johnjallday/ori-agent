@@ -504,7 +504,9 @@ func (s *TodayService) loadStudio(userID, slug, hqID string) *TodayStudioProject
 		return out
 	}
 
-	linked, err := workspace.NewAssistantProgramStore(s.workspaces).LinkedProjects(station.ID)
+	// Songs only: a Home's resource workspace is not a song blueprint and must
+	// not read as a stale reference that hides the whole section.
+	linked, err := workspace.NewAssistantProgramStore(s.workspaces).LinkedSongProjects(station.ID)
 	if err != nil {
 		out.Health = todayUnavailable("read_failed")
 		return out
