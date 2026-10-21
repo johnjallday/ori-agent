@@ -47,7 +47,7 @@ type Session = {
   applied: string[];
   team_patch: Record<string, unknown> | null;
   team_state: Record<string, unknown> | null;
-  pending_question: { text: string; choices: Choice[] } | null;
+  pending_question: { question: string; choices: Choice[] } | null;
   create_now: boolean;
   furthest_step: number;
   turn_count: number;
@@ -168,7 +168,7 @@ async function fakeBuildServer(
       text: next.text,
       ...(choices.length ? { choices } : {})
     });
-    session.pending_question = choices.length ? { text: next.text, choices } : null;
+    session.pending_question = choices.length ? { question: next.text, choices } : null;
     session.applied = applied;
     session.create_now = Boolean(next.createNow);
     session.version += 1;
@@ -412,7 +412,10 @@ async function manual(page: Page) {
 
 async function assisted(page: Page) {
   await page.locator('#workspaceBuildWithBtn').click();
-  await expect(pane(page)).toBeVisible();
+  const folder = await page.evaluate(() =>
+    Boolean((window as any).sessionManager.workspaceBuild?.session?.folder)
+  );
+  await expect(folder ? page.locator('#workspaceBuildFolderReview') : pane(page)).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -421,6 +424,92 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ json: { needs_onboarding: false, completed: true } })
   );
   await mockHiredAssistant(page);
+});
+
+test('folder review is one shared editable surface with optional conversation', async ({
+  page
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const fake = await fakeBuildServer(page, [
+    {
+      text: 'Here is a tentative workspace.',
+      set: { blank: true, name: 'Research notes', description: 'Draft a research notebook.' },
+      team: { mode: 'agentless' }
+    },
+    {
+      text: 'I refined the description. Review before creating.',
+      set: { description: 'My refined purpose' },
+      createNow: true
+    }
+  ]);
+  let creates = 0;
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/workspaces')
+      creates++;
+  });
+  await openFromHome(page);
+  await say(page, 'Make a research notebook with no agents.');
+  await composer(page).fill('Refine my purpose, but leave my name.');
+  await pane(page).getByRole('button', { name: 'Add folder', exact: true }).click();
+  await pane(page).getByRole('button', { name: 'Documents', exact: true }).click();
+  const review = page.locator('#workspaceBuildFolderReview');
+  await expect(review).toBeVisible();
+  await expect(pane(page)).toBeHidden();
+  await expect(page.locator('#workspaceBuildDraftSummary')).toBeHidden();
+  await expect(page.locator('#workspaceBuildCreationReview')).toBeHidden();
+  await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('Research notes');
+  await expect(page.locator('#workspaceBuildFolderIdentity')).toContainText('Elite School');
+  expect(fake.turns).toHaveLength(1);
+  await page.locator('#workspaceBuildPlanName').fill('My edited workspace');
+  await page.locator('#workspaceBuildFolderDetails summary').click();
+  await page.locator('#workspaceBuildPlanGoal').fill('');
+  await expect(page.locator('#folderNameInput')).toHaveValue('My edited workspace');
+  await expect.poll(() => fake.session?.draft.name).toBe('My edited workspace');
+  await page.getByRole('button', { name: 'Edit team', exact: true }).click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await page.locator('#workspaceBuildWithBtn').click();
+  await expect(review).toBeVisible();
+  await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('My edited workspace');
+  await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
+  await expect(composer(page)).toHaveValue('Refine my purpose, but leave my name.');
+  await pane(page).getByRole('button', { name: 'Add link', exact: true }).click();
+  await page.locator('#workspaceBuildLinkInput').fill(FAKE_LINK.url);
+  await page.locator('#workspaceBuildLinkInput').press('Enter');
+  await expect(page.locator('#workspaceBuildLinkField')).toBeHidden();
+  expect(fake.links).toHaveLength(1);
+  expect(fake.turns).toHaveLength(1);
+  await page.getByRole('button', { name: 'Return to workspace review', exact: true }).click();
+  await expect(page.locator('#workspaceBuildFolderLink')).toContainText(FAKE_LINK.title);
+  await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
+  await expect(composer(page)).toHaveValue('Refine my purpose, but leave my name.');
+  const sent = page.waitForResponse(response => isTurn(response.url()));
+  await composer(page).press('Enter');
+  await settle(page, sent);
+  expect(fake.turns).toHaveLength(2);
+  expect(creates).toBe(0);
+  await page.getByRole('button', { name: 'Return to workspace review', exact: true }).click();
+  await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('My edited workspace');
+  await expect(page.locator('#workspaceBuildPlanDescription')).toHaveValue('My refined purpose');
+  expect(fake.session?.folder?.observation.id).toBe(FAKE_OBSERVATION.id);
+  expect(
+    fake.drafts.some(
+      draft => draft.edited_fields?.includes('name') && draft.draft.name === 'My edited workspace'
+    )
+  ).toBe(true);
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeEnabled();
+  await page.locator('#workspaceBuildFolderDetails summary').click();
+  await page.screenshot({ path: testInfo.outputPath('folder-review-shared-draft.png') });
+
+  await page.locator('#workspaceBuildPlanName').fill('');
+  await page.locator('#workspaceBuildFolderDetails summary').click();
+  await page.locator('#workspaceBuildPlanDescription').fill('');
+  await page.getByRole('button', { name: 'Change purpose', exact: true }).click();
+  await cardByLabel(page, 'Code Project').click();
+  await page.locator('#workspaceBuildWithBtn').click();
+  await expect(page.locator('#workspaceBuildFolderPurpose')).toContainText('Code Project');
+  await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('');
+  await expect(page.locator('#workspaceBuildPlanDescription')).toHaveValue('');
+  expect(fake.turns).toHaveLength(2);
 });
 
 test('golden path: three turns and no form clicks create the workspace the build drafted', async ({
@@ -575,17 +664,20 @@ test('a folder attached in the pane shows on the chip, the draft line, the turn,
   await expect(page.locator('#workspaceBuildFolderSummary')).toContainText('42 files observed');
   await expect(page.locator('#workspaceBuildFolderSummary')).toContainText('contents not read');
   await expect(page.locator('#workspaceBuildDraftText')).toContainText('Folder: Elite School');
-  await expect(pane(page)).toContainText('Folder attached');
+  await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
+  await expect(page.locator('#workspaceBuildFolderIdentity')).toContainText('Elite School');
   expect(fake.folders).toHaveLength(1);
   expect(fake.folders[0]).toMatchObject({ mode: 'chip', chip: 'documents' });
   expect(fake.folders[0].path).toBeUndefined();
 
-  // An empty Send asks for the folder itself; the reply fills the form.
+  // This UI fake has no proposal operation; real automatic inference is
+  // covered by file-janitor-creation-flow. Empty Send is never a user turn.
+  await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
   await expect(composer(page)).toBeEnabled();
-  const turn = page.waitForResponse(response => isTurn(response.url()));
   await composer(page).press('Enter');
-  await settle(page, turn);
-  expect(fake.turns.at(-1)?.text).toBe('Set it up from the attached folder.');
+  expect(fake.turns).toHaveLength(0);
+  await say(page, 'Review the attached Python project.');
+  expect(fake.turns.at(-1)?.text).toBe('Review the attached Python project.');
   await expect(page.locator('#folderNameInput')).toHaveValue('Elite School');
 
   // Review names the folder Create will link, whichever surface is active.
@@ -596,6 +688,7 @@ test('a folder attached in the pane shows on the chip, the draft line, the turn,
   await manual(page);
   await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(1);
   await assisted(page);
+  await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
 
   const detached = page.waitForResponse(response =>
     /\/folder\/detach$/.test(new URL(response.url()).pathname)
@@ -692,7 +785,10 @@ test('a link attached in the pane shows on the chip, the draft line, the turn, t
   const detached = page.waitForResponse(response =>
     /\/link\/detach$/.test(new URL(response.url()).pathname)
   );
-  await page.locator('#workspaceBuildLink').getByRole('button', { name: /Remove link/ }).click();
+  await page
+    .locator('#workspaceBuildLink')
+    .getByRole('button', { name: /Remove link/ })
+    .click();
   await detached;
   await expect(page.locator('#workspaceBuildLink')).toBeHidden();
   await expect(page.locator('#workspaceBuildDraftText')).not.toContainText('Link:');

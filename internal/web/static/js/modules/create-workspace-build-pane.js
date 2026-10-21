@@ -1865,11 +1865,35 @@
     render();
   }
 
+  function renderFolderQuestion(host, question, busy = false) {
+    if (!host) return;
+    const key = JSON.stringify([question, busy]);
+    if (host.dataset.questionKey === key) return;
+    host.dataset.questionKey = key;
+    host.textContent = '';
+    host.hidden = !question;
+    if (!question) return;
+    host.appendChild(createElement('p', 'workspace-build-folder-question', question.question));
+    const choices = createElement('div', 'workspace-build-chips');
+    for (const choice of question.choices || []) {
+      const button = createElement('button', 'workspace-build-chip', choice.label);
+      button.type = 'button';
+      button.disabled = busy;
+      button.addEventListener('click', () => {
+        if (button.disabled) return;
+        for (const sibling of choices.children) sibling.disabled = true;
+        emit('workspace-build-turn', { choiceId: choice.id, label: choice.label });
+      });
+      choices.appendChild(button);
+    }
+    host.appendChild(choices);
+  }
+
   // The controller owns authority and requests; this host renderer displays
   // server facts only, never model-authored permission prose or HTML.
   function renderCreationReview(
     host,
-    { review = null, busy = false, message = '', accepted = false } = {}
+    { review = null, busy = false, message = '', accepted = false, compact = false } = {}
   ) {
     if (!host) return;
     host.textContent = '';
@@ -1882,7 +1906,9 @@
         ? 'Preparation deferred'
         : accepted
           ? 'Resume accepted preparation'
-          : 'Review & create'
+          : compact
+            ? 'Folder permissions'
+            : 'Review & create'
     );
     heading.tabIndex = -1;
     host.appendChild(heading);
@@ -1898,26 +1924,28 @@
       return button;
     };
     if (review?.workspace) {
-      host.appendChild(createElement('strong', '', review.workspace.name));
-      if (review.workspace.description)
-        host.appendChild(createElement('p', '', review.workspace.description));
-      host.appendChild(createElement('p', '', review.workspace.mission || 'No goal specified'));
-      host.appendChild(
-        createElement('p', '', 'Placement: ' + (review.placement_label || 'Workspace root'))
-      );
-      const team = createElement('ul', 'workspace-build-review__team');
-      for (const member of review.team || []) {
-        team.appendChild(
-          createElement(
-            'li',
-            '',
-            member.name + ' · ' + member.action + (member.model ? ' · ' + member.model : '')
-          )
+      if (!compact || accepted) {
+        host.appendChild(createElement('strong', '', review.workspace.name));
+        if (review.workspace.description)
+          host.appendChild(createElement('p', '', review.workspace.description));
+        host.appendChild(createElement('p', '', review.workspace.mission || 'No goal specified'));
+        host.appendChild(
+          createElement('p', '', 'Placement: ' + (review.placement_label || 'Workspace root'))
         );
+        const team = createElement('ul', 'workspace-build-review__team');
+        for (const member of review.team || []) {
+          team.appendChild(
+            createElement(
+              'li',
+              '',
+              member.name + ' · ' + member.action + (member.model ? ' · ' + member.model : '')
+            )
+          );
+        }
+        if (!(review.team || []).length)
+          team.appendChild(createElement('li', '', 'No agents will be created or attached.'));
+        host.appendChild(team);
       }
-      if (!(review.team || []).length)
-        team.appendChild(createElement('li', '', 'No agents will be created or attached.'));
-      host.appendChild(team);
       host.appendChild(createElement('strong', '', 'Folder: ' + review.folder.name));
       const details = createElement('details', 'workspace-build-review__details');
       details.appendChild(createElement('summary', '', 'Folder details'));
@@ -1961,7 +1989,7 @@
       );
       confirm.className = 'modern-btn modern-btn-primary';
       actions.appendChild(confirm);
-    } else if (!accepted) {
+    } else if (!accepted && !compact) {
       actions.appendChild(action('Review & create', 'workspace-build-review'));
     }
     if (accepted && review?.state !== 'deferred') {
@@ -1974,7 +2002,7 @@
         )
       );
     }
-    if (!accepted) {
+    if (!accepted && !compact) {
       actions.appendChild(action('Edit setup', 'workspace-build-collapse'));
       actions.appendChild(action('Change folder', 'workspace-build-folder-open'));
     }
@@ -2032,6 +2060,7 @@
     expand,
     destroy,
     renderCreationReview,
+    renderFolderQuestion,
     openFolderChooser,
     closeFolderChooser,
     folderChooserOpen: () => Boolean(state.root && state.chooserOpen),

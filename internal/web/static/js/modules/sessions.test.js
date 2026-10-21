@@ -6803,7 +6803,7 @@ test('a refused Set it up says why and does not follow anything', async () => {
   ]);
 });
 
-test('a recognized folder’s plan is “Plan so far”, reviewed in place of the wizard', () => {
+test('a recognized folder opens its host review directly and edits the shared draft', () => {
   const elements = planReviewElements();
   const rendered = [];
   const manager = loadSessionManager(
@@ -6830,9 +6830,9 @@ test('a recognized folder’s plan is “Plan so far”, reviewed in place of th
     elements.get('workspaceBuildDraftText').textContent,
     'Music Production Home (new) › Ori Music Demo · Folder: Ori Music Demo · Needs: Music Project Management (install)'
   );
-  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
 
-  // Review or edit draft opens the plan review, never the wizard.
+  // Returning to review never opens a second draft or the wizard.
   manager.reviewOrEditWorkspaceBuild();
   assert.equal(collapsed, 0);
   assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
@@ -6853,8 +6853,8 @@ test('a recognized folder’s plan is “Plan so far”, reviewed in place of th
     /› Summer Demos · Folder: Ori Music Demo/
   );
 
-  // Closing it again; and once every plugin is ready there is nothing to need.
-  manager.reviewOrEditWorkspaceBuild();
+  // Optional conversation keeps the plan; ready prerequisites update in place.
+  manager.refineWorkspaceBuildFolder();
   assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
   manager.workspaceBuild.session.plan.needs[1].state = 'ready';
   manager.syncWorkspaceBuildPresentation();
@@ -6863,13 +6863,13 @@ test('a recognized folder’s plan is “Plan so far”, reviewed in place of th
     'Music Production Home (new) › Summer Demos · Folder: Ori Music Demo'
   );
 
-  // Without a ready plan the button is the wizard again.
+  // An unavailable recognized plan stays constrained, not a generic wizard.
   manager.workspaceBuild.session.plan.ready = false;
   manager.reviewOrEditWorkspaceBuild();
-  assert.equal(collapsed, 1);
+  assert.equal(collapsed, 0);
   manager.syncWorkspaceBuildPresentation();
-  assert.equal(elements.get('workspaceBuildDraftTitle').textContent, 'Draft so far');
-  assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+  assert.equal(elements.get('workspaceBuildPlanReview').hidden, false);
+  assert.equal(elements.get('workspaceBuildDraftSummary').hidden, true);
 });
 
 function prepareProposalWizard() {
@@ -7051,6 +7051,71 @@ test('proposal application restores explicit empty fields after blueprint prefil
   assert.equal(patches[0].template_id, 'code-project');
 });
 
+test('folder review shows the actual effective team and constrains recognized plans', async () => {
+  const { manager, nodes, window } = prepareProposalWizard();
+  for (const id of [
+    'workspaceBuildFolderPurpose',
+    'workspaceBuildFolderTeam',
+    'workspaceBuildFolderIdentity',
+    'workspaceBuildFolderPlacement',
+    'workspaceBuildFolderPurposeEdit',
+    'workspaceBuildFolderTeamEdit',
+    'workspaceBuildFolderPlacementEdit',
+    'workspaceBuildFolderGoalField'
+  ])
+    nodes.set(id, new BuildNode('div', id));
+  manager.workspaceBuild.session.folder = {
+    observation: { folder: 'Same-named folder', files: 3 }
+  };
+  manager.workspaceBuildGateProblem = () => '';
+  window.ProjectTemplateCard = { getSelectedTemplate: () => ({ name: 'Research' }) };
+  manager.teamView = () => ({
+    planStatus: 'ready',
+    roleRoster: {
+      total_count: 1,
+      roles: [{ label: 'Researcher', state: 'filled', agent: { name: '<saved teammate>' } }]
+    }
+  });
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(nodes.get('workspaceBuildFolderTeam').textContent, 'Researcher: <saved teammate>');
+  assert.equal(nodes.get('workspaceBuildFolderTeam').children.length, 0);
+  assert.equal(nodes.get('workspaceBuildFolderPurposeEdit').hidden, false);
+  manager.workspaceBuild.session.plan = { ready: true, home: { name: 'Music Production Home' } };
+  manager.workspaceBuild.session.folder.recognition = {
+    verdict: 'project',
+    blueprint_label: 'REAPER Song'
+  };
+  manager.syncWorkspaceBuildFolderReview();
+  assert.match(nodes.get('workspaceBuildFolderPurpose').textContent, /REAPER Song.*fixed/);
+  assert.equal(nodes.get('workspaceBuildFolderTeamEdit').hidden, true);
+  assert.equal(nodes.get('workspaceBuildFolderGoalField').hidden, true);
+  assert.equal(nodes.get('workspaceBuildFolderPlacement').textContent, 'Music Production Home');
+  manager.workspaceBuild.session.plan.ready = false;
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(nodes.get('workspaceBuildFolderTeamEdit').hidden, true);
+  let prerequisites = 0;
+  manager.refineWorkspaceBuildFolder = () => prerequisites++;
+  manager.createFromWorkspaceBuild = () => {
+    throw new Error('generic fallback');
+  };
+  await manager.actOnWorkspaceBuildFolderReview();
+  assert.equal(prerequisites, 1);
+});
+
+test('changing purpose cannot refill earlier explicitly cleared name or description', () => {
+  const { manager, nameInput, nodes } = prepareProposalWizard();
+  const descriptionInput = nodes.get('folderDescriptionInput');
+  for (const [input, field, attr] of [
+    [nameInput, 'name', 'autofillName'],
+    [descriptionInput, 'description', 'autofillDescription']
+  ]) {
+    input.value = '';
+    manager.markWorkspaceBuildEdited(field);
+    manager.prefillTemplateValue(input, 'New blueprint default', attr);
+    assert.equal(input.value, '');
+  }
+});
+
 test('an explicitly cleared goal is not refilled from the description by a proposal', async () => {
   const { manager, nodes } = loadBuildWizard();
   const goal = new BuildNode('textarea', 'folderGoalInput');
@@ -7103,6 +7168,26 @@ test('a draft conflict blocks later debounce and forced-close saves until explic
   assert.equal(sends, 1);
   assert.equal(manager.workspaceBuild.draftConflict, true);
   assert.equal(manager.workspaceBuild.draftUser, true);
+});
+
+test('agent and Map subflows retain the same draft without setting a lifecycle close latch', () => {
+  const { manager, nodes } = prepareProposalWizard();
+  const modal = new BuildNode('div', 'addFolderModal');
+  nodes.set('addFolderModal', modal);
+  manager.workspaceBuild.draftUser = true;
+  manager.pauseWorkspaceBuildSuggestion = () => {
+    throw new Error('subflow treated as close');
+  };
+  for (const flag of ['suspendedForAgentSetup', 'suspendedForMapPlacement']) {
+    modal.dataset[flag] = 'true';
+    manager.guardWorkspaceBuildClose({
+      preventDefault() {
+        throw new Error('blocked subflow');
+      }
+    });
+    delete modal.dataset[flag];
+  }
+  assert.equal(manager.workspaceBuild.closeReady, undefined);
 });
 
 test('closing pauses inference and saves the kept draft before destroying controls', async () => {

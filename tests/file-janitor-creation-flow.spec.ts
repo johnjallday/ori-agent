@@ -210,6 +210,7 @@ test.describe('attached creation with a scripted local model', () => {
         calls = stopModel!.calls();
       await attachFirst(page, request, root);
       if (mode === 'success') {
+        await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
         await expect(page.locator('#workspaceBuildDraftText')).toContainText('Synthetic Janitor');
         await expect(page.locator('#workspaceBuildComposerInput')).toHaveValue('');
       } else if (mode === 'failure') {
@@ -220,7 +221,7 @@ test.describe('attached creation with a scripted local model', () => {
       } else {
         await expect(
           page
-            .locator('#workspaceBuildPane')
+            .locator('#workspaceBuildFolderReview')
             .getByRole('button', { name: 'Organize files', exact: true })
         ).toBeVisible();
       }
@@ -298,9 +299,14 @@ test.describe('attached creation with a scripted local model', () => {
     try {
       await attachFirst(page, request, inbox(), 'Unsent composer buffer');
       await held.started;
-      await page.getByRole('button', { name: 'Set up manually', exact: true }).click();
-      await page.locator('#wizardNextBtn').click();
-      await page.locator('#folderNameInput').fill('Keep my manual name');
+      // A still-focused composer may keep refinement open; switch explicitly
+      // in that case without submitting its buffer.
+      const returnToReview = page.getByRole('button', {
+        name: 'Return to workspace review',
+        exact: true
+      });
+      if (await returnToReview.isVisible()) await returnToReview.click();
+      await page.locator('#workspaceBuildPlanName').fill('Keep my manual name');
       await page.getByRole('button', { name: 'Close create workspace', exact: true }).click();
       await expect(page.locator('#addFolderModal')).toBeHidden();
       held.release();
@@ -317,6 +323,43 @@ test.describe('attached creation with a scripted local model', () => {
       held.release();
       stopModel!.scenario();
     }
+  });
+
+  test('folder review keeps a staged team edit and the held folder through manual setup', async ({
+    page,
+    request
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const before = await resources(request);
+    await attachFirst(page, request, inbox('Downloads'));
+    await expect(page.locator('#workspaceBuildFolderTeam')).toContainText('Synthetic Curator');
+    const folder = (await currentBuild(request)).folder.observation.id;
+    await page.locator('#workspaceBuildPlanName').fill('Reviewed folder draft');
+    await page.getByRole('button', { name: 'Edit team', exact: true }).click();
+    const roster = page.locator('#workspaceRoleRoster');
+    await roster.getByRole('button', { name: 'Clear File Curator', exact: true }).click();
+    await roster
+      .getByRole('button', { name: 'Create an agent for File Curator', exact: true })
+      .click();
+    const agent = page.locator('#addAgentModal');
+    await expect(agent).toBeVisible();
+    await agent.locator('[data-agent-create-field=name]').fill('Reviewed Curator');
+    await agent.locator('[data-agent-create-field=model]').selectOption('ori-synthetic-model');
+    await agent.getByRole('button', { name: 'Add to team', exact: true }).click();
+    await expect(agent).toBeHidden();
+    await page.locator('#workspaceBuildWithBtn').click();
+    await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
+    await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('Reviewed folder draft');
+    await expect(page.locator('#workspaceBuildFolderTeam')).toContainText('Reviewed Curator');
+    await expect
+      .poll(async () => (await currentBuild(request)).draft.role_staffing?.[0]?.name)
+      .toBe('Reviewed Curator');
+    expect((await currentBuild(request)).folder.observation.id).toBe(folder);
+    expect(await resources(request)).toEqual(before);
+    await page
+      .getByText('Reviewed Curator added to the workspace draft.', { exact: true })
+      .waitFor({ state: 'hidden', timeout: 10_000 });
+    await page.screenshot({ path: testInfo.outputPath('folder-review-edited-team.png') });
   });
 
   for (const monitoring of [false, true]) {

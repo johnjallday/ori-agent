@@ -240,6 +240,31 @@ function entries(root) {
   return root.querySelectorAll('li');
 }
 
+test('folder review clarification is text-only, does not touch unsent text, and sends one choice', () => {
+  const { pane, document, events, root } = loadPane();
+  pane.mount({ assistant: { display_name: 'Atlas' } });
+  const host = document.createElement('section');
+  const input = root.querySelectorAll('textarea')[0];
+  input.value = 'Unsent thought';
+  const question = {
+    question: 'What should this folder do?',
+    choices: [{ id: 'choice-1', label: '<img src=x>' }]
+  };
+  pane.renderFolderQuestion(host, question);
+  const choice = host.querySelectorAll('button')[0];
+  assert.equal(choice.textContent, '<img src=x>');
+  pane.renderFolderQuestion(host, question);
+  assert.equal(
+    host.querySelectorAll('button')[0],
+    choice,
+    'unchanged projection keeps the focused control'
+  );
+  choice.click();
+  choice.click();
+  assert.equal(events.filter(event => event.type === 'workspace-build-turn').length, 1);
+  assert.equal(input.value, 'Unsent thought');
+});
+
 test('creation permission review is host-rendered, default-off and explicitly confirmed', () => {
   const { pane, document, events } = loadPane();
   const host = document.createElement('section');

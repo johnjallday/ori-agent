@@ -66,6 +66,7 @@ test('folder-first recognized plan needs no model or setup action on attachment'
 }, testInfo) => {
   test.skip(!SONG, 'NARRATED_SONG names a seeded song folder in the sandbox');
   const model = await startJanitorBuildModel();
+  await page.setViewportSize({ width: 1280, height: 900 });
   try {
     const before = await workspaces(page);
     let turns = 0;
@@ -81,7 +82,12 @@ test('folder-first recognized plan needs no model or setup action on attachment'
     await expect(page.locator('.workspace-build-folder__recognition')).toContainText(
       'Recognized: REAPER project'
     );
-    await expect(page.locator('#workspaceBuildPlan')).toContainText(`Creates Home “${HOME}”`);
+    await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
+    await expect(page.locator('#workspaceBuildPlanReviewLines')).toContainText(
+      `Creates Home “${HOME}”`
+    );
+    await expect(page.locator('#workspaceBuildFolderTeamEdit')).toBeHidden();
+    await expect(page.locator('#workspaceBuildFolderPurpose')).toContainText('fixed by this plan');
     expect(await workspaces(page)).toEqual(before);
     expect(turns).toBe(0);
     expect(model.calls()).toBe(0);
@@ -135,9 +141,9 @@ test('the build path recognizes the song, runs one Set it up, and places the new
   await expect(page.locator('#workspaceBuildPlan')).toContainText(`Creates Home “${HOME}”`);
   await expect(page.locator('#workspaceBuildDraftTitle')).toHaveText('Plan so far');
 
-  // Review or edit draft names the workspace; nothing else on the plan moves.
-  // The open review stands in for the conversation, with its own Set it up.
-  await page.click('#workspaceBuildEditDraftBtn');
+  // Attachment opens the shared review directly. Naming the workspace does
+  // not change the host-owned plan, team or placement.
+  await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
   await expect(page.locator('#workspaceBuildPane')).toBeHidden();
   await page.fill('#workspaceBuildPlanName', 'Ori Music Demo');
   const setUp = page.locator('#workspaceBuildPlanReviewSetup');

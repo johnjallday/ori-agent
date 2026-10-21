@@ -2374,6 +2374,126 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   outline-offset: 3px;
 }
 
+/* Folder-first review: one ledger-like decision surface, one scrolling body.
+   The shared wizard stays mounted; conversation is optional refinement. */
+.workspace-create-modal .workspace-build-folder-review {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  color: var(--wc-ink);
+  background: var(--wc-panel);
+}
+.workspace-create-modal .workspace-build-folder-review[hidden],
+.workspace-create-modal .workspace-build-return[hidden] {
+  display: none;
+}
+.workspace-create-modal.workspace-create-modal--build.workspace-create-modal--folder-review
+  #workspaceBuildPane {
+  display: none;
+}
+.workspace-create-modal#addFolderModal.workspace-create-modal--folder-review
+  .workspace-create-modal-dialog {
+  width: min(840px, calc(100vw - 2rem));
+  max-width: min(840px, calc(100vw - 2rem));
+}
+.workspace-build-folder-review__body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 20px 24px;
+  scroll-padding: 16px;
+  overflow-wrap: anywhere;
+}
+.workspace-create-modal.workspace-create-modal--folder-review
+  .workspace-build-folder-review
+  .workspace-build-plan-review,
+.workspace-create-modal .workspace-build-folder-review .workspace-build-review {
+  padding: 0;
+  flex: none;
+  overflow: visible;
+  max-height: none;
+  border: 0;
+}
+.workspace-create-modal .workspace-build-folder-review .workspace-build-plan-review h2 {
+  margin: 0 0 12px;
+  font-size: 22px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.workspace-create-modal .workspace-build-folder-review .workspace-build-plan-review__fields {
+  gap: 8px;
+}
+.workspace-build-folder-review__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+  margin: 24px 0;
+}
+.workspace-build-folder-review__facts > div {
+  border-top: 1px solid var(--wc-line);
+  padding-top: 12px;
+  min-width: 0;
+}
+.workspace-build-folder-review__facts dt {
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wc-ink-dim);
+  margin-bottom: 6px;
+}
+.workspace-build-folder-review__facts dd {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.workspace-create-modal .workspace-build-text-action {
+  border: 0;
+  padding: 2px 0;
+  background: none;
+  color: var(--wc-faction);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 13px;
+}
+.workspace-build-folder-review__footer {
+  flex: none;
+  padding: 12px 24px;
+  border-top: 1px solid var(--wc-line);
+  background: var(--wc-bg-2);
+}
+.workspace-build-folder-review__footer > p:empty {
+  display: none;
+}
+.workspace-build-folder-review__footer > p {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+.workspace-build-folder-review__footer .modern-btn {
+  white-space: normal;
+}
+.workspace-build-folder-review :is(button, input, textarea, summary):focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 3px;
+}
+.workspace-build-return {
+  margin: 8px 16px;
+  align-self: flex-start;
+}
+@media (max-width: 600px) {
+  .workspace-build-folder-review__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-build-folder-review__body {
+    padding: 16px;
+  }
+  .workspace-build-folder-review__footer {
+    padding: 12px 16px;
+  }
+}
+
 /* ---------- build with your assistant ---------- */
 /* One active surface, in DOM order. The shared form remains mounted but hidden
    during conversation; no duplicated Team or Review editor. */
