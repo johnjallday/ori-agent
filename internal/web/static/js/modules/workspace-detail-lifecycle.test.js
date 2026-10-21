@@ -1454,3 +1454,54 @@ test('a tree read finishing after teardown publishes nothing', async t => {
   assert.equal(page.parentGroup, null);
   assert.equal(view.syncs, 0);
 });
+
+test('a header refresh outside a full load (an inline edit) also publishes the parent', async t => {
+  const { page, view } = makePage(t);
+  page.renderWorkspaceInfo = WorkspaceDetailPage.prototype.renderWorkspaceInfo;
+  page.parentGroup = descriptorFor(STUDIO_GROUP);
+  watchParentSyncs(view);
+  // The workspace moved to another group since the page loaded.
+  t.mock.method(globalThis, 'fetch', async () => response(memberTree(LABEL_GROUP)));
+  await page.renderWorkspaceInfo(); // what saveWorkspaceIdentityField runs after a rename
+  assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+  assert.equal(view.syncs, 2, 'removed as the read began, then the new group');
+  assert.equal(view.refreshes, 0, 'only the link is updated; no full Command render');
+});
+
+test('an older full load cannot overwrite the group a newer full load resolved', async t => {
+  const { page, view } = makePage(t);
+  page.renderWorkspaceInfo = WorkspaceDetailPage.prototype.renderWorkspaceInfo;
+  watchParentSyncs(view);
+  const oldTree = deferred();
+  let trees = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (!url.includes('tree=true')) return response(workspace('loaded'));
+    return ++trees === 1 ? oldTree.promise : response(memberTree(LABEL_GROUP));
+  });
+  const oldLoad = page.loadWorkspace();
+  while (trees === 0) await flush(); // the old load is waiting on its tree read
+  await page.loadWorkspace();
+  assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+  const syncs = view.syncs;
+  oldTree.resolve(response(memberTree(STUDIO_GROUP)));
+  await oldLoad;
+  assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+  assert.equal(view.syncs, syncs);
+});
+
+test('an unrelated Command refresh during a pending tree read cannot show the old group', async t => {
+  const dataLoader = { loadTasks: async () => ({ tasks: [{ id: 'task-1' }] }) };
+  const { page, view } = makePage(t, { dataLoader });
+  page.parentGroup = descriptorFor(STUDIO_GROUP);
+  watchParentSyncs(view);
+  const seenByRefresh = [];
+  window.workspaceCommand.refresh = () => seenByRefresh.push(page.parentGroup);
+  const tree = deferred();
+  t.mock.method(globalThis, 'fetch', () => tree.promise);
+  const read = page.loadChildren();
+  await page.loadTasks(); // re-renders the whole Command view mid-read
+  assert.deepEqual(seenByRefresh, [null]);
+  tree.resolve(response(memberTree()));
+  await read;
+  assert.deepEqual(page.parentGroup, descriptorFor(STUDIO_GROUP));
+});

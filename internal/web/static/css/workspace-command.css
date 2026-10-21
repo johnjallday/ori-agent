@@ -122,6 +122,9 @@
 }
 .ws-cmd-nav {
   flex: 1 0 100%;
+  /* Never wider than the bar: a long group name shortens, it does not push
+     the row (and the page) past a phone's width. */
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -149,9 +152,11 @@
   border-color: var(--ws-faction-deep);
   text-decoration: none;
 }
+/* Inside the border: the clip-path above cuts away anything drawn outside it,
+   which used to include the whole focus ring. */
 .ws-cmd-nav-btn:focus-visible {
   outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
+  outline-offset: -4px;
 }
 .ws-cmd-nav-btn:disabled {
   cursor: progress;

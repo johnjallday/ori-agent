@@ -1482,17 +1482,14 @@ export class WorkspaceCommandView {
       existing.getAttribute('title') === group.title
     )
       return;
-    const hadFocus = Boolean(existing) && this.isFocused(existing);
+    const hadFocus =
+      Boolean(existing) && typeof document !== 'undefined' && document.activeElement === existing;
     existing?.remove();
     if (group)
       nav
         .querySelector('[data-cmd-nav-home]')
         ?.insertAdjacentHTML('afterend', this.parentGroupLinkHTML());
     if (hadFocus) this.restoreParentGroupFocus(nav);
-  }
-
-  isFocused(element) {
-    return typeof document !== 'undefined' && document.activeElement === element;
   }
 
   // Focus follows the link to its replacement, or to Home when it is gone.
