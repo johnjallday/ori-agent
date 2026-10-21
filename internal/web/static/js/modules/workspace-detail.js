@@ -30,6 +30,7 @@ import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
+import { flattenWorkspaceTree, isGroupWorkspace } from './workspace-map-snapshot.js';
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
 import { taskCreateBody } from './quick-task.js';
@@ -91,6 +92,29 @@ function slugifyWorkspaceName(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-');
+}
+
+/**
+ * The immediate parent group of a workspace, from flattened `?tree=true` rows.
+ *
+ * Only a distinct parent that is a group and has a folder slug qualifies: the
+ * header links to it by route, so anything else would be a guessed URL. The
+ * descriptor carries the child's id so it can never be shown for another one.
+ *
+ * @param {Array<object>} rows - flattenWorkspaceTree output
+ * @param {string} workspaceId - the current workspace's UUID
+ * @returns {{workspaceId: string, id: string, name: string, slug: string}|null}
+ */
+export function resolveParentGroup(rows, workspaceId) {
+  const id = String(workspaceId || '').trim();
+  if (!id || !Array.isArray(rows)) return null;
+  const current = rows.find(row => row && row.id === id);
+  const parentId = String(current?.parent_id || '').trim();
+  if (!parentId || parentId === id) return null;
+  const parent = rows.find(row => row && row.id === parentId);
+  const slug = String(parent?.folder_slug || '').trim();
+  if (!parent || !isGroupWorkspace(parent) || !slug) return null;
+  return { workspaceId: id, id: parentId, name: String(parent.name || '').trim() || slug, slug };
 }
 
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
@@ -212,6 +236,9 @@ export class WorkspaceDetailPage {
     // True once init() has loaded every list above for the first time.
     this.initialListsLoaded = false;
     this.children = [];
+    // The group this workspace sits in, resolved from the same tree read as
+    // `children`; the Command header links to it (see publishParentGroup).
+    this.parentGroup = null;
     // Backlog (uncommitted capture, PRD workspace-backlog): a separate list
     // from this.tasks, which now begins at Ready — Backlog items are never
     // mixed into task surfaces. backlogIncludeDescendants is a page-session
@@ -374,6 +401,23 @@ export class WorkspaceDetailPage {
       this._workspaceMetadataRevision || 0,
       request.sequence
     );
+  }
+
+  // Reads that can change the parent clear it as they begin, so no render
+  // during the read shows a group from an older one; the current tree read
+  // sets it again. Only a real change touches the header, and only its link.
+  publishParentGroup(descriptor) {
+    const next = descriptor || null;
+    const previous = this.parentGroup || null;
+    if (
+      previous === next ||
+      (previous &&
+        next &&
+        ['workspaceId', 'id', 'name', 'slug'].every(key => previous[key] === next[key]))
+    )
+      return;
+    this.parentGroup = next;
+    window.workspaceCommand?.syncParentGroupLink?.();
   }
 
   listenToPage(target, type, listener) {
@@ -2401,6 +2445,7 @@ export class WorkspaceDetailPage {
   async loadWorkspace() {
     const request = this.beginResourceRequest('workspace');
     if (!request) return;
+    this.publishParentGroup(null);
     try {
       const response = await fetch(
         `/api/orchestration/workspace?id=${encodeURIComponent(request.workspaceId)}`,
@@ -3312,6 +3357,8 @@ export class WorkspaceDetailPage {
   async loadChildren(parent = null) {
     const request = this.beginResourceRequest('children', parent);
     if (!request) return;
+    // A failed or empty read leaves the parent cleared; Home stays the way out.
+    this.publishParentGroup(null);
     try {
       // Fetch the full workspace tree to find children
       const response = await fetch('/api/workspaces?tree=true', {
@@ -3326,25 +3373,13 @@ export class WorkspaceDetailPage {
 
       const data = await response.json();
       if (!this.isResourceRequestCurrent(request)) return;
-      const folders = data.folders || [];
 
-      // Find this workspace in the tree and get its children
-      const findWorkspace = (workspaces, targetId) => {
-        for (const ws of workspaces) {
-          if (ws.id === targetId) {
-            return ws;
-          }
-          if (ws.children && ws.children.length > 0) {
-            const found = findWorkspace(ws.children, targetId);
-            if (found) return found;
-          }
-        }
-        return null;
-      };
-
-      const currentWorkspace = findWorkspace(folders, request.workspaceId);
+      // One walk finds this workspace for its children and its parent group.
+      const rows = flattenWorkspaceTree(data.folders || []);
+      const currentWorkspace = rows.find(row => row.id === request.workspaceId);
       this.children = currentWorkspace?.children || [];
       this.renderChildren();
+      this.publishParentGroup(resolveParentGroup(rows, request.workspaceId));
     } catch (error) {
       if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load children workspaces:', error);

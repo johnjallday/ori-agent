@@ -7708,3 +7708,309 @@ test('How this was set up shows the assistant, the request, and each reason, esc
   assert.match(attached, /<strong>Folder<\/strong> Linked the folder/);
   assert.match(attached, /<strong>Link<\/strong> Bound this workspace to acme\/widgets/);
 });
+
+// --- Parent group link (workspace-parent-group-navigation) -------------------
+//
+// The page resolves `parentGroup` from its tree read; these tests cover what
+// the shared header does with it. Ids, names, and slugs are all distinct.
+
+const MEMBER_UUID = '2d5b7c10-member-uuid';
+const STUDIO = {
+  workspaceId: MEMBER_UUID,
+  id: '8e04a1f3-group-uuid',
+  name: 'Studio Sessions',
+  slug: 'studio-sessions'
+};
+
+function parentNavView(parentGroup, { viewMode = 'details', kind = 'workspace' } = {}) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode,
+    page: {
+      workspaceId: MEMBER_UUID,
+      workspaceSlug: 'drum-tracking',
+      workspace: { id: MEMBER_UUID, name: 'Drum Tracking', kind, folder_slug: 'drum-tracking' },
+      parentGroup,
+      tasks: []
+    }
+  });
+  return commandView;
+}
+
+function parentNavOf(commandView) {
+  const html = commandView.commandBarHTML(commandView.page.workspace, 'Drum Tracking', '', {
+    agents: 0,
+    openTasks: 0,
+    tools: 0
+  });
+  return html.slice(
+    html.indexOf('<div class="ws-cmd-nav">'),
+    html.indexOf('<div class="ws-cmd-crest">')
+  );
+}
+
+test("a member's header links to its parent group right after Home, by the group's slug", () => {
+  const nav = withSurfaceHost([], () => parentNavOf(parentNavView(STUDIO)));
+  assert.match(
+    nav,
+    /aria-label="Back to the workspace map on Home">Home<\/a><a class="ws-cmd-nav-btn ws-cmd-nav-parent" data-cmd-parent-group href="\/workspaces\/studio-sessions" title="Open the group Studio Sessions"><span class="ws-cmd-nav-parent-arrow" aria-hidden="true">←<\/span><span class="ws-cmd-nav-parent-label">Group: <span class="ws-cmd-nav-parent-name">Studio Sessions<\/span><\/span><\/a><a class="ws-cmd-nav-btn" href="\/workspaces\/drum-tracking\/canvas">Canvas</
+  );
+  assert.ok(!nav.includes(STUDIO.id), 'the route uses the slug, never the group UUID');
+  assert.equal((nav.match(/data-cmd-parent-group/g) || []).length, 1);
+});
+
+test("the group link never carries the member's query, task, or hash", () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    location: {
+      pathname: '/workspaces/drum-tracking/task/task-42',
+      search: '?mode=map&task=task-42&panel=tools',
+      hash: '#run-7'
+    }
+  };
+  try {
+    const nav = parentNavOf(parentNavView(STUDIO));
+    assert.match(nav, /data-cmd-parent-group href="\/workspaces\/studio-sessions" /);
+    assert.doesNotMatch(nav, /studio-sessions[?#]/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the group slug is encoded and its name escaped in text and tooltip', () => {
+  const nav = withSurfaceHost([], () =>
+    parentNavOf(
+      parentNavView({
+        ...STUDIO,
+        name: `<img src=x onerror="alert(1)"> Mix & 'Master'`,
+        slug: 'mix & master/2'
+      })
+    )
+  );
+  assert.match(nav, /href="\/workspaces\/mix%20%26%20master%2F2"/);
+  const escapedName = '&lt;img src=x onerror=&quot;alert(1)&quot;&gt; Mix &amp; &#39;Master&#39;';
+  assert.ok(nav.includes('title="Open the group ' + escapedName + '"'));
+  assert.ok(nav.includes('<span class="ws-cmd-nav-parent-name">' + escapedName + '</span>'));
+  assert.ok(!nav.includes('<img'), 'no markup from the name survives');
+});
+
+test('no group link without a parent descriptor for this workspace', () => {
+  for (const [label, parentGroup] of [
+    ['not resolved yet, ungrouped, or cleared', null],
+    ['never set', undefined],
+    ['no slug', { ...STUDIO, slug: '' }],
+    ['a blank slug', { ...STUDIO, slug: '  ' }],
+    ['resolved for another workspace', { ...STUDIO, workspaceId: 'another-member-uuid' }],
+    ['the workspace itself', { ...STUDIO, id: MEMBER_UUID }]
+  ]) {
+    const nav = withSurfaceHost([], () => parentNavOf(parentNavView(parentGroup)));
+    assert.doesNotMatch(nav, /data-cmd-parent-group|Group:/, label);
+    assert.match(nav, /href="\/" aria-label="Back to the workspace map on Home">Home</, label);
+    assert.doesNotMatch(nav, /href="#"/, label);
+  }
+});
+
+test('a nested group gets the same link one level up', () => {
+  const label = {
+    ...STUDIO,
+    id: '1f9e33c2-label-uuid',
+    name: 'Label Releases',
+    slug: 'label-releases'
+  };
+  const nav = withSurfaceHost([], () => parentNavOf(parentNavView(label, { kind: 'group' })));
+  assert.match(nav, /data-cmd-parent-group href="\/workspaces\/label-releases"/);
+  assert.match(nav, /Group: <span class="ws-cmd-nav-parent-name">Label Releases</);
+});
+
+test('Details, Map, Tickets, and Dashboard share the same group link', () => {
+  for (const viewMode of ['details', 'map', 'tickets', 'dashboard']) {
+    const nav = withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: true }], () =>
+      parentNavOf(parentNavView(STUDIO, { viewMode }))
+    );
+    assert.match(nav, /data-cmd-parent-group href="\/workspaces\/studio-sessions"/, viewMode);
+  }
+});
+
+// A minimal nav for syncParentGroupLink: elements keyed by attribute, in order.
+function decodeAttribute(value) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function makeParentNav() {
+  const items = [];
+  const element = (attrs, html = '') => ({
+    attrs,
+    html,
+    getAttribute: name => (name in attrs ? attrs[name] : null),
+    hasAttribute: name => name in attrs,
+    remove() {
+      items.splice(items.indexOf(this), 1);
+    },
+    focus() {
+      globalThis.document.activeElement = this;
+    },
+    insertAdjacentHTML(position, markup) {
+      assert.equal(position, 'afterend');
+      const tag = markup.slice(0, markup.indexOf('>'));
+      const parsed = {};
+      for (const [, name, value] of tag.matchAll(/ ([a-z-]+)(?:="([^"]*)")?/g)) {
+        parsed[name] = value === undefined ? '' : decodeAttribute(value);
+      }
+      items.splice(items.indexOf(this) + 1, 0, element(parsed, markup));
+    }
+  });
+  items.push(
+    element({ 'data-cmd-nav-home': '', href: '/' }),
+    element({ href: '/workspaces/drum-tracking/canvas' })
+  );
+  const nav = {
+    items,
+    querySelector: selector => items.find(item => selector.slice(1, -1) in item.attrs) || null
+  };
+  return nav;
+}
+
+function withParentNav(parentGroup, body) {
+  const nav = makeParentNav();
+  const commandView = parentNavView(parentGroup);
+  commandView.container = { querySelector: selector => (selector === '.ws-cmd-nav' ? nav : null) };
+  const previousActive = globalThis.document.activeElement;
+  try {
+    return body({ commandView, nav, link: () => nav.querySelector('[data-cmd-parent-group]') });
+  } finally {
+    globalThis.document.activeElement = previousActive;
+  }
+}
+
+test('a resolved parent is patched in after Home without rebuilding the header', () => {
+  withParentNav(null, ({ commandView, nav, link }) => {
+    let renders = 0;
+    commandView.render = () => renders++;
+    commandView.syncParentGroupLink();
+    assert.equal(link(), null);
+
+    commandView.page.parentGroup = STUDIO;
+    commandView.syncParentGroupLink();
+    assert.deepEqual(
+      nav.items.map(item => item.getAttribute('href')),
+      ['/', '/workspaces/studio-sessions', '/workspaces/drum-tracking/canvas']
+    );
+    assert.equal(link().getAttribute('title'), 'Open the group Studio Sessions');
+
+    // The same parent again leaves the very same element in place.
+    const first = link();
+    commandView.page.parentGroup = { ...STUDIO };
+    commandView.syncParentGroupLink();
+    assert.equal(link(), first);
+    assert.equal(renders, 0, 'only the link is touched');
+  });
+});
+
+test('a renamed or moved parent replaces the link, and focus follows it', () => {
+  withParentNav(STUDIO, ({ commandView, link }) => {
+    commandView.syncParentGroupLink();
+    link().focus();
+    commandView.page.parentGroup = { ...STUDIO, name: 'Studio B', slug: 'studio-b' };
+    commandView.syncParentGroupLink();
+    assert.equal(link().getAttribute('href'), '/workspaces/studio-b');
+    assert.equal(link().getAttribute('title'), 'Open the group Studio B');
+    assert.equal(globalThis.document.activeElement, link());
+  });
+});
+
+test('a removed parent takes its link away; focus on it returns to Home, other focus stays', () => {
+  withParentNav(STUDIO, ({ commandView, nav, link }) => {
+    commandView.syncParentGroupLink();
+    link().focus();
+    commandView.page.parentGroup = null;
+    commandView.syncParentGroupLink();
+    assert.equal(link(), null);
+    assert.equal(globalThis.document.activeElement, nav.querySelector('[data-cmd-nav-home]'));
+  });
+  withParentNav(STUDIO, ({ commandView, nav, link }) => {
+    commandView.syncParentGroupLink();
+    const canvas = nav.items[2];
+    canvas.focus();
+    commandView.page.parentGroup = null;
+    commandView.syncParentGroupLink();
+    assert.equal(link(), null);
+    assert.equal(globalThis.document.activeElement, canvas, 'focus elsewhere is not moved');
+  });
+});
+
+test('syncing before the header exists is a no-op', () => {
+  const commandView = parentNavView(STUDIO);
+  commandView.container = null;
+  assert.doesNotThrow(() => commandView.syncParentGroupLink());
+  commandView.container = { querySelector: () => null };
+  assert.doesNotThrow(() => commandView.syncParentGroupLink());
+});
+
+// render() rebuilds the whole header. Everything but its focus bookkeeping is
+// stubbed here, and each innerHTML write builds a fresh nav from the markup.
+function renderFocusView(parentGroup) {
+  const commandView = parentNavView(parentGroup);
+  for (const name of Object.getOwnPropertyNames(WorkspaceCommandView.prototype)) {
+    if (['constructor', 'render', 'restoreParentGroupFocus'].includes(name)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(WorkspaceCommandView.prototype, name);
+    if (typeof descriptor.value === 'function') commandView[name] = () => '';
+  }
+  commandView.commandBarHTML = () =>
+    '<div class="ws-cmd-nav">' +
+    parentNavView(commandView.page.parentGroup).parentGroupLinkHTML() +
+    '</div>';
+  let nav = makeParentNav();
+  commandView.container = {
+    set innerHTML(html) {
+      nav = makeParentNav();
+      if (html.includes('data-cmd-parent-group')) {
+        nav.items[0].insertAdjacentHTML('afterend', html.slice(html.indexOf('<a')));
+      }
+    },
+    get innerHTML() {
+      return '';
+    },
+    querySelector: selector => (selector === '.ws-cmd-nav' ? nav : null),
+    querySelectorAll: () => []
+  };
+  return { commandView, nav: () => nav };
+}
+
+test('a full render keeps focus on the group link, or hands it to Home if the link is gone', () => {
+  const previousActive = globalThis.document.activeElement;
+  try {
+    const kept = renderFocusView(STUDIO);
+    kept.commandView.render();
+    kept.nav().querySelector('[data-cmd-parent-group]').focus();
+    kept.commandView.render();
+    assert.equal(
+      globalThis.document.activeElement,
+      kept.nav().querySelector('[data-cmd-parent-group]')
+    );
+
+    const gone = renderFocusView(STUDIO);
+    gone.commandView.render();
+    gone.nav().querySelector('[data-cmd-parent-group]').focus();
+    gone.commandView.page.parentGroup = null;
+    gone.commandView.render();
+    assert.equal(
+      globalThis.document.activeElement,
+      gone.nav().querySelector('[data-cmd-nav-home]')
+    );
+
+    const elsewhere = renderFocusView(STUDIO);
+    elsewhere.commandView.render();
+    const other = { hasAttribute: () => false, getAttribute: () => null };
+    globalThis.document.activeElement = other;
+    elsewhere.commandView.page.parentGroup = null;
+    elsewhere.commandView.render();
+    assert.equal(globalThis.document.activeElement, other, 'focus elsewhere is left alone');
+  } finally {
+    globalThis.document.activeElement = previousActive;
+  }
+});
