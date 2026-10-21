@@ -361,6 +361,12 @@ func (s *Service) run(ctx context.Context, run *runningOperation, ref studioRef,
 func (s *Service) readSource(ctx context.Context, run *runningOperation, ref studioRef, status ProviderStatus, answer SourcesAnswer, index int, cursor string, total *int, result *sourceResult) bool {
 	opSource := run.op.Sources[index]
 	source, _ := answer.Source(opSource.SourceID)
+	folder, kept := s.folderRef(ref, opSource.SourceID)
+	if !kept {
+		// The owner removed the folder, which withdrew it.
+		result.outcome, result.reason, result.publish = OutcomeWithdrawn, "", false
+		return false
+	}
 	resetOnce := false
 	for page := 0; ; page++ {
 		if ctx.Err() != nil {
@@ -375,7 +381,7 @@ func (s *Service) readSource(ctx context.Context, run *runningOperation, ref stu
 			result.outcome, result.reason, result.publish = OutcomeWithdrawn, "", false
 			return false
 		}
-		request, err := NewInventoryRequest(run.op.InstallationID, opSource.SourceID, cursor, PageLimit)
+		request, err := NewInventoryRequest(run.op.InstallationID, opSource.SourceID, cursor, PageLimit, folder)
 		if err != nil {
 			result.outcome, result.reason = OutcomeFailed, "invalid_cursor"
 			return false
@@ -800,16 +806,43 @@ func (s *Service) attachedStudio(owner, studioID string) (studioRef, ProviderSta
 	return ref, status, nil
 }
 
+// readSources asks the provider for its sources, giving it this computer's
+// owner folders, and requires every folder back exactly as it was given.
 func (s *Service) readSources(ctx context.Context, ref studioRef, status ProviderStatus) (SourcesAnswer, error) {
-	raw, err := s.deps.Provider.Sources(ctx, ref.workspace)
+	folders, err := readFolders(ref.paths)
+	if err != nil {
+		return SourcesAnswer{}, err
+	}
+	input, sent := sourcesInput(status.Declaration, folders)
+	raw, err := s.deps.Provider.Sources(ctx, ref.workspace, input)
 	if err != nil {
 		return SourcesAnswer{}, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 	answer, err := DecodeSourcesAnswer(raw, status.Declaration)
+	if err == nil {
+		err = checkFolderSources(answer, sent)
+	}
 	if err != nil {
 		return SourcesAnswer{}, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 	return answer, nil
+}
+
+// folderRef is the owner folder a folder source reads, or nil for the
+// provider's own sources. A removed folder is reported as missing.
+func (s *Service) folderRef(ref studioRef, sourceID string) (*FolderRef, bool) {
+	if !IsFolderSource(sourceID) {
+		return nil, true
+	}
+	folders, err := readFolders(ref.paths)
+	if err != nil {
+		return nil, false
+	}
+	folder := ownerFolder(folders, sourceID)
+	if folder == nil {
+		return nil, false
+	}
+	return &FolderRef{Category: folder.Category, Path: folder.Path}, true
 }
 
 func (s *Service) putReview(review pendingReview) string {

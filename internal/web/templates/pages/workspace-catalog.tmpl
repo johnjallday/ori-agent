@@ -51,7 +51,10 @@
             </div>
           </section>
           <section class="resource-catalog-sources" aria-labelledby="resourceCatalogSourcesTitle">
-            <h2 id="resourceCatalogSourcesTitle">Sources on this computer</h2>
+            <div class="resource-catalog-sources-header">
+              <h2 id="resourceCatalogSourcesTitle">Sources on this computer</h2>
+              <button id="resourceCatalogAddFolder" class="modern-btn modern-btn-secondary" type="button" hidden>Add a folder</button>
+            </div>
             <ul id="resourceCatalogSources" class="resource-catalog-source-list"></ul>
           </section>
         </div>
@@ -84,6 +87,42 @@
       <div class="resource-catalog-dialog-actions">
         <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Keep access</button>
         <button id="resourceCatalogWithdrawCommit" class="modern-btn modern-btn-danger" type="button">Withdraw access</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resourceCatalogFolder" class="resource-catalog-dialog" aria-labelledby="resourceCatalogFolderTitle">
+    <form method="dialog" class="resource-catalog-dialog-body">
+      <h2 id="resourceCatalogFolderTitle">Add a folder</h2>
+      <fieldset>
+        <legend>What it holds</legend>
+        <div id="resourceCatalogFolderCategories" class="resource-catalog-folder-categories"></div>
+      </fieldset>
+      <div class="resource-catalog-field">
+        <label for="resourceCatalogFolderPath">Folder path</label>
+        <div class="resource-catalog-folder-path">
+          <input id="resourceCatalogFolderPath" type="text" maxlength="1024" autocomplete="off" spellcheck="false" placeholder="~/Music/My Templates">
+          <button id="resourceCatalogFolderChoose" class="modern-btn modern-btn-secondary" type="button">Choose…</button>
+        </div>
+      </div>
+      <p class="resource-catalog-dialog-note">Ori reads nothing in it until you approve it in Review sources, and then only names and bounded details. The path stays on this computer.</p>
+      <p id="resourceCatalogFolderNote" class="resource-catalog-dialog-note" role="status"></p>
+      <p id="resourceCatalogFolderError" class="resource-catalog-error" role="alert"></p>
+      <div class="resource-catalog-dialog-actions">
+        <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Cancel</button>
+        <button id="resourceCatalogFolderCommit" class="modern-btn modern-btn-primary" type="button">Add folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="resourceCatalogRemoveFolder" class="resource-catalog-dialog" aria-labelledby="resourceCatalogRemoveFolderTitle">
+    <form method="dialog" class="resource-catalog-dialog-body">
+      <h2 id="resourceCatalogRemoveFolderTitle">Remove folder</h2>
+      <p id="resourceCatalogRemoveFolderText"></p>
+      <p id="resourceCatalogRemoveFolderError" class="resource-catalog-error" role="alert"></p>
+      <div class="resource-catalog-dialog-actions">
+        <button value="cancel" class="modern-btn modern-btn-secondary" type="submit">Keep it</button>
+        <button id="resourceCatalogRemoveFolderCommit" class="modern-btn modern-btn-danger" type="button">Remove folder</button>
       </div>
     </form>
   </dialog>

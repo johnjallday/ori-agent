@@ -4,9 +4,12 @@
 It answers studio.sources.read and studio.inventory.read from fixed data so
 Ori's host can be exercised end to end. It reads no folder, talks to no
 REAPER and changes nothing. Pages are cut by the request's cursor and limit.
+An owner folder it is given is a source (ready when the directory exists,
+a stat only) whose inventory is one fixed entry of its category.
 """
 
 import json
+import os
 import sys
 
 INSTALLATION = {
@@ -60,8 +63,25 @@ ENTRIES = {
 }
 
 
-def sources_read(_payload):
-    return {"schema_version": 1, "installation": INSTALLATION, "sources": SOURCES}
+FOLDER_ENTRIES = {
+    "templates": [entry("Folder session.RPP", "project_template", "Folder session")],
+    "scripts": [entry("Folder tool.lua", "script", "Folder tool", [{"id": "language", "value": "Lua"}])],
+}
+
+
+def folder_source(folder):
+    path = str(folder.get("path", ""))
+    # Ori sends the canonical path, so compare with the resolved home.
+    home = os.path.realpath(os.path.expanduser("~"))
+    shown = "~" + path[len(home):] if home and path.startswith(home + "/") else path
+    return {"id": str(folder.get("id", "")), "category": str(folder.get("category", "")),
+            "label": os.path.basename(path) or path, "location": shown, "access": "file",
+            "state": "ready" if os.path.isdir(path) else "absent"}
+
+
+def sources_read(payload):
+    folders = [folder_source(item) for item in payload.get("folders") or [] if isinstance(item, dict)]
+    return {"schema_version": 1, "installation": INSTALLATION, "sources": SOURCES + folders}
 
 
 def inventory_read(payload):
@@ -78,11 +98,19 @@ def inventory_read(payload):
     if answer["installation_id"] != INSTALLATION["id"]:
         answer["state"] = "installation_changed"
         return answer
-    source = next((item for item in SOURCES if item["id"] == source_id), None)
+    folder = payload.get("folder") if isinstance(payload.get("folder"), dict) else None
+    if source_id.startswith("folder_"):
+        if folder is None:
+            answer["state"] = "unsupported"
+            return answer
+        source = folder_source({"id": source_id, **folder})
+        items = FOLDER_ENTRIES.get(source["category"], [])
+    else:
+        source = next((item for item in SOURCES if item["id"] == source_id), None)
+        items = ENTRIES.get(source_id, [])
     if source is None or source["state"] != "ready":
         answer["state"] = source["state"] if source else "unsupported"
         return answer
-    items = ENTRIES.get(source_id, [])
     cursor = str(payload.get("cursor", ""))
     start = int(cursor[3:]) if cursor.startswith("at-") and cursor[3:].isdigit() else 0
     limit = max(1, min(int(payload.get("limit", 1)), 256))

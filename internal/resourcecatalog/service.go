@@ -55,10 +55,11 @@ const (
 // Provider bridges to the Studio's project plugin. It is given only the
 // Studio workspace (to find its exact provider) and an operation input; it
 // calls the plugin's declared machine-level operations with the host's
-// timeout, byte and schema checks, and never sees a grant, path or catalog.
+// timeout, byte and schema checks, and never sees a grant or catalog. The
+// only paths an input carries are the owner's own folders.
 type Provider interface {
 	Status(studio *workspace.Workspace) ProviderStatus
-	Sources(ctx context.Context, studio *workspace.Workspace) ([]byte, error)
+	Sources(ctx context.Context, studio *workspace.Workspace, input []byte) ([]byte, error)
 	Inventory(ctx context.Context, studio *workspace.Workspace, input []byte) ([]byte, error)
 }
 

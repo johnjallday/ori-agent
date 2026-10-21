@@ -25,6 +25,23 @@ func (h *Handler) SetResourceCatalogCall(call func(context.Context, plugin.Insta
 	}
 }
 
+// SetResourceCatalogFolderCheck sets the decision on a folder the owner types
+// or picks for a catalog: it returns the canonical folder and an optional
+// sentence to show, or an error whose text is safe to show as it is.
+func (h *Handler) SetResourceCatalogFolderCheck(check func(*http.Request, string) (string, string, error)) {
+	if h != nil {
+		h.resourceCatalogsMu.Lock()
+		h.resourceCatalogFolderCheck = check
+		h.resourceCatalogsMu.Unlock()
+	}
+}
+
+func (h *Handler) catalogFolderCheck() func(*http.Request, string) (string, string, error) {
+	h.resourceCatalogsMu.Lock()
+	defer h.resourceCatalogsMu.Unlock()
+	return h.resourceCatalogFolderCheck
+}
+
 // SetResourceCatalogDataDir sets where this computer's catalog grants live.
 func (h *Handler) SetResourceCatalogDataDir(dir string) {
 	if h != nil {
@@ -73,12 +90,12 @@ func (p resourceCatalogProvider) Status(studio *workspace.Workspace) resourcecat
 	return status
 }
 
-func (p resourceCatalogProvider) Sources(ctx context.Context, studio *workspace.Workspace) ([]byte, error) {
+func (p resourceCatalogProvider) Sources(ctx context.Context, studio *workspace.Workspace, input []byte) ([]byte, error) {
 	installed, status := p.find(studio)
 	if !status.Available || p.call == nil {
 		return nil, plugin.ErrResourceCatalogUnavailable
 	}
-	return p.call(ctx, installed, plugin.ResourceCatalogSources, json.RawMessage(`{"schema_version":1}`))
+	return p.call(ctx, installed, plugin.ResourceCatalogSources, input)
 }
 
 func (p resourceCatalogProvider) Inventory(ctx context.Context, studio *workspace.Workspace, input []byte) ([]byte, error) {
@@ -182,6 +199,9 @@ func respondCatalogError(w http.ResponseWriter, err error) {
 		code, status, message = "inspection_active", http.StatusConflict, "An inspection is already running."
 	case errors.Is(err, resourcecatalog.ErrConflict):
 		code, status, message = "page_stale", http.StatusConflict, "The catalog changed since this page was read. Reload it."
+	case errors.Is(err, resourcecatalog.ErrFolderLimit):
+		code, status, message = "folder_limit", http.StatusConflict,
+			"This catalog already has "+strconv.Itoa(resourcecatalog.MaxOwnerFolders)+" folders on this computer. Remove one first."
 	case errors.Is(err, resourcecatalog.ErrCorrupt):
 		code, message = "catalog_unreadable", "The saved catalog could not be read; it was left as it is."
 	}
@@ -413,6 +433,55 @@ func respondAnnotationConflict(w http.ResponseWriter, err error) bool {
 		"code":  "annotation_conflict", "current": conflict.Current,
 	})
 	return true
+}
+
+// AddResourceCatalogFolder handles POST .../resource-catalog/folders: a folder
+// of the owner's own for one category. The path passes the shared typed-path
+// rules first; nothing is read until the owner approves it in a review.
+func (h *Handler) AddResourceCatalogFolder(w http.ResponseWriter, r *http.Request) {
+	service, owner, studioID, ok := h.catalogRequest(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Category string `json:"category"`
+		Path     string `json:"path"`
+	}
+	if !decodeStrictAction(w, r, &request, "The folder request is invalid") {
+		return
+	}
+	check := h.catalogFolderCheck()
+	if check == nil {
+		_ = orihttp.RespondNotFound(w, "This catalog is unavailable")
+		return
+	}
+	path, note, err := check(r, request.Path)
+	if err != nil {
+		_ = orihttp.RespondAPIError(w, http.StatusBadRequest, orihttp.NewAPIError("folder_refused", err.Error()))
+		return
+	}
+	folder, err := service.AddFolder(owner, studioID, strings.TrimSpace(request.Category), path)
+	if err != nil {
+		respondCatalogError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"folder": map[string]string{"id": folder.ID, "category": folder.Category, "path": folder.Path}, "warning_note": note,
+	})
+}
+
+// RemoveResourceCatalogFolder handles DELETE .../resource-catalog/folders/{folderID}.
+func (h *Handler) RemoveResourceCatalogFolder(w http.ResponseWriter, r *http.Request) {
+	service, owner, studioID, ok := h.catalogRequest(w, r)
+	if !ok {
+		return
+	}
+	view, err := service.RemoveFolder(owner, studioID, strings.TrimSpace(r.PathValue("folderID")))
+	if err != nil {
+		respondCatalogError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, view)
 }
 
 // ReviewResourceCatalogWithdrawal handles POST .../sources/{sourceID}/withdraw/review.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -131,6 +132,52 @@ func TestResourceCatalogHTTP_ReviewApproveInspectAndBrowse(t *testing.T) {
 		t.Fatalf("entries = %d %v", code, page)
 	}
 	_ = fixture
+}
+
+func TestResourceCatalogHTTP_AddsAFolderOnlyThroughTheFolderCheck(t *testing.T) {
+	h, _, studioID := newCatalogHandler(t)
+	path := map[string]string{"workspaceID": studioID}
+	archive := "/Users/me/Music/Templates Archive"
+	body := `{"category":"templates","path":"~/Music/Templates Archive"}`
+	if code, _ := catalogCall(t, h.AddResourceCatalogFolder, http.MethodPost, "/folders", path, body); code != http.StatusNotFound {
+		t.Fatalf("without a folder check = %d", code)
+	}
+	var checked []string
+	h.SetResourceCatalogFolderCheck(func(_ *http.Request, raw string) (string, string, error) {
+		checked = append(checked, raw)
+		if raw == "/" {
+			return "", "", errors.New("Choose a folder, not a whole drive.")
+		}
+		return archive, "", nil
+	})
+	code, refused := catalogCall(t, h.AddResourceCatalogFolder, http.MethodPost, "/folders", path, `{"category":"templates","path":"/"}`)
+	if code != http.StatusBadRequest || refused["code"] != "folder_refused" || refused["message"] != "Choose a folder, not a whole drive." {
+		t.Fatalf("a refused folder = %d %v", code, refused)
+	}
+	if code, _ := catalogCall(t, h.AddResourceCatalogFolder, http.MethodPost, "/folders", path, `{"category":"audio_plugins","path":"~/x"}`); code != http.StatusBadRequest {
+		t.Fatalf("a category without folders = %d", code)
+	}
+	code, added := catalogCall(t, h.AddResourceCatalogFolder, http.MethodPost, "/folders", path, body)
+	folder, _ := added["folder"].(map[string]any)
+	if code != http.StatusOK || folder["path"] != archive || folder["id"] != "folder_96e14ca9ccd35869" || checked[len(checked)-1] != "~/Music/Templates Archive" {
+		t.Fatalf("added = %d %v (checked %v)", code, added, checked)
+	}
+
+	// The review gives the provider the folder; this one reports it back.
+	var inputs []string
+	h.SetResourceCatalogCall(func(_ context.Context, _ plugin.InstalledPlugin, which string, input json.RawMessage) (json.RawMessage, error) {
+		inputs = append(inputs, string(input))
+		return catalogContractFile(t, "sources.folder.valid.json"), nil
+	})
+	code, review := catalogCall(t, h.ReviewResourceCatalogSources, http.MethodPost, "/review", path, `{}`)
+	if code != http.StatusOK || len(inputs) != 1 || !bytes.Contains([]byte(inputs[0]), []byte(archive)) {
+		t.Fatalf("review = %d %v; inputs %v", code, review, inputs)
+	}
+	code, view := catalogCall(t, h.RemoveResourceCatalogFolder, http.MethodDelete, "/folders/x",
+		map[string]string{"workspaceID": studioID, "folderID": "folder_96e14ca9ccd35869"}, "")
+	if code != http.StatusOK || len(view["sources"].([]any)) != 0 {
+		t.Fatalf("removed = %d %v", code, view)
+	}
 }
 
 func TestResourceCatalogHTTP_RefusesWhatIsNotTheOwnersCatalog(t *testing.T) {

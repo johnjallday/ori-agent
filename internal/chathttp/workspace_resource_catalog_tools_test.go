@@ -24,7 +24,7 @@ func (p catalogToolProvider) Status(*workspace.Workspace) resourcecatalog.Provid
 		Catalog: resourcecatalog.CatalogRef{PluginID: "reaper-plugin", ID: p.declaration.ID, Version: p.declaration.Version}}
 }
 
-func (catalogToolProvider) Sources(context.Context, *workspace.Workspace) ([]byte, error) {
+func (catalogToolProvider) Sources(context.Context, *workspace.Workspace, []byte) ([]byte, error) {
 	return os.ReadFile(filepath.Join("..", "resourcecatalog", "testdata", "contract", "sources.valid.json"))
 }
 

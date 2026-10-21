@@ -130,13 +130,15 @@ type Source struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
-// InventoryRequest is the input of the inventory operation.
+// InventoryRequest is the input of the inventory operation. Folder is set
+// exactly when the source is an owner folder.
 type InventoryRequest struct {
-	SchemaVersion  int    `json:"schema_version"`
-	InstallationID string `json:"installation_id"`
-	SourceID       string `json:"source_id"`
-	Cursor         string `json:"cursor"`
-	Limit          int    `json:"limit"`
+	SchemaVersion  int        `json:"schema_version"`
+	InstallationID string     `json:"installation_id"`
+	SourceID       string     `json:"source_id"`
+	Cursor         string     `json:"cursor"`
+	Limit          int        `json:"limit"`
+	Folder         *FolderRef `json:"folder,omitempty"`
 }
 
 // InventoryAnswer is one page of one source.
@@ -255,9 +257,10 @@ func (a SourcesAnswer) Source(id string) (Source, bool) {
 	return Source{}, false
 }
 
-// NewInventoryRequest builds the input for one page.
-func NewInventoryRequest(installationID, sourceID, cursor string, limit int) (InventoryRequest, error) {
-	request := InventoryRequest{SchemaVersion: WireSchemaVersion, InstallationID: installationID, SourceID: sourceID, Cursor: cursor, Limit: limit}
+// NewInventoryRequest builds the input for one page. An owner folder's page
+// names its folder; any other source's page names none.
+func NewInventoryRequest(installationID, sourceID, cursor string, limit int, folder *FolderRef) (InventoryRequest, error) {
+	request := InventoryRequest{SchemaVersion: WireSchemaVersion, InstallationID: installationID, SourceID: sourceID, Cursor: cursor, Limit: limit, Folder: folder}
 	switch {
 	case !installationIDPattern.MatchString(installationID):
 		return InventoryRequest{}, errors.New("installation id is not an opaque installation identifier")
@@ -267,6 +270,10 @@ func NewInventoryRequest(installationID, sourceID, cursor string, limit int) (In
 		return InventoryRequest{}, errors.New("cursor is not an opaque cursor")
 	case limit < 1 || limit > MaxPageEntries:
 		return InventoryRequest{}, fmt.Errorf("limit must be 1 to %d", MaxPageEntries)
+	case IsFolderSource(sourceID) != (folder != nil):
+		return InventoryRequest{}, errors.New("a folder is named exactly for an owner folder source")
+	case folder != nil && (FolderID(folder.Category, folder.Path) != sourceID || !validFolderPath(folder.Path)):
+		return InventoryRequest{}, errors.New("the folder is not the one its source id names")
 	}
 	return request, nil
 }

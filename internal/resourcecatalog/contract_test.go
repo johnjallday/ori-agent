@@ -126,7 +126,7 @@ func inventoryFixture(t *testing.T) (*Declaration, Source, InventoryRequest) {
 	if err := json.Unmarshal(readContractFile(t, "inventory.request.valid.json"), &request); err != nil {
 		t.Fatal(err)
 	}
-	built, err := NewInventoryRequest(request.InstallationID, request.SourceID, request.Cursor, request.Limit)
+	built, err := NewInventoryRequest(request.InstallationID, request.SourceID, request.Cursor, request.Limit, nil)
 	if err != nil || built != request {
 		t.Fatalf("NewInventoryRequest = %+v, %v; fixture %+v", built, err, request)
 	}
@@ -175,11 +175,74 @@ func TestNewInventoryRequest_RefusesWhatThePluginMustNeverBeAsked(t *testing.T) 
 		"zero limit":              {InstallationID: "inst_abc123", SourceID: "reaper_scripts", Limit: 0},
 		"oversized limit":         {InstallationID: "inst_abc123", SourceID: "reaper_scripts", Limit: MaxPageEntries + 1},
 	}
+	folder := &FolderRef{Category: "templates", Path: "/Users/me/Templates Archive"}
+	folderID := FolderID(folder.Category, folder.Path)
+	cases["folder without its folder"] = InventoryRequest{InstallationID: "inst_abc123", SourceID: folderID, Limit: 1}
+	cases["folder named for another source"] = InventoryRequest{InstallationID: "inst_abc123", SourceID: "reaper_scripts", Limit: 1, Folder: folder}
+	cases["folder that is not its id's"] = InventoryRequest{InstallationID: "inst_abc123", SourceID: folderID, Limit: 1,
+		Folder: &FolderRef{Category: "scripts", Path: folder.Path}}
+	cases["relative folder"] = InventoryRequest{InstallationID: "inst_abc123", SourceID: FolderID("templates", "Templates"), Limit: 1,
+		Folder: &FolderRef{Category: "templates", Path: "Templates"}}
+	cases["unclean folder"] = InventoryRequest{InstallationID: "inst_abc123", SourceID: FolderID("templates", "/Users/me/../me"), Limit: 1,
+		Folder: &FolderRef{Category: "templates", Path: "/Users/me/../me"}}
 	for name, request := range cases {
-		if _, err := NewInventoryRequest(request.InstallationID, request.SourceID, request.Cursor, request.Limit); err == nil {
+		if _, err := NewInventoryRequest(request.InstallationID, request.SourceID, request.Cursor, request.Limit, request.Folder); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	if _, err := NewInventoryRequest("inst_abc123", folderID, "", 1, folder); err != nil {
+		t.Fatalf("an owner folder's page was refused: %v", err)
+	}
+}
+
+// An owner folder travels as the vectors show: in the sources input, back as
+// one file source, and named again on each of its inventory pages.
+func TestOwnerFolderContract_MatchesTheVectors(t *testing.T) {
+	declaration := validDeclaration(t)
+	folder := OwnerFolder{Category: "templates", Path: "/Users/me/Music/Templates Archive"}
+	folder.ID = FolderID(folder.Category, folder.Path)
+	input, sent := sourcesInput(declaration, []OwnerFolder{folder, {ID: FolderID("audio_plugins", "/Users/me"), Category: "audio_plugins", Path: "/Users/me"}})
+	var got, want any
+	if err := json.Unmarshal(input, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(readContractFile(t, "sources.request.valid.json"), &want); err != nil {
+		t.Fatal(err)
+	}
+	if !jsonEqual(got, want) || len(sent) != 1 {
+		t.Fatalf("sources input = %s (sent %d); a category without owner_folders must not be sent", input, len(sent))
+	}
+	answer, err := DecodeSourcesAnswer(readContractFile(t, "sources.folder.valid.json"), declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkFolderSources(answer, sent); err != nil {
+		t.Fatalf("the folder answer was refused: %v", err)
+	}
+	if err := checkFolderSources(answer, nil); err == nil {
+		t.Fatal("a folder that was never sent was accepted")
+	}
+	plain, err := DecodeSourcesAnswer(readContractFile(t, "sources.valid.json"), declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkFolderSources(plain, sent); err == nil {
+		t.Fatal("an answer that left the folder out was accepted")
+	}
+	var request InventoryRequest
+	if err := json.Unmarshal(readContractFile(t, "inventory.request.folder.valid.json"), &request); err != nil {
+		t.Fatal(err)
+	}
+	built, err := NewInventoryRequest(request.InstallationID, folder.ID, "", PageLimit, &FolderRef{Category: folder.Category, Path: folder.Path})
+	if err != nil || built.SourceID != request.SourceID || *built.Folder != *request.Folder {
+		t.Fatalf("folder page = %+v, %v; vector %+v", built, err, request)
+	}
+}
+
+func jsonEqual(left, right any) bool {
+	a, _ := json.Marshal(left)
+	b, _ := json.Marshal(right)
+	return string(a) == string(b)
 }
 
 // The operation declarations a provider copies into its manifest must accept
@@ -201,8 +264,17 @@ func TestOperationSchemas_AcceptTheContractVectors(t *testing.T) {
 	if err := workspacesurface.ValidateOperationInput(sources, json.RawMessage(`{"schema_version":1}`)); err != nil {
 		t.Fatalf("sources input: %v", err)
 	}
+	if err := workspacesurface.ValidateOperationInput(sources, readContractFile(t, "sources.request.valid.json")); err != nil {
+		t.Fatalf("sources input with folders: %v", err)
+	}
+	if err := workspacesurface.ValidateOperationInput(inventory, readContractFile(t, "inventory.request.folder.valid.json")); err != nil {
+		t.Fatalf("inventory input for a folder: %v", err)
+	}
 	if err := workspacesurface.ValidateOperationOutput(sources, readContractFile(t, "sources.valid.json")); err != nil {
 		t.Fatalf("sources output: %v", err)
+	}
+	if err := workspacesurface.ValidateOperationOutput(sources, readContractFile(t, "sources.folder.valid.json")); err != nil {
+		t.Fatalf("sources output with a folder: %v", err)
 	}
 	if err := workspacesurface.ValidateOperationInput(inventory, readContractFile(t, "inventory.request.valid.json")); err != nil {
 		t.Fatalf("inventory input: %v", err)

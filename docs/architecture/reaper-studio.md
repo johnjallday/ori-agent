@@ -1,6 +1,8 @@
 # REAPER Studio: resource workspaces and the resource catalog (contract v1)
 
-Status: frozen implementation contract (task 1.5, 2026-10-20). Product scope is
+Status: frozen implementation contract (task 1.5, 2026-10-20), amended
+2026-10-21 before any release to add owner-added folders (§3.4, §4.5) at the
+owner's request. Product scope is
 `tasks/prd-reaper-studio.md` (decisions 1A, 2A, 3A). Nothing here is
 implemented until the checklist says so, and no companion source, release or
 reviewed floor exists for it yet.
@@ -44,8 +46,9 @@ production sessions. New host identifiers never use `studio`.
 | REAPER | Blueprint `reaper-studio` and team `reaper-studio-team` (§3.3), the `resource_catalog` declaration (§3.4) with category words, the two read-only operations and their readers (§4), the Studio role prompt and skill, guidance for song assistants. |
 | Ori | Host feature `resource_workspaces_v1`, declaration validation, resource classification and exclusion, create/reuse, source review and grants, inspection, publication and withdrawal, catalog persistence, owner browsing UI (rendered from declared words), Home summary, song lookup authorization, upgrade class, compatibility. |
 
-Ori never opens a REAPER folder. The REAPER plugin never sees the catalog, the
-annotations or a workspace. The Music package never reads a source.
+Ori never reads a source folder: for a folder the owner adds, it only checks
+that the folder exists and is allowed (§4.5). The REAPER plugin never sees the
+catalog, the annotations or a workspace. The Music package never reads a source.
 
 **Owner UI rendering.** The catalog view is rendered by Ori from the plugin's
 declared categories, kinds and fact labels, the same split the Home profile card
@@ -174,16 +177,17 @@ action (§5.2), never as a second creation path.
   "inventory_operation": "studio.inventory.read",
   "categories": [
     { "id": "templates", "label": "Templates",
-      "description": "Project and track templates in your REAPER resource folder.",
+      "description": "Project and track templates in your REAPER resource folder and folders you add.",
       "kinds": [ { "id": "project_template", "label": "Project template" },
                  { "id": "track_template",   "label": "Track template" } ],
-      "facts": [], "profile_row": "templates" },
+      "facts": [], "profile_row": "templates", "owner_folders": true },
     { "id": "scripts", "label": "Scripts",
-      "description": "Lua, EEL and Python scripts in REAPER's Scripts folder and Ori's script library.",
+      "description": "Lua, EEL and Python scripts in REAPER's Scripts folder, Ori's script library and folders you add.",
       "kinds": [ { "id": "script", "label": "Script" } ],
       "facts": [ { "id": "language", "label": "Language" },
                  { "id": "registration", "label": "Registered in REAPER" },
-                 { "id": "package", "label": "Package" } ] },
+                 { "id": "package", "label": "Package" } ],
+      "owner_folders": true },
     { "id": "audio_plugins", "label": "Audio Plugins",
       "description": "Effects and instruments REAPER reports. Being listed does not mean licensed, loaded or tested.",
       "kinds": [ { "id": "effect", "label": "Effect" }, { "id": "instrument", "label": "Instrument" } ],
@@ -200,7 +204,10 @@ must be declared by `service_id` with policy `read_only`. Categories number
 plain line. Declared words are inert; no path, URL, command or operation appears
 in them. Optional `profile_row` (only `"templates"`, on one category at most)
 says the category stands for the Home profile's templates row (§12); the host
-never infers it from an ID.
+never infers it from an ID. Optional `owner_folders` (boolean) lets the owner
+add folders of their own to that category, which the provider then reads like
+its own file sources (§4.5). A category the provider can only read live never
+declares it.
 
 The declaration is part of the plugin's trusted fingerprint. A change to its
 `id`, `version`, categories, kinds or facts is a catalog version change (§13).
@@ -218,7 +225,9 @@ answer). Canonical vectors live in
 ### 4.1 `studio.sources.read`
 
 Policy `read_only`, timeout class `fast`, `max_output_bytes` 32768. Input:
-`{ "schema_version": 1 }`. Output:
+`{ "schema_version": 1, "folders": [ { "id", "category", "path" } ] }`, where
+`folders` (0–8, omitted when empty) are this computer's owner folders (§4.5).
+Output:
 
 ```json
 {
@@ -267,6 +276,9 @@ for a `live` source; `max_output_bytes` 262144. Input:
 { "schema_version": 1, "installation_id": "inst_…", "source_id": "reaper_scripts",
   "cursor": "", "limit": 256 }
 ```
+
+A page of an owner folder also carries `"folder": { "category", "path" }`
+(§4.5); every other page carries no `folder`.
 
 Output:
 
@@ -343,6 +355,60 @@ If neither is reliable with REAPER closed, the source is `access: "live"` and a
 closed REAPER reports `app_closed` (FR 17, AC 8). Inventory presence is never
 described as licensed, loaded, working or tested.
 
+### 4.5 Owner-added folders (amendment 2026-10-21)
+
+The owner may add folders of their own to a category that declares
+`owner_folders` (§3.4): for example templates kept in `~/Music/Templates
+Archive`. Each folder is one more file source of that category.
+
+**Ori (host)**
+
+- **Adding a folder.** The owner chooses the category and the folder, typed or
+  picked in the system dialog. Ori checks it with its shared typed-path rules:
+  - it must be an existing directory, with symlinks resolved;
+  - it must not be a whole drive or the home folder itself;
+  - it must not hold Ori's data or workspaces;
+  - it must not be or contain a credential folder;
+  - a folder outside the home folder is allowed, with a warning.
+
+  At most 8 folders per Studio per computer. Adding a folder reads nothing.
+- **Folder ID.** `folder_` + the first 16 hex characters of
+  SHA-256(category ‖ 0x00 ‖ canonical path). The same category and path always
+  give the same ID, so a folder added again finds its old entries and
+  annotations. The provider's own source IDs never start with `folder_`.
+- **Storage.** Folders are machine-local, like grants: `folders.json` in the
+  Studio's data directory (§6.1, §6.5). The path never enters the Studio folder.
+- **Reading.** A new folder is read only after the owner approves it in a scope
+  review (§7.1), like any source.
+- **Wire.** Ori sends every folder in `sources.read` (§4.1). It names a page's
+  folder in `inventory.read` (§4.2) exactly when the `source_id` is that
+  folder's ID. Ori refuses a sources answer that drops, repeats or invents an
+  owner folder, or reports one in another category or with `access` other than
+  `file`.
+- **Removing a folder.** Removal withdraws it at once (§7.4) and forgets its
+  path. What was read from it stays readable to the owner, marked Access
+  withdrawn. Removal works without the provider and on a detached Studio.
+
+**Provider (REAPER)**
+
+- For each folder in the sources input, answer exactly one source with the same
+  `id` and `category` and `access: "file"`.
+  - The label and location are the provider's own words, e.g. the folder name
+    and its `~` form.
+  - `state` is `ready`, `absent`, `denied` or `unsupported`, found by a presence
+    `Lstat` only.
+  - A folder that is itself a symlink is `unsupported`.
+- Read a folder page exactly as the provider's own file sources of that
+  category:
+  - the same non-creating walker, bounds, cursor and skips;
+  - kinds by extension within the category;
+  - the same facts, such as script language and registration matched against
+    `reaper-kb.ini` rows by absolute path.
+  - `native_id` stays relative to the folder.
+- Refuse a `folder` page whose `folder` is missing or is not the folder its
+  `source_id` names, with state `unsupported`.
+- Never create, follow out of, write or execute anything in the folder (FR 11).
+
 ## 5. Resource workspace identity, creation and classification
 
 ### 5.1 Identity and classification
@@ -415,6 +481,7 @@ flow preselected.
 | Observations | `<Studio folder>/.ori/resource-catalog/observations.json` | yes |
 | Annotations | `<Studio folder>/.ori/resource-catalog/annotations.json` | yes |
 | Source grants | `<Ori data dir>/resource_catalog/<Studio workspace ID>/grants.json` | **no** (machine-local) |
+| Owner folders | `<Ori data dir>/resource_catalog/<Studio workspace ID>/folders.json` | **no** (machine-local) |
 | Inspection operations | `<Ori data dir>/resource_catalog/<Studio workspace ID>/operations.json` | no |
 
 The two catalog files are the canonical catalog (FR 13). Writes are atomic
@@ -479,6 +546,17 @@ until that computer approves its own sources (FR 33).
   sources: [{source_id, category, label, location, access, approved_at, approved_revision, withdrawn_at?}],
   reviews: [bounded pending review tokens] }
 ```
+
+### 6.5 Owner folders document (machine-local, schema 1)
+
+```text
+{ schema_version: 1, studio_workspace_id,
+  folders: [{id: "folder_<16 hex>", category, path: <canonical absolute path>, added_at}] }   // at most 8
+```
+
+A folder stays listed until the owner removes it, including while its grant is
+withdrawn. A different installation (§7.1) does not drop folders: they belong
+to this computer, not to one REAPER resource folder.
 
 ## 7. Review, inspection, refresh and withdrawal
 
@@ -800,11 +878,14 @@ bounded body (16 KiB). Foreign or unknown IDs answer 404.
 | `GET …/resource-catalog/inspections/{operationID}` | Progress |
 | `POST …/resource-catalog/inspections/{operationID}/cancel` | Cancel |
 | `POST …/resource-catalog/sources/{sourceID}/withdraw/review` and `/commit` | Withdraw access |
+| `POST …/resource-catalog/folders` | `{category, path}`: add an owner folder (§4.5); answers `{folder, warning_note}` |
+| `DELETE …/resource-catalog/folders/{folderID}` | Remove an owner folder (withdraws it) |
 | `GET /api/workspaces/{workspaceID}/assistant-program/resource-workspaces` | Home summary (§8.2) |
 
 Error codes: `resource_workspace_exists`, `review_stale`, `scope_review_required`,
 `inspection_active`, `annotation_conflict`, `page_stale`, `provider_unavailable`,
-`not_resource_workspace`.
+`not_resource_workspace`, `folder_refused` (the typed-path rules' own sentence),
+`folder_limit`.
 
 ## 16. Fixtures and focused checks
 
@@ -812,7 +893,12 @@ Error codes: `resource_workspace_exists`, `review_stale`, `scope_review_required
   `sources.read` / `inventory.read` outputs, inventory input, the
   `resource_catalog` declaration, the appended Home attachment and the Studio
   team. The REAPER builder copies the operation vectors into its own tests.
+  The owner-folder vectors are `sources.request.valid.json` (input with one
+  folder), `sources.folder.valid.json` (its answer) and
+  `inventory.request.folder.valid.json` (one of its pages).
 - `go test ./internal/resourcecatalog/...` decodes every vector and refuses
   every invalid one.
-- Candidate check, once a REAPER candidate exists:
-  `ORI_REAPER_PLUGIN_PATH=<candidate> go test ./internal/resourcecatalog -run TestLocalCandidateCatalogFitsTheHostContract`.
+- Candidate checks:
+  - REAPER: `ORI_REAPER_PLUGIN_PATH=<candidate> go test ./internal/plugin -run TestLocalResourceCatalogProviderFitsTheContract`.
+  - Music: `ORI_MUSIC_PLUGIN_PATH=<candidate> go test ./internal/plugin -run TestLocalResourceAttachmentHomeFitsTheContract`.
+  - Journey: `./scripts/reaper-demo.sh test --suite studio`.

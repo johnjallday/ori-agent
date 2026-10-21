@@ -3,7 +3,23 @@
     "id": "studio.sources.read",
     "input_schema": {
       "type": "object",
-      "properties": { "schema_version": { "type": "integer", "minimum": 1, "maximum": 1 } },
+      "properties": {
+        "schema_version": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "folders": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 23, "maxLength": 23 },
+              "category": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "path": { "type": "string", "minLength": 1, "maxLength": 1024 }
+            },
+            "required": ["id", "category", "path"],
+            "additionalProperties": false
+          }
+        }
+      },
       "required": ["schema_version"],
       "additionalProperties": false
     },
@@ -64,7 +80,16 @@
         "installation_id": { "type": "string", "minLength": 8, "maxLength": 128 },
         "source_id": { "type": "string", "minLength": 1, "maxLength": 40 },
         "cursor": { "type": "string", "maxLength": 512 },
-        "limit": { "type": "integer", "minimum": 1, "maximum": 256 }
+        "limit": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "folder": {
+          "type": "object",
+          "properties": {
+            "category": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "path": { "type": "string", "minLength": 1, "maxLength": 1024 }
+          },
+          "required": ["category", "path"],
+          "additionalProperties": false
+        }
       },
       "required": ["schema_version", "installation_id", "source_id", "cursor", "limit"],
       "additionalProperties": false

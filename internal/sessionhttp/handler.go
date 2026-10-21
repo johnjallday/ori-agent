@@ -73,6 +73,9 @@ type Handler struct {
 	resourceCatalogDataDir string
 	resourceCatalogsMu     sync.Mutex
 	resourceCatalogs       *resourcecatalog.Service
+	// resourceCatalogFolderCheck decides on a folder the owner adds to a
+	// catalog. Nil means no folder can be added.
+	resourceCatalogFolderCheck func(*http.Request, string) (string, string, error)
 	// assistantRoleStaffer commits exactly the roles the user filled on an
 	// assistant-program blueprint. Separate from assistantReviewedStaffer,
 	// which staffs every required role: under the vacancy model a role the user

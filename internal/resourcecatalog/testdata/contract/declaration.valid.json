@@ -10,24 +10,26 @@
     {
       "id": "templates",
       "label": "Templates",
-      "description": "Project and track templates in your REAPER resource folder.",
+      "description": "Project and track templates in your REAPER resource folder and folders you add.",
       "kinds": [
         { "id": "project_template", "label": "Project template" },
         { "id": "track_template", "label": "Track template" }
       ],
       "facts": [],
-      "profile_row": "templates"
+      "profile_row": "templates",
+      "owner_folders": true
     },
     {
       "id": "scripts",
       "label": "Scripts",
-      "description": "Lua, EEL and Python scripts in REAPER's Scripts folder and Ori's script library.",
+      "description": "Lua, EEL and Python scripts in REAPER's Scripts folder, Ori's script library and folders you add.",
       "kinds": [{ "id": "script", "label": "Script" }],
       "facts": [
         { "id": "language", "label": "Language" },
         { "id": "registration", "label": "Registered in REAPER" },
         { "id": "package", "label": "Package" }
-      ]
+      ],
+      "owner_folders": true
     },
     {
       "id": "audio_plugins",

@@ -28,6 +28,10 @@ type fakeProvider struct {
 	// hook runs before a page is answered; it may block or fail.
 	hook  func(ctx context.Context, request InventoryRequest) error
 	calls []InventoryRequest
+	// sourceInputs records every sources input; each folder it names is
+	// answered as one ready file source, unless dropFolders leaves them out.
+	sourceInputs []string
+	dropFolders  bool
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -60,10 +64,27 @@ func (p *fakeProvider) Status(*workspace.Workspace) ProviderStatus {
 	return p.status
 }
 
-func (p *fakeProvider) Sources(context.Context, *workspace.Workspace) ([]byte, error) {
+func (p *fakeProvider) Sources(_ context.Context, _ *workspace.Workspace, input []byte) ([]byte, error) {
+	var request struct {
+		SchemaVersion int           `json:"schema_version"`
+		Folders       []folderInput `json:"folders"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(input))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.SchemaVersion != 1 {
+		return nil, errors.New("the sources input is not the contract's")
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return json.Marshal(SourcesAnswer{SchemaVersion: 1, Installation: p.installation, Sources: p.sources})
+	p.sourceInputs = append(p.sourceInputs, string(input))
+	sources := slices.Clone(p.sources)
+	if !p.dropFolders {
+		for _, folder := range request.Folders {
+			sources = append(sources, Source{ID: folder.ID, Category: folder.Category, Label: "Folder " + filepath.Base(folder.Path),
+				Location: folder.Path, Access: AccessFile, State: SourceReady})
+		}
+	}
+	return json.Marshal(SourcesAnswer{SchemaVersion: 1, Installation: p.installation, Sources: sources})
 }
 
 // Inventory pages one entry at a time so cursors and continuation are real.

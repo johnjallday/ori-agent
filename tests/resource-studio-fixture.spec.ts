@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 // Host journey for a resource workspace (REAPER Studio) against the TEST
 // FIXTURE plugins in tests/fixtures/resource-studio/. Run only through
@@ -11,6 +12,7 @@ import { mkdirSync } from 'node:fs';
 // no folder, so this proves Ori's side of the contract only: it is not
 // candidate or real-reader evidence (checklist 5.1/5.2).
 const ENABLED = process.env.ORI_RESOURCE_STUDIO_FIXTURES === '1';
+const SANDBOX = process.env.ORI_RESOURCE_STUDIO_SANDBOX || '';
 const SHOTS = 'test-results/resource-studio-fixture';
 const HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
 const STUDIO_BLUEPRINT = 'plugin:reaper-plugin:reaper-studio';
@@ -53,6 +55,8 @@ async function openTab(page: Page, label: RegExp) {
 }
 
 test('a fresh Home offers REAPER Studio and reads nothing', async ({ page, request }) => {
+  // A fresh profile opens onboarding over every page; this suite is not about it.
+  await json(await request.post('/api/onboarding/skip', { headers: HEADERS }));
   const templates = (await json(await request.get('/api/workspaces/group-templates')))
     .group_templates;
   const music = templates.filter(
@@ -280,6 +284,51 @@ test('the owner’s notes persist and are searchable', async ({ page }) => {
   await expect(page.locator('#resourceCatalogList .resource-catalog-row')).toHaveCount(1);
   await expect(page.locator('#resourceCatalogList')).toContainText('★ Vocals');
   await evidence(page, '07-notes-search');
+});
+
+test('the owner adds a folder of their own, approves it, and removes it', async ({ page }) => {
+  // A real folder in the sandbox HOME: the server checks the typed path.
+  expect(basename(SANDBOX)).toMatch(/^ori-demo\./);
+  mkdirSync(join(SANDBOX, 'Music', 'Templates Archive'), { recursive: true });
+  await openCatalog(page);
+  await page.getByRole('button', { name: 'Add a folder' }).click();
+  const dialog = page.locator('#resourceCatalogFolder');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Templates')).toBeChecked();
+  await dialog.getByLabel('Folder path').fill('/');
+  await dialog.getByRole('button', { name: 'Add folder' }).click();
+  await expect(page.locator('#resourceCatalogFolderError')).not.toBeEmpty();
+  await expect(dialog).toBeVisible();
+  await dialog.screenshot({ path: `${SHOTS}/08a-folder-refused.png` });
+
+  await dialog.getByLabel('Folder path').fill('~/Music/Templates Archive');
+  await dialog.getByRole('button', { name: 'Add folder' }).click();
+  // Nothing is read until the folder is approved: the review opens next.
+  const review = page.locator('#resourceCatalogReview');
+  await expect(review).toBeVisible();
+  await expect(review).toContainText('Templates: Templates Archive · ~/Music/Templates Archive');
+  await review.screenshot({ path: `${SHOTS}/08b-folder-review.png` });
+  await page.locator('#resourceCatalogReviewCommit').click();
+  await expect(review).toBeHidden();
+  await expect(
+    page.locator('#resourceCatalogActions').getByRole('button', { name: 'Refresh' })
+  ).toBeVisible({ timeout: 30_000 });
+  await openTab(page, /Templates/);
+  const folderRow = page.locator('#resourceCatalogList .resource-catalog-row', {
+    hasText: 'Folder session'
+  });
+  await expect(folderRow).toContainText('Project template · Templates Archive');
+  await evidence(page, '08c-folder-read');
+
+  const source = page.locator('#resourceCatalogSources li', { hasText: 'Templates Archive' });
+  await source.getByRole('button', { name: 'Remove folder' }).click();
+  const remove = page.locator('#resourceCatalogRemoveFolder');
+  await expect(remove).toContainText('Nothing in the folder changes.');
+  await page.locator('#resourceCatalogRemoveFolderCommit').click();
+  await expect(remove).toBeHidden();
+  await expect(source).toContainText('Access withdrawn');
+  await expect(source.getByRole('button')).toHaveCount(0);
+  await expect(folderRow).toContainText('Access withdrawn');
 });
 
 test('withdrawing one source keeps its history and drops it from the Home', async ({

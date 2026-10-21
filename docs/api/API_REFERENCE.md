@@ -2732,8 +2732,10 @@ Owner of that exact resource workspace only; anything else is `404`. GETs read O
 | `POST …/resource-catalog/inspections` `{idempotency_key, mode: "refresh"\|"continue", source_ids?}` | Reads approved sources again, or continues ones a bound stopped |
 | `GET …/resource-catalog/inspections/{operationID}` · `POST …/{operationID}/cancel` `{}` | Progress; cancel keeps finished sources and reports the inspection cancelled |
 | `POST …/resource-catalog/sources/{sourceID}/withdraw/review` `{}` · `…/withdraw/commit` `{review_token}` | Withdraw access on this computer: no further reads or publication of that source, and its entries leave counts and lookups |
+| `POST …/resource-catalog/folders` `{category, path}` | Adds a folder of the owner's own to a category the plugin opens to folders (the overview's `folder_categories`). The path, typed or picked, passes the shared typed-path rules; the answer is `{folder: {id, category, path}, warning_note}`. Nothing is read until a review approves it. At most 8 per Studio on this computer |
+| `DELETE …/resource-catalog/folders/{folderID}` | Forgets the folder on this computer and withdraws it if approved; its entries stay readable as Access withdrawn. Returns the overview |
 
-Refusals are `409` with `code`: `not_attached`, `provider_unavailable`, `scope_review_required`, `review_stale`, `inspection_active` (carries `operation`), `page_stale`; and `500 catalog_unreadable` for a saved file Ori cannot read (it is left as it is).
+Refusals are `409` with `code`: `not_attached`, `provider_unavailable`, `scope_review_required`, `review_stale`, `inspection_active` (carries `operation`), `page_stale`, `folder_limit`; `400 folder_refused` with the typed-path rule's own sentence; and `500 catalog_unreadable` for a saved file Ori cannot read (it is left as it is). The overview also carries `folder_categories`, `can_add_folder`, and `folder: true` on each owner folder's source.
 
 ## Home Package Upgrade API
 

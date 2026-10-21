@@ -68,6 +68,9 @@ type Category struct {
 	// ProfileRow names the Home profile row this category stands for, once
 	// it has evidence. Only ProfileRowTemplates exists.
 	ProfileRow string `json:"profile_row,omitempty"`
+	// OwnerFolders lets the owner add folders of their own to this category;
+	// the provider reads each one like its own file sources.
+	OwnerFolders bool `json:"owner_folders,omitempty"`
 }
 
 // ProfileRowTemplates is the Home profile's templates row. A category that
@@ -177,6 +180,20 @@ func (d *Declaration) Category(id string) (Category, bool) {
 		}
 	}
 	return Category{}, false
+}
+
+// FolderCategories returns the categories the owner may add folders to.
+func (d *Declaration) FolderCategories() []Category {
+	if d == nil {
+		return nil
+	}
+	var categories []Category
+	for _, category := range d.Categories {
+		if category.OwnerFolders {
+			categories = append(categories, category)
+		}
+	}
+	return categories
 }
 
 func (c Category) hasKind(id string) bool {

@@ -158,6 +158,16 @@ export function attemptLine(source, options = {}) {
   }
 }
 
+// sourceLine is one source's row: its words and how its last read went. A
+// folder the owner added waits for review before anything is read in it.
+export function sourceLine(source, options = {}) {
+  const status =
+    source?.folder && !source.approved && !source.withdrawn && !source.last_attempt
+      ? 'Added; read once you approve it in Review sources'
+      : attemptLine(source, options);
+  return [source?.label, source?.location, status].filter(Boolean).join(' · ');
+}
+
 export function entryStateLabel(state) {
   return ENTRY_STATES[state] || '';
 }
@@ -245,6 +255,7 @@ export class ResourceCatalogPage {
     this.cursor = '';
     this.review = null;
     this.withdraw = null;
+    this.removing = null;
     this.pollTimer = null;
   }
 
@@ -303,6 +314,25 @@ export class ResourceCatalogPage {
     this.el('resourceCatalogWithdrawCommit')?.addEventListener?.(
       'click',
       () => void this.commitWithdraw()
+    );
+    this.el('resourceCatalogAddFolder')?.addEventListener?.('click', () => this.openFolder());
+    this.el('resourceCatalogFolderChoose')?.addEventListener?.(
+      'click',
+      () => void this.chooseFolder()
+    );
+    this.el('resourceCatalogFolderCommit')?.addEventListener?.(
+      'click',
+      () => void this.commitFolder()
+    );
+    // Enter in the path adds the folder rather than submitting Cancel.
+    this.el('resourceCatalogFolderPath')?.addEventListener?.('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault?.();
+      void this.commitFolder();
+    });
+    this.el('resourceCatalogRemoveFolderCommit')?.addEventListener?.(
+      'click',
+      () => void this.commitRemoveFolder()
     );
   }
 
@@ -517,7 +547,7 @@ export class ResourceCatalogPage {
         'aria-label',
         [row.name, rowContext(row), state].filter(Boolean).join(', ')
       );
-      button.addEventListener('click', () => void this.showDetail(row.entry_id));
+      button.addEventListener('click', () => void this.showDetail(row.entry_id, { focus: true }));
       item.append(button);
       list.append(item);
     }
@@ -534,7 +564,9 @@ export class ResourceCatalogPage {
     if (more) more.hidden = !this.cursor;
   }
 
-  async showDetail(entryId) {
+  // showDetail opens one entry. Chosen from the list, it takes the focus, so
+  // a keyboard user lands on the entry rather than behind every other row.
+  async showDetail(entryId, { focus = false } = {}) {
     const panel = this.el('resourceCatalogDetail');
     if (!panel) return;
     const result = await this.request(this.api(`/entries/${encodeURIComponent(entryId)}`));
@@ -552,12 +584,14 @@ export class ResourceCatalogPage {
       else button.removeAttribute('aria-current');
     }
     this.renderDetail(panel, result.body);
+    if (focus) panel.querySelector?.('h2')?.focus?.();
   }
 
   renderDetail(panel, detail) {
     const doc = this.document;
     const title = doc.createElement('h2');
     title.textContent = detail.name;
+    title.tabIndex = -1;
     panel.append(title);
     const line = (label, value) => {
       if (!value) return;
@@ -785,6 +819,8 @@ export class ResourceCatalogPage {
   }
 
   renderSources() {
+    const add = this.el('resourceCatalogAddFolder');
+    if (add) add.hidden = !this.view?.can_add_folder;
     const root = this.el('resourceCatalogSources');
     if (!root) return;
     root.replaceChildren();
@@ -799,20 +835,131 @@ export class ResourceCatalogPage {
       const item = this.document.createElement('li');
       item.className = 'resource-catalog-source';
       const text = this.document.createElement('span');
-      text.textContent = [source.label, source.location, attemptLine(source)]
-        .filter(Boolean)
-        .join(' · ');
+      text.textContent = sourceLine(source);
       item.append(text);
-      if (source.approved) {
+      // A folder the owner added is removed; any other source is withdrawn.
+      const action = source.folder
+        ? { label: 'Remove folder', run: () => this.openRemoveFolder(source) }
+        : source.approved
+          ? { label: 'Withdraw access', run: () => void this.openWithdraw(source.source_id) }
+          : null;
+      if (action) {
         const button = this.document.createElement('button');
         button.type = 'button';
         button.className = 'modern-btn modern-btn-secondary';
-        button.textContent = 'Withdraw access';
-        button.addEventListener('click', () => void this.openWithdraw(source.source_id));
+        button.textContent = action.label;
+        button.addEventListener('click', action.run);
         item.append(button);
       }
       root.append(item);
     }
+  }
+
+  openFolder() {
+    const root = this.el('resourceCatalogFolderCategories');
+    root?.replaceChildren();
+    const categories = this.view?.folder_categories || [];
+    const preferred = categories.some(category => category.id === this.category)
+      ? this.category
+      : categories[0]?.id;
+    for (const category of categories) {
+      const label = this.document.createElement('label');
+      label.className = 'resource-catalog-check';
+      const radio = this.document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'resourceCatalogFolderCategory';
+      radio.value = category.id;
+      radio.checked = category.id === preferred;
+      const text = this.document.createElement('span');
+      text.textContent = category.label;
+      label.append(radio, text);
+      root?.append(label);
+    }
+    for (const id of ['resourceCatalogFolderNote', 'resourceCatalogFolderError']) {
+      const line = this.el(id);
+      if (line) line.textContent = '';
+    }
+    const path = this.el('resourceCatalogFolderPath');
+    if (path) path.value = '';
+    this.el('resourceCatalogFolder')?.showModal?.();
+    path?.focus?.();
+  }
+
+  // chooseFolder opens the system's folder dialog; where it is unavailable
+  // the owner types the path instead.
+  async chooseFolder() {
+    const note = this.el('resourceCatalogFolderNote');
+    const result = await this.request('/api/folder-picker/select-path', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Choose a folder for this catalog' })
+    });
+    if (result.ok && result.body?.selected && result.body?.path) {
+      const path = this.el('resourceCatalogFolderPath');
+      if (path) path.value = result.body.path;
+      if (note) note.textContent = '';
+      return;
+    }
+    if (result.ok && result.body?.success && !result.body?.selected) return;
+    if (note) {
+      note.textContent =
+        result.body?.note ||
+        result.body?.error ||
+        'The folder dialog is not available here. Type or paste the folder path instead.';
+    }
+  }
+
+  async commitFolder() {
+    const error = this.el('resourceCatalogFolderError');
+    const category = this.el('resourceCatalogFolderCategories')?.querySelector?.(
+      'input:checked'
+    )?.value;
+    const path = String(this.el('resourceCatalogFolderPath')?.value || '').trim();
+    if (!path) {
+      if (error) error.textContent = 'Type or paste a folder path first.';
+      return;
+    }
+    const result = await this.request(this.api('/folders'), {
+      method: 'POST',
+      body: JSON.stringify({ category, path })
+    });
+    if (!result.ok) {
+      if (error) error.textContent = result.body?.message || 'The folder could not be added.';
+      return;
+    }
+    this.el('resourceCatalogFolder')?.close?.();
+    await this.loadOverview();
+    if (result.body?.warning_note) this.showStatus(result.body.warning_note);
+    // Nothing is read until the owner approves the new folder.
+    await this.openReview();
+  }
+
+  openRemoveFolder(source) {
+    this.removing = source;
+    const text = this.el('resourceCatalogRemoveFolderText');
+    if (text) {
+      text.textContent =
+        source.approved || source.last_attempt
+          ? `Ori stops reading ${source.label} and forgets this folder on this computer. What it found stays here marked Access withdrawn, with your notes. Nothing in the folder changes.`
+          : `Ori forgets ${source.label} on this computer. Nothing was read in it, and nothing in the folder changes.`;
+    }
+    const error = this.el('resourceCatalogRemoveFolderError');
+    if (error) error.textContent = '';
+    this.el('resourceCatalogRemoveFolder')?.showModal?.();
+  }
+
+  async commitRemoveFolder() {
+    const id = this.removing?.source_id;
+    if (!id) return;
+    const result = await this.request(this.api(`/folders/${encodeURIComponent(id)}`), {
+      method: 'DELETE'
+    });
+    if (!result.ok) {
+      const error = this.el('resourceCatalogRemoveFolderError');
+      if (error) error.textContent = result.body?.message || 'The folder could not be removed.';
+      return;
+    }
+    this.el('resourceCatalogRemoveFolder')?.close?.();
+    await this.loadOverview();
   }
 
   async openWithdraw(sourceId) {

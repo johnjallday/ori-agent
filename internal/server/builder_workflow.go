@@ -945,6 +945,8 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	// picker issued, so both must share one store. Later phases (the guided
 	// journey, sample libraries) reuse it rather than creating their own.
 	if b.sessionHandler != nil {
+		// A folder the owner adds to a resource catalog passes the same checks.
+		b.sessionHandler.SetResourceCatalogFolderCheck(newTypedFolderPaths(guards).catalogFolder)
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
 		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
 	}

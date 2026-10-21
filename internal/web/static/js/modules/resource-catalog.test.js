@@ -10,6 +10,7 @@ import {
   operationLine,
   providerLine,
   rowContext,
+  sourceLine,
   splitTags
 } from './resource-catalog.js';
 
@@ -231,6 +232,9 @@ function fakeDocument() {
         walk(this);
         return all;
       },
+      querySelector(selector) {
+        return this.querySelectorAll(selector)[0] || null;
+      },
       showModal() {
         this.open = true;
       },
@@ -356,6 +360,131 @@ test('the page loads, offers Inspect, and approves only the sources the owner ke
   assert.deepEqual(body.source_ids, ['project_templates']);
   assert.equal(body.review_token, 'rv-1');
   assert.equal(review.open, false);
+});
+
+test('a folder the owner added waits for review before anything is read', () => {
+  const folder = {
+    source_id: 'folder_96e14ca9ccd35869',
+    label: 'Templates Archive',
+    location: '/Users/me/Music/Templates Archive',
+    folder: true,
+    approved: false,
+    withdrawn: false
+  };
+  assert.equal(
+    sourceLine(folder),
+    'Templates Archive · /Users/me/Music/Templates Archive · Added; read once you approve it in Review sources'
+  );
+  assert.match(sourceLine({ ...folder, approved: true }), /Approved; not read yet$/);
+  assert.match(sourceLine({ ...folder, withdrawn: true }), /Access withdrawn$/);
+});
+
+test('adding a folder goes through the server check, then opens the review; removing asks first', async () => {
+  const doc = fakeDocument();
+  const requests = [];
+  const pending = {
+    source_id: 'folder_96e14ca9ccd35869',
+    category: 'templates',
+    label: 'Templates Archive',
+    location: '/Users/me/Music/Templates Archive',
+    access: 'file',
+    folder: true,
+    approved: false,
+    withdrawn: false
+  };
+  const overview = {
+    ...OVERVIEW,
+    folder_categories: [
+      { id: 'templates', label: 'Templates' },
+      { id: 'scripts', label: 'Scripts' }
+    ],
+    can_add_folder: true,
+    sources: [pending]
+  };
+  let refuse = true;
+  const respond = (body, ok = true) => ({ ok, status: ok ? 200 : 400, json: async () => body });
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url, method: options.method || 'GET', body: options.body });
+    if (url.endsWith('/resource-catalog')) return respond(overview);
+    if (url.includes('/resource-catalog/entries?')) return respond({ rows: [], total: 0 });
+    if (url.endsWith('/resource-catalog/folders')) {
+      return refuse
+        ? respond({ code: 'folder_refused', message: 'Choose a folder, not a whole drive.' }, false)
+        : respond({ folder: { id: pending.source_id }, warning_note: '' });
+    }
+    if (url.endsWith('/sources/review'))
+      return respond({ review_token: 'rv-1', installation: { label: 'REAPER 7.28' }, sources: [] });
+    if (url.includes('/resource-catalog/folders/')) return respond(overview);
+    return respond({}, false);
+  };
+  const page = new ResourceCatalogPage({
+    workspaceId: 'studio-1',
+    workspaceSlug: 'reaper-studio',
+    fetchImpl,
+    documentImpl: doc,
+    locationImpl: { search: '' }
+  });
+  await page.init();
+  assert.equal(doc.getElementById('resourceCatalogAddFolder').hidden, false);
+  const row = doc.getElementById('resourceCatalogSources').children[0];
+  assert.match(row.children[0].textContent, /Added; read once you approve it/);
+  assert.equal(row.children[1].textContent, 'Remove folder');
+
+  page.openFolder();
+  assert.equal(doc.getElementById('resourceCatalogFolder').open, true);
+  const radios = doc
+    .getElementById('resourceCatalogFolderCategories')
+    .children.map(label => label.children[0]);
+  assert.deepEqual(
+    radios.map(radio => [radio.value, radio.checked]),
+    [
+      ['templates', true],
+      ['scripts', false]
+    ]
+  );
+  await page.commitFolder();
+  assert.equal(
+    doc.getElementById('resourceCatalogFolderError').textContent,
+    'Type or paste a folder path first.'
+  );
+  assert.ok(!requests.some(request => request.url.endsWith('/folders')), 'an empty path was sent');
+
+  doc.getElementById('resourceCatalogFolderPath').value = ' / ';
+  await page.commitFolder();
+  assert.equal(
+    doc.getElementById('resourceCatalogFolderError').textContent,
+    'Choose a folder, not a whole drive.'
+  );
+  assert.equal(doc.getElementById('resourceCatalogFolder').open, true);
+
+  refuse = false;
+  radios[1].checked = true;
+  radios[0].checked = false;
+  doc.getElementById('resourceCatalogFolderPath').value = '~/Music/Scripts Archive';
+  await page.commitFolder();
+  const added = requests
+    .filter(request => request.url.endsWith('/resource-catalog/folders'))
+    .at(-1);
+  assert.deepEqual(JSON.parse(added.body), {
+    category: 'scripts',
+    path: '~/Music/Scripts Archive'
+  });
+  assert.equal(doc.getElementById('resourceCatalogFolder').open, false);
+  assert.equal(doc.getElementById('resourceCatalogReview').open, true, 'the review opens next');
+
+  row.children[1].listeners.click();
+  assert.equal(doc.getElementById('resourceCatalogRemoveFolder').open, true);
+  assert.match(
+    doc.getElementById('resourceCatalogRemoveFolderText').textContent,
+    /Nothing was read in it/
+  );
+  await page.commitRemoveFolder();
+  const removed = requests.find(request => request.method === 'DELETE');
+  assert.equal(
+    removed.url,
+    '/api/workspaces/studio-1/resource-catalog/folders/folder_96e14ca9ccd35869'
+  );
+  assert.equal(doc.getElementById('resourceCatalogRemoveFolder').open, false);
 });
 
 test('tags split on commas and drop blanks', () => {

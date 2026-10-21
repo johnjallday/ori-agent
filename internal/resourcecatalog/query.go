@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -79,6 +80,14 @@ type SourceView struct {
 	LastAttempt    *Attempt   `json:"last_attempt,omitempty"`
 	LastCompleteAt *time.Time `json:"last_complete_at,omitempty"`
 	CanContinue    bool       `json:"can_continue"`
+	// Folder marks a folder the owner added; it is removed, not withdrawn.
+	Folder bool `json:"folder,omitempty"`
+}
+
+// FolderCategoryView is a category the owner may add a folder to.
+type FolderCategoryView struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 // OwnerView is the Studio's catalog page: words, states, sources and the
@@ -96,6 +105,10 @@ type OwnerView struct {
 	Categories   []CategoryView      `json:"categories"`
 	Sources      []SourceView        `json:"sources"`
 	Operation    *Operation          `json:"operation,omitempty"`
+	// FolderCategories are where the owner may add a folder now; CanAddFolder
+	// is false once this computer holds MaxOwnerFolders.
+	FolderCategories []FolderCategoryView `json:"folder_categories"`
+	CanAddFolder     bool                 `json:"can_add_folder"`
 }
 
 // catalogState is everything a projection reads, loaded once.
@@ -107,6 +120,7 @@ type catalogState struct {
 	grants       Grants
 	hasGrants    bool
 	declaration  *Declaration
+	folders      []OwnerFolder
 }
 
 func (s *Service) loadState(owner, studioID string) (catalogState, error) {
@@ -126,7 +140,11 @@ func (s *Service) loadState(owner, studioID string) (catalogState, error) {
 	if err != nil {
 		return catalogState{}, err
 	}
-	state := catalogState{ref: ref, observations: observations, annotations: annotations, grants: grants, hasGrants: hasGrants}
+	folders, err := readFolders(ref.paths)
+	if err != nil {
+		return catalogState{}, err
+	}
+	state := catalogState{ref: ref, observations: observations, annotations: annotations, grants: grants, hasGrants: hasGrants, folders: folders}
 	if ref.link != nil {
 		state.status = s.provider(ref, observations)
 	} else {
@@ -169,7 +187,13 @@ func (s *Service) Overview(owner, studioID string) (OwnerView, error) {
 		Provider:   ProviderView{Available: state.status.Available, Reason: state.status.Reason},
 		CanInspect: state.ref.attached && state.status.Available, Approved: state.hasGrants,
 		Revision: state.observations.Revision, PublishedAt: state.observations.PublishedAt,
-		Categories: []CategoryView{}, Sources: []SourceView{},
+		Categories: []CategoryView{}, Sources: []SourceView{}, FolderCategories: []FolderCategoryView{},
+	}
+	if view.CanInspect {
+		for _, category := range state.status.Declaration.FolderCategories() {
+			view.FolderCategories = append(view.FolderCategories, FolderCategoryView{ID: category.ID, Label: category.Label})
+		}
+		view.CanAddFolder = len(view.FolderCategories) > 0 && len(state.folders) < MaxOwnerFolders
 	}
 	if state.hasGrants {
 		for _, installation := range state.observations.Installations {
@@ -182,6 +206,7 @@ func (s *Service) Overview(owner, studioID string) (OwnerView, error) {
 			source := SourceView{
 				SourceID: granted.SourceID, Category: granted.Category, Label: granted.Label, Location: granted.Location,
 				Access: granted.Access, Approved: granted.Active(), Withdrawn: !granted.Active(), WithdrawnAt: granted.WithdrawnAt,
+				Folder: ownerFolder(state.folders, granted.SourceID) != nil,
 			}
 			approvedAt := granted.ApprovedAt
 			source.ApprovedAt = &approvedAt
@@ -191,6 +216,17 @@ func (s *Service) Overview(owner, studioID string) (OwnerView, error) {
 			}
 			view.Sources = append(view.Sources, source)
 		}
+	}
+	// A folder added on this computer but never approved is listed too, so the
+	// owner sees it waiting for review.
+	for _, folder := range state.folders {
+		if state.hasGrants && grantSource(state.grants, folder.ID) != nil {
+			continue
+		}
+		view.Sources = append(view.Sources, SourceView{
+			SourceID: folder.ID, Category: folder.Category, Label: filepath.Base(folder.Path), Location: folder.Path,
+			Access: AccessFile, Folder: true,
+		})
 	}
 	if state.declaration != nil {
 		for _, category := range state.declaration.Categories {

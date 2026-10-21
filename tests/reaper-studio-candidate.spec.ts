@@ -47,6 +47,12 @@ const reaperHasStudio =
   (manifestOf(reaperPath).blueprints || []).some(
     (blueprint: { id: string }) => blueprint.id === 'reaper-studio'
   );
+// A REAPER commit that opens categories to the owner's own folders.
+const reaperFolders =
+  reaperHasStudio &&
+  (manifestOf(reaperPath).resource_catalog?.categories || []).some(
+    (category: { owner_folders?: boolean }) => category.owner_folders
+  );
 const RUN = upgradePath ? 'upgrade' : reaperHasStudio ? ORDER : 'older-reaper';
 // ORI_STUDIO_EVIDENCE_DIR keeps screenshots outside the sandbox, which the
 // harness removes on exit.
@@ -697,6 +703,61 @@ test.describe('fresh Home', () => {
     const back = await lookup(request, saved.songID, 'resource_catalog_search', { query: 'vocal' });
     expect(back.success, back.text).toBe(true);
     save();
+  });
+
+  test('a folder of the owner’s own is read by the candidate and can be removed', async ({
+    page,
+    request
+  }) => {
+    test.skip(!reaperFolders, 'the staged REAPER commit does not accept owner folders');
+    const archive = join(sandbox, 'Music', 'Templates Archive');
+    mkdirSync(join(archive, 'Live'), { recursive: true });
+    writeFileSync(join(archive, 'Saturday Residency.RPP'), '<REAPER_PROJECT 0.1 "7.80" 0\n>\n');
+    writeFileSync(join(archive, 'Live', 'Drum room.RPP'), '<REAPER_PROJECT 0.1 "7.80" 0\n>\n');
+    writeFileSync(join(archive, 'notes.txt'), 'not a template\n');
+    const hashes = () =>
+      Object.fromEntries(
+        ['Saturday Residency.RPP', 'Live/Drum room.RPP', 'notes.txt'].map(file => [
+          file,
+          createHash('sha256')
+            .update(readFileSync(join(archive, file)))
+            .digest('hex')
+        ])
+      );
+    const before = hashes();
+
+    await openCatalog(page);
+    await page.getByRole('button', { name: 'Add a folder' }).click();
+    const dialog = page.locator('#resourceCatalogFolder');
+    await dialog.getByLabel('Templates').check();
+    await dialog.getByLabel('Folder path').fill('~/Music/Templates Archive');
+    await dialog.getByRole('button', { name: 'Add folder' }).click();
+    const review = page.locator('#resourceCatalogReview');
+    await expect(review).toContainText('Templates Archive');
+    await review.screenshot({ path: join(SHOTS, '10a-folder-review.png') });
+    await page.locator('#resourceCatalogReviewCommit').click();
+    await expect(review).toBeHidden();
+    await expect(
+      page.locator('#resourceCatalogActions').getByRole('button', { name: 'Refresh' })
+    ).toBeVisible({ timeout: 60_000 });
+    const source = page.locator('#resourceCatalogSources li', { hasText: 'Templates Archive' });
+    await expect(source).toContainText('2 found');
+    await openTab(page, /Templates/);
+    await expect(page.locator('#resourceCatalogList')).toContainText('Saturday Residency');
+    await expect(page.locator('#resourceCatalogList')).toContainText('Drum room');
+    await shot(page, '10b-folder-read');
+    expect(counts(await studioSummary(request)).templates).toBe(5);
+    const found = await lookup(request, saved.songID, 'resource_catalog_search', {
+      query: 'Saturday Residency'
+    });
+    expect(found.answer?.results?.[0]?.name, found.text).toBe('Saturday Residency');
+    expect(found.text).not.toContain(archive);
+
+    await source.getByRole('button', { name: 'Remove folder' }).click();
+    await page.locator('#resourceCatalogRemoveFolderCommit').click();
+    await expect(source).toContainText('Access withdrawn');
+    expect(counts(await studioSummary(request)).templates).toBe(3);
+    expect(hashes()).toEqual(before);
   });
 
   test('narrow and dark layouts, and the folders were never changed', async ({ page }) => {
