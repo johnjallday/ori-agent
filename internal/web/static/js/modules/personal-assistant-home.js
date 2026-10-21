@@ -615,7 +615,11 @@ function renderCompactRows(list, rows, skipCards = false) {
   rows.forEach(row => {
     // Offer cards provide their own single actions. Never render another
     // inert row that looks like a competing action.
-    if (skipCards && (row.kind === 'folder_offer' || row.kind === 'hq_setup')) return;
+    if (
+      skipCards &&
+      (row.kind === 'folder_offer' || row.kind === 'hq_setup' || row.kind === 'second_brain_result')
+    )
+      return;
     const li = document.createElement('li');
     // The protection line's route is its primary button, not its title.
     if (row.kind === 'backup_coverage') li.textContent = row.title;

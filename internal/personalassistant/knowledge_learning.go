@@ -373,6 +373,11 @@ func validateKnowledgeProposal(input KnowledgeProposal) (KnowledgeProposal, erro
 		if input.Category != "projects" && input.Category != "how_you_work" {
 			return KnowledgeProposal{}, fmt.Errorf("%w: unsupported category for source", ErrValidation)
 		}
+	case SecondBrainSourceKind:
+		// A connected notes folder says how the user works, nothing else.
+		if input.Category != "how_you_work" {
+			return KnowledgeProposal{}, fmt.Errorf("%w: unsupported category for source", ErrValidation)
+		}
 	case WorkspaceAgentSourceKind:
 		// Any of the five dossier categories; ProposeWorkspaceFact is the only
 		// constructor and fills everything but Category and Text itself.

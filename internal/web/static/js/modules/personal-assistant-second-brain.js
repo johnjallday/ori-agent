@@ -204,6 +204,62 @@ export function followUpReceiptLine(receipt) {
   return `${added} ${skipped === 1 ? '1 was' : `${skipped} were`} already there.`;
 }
 
+// sinceLabel says how long ago a moment was, the way a person would.
+export function sinceLabel(at, now = Date.now()) {
+  const then = Date.parse(at || '');
+  if (!Number.isFinite(then)) return '';
+  const minutes = Math.max(0, Math.round((Number(now) - then) / 60000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
+// secondBrainManageView is the connection's own card, opened from the HQ's
+// Notes station and the Profile (FR33, FR35, FR38): connected with Look again
+// and Disconnect, or a folder Ori can no longer find with Choose again.
+export function secondBrainManageView(secondBrain, now = Date.now()) {
+  const source = secondBrain?.source;
+  if (!source?.name || secondBrain?.status === 'not_connected') {
+    return {
+      state: 'not_connected',
+      title: 'Your notes are not connected.',
+      detail:
+        'Point Ori at an Obsidian vault or a folder of Markdown and it tells you what is open.',
+      actions: [{ id: 'choose', label: 'Choose folder…', style: 'primary' }]
+    };
+  }
+  const kind = source.kind === 'obsidian' ? 'Obsidian' : 'Markdown folder';
+  const disconnect = { id: 'disconnect', label: 'Disconnect', style: 'link' };
+  if (secondBrain.status === 'missing') {
+    return {
+      state: 'missing',
+      title: `Can't find ${source.name}`,
+      detail: 'It may have been moved or renamed. Your follow-ups are kept.',
+      actions: [{ id: 'choose', label: 'Choose again', style: 'primary' }, disconnect]
+    };
+  }
+  const last = secondBrain.last_look;
+  const since = last?.at ? sinceLabel(last.at, now) : '';
+  return {
+    state: 'connected',
+    title: `Connected · ${source.name}`,
+    detail: since ? `${kind} · last look ${since}` : `${kind} · not looked at yet`,
+    actions: [{ id: 'again', label: 'Look again', style: 'primary' }, disconnect]
+  };
+}
+
+// secondBrainQuestRequested says the mission card sent the user here.
+export function secondBrainQuestRequested(search) {
+  try {
+    return new URLSearchParams(search || '').get('quest') === 'second-brain';
+  } catch (_) {
+    return false;
+  }
+}
+
 // secondBrainError reads the one sentence from either error shape the server
 // writes ({error} or {message}).
 export function secondBrainError(payload, fallback = 'That did not work. Try again.') {
@@ -241,6 +297,8 @@ const state = {
   error: '',
   receipt: '',
   decision: '',
+  // answer replaces the decline line when the turn ends another way.
+  answer: '',
   pickerOff: '',
   replace: false,
   loading: false,
@@ -318,7 +376,10 @@ function actionRow(actions, onClick) {
 
 // go moves forward one step, remembering where Back returns to.
 function go(phase) {
-  if (state.phase !== phase && (state.phase === 'ask' || state.phase === 'chooser'))
+  if (
+    state.phase !== phase &&
+    (state.phase === 'ask' || state.phase === 'chooser' || state.phase === 'manage')
+  )
     state.history.push(state.phase);
   setPhase(phase);
 }
@@ -341,7 +402,27 @@ function renderAsk(body) {
 }
 
 function renderAnswered(body) {
-  body.append(node('p', 'pa-specialist-offer__headline', secondBrainAnsweredLine(state.decision)));
+  const line = state.answer || secondBrainAnsweredLine(state.decision);
+  body.append(node('p', 'pa-specialist-offer__headline', line));
+}
+
+function renderManage(body) {
+  const view = secondBrainManageView(state.secondBrain);
+  body.append(node('p', 'pa-specialist-offer__headline', view.title));
+  if (view.detail) body.append(node('p', 'pa-folder__note', view.detail));
+  if (state.secondBrain?.source?.path) {
+    body.append(node('p', 'pa-second-brain__path', state.secondBrain.source.path));
+  }
+  body.append(
+    actionRow(view.actions, action => {
+      if (action.id === 'again') void lookAgain();
+      else if (action.id === 'disconnect') void disconnect();
+      else {
+        state.message = '';
+        go('chooser');
+      }
+    })
+  );
 }
 
 function renderChooser(body) {
@@ -536,6 +617,7 @@ function render() {
     else if (state.phase === 'answered') renderAnswered(els.body);
     else if (state.phase === 'chooser') renderChooser(els.body);
     else if (state.phase === 'consent') renderConsent(els.body);
+    else if (state.phase === 'manage') renderManage(els.body);
     else renderLook(els.body);
   }
   if (els.status) {
@@ -777,6 +859,37 @@ async function lookAgain() {
   if (state.look.state === 'running') schedulePoll();
 }
 
+// disconnect removes the connection; the follow-ups it made stay (FR37).
+async function disconnect() {
+  if (state.busy || !state.secondBrain) return;
+  state.busy = true;
+  showError('');
+  render();
+  const name = state.secondBrain.source?.name || 'your notes';
+  const { ok, payload } = await request('/disconnect', {
+    method: 'POST',
+    body: { request_id: newRequestID('disconnect'), if_version: state.secondBrain.version || 0 }
+  }).catch(() => ({ ok: false, payload: {} }));
+  state.busy = false;
+  if (!ok) {
+    showError(secondBrainError(payload));
+    // A newer version (another tab) is read again so the next try can land.
+    await refresh();
+    render();
+    return;
+  }
+  state.secondBrain = payload.second_brain || state.secondBrain;
+  state.answer = `Disconnected ${name}. Ori no longer reads it; your follow-ups are kept.`;
+  setPhase('answered');
+  announce();
+}
+
+async function refresh() {
+  const { ok, payload } = await request('').catch(() => ({ ok: false, payload: {} }));
+  if (ok && payload.second_brain) state.secondBrain = payload.second_brain;
+  return state.secondBrain;
+}
+
 async function dismiss() {
   const lookId = state.look?.look_id || state.look?.result?.id;
   if (state.busy || !lookId) return;
@@ -930,8 +1043,67 @@ function init() {
       state.history = [];
       await chooseFolder({ selectionToken, name: name || baseName(path), path: path || '' });
     },
+    // The Notes station and the Profile open the connection's own card:
+    // connected, missing, or not set up (which is the chooser).
+    openManage: async () => {
+      await refresh();
+      state.pinned = false;
+      state.latest = true;
+      state.message = '';
+      state.answer = '';
+      state.history = [];
+      showError('');
+      if (state.secondBrain?.status === 'not_connected') setPhase('chooser');
+      else setPhase('manage');
+    },
+    // Read the connection without changing what the drawer shows.
+    status: refresh,
+    // Another surface changed the connection (the Profile's Disconnect): read
+    // it again, and drop a result or card whose folder is no longer connected.
+    changed: async () => {
+      await refresh();
+      if (
+        state.secondBrain?.status === 'not_connected' &&
+        ['result', 'reading', 'failed', 'manage'].includes(state.phase)
+      ) {
+        clearTimeout(state.pollTimer);
+        state.pinned = false;
+        setPhase('idle', { focus: false });
+      }
+      announce();
+    },
     current: () => state.secondBrain
   };
+  if (secondBrainQuestRequested(window.location.search)) startQuestArrival();
+}
+
+// startQuestArrival is the mission card's Start (/?quest=second-brain): open
+// the drawer on the chooser once the panel knows the assistant, then scrub
+// the query so a reload does not open it again.
+function startQuestArrival() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('quest');
+    window.history?.replaceState?.(window.history.state, '', url.pathname + url.search + url.hash);
+  } catch (_) {
+    // A cosmetic URL tidy never blocks the chooser.
+  }
+  let done = false;
+  const attempt = () => {
+    const panel = window.PersonalAssistantPanel;
+    if (done || !panel || typeof panel.open !== 'function') return;
+    if (!panel.open(document.getElementById('personalAssistantLauncher'), { focus: false })) return;
+    done = true;
+    void window.PersonalAssistantSecondBrain.openManage();
+  };
+  attempt();
+  if (done) return;
+  const onStatus = () => setTimeout(attempt, 0);
+  document.addEventListener('personal-assistant:status', onStatus);
+  setTimeout(() => {
+    done = true;
+    document.removeEventListener('personal-assistant:status', onStatus);
+  }, 15000);
 }
 
 if (typeof document !== 'undefined') {

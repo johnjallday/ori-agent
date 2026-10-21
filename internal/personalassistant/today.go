@@ -269,6 +269,7 @@ type TodayService struct {
 	janitorResults     JanitorResultReader
 	folderReceipts     FolderReceiptReader
 	folderDigest       FolderDigestReader
+	secondBrain        SecondBrainTodayReader
 	workspaceBuilds    WorkspaceBuildReader
 	meetings           TodayMeetingReader
 	backups            dailybrief.BackupSource
@@ -322,6 +323,20 @@ func (s *TodayService) SetJanitorResultReader(reader JanitorResultReader) {
 func (s *TodayService) SetFolderReceiptReader(reader FolderReceiptReader) {
 	if s != nil {
 		s.folderReceipts = reader
+	}
+}
+
+// SecondBrainTodayReader is what Today reads about the connected notes folder.
+type SecondBrainTodayReader interface {
+	Status(ctx context.Context, userID string) (SecondBrainView, error)
+	Look(ctx context.Context, userID string) (SecondBrainLookView, error)
+}
+
+// SetSecondBrainReader attaches the notes folder's look for Working on, Done
+// and Needs you (second-brain FR32).
+func (s *TodayService) SetSecondBrainReader(reader SecondBrainTodayReader) {
+	if s != nil {
+		s.secondBrain = reader
 	}
 }
 

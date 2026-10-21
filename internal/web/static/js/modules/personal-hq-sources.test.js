@@ -1,11 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  notesSourceView,
   renderDossierSources,
   safeDossierRoute,
   sourceCapabilityDisclosures,
   sourceCardSummary
 } from './personal-hq-sources.js';
+
+test('the Notes row names the connected folder, a missing one, or none', () => {
+  const connected = notesSourceView({
+    status: 'connected',
+    source: { name: 'Second Brain', kind: 'obsidian' }
+  });
+  assert.match(connected.summary, /^Second brain: Second Brain \(Obsidian\)\./);
+  assert.equal(connected.disconnect, true);
+  assert.equal(connected.action, null);
+
+  const folder = notesSourceView({
+    status: 'connected',
+    source: { name: 'Thesis Notes', kind: 'markdown' }
+  });
+  assert.match(folder.summary, /\(Markdown folder\)/);
+
+  const missing = notesSourceView({
+    status: 'missing',
+    source: { name: 'Second Brain', kind: 'obsidian' }
+  });
+  assert.equal(missing.summary, "Can't find Second Brain. It may have been moved or renamed.");
+  assert.deepEqual(missing.action, { label: 'Choose again', route: '/?quest=second-brain' });
+  assert.equal(missing.disconnect, true);
+
+  const none = notesSourceView({ status: 'not_connected' });
+  assert.equal(none.disconnect, false);
+  assert.equal(none.action.label, 'Connect your notes');
+});
 
 test('saved observation displays only its actual saved date and never claims a scan', () => {
   const body = sourceCardSummary('saved_apps', {

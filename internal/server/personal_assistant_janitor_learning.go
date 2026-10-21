@@ -84,9 +84,10 @@ func janitorKnowledgeProposal(pattern janitorKnowledgeEvidence) (personalassista
 // are reread on each approval and context read; lost notifications cannot
 // make a successfully undone action remain active in the prompt.
 type scopedKnowledgeAuthority struct {
-	apps       personalassistant.SavedAppAuthority
-	janitor    *janitorKnowledgeReader
-	folderScan *folderScanAuthority
+	apps        personalassistant.SavedAppAuthority
+	janitor     *janitorKnowledgeReader
+	folderScan  *folderScanAuthority
+	secondBrain *secondBrainAuthority
 }
 
 func (a scopedKnowledgeAuthority) Revalidate(ctx context.Context, binding personalassistant.KnowledgeBinding, item personalassistant.KnowledgeItem) error {
@@ -98,6 +99,8 @@ func (a scopedKnowledgeAuthority) Revalidate(ctx context.Context, binding person
 			return errFolderScanSourceUnavailable
 		}
 		return a.folderScan.Revalidate(ctx, binding, item)
+	case personalassistant.SecondBrainSourceKind:
+		return a.secondBrain.Revalidate(ctx, binding, item)
 	case "file_janitor":
 		if a.janitor == nil {
 			return errJanitorKnowledgeSourceUnavailable

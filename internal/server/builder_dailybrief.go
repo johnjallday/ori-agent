@@ -326,6 +326,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 				digest: b.personalAssistantFolderDigest, files: b.workspaceFileStore, validate: validateShownFolder,
 			}
 		}
+		if b.personalAssistantSecondBrain != nil {
+			authority.secondBrain = &secondBrainAuthority{brain: b.personalAssistantSecondBrain}
+		}
 		memoryStore := workspace.NewMemoryStore(b.workspaceFileStore)
 		learning := personalassistant.NewKnowledgeLifecycleService(knowledge, memoryStore, authority)
 		b.personalAssistantLearning = learning
@@ -333,6 +336,13 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			// A yes on a project is the review: the fact is proposed and
 			// approved in the same request, tool candidates wait in the queue.
 			b.personalAssistantFolderDigest.SetOnResolved(personalassistant.NewFolderScanProducer(learning).LearnFromOffer)
+		}
+		if b.personalAssistantSecondBrain != nil {
+			// Connecting the notes folder is the review of where the user keeps
+			// notes; disconnecting sends that fact back to review (FR16, FR37).
+			notes := personalassistant.NewSecondBrainKnowledge(learning)
+			b.personalAssistantSecondBrain.OnConnected(notes.Learn)
+			b.personalAssistantSecondBrain.OnDisconnected(notes.Unlearn)
 		}
 		b.personalAssistantMemory.SetReviewedHQWriter(learning)
 		rememberedReader = learning

@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -157,6 +158,21 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		b.dailyBriefHandler.SetOnBriefSeen(func(string) {
 			if b.assistantHired() {
 				engine.Complete(progression.FirstBriefQuestID)
+			}
+		})
+	}
+	// Connect your second brain: a connected notes folder completes it and
+	// "I don't keep notes" skips it, both observed on the server (FR8, FR34).
+	if b.personalAssistantSecondBrain != nil {
+		if b.personalAssistantToday != nil {
+			b.personalAssistantToday.SetSecondBrainReader(b.personalAssistantSecondBrain)
+		}
+		b.personalAssistantSecondBrain.OnConnected(func(context.Context, string, secondbrain.Source) {
+			engine.Complete(progression.SecondBrainQuestID)
+		})
+		b.personalAssistantSecondBrain.OnDeclined(func(context.Context, string) {
+			if err := engine.Skip(progression.SecondBrainQuestID); err != nil {
+				logger.Debug("Second-brain mission not skipped", logger.Fields{"error": err.Error()})
 			}
 		})
 	}
@@ -328,6 +344,13 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	// Mission 05: HQ already has a Daily Brief revision.
 	if b.dailyBriefService != nil {
 		snap.HasBriefRevision = briefRevisionExists(b.dailyBriefService, hqWorkspaceID)
+	}
+
+	// Connect your second brain: a notes folder is already connected.
+	if b.personalAssistantSecondBrain != nil {
+		if _, connected, err := b.personalAssistantSecondBrain.ConnectedSource(context.Background(), userprofile.LocalUserID); err == nil {
+			snap.SecondBrainConnected = connected
+		}
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".

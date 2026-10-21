@@ -61,7 +61,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 
 	wantTiers := map[string]int{
 		MeetAssistantQuestID: 1,
-		BuildHQQuestID:       1, ShowFolderQuestID: 1, FolderFirstLookQuestID: 1,
+		BuildHQQuestID:       1, SecondBrainQuestID: 1, ShowFolderQuestID: 1, FolderFirstLookQuestID: 1,
 		ConnectSourceQuestID: 2, FirstBriefQuestID: 2,
 		"t1-first-message": 3, "t1-personalize": 3, "t2-create-note": 3, "t2-run-task": 3,
 		"t3-second-agent": 3, "t3-delegate": 3, "t3-agent-task-done": 3,
@@ -92,7 +92,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		}
 	}
 
-	// Exactly five missions stay visible. Retired objectives still have IDs,
+	// Exactly six missions stay visible. Retired objectives still have IDs,
 	// detectors, and completions but cannot appear on the mission board.
 	wantMissions := []struct {
 		id, title, url, label string
@@ -100,6 +100,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		lockedUntil           string
 	}{
 		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
+		{SecondBrainQuestID, "Connect your second brain", SecondBrainActionURL, "Start", true, BuildHQQuestID},
 		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, BuildHQQuestID},
 		// The static action is the no-folder fallback; Resolve replaces it once
 		// a folder workspace has a first look.
@@ -128,10 +129,13 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	if why := graph.Quests[0].Why; why != "Your assistant is the one agent that owns your ongoing work. Make them yours." {
 		t.Fatalf("Meet your assistant why = %q", why)
 	}
-	if why := graph.Quests[2].Why; why != "Point Ori at a folder and it will tell you what it can do with it." {
+	if why := graph.Quests[2].Why; why != "Point Ori at your notes and it tells you what's open." {
+		t.Fatalf("Connect your second brain why = %q", why)
+	}
+	if why := graph.Quests[3].Why; why != "Point Ori at a folder and it will tell you what it can do with it." {
 		t.Fatalf("Show your assistant a folder why = %q", why)
 	}
-	firstLook := graph.Quests[3]
+	firstLook := graph.Quests[4]
 	if firstLook.Why != "Your assistant takes one read-only look at the folder and reports back. This is where you see what it can do." {
 		t.Fatalf("See what your assistant found why = %q", firstLook.Why)
 	}
@@ -168,6 +172,27 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	}
 }
 
+func TestSecondBrainMission_NamesTheFoundVaultAndIsGrandfatheredByAConnection(t *testing.T) {
+	var mission Quest
+	for _, q := range PersonalAssistantGraph().Quests {
+		if q.ID == SecondBrainQuestID {
+			mission = q
+		}
+	}
+	if mission.Resolve == nil || mission.Satisfied == nil || mission.Match != nil {
+		t.Fatalf("second-brain mission wiring = %+v", mission)
+	}
+	if got := mission.Resolve(MissionContext{SecondBrainVault: "Second Brain"}); got.Hint != "Found: Second Brain" {
+		t.Fatalf("with a vault found: %+v", got)
+	}
+	if got := mission.Resolve(MissionContext{SecondBrainVault: "  "}); got != (MissionPresentation{}) {
+		t.Fatalf("with no vault found: %+v", got)
+	}
+	if !mission.Satisfied(Snapshot{SecondBrainConnected: true}) || mission.Satisfied(Snapshot{}) {
+		t.Fatal("a connection does not grandfather the mission, or nothing does")
+	}
+}
+
 func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards(t *testing.T) {
 	graph := PersonalAssistantGraph()
 	visible := []string{}
@@ -176,7 +201,7 @@ func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards
 			visible = append(visible, q.ID)
 		}
 	}
-	want := []string{MeetAssistantQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID}
+	want := []string{MeetAssistantQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID}
 	if strings.Join(visible, ",") != strings.Join(want, ",") {
 		t.Fatalf("visible quests = %v, want %v", visible, want)
 	}
@@ -187,13 +212,13 @@ func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards
 	if !e.HasCompleted("t1-first-message") {
 		t.Fatal("a retired quest stopped recording real events")
 	}
-	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 5 || after.TotalTiers != 2 || after.NextQuest.ID != MeetAssistantQuestID {
+	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 6 || after.TotalTiers != 2 || after.NextQuest.ID != MeetAssistantQuestID {
 		t.Fatalf("retired completion changed the mission board: %+v", after)
 	}
 	if err := e.Reset(); err != nil {
 		t.Fatal(err)
 	}
-	if e.HasCompleted("t1-first-message") || e.Status().TotalCount != 5 {
+	if e.HasCompleted("t1-first-message") || e.Status().TotalCount != 6 {
 		t.Fatal("reset did not clear retired history while preserving the visible graph")
 	}
 }
@@ -214,7 +239,7 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 		}
 		return strings.Join(ids, ",")
 	}
-	if got := names(st.Tiers[0]); got != strings.Join([]string{MeetAssistantQuestID, ShowFolderQuestID, FolderFirstLookQuestID}, ",") {
+	if got := names(st.Tiers[0]); got != strings.Join([]string{MeetAssistantQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID}, ",") {
 		t.Fatalf("Starter holds %s", got)
 	}
 	if got := names(st.Tiers[1]); got != ConnectSourceQuestID+","+FirstBriefQuestID {
@@ -224,6 +249,7 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 	// Tier 2 opens only when every Starter mission is resolved, and a skip counts
 	// as resolved (FR3).
 	e.Complete(MeetAssistantQuestID)
+	e.Complete(SecondBrainQuestID)
 	e.Complete(ShowFolderQuestID)
 	if st := e.Status(); st.CurrentTier != 1 {
 		t.Fatalf("current tier = %d with the first look still open", st.CurrentTier)
@@ -242,8 +268,8 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 	if err := e.Skip(FirstBriefQuestID); err != nil {
 		t.Fatal(err)
 	}
-	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 5 {
-		t.Fatalf("status after five missions = %+v", st)
+	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 6 {
+		t.Fatalf("status after six missions = %+v", st)
 	}
 }
 
@@ -253,6 +279,9 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 func TestSkippedGateDoesNotStrandTheTier(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 	e.Complete(MeetAssistantQuestID)
+	if err := e.Skip(SecondBrainQuestID); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.Skip(ShowFolderQuestID); err != nil {
 		t.Fatal(err)
 	}
@@ -310,6 +339,7 @@ func TestDailyLoop_WaitsForStarter(t *testing.T) {
 		t.Fatal("a tier-locked mission refused a real completion")
 	}
 
+	e.Complete(SecondBrainQuestID)
 	e.Complete(ShowFolderQuestID)
 	if err := e.Skip(FolderFirstLookQuestID); err != nil {
 		t.Fatal(err)
@@ -656,6 +686,7 @@ func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 	if why := brief().Why; why != firstBriefWhy {
 		t.Fatalf("Mission 05 advised while Starter was open: %q", why)
 	}
+	e.Complete(SecondBrainQuestID)
 	e.Complete(ShowFolderQuestID)
 	if err := e.Skip(FolderFirstLookQuestID); err != nil {
 		t.Fatal(err)
@@ -895,11 +926,12 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 
 	st := e.Status()
-	if len(st.Missions) != 5 || st.Missions[0].ID != MeetAssistantQuestID {
-		t.Fatalf("missions = %v, want five with Meet your assistant first", missionLocks(e))
+	if len(st.Missions) != 6 || st.Missions[0].ID != MeetAssistantQuestID {
+		t.Fatalf("missions = %v, want six with Meet your assistant first", missionLocks(e))
 	}
 	wantLocked := []string{
 		MeetAssistantQuestID + ":false:",
+		SecondBrainQuestID + ":true:Build your HQ first",
 		ShowFolderQuestID + ":true:Build your HQ first",
 		FolderFirstLookQuestID + ":true:Show your assistant a folder first",
 		ConnectSourceQuestID + ":true:Starter first",
@@ -1197,7 +1229,7 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 	if err := e.Skip(MeetAssistantQuestID); !errors.Is(err, ErrQuestNotOptional) {
 		t.Fatalf("Skip(Meet your assistant) = %v, want ErrQuestNotOptional", err)
 	}
-	for _, id := range []string{BuildHQQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID} {
+	for _, id := range []string{BuildHQQuestID, SecondBrainQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID, FirstBriefQuestID} {
 		if err := e.Skip(id); err != nil {
 			t.Fatal(err)
 		}
@@ -1208,7 +1240,7 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 	e.Complete(MeetAssistantQuestID)
 	// Everything else was skipped, so the hire resolves Starter, opens the Daily
 	// loop (also skipped), and completes the board.
-	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 5 {
+	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 6 {
 		t.Fatalf("status after the hire = %+v", st)
 	}
 }

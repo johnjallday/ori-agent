@@ -13,9 +13,67 @@ import {
   secondBrainError,
   secondBrainItemGroups,
   secondBrainLookView,
+  secondBrainManageView,
   secondBrainPlacement,
+  secondBrainQuestRequested,
+  sinceLabel,
   suggestedLabel
 } from './personal-assistant-second-brain.js';
+
+test('the connection card says connected, missing, or not set up', () => {
+  const now = Date.parse('2026-10-21T12:00:00Z');
+  const connected = {
+    status: 'connected',
+    source: { name: 'Second Brain', kind: 'obsidian', path: '/Users/sam/Second Brain' },
+    last_look: { at: '2026-10-21T10:00:00Z', open_items: 12 }
+  };
+  const view = secondBrainManageView(connected, now);
+  assert.equal(view.title, 'Connected · Second Brain');
+  assert.equal(view.detail, 'Obsidian · last look 2 hours ago');
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Look again', 'Disconnect']
+  );
+
+  const missing = secondBrainManageView({ ...connected, status: 'missing' }, now);
+  assert.equal(missing.title, "Can't find Second Brain");
+  assert.deepEqual(
+    missing.actions.map(action => action.label),
+    ['Choose again', 'Disconnect']
+  );
+
+  const fresh = secondBrainManageView({ ...connected, last_look: null }, now);
+  assert.equal(fresh.detail, 'Obsidian · not looked at yet');
+  const folder = secondBrainManageView(
+    { ...connected, source: { name: 'Thesis Notes', kind: 'markdown' } },
+    now
+  );
+  assert.match(folder.detail, /^Markdown folder · /);
+
+  const none = secondBrainManageView({ status: 'not_connected' }, now);
+  assert.equal(none.state, 'not_connected');
+  assert.deepEqual(
+    none.actions.map(action => action.label),
+    ['Choose folder…']
+  );
+});
+
+test('since labels read like a person says them', () => {
+  const now = Date.parse('2026-10-21T12:00:00Z');
+  assert.equal(sinceLabel('2026-10-21T11:59:50Z', now), 'just now');
+  assert.equal(sinceLabel('2026-10-21T11:59:00Z', now), '1 minute ago');
+  assert.equal(sinceLabel('2026-10-21T11:15:00Z', now), '45 minutes ago');
+  assert.equal(sinceLabel('2026-10-21T11:00:00Z', now), '1 hour ago');
+  assert.equal(sinceLabel('2026-10-20T12:00:00Z', now), 'yesterday');
+  assert.equal(sinceLabel('2026-10-17T12:00:00Z', now), '4 days ago');
+  assert.equal(sinceLabel('', now), '');
+});
+
+test('the mission card arrives with ?quest=second-brain', () => {
+  assert.equal(secondBrainQuestRequested('?quest=second-brain'), true);
+  assert.equal(secondBrainQuestRequested('?quest=show-folder'), false);
+  assert.equal(secondBrainQuestRequested(''), false);
+});
 
 const detected = {
   status: 'not_connected',
