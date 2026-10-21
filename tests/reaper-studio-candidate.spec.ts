@@ -746,7 +746,11 @@ test.describe('fresh Home', () => {
     await expect(page.locator('#resourceCatalogList')).toContainText('Saturday Residency');
     await expect(page.locator('#resourceCatalogList')).toContainText('Drum room');
     await shot(page, '10b-folder-read');
-    expect(counts(await studioSummary(request)).templates).toBe(5);
+    const read = await studioSummary(request);
+    expect(counts(read).templates).toBe(5);
+    // Reading the folder published a new revision; the restart check expects it.
+    saved.revision = read.catalog.revision;
+    save();
     const found = await lookup(request, saved.songID, 'resource_catalog_search', {
       query: 'Saturday Residency'
     });

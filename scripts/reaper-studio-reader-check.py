@@ -3,14 +3,17 @@
 
 Usage:
   ./scripts/reaper-studio-reader-check.py --binary PATH --out DIR [--home DIR]
+      [--folder CATEGORY=PATH ...]
 
 Runs the candidate binary's MCP service (`serve`) with HOME set to --home
 (default: the current HOME), calls `studio.sources.read` once and pages
 `studio.inventory.read` for every ready source, and snapshots the REAPER
-resource folder and the Ori script library before and after: membership,
-symlink targets and a sha256 of every regular file, never following a link
-and never creating a path. It writes the answers, both snapshots and their
-difference to --out and exits non-zero when a source changed.
+resource folder, the Ori script library and every --folder before and after:
+membership, symlink targets and a sha256 of every regular file, never
+following a link and never creating a path. It writes the answers, both
+snapshots and their difference to --out and exits non-zero when a source
+changed. Each --folder is passed as an owner folder (contract §4.5), as Ori
+would after the owner added and approved it.
 
 The candidate decides what it reads; this script only observes. It starts no
 REAPER, installs nothing and never runs a cataloged script.
@@ -62,12 +65,25 @@ def snapshot(root: Path) -> dict:
     return {"exists": True, "entries": entries}
 
 
-def snapshot_all(home: Path) -> dict:
-    return {
+def snapshot_all(home: Path, folders: list) -> dict:
+    snapshots = {
         "resource": snapshot(home / RESOURCE),
         "library": snapshot(home / LIBRARY),
         "exchange": snapshot(home / EXCHANGE),
     }
+    for folder in folders:
+        snapshots[folder["id"]] = snapshot(Path(folder["path"]))
+    return snapshots
+
+
+def owner_folder(spec: str) -> dict:
+    """CATEGORY=PATH as Ori sends it: the canonical path and its folder ID."""
+    category, _, raw = spec.partition("=")
+    if not category or not raw:
+        raise SystemExit(f"--folder needs CATEGORY=PATH, got {spec!r}")
+    path = os.path.realpath(os.path.expanduser(raw))
+    digest = hashlib.sha256(f"{category}\x00{path}".encode()).hexdigest()[:16]
+    return {"id": "folder_" + digest, "category": category, "path": path}
 
 
 def difference(before: dict, after: dict, ignore: set) -> list:
@@ -142,12 +158,14 @@ def main() -> int:
     parser.add_argument("--binary", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--home", default=os.environ.get("HOME", ""))
+    parser.add_argument("--folder", action="append", default=[], help="CATEGORY=PATH owner folder")
     args = parser.parse_args()
     home = Path(args.home)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    folders = [owner_folder(spec) for spec in args.folder]
 
-    before = snapshot_all(home)
+    before = snapshot_all(home, folders)
     service = Service(args.binary, home)
     try:
         service.request(
@@ -159,22 +177,27 @@ def main() -> int:
         missing = {"studio.sources.read", "studio.inventory.read"} - tools
         if missing:
             raise RuntimeError(f"the candidate does not serve {sorted(missing)}")
-        sources = service.call("studio.sources.read", {"schema_version": 1})
+        sources_input = {"schema_version": 1}
+        if folders:
+            sources_input["folders"] = folders
+        sources = service.call("studio.sources.read", sources_input)
+        by_id = {folder["id"]: folder for folder in folders}
         inventories = {}
         for source in sources["sources"]:
             pages, cursor = [], ""
             if source["state"] == "ready" or source["access"] == "live":
                 while True:
-                    page = service.call(
-                        "studio.inventory.read",
-                        {
-                            "schema_version": 1,
-                            "installation_id": sources["installation"]["id"],
-                            "source_id": source["id"],
-                            "cursor": cursor,
-                            "limit": 256,
-                        },
-                    )
+                    request = {
+                        "schema_version": 1,
+                        "installation_id": sources["installation"]["id"],
+                        "source_id": source["id"],
+                        "cursor": cursor,
+                        "limit": 256,
+                    }
+                    if source["id"] in by_id:
+                        folder = by_id[source["id"]]
+                        request["folder"] = {"category": folder["category"], "path": folder["path"]}
+                    page = service.call("studio.inventory.read", request)
                     pages.append(page)
                     cursor = page.get("next_cursor", "")
                     if not cursor or len(pages) >= 1000:
@@ -182,13 +205,15 @@ def main() -> int:
             inventories[source["id"]] = pages
     finally:
         service.close()
-    after = snapshot_all(home)
+    after = snapshot_all(home, folders)
 
     changes = {
         "resource": difference(before["resource"], after["resource"], REAPER_OWNED),
         "library": difference(before["library"], after["library"], set()),
         "exchange": difference(before["exchange"], after["exchange"], set()),
     }
+    for folder in folders:
+        changes[folder["id"]] = difference(before[folder["id"]], after[folder["id"]], set())
     summary = {"installation": sources["installation"], "sources": []}
     for source in sources["sources"]:
         pages = inventories[source["id"]]
@@ -210,7 +235,7 @@ def main() -> int:
                 "sample_ids": [entry["native_id"] for entry in entries[:5]],
             }
         )
-    summary["source_changes"] = len(changes["resource"]) + len(changes["library"])
+    summary["source_changes"] = sum(len(found) for key, found in changes.items() if key != "exchange")
     summary["exchange_changes"] = len(changes["exchange"])
 
     (out / "sources.json").write_text(json.dumps(sources, indent=2) + "\n")
