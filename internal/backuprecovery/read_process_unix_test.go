@@ -173,7 +173,7 @@ func TestReadProcessDeadlineStopsBlockedHelpersNestedPipelineChild(t *testing.T)
 	}
 	// Admission includes cold process startup. A deadline may expire before the
 	// nested writer starts; neither an existing writer nor a late one may survive.
-	assertNestedHeartbeatStopped(t, heartbeat)
+	assertHeartbeatStopped(t, heartbeat, "nested pipeline child")
 }
 
 func TestReadProcessCancellationStopsRunningNestedPipelineChild(t *testing.T) {
@@ -212,23 +212,42 @@ func TestReadProcessCancellationStopsRunningNestedPipelineChild(t *testing.T) {
 	if readErr != errReadProcessCancelled || len(out) != 0 {
 		t.Fatal("cancellation did not drain the running nested pipeline")
 	}
-	assertNestedHeartbeatStopped(t, heartbeat)
+	assertHeartbeatStopped(t, heartbeat, "nested pipeline child")
 }
 
-func assertNestedHeartbeatStopped(t *testing.T, heartbeat string) {
+// assertHeartbeatStopped requires the heartbeat writer to be dead: silent for
+// heartbeatSilence, seen within childDrainLimit of the call. A group SIGKILL
+// is queued when kill(2) returns, not yet delivered, so a write the writer
+// already had in flight can still land after the owner's cleanup returned.
+// A writer that survived keeps writing every 20 ms and fails once the bound
+// runs out; a writer never seen must not appear either.
+func assertHeartbeatStopped(t *testing.T, heartbeat, writer string) {
 	t.Helper()
+	const heartbeatSilence = 150 * time.Millisecond
 	before, beforeErr := os.Stat(heartbeat)
-	if beforeErr != nil && !errors.Is(beforeErr, os.ErrNotExist) {
+	if errors.Is(beforeErr, os.ErrNotExist) {
+		time.Sleep(heartbeatSilence)
+		if _, err := os.Stat(heartbeat); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s started writing after its owner was reaped", writer)
+		}
+		return
+	}
+	if beforeErr != nil {
 		t.Fatal(beforeErr)
 	}
-	time.Sleep(150 * time.Millisecond)
-	after, afterErr := os.Stat(heartbeat)
-	if errors.Is(beforeErr, os.ErrNotExist) {
-		if !errors.Is(afterErr, os.ErrNotExist) {
-			t.Fatal("nested pipeline child started writing after its owner was reaped")
+	for deadline := time.Now().Add(childDrainLimit); ; {
+		time.Sleep(heartbeatSilence)
+		after, err := os.Stat(heartbeat)
+		if err != nil {
+			t.Fatal(err)
 		}
-	} else if afterErr != nil || !before.ModTime().Equal(after.ModTime()) {
-		t.Fatal("nested pipeline child continued writing after its owner was reaped")
+		if before.ModTime().Equal(after.ModTime()) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s continued writing after process cleanup", writer)
+		}
+		before = after
 	}
 }
 
@@ -319,15 +338,10 @@ func TestReadProcessStopsDescendantAfterParentExits(t *testing.T) {
 	if _, err := runReadProcess(t.Context(), spec); err != errReadProcess {
 		t.Fatalf("expected bounded pipe-drain failure: %v", err)
 	}
-	before, err := os.Stat(heartbeat)
-	if err != nil {
+	if _, err := os.Stat(heartbeat); err != nil {
 		t.Fatal("descendant never started")
 	}
-	time.Sleep(120 * time.Millisecond)
-	after, err := os.Stat(heartbeat)
-	if err != nil || !before.ModTime().Equal(after.ModTime()) {
-		t.Fatal("descendant continued writing after process cleanup")
-	}
+	assertHeartbeatStopped(t, heartbeat, "descendant")
 }
 
 func TestReadProcessDoesNotInheritProviderEnvironment(t *testing.T) {
