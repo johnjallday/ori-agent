@@ -196,16 +196,32 @@ func TestFolderHireCandidate_ARecognizedProjectWithAPlanIsReviewedOnAttach(t *te
 	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{Unavailable: FolderStructureReviewPending}) {
 		t.Fatalf("while a card waits: %+v", got)
 	}
-	if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
-		for i := range d.Offers {
-			if d.Offers[i].ID == waiting.ID {
-				d.Offers[i].Status = FolderOfferClosed
+	closeOffer := func(id string) {
+		t.Helper()
+		if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+			for i := range d.Offers {
+				if d.Offers[i].ID == id {
+					d.Offers[i].Status = FolderOfferClosed
+				}
 			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
+	closeOffer(waiting.ID)
+
+	// A card waiting on Home for this very song is no reason to refuse: the
+	// conversation's review takes its place.
+	fx.service.digest.deps.ResolveSelection = func(string) (string, error) { return fx.song, nil }
+	home, err := fx.service.digest.ScanSelection(ctx, "local", "song-token")
+	if err != nil || home.Status != FolderOfferPending {
+		t.Fatalf("the song's card on Home: %+v %v", home, err)
+	}
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{CandidateID: fx.candidate}) {
+		t.Fatalf("with the same song's card on Home: %+v", got)
+	}
+	closeOffer(home.ID)
 
 	// A folder the user said never to ask about again stays unasked.
 	if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {

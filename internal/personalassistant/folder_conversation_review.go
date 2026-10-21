@@ -204,8 +204,10 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 		}
 		if pending := doc.Pending(); pending != nil {
 			// An open arrangement review is closed explicitly (Keep chatting), never
-			// silently retired by an unrelated manual review.
-			if pending.ConversationReview == nil || pending.ConversationReview.Target != target || pending.Structure.Arranged() {
+			// silently retired by an unrelated manual review. This conversation's
+			// own review, and a card waiting on Home for this very project, give
+			// way to the review the user just asked for here.
+			if !ownConversationReview(pending, target) && !sameProjectHomeOffer(pending, offer.Subject.Key) {
 				return ErrFolderReviewPending
 			}
 			// Retirement is not a decline, tombstone or memory preference.
@@ -477,13 +479,28 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 		return FolderHireCandidate{}
 	}
 	if pending := doc.Pending(); pending != nil && !ownConversationReview(pending, target) {
-		return FolderHireCandidate{Unavailable: FolderStructureReviewPending}
+		// A card waiting on Home for this very project gives way to the review
+		// (Review closes it); any other waiting card keeps it away.
+		offer, err := s.prepareReviewOffer(ctx, held, target, recognition.CandidateID)
+		if err != nil || !sameProjectHomeOffer(pending, offer.Subject.Key) {
+			return FolderHireCandidate{Unavailable: FolderStructureReviewPending}
+		}
 	}
 	option, ok := s.reviewOption(ctx, held, target, recognition.CandidateID)
 	if !ok || (option.Presentation != nil && option.Presentation.State == "unavailable") {
 		return FolderHireCandidate{}
 	}
 	return FolderHireCandidate{CandidateID: option.CandidateID}
+}
+
+// sameProjectHomeOffer is a card waiting on Home (Explore a folder) for the
+// very project a conversation now reviews. The conversation's review takes its
+// place, so the same folder never has two cards and the user is never told to
+// finish a setup that is the one they are asking for. A collection's or an
+// arranged card is never this: its subject is the whole folder.
+func sameProjectHomeOffer(pending *FolderOffer, subjectKey string) bool {
+	return pending.ConversationReview == nil && pending.Structure == nil && pending.Portfolio == nil &&
+		subjectKey != "" && pending.Subject.Key == subjectKey
 }
 
 // ownConversationReview is a pending review this conversation opened, which a
