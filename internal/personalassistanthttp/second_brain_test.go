@@ -61,6 +61,10 @@ func (f *fakeSecondBrain) AcceptFollowUps(_ context.Context, _ string, lookID st
 	return personalassistant.SecondBrainAcceptView{LookID: lookID, Created: 2}, f.record("follow_ups")
 }
 
+func (f *fakeSecondBrain) DismissLook(context.Context, string, string, string) (personalassistant.SecondBrainLookView, error) {
+	return personalassistant.SecondBrainLookView{}, f.record("dismiss")
+}
+
 func (f *fakeSecondBrain) Disconnect(_ context.Context, _ string, _ string, ifVersion int64) (personalassistant.SecondBrainView, error) {
 	f.version = ifVersion
 	return personalassistant.SecondBrainView{}, f.record("disconnect")
@@ -78,6 +82,7 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("GET "+base+"/look", h.GetSecondBrainLook)
 	mux.HandleFunc("POST "+base+"/look", h.LookSecondBrainAgain)
 	mux.HandleFunc("POST "+base+"/look/{lookID}/follow-ups", h.AcceptSecondBrainFollowUps)
+	mux.HandleFunc("POST "+base+"/look/{lookID}/dismiss", h.DismissSecondBrainLook)
 	mux.HandleFunc("POST "+base+"/disconnect", h.DisconnectSecondBrain)
 	return mux
 }
@@ -104,6 +109,7 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodGet, "/look", ""},
 		{http.MethodPost, "/look", `{"request_id":"l-1"}`},
 		{http.MethodPost, "/look/look-1/follow-ups", `{"items":"suggested","request_id":"f-1"}`},
+		{http.MethodPost, "/look/look-1/dismiss", `{"request_id":"x-1"}`},
 		{http.MethodPost, "/disconnect", `{"request_id":"d-1","if_version":1}`},
 	} {
 		if got := secondBrainRequest(handler, route.method, route.path, route.body, "https://evil.example").Code; got != http.StatusForbidden {
@@ -113,8 +119,8 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 			t.Errorf("%s %s from Ori's page = %d, want 200", route.method, route.path, got)
 		}
 	}
-	if len(fake.calls) != 8 {
-		t.Fatalf("calls = %v, want only the eight local requests", fake.calls)
+	if len(fake.calls) != 9 {
+		t.Fatalf("calls = %v, want only the nine local requests", fake.calls)
 	}
 
 	rebound := httptest.NewRequest(http.MethodGet, "http://attacker.example/api/personal-assistant/second-brain", nil)

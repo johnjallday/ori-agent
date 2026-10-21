@@ -374,6 +374,11 @@ type FolderDigestDeps struct {
 	// MissionUnresolved is bound after progression and the assistant exist.
 	// Nil fails closed: no automatic prompt without trustworthy mission state.
 	MissionUnresolved func(id string) bool
+	// FirstPromptOwned says another first message owns the assistant's
+	// opening turn after HQ (the second-brain ask), so the folder hand-over
+	// is never shown as a message for this relationship. The Explore a folder
+	// chip and the mission stay.
+	FirstPromptOwned func(ctx context.Context, userID string) bool
 }
 
 // FolderLearning is what the dossier producer did with a resolved project
@@ -405,6 +410,14 @@ func (s *FolderDigestService) SetOnOutcome(fn func(ctx context.Context, userID s
 func (s *FolderDigestService) SetMissionUnresolved(fn func(id string) bool) {
 	if s != nil {
 		s.deps.MissionUnresolved = fn
+	}
+}
+
+// SetFirstPromptOwned binds the second-brain ask, which replaces the folder
+// hand-over as the first message after HQ (second-brain FR5, FR9).
+func (s *FolderDigestService) SetFirstPromptOwned(fn func(ctx context.Context, userID string) bool) {
+	if s != nil {
+		s.deps.FirstPromptOwned = fn
 	}
 }
 
@@ -857,7 +870,8 @@ func (s *FolderDigestService) current(ctx context.Context, userID, offerID strin
 		}
 	}
 	view.PromptFirstFolder = !binding.Paused && doc.FirstPromptShownAt == nil &&
-		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder")
+		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder") &&
+		(s.deps.FirstPromptOwned == nil || !s.deps.FirstPromptOwned(ctx, userID))
 	if pending != nil {
 		offer := s.viewFor(ctx, userID, *pending, binding.Paused)
 		view.Offer = &offer

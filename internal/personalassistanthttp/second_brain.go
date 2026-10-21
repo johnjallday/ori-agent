@@ -25,6 +25,7 @@ type SecondBrainService interface {
 	Look(ctx context.Context, userID string) (personalassistant.SecondBrainLookView, error)
 	LookAgain(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainLookView, error)
 	AcceptFollowUps(ctx context.Context, userID, lookID string, input personalassistant.SecondBrainAcceptInput) (personalassistant.SecondBrainAcceptView, error)
+	DismissLook(ctx context.Context, userID, lookID, requestID string) (personalassistant.SecondBrainLookView, error)
 	Disconnect(ctx context.Context, userID, requestID string, ifVersion int64) (personalassistant.SecondBrainView, error)
 }
 
@@ -241,6 +242,32 @@ func (h *Handler) AcceptSecondBrainFollowUps(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	orihttp.Success(w, map[string]any{"follow_ups": view})
+}
+
+// DismissSecondBrainLook takes a finished result off Needs you.
+func (h *Handler) DismissSecondBrainLook(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	lookID := strings.TrimSpace(r.PathValue("lookID"))
+	if lookID == "" {
+		orihttp.BadRequest(w, "Look id is required")
+		return
+	}
+	var req secondBrainRequestOnly
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &req, "request_id") {
+		return
+	}
+	view, err := h.secondBrain.DismissLook(r.Context(), userID, lookID, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"look": view})
 }
 
 type secondBrainDisconnectRequest struct {

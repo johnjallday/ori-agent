@@ -475,6 +475,54 @@ func chosenItems(items []secondbrain.LookItem, input SecondBrainAcceptInput) ([]
 	return chosen, nil
 }
 
+// OwnsFirstPrompt says the second-brain ask is the first message after HQ for
+// this relationship (FR5, FR9), so the folder hand-over is not shown. It holds
+// whenever the record can be read, whatever the ask's state: a declined ask
+// is never followed by the folder prompt as a second unprompted message.
+func (s *SecondBrainService) OwnsFirstPrompt(ctx context.Context, userID string) bool {
+	_, err := s.read(ctx, userID)
+	return err == nil
+}
+
+// ResetAsk re-arms the ask after Reset Getting Started (FR39); the connection
+// is kept. With no active HQ there is nothing to reset.
+func (s *SecondBrainService) ResetAsk(ctx context.Context, userID string) error {
+	_, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+		doc.ResetAsk()
+		return nil
+	})
+	if errors.Is(err, ErrNeedsHQ) || errors.Is(err, ErrRepairNeeded) || errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// DismissLook takes a finished result off Needs you without adding anything
+// (FR31, FR32). Dismissing twice is the same as once.
+func (s *SecondBrainService) DismissLook(ctx context.Context, userID, lookID, requestID string) (SecondBrainLookView, error) {
+	if !secondbrain.ValidRequestID(requestID) || lookID == "" {
+		return SecondBrainLookView{}, ErrValidation
+	}
+	doc, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
+		connected := doc.Connected()
+		if connected == nil {
+			return ErrSecondBrainNotConnected
+		}
+		if connected.LastLook == nil || connected.LastLook.ID != lookID {
+			return ErrSecondBrainLookNotFound
+		}
+		if connected.LastLook.ActedAt == nil {
+			at := s.deps.Now().UTC()
+			connected.LastLook.ActedAt = &at
+		}
+		return nil
+	})
+	if err != nil {
+		return SecondBrainLookView{}, err
+	}
+	return s.lookView(userID, doc.Connected()), nil
+}
+
 // Disconnect removes the connection at ifVersion (FR37). The follow-ups it
 // created stay.
 func (s *SecondBrainService) Disconnect(ctx context.Context, userID, requestID string, ifVersion int64) (SecondBrainView, error) {

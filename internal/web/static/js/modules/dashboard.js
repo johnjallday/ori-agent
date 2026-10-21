@@ -10700,6 +10700,18 @@
               { selection_token: view.token }
             );
             continueWithFolder(view);
+          },
+          // An Obsidian vault: the second brain's consent card takes over, with
+          // the vault's own unbound selection.
+          secondBrain: async function (view) {
+            var notes = window.PersonalAssistantSecondBrain;
+            if (!notes || typeof notes.connectSelection !== 'function')
+              throw new Error('Notes are unavailable on this page. Nothing was opened.');
+            await notes.connectSelection({
+              selectionToken: view.secondBrainToken,
+              name: view.name,
+              path: view.path
+            });
           }
         });
       }

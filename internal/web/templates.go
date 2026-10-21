@@ -77,6 +77,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/ask-ori-activity.tmpl",
 		"templates/components/personal-assistant-today.tmpl",
 		"templates/components/personal-assistant-folder.tmpl",
+		"templates/components/personal-assistant-second-brain.tmpl",
 		"templates/components/assistant-led-setup.tmpl",
 		"templates/components/daily-brief-settings-modal.tmpl",
 		"templates/components/dashboard.tmpl",

@@ -169,9 +169,22 @@ func (b *ServerBuilder) completeProgressionWiring() {
 			b.personalAssistantToday.SetFolderDigestReader(b.personalAssistantFolderDigest)
 		}
 		b.personalAssistantFolderDigest.SetMissionUnresolved(engine.MissionUnresolved)
+		// The second-brain ask is the first message after HQ; the folder
+		// hand-over is never shown as a message beside it.
+		if b.personalAssistantSecondBrain != nil {
+			b.personalAssistantFolderDigest.SetFirstPromptOwned(b.personalAssistantSecondBrain.OwnsFirstPrompt)
+		}
 		if b.progressionHandler != nil {
+			// SetAfterReset holds one callback: Reset Getting Started re-arms
+			// both first-message receipts, never the notes connection.
 			b.progressionHandler.SetAfterReset(func(ctx context.Context) error {
-				return b.personalAssistantFolderDigest.ClearFirstPrompt(ctx, userprofile.LocalUserID)
+				if err := b.personalAssistantFolderDigest.ClearFirstPrompt(ctx, userprofile.LocalUserID); err != nil {
+					return err
+				}
+				if b.personalAssistantSecondBrain != nil {
+					return b.personalAssistantSecondBrain.ResetAsk(ctx, userprofile.LocalUserID)
+				}
+				return nil
 			})
 		}
 		b.personalAssistantFolderDigest.SetOnOutcome(func(context.Context, string, personalassistant.FolderOffer) {

@@ -295,6 +295,52 @@ func TestSecondBrain_AFailedLookKeepsTheLastResultAndALostRunReadsAsFailed(t *te
 	}
 }
 
+func TestSecondBrain_OwnsTheFirstPromptAndResetRearmsTheAskButKeepsTheConnection(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	if !h.service.OwnsFirstPrompt(ctx, "local") {
+		t.Fatal("the ask does not own the first message after HQ")
+	}
+	if h.service.OwnsFirstPrompt(ctx, "someone-else") {
+		t.Fatal("the ask owns another user's first message")
+	}
+	h.connectVault(t)
+	if _, err := h.service.DecideAsk(ctx, "local", secondbrain.DecisionNone, "ask-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.service.ResetAsk(ctx, "local"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.Status(ctx, "local")
+	if err != nil || view.Ask.State != secondbrain.AskPending || view.Status != SecondBrainConnected {
+		t.Fatalf("after Reset Getting Started = %+v, %v", view, err)
+	}
+	if err := h.service.ResetAsk(ctx, "someone-else"); err != nil {
+		t.Fatalf("reset with no HQ for the user = %v, want nothing to do", err)
+	}
+}
+
+func TestSecondBrain_DismissTakesTheResultOffNeedsYou(t *testing.T) {
+	ctx := context.Background()
+	h := newSecondBrainHarness(t)
+	h.connectVault(t)
+	look, _ := h.service.Look(ctx, "local")
+	for _, requestID := range []string{"dismiss-1", "dismiss-2"} {
+		if _, err := h.service.DismissLook(ctx, "local", look.LookID, requestID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status, _ := h.service.Status(ctx, "local"); !status.LastLook.Acted {
+		t.Fatal("a dismissed result still waits under Needs you")
+	}
+	if _, err := h.service.DismissLook(ctx, "local", "look-other", "dismiss-3"); !errors.Is(err, ErrSecondBrainLookNotFound) {
+		t.Fatalf("another look: %v", err)
+	}
+	if all, _ := h.followUps.List(ctx, followup.Filter{UserID: "local"}); len(all) != 0 {
+		t.Fatalf("dismissing created %d follow-ups", len(all))
+	}
+}
+
 func TestSecondBrain_AskAndDisconnect(t *testing.T) {
 	ctx := context.Background()
 	h := newSecondBrainHarness(t)

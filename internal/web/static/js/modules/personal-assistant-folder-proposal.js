@@ -20,6 +20,9 @@ export function folderProposalView(proposal) {
   if (!token || !path) return null;
   const name = text(proposal.folder_name) || 'this folder';
   const warning = text(proposal.warning_note);
+  // An Obsidian vault can also be connected as the user's second brain, with
+  // its own unbound selection (second-brain FR10).
+  const secondBrainToken = text(proposal.second_brain_token);
   if (text(proposal.kind) === 'link') {
     const workspaceId = text(proposal.workspace_id);
     const workspace = text(proposal.workspace_name) || 'this workspace';
@@ -31,6 +34,7 @@ export function folderProposalView(proposal) {
       name,
       workspaceId,
       warning,
+      secondBrainToken,
       title: `Link ${name} to ${workspace}?`,
       detail: `Linking lets Ori read the files in this folder from ${workspace}. Nothing is moved or changed.`,
       confirm: 'Link folder',
@@ -46,6 +50,7 @@ export function folderProposalView(proposal) {
     name,
     workspaceId: '',
     warning,
+    secondBrainToken,
     title: `Explore ${name}?`,
     detail:
       'A read-only peek. Nothing moves. Ori looks at names, kinds and dates, not at what is inside the files.',
@@ -62,7 +67,7 @@ export function folderProposalView(proposal) {
 export function renderFolderProposal(
   row,
   proposal,
-  { explore, link, isCurrent = () => true } = {}
+  { explore, link, secondBrain, isCurrent = () => true } = {}
 ) {
   const view = folderProposalView(proposal);
   if (!view || !row?.ownerDocument) return null;
@@ -99,6 +104,33 @@ export function renderFolderProposal(
   confirm.type = 'button';
   confirm.textContent = view.confirm;
   actions.append(confirm);
+  if (view.secondBrainToken && typeof secondBrain === 'function') {
+    const connect = doc.createElement('button');
+    connect.type = 'button';
+    connect.dataset.folderProposalAction = 'second-brain';
+    connect.textContent = 'Connect as my second brain';
+    connect.addEventListener('click', async () => {
+      if (connect.disabled) return;
+      if (!isCurrent()) {
+        status.textContent =
+          'Reopen the conversation this reply belongs to, or paste the path again. Nothing was opened.';
+        return;
+      }
+      connect.disabled = true;
+      try {
+        // The second brain shows what connecting means before anything is
+        // read; this card is done once that step is open.
+        await secondBrain(view);
+        actions.remove();
+        card.dataset.state = 'done';
+        status.textContent = `Connecting ${view.name} as your notes. Check the card below.`;
+      } catch (error) {
+        connect.disabled = false;
+        status.textContent = text(error?.message) || FOLDER_PROPOSAL_EXPIRED;
+      }
+    });
+    actions.append(connect);
+  }
   const status = doc.createElement('p');
   status.className = 'personal-assistant-folder-proposal__status';
   status.setAttribute('role', 'status');

@@ -137,6 +137,31 @@ test('one press confirms with the held selection and leaves the card as a receip
   );
 });
 
+test('an Obsidian vault also offers Connect as my second brain, with its own selection', async () => {
+  const vault = { ...explore, folder_name: 'Second Brain', second_brain_token: 'tok-brain' };
+  assert.equal(folderProposalView(vault).secondBrainToken, 'tok-brain');
+  assert.equal(folderProposalView(explore).secondBrainToken, '');
+
+  const calls = [];
+  const card = renderFolderProposal(replyRow(), vault, {
+    explore: async view => calls.push(['explore', view.token]),
+    secondBrain: async view => calls.push(['second-brain', view.secondBrainToken])
+  });
+  const actions = card.find('personal-assistant-folder-proposal__actions');
+  assert.deepEqual(
+    actions.children.map(button => button.textContent),
+    ['Explore folder', 'Connect as my second brain']
+  );
+  await actions.children[1].listeners.click();
+  assert.deepEqual(calls, [['second-brain', 'tok-brain']]);
+  assert.equal(card.dataset.state, 'done');
+  assert.match(card.find('personal-assistant-folder-proposal__status').textContent, /Second Brain/);
+
+  // Without the second brain on the page, the card offers explore alone.
+  const plain = renderFolderProposal(replyRow(), vault, { explore: async () => {} });
+  assert.equal(plain.find('personal-assistant-folder-proposal__actions').children.length, 1);
+});
+
 test('a link card calls link, and a refused confirmation says why and can be retried', async () => {
   const row = replyRow();
   let attempts = 0;

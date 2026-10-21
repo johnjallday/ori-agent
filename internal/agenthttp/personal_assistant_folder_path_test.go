@@ -77,6 +77,35 @@ func lastStored(store *researchHostStore, role string) string {
 	return ""
 }
 
+// An Obsidian vault written in the chat also gets an unbound selection for the
+// card's Connect as my second brain (second-brain FR10), beside the token its
+// explore or link already has. Any other folder gets none.
+func TestFolderPath_AnObsidianVaultAlsoOffersTheSecondBrain(t *testing.T) {
+	f, store, paths := newFolderPathFixture(t)
+	const vaultText, vaultPath = "~/Documents/Second Brain", "/Users/riley/Documents/Second Brain"
+	paths.folders[vaultText] = FolderPathFound{Path: vaultPath, Name: "Second Brain", Obsidian: true}
+	f.provider.script = []llm.ChatResponse{{Content: "Second Brain is ready: confirm the card below."}}
+
+	resp := askPanel(f, "My notes live in "+vaultText, f.refs)
+	card := resp.FolderProposal
+	if card == nil || card.SecondBrainToken != "held-"+vaultPath {
+		t.Fatalf("card = %+v", card)
+	}
+	if len(paths.held) != 2 || paths.held[1] != vaultPath+"|" {
+		t.Fatalf("held = %v, want the card's own selection and an unbound one", paths.held)
+	}
+	for _, message := range store.sessions["canonical"].messages {
+		if strings.Contains(message.Content, card.SecondBrainToken) {
+			t.Fatalf("the second-brain selection was stored: %q", message.Content)
+		}
+	}
+
+	f.provider.script = []llm.ChatResponse{{Content: "Song Projects is ready: confirm the card below."}}
+	if other := askPanel(f, "My stems are in "+songsText, f.refs).FolderProposal; other == nil || other.SecondBrainToken != "" {
+		t.Fatalf("a folder that is not a vault offered the second brain: %+v", other)
+	}
+}
+
 // Inside a project workspace the folder is offered as a link to that workspace.
 // The model is handed the facts with the user's message; the host holds the
 // folder and attaches the card whatever the model says.
