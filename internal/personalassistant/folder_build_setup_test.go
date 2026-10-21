@@ -96,10 +96,16 @@ func (fx *buildSetupFixture) waitSettled(t *testing.T) FolderOffer {
 func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *testing.T) {
 	fx := newBuildSetupFixture(t)
 	ctx := context.Background()
+	fx.setup.hire = &FolderHire{Mode: FolderHireCreate, AgentName: "Song Assistant", RoleLabel: "Song"}
+	fx.setup.briefDefault = "Keep the session tidy."
 
 	plan, err := fx.service.BuildPlan(ctx, fx.draft, fx.observation.ID, fx.candidate, "Summer Demos")
 	if err != nil || !plan.Ready {
 		t.Fatalf("plan %+v %v", plan, err)
+	}
+	// The build shows the same hire and brief as Home's card.
+	if plan.Hire == nil || plan.Hire.AgentName != "Song Assistant" || plan.BriefDefault != "Keep the session tidy." {
+		t.Fatalf("plan hire %+v brief %q", plan.Hire, plan.BriefDefault)
 	}
 	view, err := fx.service.ReviewBuild(ctx, fx.draft, "session-1", fx.observation.ID, fx.candidate, "Summer Demos")
 	if err != nil || view.ID == "" {
@@ -123,7 +129,7 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 		t.Fatalf("plan after the move %+v %v (was %s)", again, err, plan.Digest)
 	}
 
-	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", ""); err != nil {
+	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", "", " Mix the  chorus first. "); err != nil {
 		t.Fatal(err)
 	}
 	settled := fx.waitSettled(t)
@@ -131,7 +137,8 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 		t.Fatalf("observer heard %+v", settled.Setup)
 	}
 	ran := fx.setup.ran
-	if len(ran) != 1 || ran[0].Path != fx.song || ran[0].WorkspaceName != "Summer Demos" || ran[0].Offer.ID != view.ID {
+	if len(ran) != 1 || ran[0].Path != fx.song || ran[0].WorkspaceName != "Summer Demos" || ran[0].Offer.ID != view.ID ||
+		ran[0].Brief != "Mix the chorus first." {
 		t.Fatalf("the run got %+v", ran)
 	}
 	fx.mu.Lock()
@@ -158,7 +165,7 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 	if rebound.ConversationReview.ObservationID != fresh.ID || rebound.ConversationReview.WorkspaceName != "Summer Demos" {
 		t.Fatalf("rebound review %+v", rebound.ConversationReview)
 	}
-	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-2", ""); err != nil {
+	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-2", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	fx.waitSettled(t)
@@ -181,7 +188,7 @@ func TestFolderBuildSetup_AGuardThatNoLongerVouchesStopsTheSetup(t *testing.T) {
 	fx.mu.Lock()
 	fx.guardErr = errors.New("the build was abandoned")
 	fx.mu.Unlock()
-	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", ""); err == nil {
+	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", "", ""); err == nil {
 		t.Fatal("a build that no longer vouches cannot start the run")
 	}
 	if fx.setup.runCount() != 0 {

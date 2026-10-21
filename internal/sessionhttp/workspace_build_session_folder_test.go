@@ -58,7 +58,7 @@ type reviewedSetup struct {
 	sessionID, observationID, candidateID, workspaceName string
 }
 
-type startedSetup struct{ userID, offerID, digest, requestID, entryName string }
+type startedSetup struct{ userID, offerID, digest, requestID, entryName, brief string }
 
 func (f *fakeBuildFolders) ReviewSetup(_ context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error) {
 	f.reviewed = append(f.reviewed, reviewedSetup{draft, sessionID, observationID, candidateID, workspaceName})
@@ -72,8 +72,8 @@ func (f *fakeBuildFolders) ReviewSetup(_ context.Context, draft foldercontext.Ta
 	return personalassistant.FolderOfferView{ID: id}, nil
 }
 
-func (f *fakeBuildFolders) StartSetup(_ context.Context, userID, offerID, digest, requestID, entryName string) (personalassistant.FolderOfferView, error) {
-	f.started = append(f.started, startedSetup{userID, offerID, digest, requestID, entryName})
+func (f *fakeBuildFolders) StartSetup(_ context.Context, userID, offerID, digest, requestID, entryName, brief string) (personalassistant.FolderOfferView, error) {
+	f.started = append(f.started, startedSetup{userID, offerID, digest, requestID, entryName, brief})
 	if f.startErr != nil {
 		return personalassistant.FolderOfferView{}, f.startErr
 	}

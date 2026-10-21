@@ -71,7 +71,7 @@
     // where it is set up.
     folderCollectionHint: 'Explore a folder on Home sets them up together',
     // A recognized folder's plan: the host's own lines, never the model's.
-    planTitle: 'What Set it up will do',
+    planTitle: 'The setup plan',
     // The sketch above the lines: the Home and the workspace Set it up leaves
     // behind, drawn from the plan's own facts, then the lines as a checklist.
     planGet: 'You’ll get',
@@ -88,6 +88,8 @@
     planPartTask: 'First task',
     planWhy: 'Why this suggestion?',
     setUp: 'Set it up',
+    // A plan that names a hire is pressed as one, as on Home's card.
+    hireStart: 'Hire and start',
     setupRetry: 'Retry',
     setupRunning: 'Setting it up… Ori is running the plan, line by line.',
     setupEntry: name => `Use ${name}`,
@@ -370,6 +372,10 @@
     groupHint: null,
     // Installing the Home's plugin a plan waits on (setProviderInstall).
     providerInstall: { phase: 'idle', preview: null, note: '', drawn: false },
+    // What the user typed as the hire's brief, for the build it was typed in.
+    brief: { sessionId: '', value: '', typed: false },
+    // The folder review's copy of the hire block (renderReviewHire).
+    reviewHire: null,
     listeners: [],
     els: {}
   };
@@ -652,6 +658,7 @@
       : '';
     els.linesKicker.hidden = !lines.length;
     renderSketch(lines.length ? plan : null, lines);
+    renderHire(lines.length ? planHireView() : null);
     els.planNote.textContent = note;
     els.planNote.hidden = !note;
     const evidence = lines.length && plan ? text(plan.evidence) : '';
@@ -665,12 +672,127 @@
   // summary says it: the draft's name, else the recognized project's own name,
   // else the attached folder's. '' when none is known.
   function planWorkspaceName() {
-    const session = state.session || {};
-    const folder = session.folder || {};
+    return text(state.session?.draft?.name) || planProjectName();
+  }
+
+  // planProjectName is the recognized project's own name, else the attached
+  // folder's; '' when neither is known.
+  function planProjectName() {
+    const folder = state.session?.folder || {};
     const id = folder.recognition?.candidate_id;
     const projects = Array.isArray(folder.observation?.projects) ? folder.observation.projects : [];
     const project = projects.find(item => item && item.id === id);
-    return text(session.draft?.name) || text(project?.name) || text(folder.observation?.folder);
+    return text(project?.name) || text(folder.observation?.folder);
+  }
+
+  // planHireView is the ready plan presented as a hire, as Home's card shows it
+  // (folder-plan-lines.js), while Hire and start can still be pressed; null
+  // once the setup started or when the plan names no hire.
+  function planHireView() {
+    const session = state.session || {};
+    const plan = session.plan;
+    const shared = globalThis.OriFolderPlanLines;
+    if (!plan || plan.ready !== true || session.setup || !shared?.hireView) return null;
+    return shared.hireView(plan, planProjectName() || 'this folder', { needs: plan.needs });
+  }
+
+  // setupBrief is the brief Hire and start sends: what the user typed for this
+  // build, else the draft's goal, else the plan's own. null when the plan asks
+  // no question, so the server keeps its own.
+  function setupBrief() {
+    const view = planHireView();
+    if (!view?.brief) return null;
+    const session = state.session || {};
+    if (state.brief.typed && state.brief.sessionId === text(session.id)) return state.brief.value;
+    return text(session.draft?.mission) || view.brief.value;
+  }
+
+  // createHireBlock builds a hire's agent row and its one question: the
+  // agent's badge and role, then the field whose answer becomes the workspace
+  // goal. Text only, from the server's hire facts. The plan column and the
+  // folder review each have one; both edit the same brief.
+  function createHireBlock(id) {
+    const hire = createElement('div', 'pa-folder__hire workspace-build-plan__hire');
+    hire.hidden = true;
+    const agent = createElement('p', 'pa-folder__hire-agent');
+    const initials = createElement('span', 'pa-folder__hire-initials');
+    initials.setAttribute('aria-hidden', 'true');
+    const detail = createElement('span');
+    agent.appendChild(initials);
+    agent.appendChild(detail);
+    const field = createElement('div', 'pa-folder__brief');
+    field.hidden = true;
+    const label = createElement('label', 'pa-folder__brief-label');
+    label.setAttribute('for', id);
+    const brief = createElement('textarea', 'form-control form-control-sm');
+    brief.id = id;
+    brief.rows = 3;
+    brief.setAttribute('maxlength', '300');
+    brief.setAttribute('aria-describedby', `${id}Hint`);
+    const hint = createElement('p', 'pa-folder__note');
+    hint.id = `${id}Hint`;
+    field.appendChild(label);
+    field.appendChild(brief);
+    field.appendChild(hint);
+    hire.appendChild(agent);
+    hire.appendChild(field);
+    listen(brief, 'input', () => {
+      state.brief = { sessionId: text(state.session?.id), value: brief.value, typed: true };
+      // The other copy follows what was typed here.
+      [state.els.hireBlock, state.reviewHire?.block].forEach(other => {
+        if (other && other !== block) fillHire(other, planHireView());
+      });
+    });
+    const block = { hire, initials, detail, field, label, brief, hint };
+    return block;
+  }
+
+  // fillHire draws a hire view into one hire block. The field is never
+  // rewritten while it has focus.
+  function fillHire(block, view) {
+    block.hire.hidden = !view;
+    if (!view) return;
+    block.initials.textContent = view.agent.initials;
+    block.detail.textContent = view.agent.detail;
+    block.field.hidden = !view.brief;
+    if (view.brief) {
+      block.label.textContent = view.brief.label;
+      block.hint.textContent = view.brief.hint;
+      if (document.activeElement !== block.brief) block.brief.value = setupBrief() || '';
+    }
+    block.brief.disabled = Boolean(state.busy);
+  }
+
+  // renderHire draws who Hire and start hires as the plan's title, with the
+  // agent's badge and the one question above the sketch.
+  function renderHire(view) {
+    const { els } = state;
+    if (!els.hireBlock) return;
+    fillHire(els.hireBlock, view);
+    els.planTitle.classList.toggle('workspace-build-plan__title--hire', Boolean(view));
+    els.planTitle.textContent = view ? '' : COPY.planTitle;
+    view?.headline.forEach(part => {
+      if (part.strong) els.planTitle.appendChild(createElement('strong', '', part.text));
+      else els.planTitle.append(part.text);
+    });
+  }
+
+  // renderReviewHire draws the same hire into the folder review (sessions.js),
+  // which stands in for the pane once a recognized folder is attached, and
+  // returns its view for the review's title and button; null, with the host
+  // hidden, when the plan names no hire.
+  function renderReviewHire(host) {
+    if (!host) return null;
+    if (state.reviewHire?.host !== host) {
+      const block = createHireBlock('workspaceBuildPlanReviewBrief');
+      host.textContent = '';
+      host.appendChild(block.hire);
+      state.reviewHire = { host, block };
+    }
+    const view = state.root ? planHireView() : null;
+    host.hidden = !view;
+    fillHire(state.reviewHire.block, view);
+    return view;
   }
 
   // sketchView is what the sketch above the lines draws, from the plan's own
@@ -770,6 +892,7 @@
     els.planStatus.textContent = preparing ? COPY.setupRunning : '';
     els.planStatus.hidden = !preparing;
     els.setupButton.hidden = !(hasLines && open && !session.setup && session.plan?.ready === true);
+    els.setupButton.textContent = planHireView() ? COPY.hireStart : COPY.setUp;
     // An unnamed draft is named after its folder, as the plan says.
     els.setupButton.disabled = busy || expired;
     const candidates =
@@ -823,6 +946,8 @@
     sketch.appendChild(createElement('p', 'workspace-build-plan__kicker', COPY.planGet));
     const sketchBody = createElement('div', 'workspace-build-sketch');
     sketch.appendChild(sketchBody);
+    // A hire's agent row and question sit above the sketch.
+    const hireBlock = createHireBlock('workspaceBuildBrief');
     const linesKicker = createElement('p', 'workspace-build-plan__kicker', COPY.planSteps);
     linesKicker.setAttribute('aria-hidden', 'true');
     linesKicker.hidden = true;
@@ -868,6 +993,7 @@
     // The body scrolls as one page beside the conversation; the title, the
     // run's status and Set it up stay put (workspace-construct.css).
     const body = createElement('div', 'workspace-build-plan__body');
+    body.appendChild(hireBlock.hire);
     body.appendChild(sketch);
     body.appendChild(linesKicker);
     body.appendChild(planLines);
@@ -881,7 +1007,9 @@
     plan.appendChild(planExpiry);
     return {
       plan,
+      planTitle: title,
       body,
+      hireBlock,
       sketch,
       sketchBody,
       linesKicker,
@@ -1254,6 +1382,7 @@
     state.groupNote = '';
     state.groupHint = null;
     state.providerInstall = { phase: 'idle', preview: null, note: '', drawn: false };
+    state.brief = { sessionId: '', value: '', typed: false };
 
     root.textContent = '';
     root.appendChild(renderHeader());
@@ -1357,7 +1486,11 @@
           if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-link-remove');
         } else if (kind === 'link-cancel') closeLinkField();
         else if (kind === 'link-attach') submitLink();
-        else if ((kind === 'setup' || kind === 'setup-retry') && !control.disabled) {
+        else if (kind === 'setup' && !control.disabled) {
+          // Hire and start sends the brief; a Retry continues with the one sent.
+          const brief = setupBrief();
+          emit('workspace-build-setup', brief === null ? {} : { brief });
+        } else if (kind === 'setup-retry' && !control.disabled) {
           emit('workspace-build-setup', {});
         } else if (kind === 'setup-entry' && !control.disabled) {
           emit('workspace-build-setup', { entry_name: text(control.dataset.entryName) });
@@ -2093,6 +2226,8 @@
     state.groupNote = '';
     state.groupHint = null;
     state.providerInstall = { phase: 'idle', preview: null, note: '', drawn: false };
+    state.brief = { sessionId: '', value: '', typed: false };
+    state.reviewHire = null;
   }
 
   window.WorkspaceBuildPane = {
@@ -2110,6 +2245,8 @@
     destroy,
     renderCreationReview,
     renderFolderQuestion,
+    setupBrief,
+    renderReviewHire,
     openFolderChooser,
     closeFolderChooser,
     folderChooserOpen: () => Boolean(state.root && state.chooserOpen),

@@ -13062,9 +13062,18 @@ const sessionManager = {
       status =
         'Your edits are kept here, but this draft is not saved. Resolve the save conflict before creating.';
     setText('workspaceBuildFolderStatus', status);
+    // A plan that names a hire is titled by it, with its agent and question.
+    const hire =
+      this.workspaceBuildPane()?.renderReviewHire?.(
+        document.getElementById('workspaceBuildPlanReviewHire')
+      ) || null;
     setText(
       'workspaceBuildPlanReviewTitle',
-      recognized ? 'Review recognized setup' : 'Review your workspace'
+      hire
+        ? hire.headline.map(part => part.text).join('')
+        : recognized
+          ? 'Review recognized setup'
+          : 'Review your workspace'
     );
     hide(
       'workspaceBuildPlanReview',
@@ -13163,7 +13172,7 @@ const sessionManager = {
     setText(
       'workspaceBuildFolderEffects',
       recognized
-        ? 'Only Set it up runs these host-owned steps. To use another purpose, change the attached folder.'
+        ? `Only ${hire ? 'Hire and start' : 'Set it up'} runs these host-owned steps. To use another purpose, change the attached folder.`
         : janitor
           ? 'Creating makes Filed/ and scans top-level metadata once. Review the folder permissions below. Moves and Trash always need separate approval.'
           : 'Creating links this folder in place. No files are moved or changed by attaching it.'
@@ -13218,7 +13227,9 @@ const sessionManager = {
         ? 'Creating workspace…'
         : recognized
           ? planReady
-            ? 'Set it up'
+            ? session.plan?.hire
+              ? 'Hire and start'
+              : 'Set it up'
             : 'Review prerequisites'
           : janitor
             ? build.preparationBusy
@@ -14769,6 +14780,10 @@ const sessionManager = {
       const body = { version: Number(build.session.version) || 0, plan_digest: digest };
       const entry = String(detail.entry_name || '').trim();
       if (entry) body.entry_name = entry;
+      // Hire and start sends the brief the pane shows, from either button; a
+      // Retry sends none and continues with the one the run was given.
+      const brief = typeof detail.brief === 'string' ? detail.brief : (pane.setupBrief?.() ?? null);
+      if (typeof brief === 'string' && !build.session.setup) body.brief = brief.trim();
       try {
         result = await this.workspaceBuildApi().setup(build.session.id, body);
       } catch (_) {

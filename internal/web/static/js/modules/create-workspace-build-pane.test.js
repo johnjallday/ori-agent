@@ -240,11 +240,16 @@ function entries(root) {
   return root.querySelectorAll('li');
 }
 
+// The composer, by its id: a plan's brief field is a textarea too.
+function composerOf(root) {
+  return root.querySelectorAll('textarea').find(node => node.id === 'workspaceBuildComposerInput');
+}
+
 test('folder review clarification is text-only, does not touch unsent text, and sends one choice', () => {
   const { pane, document, events, root } = loadPane();
   pane.mount({ assistant: { display_name: 'Atlas' } });
   const host = document.createElement('section');
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   input.value = 'Unsent thought';
   const question = {
     question: 'What should this folder do?',
@@ -410,7 +415,7 @@ test('the pane opens with the fixed opening line, the assistant, and a composer'
   assert.match(text, /Start over/);
   const [first] = entries(root);
   assert.match(first.textContent, /What should this workspace do\?/);
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   assert.equal(input.id, 'workspaceBuildComposerInput');
   assert.equal(input.maxLength, 2000);
   const status = root.querySelectorAll('p').find(node => node.id === 'workspaceBuildStatus');
@@ -481,7 +486,7 @@ test('only the newest unanswered question keeps live chips', () => {
 test('Enter sends, Shift+Enter does not, and a busy pane disables the composer', () => {
   const { pane, root, events } = loadPane();
   pane.mount({ assistant });
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   input.value = 'a newsletter';
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter', shiftKey: true }));
   assert.equal(events.filter(event => event.type === 'workspace-build-turn').length, 0);
@@ -509,7 +514,7 @@ test('focus moves from the dialog to the composer, never out of a form field', (
   modal.className = 'modal';
   modal.appendChild(root);
   pane.mount({ assistant });
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   modal.focus();
   assert.equal(pane.focusComposer(), true);
   assert.equal(document.activeElement, input, 'the dialog itself gives focus up');
@@ -786,7 +791,7 @@ test('the attached folder shows metadata without inventing an empty Send turn', 
   const { pane, root, events } = loadPane();
   pane.mount({ assistant, folders: true });
   const controls = folderControls(root);
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
 
@@ -1168,6 +1173,95 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
   assert.equal(sketch(), undefined);
 });
 
+test('a plan that names a hire shows it above the sketch and Hire and start sends the brief', () => {
+  const { pane, root, events, document } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const byId = (tag, id) => root.querySelectorAll(tag).find(node => node.id === id);
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  const plan = {
+    ready: true,
+    digest: 'd',
+    lines: [{ kind: 'workspace', name: 'Creates a REAPER song workspace named Ori Music Demo' }],
+    hire: { mode: 'create', agent_name: 'Song Assistant', role_label: 'Song', model: 'gpt-5' },
+    brief_default: 'Keep the session tidy.'
+  };
+  const session = {
+    id: 'build-1',
+    status: 'open',
+    transcript: [],
+    folder: { observation: { ...observation, folder: 'Ori Music Demo' } },
+    folder_expires_at: new Date(Date.now() + 20 * 60000).toISOString(),
+    plan,
+    draft: {}
+  };
+  pane.applySession(session);
+  const title = byId('h3', 'workspaceBuildPlanTitle');
+  const brief = byId('textarea', 'workspaceBuildBrief');
+  const hire = brief.parentNode.parentNode;
+  assert.equal(title.textContent, 'Hire Song Assistant for Ori Music Demo');
+  assert.equal(title.querySelectorAll('strong').length, 2);
+  assert.equal(hire.hidden, false);
+  assert.match(hire.textContent, /SA/);
+  assert.match(hire.textContent, /Song role · uses gpt-5/);
+  assert.match(hire.textContent, /What should it do with it\?/);
+  assert.match(hire.textContent, /This becomes the workspace goal/);
+  // The question comes before the sketch.
+  const body = hire.parentNode;
+  assert.ok(
+    body.children.indexOf(hire) <
+      body.children.findIndex(node => node.classList.contains('workspace-build-plan__sketch'))
+  );
+  assert.equal(brief.value, 'Keep the session tidy.');
+  assert.equal(control('setup').textContent, 'Hire and start');
+  // The draft's goal stands in for the plan's own until the user types.
+  pane.applySession({ ...session, draft: { mission: 'Finish three demos.' } });
+  assert.equal(brief.value, 'Finish three demos.');
+  brief.value = 'Mix the chorus first.';
+  brief.dispatchEvent(new FakeEvent('input'));
+  pane.applySession({ ...session, draft: { mission: 'Something else.' } });
+  assert.equal(brief.value, 'Mix the chorus first.');
+  assert.equal(pane.setupBrief(), 'Mix the chorus first.');
+  control('setup').click();
+  same(events.at(-1), {
+    type: 'workspace-build-setup',
+    detail: { brief: 'Mix the chorus first.' }
+  });
+
+  // The folder review draws the same hire, and both fields edit one brief.
+  const host = document.createElement('div');
+  const view = pane.renderReviewHire(host);
+  assert.equal(
+    view.headline.map(part => part.text).join(''),
+    'Hire Song Assistant for Ori Music Demo'
+  );
+  assert.equal(host.hidden, false);
+  const reviewBrief = host
+    .querySelectorAll('textarea')
+    .find(node => node.id === 'workspaceBuildPlanReviewBrief');
+  assert.equal(reviewBrief.value, 'Mix the chorus first.');
+  reviewBrief.value = 'Write the bridge.';
+  reviewBrief.dispatchEvent(new FakeEvent('input'));
+  assert.equal(brief.value, 'Write the bridge.');
+  assert.equal(pane.setupBrief(), 'Write the bridge.');
+  pane.renderReviewHire(host);
+  assert.equal(host.querySelectorAll('textarea').length, 1, 'a repaint keeps one field');
+
+  // Once the setup runs, the plan's title is back and nothing is asked.
+  pane.applySession({ ...session, status: 'preparing', setup: { plan_digest: 'd' } });
+  assert.equal(hire.hidden, true);
+  assert.equal(title.textContent, 'The setup plan');
+  assert.equal(pane.setupBrief(), null);
+  assert.equal(pane.renderReviewHire(host), null);
+  assert.equal(host.hidden, true);
+  // A plan without a hire keeps Set it up and sends no brief.
+  pane.applySession({ ...session, id: 'build-2', plan: { ...plan, hire: undefined } });
+  assert.equal(hire.hidden, true);
+  assert.equal(control('setup').textContent, 'Set it up');
+  control('setup').click();
+  same(events.at(-1), { type: 'workspace-build-setup', detail: {} });
+});
+
 test('Set it up is offered on a ready, named plan and follows the run it starts', () => {
   const { pane, root, events } = loadPane();
   pane.mount({ assistant, folders: true });
@@ -1227,7 +1321,7 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
   assert.equal(control('setup').hidden, true);
   assert.equal(control('setup-retry').hidden, true);
   // The build takes no turn while it runs.
-  assert.equal(root.querySelectorAll('textarea')[0].disabled, true);
+  assert.equal(composerOf(root).disabled, true);
   assert.equal(status().hidden, false);
   assert.equal(status().textContent, 'Setting it up… Ori is running the plan, line by line.');
   const item = root.querySelectorAll('li').find(node => node.dataset.kind === 'home');
@@ -1657,7 +1751,7 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
   pane.mount({ assistant, folders: true, links: true });
   const controls = linkControls(root);
   const folder = folderControls(root);
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   assert.equal(controls.chip.hidden, true);
 
   pane.applySession({ transcript: [], link: { observation: repoLink } });
@@ -1698,7 +1792,7 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
 test('suggestion activity keeps unsent text and focus, and retry is a system action', () => {
   const { pane, root, events, document } = loadPane();
   pane.mount({ assistant, folders: true });
-  const input = root.querySelectorAll('textarea')[0];
+  const input = composerOf(root);
   input.value = 'A thought I have not sent';
   input.focus();
   pane.applySession({

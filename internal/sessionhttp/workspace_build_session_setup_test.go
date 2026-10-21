@@ -166,6 +166,40 @@ func TestWorkspaceBuildSetup_RunsTheConfirmedPlanAndRecordsWhatItMade(t *testing
 	}
 }
 
+// The brief typed under the plan is the hire's goal: it goes to the run, and
+// the draft's goal does not replace it on the workspace the run made.
+func TestWorkspaceBuildSetup_TheTypedBriefIsTheMadeWorkspacesGoal(t *testing.T) {
+	f := newBuildFixture(t, true, plannedTeammateReply)
+	files, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.handler.SetWorkspaceStore(files)
+	folders := &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan()}
+	build := f.plannedBuild(t, folders)
+	const brief = "Mix the chorus first."
+	if status, body := f.setUp(t, build, map[string]any{"plan_digest": songDigest, "brief": brief}); status != http.StatusOK {
+		t.Fatalf("hire and start: %d %v", status, body)
+	}
+	if len(folders.started) != 1 || folders.started[0].brief != brief {
+		t.Fatalf("started %+v", folders.started)
+	}
+	if err := files.Save(&agentworkspace.Workspace{ID: "ws-song", Name: "Ori Music Demo", Kind: "workspace", FolderSlug: "ori-music-demo",
+		Status: agentworkspace.StatusActive, Mission: brief}); err != nil {
+		t.Fatal(err)
+	}
+	settled := resolvedSongOffer(build.ID)
+	settled.Setup.Brief = brief
+	f.handler.WorkspaceBuildSetupSettled(context.Background(), "local", settled)
+	made, err := files.Get("ws-song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made.Mission != brief || made.Description != "Demos for the next release." {
+		t.Fatalf("made workspace: mission %q description %q", made.Mission, made.Description)
+	}
+}
+
 func TestWorkspaceBuildSetup_AStoppedRunReopensTheBuildAndRetryContinuesIt(t *testing.T) {
 	for _, tc := range []struct {
 		reason, line string

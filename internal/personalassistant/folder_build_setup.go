@@ -90,11 +90,11 @@ func (s *FolderObservationService) ReviewBuild(ctx context.Context, draft folder
 
 // StartBuildSetup is Set it up: Home's own StartSetup on the build's offer,
 // held to the plan digest the user confirmed.
-func (s *FolderObservationService) StartBuildSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName string) (FolderOfferView, error) {
+func (s *FolderObservationService) StartBuildSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName, brief string) (FolderOfferView, error) {
 	if s == nil || s.digest == nil {
 		return FolderOfferView{}, ErrFolderOutcomeUnavailable
 	}
-	return s.digest.StartSetup(ctx, userID, offerID, FolderSetupInput{RequestID: requestID, PlanDigest: planDigest, EntryName: entryName})
+	return s.digest.StartSetup(ctx, userID, offerID, FolderSetupInput{RequestID: requestID, PlanDigest: planDigest, EntryName: entryName, Brief: brief})
 }
 
 // ReadBuildSetup projects a build's offer and its run, for the build that owns

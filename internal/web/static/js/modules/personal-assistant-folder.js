@@ -226,7 +226,7 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
 // setupLinesView normalizes the server's plan or run lines for rendering, and
 // renderSetupLines draws them: the shared plan lines the Create Workspace build
 // pane draws too (folder-plan-lines.js).
-export const { setupLinesView, renderSetupLines } = globalThis.OriFolderPlanLines;
+export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFolderPlanLines;
 
 const SETUP_STOP_COPY = {
   plan_changed:
@@ -548,65 +548,6 @@ export function folderSetupDestinationLabel(offer) {
   const kind =
     destination.kind === 'project' ? 'Project' : destination.kind === 'group' ? 'Group' : 'Home';
   return `Destination: ${destination.status === 'new' ? 'new ' : ''}${kind} “${name}” · ${operation}.`;
-}
-
-const HIRE_MODES = ['create', 'bind', 'pending'];
-
-// initialsOf is the two letters an agent's badge shows.
-function initialsOf(name) {
-  const words = String(name || '')
-    .split(/\s+/)
-    .filter(word => /^[\p{L}\p{N}]/u.test(word));
-  return words
-    .slice(0, 2)
-    .map(word => Array.from(word)[0].toUpperCase())
-    .join('');
-}
-
-// hireView is a recognized project's plan presented as a hire: who the setup
-// hires (or assigns) for the folder, the one question whose answer becomes the
-// workspace goal, and the heading the plan's lines sit under. All of it is
-// written from the server's hire facts; null when the plan names no hire.
-export function hireView(plan, subject, { needs = [] } = {}) {
-  const hire = plan?.hire;
-  if (!hire || typeof hire !== 'object' || !HIRE_MODES.includes(hire.mode)) return null;
-  const name = String(hire.agent_name || '').trim();
-  const role = String(hire.role_label || '').trim();
-  const model = String(hire.model || '').trim();
-  let headline;
-  if (name && hire.mode === 'bind')
-    headline = segments(['Assign ', { text: name }, ' to ', { text: subject }]);
-  else if (name) headline = segments(['Hire ', { text: name }, ' for ', { text: subject }]);
-  else {
-    const kind = role || 'project';
-    const article = /^[aeiou]/i.test(kind) ? 'an' : 'a';
-    headline = segments([`Hire ${article} ${kind} assistant for `, { text: subject }]);
-  }
-  const detail = name
-    ? [role ? `${role} role` : '', model ? `uses ${model}` : 'no model yet']
-        .filter(Boolean)
-        .join(' · ')
-    : `${role || 'Project'} role · named once its plugin is installed`;
-  // A plan that installs or enables a plugin first says its other lines happen
-  // once that is done.
-  const waits =
-    hire.mode === 'pending' ||
-    (Array.isArray(needs) && needs.some(need => need && need.state && need.state !== 'ready'));
-  const brief = String(plan.brief_default || '').trim();
-  return {
-    mode: hire.mode,
-    headline,
-    agent: { initials: initialsOf(name || role || 'Agent'), detail },
-    brief: brief
-      ? {
-          label: 'What should it do with it?',
-          value: brief,
-          hint: 'This becomes the workspace goal. You can change it later.'
-        }
-      : null,
-    linesHeading: waits ? 'Also, once installed' : 'Also, in the background',
-    adjust: null
-  };
 }
 
 // A reviewed capability rides the same result card. With a plan from the server

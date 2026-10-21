@@ -53,7 +53,7 @@ type WorkspaceBuildFolders interface {
 	// StartSetup runs it on the confirmed digest; ReadSetup projects the offer
 	// and its run for the build that owns it.
 	ReviewSetup(ctx context.Context, draft foldercontext.Target, sessionID, observationID, candidateID, workspaceName string) (personalassistant.FolderOfferView, error)
-	StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName string) (personalassistant.FolderOfferView, error)
+	StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName, brief string) (personalassistant.FolderOfferView, error)
 	ReadSetup(ctx context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error)
 }
 

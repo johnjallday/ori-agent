@@ -118,7 +118,7 @@ func TestWorkspaceBuildHomeProvider_InstallsOnlyTheReleaseTheUserReviewedThenThe
 	if plan := planOf(t, body); plan["ready"] != true || plan["digest"] != songDigest {
 		t.Fatalf("after the install the plan is ready: %v", plan)
 	}
-	if last := lastEntry(got); !last.Host || last.Text != "Installed Music Project Management 0.3.0. Set it up can run the plan now." {
+	if last := lastEntry(got); !last.Host || last.Text != "Installed Music Project Management 0.3.0. Hire and start can run the plan now." {
 		t.Fatalf("the transcript says what was installed: %+v", last)
 	}
 	if offer := installProviderOf(body); offer != nil {

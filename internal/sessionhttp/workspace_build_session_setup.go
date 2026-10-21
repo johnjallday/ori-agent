@@ -38,6 +38,10 @@ type buildSetupRequest struct {
 	// EntryName answers a run that stopped to ask which project file to use;
 	// it must be one of the run's own candidates.
 	EntryName string `json:"entry_name,omitempty"`
+	// Brief is the answer to the plan's one question, what the hire should do
+	// with the folder; it becomes the workspace goal. Empty takes the plan's
+	// default. A Retry continues with the brief the run started with.
+	Brief string `json:"brief,omitempty"`
 }
 
 // Fixed host lines for a setup run.
@@ -296,7 +300,7 @@ func (h *Handler) postWorkspaceBuildSetup(w http.ResponseWriter, r *http.Request
 		respondBuildUnavailable(w, buildReasonAssistantNotReady)
 		return
 	}
-	if _, err := deps.Folders.StartSetup(ctx, userID, offer.ID, digest, requestID, req.EntryName); err != nil {
+	if _, err := deps.Folders.StartSetup(ctx, userID, offer.ID, digest, requestID, req.EntryName, req.Brief); err != nil {
 		reason := personalassistant.FolderStopFailed
 		switch {
 		case errors.Is(err, personalassistant.ErrFolderPlanChanged):
@@ -436,7 +440,11 @@ func (h *Handler) finishWorkspaceBuildSetup(ctx context.Context, userID, session
 	}
 	logger.Info("Workspace build set up", logger.Fields{"session_id": sessionID, "workspace_id": workspaceID, "home_id": finished.HomeWorkspaceID})
 	decisions := h.applyBuildSetupDetails(workspaceID, finished)
-	h.applyCreateWorkspaceGoal(workspaceID, finished.Draft.Mission)
+	// A hire's brief was the workspace's goal from the moment it was created;
+	// the draft's goal is given only to a run that carried none.
+	if offer.Setup == nil || strings.TrimSpace(offer.Setup.Brief) == "" {
+		h.applyCreateWorkspaceGoal(workspaceID, finished.Draft.Mission)
+	}
 	store := h.taskMutationStore()
 	if store == nil {
 		return

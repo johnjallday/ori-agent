@@ -7277,6 +7277,42 @@ test('a refused Set it up says why and does not follow anything', async () => {
   ]);
 });
 
+test('Hire and start sends the brief the pane shows, from either button', async () => {
+  const manager = loadSessionManager();
+  let paneBrief = 'Mix the chorus first.';
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    applySession() {},
+    setBusy() {},
+    showLine() {},
+    setupBrief: () => paneBrief
+  });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.workspaceBuildScheduler = () => {};
+  const build = plannedBuild();
+  build.session.id = 'build-1';
+  build.session.version = 4;
+  build.session.plan.digest = 'digest-1';
+  manager.workspaceBuild = build;
+  const sent = [];
+  manager.workspaceBuildTransport = {
+    setup: async (id, body) => (sent.push(body), { ok: false, status: 409, body: {} })
+  };
+  // The pane's own button sends what its field holds.
+  await manager.setUpWorkspaceBuild({ brief: ' Find the risky parts. ' });
+  // The folder review's button reads the pane's field.
+  await manager.setUpWorkspaceBuild({});
+  // A plan that asks no question sends none.
+  paneBrief = null;
+  await manager.setUpWorkspaceBuild({});
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    { version: 4, plan_digest: 'digest-1', brief: 'Find the risky parts.' },
+    { version: 4, plan_digest: 'digest-1', brief: 'Mix the chorus first.' },
+    { version: 4, plan_digest: 'digest-1' }
+  ]);
+});
+
 test('a recognized folder opens its host review directly and edits the shared draft', () => {
   const elements = planReviewElements();
   const rendered = [];
@@ -7673,6 +7709,40 @@ test('folder review shows the actual effective team and constrains recognized pl
   assert.equal(nodes.get('workspaceBuildFolderTeamEdit').hidden, true);
   assert.equal(nodes.get('workspaceBuildFolderGoalField').hidden, true);
   assert.equal(nodes.get('workspaceBuildFolderPlacement').textContent, 'Music Production Home');
+  // A plan that names a hire titles the review with it, shows its agent and
+  // question (drawn by the pane), and is pressed as Hire and start.
+  for (const id of [
+    'workspaceBuildPlanReviewTitle',
+    'workspaceBuildPlanReviewSetup',
+    'workspaceBuildFolderEffects',
+    'workspaceBuildPlanReviewHire'
+  ])
+    nodes.set(id, new BuildNode('div', id));
+  const pane = manager.workspaceBuildPane;
+  const hosts = [];
+  const hire = {
+    headline: [
+      { text: 'Hire ' },
+      { text: 'Song Assistant' },
+      { text: ' for ' },
+      { text: 'Ori Music Demo' }
+    ]
+  };
+  manager.workspaceBuildPane = () => ({
+    ...pane?.(),
+    renderReviewHire: host => (hosts.push(host), hire)
+  });
+  manager.workspaceBuild.session.plan.hire = { mode: 'create', agent_name: 'Song Assistant' };
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(hosts.at(-1), nodes.get('workspaceBuildPlanReviewHire'));
+  assert.equal(
+    nodes.get('workspaceBuildPlanReviewTitle').textContent,
+    'Hire Song Assistant for Ori Music Demo'
+  );
+  assert.equal(nodes.get('workspaceBuildPlanReviewSetup').textContent, 'Hire and start');
+  assert.match(nodes.get('workspaceBuildFolderEffects').textContent, /^Only Hire and start runs/);
+  manager.workspaceBuildPane = pane;
+  delete manager.workspaceBuild.session.plan.hire;
   manager.workspaceBuild.session.plan.ready = false;
   manager.syncWorkspaceBuildFolderReview();
   assert.equal(nodes.get('workspaceBuildFolderTeamEdit').hidden, true);

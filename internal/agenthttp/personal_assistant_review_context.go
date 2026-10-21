@@ -282,7 +282,11 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 			} else if view.Software != nil {
 				softwareReviewState(view, result)
 			} else if view.Capability != nil {
-				if view.Plan != nil {
+				if view.Plan != nil && view.Plan.Hire != nil {
+					// A plan that names a hire is a hire card: its brief field
+					// is the one question, Adjust sits beside the plan's lines.
+					result.Controls = []string{"Hire and start", "Adjust", "Keep chatting"}
+				} else if view.Plan != nil {
 					result.Controls = []string{"Set up", "Adjust…", "Keep chatting"}
 				} else {
 					result.Controls = []string{workspaceContextText(view.Capability.AcceptLabel, 80), "Keep chatting"}
@@ -360,6 +364,8 @@ func softwareReviewState(view *personalassistant.FolderOfferView, result *person
 	case !software.SetupAvailable:
 		result.Status, result.Blocker = "setup_unavailable", "setup_path_unavailable"
 		result.Controls = []string{"Adjust names…", "Review again", "Keep chatting"}
+	case view.Plan.Hire != nil:
+		result.Controls = []string{"Hire and start", "Adjust", "Not now", "Review again", "Keep chatting"}
 	default:
 		result.Controls = []string{"Set up", "Adjust names…", "Review again", "Keep chatting"}
 	}

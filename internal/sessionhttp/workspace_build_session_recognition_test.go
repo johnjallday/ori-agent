@@ -109,6 +109,8 @@ func songPlan() *personalassistant.BuildFolderPlan {
 		},
 		Home:      &personalassistant.BuildFolderHome{Name: "Music Production Home", Status: "new"},
 		Placement: "grouped", Evidence: "Has a REAPER session, edited yesterday", Ready: true,
+		Hire:         &personalassistant.FolderHire{Mode: personalassistant.FolderHirePending, RoleLabel: "Song"},
+		BriefDefault: "Keep the session tidy and say what is unfinished.",
 	}
 }
 
@@ -182,12 +184,16 @@ func TestWorkspaceBuildPlan_EveryResponseCarriesTheHostPlanAndSaysItsNeedsOnce(t
 		t.Fatalf("the model hears the Needs line as Ori's note, not the user's edit: %+v", f.provider.messages[0])
 	}
 	system := f.provider.systems[0]
-	for _, want := range []string{"<setup_plan>", `"name":"Creates Home “Music Production Home”"`, `"state":"install"`, "You may set only name, description, goal", "Its setup plan fixes the blueprint and the group"} {
+	// The plan column answers the setup request (FR27): the reply never says
+	// what it says.
+	for _, want := range []string{"<setup_plan>", `"name":"Creates Home “Music Production Home”"`, `"state":"install"`, "You may set only name, description, goal", "Its setup plan fixes the blueprint and the group",
+		"The plan column beside the conversation answers the setup request",
+		"never name the hired assistant or its role, count or list the plan's steps, or describe its controls"} {
 		if !strings.Contains(system, want) {
 			t.Fatalf("planned prompt lacks %q:\n%s", want, system)
 		}
 	}
-	for _, absent := range []string{"Blueprints (id", songDigest, "Choose suggested_blueprint_id"} {
+	for _, absent := range []string{"Blueprints (id", songDigest, "Choose suggested_blueprint_id", "Use Set it up to run the plan", `"hire"`, `"brief_default"`} {
 		if strings.Contains(system, absent) {
 			t.Fatalf("planned prompt still has %q:\n%s", absent, system)
 		}
