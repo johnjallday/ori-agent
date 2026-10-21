@@ -2558,8 +2558,8 @@
       '" ' +
       'aria-label="Select for bulk action" ' +
       'title="Select for bulk action (or Shift/Cmd + Enter on the tile)"' +
-      // A group page has no bulk actions, so it draws no bulk checkbox.
-      (scopeGroupId ? ' hidden' : '') +
+      // Drawn on Home and on a group page alike: a group's host passes the same
+      // bulk callbacks Home does, so its members check the same way.
       '></span>' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' +
       (active ? ' is-working' : '') +
@@ -4541,9 +4541,8 @@
     if (setupPresentation(setupStatusCache[id])) {
       items.push({ label: 'Open → Setup', action: 'open-setup' });
     }
-    // A group page navigates; selection sets and deletion stay on Home, Tree,
-    // and the Details panel.
-    if (scoped) return items;
+    // Selection and deletion run the host's bulk callbacks, which a group page
+    // passes exactly as Home does, so a member's menu carries them too.
     items.push(menuDivider());
     items.push({
       label: multiSelected[id] ? 'Remove from selection' : 'Add to selection',
@@ -4710,7 +4709,7 @@
       // A tile inside the checked set acts on the whole set; a tile outside it
       // acts on itself. Which menu you get is therefore a statement about what
       // is already selected, not a mode.
-      if (!scoped && spec.id && multiSelected[spec.id]) return multiMenuItems();
+      if (spec.id && multiSelected[spec.id]) return multiMenuItems();
       return tileMenuItems(spec.ws || { id: spec.id }, scoped);
     }
     if (spec.type === 'district') {
@@ -5397,7 +5396,7 @@
       var isTile = el.classList.contains('ws-map-tile');
       // The corner checkbox — or a Cmd/Ctrl/Shift-click anywhere on a tile —
       // toggles the tile into the multi-select set (group districts can't be
-      // multi-selected). That is true in both modes.
+      // multi-selected). That is true in both modes, and on a group page.
       //
       // Otherwise:
       //   select-only (cockpit): a click ALWAYS selects and never opens, no
@@ -5429,7 +5428,7 @@
           openHarvestPopover(container, id, { origin: el, event: e, at: anchorForElement(onPile) });
           return;
         }
-        if (isTile && !scopeGroupId && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
+        if (isTile && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
           e.preventDefault();
           toggleMulti(container, id);
           return;
@@ -5447,7 +5446,7 @@
       if (isTile) {
         el.addEventListener('keydown', function (e) {
           if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-          if (scopeGroupId || !(e.metaKey || e.ctrlKey || e.shiftKey)) return;
+          if (!(e.metaKey || e.ctrlKey || e.shiftKey)) return;
           // Suppress the synthesized click so the tile does not also select.
           e.preventDefault();
           toggleMulti(container, el.getAttribute('data-ws-id'));

@@ -33,6 +33,12 @@ import {
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
+import {
+  deleteWorkspace as deleteWorkspaceAction,
+  deleteWorkspaces as deleteWorkspacesAction,
+  moveMembersIntoGroup,
+  topLevelIds
+} from './workspace-bulk-actions.js';
 import { OperationsMapActivity } from './operations-map-activity.js';
 import { mountDailyBrief } from './home-daily-brief.js';
 import { openParcelByRef } from './parcel-open.js';
@@ -12491,6 +12497,12 @@ export class WorkspaceCommandView {
       // is the same one the zone header opens (FR-13, FR-24).
       onBuild: () => this.openGroupCreator({ entryPoint: 'group_command_build' }),
       onAddExisting: () => this.openDetachmentPicker(),
+      // Multi-select, as on Home: the map hands checked ids back and these run
+      // the same workspace-bulk-actions.js code Home's Map and Tree run, so a
+      // group page deletes and groups its members through the same confirms.
+      onDeleteWorkspace: id => void deleteWorkspaceAction(id, this.detachmentBulkContext()),
+      onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, this.detachmentBulkContext()),
+      onGroupWorkspaces: ids => this.groupDetachmentSelection(ids),
       // A unit on the ground opens the same Unit Sheet its roster card did.
       onSelectUnit: unit => {
         if (!unit || !unit.selectKey) return;
@@ -12510,6 +12522,131 @@ export class WorkspaceCommandView {
     const member = rows.find(row => row && row.id === id);
     if (!member) return;
     this.navigateTo(workspacePageURL(member.folder_slug || member.id));
+  }
+
+  // ---------- Detachment bulk actions (multi-select, as on Home) ----------
+
+  /**
+   * Host context for workspace-bulk-actions.js, the group page's counterpart
+   * of Home's bulkContext(). The rows are the whole tree the members panel
+   * already holds, so a nested member or the group itself resolves too, and
+   * every change comes back through the same reload the Add picker uses.
+   */
+  detachmentBulkContext() {
+    const rows = () => this.detachmentSnapshot().workspaces;
+    return {
+      rows: rows(),
+      announce: message => this.announceDetachment(message),
+      onTrashed: (id, name) => this.offerDetachmentUndo(id, name),
+      onChanged: async () => {
+        await this.handleWorkspacesChanged({});
+      },
+      verifyMembership: ({ groupId, memberIds }) =>
+        new Set(
+          (memberIds || []).filter(
+            id => rows().find(row => row && row.id === id)?.parent_id === groupId
+          )
+        )
+    };
+  }
+
+  // The map's own live region speaks for the group page, as it does for Home,
+  // so a bulk outcome is announced where the selection was made.
+  announceDetachment(message) {
+    const host = this.detachmentMapEl;
+    const live =
+      host && typeof host.querySelector === 'function'
+        ? host.querySelector('[data-map-live]')
+        : null;
+    if (live) live.textContent = String(message || '');
+  }
+
+  // Home keeps a trashed item restorable from its Tree toolbar; a group page
+  // has no Tree, so the Undo rides on the toast instead.
+  offerDetachmentUndo(id, name) {
+    const toast = typeof window === 'undefined' ? null : window.Toast;
+    if (!toast || typeof toast.info !== 'function') return;
+    toast.info(`"${name}" moved to the Trash.`, {
+      title: 'Deleted',
+      duration: 9000,
+      action: { label: 'Undo', onClick: () => void this.restoreDetachmentMember(id, name) }
+    });
+  }
+
+  async restoreDetachmentMember(id, name) {
+    try {
+      const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/restore`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.announceDetachment(`Restored ${name}.`);
+    } catch (err) {
+      this.announceDetachment(`Could not restore ${name}.`);
+      if (typeof window !== 'undefined') window.Toast?.error?.(`Could not restore "${name}".`);
+      console.error('workspace-command: restore failed', err);
+    }
+    await this.handleWorkspacesChanged({ detail: { workspaceId: id } });
+  }
+
+  /**
+   * Group selected, on a group page: the shared creator opens with this group
+   * locked as the parent, so the checked members become a nested group inside
+   * it. Members are snapshotted at open and moved only after the durable group
+   * POST, exactly as Home's groupFromMap does, and the map then adopts the new
+   * district with the members' coordinates pinned.
+   */
+  groupDetachmentSelection(ids) {
+    const manager = typeof window === 'undefined' ? null : window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') {
+      const message = 'Create Group is unavailable. Refresh the page and try again.';
+      this.announceDetachment(message);
+      if (typeof window !== 'undefined') window.Toast?.error?.(message);
+      return false;
+    }
+    const rows = this.detachmentSnapshot().workspaces;
+    const memberIDs = topLevelIds(ids, rows);
+    if (!memberIDs.length) return false;
+    const selection = {
+      ids: memberIDs,
+      names: memberIDs.map(id => rows.find(row => row && row.id === id)?.name || 'Workspace')
+    };
+    const map = window.OriWorkspaceMap || null;
+    const anchors =
+      map && typeof map.captureGroupingAnchors === 'function'
+        ? map.captureGroupingAnchors(memberIDs)
+        : {};
+    const ws = (this.page && this.page.workspace) || {};
+    manager.showAddWorkspaceModal({
+      kind: 'group',
+      fixedKind: 'group',
+      selection,
+      parentId: this.workspaceId(),
+      parentName: String(ws.name || ''),
+      parentLocked: true,
+      entryPoint: 'group_command_group_selected',
+      invoker: typeof document === 'undefined' ? null : document.activeElement,
+      onCreated: async created => {
+        // The new district is what the page should land on once the members
+        // have moved into it.
+        this.pendingDetachmentSelectionId = String(created.groupId || '');
+        const outcome = await moveMembersIntoGroup(
+          { id: created.groupId, name: created.folder?.name },
+          selection.ids,
+          this.detachmentBulkContext()
+        );
+        if (map && typeof map.adoptNewGroup === 'function') {
+          const pinned = {};
+          outcome.placed.forEach(id => {
+            if (anchors[id]) pinned[id] = anchors[id];
+          });
+          await map.adoptNewGroup(outcome.groupId, pinned);
+        } else if (map && typeof map.clearMultiSelection === 'function') {
+          map.clearMultiSelection();
+        }
+        return outcome;
+      }
+    });
+    return true;
   }
 
   unmountDetachmentMap() {

@@ -698,6 +698,24 @@
   height: 100%;
   min-height: 0;
 }
+/* The map's multi-select bar is position:fixed and centred on the viewport for
+   Home, whose bottom centre is clear. A group page's map is narrower and its
+   control dock holds the bottom-left row, so there the bar docks inside the
+   host instead, centred just above that row. The dock wraps to two rows on a
+   narrow screen, and the bar rises with it. */
+.ws-cmd-detachment-host .ws-map-selbar {
+  position: absolute;
+  left: 50%;
+  bottom: 92px;
+  transform: translateX(-50%);
+  z-index: 8;
+  max-width: calc(100% - 32px);
+}
+@media (max-width: 720px) {
+  .ws-cmd-detachment-host .ws-map-selbar {
+    bottom: 156px;
+  }
+}
 /* The operations map already draws the frame and owns the top-right corner
    (the tool belt), so the map's own theatre border and compass step aside. */
 .ws-cmd-opmap.is-combined .ws-map-theatre {

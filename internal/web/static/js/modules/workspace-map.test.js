@@ -8302,6 +8302,94 @@ test('visible selection-bar actions and the context menu hand checked ids to the
   );
 });
 
+// A group page's Detachment map: the same checked set, bar, and menus as Home,
+// scoped to the group's members, handing ids to the group page's own callbacks.
+function scopedBulkHarness({ handlers = {} } = {}) {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 300, y: 100 } }
+    })
+  );
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'g', kind: 'group', name: 'Studio' },
+      { id: 'ws-1', parent_id: 'g', name: 'Alpha' },
+      { id: 'ws-2', parent_id: 'g', name: 'Beta' },
+      { id: 'loose', name: 'Loose' }
+    ],
+    scopeGroupId: 'g',
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    ...handlers
+  });
+  return { map, harness };
+}
+
+test('a group page checks members like Home: checkbox, modifier-click, keyboard, bar, and menu', async () => {
+  const deleted = [];
+  const grouped = [];
+  const { map, harness } = scopedBulkHarness({
+    handlers: {
+      onDeleteWorkspaces: ids => deleted.push(ids),
+      onGroupWorkspaces: ids => grouped.push(ids)
+    }
+  });
+  await flush();
+  assert.equal(map.getScopeGroupId(), 'g');
+  const bar = harness.container.querySelector('[data-ws-selbar]');
+  assert.equal(bar.hidden, true, 'nothing checked yet');
+
+  // The corner checkbox checks without selecting.
+  harness.tile('ws-1').fire('click', checkboxClick());
+  assert.equal(bar.hidden, false, 'the bar appears once a member is checked');
+  assert.equal(map.getSelectedId(), '', 'checking is not a selection change');
+  assert.deepEqual(
+    [...map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', scoped: true }).map(i => i.action)],
+    ['group-multi', 'clear-selection', undefined, 'delete-multi'],
+    'a checked member’s menu acts on the whole set'
+  );
+
+  // A modifier-click and a modified Enter check too, exactly as on Home. The
+  // checked set's size is read back through the menu's own count label.
+  const checkedCount = () =>
+    map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', scoped: true })[0].label;
+  harness.tile('ws-2').fire('click', {
+    target: { closest: () => null },
+    shiftKey: true,
+    preventDefault() {}
+  });
+  assert.equal(checkedCount(), 'Group 2 workspaces');
+  harness.tile('ws-2').fire('keydown', { key: 'Enter', metaKey: true, preventDefault() {} });
+  assert.equal(checkedCount(), 'Group 1 workspace');
+  harness.tile('ws-2').fire('keydown', { key: 'Enter', metaKey: true, preventDefault() {} });
+  assert.equal(checkedCount(), 'Group 2 workspaces');
+
+  harness.control('[data-ws-selbar-group]').click();
+  assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'Group selected reaches the group page');
+
+  harness.control('[data-ws-selbar-delete]').click();
+  assert.deepEqual(ids(deleted), [['ws-1', 'ws-2']], 'Delete reaches the group page');
+
+  openTileMenu(harness, 'ws-1');
+  harness.menu.item('group-multi').fire('click');
+  assert.deepEqual(ids(grouped), [
+    ['ws-1', 'ws-2'],
+    ['ws-1', 'ws-2']
+  ]);
+
+  harness.control('[data-ws-selbar-clear]').click();
+  assert.equal(bar.hidden, true, 'Clear empties the set');
+  assert.deepEqual(
+    [...map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', scoped: true }).map(i => i.action)],
+    ['open', 'open-backlog', undefined, 'toggle-selection', undefined, 'delete']
+  );
+});
+
 test('an unwired bulk action reports the wiring bug instead of doing nothing', async () => {
   const errors = [];
   const { harness } = bulkHarness({
@@ -9736,7 +9824,7 @@ test('a mount without scopeGroupId draws the whole world exactly as before', () 
   );
 });
 
-test('a scoped mount draws only its group, without collapse or bulk controls, and unmount clears it', () => {
+test('a scoped mount draws only its group, without collapse controls, and unmount clears it', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness();
   map.mount(container, scopedMountState());
@@ -9748,7 +9836,14 @@ test('a scoped mount draws only its group, without collapse or bulk controls, an
     assert.doesNotMatch(container.innerHTML, new RegExp('data-ws-id="' + id + '"'));
   }
   assert.doesNotMatch(container.innerHTML, /data-group-collapse/);
-  assert.match(container.innerHTML, /aria-label="Select for bulk action"[^>]* hidden>/);
+  // Members check for bulk actions exactly as Home's buildings do: the corner
+  // checkbox is drawn, not hidden, on a group page.
+  assert.match(
+    container.innerHTML,
+    /data-ws-check role="checkbox" tabindex="-1" aria-checked="false" aria-label="Select for bulk action" title="Select for bulk action \(or Shift\/Cmd \+ Enter on the tile\)"><\/span>/
+  );
+  assert.doesNotMatch(container.innerHTML, /aria-label="Select for bulk action"[^>]* hidden>/);
+  assert.match(container.innerHTML, /data-ws-selbar hidden/, 'the selection bar waits for a check');
   // The page is the group: everything drawn is in it, so no district frame is
   // drawn at all — no outline, no header, no ⤧/⋯ controls (PRD §10).
   assert.doesNotMatch(container.innerHTML, /ws-map-district/);
@@ -10075,12 +10170,21 @@ test('scopedFrameBounds frames the district, falling back to everything drawn', 
   assert.deepEqual({ ...map.scopedFrameBounds(layout, 'missing') }, { ...layout.bounds });
 });
 
-test('scoped menus offer navigation, group layout, and building only', () => {
+test('scoped menus offer navigation, selection, deletion, and building, never a task or a district', () => {
   const map = loadOriWorkspaceMap();
   const labels = items => items.map(item => (item.divider ? '—' : item.label));
 
+  // A member's menu matches a Home building's apart from Give a task, which a
+  // group page's New Quest composer already covers.
   const tile = map.contextMenuItemsFor({ type: 'tile', id: 'm1', ws: { id: 'm1' }, scoped: true });
-  assert.deepEqual([...labels(tile)], ['Open workspace', 'Open → Backlog']);
+  assert.deepEqual(
+    [...labels(tile)],
+    ['Open workspace', 'Open → Backlog', '—', 'Add to selection', '—', 'Delete workspace']
+  );
+  assert.deepEqual(
+    [...tile.filter(item => !item.divider).map(item => item.action)],
+    ['open', 'open-backlog', 'toggle-selection', 'delete']
+  );
   map._setSetupStatusForTest('m1', { state: 'needs_setup', steps: [{ id: 'a', done: false }] });
 
   // No district is drawn on a group page, so it has no menu of its own; the
