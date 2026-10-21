@@ -24,6 +24,7 @@ http://localhost:8765/api
 - [Workspace Groups](#workspace-groups)
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
+- [Personal Assistant Second Brain API](#personal-assistant-second-brain-api)
 - [External Memory API](#external-memory-api)
 - [Home Library: Open a Song and the Shared Assistant](#home-library-open-a-song-and-the-shared-assistant)
 - [Workspace Outputs API](#workspace-outputs-api)
@@ -2188,6 +2189,26 @@ Chat and task runs in a workspace with a linked directory get two tools:
 - `workspace_directory_read` — `{ "directory_id", "path", "offset"? }` returns parsed text for PDF, DOCX, and text-like files in 40,000-character pages with `next_offset`; binary and unsupported files are refused. The `content` field is labelled as file content: reference data, not instructions.
 
 Both are read-only; nothing here writes to a linked directory.
+
+## Personal Assistant Second Brain API
+
+Connect your second brain: the user's notes (an Obsidian vault found in Obsidian's own vault list, or a Markdown folder chosen through the folder picker) connected read-only to the Personal HQ. Contract: [docs/architecture/second-brain.md](../architecture/second-brain.md).
+
+Every route refuses a request that did not come from Ori's own page (`connectionshttp.OriginGuard`: `403`), reads included, since a status names the folder. Bodies are closed: an unknown field is `400`, and any key naming a path or folder is `400` "This action does not accept a folder path". No route accepts a path; a folder is named by a detected vault's `id` or by a `selection_token` from `POST /api/folder-picker/select-path`. `request_id` (`[A-Za-z0-9._:-]{1,128}`) makes every write idempotent: a replay returns what the first call did, and an id reused for another action is `409`.
+
+| Method and route | Body | Result |
+|---|---|---|
+| `GET /api/personal-assistant/second-brain` | none | `second_brain`: `{status: not_connected\|connected\|missing, detected: [{id, name, parent, path}], source?: {id, kind: obsidian\|markdown, name, path, connected_at}, last_look?: {id, at, open_items, headline, acted}, ask: {state: pending\|shown\|deferred\|declined, offer_again?}, version}` |
+| `POST …/second-brain/prompted` | `{request_id}` | records that the ask was shown (once) |
+| `POST …/second-brain/ask` | `{decision: "later"\|"none", request_id}` | Not now / I don't keep notes |
+| `POST …/second-brain/connect` | `{detected_id}` or `{selection_token}`, `request_id`, optional `replace: true` | `second_brain` and `look_id`; the first look starts. `400` `no_notes` "No Markdown notes found in {name}.", `400` `repair: choose_folder` for a refused folder, `409` `needs_pick` for an expired token, `404` for a vault no longer listed, `409` `needs_confirm` when another folder is connected and `replace` was not sent |
+| `GET …/second-brain/look` | none | `look`: `{state: running\|finished\|failed\|none, look_id, result?}`; `result` holds `headline`, `headline_by` (`rules`\|`model`), `also_noticed`, `counts`, `items` (`id`, `text`, `note`, `line`, `due`, `suggested`, `in_decision`, `link`), `new_since`, `done_since`, or `failure` |
+| `POST …/second-brain/look` | `{request_id}` | Look again; `429` with `retry_after_seconds` within 10 minutes of the last look |
+| `POST …/second-brain/look/{lookID}/follow-ups` | `{items: "suggested"}` or `{items: [id, …]}` (1–500), `request_id` | `follow_ups`: `{look_id, created, skipped}`; items already captured are skipped |
+| `POST …/second-brain/look/{lookID}/dismiss` | `{request_id}` | takes a waiting result off Needs you |
+| `POST …/second-brain/disconnect` | `{request_id, if_version}` | removes the connection (follow-ups stay); `409` on a stale `if_version` |
+
+`409` "Build Personal HQ before connecting your notes" before the HQ exists. Errors carry either `{error}` or `{code, message}`.
 
 ## Folder Protection API
 

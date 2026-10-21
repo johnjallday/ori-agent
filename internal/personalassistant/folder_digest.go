@@ -922,8 +922,14 @@ func (s *FolderDigestService) MarkFirstPromptShown(ctx context.Context, userID s
 		return FolderDigestView{}, ErrRepairNeeded
 	}
 	before, err := s.Current(ctx, userID)
-	if err != nil || !before.PromptFirstFolder {
+	if err != nil {
 		return before, err
+	}
+	// The second-brain ask replaces the hand-over for this relationship, so a
+	// receipt sent while it owns the first message consumes the hand-over too.
+	owned := s.deps.FirstPromptOwned != nil && s.deps.FirstPromptOwned(ctx, userID)
+	if !before.PromptFirstFolder && !owned {
+		return before, nil
 	}
 	_, err = s.store.Mutate(ctx, userID, func(doc *FolderDigestDocument) error {
 		if doc.FirstPromptShownAt == nil {

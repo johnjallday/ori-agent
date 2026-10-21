@@ -618,8 +618,9 @@ func TestFolderDigest_FirstPromptPersistsOnceAndResetRearmsIt(t *testing.T) {
 }
 
 // The second-brain ask replaces the folder hand-over as the first message
-// after HQ: while it owns the turn the folder prompt is neither offered nor
-// recorded, so a declined ask is never followed by it (second-brain FR5, FR9).
+// after HQ: while it owns the turn the folder prompt is not offered, so a
+// declined ask is never followed by it, and a receipt sent then consumes the
+// hand-over for the relationship (second-brain FR5, FR9).
 func TestFolderDigest_FirstPromptGivesWayToTheSecondBrainAsk(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()
@@ -630,15 +631,20 @@ func TestFolderDigest_FirstPromptGivesWayToTheSecondBrainAsk(t *testing.T) {
 	if err != nil || view.PromptFirstFolder {
 		t.Fatalf("prompt while the ask owns the turn = %+v, err=%v", view, err)
 	}
-	if view, err := f.service.MarkFirstPromptShown(ctx, "local"); err != nil || view.PromptFirstFolder {
-		t.Fatalf("marked = %+v, err=%v", view, err)
-	}
-	if stored, _ := f.store.Read(ctx, "local"); stored.FirstPromptShownAt != nil {
-		t.Fatal("the folder receipt was written for a prompt that was never shown")
-	}
 	owned = false
 	if view, _ := f.service.Current(ctx, "local"); !view.PromptFirstFolder {
 		t.Fatal("without the second brain the folder hand-over did not come back")
+	}
+	owned = true
+	if view, err := f.service.MarkFirstPromptShown(ctx, "local"); err != nil || view.PromptFirstFolder {
+		t.Fatalf("marked = %+v, err=%v", view, err)
+	}
+	if stored, _ := f.store.Read(ctx, "local"); stored.FirstPromptShownAt == nil {
+		t.Fatal("a receipt sent while the ask owns the turn did not consume the hand-over")
+	}
+	owned = false
+	if view, _ := f.service.Current(ctx, "local"); view.PromptFirstFolder {
+		t.Fatal("the consumed hand-over came back")
 	}
 }
 
