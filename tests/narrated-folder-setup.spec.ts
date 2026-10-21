@@ -214,8 +214,10 @@ test('Home’s Explore says the same lines, joins the existing Home, and Keep au
       )
       .first()
   ).toHaveText('Needs: REAPER integration (installed) · Music Project Management (installed)');
+  // The card is a hire: its one question starts from the shape's default.
+  await expect(page.getByLabel('What should it do with it?').first()).toHaveValue(/\S/);
   await page
-    .locator('button:visible', { hasText: /^Set up$/ })
+    .locator('button:visible', { hasText: /^Hire and start$/ })
     .first()
     .click();
 

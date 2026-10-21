@@ -233,8 +233,11 @@ func (h *folderSetupHost) softwareRun(ctx context.Context, req personalassistant
 			}
 			parentID = destination.WorkspaceID
 		}
+		// The brief the user gave the hire is the new workspace's goal, in
+		// place of the blueprint's.
 		id, err := b.sessionHandler.CreateFolderOfferWorkspace(ctx, sessionhttp.FolderOfferWorkspaceRequest{
 			Name: intent.WorkspaceName, TemplateID: intent.Template, OfferID: req.Offer.ID, ParentID: parentID, Roster: &review,
+			Mission: req.Brief,
 		})
 		if errors.Is(err, sessionhttp.ErrFolderOfferRosterChanged) {
 			return changed(personalassistant.FolderPlanAgents, err)

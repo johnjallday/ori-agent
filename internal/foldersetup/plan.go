@@ -54,6 +54,10 @@ type PlanFacts struct {
 	SharingOff bool
 	// Profile is set when the Home's installed package declares a profile.
 	Profile *ProfileFacts
+	// Hire is who the card names for the folder and BriefDefault the brief it
+	// starts from; the plan carries both beside its lines, outside the digest.
+	Hire         *personalassistant.FolderHire
+	BriefDefault string
 }
 
 // ProfileFacts are what a plan's profile line is built from. The host reads
@@ -147,6 +151,10 @@ func joinAnd(names []string) string {
 	}
 }
 
+// FolderLinkLine is how a hire card says what happens to the folder it is
+// about: it is linked where it is and nothing in it is moved, copied or run.
+const FolderLinkLine = "Linked where it is; nothing is moved, copied or run"
+
 // BuildPlan lists every consequence of one press of Set up, in the order the card
 // shows them, and the machine-readable intent a run is held to. Every string is
 // plain text and names no path.
@@ -219,13 +227,10 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		lines = append(lines, line)
 		intent.SetsProfile, intent.GrantsTemplates = true, grants
 	}
-	folderName := strings.TrimSpace(facts.FolderName)
-	if folderName == "" {
-		folderName = facts.WorkspaceName
-	}
 	lines = append(lines,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: workspaceName},
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + folderName + " where it is", Detail: "Nothing is moved or copied."},
+		// The card's headline names the folder; the line says what happens to it.
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: FolderLinkLine},
 		mode,
 		agents,
 		// Nothing starts it: the user does, with Start first look, which is when
@@ -235,6 +240,11 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	plan.Intent = intent
 	plan.Destination = facts.Destination
+	if facts.Hire != nil {
+		hire := *facts.Hire
+		plan.Hire = &hire
+	}
+	plan.BriefDefault = facts.BriefDefault
 	return plan.Stamped()
 }
 

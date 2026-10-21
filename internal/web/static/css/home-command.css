@@ -317,6 +317,83 @@ body.home-command-page .home-command-bridge * {
   display: none;
 }
 
+/* A recognized project's plan as a hire: the agent's badge and role, then the
+   one question whose answer becomes the workspace goal. */
+.pa-folder__hire {
+  display: grid;
+  gap: 10px;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.pa-folder__hire[hidden],
+.pa-folder__brief[hidden],
+.pa-folder__plan-heading[hidden] {
+  display: none;
+}
+
+.pa-folder__hire-agent {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  min-width: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pa-folder__hire-initials {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 8px;
+  background: var(--hc-panel);
+  color: var(--hc-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.pa-folder__brief {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pa-folder__brief-label {
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.pa-folder__brief textarea {
+  width: 100%;
+  min-height: 4.5em;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+/* What happens besides the hire: the plan's lines under a quieter heading, with
+   Adjust beside it. */
+.pa-folder__plan-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.5rem 0 -0.25rem;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pa-folder__plan-adjust {
+  padding: 0;
+  font-size: 12px;
+}
+
 /* The one-card setup's plan: one row per consequence, with a state glyph that
    is also said in words for assistive tech (never colour alone). */
 .pa-folder__plan {

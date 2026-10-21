@@ -26,6 +26,9 @@ import (
 const (
 	maxEntryCandidates = 64
 	connectionRunKey   = "setup_journey_run_id"
+	// maxGoalRunes bounds a project's goal the way a typed workspace goal is
+	// bounded elsewhere (a build session's goal, a folder setup's brief).
+	maxGoalRunes = 300
 )
 
 var (
@@ -93,6 +96,11 @@ type Request struct {
 	WorkspaceName    string                                 `json:"workspace_name"`
 	ProjectName      string                                 `json:"project_name,omitempty"`
 	GroupComposition string                                 `json:"group_composition,omitempty"`
+	// Goal, when set, is the goal the new project workspace is created with
+	// (Workspace.Mission), its first goal run left pending until it is opened.
+	// It is part of the reviewed input, so a commit creates exactly the goal
+	// its review was made with. An existing project keeps its own.
+	Goal string `json:"goal,omitempty"`
 }
 
 type Projection struct {
@@ -130,7 +138,21 @@ func NormalizeRequest(request Request) Request {
 	request.ProjectName = strings.TrimSpace(request.ProjectName)
 	request.EntryName = strings.TrimSpace(request.EntryName)
 	request.GroupComposition = strings.ToLower(strings.TrimSpace(request.GroupComposition))
+	request.Goal = strings.Join(strings.Fields(request.Goal), " ")
 	return request
+}
+
+// validGoal accepts an empty goal or one line of bounded plain text.
+func validGoal(value string) bool {
+	if len([]rune(value)) > maxGoalRunes {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func InputDigest(request Request) (string, error) {
@@ -143,7 +165,7 @@ func (s *Service) Preview(_ context.Context, scope Scope, request Request) (Prev
 		return Preview{}, ErrUnavailable
 	}
 	request = NormalizeRequest(request)
-	if !validDisplayName(request.WorkspaceName) || !scope.Template.ProjectConnection.Supports(request.ModeID) {
+	if !validDisplayName(request.WorkspaceName) || !validGoal(request.Goal) || !scope.Template.ProjectConnection.Supports(request.ModeID) {
 		return Preview{}, ErrInvalid
 	}
 	inputDigest, err := digestJSON(request)
@@ -520,6 +542,11 @@ func (s *Service) ensureChild(scope Scope, request Request, preview Preview, hom
 	child.ParentID = expectedParentID
 	child.SharedData = map[string]any{connectionRunKey: scope.RunID}
 	child.SetTemplateProvenance(templateProvenance(scope.Template, s.now(), groupSnapshot))
+	if request.Goal != "" {
+		// Created with its goal, as the Create Workspace modal creates one: the
+		// first goal run is pending and starts only when the workspace is opened.
+		child.Mission, child.GoalFirstRunPending = request.Goal, true
+	}
 	if request.ModeID == projecttemplates.ProjectConnectionExistingProject {
 		if err := RecordAttachedProject(child, request.WorkspaceName, preview.selectedRoot, preview.selectedEntry, connectionReferenceID(scope.RunID)); err != nil {
 			return nil, err

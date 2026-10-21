@@ -542,10 +542,71 @@ export function folderSetupDestinationLabel(offer) {
   return `Destination: ${destination.status === 'new' ? 'new ' : ''}${kind} “${name}” · ${operation}.`;
 }
 
+const HIRE_MODES = ['create', 'bind', 'pending'];
+
+// initialsOf is the two letters an agent's badge shows.
+function initialsOf(name) {
+  const words = String(name || '')
+    .split(/\s+/)
+    .filter(word => /^[\p{L}\p{N}]/u.test(word));
+  return words
+    .slice(0, 2)
+    .map(word => Array.from(word)[0].toUpperCase())
+    .join('');
+}
+
+// hireView is a recognized project's plan presented as a hire: who the setup
+// hires (or assigns) for the folder, the one question whose answer becomes the
+// workspace goal, and the heading the plan's lines sit under. All of it is
+// written from the server's hire facts; null when the plan names no hire.
+export function hireView(plan, subject, { needs = [] } = {}) {
+  const hire = plan?.hire;
+  if (!hire || typeof hire !== 'object' || !HIRE_MODES.includes(hire.mode)) return null;
+  const name = String(hire.agent_name || '').trim();
+  const role = String(hire.role_label || '').trim();
+  const model = String(hire.model || '').trim();
+  let headline;
+  if (name && hire.mode === 'bind')
+    headline = segments(['Assign ', { text: name }, ' to ', { text: subject }]);
+  else if (name) headline = segments(['Hire ', { text: name }, ' for ', { text: subject }]);
+  else {
+    const kind = role || 'project';
+    const article = /^[aeiou]/i.test(kind) ? 'an' : 'a';
+    headline = segments([`Hire ${article} ${kind} assistant for `, { text: subject }]);
+  }
+  const detail = name
+    ? [role ? `${role} role` : '', model ? `uses ${model}` : 'no model yet']
+        .filter(Boolean)
+        .join(' · ')
+    : `${role || 'Project'} role · named once its plugin is installed`;
+  // A plan that installs or enables a plugin first says its other lines happen
+  // once that is done.
+  const waits =
+    hire.mode === 'pending' ||
+    (Array.isArray(needs) && needs.some(need => need && need.state && need.state !== 'ready'));
+  const brief = String(plan.brief_default || '').trim();
+  return {
+    mode: hire.mode,
+    headline,
+    agent: { initials: initialsOf(name || role || 'Agent'), detail },
+    brief: brief
+      ? {
+          label: 'What should it do with it?',
+          value: brief,
+          hint: 'This becomes the workspace goal. You can change it later.'
+        }
+      : null,
+    linesHeading: waits ? 'Also, once installed' : 'Also, in the background',
+    adjust: null
+  };
+}
+
 // A reviewed capability rides the same result card. With a plan from the server
 // the card is the one consent: Set up runs the whole setup on the server and
 // Adjust… opens the step-by-step journey. Without one it opens the existing
 // install → project-setup journey. It never uses the blank-workspace creator.
+// A plan that names a hire is shown as one: Hire and start, Not now, and Adjust
+// beside the plan's lines.
 function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
   const portfolio = offer.portfolio;
@@ -556,6 +617,10 @@ function capabilityConfirmView(offer, base, subject) {
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const continuing = base.status === 'awaiting_outcome';
+  const hire =
+    hasPlan && !portfolio && (continuing || !base.decided)
+      ? hireView(offer.plan, subject, { needs: offer.needs })
+      : null;
   const decline = {
     id: 'no',
     label: String(capability.decline_label || 'No thanks'),
@@ -568,13 +633,19 @@ function capabilityConfirmView(offer, base, subject) {
   else if (continuing && hasPlan)
     // Adjust… was pressed earlier: the one-click plan stays, beside the journey.
     actions = [
-      { id: 'setup', label: 'Set up', style: 'primary', oneCard: true },
+      { id: 'setup', label: hire ? 'Hire and start' : 'Set up', style: 'primary', oneCard: true },
       { id: 'resume', label: 'Continue setup', style: 'outline', journey: true }
     ];
   else if (continuing)
     actions = [{ id: 'resume', label: 'Continue setup', style: 'primary', journey: true }];
   else if (base.decided) actions = [];
-  else if (hasPlan)
+  else if (hire) {
+    actions = [
+      { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+      { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
+    ];
+    hire.adjust = { id: 'adjust', label: 'Adjust', style: 'link', journey: true };
+  } else if (hasPlan)
     actions = [
       {
         id: 'setup',
@@ -598,13 +669,18 @@ function capabilityConfirmView(offer, base, subject) {
       decline,
       later
     ];
-  const headline = portfolio
-    ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
-    : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
+  const headline = hire
+    ? hire.headline
+    : portfolio
+      ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
+      : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
   let question = portfolio
     ? String(capability.question || `Set up a ${capability.workspace}?`)
     : `Set up ${subject} as a ${capability.workspace}?`;
   if (hasPlan) question += ' Here is everything Set up will do:';
+  // A hire asks its one question in its own field; this line says what the
+  // folder was recognized as.
+  if (hire) question = `${subject} looks like a ${capability.recognized} project.`;
   if (run) question = run.question;
   else if (capability.revived)
     question = `You said no before, but this is a whole collection now. ${question}`;
@@ -644,6 +720,7 @@ function capabilityConfirmView(offer, base, subject) {
     actions,
     resume: continuing,
     plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    hire,
     setup: run
   };
 }
@@ -1219,6 +1296,27 @@ export function softwareOfferView(offer, view, { subject, folder }) {
   }
   const workspace = `${String(offer.blueprint_label || 'Code project').trim()} workspace`;
   const available = software.setup_available === true;
+  const hire = available ? hireView(offer.plan, subject) : null;
+  if (hire) {
+    // The reviewed plan as a hire: who is hired, the one question, what was
+    // read, and the plan's lines under their heading with Adjust beside it.
+    hire.adjust = { id: 'adjust', label: 'Adjust', style: 'link', softwareAdjust: true };
+    return {
+      ...reviewed,
+      headline: hire.headline,
+      question: completable
+        ? `This completes your workspace ${String(completable.name).trim()}. What I read in ${subject}:`
+        : `What I read in ${subject}:`,
+      hire,
+      actions: [
+        { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+        ...(view.decided ? [] : [{ id: 'no', label: 'Not now', style: 'outline', decision: 'no' }]),
+        reviewAction('Review again', 'link'),
+        ...openExisting,
+        ...elsewhere
+      ]
+    };
+  }
   let question = completable
     ? `Complete your workspace ${String(completable.name).trim()} for ${subject}? Here is everything Set up will do:`
     : `Set up ${subject} as a ${workspace}? Here is everything Set up will do:`;
@@ -2008,6 +2106,9 @@ const state = {
   // assistant's name as typed. The workspace name shares workspaceName above.
   softwareAdjusting: '',
   assistantName: '',
+  // The brief typed on a hire card: which offer, and the text. Untouched, the
+  // card shows the plan's default and sends nothing, so the server's applies.
+  brief: { offerId: '', value: '', typed: false },
   digest: null,
   offer: null,
   busy: false,
@@ -2141,6 +2242,13 @@ function elements() {
     status: document.getElementById('personalAssistantFolderStatus'),
     offer: document.getElementById('personalAssistantFolderOffer'),
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
+    hire: document.getElementById('personalAssistantFolderHire'),
+    hireInitials: document.getElementById('personalAssistantFolderHireInitials'),
+    hireDetail: document.getElementById('personalAssistantFolderHireDetail'),
+    briefField: document.getElementById('personalAssistantFolderBriefField'),
+    brief: document.getElementById('personalAssistantFolderBrief'),
+    planHeading: document.getElementById('personalAssistantFolderPlanHeading'),
+    planHeadingText: document.getElementById('personalAssistantFolderPlanHeadingText'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     structure: document.getElementById('personalAssistantFolderOfferStructure'),
     nameLabel: document.getElementById('personalAssistantFolderWorkspaceNameLabel'),
@@ -2680,6 +2788,31 @@ export function conversationFolderOfferView(offer, options = {}) {
   return { ...view, actions };
 }
 
+// briefFor is the brief the user typed on an offer's hire card, or null when
+// they left the field as the plan wrote it.
+function briefFor(offer) {
+  return offer?.id && state.brief.offerId === offer.id && state.brief.typed
+    ? state.brief.value
+    : null;
+}
+
+// renderHire draws who the card hires and its one question. The field keeps
+// what the user typed across re-renders (polls, a refused stale plan) and is
+// never rewritten while it has focus.
+function renderHire(els, hire, offer) {
+  if (!els.hire) return;
+  els.hire.hidden = !hire;
+  if (!hire) return;
+  setText(els.hireInitials, hire.agent.initials, false);
+  setText(els.hireDetail, hire.agent.detail, false);
+  if (els.briefField) els.briefField.hidden = !hire.brief;
+  if (els.brief && hire.brief && document.activeElement !== els.brief) {
+    const typed = briefFor(offer);
+    els.brief.value = typed === null ? hire.brief.value : typed;
+  }
+  if (els.brief) els.brief.disabled = state.busy;
+}
+
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
@@ -2731,6 +2864,7 @@ function renderOffer(place) {
       }
     });
   }
+  renderHire(els, view.hire, state.offer);
   setText(els.question, view.question, false);
   if (els.structure) {
     // The proposed group and its member workspaces, drawn by the same renderer
@@ -2790,6 +2924,25 @@ function renderOffer(place) {
     renderSetupLines(els.plan, lines);
     els.plan.hidden = !lines.length;
     els.plan.dataset.mode = view.setup ? view.setup.status : 'plan';
+    // A hire's lines are what happens besides the hire, under their heading.
+    const heading = !view.setup && lines.length ? view.hire?.linesHeading || '' : '';
+    els.plan.setAttribute('aria-label', heading || 'What Set up does');
+    if (els.planHeading) {
+      els.planHeading.hidden = !heading;
+      setText(els.planHeadingText, heading, false);
+      els.planHeading.querySelector('[data-folder-action]')?.remove();
+      const adjust = heading ? view.hire.adjust : null;
+      if (adjust) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-link pa-folder__plan-adjust';
+        button.dataset.folderAction = adjust.id;
+        button.textContent = adjust.label;
+        button.disabled = state.busy;
+        button.addEventListener('click', () => runAction(adjust));
+        els.planHeading.append(button);
+      }
+    }
   }
   if (els.actions) {
     els.actions.replaceChildren();
@@ -3151,6 +3304,10 @@ async function startOneCardSetup(action) {
   try {
     const body = { plan_digest: digest };
     if (action?.entry) body.entry_name = action.entry;
+    // The brief the user typed; untouched, the server applies the plan's own
+    // default, and a cleared field is sent empty for the same default.
+    const brief = offer.plan?.brief_default ? briefFor(offer) : null;
+    if (brief !== null) body.brief = brief;
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
@@ -3592,7 +3749,10 @@ function startManualTidy() {
 function act(actionId) {
   const view = folderOfferView(state.offer, { confirm: state.confirm });
   if (!view.visible || (view.decided && !view.resume)) return false;
-  const action = (view.actions || []).find(candidate => candidate.id === actionId);
+  // A hire's Adjust sits beside its lines rather than in the action row.
+  const action = [...(view.actions || []), ...(view.hire?.adjust ? [view.hire.adjust] : [])].find(
+    candidate => candidate.id === actionId
+  );
   if (!action) return false;
   runAction(action);
   return true;
@@ -4237,6 +4397,9 @@ function init() {
   els.workspaceName?.addEventListener('input', () => {
     state.workspaceName = els.workspaceName.value;
   });
+  els.brief?.addEventListener('input', () => {
+    state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };
+  });
   window.PersonalAssistantFolder = {
     open: openChooser,
     openChooser,
@@ -4287,7 +4450,18 @@ function init() {
       closeRunModal();
       render();
     },
-    act
+    act,
+    // The brief typed for an offer's hire, shared by every surface that asks
+    // the hire's question (the drawer's card and the mission card): null while
+    // it is the plan's own default.
+    brief: offer => briefFor(offer),
+    setBrief: (offerId, value) => {
+      if (!offerId) return;
+      state.brief = { offerId: String(offerId), value: String(value ?? ''), typed: true };
+      const els = elements();
+      if (els?.brief && document.activeElement !== els.brief && state.offer?.id === offerId)
+        els.brief.value = state.brief.value;
+    }
   };
 }
 

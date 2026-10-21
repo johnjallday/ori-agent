@@ -35,7 +35,8 @@ func TestBuildSoftwarePlanListsEveryConsequenceAndInstallsNothing(t *testing.T) 
 	if got := line(plan, personalassistant.FolderPlanWorkspace).Name; got != "Creates a Code project workspace named widget" {
 		t.Errorf("workspace line = %q", got)
 	}
-	if got := line(plan, personalassistant.FolderPlanFolder); got.Name != "Links widget where it is" || strings.Contains(got.Detail, "worktrees") {
+	if got := line(plan, personalassistant.FolderPlanFolder); got.Name != "Linked where it is; nothing is moved, copied or run" ||
+		got.Detail != "Read-only." || strings.Contains(got.Detail, "worktrees") {
 		t.Errorf("folder line = %+v", got)
 	}
 	if got := line(plan, personalassistant.FolderPlanAgents); got.Name != "Adds one development assistant, Development Assistant" ||

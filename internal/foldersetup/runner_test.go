@@ -37,6 +37,8 @@ type fakeJourney struct {
 	// shownProfile makes the staffing review disclose another agent's name.
 	shownProfile  string
 	staffRequests []staffedRole
+	// projectRequests are the project connection inputs reviewed and committed.
+	projectRequests []projectconnection.Request
 
 	// rootHasProject makes the root run hold another folder's project already, so
 	// a further project must be its own child run.
@@ -155,6 +157,11 @@ func (f *fakeJourney) Read(_ context.Context, runID string) (*setupjourney.Journ
 
 func (f *fakeJourney) Mutate(_ context.Context, _ string, action setupjourney.ActionID, request setupjourney.ActionMutation) (*setupjourney.ActionResult, error) {
 	f.calls = append(f.calls, string(action))
+	if action == setupjourney.ActionReviewExistingProject || action == setupjourney.ActionConnectExistingProject {
+		var project projectconnection.Request
+		_ = json.Unmarshal(request.Input, &project)
+		f.projectRequests = append(f.projectRequests, project)
+	}
 	switch action {
 	case setupjourney.ActionReviewCreateGroup:
 		template := f.homeShownTmpl
@@ -314,6 +321,33 @@ func TestRunHappyPathDrivesEveryStepInOrder(t *testing.T) {
 	}
 	if result.RunID != "run-1" || progress.last().RunID != "run-1" {
 		t.Fatalf("run id not recorded: %+v", result)
+	}
+	// Without a brief the project is connected as it always was: no goal.
+	for _, request := range journey.projectRequests {
+		if request.Goal != "" {
+			t.Fatalf("a run without a brief sent a goal: %+v", request)
+		}
+	}
+}
+
+// The brief the user gave the hire is the goal the project workspace is created
+// with: the same input is reviewed and committed, so the commit creates exactly
+// the goal its review showed.
+func TestRunCreatesTheProjectWithTheBriefAsItsGoal(t *testing.T) {
+	journey := newFake()
+	config := testConfig()
+	config.Brief = "Finish the bridge before the mix."
+	runner := &Runner{Journey: journey, Selections: fakeSelections{}, Progress: &recorder{}}
+	if result, err := runner.Run(context.Background(), config); err != nil || result.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("run = %+v, %v", result, err)
+	}
+	if len(journey.projectRequests) != 2 {
+		t.Fatalf("project requests = %+v", journey.projectRequests)
+	}
+	for _, request := range journey.projectRequests {
+		if request.Goal != "Finish the bridge before the mix." || request.WorkspaceName != "My Song" {
+			t.Fatalf("project request = %+v", request)
+		}
 	}
 }
 

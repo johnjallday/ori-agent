@@ -40,7 +40,11 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 	run := *offer.Setup
 	view := &FolderSetupView{
 		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryCandidates: append([]string(nil), run.EntryCandidates...),
-		Lines: append([]FolderPlanLine(nil), run.Lines...),
+		Lines: append([]FolderPlanLine(nil), run.Lines...), Brief: run.Brief,
+	}
+	if run.Hire != nil {
+		hire := *run.Hire
+		view.Hire = &hire
 	}
 	if run.Intent.Destination != nil {
 		destination := *run.Intent.Destination
@@ -184,6 +188,10 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		validateFolderName(input.EntryName) != nil) {
 		return FolderOfferView{}, fmt.Errorf("%w: project file", ErrValidation)
 	}
+	brief, err := NormalizeFolderBrief(input.Brief)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
 	binding, err := s.store.Binding(ctx, userID)
 	if err != nil {
 		return FolderOfferView{}, err
@@ -275,14 +283,25 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		if plan.Digest == "" || plan.Digest != input.PlanDigest {
 			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
 		}
+		// A plan that hires for a new workspace takes the user's brief, or its
+		// default when the field was cleared: a workspace is never created with
+		// an empty goal. A plan with no question takes no brief.
+		switch {
+		case plan.BriefDefault == "":
+			brief = ""
+		case brief == "":
+			brief = plan.BriefDefault
+		}
 	} else {
 		if offer.Setup.PlanDigest != input.PlanDigest {
 			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
 		}
 		plan = FolderSetupPlan{
 			Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest,
-			Intent: offer.Setup.Intent, Destination: offer.Setup.Intent.Destination,
+			Intent: offer.Setup.Intent, Destination: offer.Setup.Intent.Destination, Hire: offer.Setup.Hire,
 		}
+		// A resume carries on with the brief the run was started with.
+		brief = offer.Setup.Brief
 		if plan.Destination != nil {
 			guard, ok := s.deps.Setup.(FolderSetupDestinationGuard)
 			request := s.setupRequest(ctx, userID, *offer)
@@ -331,7 +350,11 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
-			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent,
+			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
+		}
+		if plan.Hire != nil {
+			hire := *plan.Hire
+			item.Setup.Hire = &hire
 		}
 		if structure := plan.Intent.Structure; structure != nil && structure.GroupType == FolderGroupPlain {
 			// The user confirmed a plain group. The folder is no longer a
@@ -364,6 +387,9 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	update := func(ctx context.Context, u FolderSetupUpdate) error { return s.recordSetup(ctx, userID, offer.ID, u) }
 	request := FolderSetupRequest{
 		UserID: userID, Offer: offer, Path: path, EntryName: entryName, Plan: plan, Update: update,
+	}
+	if offer.Setup != nil {
+		request.Brief = offer.Setup.Brief
 	}
 	if review := offer.ConversationReview; review != nil {
 		request.WorkspaceName = review.WorkspaceName

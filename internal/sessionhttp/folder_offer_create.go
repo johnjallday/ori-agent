@@ -26,6 +26,10 @@ type FolderOfferWorkspaceRequest struct {
 	TemplateID string
 	OfferID    string
 	ParentID   string
+	// Mission, when set, is the goal the user gave the hire. It is created as
+	// the workspace goal through the same goal-at-create path as the Create
+	// Workspace modal, in place of the blueprint's own.
+	Mission string
 	// Roster, when set, holds the creation to the assistant roster a review
 	// showed. The endpoint then creates the whole reviewed roster or nothing:
 	// a roster that changed since the review is ErrFolderOfferRosterChanged.
@@ -88,6 +92,9 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 	create := createWorkspaceRequest{
 		Name: name, TemplateID: strings.TrimSpace(req.TemplateID), ParentID: req.ParentID,
 		EntryPoint: folderDigestEntryPoint, FolderOfferID: offerID,
+	}
+	if mission := strings.TrimSpace(req.Mission); mission != "" {
+		create.Mission = &mission
 	}
 	if req.Roster != nil {
 		overrides, review, err := h.folderOfferRosterRequest(create.TemplateID, *req.Roster)

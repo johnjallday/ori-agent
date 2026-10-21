@@ -243,10 +243,15 @@ export function firstMissionOfferView(view, offer, confirm = '') {
   // A one-card setup run keeps its question (progress or what stopped it) and,
   // when stopped, its actions, even though the offer is already decided.
   const inRun = Boolean(offerView.setup);
+  // A hire's Adjust sits beside its lines on the drawer's card; here it joins
+  // the card's own actions, after them.
+  const hire = inRun ? null : offerView.hire || null;
+  const actions = offerView.decided && !inRun ? [] : offerView.actions || [];
   return {
     ...offerView,
     inRun,
-    actions: offerView.decided && !inRun ? [] : offerView.actions || [],
+    hire,
+    actions: hire?.adjust ? [...actions, hire.adjust] : actions,
     note: offerView.decided ? folderOutcomeNote(offer) : ''
   };
 }
@@ -641,6 +646,34 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     if (chooser && typeof chooser.open === 'function') chooser.open();
   }
 
+  // renderFirstMissionHire draws who the offer hires and its one question. The
+  // brief is kept by the folder card's module, so both surfaces send the same
+  // words, and the field is never rewritten while it has focus.
+  function renderFirstMissionHire(hire) {
+    const box = el('first-mission-offer-hire');
+    if (!box) return;
+    box.hidden = !hire;
+    if (!hire) return;
+    const initials = el('first-mission-offer-hire-initials');
+    if (initials) initials.textContent = hire.agent.initials;
+    const detail = el('first-mission-offer-hire-detail');
+    if (detail) detail.textContent = hire.agent.detail;
+    const field = el('first-mission-offer-brief-field');
+    if (field) field.hidden = !hire.brief;
+    const input = el('first-mission-offer-brief');
+    if (!input || !hire.brief) return;
+    if (!input.dataset.bound) {
+      input.dataset.bound = 'true';
+      input.addEventListener('input', () =>
+        window.PersonalAssistantFolder?.setBrief?.(currentFolderOffer()?.id, input.value)
+      );
+    }
+    if (document.activeElement !== input) {
+      const typed = window.PersonalAssistantFolder?.brief?.(currentFolderOffer());
+      input.value = typeof typed === 'string' ? typed : hire.brief.value;
+    }
+  }
+
   function renderFirstMissionOffer(view) {
     const box = el('first-mission-offer');
     if (!box) return;
@@ -663,6 +696,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
         }
       });
     }
+    renderFirstMissionHire(offer.hire);
     const question = el('first-mission-offer-question');
     if (question)
       question.textContent = offer.decided && !offer.inRun ? offer.note : offer.question;
@@ -681,6 +715,12 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     if (plan) {
       renderSetupLines(plan, planLines);
       plan.hidden = !planLines.length;
+      plan.setAttribute('aria-label', offer.hire?.linesHeading || 'What Set up does');
+    }
+    const planHeading = el('first-mission-offer-plan-heading');
+    if (planHeading) {
+      planHeading.textContent = planLines.length ? offer.hire?.linesHeading || '' : '';
+      planHeading.hidden = !planHeading.textContent;
     }
     const status = el('first-mission-offer-status');
     if (status) {

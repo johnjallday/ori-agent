@@ -351,6 +351,12 @@ type FolderSetupPlan struct {
 	// the intent, and one that does not (an optional connection) must not make
 	// an approved review stale.
 	Prerequisites []FolderPrerequisite `json:"prerequisites,omitempty"`
+	// Hire names who the setup hires for the folder, and BriefDefault is the
+	// answer its card's one question starts from. A plan that hires nobody for
+	// a new workspace has neither. Neither is part of the digest: the lines say
+	// what the run creates, and the brief is the user's own words.
+	Hire         *FolderHire `json:"hire,omitempty"`
+	BriefDefault string      `json:"brief_default,omitempty"`
 	// Intent is the machine-readable promise behind the lines; server only.
 	Intent FolderSetupIntent `json:"-"`
 }
@@ -410,6 +416,11 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
 	stamped.Prerequisites = append([]FolderPrerequisite(nil), p.Prerequisites...)
+	if p.Hire != nil {
+		hire := *p.Hire
+		stamped.Hire = &hire
+	}
+	stamped.BriefDefault = p.BriefDefault
 	if p.Destination != nil {
 		destination := *p.Destination
 		stamped.Destination = &destination
@@ -466,6 +477,9 @@ type FolderSetupRequest struct {
 	// WorkspaceName names the new workspace when the review gave it a name of
 	// its own; empty names it after the folder.
 	WorkspaceName string
+	// Brief is the user's answer to the card's question, set only for Run: the
+	// workspace the run creates takes it as its goal.
+	Brief string
 	// Plan is the confirmed plan a Run is held to.
 	Plan FolderSetupPlan
 	// Software is set for a built-in software offer: what the service holds
@@ -496,11 +510,13 @@ type FolderSetupDestinationGuard interface {
 }
 
 // FolderSetupInput is the click on Set up: the plan digest the card showed, the
-// idempotency key, and the project file when the user chose one.
+// idempotency key, the project file when the user chose one, and the brief the
+// user typed (empty takes the plan's default).
 type FolderSetupInput struct {
 	RequestID  string
 	PlanDigest string
 	EntryName  string
+	Brief      string
 }
 
 // FolderSetupView is a run as the browser sees it.
@@ -512,6 +528,9 @@ type FolderSetupView struct {
 	Lines           []FolderPlanLine        `json:"lines"`
 	EntryCandidates []string                `json:"entry_candidates,omitempty"`
 	Destination     *FolderSetupDestination `json:"destination,omitempty"`
+	// Hire and Brief are who the run hired and the goal it was given.
+	Hire  *FolderHire `json:"hire,omitempty"`
+	Brief string      `json:"brief,omitempty"`
 }
 
 const (
@@ -584,6 +603,12 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	if len(run.HomeID) > 200 || strings.ContainsAny(run.HomeID, "/\\\x00\r\n") || len(run.Receipt) > folderSetupMaxLines {
 		return fmt.Errorf("%w: setup home", errFolderDigestInvalid)
 	}
+	if brief, err := NormalizeFolderBrief(run.Brief); err != nil || brief != run.Brief {
+		return fmt.Errorf("%w: setup brief", errFolderDigestInvalid)
+	}
+	if err := run.Hire.validate(); err != nil {
+		return err
+	}
 	for _, row := range run.Receipt {
 		if row.Kind == "" || len(row.Kind) > 40 || len(row.Name) > folderSetupMaxText || len(row.Detail) > folderSetupMaxText ||
 			len(row.Route) > 512 || (row.Route != "" && !strings.HasPrefix(row.Route, "/workspaces/")) ||
@@ -619,6 +644,10 @@ type FolderSetupRun struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	// Intent is what the confirmed plan promised, kept for a resume.
 	Intent FolderSetupIntent `json:"intent,omitempty"`
+	// Brief is the goal the user gave the hire, and Hire who the card named;
+	// a resume reuses both rather than asking again.
+	Brief string      `json:"brief,omitempty"`
+	Hire  *FolderHire `json:"hire,omitempty"`
 	// HomeID and Receipt are a portfolio run's Home and what it read back from
 	// canonical state when it finished; the offer resolves to that Home.
 	HomeID  string             `json:"home_id,omitempty"`

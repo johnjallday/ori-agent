@@ -201,7 +201,7 @@ func TestSoftwareReview_RealPlanAndPrerequisitesWithNoSideEffects(t *testing.T) 
 	lines := planLines(offer)
 	want := []struct{ kind, name string }{
 		{"workspace", "Creates a Code project workspace named widget"},
-		{"folder", "Links widget where it is"},
+		{"folder", "Linked where it is; nothing is moved, copied or run"},
 		{"agents", "Adds one development assistant, Development Assistant"},
 		{"mode", "Starts with understanding and planning"},
 		{"task", "Queues a first assessment for you to start"},
@@ -225,6 +225,17 @@ func TestSoftwareReview_RealPlanAndPrerequisitesWithNoSideEffects(t *testing.T) 
 	// With no model set, the assistant's line and the prerequisite both say so.
 	if !strings.Contains(lines[2]["detail"].(string), "has no model yet") {
 		t.Fatalf("assistant line without a model: %v", lines[2])
+	}
+	// The card names the hire from the blueprint's roster, and its question
+	// starts from the blueprint's own goal.
+	plan := offer["plan"].(map[string]any)
+	hire, _ := plan["hire"].(map[string]any)
+	if hire == nil || hire["mode"] != "create" || hire["agent_name"] != "Development Assistant" ||
+		hire["role_label"] != "Code project" || hire["model"] != nil {
+		t.Fatalf("hire = %v", plan["hire"])
+	}
+	if plan["brief_default"] != "Understand this project, identify evidence-backed risks, and propose prioritized improvements before changing code." {
+		t.Fatalf("brief_default = %v", plan["brief_default"])
 	}
 	for id, state := range map[string]string{"folder": "verified", "model": "absent", "github": "absent", "execution_tool": "absent"} {
 		row := prerequisite(offer, id)
@@ -299,9 +310,14 @@ func TestSoftwareReview_ModelAndNamesAreReadLiveIntoThePlan(t *testing.T) {
 	}
 	adjusted := body["offer"].(map[string]any)
 	lines := planLines(adjusted)
-	if lines[0]["name"] != "Creates a Code project workspace named Widget service" || lines[1]["name"] != "Links widget where it is" ||
+	if lines[0]["name"] != "Creates a Code project workspace named Widget service" || lines[1]["name"] != "Linked where it is; nothing is moved, copied or run" ||
 		lines[2]["name"] != "Adds one development assistant, Pat" || adjusted["plan"].(map[string]any)["digest"] == modelDigest {
 		t.Fatalf("adjusted plan: %v", lines)
+	}
+	// A renamed assistant is the one the card hires, on the model it will use.
+	if hire, _ := adjusted["plan"].(map[string]any)["hire"].(map[string]any); hire == nil || hire["agent_name"] != "Pat" ||
+		hire["mode"] != "create" || hire["model"] != "sonnet" {
+		t.Fatalf("renamed hire = %v", adjusted["plan"].(map[string]any)["hire"])
 	}
 	for _, bad := range []map[string]any{
 		{"request_id": "bad-1", "workspace_name": "a/b"},

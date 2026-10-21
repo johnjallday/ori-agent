@@ -89,10 +89,7 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 		Kind: personalassistant.FolderPlanWorkspace, Name: "Creates a " + facts.BlueprintLabel + " workspace named " + facts.WorkspaceName,
 		Detail: "The workspace lives in Ori. Nothing is created in the project folder.",
 	}
-	folder := personalassistant.FolderPlanLine{
-		Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.ProjectName + " where it is",
-		Detail: "Read-only. Nothing is moved, copied or written into it.",
-	}
+	folder := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: FolderLinkLine, Detail: "Read-only."}
 	if facts.Linked {
 		folder.Detail += " This is one checkout; other worktrees of the same repository are not included."
 	}

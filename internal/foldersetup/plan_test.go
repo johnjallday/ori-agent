@@ -302,18 +302,32 @@ func TestBuildPlanSaysWhenTheAppItselfIsNotInstalled(t *testing.T) {
 
 // A workspace named apart from its folder (a build's draft) still links the
 // folder by the folder's own name; one named after it reads exactly as before.
-func TestBuildPlanLinksTheFolderByItsOwnName(t *testing.T) {
+func TestBuildPlanCarriesTheHireOutsideTheDigest(t *testing.T) {
+	bare := BuildPlan(baseFacts())
+	facts := baseFacts()
+	facts.Hire = &personalassistant.FolderHire{Mode: personalassistant.FolderHireBind, AgentName: "Producer", Model: "some-model"}
+	facts.BriefDefault = "Understand this song's project and suggest the next production step."
+	plan := BuildPlan(facts)
+	if plan.Hire == nil || plan.Hire.AgentName != "Producer" || plan.Hire == facts.Hire || plan.BriefDefault != facts.BriefDefault {
+		t.Fatalf("plan hire = %+v brief = %q", plan.Hire, plan.BriefDefault)
+	}
+	if plan.Digest != bare.Digest {
+		t.Fatal("who the card names and what it asks are not part of the consent's digest")
+	}
+}
+
+func TestBuildPlanSaysTheFolderStaysWhereItIs(t *testing.T) {
 	same := BuildPlan(baseFacts())
 	named := baseFacts()
 	named.FolderName = "My Song"
-	if plan := BuildPlan(named); plan.Digest != same.Digest || line(plan, personalassistant.FolderPlanFolder).Name != "Links My Song where it is" {
+	if plan := BuildPlan(named); plan.Digest != same.Digest || line(plan, personalassistant.FolderPlanFolder).Name != FolderLinkLine {
 		t.Fatalf("a folder named like its workspace changes nothing: %+v", plan.Lines)
 	}
 	renamed := baseFacts()
 	renamed.WorkspaceName, renamed.FolderName = "Summer Demos", "My Song"
 	plan := BuildPlan(renamed)
-	if got := line(plan, personalassistant.FolderPlanFolder).Name; got != "Links My Song where it is" {
-		t.Fatalf("folder line = %q", got)
+	if got := line(plan, personalassistant.FolderPlanFolder); got.Name != "Linked where it is; nothing is moved, copied or run" || got.Detail != "" {
+		t.Fatalf("folder line = %+v", got)
 	}
 	if got := line(plan, personalassistant.FolderPlanWorkspace).Name; !strings.Contains(got, "named Summer Demos") {
 		t.Fatalf("workspace line = %q", got)
