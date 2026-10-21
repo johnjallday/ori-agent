@@ -7202,6 +7202,120 @@ test('zone Build opens the shared creator with this group locked, and clears any
   }
 });
 
+test('the scoped mount wires delete and Group selected to the shared bulk actions', () => {
+  const commandView = detachmentCommandView('group', [
+    { id: 'm1', name: 'Mixing' },
+    { id: 'm2', name: 'Mastering' }
+  ]);
+  const mounts = [];
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push(state),
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    }
+  };
+  try {
+    commandView.syncDetachmentMap();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+  assert.equal(mounts.length, 1);
+  for (const name of ['onDeleteWorkspace', 'onDeleteWorkspaces', 'onGroupWorkspaces']) {
+    assert.equal(typeof mounts[0][name], 'function', name + ' is passed to the map');
+  }
+  const ctx = commandView.detachmentBulkContext();
+  assert.deepEqual(
+    ctx.rows.map(row => row.id),
+    ['g', 'm1', 'm2', 'other'],
+    'the whole tree is the row set, so a nested member or the group itself resolves'
+  );
+  assert.deepEqual(
+    [...ctx.verifyMembership({ groupId: 'g', memberIds: ['m1', 'other', 'missing'] })],
+    ['m1'],
+    'membership is verified against the reloaded tree by parent'
+  );
+});
+
+test('Group selected on a group page builds a nested group from the checked members', async () => {
+  const commandView = detachmentCommandView('group', [
+    { id: 'm1', name: 'Mixing' },
+    { id: 'm2', name: 'Mastering' },
+    { id: 'm3', name: 'Stems' }
+  ]);
+  const opened = [];
+  const adopted = [];
+  const patches = [];
+  const changes = [];
+  commandView.handleWorkspacesChanged = async event => {
+    changes.push(event);
+  };
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      captureGroupingAnchors: ids => Object.fromEntries(ids.map(id => [id, { x: 1, y: 2 }])),
+      adoptNewGroup: (groupId, pinned) => {
+        adopted.push({ groupId, pinned });
+        return Promise.resolve();
+      }
+    },
+    sessionManager: { showAddWorkspaceModal: options => opened.push(options) }
+  };
+  globalThis.fetch = (url, init) => {
+    patches.push({ url, body: JSON.parse(init.body) });
+    return Promise.resolve({ ok: true });
+  };
+  try {
+    assert.equal(commandView.groupDetachmentSelection(['m1', 'm2']), true);
+    assert.equal(opened.length, 1);
+    const options = opened[0];
+    assert.equal(options.kind, 'group');
+    assert.equal(options.fixedKind, 'group', 'the choice is fixed: this operation makes a group');
+    assert.deepEqual(options.selection, { ids: ['m1', 'm2'], names: ['Mixing', 'Mastering'] });
+    assert.equal(options.parentId, 'g', 'the new group nests inside this group');
+    assert.equal(options.parentLocked, true);
+    assert.equal(options.entryPoint, 'group_command_group_selected');
+
+    const outcome = await options.onCreated({ groupId: 'sub', folder: { name: 'Stems' } });
+    assert.deepEqual(
+      patches.map(p => p.url),
+      ['/api/workspaces/m1', '/api/workspaces/m2'],
+      'members move only after the durable group POST'
+    );
+    assert.deepEqual(patches[0].body, { parent_id: 'sub', order_index: 1 });
+    assert.deepEqual(outcome.placed, ['m1', 'm2']);
+    assert.equal(outcome.partial, false);
+    assert.deepEqual(adopted, [
+      { groupId: 'sub', pinned: { m1: { x: 1, y: 2 }, m2: { x: 1, y: 2 } } }
+    ]);
+    assert.equal(
+      commandView.pendingDetachmentSelectionId,
+      'sub',
+      'the map lands on the new district once the members have moved'
+    );
+    assert.ok(changes.length >= 1, 'the members tree reloads after the move');
+
+    // Nothing checked: nothing to group, and no creator opens.
+    assert.equal(commandView.groupDetachmentSelection([]), false);
+    assert.equal(opened.length, 1);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('Add existing renders the members panel’s own picker into the toolbar', () => {
   const commandView = detachmentCommandView('group');
   const host = { hidden: true, innerHTML: '' };
