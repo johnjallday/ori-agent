@@ -1,8 +1,14 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 import {
+  prepareFolderCreationRuntime,
+  attachFirst,
+  resources,
+  currentBuild,
+  inbox
+} from './helpers/folder-first-runtime';
+import {
   mkdtempSync,
-  mkdirSync,
   writeFileSync,
   existsSync,
   readFileSync,
@@ -21,78 +27,11 @@ test.describe('attached creation with a scripted local model', () => {
   let stopModel: Awaited<ReturnType<typeof startJanitorBuildModel>> | undefined;
   test.beforeAll(async ({ request }) => {
     stopModel = await startJanitorBuildModel();
-    const model = await request.post('/api/settings/system-model', {
-      data: { provider: 'lmstudio', model: 'ori-synthetic-model' }
-    });
-    expect(model.ok(), await model.text()).toBeTruthy();
-    let state = (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
-    if (state.state === 'needs_hire') {
-      const hired = await request.post('/api/personal-assistant/hire', {
-        data: {
-          request_id: 'synthetic-creation-hire-' + Date.now(),
-          if_version: state.state_version || 0,
-          display_name: 'Synthetic Assistant',
-          mandate: 'Help review synthetic folders.',
-          focus_areas: ['plan_my_day']
-        }
-      });
-      expect(hired.ok(), await hired.text()).toBeTruthy();
-      state = (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
-    }
-    if (state.state === 'needs_hq') {
-      const hq = await request.post('/api/personal-assistant/hq', {
-        data: {
-          request_id: 'synthetic-creation-hq-' + Date.now(),
-          if_version: state.state_version,
-          name: 'Synthetic HQ',
-          timezone: 'UTC'
-        }
-      });
-      expect(hq.ok(), await hq.text()).toBeTruthy();
-    }
-    const availability = await request.get('/api/workspaces/build-sessions/availability');
-    expect((await availability.json()).available).toBeTruthy();
+    await prepareFolderCreationRuntime(request);
   });
   test.afterAll(async () => {
     await stopModel?.();
   });
-
-  async function attachFirst(
-    page: Page,
-    request: APIRequestContext,
-    root: string,
-    unsent = '',
-    beforeAttach?: () => Promise<void>
-  ) {
-    const old = (
-      await (
-        await request.post('/api/workspaces/build-sessions', {
-          data: { entry_point: 'home_cockpit_create' }
-        })
-      ).json()
-    ).session;
-    if (old?.status === 'open')
-      await request.post(`/api/workspaces/build-sessions/${old.id}/abandon`, {
-        data: { version: old.version }
-      });
-    await request.post('/api/onboarding/skip');
-    await page.goto('/');
-    await page.locator('#cockpitCreateWorkspaceBtn').click();
-    const composer = page.locator('#workspaceBuildComposerInput');
-    await expect(composer).toBeEnabled();
-    if (unsent) await composer.fill(unsent);
-    if (beforeAttach) await beforeAttach();
-    await page
-      .locator('#workspaceBuildPane')
-      .getByRole('button', { name: 'Add folder', exact: true })
-      .click();
-    await expect(page.locator('#workspaceBuildPane')).toContainText(
-      'shared with your configured model'
-    );
-    await page.getByPlaceholder('~/Projects/my-app').fill(root);
-    await page.getByRole('button', { name: 'Use this path', exact: true }).click();
-    return composer;
-  }
 
   async function editDraftTeam(page: Page, name: string) {
     await page.getByRole('button', { name: 'Edit team', exact: true }).click();
@@ -109,47 +48,6 @@ test.describe('attached creation with a scripted local model', () => {
     await agent.getByRole('button', { name: 'Add to team', exact: true }).click();
     await expect(agent).toBeHidden();
     await page.locator('#workspaceBuildWithBtn').click();
-  }
-
-  async function resources(request: APIRequestContext) {
-    const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
-    const permissions = await Promise.all(
-      workspaces.map(
-        async (w: { id: string; directory_references: unknown; mcp_bindings: unknown }) => {
-          const base = `/api/workspaces/${w.id}/file-janitor`;
-          const status = (await (await request.get(base)).json()).status;
-          // Readiness timestamps change on reads, not because automation ran.
-          const { checked_at: _checkedAt, ...readiness } = status.readiness;
-          return {
-            id: w.id,
-            references: w.directory_references,
-            bindings: w.mcp_bindings,
-            settings: status.settings,
-            readiness,
-            batches: await (await request.get(`${base}/batches`)).json(),
-            history: await (await request.get(`${base}/history`)).json()
-          };
-        }
-      )
-    );
-    return {
-      workspaces: workspaces.map((w: { id: string }) => w.id).sort(),
-      permissions: permissions.sort((a, b) => a.id.localeCompare(b.id)),
-      plugins: await (await request.get('/api/plugins')).json(),
-      agents: (await (await request.get('/api/agents')).json()).agents.sort(
-        (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name)
-      )
-    };
-  }
-
-  async function currentBuild(request: APIRequestContext) {
-    return (
-      await (
-        await request.post('/api/workspaces/build-sessions', {
-          data: { entry_point: 'home_cockpit_create' }
-        })
-      ).json()
-    ).session;
   }
 
   test('folder-first suggestion uses one draft-only operation even with create_now and unsent text', async ({
@@ -717,19 +615,6 @@ test.describe('attached creation with a scripted local model', () => {
 // watcher, wizard or scan endpoint is stubbed. Native picker evidence is separate.
 test.describe.configure({ mode: 'serial' });
 const run = Date.now().toString(36);
-
-function inbox(name = '') {
-  let root = realpathSync(mkdtempSync(join(tmpdir(), 'ori-janitor-creation-')));
-  if (name) {
-    root = join(root, name);
-    mkdirSync(root, { mode: 0o700 });
-  }
-  const file = join(root, 'invoice.pdf');
-  writeFileSync(file, 'synthetic source bytes', { mode: 0o600 });
-  const old = new Date(Date.now() - 3600000);
-  utimesSync(file, old, old);
-  return root;
-}
 
 async function createLinked(request: APIRequestContext, label: string, roots: string[]) {
   const response = await request.post('/api/workspaces', {

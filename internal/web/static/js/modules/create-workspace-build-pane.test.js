@@ -336,7 +336,35 @@ test('compact permissions retain focused monitoring and open details without a d
     'details stay open through a preview refresh'
   );
   assert.equal(document.activeElement, host.querySelectorAll('input')[0]);
+  host.querySelectorAll('summary')[0].focus();
+  pane.renderCreationReview(host, { review, compact: true, actionsHost, message: 'Updated terms' });
+  assert.equal(document.activeElement, host.querySelectorAll('summary')[0]);
+  const otherControl = document.createElement('button');
+  otherControl.focus();
+  pane.renderCreationReview(host, { review, compact: true, actionsHost, message: 'Current terms' });
+  assert.equal(
+    document.activeElement,
+    otherControl,
+    'no focus change outside the refreshed review'
+  );
   assert.equal(events.length, 0, 'rendering cannot request or confirm anything');
+});
+
+test('a refreshed recovery retains focus on its existing workspace link', () => {
+  const { pane, document } = loadPane();
+  const host = document.createElement('section');
+  const actionsHost = document.createElement('div');
+  const review = { state: 'accepted', review_revision: 'accepted', folder_slug: 'kept-workspace' };
+  pane.renderCreationReview(host, { review, compact: true, accepted: true, actionsHost });
+  actionsHost.querySelectorAll('a')[0].focus();
+  pane.renderCreationReview(host, {
+    review,
+    compact: true,
+    accepted: true,
+    actionsHost,
+    busy: true
+  });
+  assert.equal(document.activeElement, actionsHost.querySelectorAll('a')[0]);
 });
 
 test('accepted preparation can be explicitly deferred without offering ordinary recreation', () => {
@@ -779,14 +807,14 @@ test('the attached folder shows metadata without inventing an empty Send turn', 
     controls.summary.textContent,
     '42 files observed · partial look · contents not read'
   );
-  assert.equal(controls.hint.hidden, true);
+  assert.equal(controls.hint, undefined);
 
   input.value = 'a thing';
   input.dispatchEvent(new FakeEvent('input'));
-  assert.equal(controls.hint.hidden, true);
+  assert.equal(controls.hint, undefined);
   input.value = '';
   input.dispatchEvent(new FakeEvent('input'));
-  assert.equal(controls.hint.hidden, true);
+  assert.equal(controls.hint, undefined);
 
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
   assert.equal(
@@ -825,7 +853,7 @@ test('the attached folder shows metadata without inventing an empty Send turn', 
   pane.applySession({ transcript: [] });
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
-  assert.equal(controls.hint.hidden, true);
+  assert.equal(controls.hint, undefined);
 });
 
 test('the recognition line says what Ori recognized, from server facts only', () => {
@@ -847,7 +875,10 @@ test('the recognition line says what Ori recognized, from server facts only', ()
     pane.folderRecognitionText({ verdict: 'project', label: 'software project', project_count: 1 }),
     'Recognized: software project'
   );
-  assert.equal(pane.folderRecognitionText({ verdict: 'none' }), 'Not a project Ori recognizes yet');
+  assert.equal(
+    pane.folderRecognitionText({ verdict: 'none' }),
+    'Folder metadata attached. Choose the purpose that fits.'
+  );
   assert.equal(
     pane.folderRecognitionText({ verdict: 'collection', project_count: 7 }),
     'Holds 7 projects · Explore a folder on Home sets them up together'
@@ -889,7 +920,7 @@ test('an attached folder shows its recognition line under the chip', () => {
   assert.equal(line().classList.contains('is-recognized'), true);
 
   pane.applySession({ transcript: [], folder: { observation, recognition: { verdict: 'none' } } });
-  assert.equal(line().textContent, 'Not a project Ori recognizes yet');
+  assert.equal(line().textContent, 'Folder metadata attached. Choose the purpose that fits.');
   assert.equal(line().classList.contains('is-recognized'), false);
 
   // An older build kept no recognition: the folder shows without a line.
@@ -1175,8 +1206,8 @@ test('Set it up is offered on a ready, named plan and follows the run it starts'
   assert.equal(
     root
       .querySelectorAll('span')
-      .find(node => node.classList.contains('workspace-build-folder__hint')).hidden,
-    true
+      .find(node => node.classList.contains('workspace-build-folder__hint')),
+    undefined
   );
   assert.equal(expiry().hidden, true);
   control('setup').click();
@@ -1480,7 +1511,7 @@ function linkControls(root) {
     chip: spans.find(node => node.id === 'workspaceBuildLink'),
     name: spans.find(node => node.id === 'workspaceBuildLinkName'),
     summary: root.querySelectorAll('p').find(node => node.id === 'workspaceBuildLinkSummary'),
-    hints: spans.filter(node => node.classList.contains('workspace-build-folder__hint'))
+    hints: spans.filter(node => node.classList.contains('workspace-build-link__hint'))
   };
 }
 
@@ -1634,7 +1665,7 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
   assert.equal(controls.name.textContent, 'acme/widgets');
   assert.equal(controls.remove.getAttribute('aria-label'), 'Remove link acme/widgets');
   assert.equal(controls.summary.textContent, 'GitHub repository · Go · 12 open issues');
-  const [, linkHint] = controls.hints;
+  const [linkHint] = controls.hints;
   assert.equal(linkHint.hidden, false);
   assert.equal(linkHint.textContent, 'Empty Send: “Set it up from the attached link”');
 
@@ -1647,7 +1678,7 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
 
   // A folder proposal includes both observations without a synthetic user turn.
   pane.applySession({ transcript: [], link: { observation: repoLink }, folder: { observation } });
-  assert.equal(folder.hint.hidden, true);
+  assert.equal(folder.hint, undefined);
   assert.equal(linkHint.hidden, true);
   const count = events.length;
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
@@ -1661,7 +1692,7 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
   assert.equal(linkHint.hidden, true);
-  assert.equal(folder.hint.hidden, true);
+  assert.equal(folder.hint, undefined);
 });
 
 test('suggestion activity keeps unsent text and focus, and retry is a system action', () => {

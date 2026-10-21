@@ -5450,7 +5450,7 @@ function loadBuildWizard(timers = { setTimeout, clearTimeout }) {
     chosen: new Map(),
     chosenRoles: new Set()
   };
-  return { manager, window, nodes, nameInput, nameLabel, parentSelect, allTags, calls };
+  return { manager, window, document, nodes, nameInput, nameLabel, parentSelect, allTags, calls };
 }
 
 test('an assistant patch fills the form through its setters and tags each field', async () => {
@@ -5802,6 +5802,34 @@ test('automatic permissions coalesce edits, preserve monitoring, and never confi
   );
   assert.equal(f.confirms(), 0);
   assert.equal(build.draftUser, undefined);
+});
+
+test('an expired held selection blocks preview and confirmation without losing the draft', async () => {
+  const f = permissionReviewFixture();
+  await f.manager.reviewWorkspaceBuildPreparation();
+  f.build.session.folder_expires_at = '1970-01-01T00:00:00Z';
+  f.manager.syncWorkspaceBuildPresentation();
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), false);
+  await f.manager.reviewWorkspaceBuildPreparation();
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.confirms(), 0);
+  assert.equal(f.timers.size, 0);
+  assert.equal(f.build.session.draft.name, 'Reviewed inbox');
+});
+
+test('failed confirmation does not steal focus from a later dialog control', async () => {
+  const f = permissionReviewFixture();
+  await f.manager.reviewWorkspaceBuildPreparation();
+  let focused = 0;
+  f.document.querySelector = () => ({
+    focus: () => {
+      focused++;
+    }
+  });
+  f.document.activeElement = new BuildNode('button', 'cancel');
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(focused, 0);
 });
 
 test('Start over uses a new client identity with default-off monitoring and no old ownership or review', async () => {
@@ -7350,15 +7378,24 @@ test('a delayed suggestion is ignored after manual mode, without reviving the mo
   assert.equal(nameInput.value, 'My manual name');
 });
 
-test('successful folder attachment suggests once; cancellation neither suggests nor focuses', async () => {
-  for (const cancelled of [false, true]) {
-    const { manager } = prepareProposalWizard();
+test('attachment suggests once; cancelled picking restores its trigger without stealing later focus', async () => {
+  for (const [cancelled, movedFocus] of [
+    [false, false],
+    [true, false],
+    [true, true]
+  ]) {
+    const { manager, pane, document, nameInput } = prepareProposalWizard();
     let requests = 0,
-      suggestions = 0;
+      suggestions = 0,
+      restored = 0;
+    pane.closeFolderChooser = () => {
+      restored++;
+    };
     manager.workspaceBuild.session.proposal = null;
     manager.workspaceBuildApi = () => ({
       folder: async () => {
         requests++;
+        if (movedFocus) document.activeElement = nameInput;
         return { ok: true, body: { session: manager.workspaceBuild.session, cancelled } };
       }
     });
@@ -7370,6 +7407,97 @@ test('successful folder attachment suggests once; cancellation neither suggests 
     await pending;
     assert.equal(requests, 1);
     assert.equal(suggestions, cancelled ? 0 : 1);
+    assert.equal(restored, cancelled && !movedFocus ? 1 : 0);
+  }
+});
+
+test('attachment delivery during the hide transition cannot admit inference or revive the review', async () => {
+  const { manager } = prepareProposalWizard();
+  const build = manager.workspaceBuild;
+  build.session.proposal = null;
+  const started = deferredBuildResult(),
+    reply = deferredBuildResult();
+  let suggestions = 0;
+  manager.workspaceBuildApi = () => ({
+    folder: () => {
+      started.resolve();
+      return reply.promise;
+    }
+  });
+  manager.suggestWorkspaceBuildFolder = async () => {
+    suggestions++;
+  };
+  manager.hideWorkspaceCreatorModal = () => {}; // hidden.bs.modal has not torn down the client yet
+  const pending = manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+  await started.promise;
+  await manager.guardWorkspaceBuildClose({ preventDefault() {} });
+  assert.equal(build.closeReady, true);
+  reply.resolve({
+    ok: true,
+    body: { session: { ...build.session, version: 9, proposal: { id: 'late', status: 'pending' } } }
+  });
+  await pending;
+  assert.equal(build.session.version, 3);
+  assert.equal(suggestions, 0);
+  assert.equal(build.folderPending, false);
+});
+
+test('a proposal waiting for its draft flush cannot start after close is committed', async () => {
+  const { manager } = prepareProposalWizard();
+  const flushed = deferredBuildResult();
+  manager.flushWorkspaceBuildDraft = () => flushed.promise;
+  manager.workspaceBuildApi = () => ({
+    turn: () => {
+      throw new Error('admitted after close');
+    }
+  });
+  const pending = manager.suggestWorkspaceBuildFolder();
+  manager.workspaceBuild.closeReady = true;
+  flushed.resolve();
+  await pending;
+  assert.equal(manager.workspaceBuild.suggestionRequest, undefined);
+});
+
+test('Change folder Escape returns to its review, but optional chat and obsolete choosers do not', () => {
+  const { manager, pane, nodes } = prepareProposalWizard();
+  const build = manager.workspaceBuild;
+  let focused = 0;
+  nodes.set('workspaceBuildFolderChange', { focus: () => focused++ });
+  let choosing = true;
+  pane.folderChooserOpen = () => choosing;
+  pane.closeFolderChooser = () => {
+    choosing = false;
+  };
+  build.refining = true;
+  build.returnAfterFolderChoice = true;
+  assert.equal(manager.consumeWorkspaceBuildEscape(), true);
+  assert.equal(build.refining, false);
+  assert.equal(focused, 1);
+  build.refining = true; // explicitly opened from optional conversation
+  choosing = true;
+  manager.consumeWorkspaceBuildEscape();
+  assert.equal(build.refining, true);
+  assert.equal(focused, 1);
+  manager.finishWorkspaceBuildFolderChoice({ returnAfterFolderChoice: true }, { focus: true });
+  assert.equal(build.refining, true);
+  assert.equal(focused, 1);
+});
+
+test('review Save my draft restores a visible control without taking later focus', async () => {
+  for (const movedFocus of [false, true]) {
+    const { manager, nodes, document, nameInput } = prepareProposalWizard();
+    const save = { id: 'workspaceBuildFolderSave' };
+    const later = { id: 'later-control' };
+    let focused = 0;
+    nodes.set('workspaceBuildFolderReview', { contains: node => node === save });
+    nodes.set('workspaceBuildPlanName', { focus: () => focused++ });
+    document.activeElement = save;
+    manager.performWorkspaceBuildAction = async () => {
+      document.activeElement = movedFocus ? later : document.body;
+    };
+    await manager.runWorkspaceBuildAction('sync_again');
+    assert.equal(focused, movedFocus ? 0 : 1);
+    assert.notEqual(document.activeElement, nameInput);
   }
 });
 
@@ -7407,6 +7535,8 @@ test('folder review shows the actual effective team and constrains recognized pl
     'workspaceBuildFolderPurpose',
     'workspaceBuildFolderTeam',
     'workspaceBuildFolderIdentity',
+    'workspaceBuildFolderReviewPath',
+    'workspaceBuildFolderPathDetails',
     'workspaceBuildFolderPlacement',
     'workspaceBuildFolderPurposeEdit',
     'workspaceBuildFolderTeamEdit',
@@ -7417,6 +7547,7 @@ test('folder review shows the actual effective team and constrains recognized pl
   manager.workspaceBuild.session.folder = {
     observation: { folder: 'Same-named folder', files: 3 }
   };
+  manager.workspaceBuild.session.folder_path = '/synthetic/<same-named-folder>';
   manager.workspaceBuildGateProblem = () => '';
   window.ProjectTemplateCard = { getSelectedTemplate: () => ({ name: 'Research' }) };
   manager.teamView = () => ({
@@ -7429,6 +7560,12 @@ test('folder review shows the actual effective team and constrains recognized pl
   manager.syncWorkspaceBuildFolderReview();
   assert.equal(nodes.get('workspaceBuildFolderTeam').textContent, 'Researcher: <saved teammate>');
   assert.equal(nodes.get('workspaceBuildFolderTeam').children.length, 0);
+  assert.equal(nodes.get('workspaceBuildFolderPathDetails').hidden, false);
+  assert.equal(
+    nodes.get('workspaceBuildFolderReviewPath').textContent,
+    '/synthetic/<same-named-folder>'
+  );
+  assert.equal(nodes.get('workspaceBuildFolderReviewPath').children.length, 0);
   assert.equal(nodes.get('workspaceBuildFolderPurposeEdit').hidden, false);
   manager.workspaceBuild.session.plan = { ready: true, home: { name: 'Music Production Home' } };
   manager.workspaceBuild.session.folder.recognition = {

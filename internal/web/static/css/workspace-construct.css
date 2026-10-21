@@ -2398,7 +2398,12 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   width: min(840px, calc(100vw - 2rem));
   max-width: min(840px, calc(100vw - 2rem));
 }
+/* The review owns one footer; keep the wizard footer for manual/chat modes. */
+.workspace-create-modal.workspace-create-modal--folder-review .modal-content > .modal-footer {
+  display: none;
+}
 .workspace-build-folder-review__body {
+  overscroll-behavior: contain;
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
@@ -2473,6 +2478,15 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 }
 .workspace-build-folder-review__footer .modern-btn {
   white-space: normal;
+}
+.workspace-build-folder-review__footer .workspace-build-review__actions {
+  margin-top: 0;
+}
+.workspace-build-folder-review :is(button, input, textarea, summary, a) {
+  scroll-margin-block: 16px;
+}
+.workspace-build-folder-review h2 {
+  text-wrap: balance;
 }
 .workspace-build-folder-review :is(button, input, textarea, summary):focus-visible {
   outline: 2px solid var(--wc-faction);
@@ -2741,7 +2755,7 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-pane__attachments[hidden],
 .workspace-create-modal .workspace-build-pane__chip[hidden],
 .workspace-create-modal .workspace-build-folder[hidden],
-.workspace-create-modal .workspace-build-folder__hint[hidden],
+.workspace-create-modal .workspace-build-link__hint[hidden],
 .workspace-create-modal .workspace-build-folder__summary[hidden],
 .workspace-create-modal .workspace-build-folder__recognition[hidden],
 .workspace-create-modal .workspace-build-folder-chooser[hidden],
@@ -2806,7 +2820,7 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   opacity: 0.55;
   cursor: default;
 }
-.workspace-create-modal .workspace-build-folder__hint,
+.workspace-create-modal .workspace-build-link__hint,
 .workspace-create-modal .workspace-build-folder__summary,
 .workspace-create-modal .workspace-build-folder__recognition {
   margin: 0;

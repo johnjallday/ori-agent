@@ -63,11 +63,7 @@
     folderNoChoices: 'No folder can be chosen here.',
     folderListOnly: 'Pick a folder from the list for now.',
     folderLooking: 'Looking at folder metadata locally… No file contents are read.',
-    folderAttached:
-      'Folder attached — I can see its file and folder names, not their contents. Tell me what this workspace should do, or use Review & create when the draft is ready.',
     folderCancelled: 'No folder was chosen. Your draft is unchanged.',
-    folderSend: 'Set it up from the attached folder.',
-    folderSendHint: 'Empty Send: “Set it up from the attached folder”',
     folderSummary: (files, partial) =>
       `${files} ${files === 1 ? 'file' : 'files'} observed · ${partial ? 'partial' : 'bounded'} look · contents not read`,
     // What Ori recognized in the attached folder is said by the shared
@@ -183,6 +179,8 @@
   // what Ori recognized it as, from server facts only. A folder the server
   // said nothing about (an older build, a recognition that failed) has none.
   function folderRecognitionText(recognition) {
+    if (recognition?.verdict === 'none')
+      return 'Folder metadata attached. Choose the purpose that fits.';
     const shared = globalThis.OriFolderRecognitionLines;
     if (!shared) return '';
     return shared.recognitionLine(recognition, { collectionHint: COPY.folderCollectionHint });
@@ -608,7 +606,6 @@
     );
     // With a link attached too, the link's hint speaks for both. A ready plan
     // has its own Set it up, so an empty Send is not offered as one.
-    els.folderHint.hidden = true;
   }
 
   // renderPlan draws the setup plan the server computed for a recognized
@@ -1352,7 +1349,7 @@
           }
         } else if (kind === 'remove-folder') {
           if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-folder-remove');
-        } else if (kind === 'folder-cancel') closeFolderChooser();
+        } else if (kind === 'folder-cancel') cancelFolderChooser();
         else if (kind === 'folder-path') submitFolderPath();
         else if (kind === 'add-link') {
           if (!attachmentsLocked(state) && !control.disabled) openLinkField();
@@ -1409,7 +1406,7 @@
       if (event.key !== 'Escape') return;
       event.preventDefault?.();
       event.stopPropagation?.();
-      closeFolderChooser();
+      cancelFolderChooser();
     });
     // Enter in the link field attaches; it must never submit the reply form
     // around it. Escape closes only the field.
@@ -1461,11 +1458,8 @@
     folderRemove.setAttribute('aria-label', COPY.removeFolder);
     folderChip.appendChild(folderName);
     folderChip.appendChild(folderRemove);
-    const folderHint = createElement('span', 'workspace-build-folder__hint', COPY.folderSendHint);
-    folderHint.hidden = true;
     attachments.appendChild(addFolder);
     attachments.appendChild(folderChip);
-    attachments.appendChild(folderHint);
     const linkEls = renderLinkAttachment(attachments);
     const folderSummary = createElement('p', 'workspace-build-folder__summary');
     folderSummary.id = 'workspaceBuildFolderSummary';
@@ -1547,7 +1541,6 @@
       folderChip,
       folderName,
       folderRemove,
-      folderHint,
       folderSummary,
       folderRecognition,
       chooser,
@@ -1588,7 +1581,7 @@
     linkChip.appendChild(linkIcon);
     linkChip.appendChild(linkName);
     linkChip.appendChild(linkRemove);
-    const linkHint = createElement('span', 'workspace-build-folder__hint', COPY.linkSendHint);
+    const linkHint = createElement('span', 'workspace-build-link__hint', COPY.linkSendHint);
     linkHint.hidden = true;
     attachments.appendChild(addLink);
     attachments.appendChild(linkChip);
@@ -1743,6 +1736,11 @@
     els.chooserNote.hidden = !view.note;
     (first || els.folderPath).focus?.();
     return true;
+  }
+
+  function cancelFolderChooser() {
+    closeFolderChooser();
+    emit('workspace-build-folder-cancel');
   }
 
   function closeFolderChooser({ focus = true } = {}) {
@@ -1910,8 +1908,14 @@
     const key = JSON.stringify({ review, busy, message, accepted, uncertain, compact, monitoring });
     const previous = creationReviews.get(host);
     if (previous?.key === key && previous.actionsHost === actionsHost) return;
+    const active = document.activeElement;
     const previousMonitor = host.querySelectorAll('input')[0];
-    const monitorFocused = Boolean(previousMonitor && document.activeElement === previousMonitor);
+    const monitorFocused = Boolean(previousMonitor && active === previousMonitor);
+    const detailsFocused = Boolean(active && host.querySelectorAll('summary')[0] === active);
+    const focusedAction =
+      host.contains(active) || actionsHost?.contains(active)
+        ? active?.dataset?.buildReviewAction
+        : '';
     const detailsOpen = host.querySelectorAll('details')[0]?.open ?? previous?.detailsOpen;
     creationReviews.set(host, { key, actionsHost, detailsOpen });
     host.textContent = '';
@@ -1925,7 +1929,7 @@
         : uncertain
           ? 'Check previous confirmation'
           : accepted
-            ? 'Resume accepted preparation'
+            ? 'Continue workspace setup'
             : compact
               ? 'Folder permissions'
               : 'Review & create'
@@ -1940,6 +1944,7 @@
       const button = createElement('button', 'modern-btn modern-btn-secondary', label);
       button.type = 'button';
       button.disabled = busy;
+      button.dataset.buildReviewAction = type;
       button.addEventListener('click', () => emit(type, detail));
       return button;
     };
@@ -1985,6 +1990,7 @@
       const label = createElement('label', 'workspace-build-review__monitor');
       const checkbox = createElement('input');
       checkbox.type = 'checkbox';
+      checkbox.name = 'monitor_folder';
       checkbox.checked =
         accepted || uncertain
           ? Boolean(review?.monitoring)
@@ -2036,13 +2042,25 @@
     if (accepted && review?.folder_slug) {
       const open = createElement('a', 'modern-btn modern-btn-secondary', 'Open workspace');
       open.href = '/workspaces/' + encodeURIComponent(review.folder_slug) + '?panel=file-janitor';
+      open.dataset.buildReviewAction = 'open';
       actions.appendChild(open);
     }
     if (actionsHost) {
       actionsHost.textContent = '';
       actionsHost.appendChild(actions);
     } else host.appendChild(actions);
-    if (monitorFocused) host.querySelectorAll('input')[0]?.focus?.({ preventScroll: true });
+    const restore = monitorFocused
+      ? host.querySelectorAll('input')[0]
+      : detailsFocused
+        ? host.querySelectorAll('summary')[0]
+        : focusedAction
+          ? [...(actionsHost || host).querySelectorAll('[data-build-review-action]')].find(
+              node => node.dataset.buildReviewAction === focusedAction
+            )
+          : null;
+    // Preserve the same control, scrolling it into view if the async result
+    // moved it behind the footer. Never move focus from another active control.
+    if (restore && !restore.disabled) restore.focus?.();
   }
 
   function destroy() {

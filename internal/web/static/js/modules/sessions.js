@@ -11695,22 +11695,26 @@ const sessionManager = {
     // hidden/shown handlers retain the creator and return focus to its editor.
     if (modal?.dataset?.suspendedForAgentSetup || modal?.dataset?.suspendedForMapPlacement) return;
     const build = this.workspaceBuild;
+    if (!build?.session || build.closeReady) return;
     if (
-      !build?.session ||
-      build.closeReady ||
       build.acceptedPreparation ||
       build.preparationUncertain ||
       build.session.status !== 'open'
-    )
+    ) {
+      build.closeReady = true;
       return;
+    }
     if (
       !build.suggestionRequest &&
       !build.attachmentRequestID &&
+      !this.workspaceBuildAttachmentPending(build) &&
       !build.draftInFlight &&
       !build.draftUser &&
       !build.pauseError
-    )
+    ) {
+      build.closeReady = true;
       return;
+    }
     event.preventDefault?.();
     if (build.closing) return build.closePromise;
     build.closing = true;
@@ -11723,6 +11727,7 @@ const sessionManager = {
       if (this.workspaceBuild !== build) return;
       build.closing = false;
       if (build.draftError || build.pauseError) {
+        this.syncWorkspaceBuildPresentation();
         this.workspaceBuildPane()?.showLine(
           'Your draft is still here. Resolve the save conflict or retry saving before closing.'
         );
@@ -11799,6 +11804,7 @@ const sessionManager = {
     if (
       !build?.session?.proposal ||
       build.closing ||
+      build.closeReady ||
       !pane ||
       !this.workspaceBuildAssisted() ||
       build.suggestionRequest ||
@@ -11815,7 +11821,14 @@ const sessionManager = {
     } finally {
       build.suggestionStarting = false;
     }
-    if (this.workspaceBuild !== build || build.draftError || !this.workspaceBuildAssisted()) return;
+    if (
+      this.workspaceBuild !== build ||
+      build.closing ||
+      build.closeReady ||
+      build.draftError ||
+      !this.workspaceBuildAssisted()
+    )
+      return;
     const proposal = build.session.proposal;
     if (!proposal || (!retry && proposal.status !== 'pending')) return;
     // A transport retry observes an uncertain attempt, not the next budget.
@@ -11836,6 +11849,8 @@ const sessionManager = {
     };
     const current = () =>
       this.workspaceBuild === build &&
+      !build.closing &&
+      !build.closeReady &&
       build.suggestionEpoch === epoch &&
       build.suggestionRequest?.id === proposal.id &&
       this.workspaceBuildAssisted();
@@ -11981,6 +11996,7 @@ const sessionManager = {
     }
     document.getElementById('workspaceBuildFolderChange')?.addEventListener('click', () => {
       this.refineWorkspaceBuildFolder({ focus: false });
+      if (this.workspaceBuild) this.workspaceBuild.returnAfterFolderChoice = true;
       void this.openWorkspaceBuildFolderChooser();
     });
     document.getElementById('workspaceBuildFolderRetry')?.addEventListener('click', () => {
@@ -12004,6 +12020,9 @@ const sessionManager = {
     });
     modal.addEventListener('workspace-build-folder-open', () => {
       void this.openWorkspaceBuildFolderChooser();
+    });
+    modal.addEventListener('workspace-build-folder-cancel', () => {
+      this.finishWorkspaceBuildFolderChoice(this.workspaceBuild, { cancelled: true, focus: true });
     });
     modal.addEventListener('workspace-build-folder', event => {
       void this.attachWorkspaceBuildFolder(event?.detail || {});
@@ -12230,12 +12249,23 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
+    const focused = document.activeElement;
+    const fromReview = document.getElementById('workspaceBuildFolderReview')?.contains?.(focused);
     try {
       await this.performWorkspaceBuildAction(build, pane, action);
     } finally {
       // The chip that ran the action may be gone (Resume removes its line);
       // focus goes back to the composer rather than to the page.
-      if (this.workspaceBuild === build) pane.focusComposer?.();
+      if (this.workspaceBuild === build) {
+        if (!fromReview) pane.focusComposer?.();
+        else if (document.activeElement === focused || document.activeElement === document.body) {
+          const primary = document.getElementById('workspaceBuildPlanReviewSetup');
+          (primary && !primary.hidden && !primary.disabled
+            ? primary
+            : document.getElementById('workspaceBuildPlanName')
+          )?.focus();
+        }
+      }
     }
   },
 
@@ -12959,8 +12989,10 @@ const sessionManager = {
     const proposal = session.proposal;
     const suggesting = Boolean(build.suggestionRequest || build.suggestionStarting);
     const failed = proposal?.status === 'failed' || Boolean(build.uncertainSuggestion);
+    const expired = this.workspaceBuildFolderSelectionExpired(build);
     const busy = Boolean(
       build.busy ||
+      this.isCreatingFolder ||
       build.preparationBusy ||
       build.setupBusy ||
       build.groupBusy ||
@@ -12973,7 +13005,7 @@ const sessionManager = {
       : failed
         ? 'The suggestion could not finish. Your draft is kept; edit it or retry.'
         : proposal?.status === 'invalidated'
-          ? 'The context changed. Review your kept draft, or request a new suggestion.'
+          ? 'Your draft is kept. Review it below, or request a new suggestion.'
           : recognized
             ? planReady
               ? 'Ori recognized this project. Review the host’s setup plan before running it.'
@@ -13042,6 +13074,13 @@ const sessionManager = {
     const groupNeeded = !recognized && this.workspaceBuildGroupNeeded();
     const frozen = Boolean(build.acceptedPreparation || build.preparationUncertain);
     const reviewed = janitor && this.workspaceBuildPreparationCurrent();
+    const checkingPermissions = Boolean(build.janitorReviewRequest || build.janitorReviewTimer);
+    const saving = Boolean(build.draftInFlight || build.draftUser !== undefined);
+    setText('workspaceBuildFolderReviewPath', session.folder_path);
+    hide(
+      'workspaceBuildFolderPathDetails',
+      Boolean(reviewed && build.janitorReview?.folder) || !session.folder_path
+    );
     const previewFailed =
       janitor && build.janitorReviewFailureKey === this.workspaceBuildPreparationKey();
     for (const [id] of WORKSPACE_BUILD_PLAN_FIELDS) {
@@ -13088,48 +13127,67 @@ const sessionManager = {
     );
     const retry = document.getElementById('workspaceBuildFolderRetry');
     if (retry) {
-      retry.disabled = busy || proposal?.attempt >= 3;
+      retry.disabled = busy || expired || proposal?.attempt >= 3;
       retry.textContent =
         proposal?.attempt >= 3 ? 'Suggestion retry limit reached' : 'Retry suggestion';
     }
-    hide('workspaceBuildFolderSave', !build.draftError);
+    const save = document.getElementById('workspaceBuildFolderSave');
+    if (save) {
+      save.hidden = !build.draftError || frozen;
+      save.disabled = busy || build.closing || Boolean(build.draftInFlight);
+    }
     this.workspaceBuildPane()?.renderFolderQuestion?.(
       document.getElementById('workspaceBuildFolderQuestion'),
       session.pending_question,
       busy
     );
-    const expires = Date.parse(String(session.folder_expires_at || ''));
-    const expired = Number.isFinite(expires) && expires <= Date.now();
-    const problem = frozen
-      ? ''
-      : build.draftError
-        ? 'Save the current draft before continuing.'
-        : expired
-          ? 'The folder selection expired. Change folder to attach it again.'
-          : recognized
-            ? planReady
-              ? ''
-              : prerequisite
-            : this.workspaceBuildGateProblem();
-    setText('workspaceBuildFolderProblem', problem);
+    const problem =
+      frozen || suggesting
+        ? ''
+        : build.draftError
+          ? 'Save the current draft before continuing.'
+          : expired
+            ? 'The folder selection is unavailable or expired. Change folder to attach it again; your draft is kept.'
+            : recognized
+              ? planReady
+                ? ''
+                : prerequisite
+              : this.workspaceBuildGateProblem();
+    const activity = this.isCreatingFolder
+      ? 'Creating your workspace…'
+      : build.preparationBusy
+        ? 'Continuing your confirmed setup…'
+        : saving
+          ? 'Saving your draft…'
+          : checkingPermissions
+            ? 'Checking the current folder permissions…'
+            : '';
+    setText('workspaceBuildFolderProblem', problem || activity);
     const action = document.getElementById('workspaceBuildPlanReviewSetup');
     if (action) {
-      action.hidden = build.janitorReview?.state === 'deferred';
-      action.textContent = recognized
-        ? planReady
-          ? 'Set it up'
-          : 'Review prerequisites'
-        : janitor
-          ? frozen
-            ? 'Retry preparation'
-            : reviewed
-              ? 'Create & scan folder'
-              : previewFailed
-                ? 'Refresh permissions'
-                : 'Checking permissions…'
-          : groupNeeded
-            ? 'Review required group'
-            : 'Create workspace';
+      action.hidden =
+        build.janitorReview?.state === 'deferred' || (Boolean(build.draftError) && !frozen);
+      action.textContent = this.isCreatingFolder
+        ? 'Creating workspace…'
+        : recognized
+          ? planReady
+            ? 'Set it up'
+            : 'Review prerequisites'
+          : janitor
+            ? build.preparationBusy
+              ? 'Preparing workspace…'
+              : frozen
+                ? 'Retry preparation'
+                : reviewed
+                  ? 'Create & scan folder'
+                  : previewFailed
+                    ? 'Refresh permissions'
+                    : checkingPermissions
+                      ? 'Checking permissions…'
+                      : 'Create & scan folder'
+            : groupNeeded
+              ? 'Review required group'
+              : 'Create workspace';
       action.disabled =
         busy ||
         (!frozen &&
@@ -13177,7 +13235,9 @@ const sessionManager = {
     if (status) {
       status.hidden = !this.workspaceBuild;
       status.textContent = this.workspaceBuild?.draftError
-        ? 'Draft not saved to the assistant. Your edits are kept here; switch back to retry before closing.'
+        ? folderReview
+          ? 'Draft not saved. Your edits are kept here.'
+          : 'Draft not saved to the assistant. Your edits are kept here; switch back to retry before closing.'
         : assisted
           ? `Assisted setup · one shared draft${groupLine ? ` · ${groupLine}` : ''}`
           : this.workspaceBuild?.withdrawn
@@ -14051,6 +14111,7 @@ const sessionManager = {
     if (!this.workspaceBuild || !pane) return false;
     if (pane.folderChooserOpen?.()) {
       pane.closeFolderChooser();
+      this.finishWorkspaceBuildFolderChoice(this.workspaceBuild, { cancelled: true, focus: true });
       return true;
     }
     if (pane.linkFieldOpen?.()) {
@@ -14066,6 +14127,8 @@ const sessionManager = {
   // they typed.
   workspaceBuildFolderLocked(build) {
     return Boolean(
+      build.closing ||
+      build.closeReady ||
       build.busy ||
       build.turnPending ||
       build.folderPending ||
@@ -14098,6 +14161,25 @@ const sessionManager = {
     ) {
       void this.sendWorkspaceBuildRestaff(build);
     }
+  },
+
+  finishWorkspaceBuildFolderChoice(build, { cancelled = false, focus = false } = {}) {
+    if (!build?.returnAfterFolderChoice || this.workspaceBuild !== build) return false;
+    build.returnAfterFolderChoice = false;
+    if (build.closing || build.closeReady || !this.workspaceBuildAssisted()) return false;
+    build.refining = false;
+    this.syncWorkspaceBuildPresentation();
+    if (focus && this.workspaceBuildFolderReviewActive()) {
+      document
+        .getElementById(cancelled ? 'workspaceBuildFolderChange' : 'workspaceBuildPlanReviewTitle')
+        ?.focus();
+    }
+    return true;
+  },
+
+  workspaceBuildFolderSelectionExpired(build = this.workspaceBuild) {
+    const expires = Date.parse(String(build?.session?.folder_expires_at || ''));
+    return Number.isFinite(expires) && expires <= Date.now();
   },
 
   async openWorkspaceBuildFolderChooser() {
@@ -14157,12 +14239,18 @@ const sessionManager = {
     }
     // One pick at a time from here: a second Use this path, or a chip while
     // a path is still being checked, is ignored rather than sent.
+    const focusAtPick = document.activeElement;
     this.setWorkspaceBuildAttachmentPending(build, 'folderPending', true);
     await this.pauseWorkspaceBuildSuggestion();
-    if (this.workspaceBuild !== build) return;
+    if (this.workspaceBuild !== build || build.closing || build.closeReady) {
+      if (this.workspaceBuild === build)
+        this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
+      return;
+    }
     build.attachmentRequestID = globalThis.crypto?.randomUUID?.();
     let attached = false;
     let attaching = false;
+    let cancelled = false;
     let note = '';
     try {
       if (mode === 'path') {
@@ -14174,13 +14262,21 @@ const sessionManager = {
           if (this.workspaceBuild === build) pane.setFolderPathBusy(false);
         }
         // Refused, or the sheet was cancelled while the path was checked.
-        if (this.workspaceBuild !== build || !token || !pane.folderChooserOpen()) return;
+        if (
+          this.workspaceBuild !== build ||
+          build.closing ||
+          build.closeReady ||
+          !token ||
+          !pane.folderChooserOpen()
+        )
+          return;
         body = { mode: 'selection', selection_token: token };
       }
       attaching = true;
       pane.setFolderBusy(true, pane.COPY.folderLooking);
       await this.flushWorkspaceBuildDraft();
-      if (this.workspaceBuild !== build || !build.session) return;
+      if (this.workspaceBuild !== build || build.closing || build.closeReady || !build.session)
+        return;
       body.version = Number(build.session.version) || 0;
       if (build.attachmentRequestID) body.request_id = build.attachmentRequestID;
       let result;
@@ -14189,7 +14285,7 @@ const sessionManager = {
       } catch (_) {
         result = { ok: false, status: 0, body: {} };
       }
-      if (this.workspaceBuild !== build) return;
+      if (this.workspaceBuild !== build || build.closing || build.closeReady) return;
       if (result?.status === 409 && result.body?.code === 'version') {
         await this.reloadWorkspaceBuildSession();
         if (this.workspaceBuild === build) {
@@ -14209,8 +14305,10 @@ const sessionManager = {
         );
         return;
       }
+      if (Number(session.version) < Number(build.session?.version)) return;
       this.adoptWorkspaceBuildSession(session);
       if (result.body.cancelled) {
+        cancelled = true;
         note = pane.COPY.folderCancelled;
         return;
       }
@@ -14220,6 +14318,16 @@ const sessionManager = {
         build.attachmentRequestID = null;
         this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
         if (attaching) pane.setFolderBusy(false, note);
+        const active = document.activeElement;
+        const focus =
+          active === focusAtPick ||
+          active === document.body ||
+          active === document.getElementById('addFolderModal');
+        const returned =
+          (attached || cancelled) &&
+          this.finishWorkspaceBuildFolderChoice(build, { cancelled, focus });
+        if (cancelled && !returned && focus && this.workspaceBuildAssisted())
+          pane.closeFolderChooser?.({ focus: true });
         if (attached) await this.suggestWorkspaceBuildFolder();
       }
     }
@@ -14890,8 +14998,10 @@ const sessionManager = {
       !this.workspaceBuildAssisted() ||
       build.session?.status !== 'open' ||
       build.closing ||
+      build.closeReady ||
       build.resumeLine ||
       build.groupSwitchLine ||
+      this.workspaceBuildFolderSelectionExpired(build) ||
       build.busy ||
       build.preparationBusy ||
       build.acceptedPreparation ||
@@ -15095,7 +15205,9 @@ const sessionManager = {
     build.preparationUncertain = true;
     build.preparationBusy = true;
     build.preparationMessage =
-      'Creating the reviewed workspace and preparing one metadata-only scan…';
+      alreadyUncertain || build.acceptedPreparation
+        ? 'Checking your previous confirmation and continuing its saved setup…'
+        : 'Creating the reviewed workspace and preparing one metadata-only scan…';
     this.syncWorkspaceBuildPresentation();
     this.workspaceBuildPane()?.setBusy?.(true);
     if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = true;
@@ -15183,7 +15295,12 @@ const sessionManager = {
             recovered.body.review.review_revision === request.review_revision
               ? { ...review, ...recovered.body.review }
               : recovered.body.review;
-          build.preparationMessage = `${error.message || 'The response was lost.'} Your confirmation is saved. Retry preparation to observe its exact result; no second workspace will be created.`;
+          const detail = /failed to fetch|networkerror|network request failed/i.test(
+            error.message || ''
+          )
+            ? 'The connection was interrupted.'
+            : String(error.message || 'The response was lost.').replace(/([^.?!])$/, '$1.');
+          build.preparationMessage = `${detail} Your confirmation is saved. Retry preparation to check its result; no second workspace will be created.`;
         } else if (
           this.workspaceBuild === build &&
           refusedBeforeAcceptance &&
@@ -15223,7 +15340,13 @@ const sessionManager = {
         this.workspaceBuildPane()?.setBusy?.(false);
         if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = false;
         this.syncWorkspaceBuildPresentation();
-        document.querySelector('#workspaceBuildCreationReview h3')?.focus();
+        const active = document.activeElement;
+        if (
+          !active ||
+          active === document.body ||
+          active === document.getElementById('workspaceBuildPlanReviewSetup')
+        )
+          document.querySelector('#workspaceBuildCreationReview h3')?.focus();
       }
     }
   },
@@ -15550,6 +15673,7 @@ const sessionManager = {
     // A fresh attempt starts without the previous attempt's failure on screen.
     this.clearWorkspaceCreateError();
     this.isCreatingFolder = true;
+    if (this.workspaceBuild) this.syncWorkspaceBuildPresentation();
     const creatorContext = this.workspaceCreatorContext;
     const creatorGeneration = creatorContext?.generation || 0;
     if (creatorContext) creatorContext.submitting = true;
@@ -16263,6 +16387,7 @@ const sessionManager = {
       if (!error?.status) this.mirrorWorkspaceBuildError(message);
     } finally {
       this.isCreatingFolder = false;
+      if (this.workspaceBuild) this.syncWorkspaceBuildPresentation();
       if (
         this.workspaceCreatorContext === creatorContext &&
         this.workspaceCreatorContext?.generation === creatorGeneration

@@ -512,6 +512,61 @@ test('folder review is one shared editable surface with optional conversation', 
   expect(fake.turns).toHaveLength(2);
 });
 
+test('long effective team wraps in the one narrow folder-review scroller', async ({
+  page
+}, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 640, height: 450 });
+  const names = [
+    'Editorial planning and source verification lead for the synthetic project',
+    'Publication copywriting and accessibility reviewer for the synthetic project'
+  ];
+  await fakeBuildServer(page, [
+    {
+      text: 'A draft with the requested team.',
+      set: {
+        template_id: 'content-production',
+        name: 'Long team review',
+        description: 'Review an editable team.'
+      },
+      team: {
+        mode: 'staffed',
+        roles: [
+          { role_id: 'content-lead', mode: 'create', agent_name: names[0] },
+          { role_id: 'brand-copywriter', mode: 'create', agent_name: names[1] }
+        ]
+      }
+    }
+  ]);
+  await openFromHome(page);
+  await say(page, 'Draft a content workspace with this team.');
+  await pane(page).getByRole('button', { name: 'Add folder', exact: true }).click();
+  await pane(page).getByRole('button', { name: 'Documents', exact: true }).click();
+  const team = page.locator('#workspaceBuildFolderTeam');
+  for (const name of names) await expect(team).toContainText(name);
+  await page.getByRole('button', { name: 'Edit team', exact: true }).focus();
+  const layout = await team.evaluate(node => {
+    const body = node.closest('.workspace-build-folder-review__body')!;
+    const box = document.activeElement!.getBoundingClientRect();
+    const area = body.getBoundingClientRect();
+    return {
+      overflow: body.scrollWidth > body.clientWidth + 1,
+      top: box.top,
+      bottom: box.bottom,
+      areaTop: area.top,
+      areaBottom: area.bottom,
+      nested: /scroll|auto/.test(getComputedStyle(node).overflowY)
+    };
+  });
+  expect(layout.overflow).toBe(false);
+  expect(layout.nested).toBe(false);
+  expect(layout.top).toBeGreaterThanOrEqual(layout.areaTop);
+  expect(layout.bottom).toBeLessThanOrEqual(layout.areaBottom);
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath('folder-long-team-dark-640.png') });
+});
+
 test('golden path: three turns and no form clicks create the workspace the build drafted', async ({
   page
 }, testInfo) => {

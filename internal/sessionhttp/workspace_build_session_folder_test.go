@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ type fakeBuildFolders struct {
 	modes       []string
 	choices     []string
 	resolved    []string
+	resolvedMu  sync.Mutex
 	// recognition is what Recognize says about the observation; nil with no
 	// error is a folder service that has nothing to say.
 	recognition  *personalassistant.BuildFolderRecognition
@@ -157,6 +159,8 @@ func (f *fakeBuildFolders) Observe(_ context.Context, target foldercontext.Targe
 }
 
 func (f *fakeBuildFolders) ResolveRoot(_ context.Context, _ foldercontext.Target, id string) (string, error) {
+	f.resolvedMu.Lock()
+	defer f.resolvedMu.Unlock()
 	f.resolved = append(f.resolved, id)
 	if f.rootErr != nil {
 		return "", f.rootErr
@@ -449,6 +453,7 @@ func TestWorkspaceBuildFolder_CreatePlansTheHeldRootAndRefusesALostPick(t *testi
 	}
 	_, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"})
 	attached := sessionOf(t, body)
+	resolvedBeforeCreate := len(folders.resolved) // the response also reads current UI folder details
 	if plan, err := f.handler.planCreateWorkspaceBuildFolder(ctx, createWorkspaceRequest{BuildSessionID: build.ID}, session.WorkspaceKindGroup); plan != nil || err != nil {
 		t.Fatalf("a group never links: %+v %v", plan, err)
 	}
@@ -456,7 +461,7 @@ func TestWorkspaceBuildFolder_CreatePlansTheHeldRootAndRefusesALostPick(t *testi
 	if err != nil || plan == nil || plan.root != "/Users/me/elite_school" || plan.name != "Elite School" || plan.sessionID != build.ID {
 		t.Fatalf("plan %+v %v", plan, err)
 	}
-	if len(folders.resolved) != 1 || folders.resolved[0] != "obs-1" {
+	if len(folders.resolved) != resolvedBeforeCreate+1 || folders.resolved[resolvedBeforeCreate] != "obs-1" {
 		t.Fatalf("resolved %v", folders.resolved)
 	}
 	folders.rootErr = personalassistant.ErrFolderSelection

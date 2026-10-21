@@ -32,15 +32,14 @@
             <div id="workspaceBuildFolderQuestion"></div>
             <div class="workspace-build-folder-review__recovery">
               <button type="button" id="workspaceBuildFolderRetry" class="modern-btn modern-btn-secondary" hidden>Retry suggestion</button>
-              <button type="button" id="workspaceBuildFolderSave" class="modern-btn modern-btn-secondary" hidden>Save my draft</button>
             </div>
             <div class="workspace-build-plan-review__fields">
               <label for="workspaceBuildPlanName">Workspace name</label>
-              <input type="text" id="workspaceBuildPlanName" class="modern-input" maxlength="80" autocomplete="off">
+              <input type="text" id="workspaceBuildPlanName" name="workspace_name" class="modern-input" maxlength="80" autocomplete="off" aria-describedby="workspaceBuildFolderProblem">
             </div>
             <dl class="workspace-build-folder-review__facts">
               <div><dt>Purpose</dt><dd id="workspaceBuildFolderPurpose"></dd><dd><button type="button" id="workspaceBuildFolderPurposeEdit" class="workspace-build-text-action">Change purpose</button></dd></div>
-              <div><dt>Folder</dt><dd id="workspaceBuildFolderIdentity"></dd><dd><button type="button" id="workspaceBuildFolderChange" class="workspace-build-text-action">Change folder</button></dd></div>
+              <div><dt>Folder</dt><dd id="workspaceBuildFolderIdentity"></dd><dd><button type="button" id="workspaceBuildFolderChange" class="workspace-build-text-action">Change folder</button></dd><dd><details id="workspaceBuildFolderPathDetails" class="workspace-build-review__details" hidden><summary>Folder details</summary><p id="workspaceBuildFolderReviewPath"></p></details></dd></div>
               <div><dt>Team</dt><dd id="workspaceBuildFolderTeam"></dd><dd><button type="button" id="workspaceBuildFolderTeamEdit" class="workspace-build-text-action">Edit team</button></dd></div>
               <div><dt>Placement</dt><dd id="workspaceBuildFolderPlacement"></dd><dd><button type="button" id="workspaceBuildFolderPlacementEdit" class="workspace-build-text-action">Change placement</button></dd></div>
               <div id="workspaceBuildFolderLinkRow" hidden><dt>Attached link</dt><dd id="workspaceBuildFolderLink"></dd></div>
@@ -49,10 +48,10 @@
               <summary>Goal and description</summary>
               <div class="workspace-build-plan-review__fields">
                 <label for="workspaceBuildPlanDescription">Description</label>
-                <textarea id="workspaceBuildPlanDescription" class="modern-input" rows="2" maxlength="1000"></textarea>
+                <textarea id="workspaceBuildPlanDescription" name="workspace_description" autocomplete="off" class="modern-input" rows="2" maxlength="1000"></textarea>
                 <div id="workspaceBuildFolderGoalField">
                   <label for="workspaceBuildPlanGoal">Goal</label>
-                  <textarea id="workspaceBuildPlanGoal" class="modern-input" rows="2"></textarea>
+                  <textarea id="workspaceBuildPlanGoal" name="workspace_goal" autocomplete="off" class="modern-input" rows="2"></textarea>
                 </div>
               </div>
             </details>
@@ -66,10 +65,12 @@
           <section id="workspaceBuildCreationReview" class="workspace-build-review" aria-label="Review File Janitor creation" hidden></section>
         </div>
         <div class="workspace-build-folder-review__footer">
-          <p id="workspaceBuildFolderProblem"></p>
+          <p id="workspaceBuildFolderProblem" role="status" aria-live="polite"></p>
           <div class="workspace-build-plan-review__actions">
+            <button type="button" id="workspaceBuildFolderSave" class="modern-btn modern-btn-primary" hidden>Save my draft</button>
             <button type="button" id="workspaceBuildPlanReviewSetup" class="modern-btn modern-btn-primary">Create workspace</button>
             <button type="button" id="workspaceBuildPlanReviewBack" class="modern-btn modern-btn-secondary">Refine with assistant</button>
+            <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
             <div id="workspaceBuildPreparationActions" hidden></div>
           </div>
         </div>

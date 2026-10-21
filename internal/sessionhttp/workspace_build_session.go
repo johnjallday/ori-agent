@@ -300,6 +300,9 @@ type buildSessionView struct {
 	// FolderExpiresAt is when the server stops holding the attached folder's
 	// pick (foldercontext.SelectionTTL after it was observed).
 	FolderExpiresAt *time.Time `json:"folder_expires_at,omitempty"`
+	// FolderPath identifies the owner's current held root in the local UI only.
+	// It is never part of the stored session or the model's folder observation.
+	FolderPath string `json:"folder_path,omitempty"`
 	// GroupPrerequisite is the group the drafted blueprint must be created
 	// inside (workspaceBuildGroupPrerequisite).
 	GroupPrerequisite *templateGroupRequirementPlan `json:"group_prerequisite,omitempty"`
@@ -323,6 +326,20 @@ func (h *Handler) respondBuildSession(ctx context.Context, w http.ResponseWriter
 		}
 		if session.Folder != nil && (session.Status == personalassistant.WorkspaceBuildOpen || session.Status == personalassistant.WorkspaceBuildPreparing) {
 			expires := session.Folder.Observation.ScannedAt.Add(foldercontext.SelectionTTL).UTC()
+			deps := h.workspaceBuild
+			if deps != nil && deps.Folders != nil && deps.Assistant != nil {
+				projection, err := deps.Assistant(ctx, userID)
+				if err == nil && projection != nil {
+					root, resolveErr := deps.Folders.ResolveRoot(ctx, buildFolderTarget(userID, projection, session.ID), session.Folder.Observation.ID)
+					if resolveErr != nil || strings.TrimSpace(root) == "" {
+						// The TTL is an upper bound: restart, removal or a changed
+						// assistant scope can lose the held selection sooner.
+						expires = time.Unix(0, 0).UTC()
+					} else {
+						built.FolderPath = root
+					}
+				}
+			}
 			built.FolderExpiresAt = &expires
 		}
 		if h.workspaceBuild != nil && h.workspaceBuild.HomeProvider != nil && session.Status == personalassistant.WorkspaceBuildOpen &&
