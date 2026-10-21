@@ -692,7 +692,7 @@ test('a typed path is reported as a path for the controller to check, never as a
   assert.equal(document.activeElement, controls.add);
 });
 
-test('the attached folder comes from the session: chip, summary, empty Send, and remove', () => {
+test('the attached folder shows metadata without inventing an empty Send turn', () => {
   const { pane, root, events } = loadPane();
   pane.mount({ assistant, folders: true });
   const controls = folderControls(root);
@@ -717,20 +717,20 @@ test('the attached folder comes from the session: chip, summary, empty Send, and
     controls.summary.textContent,
     '42 files observed · partial look · contents not read'
   );
-  assert.equal(controls.hint.hidden, false);
+  assert.equal(controls.hint.hidden, true);
 
   input.value = 'a thing';
   input.dispatchEvent(new FakeEvent('input'));
   assert.equal(controls.hint.hidden, true);
   input.value = '';
   input.dispatchEvent(new FakeEvent('input'));
-  assert.equal(controls.hint.hidden, false);
+  assert.equal(controls.hint.hidden, true);
 
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
-  same(events.at(-1), {
-    type: 'workspace-build-turn',
-    detail: { text: 'Set it up from the attached folder.' }
-  });
+  assert.equal(
+    events.some(event => event.type === 'workspace-build-turn'),
+    false
+  );
 
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-folder-remove');
@@ -1583,24 +1583,58 @@ test('the attached link comes from the session: chip, summary, empty Send, and r
     detail: { text: 'Set it up from the attached link.' }
   });
 
-  // With a folder too, one hint and one sentence speak for both.
+  // A folder proposal includes both observations without a synthetic user turn.
   pane.applySession({ transcript: [], link: { observation: repoLink }, folder: { observation } });
   assert.equal(folder.hint.hidden, true);
-  assert.equal(linkHint.hidden, false);
-  assert.equal(linkHint.textContent, 'Empty Send: “Set it up from what I attached”');
+  assert.equal(linkHint.hidden, true);
+  const count = events.length;
   input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
-  same(events.at(-1), {
-    type: 'workspace-build-turn',
-    detail: { text: 'Set it up from what I attached.' }
-  });
+  assert.equal(events.length, count);
 
   controls.remove.click();
   assert.equal(events.at(-1).type, 'workspace-build-link-remove');
 
-  // No link: the folder's own hint is back, and the link's chip is gone.
+  // No link: the folder still needs no empty Send, and the link's chip is gone.
   pane.applySession({ transcript: [], folder: { observation } });
   assert.equal(controls.chip.hidden, true);
   assert.equal(controls.summary.hidden, true);
   assert.equal(linkHint.hidden, true);
-  assert.equal(folder.hint.hidden, false);
+  assert.equal(folder.hint.hidden, true);
+});
+
+test('suggestion activity keeps unsent text and focus, and retry is a system action', () => {
+  const { pane, root, events, document } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const input = root.querySelectorAll('textarea')[0];
+  input.value = 'A thought I have not sent';
+  input.focus();
+  pane.applySession({
+    transcript: [],
+    folder: { observation },
+    proposal: { id: 'p', status: 'running', attempt: 1 }
+  });
+  pane.setSuggestion({ message: 'Suggesting a workspace from folder metadata…' });
+  assert.equal(input.value, 'A thought I have not sent');
+  assert.equal(input.disabled, false);
+  assert.equal(document.activeElement, input);
+  assert.equal(events.length, 0);
+  pane.setSuggestion(null);
+  pane.applySession({
+    transcript: [],
+    folder: { observation },
+    proposal: { id: 'p', status: 'failed', attempt: 1 }
+  });
+  const retry = root
+    .querySelectorAll('button')
+    .find(button => button.dataset.buildControl === 'suggest-retry');
+  assert.equal(retry.hidden, false);
+  retry.click();
+  same(events.at(-1), { type: 'workspace-build-action', detail: { action: 'suggest_again' } });
+  assert.equal(input.value, 'A thought I have not sent');
+  input.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  same(events.at(-1), {
+    type: 'workspace-build-turn',
+    detail: { text: 'A thought I have not sent' }
+  });
+  assert.equal(input.value, '');
 });

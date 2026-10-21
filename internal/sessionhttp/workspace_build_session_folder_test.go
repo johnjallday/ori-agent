@@ -230,7 +230,7 @@ func TestWorkspaceBuildFolder_AttachKeepsTheObservationAndTheModelReadsIt(t *tes
 		t.Fatalf("attach: %d %v", status, body)
 	}
 	attached := sessionOf(t, body)
-	if attached.Folder == nil || attached.Folder.Observation.Folder != "Elite School" || attached.Version != build.Version+1 {
+	if attached.Folder == nil || attached.Folder.Observation.Folder != "Elite School" || attached.Version != build.Version+2 {
 		t.Fatalf("attached session %+v", attached)
 	}
 	if last := lastEntry(attached); last.Role != personalassistant.BuildRoleForm || !strings.Contains(last.Text, "You attached the folder “Elite School”") {
@@ -363,10 +363,12 @@ func TestWorkspaceBuildFolder_ACancelledDialogChangesNothingAndDetachClearsIt(t 
 
 	status, body := f.attachFolder(t, build, map[string]any{"mode": "picker"})
 	cancelled := sessionOf(t, body)
-	if status != http.StatusOK || body["cancelled"] != true || cancelled.Folder != nil || cancelled.Version != build.Version || len(cancelled.Transcript) != 0 {
+	if status != http.StatusOK || body["cancelled"] != true || cancelled.Folder != nil || cancelled.Version != build.Version+2 || len(cancelled.Transcript) != 0 {
 		t.Fatalf("cancelled pick: %d %v %+v", status, body, cancelled)
 	}
 
+	// Admission and cancellation fence old asynchronous work, but retain the draft.
+	build = cancelled
 	folders.observation = testObservation()
 	_, body = f.attachFolder(t, build, map[string]any{"mode": "selection", "selection_token": "tok-1"})
 	attached := sessionOf(t, body)
@@ -412,10 +414,12 @@ func TestWorkspaceBuildFolder_RefusalsAreSaidInTheUsersWords(t *testing.T) {
 	if status != http.StatusConflict || body["code"] != "folder" || body["error"] != "That is your whole home folder." {
 		t.Fatalf("root refusal: %d %v", status, body)
 	}
+	build = readProposalBuild(t, f, build.ID)
 	folders.observeErr = personalassistant.ErrFolderScanBusy
 	if _, body := f.attachFolder(t, build, map[string]any{"mode": "chip", "chip": "documents"}); !strings.Contains(body["error"].(string), "still being looked at") {
 		t.Fatalf("busy: %v", body)
 	}
+	build = readProposalBuild(t, f, build.ID)
 	folders.observeErr = personalassistant.ErrFolderPickerUnavailable
 	if _, body := f.attachFolder(t, build, map[string]any{"mode": "picker"}); !strings.Contains(body["error"].(string), "dialog is unavailable") {
 		t.Fatalf("picker off: %v", body)

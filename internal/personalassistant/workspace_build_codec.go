@@ -25,6 +25,15 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 	if err := decoder.Decode(&struct{}{}); err != io.EOF || doc.Version < 1 || doc.Owner != owner {
 		return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 	}
+	legacy := doc.SchemaVersion >= 1 && doc.SchemaVersion < WorkspaceBuildSchemaVersion
+	if legacy {
+		for _, session := range doc.Sessions {
+			if session.Proposal != nil || session.EditedFields != nil || session.ContextVersion != 0 ||
+				session.InferenceID != "" || session.FolderRequestID != "" || session.LinkRequestID != "" {
+				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
+			}
+		}
+	}
 	if doc.SchemaVersion == 1 || doc.SchemaVersion == 2 {
 		// Keep the stable filename and decode genuine older builds as they were.
 		// New authority in an old schema is malformed, not a migration hint:
@@ -38,7 +47,12 @@ func decodeWorkspaceBuild(data []byte, owner KnowledgeOwner) (WorkspaceBuildDocu
 				return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt
 			}
 		}
+	}
+	if legacy {
 		doc.SchemaVersion = WorkspaceBuildSchemaVersion
+		for i := range doc.Sessions {
+			doc.Sessions[i].ProtectLegacyBuildDraft()
+		}
 	}
 	if err := validateWorkspaceBuild(doc); err != nil {
 		return WorkspaceBuildDocument{}, ErrKnowledgeCorrupt

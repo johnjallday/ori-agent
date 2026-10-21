@@ -181,6 +181,7 @@ type buildPromptInput struct {
 	Agents        []buildSavedAgent
 	Groups        []buildGroup
 	Nudge         bool
+	ProposalOnly  bool
 	// Plan is the host's ready setup plan for a recognized folder, when there
 	// is one: the model narrates it and sets only what it leaves open.
 	Plan *personalassistant.BuildFolderPlan
@@ -449,6 +450,12 @@ func buildSystemPrompt(input buildPromptInput) string {
 	if len(session.Rejections) > 0 {
 		fmt.Fprintf(&b, "The form refused these from your last reply:\n%s\n\n", rejectionsJSON)
 	}
+	if input.ProposalOnly {
+		b.WriteString("Draft-only review: NEVER set create_now, even if older messages asked to create. No creation, installation, grants, scans, monitoring or setup is authorized. Suggest editable fields only; the host requires a separate explicit action.\n")
+	}
+	if session.Proposal != nil && session.Proposal.Status == "running" {
+		b.WriteString("This is automatic folder suggestion activity, NOT a user message. Prepare a useful tentative draft from the bounded metadata, or ask ONE focused purpose question with choices. Downloads may suggest File Janitor but its name does not establish filing intent. Preserve explicitly_edited_fields, including empty values and the effective team. Do not invent contents or confidence. Describe your choice as a suggestion the user can change.\n")
+	}
 	if input.Nudge {
 		b.WriteString("Your last reply neither set a field nor asked a question. This time, set at least one field or ask one clear question.\n\n")
 	}
@@ -637,6 +644,9 @@ func buildPromptDraft(session *personalassistant.WorkspaceBuildSession) map[stri
 			inputs[id] = strings.Trim(string(raw), "\"")
 		}
 		out["inputs"] = inputs
+	}
+	if len(session.EditedFields) > 0 {
+		out["explicitly_edited_fields"] = session.EditedFields
 	}
 	if team := session.TeamPatch; team != nil {
 		out["team"] = team

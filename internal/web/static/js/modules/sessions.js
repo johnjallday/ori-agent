@@ -11665,6 +11665,7 @@ const sessionManager = {
       availability: async () => (await call('GET', `${base}/availability`)).body || null,
       create: body => call('POST', base, body),
       turn: (id, body) => call('POST', sessionURL(id, 'turns'), body),
+      pause: (id, body) => call('POST', sessionURL(id, 'pause'), body),
       draft: (id, body) => call('PATCH', sessionURL(id, 'draft'), body),
       abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {}),
       folderChoices: () => call('GET', `${base}/folder-choices`),
@@ -11679,6 +11680,224 @@ const sessionManager = {
       janitorPrepare: (id, body) => call('POST', sessionURL(id, 'janitor-prepare'), body),
       janitorDefer: (id, body) => call('POST', sessionURL(id, 'janitor-defer'), body)
     };
+  },
+
+  guardWorkspaceBuildClose(event) {
+    const build = this.workspaceBuild;
+    if (
+      !build?.session ||
+      build.closeReady ||
+      build.acceptedPreparation ||
+      build.session.status !== 'open'
+    )
+      return;
+    if (
+      !build.suggestionRequest &&
+      !build.attachmentRequestID &&
+      !build.draftInFlight &&
+      !build.draftUser &&
+      !build.pauseError
+    )
+      return;
+    event.preventDefault?.();
+    if (build.closing) return build.closePromise;
+    build.closing = true;
+    // Finish cancellation and the kept draft before hidden tears down controls.
+    // A failed save leaves the dialog open with its existing recovery action.
+    build.closePromise = (async () => {
+      await this.pauseWorkspaceBuildSuggestion();
+      if (this.workspaceBuild !== build) return;
+      if (build.draftUser) await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
+      build.closing = false;
+      if (build.draftError || build.pauseError) {
+        this.workspaceBuildPane()?.showLine(
+          'Your draft is still here. Resolve the save conflict or retry saving before closing.'
+        );
+        return;
+      }
+      build.closeReady = true;
+      this.hideWorkspaceCreatorModal();
+    })();
+    return build.closePromise;
+  },
+
+  markWorkspaceBuildEdited(field) {
+    if (!field) return;
+    const context = this.workspaceCreatorContext;
+    if (context) {
+      context.buildEditedFields ||= new Set();
+      context.buildEditedFields.add(field);
+    }
+    if (this.workspaceBuild) {
+      this.workspaceBuild.editedFields ||= new Set();
+      this.workspaceBuild.editedFields.add(field);
+    }
+  },
+
+  async pauseWorkspaceBuildSuggestion() {
+    const build = this.workspaceBuild;
+    if (!build?.session || build.acceptedPreparation || build.session.status !== 'open') return;
+    if (build.pausePromise) return build.pausePromise;
+    const proposal = build.session.proposal;
+    if (!proposal && !build.suggestionRequest && !build.attachmentRequestID) return;
+    const request = build.suggestionRequest;
+    build.suggestionEpoch = (build.suggestionEpoch || 0) + 1;
+    build.suggestionRequest = null;
+    this.workspaceBuildPane()?.setSuggestion?.(null);
+    const pause = this.workspaceBuildApi().pause;
+    if (!pause) return;
+    const body = {
+      version: build.session.version,
+      proposal_id: request?.id || proposal?.id || '',
+      attempt: request?.attempt ?? proposal?.attempt ?? 0,
+      context_version: request?.contextVersion ?? build.session.context_version ?? 0,
+      inference_id: build.session.inference_id || '',
+      attachment_id: build.attachmentRequestID || ''
+    };
+    build.pausePromise = Promise.resolve(pause(build.session.id, body))
+      .then(result => {
+        if (
+          !result?.ok ||
+          ((result.body?.paused === false || result.body?.draft_changed) && build.draftUser)
+        )
+          throw new Error('The saved draft changed in another tab.');
+        build.pauseError = false;
+        if (this.workspaceBuild === build && result?.body?.session)
+          this.adoptWorkspaceBuildSession(result.body.session);
+      })
+      .catch(() => {
+        if (this.workspaceBuild === build) {
+          build.pauseError = true;
+          build.draftError = true;
+        }
+      });
+    try {
+      await build.pausePromise;
+    } finally {
+      build.pausePromise = null;
+    }
+  },
+
+  // One server-issued proposal, through the same turn transport. This is not
+  // Send: no composer read/clear, no pending user bubble, no create dispatch.
+  async suggestWorkspaceBuildFolder({ retry = false } = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (
+      !build?.session?.proposal ||
+      build.closing ||
+      !pane ||
+      !this.workspaceBuildAssisted() ||
+      build.suggestionRequest ||
+      build.suggestionStarting ||
+      build.acceptedPreparation ||
+      this.workspaceBuildAttachmentPending(build)
+    )
+      return;
+    if (!retry && build.session.proposal.status !== 'pending') return;
+    build.suggestionStarting = true;
+    try {
+      await this.flushWorkspaceBuildDraft();
+    } finally {
+      build.suggestionStarting = false;
+    }
+    if (this.workspaceBuild !== build || build.draftError || !this.workspaceBuildAssisted()) return;
+    const proposal = build.session.proposal;
+    if (!proposal || (!retry && proposal.status !== 'pending')) return;
+    // A transport retry observes an uncertain attempt, not the next budget.
+    const attempt =
+      build.uncertainSuggestion?.id === proposal.id
+        ? build.uncertainSuggestion.attempt
+        : Number(proposal.attempt || 0) + 1;
+    if (attempt > 3) return;
+    const key = `${proposal.id}:${attempt}`;
+    if (!retry && build.lastSuggestionKey === key) return;
+    build.lastSuggestionKey = key;
+    const epoch = (build.suggestionEpoch || 0) + 1;
+    build.suggestionEpoch = epoch;
+    build.suggestionRequest = {
+      id: proposal.id,
+      attempt,
+      contextVersion: build.session.context_version
+    };
+    const current = () =>
+      this.workspaceBuild === build &&
+      build.suggestionEpoch === epoch &&
+      build.suggestionRequest?.id === proposal.id &&
+      this.workspaceBuildAssisted();
+    pane.setSuggestion?.({ message: 'Suggesting a workspace from folder metadata…', retry: false });
+    const body = {
+      intent: 'suggest_folder',
+      proposal_id: proposal.id,
+      attempt,
+      version: build.session.version,
+      retry: build.uncertainSuggestion?.retry ?? proposal.status !== 'pending'
+    };
+    let timer;
+    const poll = async () => {
+      if (!current() || !this.workspaceBuildApi().read) return;
+      try {
+        const result = await this.workspaceBuildApi().read(build.session.id);
+        const observed = result?.body?.session;
+        if (
+          current() &&
+          observed?.proposal?.status === 'running' &&
+          observed.proposal.id === proposal.id &&
+          observed.proposal.attempt === attempt &&
+          JSON.stringify(observed.edited_fields || {}) ===
+            JSON.stringify(build.session.edited_fields || {})
+        )
+          this.adoptWorkspaceBuildSession(observed);
+      } catch (_) {
+        /* The original request remains authoritative. */
+      }
+      if (current()) timer = setTimeout(poll, 350);
+    };
+    timer = setTimeout(poll, 100);
+    try {
+      const result = await this.workspaceBuildApi().turn(build.session.id, body);
+      if (!current()) return;
+      const session = result?.body?.session;
+      if (!result?.ok || !session) {
+        if (result?.status === 409) {
+          const observed = await this.workspaceBuildApi().read?.(build.session.id);
+          if (!current()) return;
+          if (observed?.body?.session) this.adoptWorkspaceBuildSession(observed.body.session);
+        }
+        throw new Error(
+          typeof result?.body?.error === 'string'
+            ? result.body.error
+            : 'The suggestion could not be loaded. Your draft is kept; edit it or retry.'
+        );
+      }
+      build.uncertainSuggestion = null;
+      if (
+        session.proposal?.id !== proposal.id ||
+        session.proposal?.attempt !== attempt ||
+        !['ready', 'clarifying', 'failed'].includes(session.proposal.status)
+      ) {
+        if (build.draftUser) this.adoptWorkspaceBuildConflict(session);
+        else await this.applyWorkspaceBuildSession(session, { resume: true });
+        return;
+      }
+      await this.applyWorkspaceBuildSession(session, {
+        proposal: true,
+        revision: this.workspaceBuildRevision()
+      });
+    } catch (error) {
+      if (current()) {
+        build.uncertainSuggestion = { id: proposal.id, attempt, retry: body.retry };
+        pane.setSuggestion?.({ message: error.message, retry: true });
+      }
+    } finally {
+      clearTimeout(timer);
+      if (current()) {
+        build.suggestionRequest = null;
+        if (!build.uncertainSuggestion) pane.setSuggestion?.(null);
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
   },
 
   workspaceBuildPane() {
@@ -11720,6 +11939,7 @@ const sessionManager = {
     modal.addEventListener('workspace-build-install-provider-cancel', () => {
       this.cancelWorkspaceBuildProvider();
     });
+    modal.addEventListener('hide.bs.modal', event => this.guardWorkspaceBuildClose(event));
     modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
     modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
     document.getElementById('workspaceBuildEditDraftBtn')?.addEventListener('click', () => {
@@ -11791,6 +12011,7 @@ const sessionManager = {
       if (this.workspaceBuildApplyDepth > 0) return;
       this.noteWorkspaceBuildIntent();
       this.clearWorkspaceBuildChosen('tags');
+      this.markWorkspaceBuildEdited('tags');
       this.scheduleWorkspaceBuildDraft({ user: true });
     });
     // Team edits happen through many buttons (create, customize, add a saved
@@ -11858,6 +12079,7 @@ const sessionManager = {
       resumeLine: '',
       chosen: new Map(),
       chosenRoles: new Set(),
+      editedFields: new Set(context.buildEditedFields || []),
       // Add folder is offered only when the server wires the composer's
       // folder chooser for builds.
       folders: availability?.folders === true,
@@ -11977,7 +12199,12 @@ const sessionManager = {
       return;
     }
     if (action === 'sync_again') {
+      build.draftConflict = false;
       await this.flushWorkspaceBuildDraft();
+      return;
+    }
+    if (action === 'suggest_again') {
+      await this.suggestWorkspaceBuildFolder({ retry: true });
       return;
     }
     if (action === 'try_again' && build.lastTurn) {
@@ -12097,6 +12324,8 @@ const sessionManager = {
     build.lastTurn = { detail: { ...detail } };
     build.turnPending = true;
     try {
+      await this.pauseWorkspaceBuildSuggestion();
+      if (this.workspaceBuild !== build) return;
       await this.flushWorkspaceBuildDraft();
     } finally {
       build.turnPending = false;
@@ -12162,6 +12391,7 @@ const sessionManager = {
   sendWorkspaceBuildRestaff(build) {
     if (this.workspaceBuild !== build || !this.workspaceBuildAssisted()) return undefined;
     build.restaffPending = false;
+    if (build.session?.folder) return undefined;
     return this.sendWorkspaceBuildTurn({ text: '(I changed the blueprint)', auto: true });
   },
 
@@ -12250,10 +12480,44 @@ const sessionManager = {
       return;
     }
     const resume = Boolean(options.resume);
-    const applied = Array.isArray(session.applied) ? session.applied : [];
+    const applied = (Array.isArray(session.applied) ? session.applied : []).filter(field => {
+      if (!options.proposal) return true;
+      const canonical =
+        field === 'blueprint' ? 'blueprint_id' : field === 'parent' ? 'parent_id' : field;
+      return !build.editedFields?.has(canonical);
+    });
     const patch = api?.buildPatchFromSession
       ? api.buildPatchFromSession(session, resume ? undefined : applied)
       : {};
+    if (options.proposal) {
+      // Human values also survive blueprint-prefill setters, not just the
+      // model's direct patch. Empty strings here are deliberate values.
+      const payload = this.collectCreatePayload()?.payload || {};
+      const owned = new Set([
+        ...Object.keys(session.edited_fields || {}),
+        ...(build.editedFields || [])
+      ]);
+      const keys = {
+        name: ['name'],
+        description: ['description'],
+        goal: ['mission'],
+        parent_id: ['parent_id'],
+        inputs: ['blueprint_inputs'],
+        tags: ['tags'],
+        color: ['color']
+      };
+      for (const [field, fields] of Object.entries(keys)) {
+        if (!owned.has(field)) continue;
+        const locallyUnsent =
+          build.editedFields?.has(field) && (build.draftUser || !session.edited_fields?.[field]);
+        const source = locallyUnsent ? payload : session.draft;
+        for (const key of fields) patch[key] = source?.[key] ?? (key === 'tags' ? [] : '');
+      }
+      if (['blueprint_id', 'team', 'inputs', 'parent_id'].some(field => owned.has(field))) {
+        delete patch.template_id;
+        delete patch.blank;
+      }
+    }
     const name = this.workspaceBuildAssistantName();
     await this.applyBuildPatchToWizard(patch, name, { animate: !resume, current });
     if (!current()) return;
@@ -12276,7 +12540,8 @@ const sessionManager = {
     this.scheduleWorkspaceBuildDraft({ user: false });
     await this.flushWorkspaceBuildDraft({ force: true });
     if (!current()) return;
-    if (session.create_now && !resume) await this.createFromWorkspaceBuild({ revision });
+    if (session.create_now && !resume && !session.folder && !options.proposal)
+      await this.createFromWorkspaceBuild({ revision });
   },
 
   collapseWorkspaceBuild({ withdraw = false, focus = true } = {}) {
@@ -12284,6 +12549,7 @@ const sessionManager = {
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
     if (build.preparationBusy || build.acceptedPreparation) return;
+    void this.pauseWorkspaceBuildSuggestion();
     this.noteWorkspaceBuildIntent();
     build.collapsed = true;
     pane.collapse({ withdraw });
@@ -12296,6 +12562,8 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane || build.withdrawn || build.kindHidden) return;
+    if (build.pausePromise) await build.pausePromise;
+    if (this.workspaceBuild !== build) return;
     build.collapsed = false;
     pane.expand();
     this.refreshWizardChrome();
@@ -12382,6 +12650,7 @@ const sessionManager = {
   workspaceBuildCanApply(build, revision) {
     return (
       this.workspaceBuild === build &&
+      !build.closing &&
       !build.acceptedPreparation &&
       !build.preparationBusy &&
       this.workspaceBuildAssisted() &&
@@ -12620,6 +12889,7 @@ const sessionManager = {
   teardownWorkspaceBuild() {
     const pane = this.workspaceBuildPane();
     const active = Boolean(this.workspaceBuild) || Boolean(pane?.isMounted?.());
+    void this.pauseWorkspaceBuildSuggestion();
     this.workspaceBuild = null;
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = null;
@@ -12820,10 +13090,13 @@ const sessionManager = {
     // Trusted edits during asynchronous patch preparation also invalidate it.
     if (event?.target?.closest?.('#workspaceBuildPane, #workspaceBuildCreationReview')) return;
     if (event?.isTrusted || this.workspaceBuildApplyDepth === 0) this.noteWorkspaceBuildIntent();
-    if (!this.workspaceBuild || (this.workspaceBuildApplyDepth > 0 && !event?.isTrusted)) return;
+    if (this.workspaceBuildApplyDepth > 0 && !event?.isTrusted) return;
     const key = this.workspaceBuildKeyForTarget(event?.target);
     if (!key) return;
     this.clearWorkspaceBuildChosen(key);
+    this.markWorkspaceBuildEdited(
+      key.startsWith('input:') ? 'inputs' : key === 'parent' ? 'parent_id' : key
+    );
     this.scheduleWorkspaceBuildDraft?.();
   },
 
@@ -12847,6 +13120,8 @@ const sessionManager = {
       if (assistantChoice !== undefined) void this.reselectWorkspaceBuildBlueprint(build);
       return;
     }
+    this.markWorkspaceBuildEdited('blueprint_id');
+    void this.pauseWorkspaceBuildSuggestion();
     this.clearWorkspaceBuildChosen('blueprint');
     build.chosenBlueprint = undefined;
     this.noteWorkspaceBuildBlueprintChanged?.(template);
@@ -12928,7 +13203,9 @@ const sessionManager = {
           description: document.getElementById('folderDescriptionInput')?.value || '',
           templateGoal: this.selectedTemplateGoal()
         });
-        if (input && goal.trim() && goal.trim() !== mirror.trim()) {
+        const explicitlyEdited =
+          build?.editedFields?.has('goal') || build?.session?.edited_fields?.goal;
+        if (input && (explicitlyEdited || (goal.trim() && goal.trim() !== mirror.trim()))) {
           input.value = goal;
           if (input.dataset) input.dataset.goalEdited = '1';
           applied.push('goal');
@@ -13101,6 +13378,7 @@ const sessionManager = {
     if (build.chosenRoles.delete(String(roleId || ''))) {
       this.clearWorkspaceBuildChosen(`role:${roleId}`);
     }
+    this.markWorkspaceBuildEdited('team');
     this.scheduleWorkspaceBuildDraft?.();
   },
 
@@ -13178,6 +13456,8 @@ const sessionManager = {
     if (teamState) body.team_state = teamState;
     if (this.wizardStep >= 1 && this.wizardStep <= 4) body.step = this.wizardStep;
     if (sync) body.sync = true;
+    else if (this.workspaceBuild?.editedFields?.size)
+      body.edited_fields = [...this.workspaceBuild.editedFields];
     return body;
   },
 
@@ -13199,19 +13479,43 @@ const sessionManager = {
     }, 500);
   },
 
+  adoptWorkspaceBuildConflict(session) {
+    const build = this.workspaceBuild;
+    if (!build) return;
+    this.adoptWorkspaceBuildSession(session);
+    build.draftConflict = true;
+    build.draftError = true;
+    this.workspaceBuildPane()?.showLine(
+      'This draft changed in another tab. Your edits are kept here. Review them before saving your draft over the newer version.',
+      { chips: [{ id: 'sync_again', label: 'Save my draft' }] }
+    );
+    this.syncWorkspaceBuildPresentation();
+  },
+
   async flushWorkspaceBuildDraft({ force = false } = {}) {
     const build = this.workspaceBuild;
     if (this.workspaceBuildTimer) {
       clearTimeout(this.workspaceBuildTimer);
       this.workspaceBuildTimer = null;
     }
-    if (!build?.session || build.session.status !== 'open' || (build.busy && !force)) return;
+    if (
+      !build?.session ||
+      build.draftConflict ||
+      build.session.status !== 'open' ||
+      ((build.busy || build.suggestionRequest) && !force)
+    )
+      return;
     if (build.draftInFlight) await build.draftInFlight;
     if (this.workspaceBuild !== build || build.draftUser === undefined) return;
     const user = Boolean(build.draftUser);
     build.draftUser = undefined;
     const body = this.workspaceBuildDraftBody(!user);
-    const key = JSON.stringify({ draft: body.draft, team: body.team_state, step: body.step });
+    const key = JSON.stringify({
+      draft: body.draft,
+      team: body.team_state,
+      step: body.step,
+      edited: body.edited_fields
+    });
     if (key === build.lastDraftKey) return;
     const fail = () => {
       if (this.workspaceBuild !== build) return;
@@ -13225,7 +13529,7 @@ const sessionManager = {
       build.draftError = true;
       this.syncWorkspaceBuildPresentation();
     };
-    const send = async (retry = false) => {
+    const send = async () => {
       let result;
       try {
         result = await this.workspaceBuildApi().draft(build.session.id, body);
@@ -13234,7 +13538,7 @@ const sessionManager = {
         return;
       }
       if (this.workspaceBuild !== build) return;
-      if (result?.status === 409 && result.body?.code === 'version' && !retry) {
+      if (result?.status === 409 && result.body?.code === 'version') {
         const reloaded = await this.workspaceBuildApi()
           .create({ entry_point: build.context.entryPoint })
           .catch(() => null);
@@ -13247,9 +13551,10 @@ const sessionManager = {
           fail();
           return;
         }
-        build.session = reloaded.body.session;
-        body.version = Number(build.session.version) || 0;
-        await send(true);
+        // No later debounce or forced close save may silently retry this
+        // whole draft. Only the conflict's explicit Save my draft can.
+        build.draftUser = Boolean(user || build.draftUser);
+        this.adoptWorkspaceBuildConflict(reloaded.body.session);
         return;
       }
       const session = result?.body?.session;
@@ -13267,7 +13572,7 @@ const sessionManager = {
       // Switching the blueprint changes what the team can be, so the
       // assistant re-staffs it without being asked (FR17), after the turn in
       // flight if there is one.
-      if (result.body.blueprint_changed) {
+      if (result.body.blueprint_changed && !session.folder) {
         if (
           build.busy ||
           this.workspaceBuildAttachmentPending(build) ||
@@ -13449,6 +13754,10 @@ const sessionManager = {
     // One pick at a time from here: a second Use this path, or a chip while
     // a path is still being checked, is ignored rather than sent.
     this.setWorkspaceBuildAttachmentPending(build, 'folderPending', true);
+    await this.pauseWorkspaceBuildSuggestion();
+    if (this.workspaceBuild !== build) return;
+    build.attachmentRequestID = globalThis.crypto?.randomUUID?.();
+    let attached = false;
     let attaching = false;
     let note = '';
     try {
@@ -13469,6 +13778,7 @@ const sessionManager = {
       await this.flushWorkspaceBuildDraft();
       if (this.workspaceBuild !== build || !build.session) return;
       body.version = Number(build.session.version) || 0;
+      if (build.attachmentRequestID) body.request_id = build.attachmentRequestID;
       let result;
       try {
         result = await this.workspaceBuildApi().folder(build.session.id, body);
@@ -13500,14 +13810,13 @@ const sessionManager = {
         note = pane.COPY.folderCancelled;
         return;
       }
-      pane.showLine(pane.COPY.folderAttached);
+      attached = true;
     } finally {
       if (this.workspaceBuild === build) {
+        build.attachmentRequestID = null;
         this.setWorkspaceBuildAttachmentPending(build, 'folderPending', false);
-        if (attaching) {
-          pane.setFolderBusy(false, note);
-          pane.focusComposer?.();
-        }
+        if (attaching) pane.setFolderBusy(false, note);
+        if (attached) await this.suggestWorkspaceBuildFolder();
       }
     }
   },
@@ -13601,6 +13910,9 @@ const sessionManager = {
       return;
     }
     this.setWorkspaceBuildAttachmentPending(build, 'linkPending', true);
+    await this.pauseWorkspaceBuildSuggestion();
+    if (this.workspaceBuild !== build) return;
+    build.attachmentRequestID = globalThis.crypto?.randomUUID?.();
     pane.setLinkBusy(true);
     pane.linkFieldStatus(pane.COPY.linkChecking);
     let attached = false;
@@ -13611,6 +13923,7 @@ const sessionManager = {
       try {
         result = await this.workspaceBuildApi().link(build.session.id, {
           url,
+          ...(build.attachmentRequestID ? { request_id: build.attachmentRequestID } : {}),
           version: Number(build.session.version) || 0
         });
       } catch (_) {
@@ -13641,6 +13954,7 @@ const sessionManager = {
       attached = true;
     } finally {
       if (this.workspaceBuild === build) {
+        build.attachmentRequestID = null;
         this.setWorkspaceBuildAttachmentPending(build, 'linkPending', false);
         pane.setLinkBusy(false);
         if (attached) {

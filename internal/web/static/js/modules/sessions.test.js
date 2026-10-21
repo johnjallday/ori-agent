@@ -5435,7 +5435,7 @@ function loadBuildWizard() {
   }
   vm.runInNewContext(
     source,
-    { window, document, Event, setTimeout, console, fetch: async () => ({}) },
+    { window, document, Event, setTimeout, clearTimeout, console, fetch: async () => ({}) },
     { filename: 'sessions.js' }
   );
   const manager = window.sessionManager;
@@ -6870,4 +6870,274 @@ test('a recognized folder’s plan is “Plan so far”, reviewed in place of th
   manager.syncWorkspaceBuildPresentation();
   assert.equal(elements.get('workspaceBuildDraftTitle').textContent, 'Draft so far');
   assert.equal(elements.get('workspaceBuildPlanReview').hidden, true);
+});
+
+function prepareProposalWizard() {
+  const fixture = prepareModeWizard();
+  const { manager } = fixture;
+  const activity = [];
+  const pane = manager.workspaceBuildPane();
+  pane.setSuggestion = value => activity.push(value);
+  pane.setFolderBusy = () => {};
+  pane.focusComposer = () => {
+    throw new Error('Automatic attachment stole focus');
+  };
+  manager.workspaceBuildPane = () => pane;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.refreshWorkspaceReview = () => {};
+  manager.workspaceBuild.session = {
+    id: 'b-1',
+    version: 3,
+    status: 'open',
+    context_version: 2,
+    draft: {},
+    folder: { observation: { id: 'obs-1', folder: 'Downloads' } },
+    proposal: { id: 'proposal-1', attempt: 0, status: 'pending', context_version: 2 }
+  };
+  return { ...fixture, activity, pane };
+}
+
+test('folder proposal admission is deduplicated and never sends composer text or Auto', async () => {
+  const { manager, activity } = prepareProposalWizard();
+  const reply = deferredBuildResult();
+  const requests = [],
+    applied = [];
+  manager.workspaceBuildApi = () => ({
+    turn: (_id, body) => {
+      requests.push(body);
+      return reply.promise;
+    }
+  });
+  manager.applyWorkspaceBuildSession = async (session, options) => {
+    applied.push(options);
+    manager.workspaceBuild.session = session;
+  };
+  const pending = manager.suggestWorkspaceBuildFolder();
+  await manager.suggestWorkspaceBuildFolder();
+  await Promise.resolve();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].intent, 'suggest_folder');
+  assert.equal(requests[0].attempt, 1);
+  assert.equal(requests[0].text, undefined);
+  assert.equal(requests[0].auto, undefined);
+  assert.match(activity[0].message, /Suggesting/);
+  reply.resolve({
+    ok: true,
+    body: {
+      session: {
+        ...manager.workspaceBuild.session,
+        version: 5,
+        create_now: true,
+        proposal: { id: 'proposal-1', attempt: 1, status: 'ready' }
+      }
+    }
+  });
+  await pending;
+  assert.equal(applied[0].proposal, true);
+  await manager.suggestWorkspaceBuildFolder();
+  assert.equal(requests.length, 1, 'a rerender/resume must not admit another suggestion');
+});
+
+test('a lost suggestion response replays its exact attempt before offering a new retry', async () => {
+  const { manager } = prepareProposalWizard();
+  const requests = [];
+  manager.workspaceBuildApi = () => ({
+    turn: async (_id, body) => {
+      requests.push({ ...body });
+      if (requests.length === 1) throw new Error('lost response');
+      return {
+        ok: true,
+        body: {
+          session: {
+            ...manager.workspaceBuild.session,
+            version: 5,
+            proposal: { id: 'proposal-1', attempt: body.attempt, status: 'failed' }
+          }
+        }
+      };
+    }
+  });
+  manager.applyWorkspaceBuildSession = async session => {
+    manager.workspaceBuild.session = session;
+  };
+  await manager.suggestWorkspaceBuildFolder();
+  await manager.suggestWorkspaceBuildFolder({ retry: true });
+  await manager.suggestWorkspaceBuildFolder({ retry: true });
+  assert.deepEqual(
+    requests.map(request => request.attempt),
+    [1, 1, 2]
+  );
+  assert.deepEqual(
+    requests.map(request => request.retry),
+    [false, false, true]
+  );
+});
+
+test('a delayed suggestion is ignored after manual mode, without reviving the modal', async () => {
+  const { manager, nameInput } = prepareProposalWizard();
+  const reply = deferredBuildResult();
+  const pauses = [];
+  manager.workspaceBuildApi = () => ({
+    turn: () => reply.promise,
+    pause: async (_id, body) => {
+      pauses.push(body);
+      return { ok: true };
+    }
+  });
+  let applied = 0;
+  manager.applyWorkspaceBuildSession = async () => {
+    applied++;
+  };
+  const pending = manager.suggestWorkspaceBuildFolder();
+  await Promise.resolve();
+  manager.collapseWorkspaceBuild();
+  nameInput.value = 'My manual name';
+  reply.resolve({ ok: true, body: buildReply().body });
+  await pending;
+  assert.equal(applied, 0);
+  assert.equal(pauses.length, 1);
+  assert.equal(pauses[0].proposal_id, 'proposal-1');
+  assert.equal(nameInput.value, 'My manual name');
+});
+
+test('successful folder attachment suggests once; cancellation neither suggests nor focuses', async () => {
+  for (const cancelled of [false, true]) {
+    const { manager } = prepareProposalWizard();
+    let requests = 0,
+      suggestions = 0;
+    manager.workspaceBuild.session.proposal = null;
+    manager.workspaceBuildApi = () => ({
+      folder: async () => {
+        requests++;
+        return { ok: true, body: { session: manager.workspaceBuild.session, cancelled } };
+      }
+    });
+    manager.suggestWorkspaceBuildFolder = async () => {
+      suggestions++;
+    };
+    const pending = manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+    await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+    await pending;
+    assert.equal(requests, 1);
+    assert.equal(suggestions, cancelled ? 0 : 1);
+  }
+});
+
+test('proposal application restores explicit empty fields after blueprint prefill and cannot create', async () => {
+  const { manager, window, nameInput } = prepareProposalWizard();
+  nameInput.value = '';
+  manager.markWorkspaceBuildEdited('name');
+  manager.collectCreatePayload = () => ({ payload: { name: '', description: 'Kept purpose' } });
+  window.WorkspaceCreatorState = { buildPatchFromSession: session => ({ ...session.draft }) };
+  const patches = [];
+  manager.applyBuildPatchToWizard = async patch => {
+    patches.push(patch);
+  };
+  manager.advanceWorkspaceBuildWizard = () => {};
+  manager.createFromWorkspaceBuild = async () => {
+    throw new Error('proposal created');
+  };
+  await manager.applyWorkspaceBuildSession(
+    {
+      ...manager.workspaceBuild.session,
+      version: 5,
+      create_now: true,
+      applied: ['blueprint', 'name'],
+      draft: { name: 'Wrong', template_id: 'code-project' }
+    },
+    { proposal: true }
+  );
+  assert.equal(patches[0].name, '');
+  assert.equal(patches[0].template_id, 'code-project');
+});
+
+test('an explicitly cleared goal is not refilled from the description by a proposal', async () => {
+  const { manager, nodes } = loadBuildWizard();
+  const goal = new BuildNode('textarea', 'folderGoalInput');
+  nodes.set('folderGoalInput', goal);
+  manager.workspaceBuild.editedFields = new Set(['goal']);
+  manager.mirroredWorkspaceGoal = () => 'Automatic description mirror';
+  await manager.applyBuildPatchToWizard({ mission: '' }, 'Assistant');
+  assert.equal(goal.value, '');
+  assert.equal(goal.dataset.goalEdited, '1');
+});
+
+test('a saved cross-tab owned value wins over an untouched local control', async () => {
+  const { manager, window } = prepareProposalWizard();
+  manager.collectCreatePayload = () => ({ payload: { name: 'Old local display' } });
+  window.WorkspaceCreatorState = { buildPatchFromSession: () => ({}) };
+  let applied;
+  manager.applyBuildPatchToWizard = async patch => {
+    applied = patch;
+  };
+  manager.advanceWorkspaceBuildWizard = () => {};
+  await manager.applyWorkspaceBuildSession(
+    {
+      ...manager.workspaceBuild.session,
+      version: 7,
+      edited_fields: { name: 6 },
+      draft: { name: 'Saved in the other tab' }
+    },
+    { proposal: true }
+  );
+  assert.equal(applied.name, 'Saved in the other tab');
+});
+
+test('a draft conflict blocks later debounce and forced-close saves until explicit retry', async () => {
+  const { manager } = prepareProposalWizard();
+  let sends = 0;
+  const newer = { ...manager.workspaceBuild.session, version: 9 };
+  manager.workspaceBuildApi = () => ({
+    draft: async () => {
+      sends++;
+      return { status: 409, body: { code: 'version' } };
+    },
+    create: async () => ({ body: { session: newer } })
+  });
+  manager.workspaceBuildDraftBody = () => ({ draft: { name: 'Kept edit' } });
+  manager.workspaceBuild.draftUser = true;
+  const flush = loadSessionManager().flushWorkspaceBuildDraft.bind(manager);
+  await flush();
+  await flush();
+  await flush({ force: true });
+  assert.equal(sends, 1);
+  assert.equal(manager.workspaceBuild.draftConflict, true);
+  assert.equal(manager.workspaceBuild.draftUser, true);
+});
+
+test('closing pauses inference and saves the kept draft before destroying controls', async () => {
+  const { manager } = prepareProposalWizard();
+  const order = [];
+  manager.workspaceBuild.suggestionRequest = { id: 'proposal-1', attempt: 1, contextVersion: 2 };
+  manager.workspaceBuild.draftUser = true;
+  manager.workspaceBuildApi = () => ({
+    pause: async () => {
+      order.push('pause');
+      return { ok: true, body: { paused: true } };
+    }
+  });
+  manager.flushWorkspaceBuildDraft = async options => {
+    assert.equal(options.force, true);
+    order.push('save');
+  };
+  manager.hideWorkspaceCreatorModal = () => order.push('hide');
+  await manager.guardWorkspaceBuildClose({ preventDefault: () => order.push('prevent') });
+  assert.deepEqual(order, ['prevent', 'pause', 'save', 'hide']);
+  assert.equal(manager.workspaceBuild.closeReady, true);
+});
+
+test('a close save conflict keeps edits visible rather than tearing down the dialog', async () => {
+  const { manager, lines, nameInput } = prepareProposalWizard();
+  nameInput.value = 'Kept local name';
+  manager.workspaceBuild.draftUser = true;
+  manager.workspaceBuildApi = () => ({
+    pause: async () => ({ ok: true, body: { paused: false } })
+  });
+  manager.hideWorkspaceCreatorModal = () => {
+    throw new Error('closed over conflict');
+  };
+  await manager.guardWorkspaceBuildClose({ preventDefault() {} });
+  assert.equal(nameInput.value, 'Kept local name');
+  assert.equal(manager.workspaceBuild.closeReady, undefined);
+  assert.match(lines.at(-1), /save conflict/);
 });

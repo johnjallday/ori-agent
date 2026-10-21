@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { startJanitorBuildModel } from './helpers/janitor-build-model';
 
 /**
  * Acceptance for narrated folder setup (tasks/prd-narrated-folder-setup.md):
@@ -58,6 +59,49 @@ async function placement(page: Page) {
   await expect(controls).toBeVisible({ timeout: 60_000 });
   return controls;
 }
+
+test('folder-first recognized plan needs no model or setup action on attachment', async ({
+  page,
+  request
+}, testInfo) => {
+  test.skip(!SONG, 'NARRATED_SONG names a seeded song folder in the sandbox');
+  const model = await startJanitorBuildModel();
+  try {
+    const before = await workspaces(page);
+    let turns = 0;
+    page.on('request', r => {
+      if (r.url().endsWith('/turns')) turns++;
+    });
+    await request.post('/api/onboarding/skip');
+    await page.goto('/');
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await page.locator('[data-build-control=add-folder]').click();
+    await page.fill('#workspaceBuildFolderPath', SONG);
+    await page.locator('[data-build-control=folder-path]').click();
+    await expect(page.locator('.workspace-build-folder__recognition')).toContainText(
+      'Recognized: REAPER project'
+    );
+    await expect(page.locator('#workspaceBuildPlan')).toContainText(`Creates Home “${HOME}”`);
+    expect(await workspaces(page)).toEqual(before);
+    expect(turns).toBe(0);
+    expect(model.calls()).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath('folder-first-recognized-plan.png') });
+    const build = (
+      await (
+        await request.post('/api/workspaces/build-sessions', {
+          data: { entry_point: 'home_cockpit_create' }
+        })
+      ).json()
+    ).session;
+    expect(build.proposal).toBeUndefined();
+    expect(build.setup_run_id || '').toBe('');
+    await request.post(`/api/workspaces/build-sessions/${build.id}/abandon`, {
+      data: { version: build.version }
+    });
+  } finally {
+    await model();
+  }
+});
 
 test('the build path recognizes the song, runs one Set it up, and places the new Home', async ({
   page

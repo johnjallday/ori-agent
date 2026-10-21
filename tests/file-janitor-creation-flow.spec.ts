@@ -1,7 +1,8 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 import {
   mkdtempSync,
+  mkdirSync,
   writeFileSync,
   existsSync,
   readFileSync,
@@ -17,7 +18,7 @@ test.describe('attached creation with a scripted local model', () => {
     process.env.ORI_TEST_BUILD_CREATION !== '1',
     'Requires the isolated scripted-model runtime documented in helpers/janitor-build-model.ts'
   );
-  let stopModel: (() => Promise<void>) | undefined;
+  let stopModel: Awaited<ReturnType<typeof startJanitorBuildModel>> | undefined;
   test.beforeAll(async ({ request }) => {
     stopModel = await startJanitorBuildModel();
     const model = await request.post('/api/settings/system-model', {
@@ -54,6 +55,268 @@ test.describe('attached creation with a scripted local model', () => {
   });
   test.afterAll(async () => {
     await stopModel?.();
+  });
+
+  async function attachFirst(
+    page: Page,
+    request: APIRequestContext,
+    root: string,
+    unsent = '',
+    beforeAttach?: () => Promise<void>
+  ) {
+    const old = (
+      await (
+        await request.post('/api/workspaces/build-sessions', {
+          data: { entry_point: 'home_cockpit_create' }
+        })
+      ).json()
+    ).session;
+    if (old?.status === 'open')
+      await request.post(`/api/workspaces/build-sessions/${old.id}/abandon`, {
+        data: { version: old.version }
+      });
+    await request.post('/api/onboarding/skip');
+    await page.goto('/');
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    const composer = page.locator('#workspaceBuildComposerInput');
+    await expect(composer).toBeEnabled();
+    if (unsent) await composer.fill(unsent);
+    if (beforeAttach) await beforeAttach();
+    await page
+      .locator('#workspaceBuildPane')
+      .getByRole('button', { name: 'Add folder', exact: true })
+      .click();
+    await expect(page.locator('#workspaceBuildPane')).toContainText(
+      'shared with your configured model'
+    );
+    await page.getByPlaceholder('~/Projects/my-app').fill(root);
+    await page.getByRole('button', { name: 'Use this path', exact: true }).click();
+    return composer;
+  }
+
+  async function resources(request: APIRequestContext) {
+    const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
+    const permissions = await Promise.all(
+      workspaces.map(
+        async (w: { id: string; directory_references: unknown; mcp_bindings: unknown }) => {
+          const base = `/api/workspaces/${w.id}/file-janitor`;
+          const status = (await (await request.get(base)).json()).status;
+          // Readiness timestamps change on reads, not because automation ran.
+          const { checked_at: _checkedAt, ...readiness } = status.readiness;
+          return {
+            id: w.id,
+            references: w.directory_references,
+            bindings: w.mcp_bindings,
+            settings: status.settings,
+            readiness,
+            batches: await (await request.get(`${base}/batches`)).json(),
+            history: await (await request.get(`${base}/history`)).json()
+          };
+        }
+      )
+    );
+    return {
+      workspaces: workspaces.map((w: { id: string }) => w.id).sort(),
+      permissions: permissions.sort((a, b) => a.id.localeCompare(b.id)),
+      plugins: await (await request.get('/api/plugins')).json(),
+      agents: (await (await request.get('/api/agents')).json()).agents.sort(
+        (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name)
+      )
+    };
+  }
+
+  async function currentBuild(request: APIRequestContext) {
+    return (
+      await (
+        await request.post('/api/workspaces/build-sessions', {
+          data: { entry_point: 'home_cockpit_create' }
+        })
+      ).json()
+    ).session;
+  }
+
+  test('folder-first suggestion uses one draft-only operation even with create_now and unsent text', async ({
+    page,
+    request
+  }, testInfo) => {
+    stopModel!.scenario({ createNow: true });
+    const before = await resources(request);
+    const calls = stopModel!.calls();
+    const root = inbox('Downloads');
+    const turns: Record<string, any>[] = [];
+    page.on('request', r => {
+      if (r.url().endsWith('/turns')) turns.push(r.postDataJSON());
+    });
+    const composer = await attachFirst(page, request, root, 'This is still an unsent thought.');
+    await expect(page.locator('#folderNameInput')).toHaveValue(/Synthetic Janitor/);
+    await expect(page.locator('#workspaceBuildDraftText')).toContainText('Synthetic Janitor');
+    await expect(composer).toHaveValue('This is still an unsent thought.');
+    await expect.poll(() => stopModel!.calls()).toBe(calls + 1);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].intent).toBe('suggest_folder');
+    expect(turns[0].text).toBeUndefined();
+    const build = await currentBuild(request);
+    expect(build.turn_count).toBe(0);
+    expect(build.first_request || '').toBe('');
+    expect(build.create_now || false).toBe(false);
+    expect(build.transcript.filter((e: { role: string }) => e.role === 'user')).toHaveLength(0);
+    const replay = await request.post(`/api/workspaces/build-sessions/${build.id}/turns`, {
+      data: turns[0]
+    });
+    expect(replay.ok(), await replay.text()).toBeTruthy();
+    expect(stopModel!.calls()).toBe(calls + 1);
+    expect(await resources(request)).toEqual(before);
+    expect(existsSync(join(root, 'Filed'))).toBe(false);
+    expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
+    await page.screenshot({ path: testInfo.outputPath('folder-first-suggestion.png') });
+    stopModel!.scenario();
+  });
+
+  test('folder-first preserves explicit earlier name and cleared description', async ({
+    page,
+    request
+  }) => {
+    const calls = stopModel!.calls(),
+      before = await resources(request);
+    await attachFirst(page, request, inbox(), 'Still unsent', async () => {
+      await page.getByRole('button', { name: 'Set up manually', exact: true }).click();
+      await page.locator('#wizardNextBtn').click();
+      await page.locator('#folderNameInput').fill('My earlier name');
+      await page.locator('#folderDescriptionInput').fill('A description I decided to clear');
+      await page.locator('#folderDescriptionInput').fill('');
+      await page.locator('#workspaceBuildWithBtn').click();
+    });
+    await expect.poll(async () => (await currentBuild(request)).proposal?.status).toBe('ready');
+    await expect(page.locator('#workspaceBuildDraftText')).toContainText('My earlier name');
+    await expect(page.locator('#folderDescriptionInput')).toHaveValue('');
+    await expect(page.locator('#workspaceBuildComposerInput')).toHaveValue('Still unsent');
+    const saved = await currentBuild(request);
+    expect(saved.draft.name).toBe('My earlier name');
+    expect(saved.draft.description || '').toBe('');
+    expect(saved.edited_fields.name).toBeGreaterThan(0);
+    expect(saved.edited_fields.description).toBeGreaterThan(0);
+    expect(stopModel!.calls()).toBe(calls + 1);
+    expect(await resources(request)).toEqual(before);
+  });
+
+  for (const mode of ['success', 'failure', 'ambiguous'] as const) {
+    test(`folder-first ${mode} leaves a usable draft without creating`, async ({
+      page,
+      request
+    }, testInfo) => {
+      stopModel!.scenario({ mode });
+      const root = inbox(mode === 'success' ? 'Downloads' : ''),
+        before = await resources(request),
+        calls = stopModel!.calls();
+      await attachFirst(page, request, root);
+      if (mode === 'success') {
+        await expect(page.locator('#workspaceBuildDraftText')).toContainText('Synthetic Janitor');
+        await expect(page.locator('#workspaceBuildComposerInput')).toHaveValue('');
+      } else if (mode === 'failure') {
+        await expect(
+          page.getByRole('button', { name: 'Retry suggestion', exact: true })
+        ).toBeVisible();
+        await expect(page.locator('#workspaceBuildStatus')).toContainText('draft is kept');
+      } else {
+        await expect(
+          page
+            .locator('#workspaceBuildPane')
+            .getByRole('button', { name: 'Organize files', exact: true })
+        ).toBeVisible();
+      }
+      expect(stopModel!.calls()).toBe(calls + 1);
+      expect(await resources(request)).toEqual(before);
+      expect(existsSync(join(root, 'Filed'))).toBe(false);
+      await page.screenshot({ path: testInfo.outputPath(`folder-first-${mode}.png`) });
+      stopModel!.scenario();
+    });
+  }
+
+  test('folder-first delayed reply cannot overwrite edits or a replacement folder', async ({
+    page,
+    request
+  }, testInfo) => {
+    stopModel!.scenario({ createNow: true, name: 'Stale synthetic suggestion' });
+    const held = stopModel!.hold();
+    const root = inbox(),
+      replacement = inbox(),
+      before = await resources(request),
+      calls = stopModel!.calls();
+    try {
+      await attachFirst(page, request, root);
+      await held.started;
+      const build = await currentBuild(request);
+      const edited = await request.patch(`/api/workspaces/build-sessions/${build.id}/draft`, {
+        data: {
+          version: build.version,
+          draft: { ...build.draft, name: 'My explicit name' },
+          edited_fields: ['name']
+        }
+      });
+      expect(edited.ok(), await edited.text()).toBeTruthy();
+      const current = (await edited.json()).session;
+      const selected = await request.post('/api/folder-picker/select-path', {
+        data: { path: replacement }
+      });
+      const attached = await request.post(`/api/workspaces/build-sessions/${build.id}/folder`, {
+        data: {
+          version: current.version,
+          mode: 'selection',
+          selection_token: (await selected.json()).selection_token
+        }
+      });
+      expect(attached.ok(), await attached.text()).toBeTruthy();
+      const replaced = (await attached.json()).session;
+      held.release();
+      await expect
+        .poll(async () => (await currentBuild(request)).proposal.id)
+        .toBe(replaced.proposal.id);
+      await expect(page.locator('#workspaceBuildStatus')).not.toContainText(
+        'Suggesting a workspace'
+      );
+      const after = await currentBuild(request);
+      expect(after.draft.name).toBe('My explicit name');
+      expect(after.folder.observation.id).toBe(replaced.folder.observation.id);
+      expect(after.create_now || false).toBe(false);
+      expect(stopModel!.calls()).toBe(calls + 1);
+      expect(await resources(request)).toEqual(before);
+      expect(existsSync(join(root, 'Filed')) || existsSync(join(replacement, 'Filed'))).toBe(false);
+      await page.screenshot({ path: testInfo.outputPath('folder-first-stale-reply.png') });
+    } finally {
+      held.release();
+      stopModel!.scenario();
+    }
+  });
+
+  test('folder-first close and Resume preserve manual edits without reviving inference', async ({
+    page,
+    request
+  }) => {
+    stopModel!.scenario({ createNow: true, name: 'Late closed suggestion' });
+    const held = stopModel!.hold();
+    const calls = stopModel!.calls();
+    try {
+      await attachFirst(page, request, inbox(), 'Unsent composer buffer');
+      await held.started;
+      await page.getByRole('button', { name: 'Set up manually', exact: true }).click();
+      await page.locator('#wizardNextBtn').click();
+      await page.locator('#folderNameInput').fill('Keep my manual name');
+      await page.getByRole('button', { name: 'Close create workspace', exact: true }).click();
+      await expect(page.locator('#addFolderModal')).toBeHidden();
+      held.release();
+      await page.locator('#cockpitCreateWorkspaceBtn').click();
+      await page
+        .locator('#workspaceBuildPane')
+        .getByRole('button', { name: 'Resume', exact: true })
+        .click();
+      await expect(page.locator('#folderNameInput')).toHaveValue('Keep my manual name');
+      await expect(page.locator('#workspaceBuildComposerInput')).toHaveValue('');
+      expect((await currentBuild(request)).create_now || false).toBe(false);
+      expect(stopModel!.calls()).toBe(calls + 1);
+    } finally {
+      held.release();
+      stopModel!.scenario();
+    }
   });
 
   for (const monitoring of [false, true]) {
@@ -338,8 +601,12 @@ test.describe('attached creation with a scripted local model', () => {
 test.describe.configure({ mode: 'serial' });
 const run = Date.now().toString(36);
 
-function inbox() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'ori-janitor-creation-')));
+function inbox(name = '') {
+  let root = realpathSync(mkdtempSync(join(tmpdir(), 'ori-janitor-creation-')));
+  if (name) {
+    root = join(root, name);
+    mkdirSync(root, { mode: 0o700 });
+  }
   const file = join(root, 'invoice.pdf');
   writeFileSync(file, 'synthetic source bytes', { mode: 0o600 });
   const old = new Date(Date.now() - 3600000);

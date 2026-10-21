@@ -51,8 +51,9 @@ const (
 var errBuildLinksOff = errors.New("workspace build: links are not available")
 
 type buildLinkRequest struct {
-	URL     string `json:"url"`
-	Version int64  `json:"version"`
+	RequestID string `json:"request_id,omitempty"`
+	URL       string `json:"url"`
+	Version   int64  `json:"version"`
 }
 
 type buildLinkDetachRequest struct {
@@ -91,6 +92,10 @@ func (h *Handler) postWorkspaceBuildLink(w http.ResponseWriter, r *http.Request,
 	if !decodeBuildBody(w, r, &req) {
 		return
 	}
+	if req.RequestID != "" && !validBuildOperationID(req.RequestID) {
+		_ = orihttp.RespondBadRequest(w, "Invalid link request identity")
+		return
+	}
 	ctx := r.Context()
 	userID := h.workspaceBuildUserID(ctx)
 	readiness := h.workspaceBuildReadiness(ctx, userID)
@@ -120,6 +125,12 @@ func (h *Handler) postWorkspaceBuildLink(w http.ResponseWriter, r *http.Request,
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": buildErrorText("version"), "code": "version"})
 		return
 	}
+	claimID, err := h.claimBuildAttachment(ctx, userID, id, req.Version, req.RequestID, false)
+	if err != nil {
+		respondBuildMutationError(w, err, id, "claimed")
+		return
+	}
+	defer h.releaseBuildAttachment(ctx, userID, id, claimID, false)
 	observation, err := deps.Links.Observe(ctx, req.URL)
 	if err != nil || observation == nil {
 		if err == nil {
@@ -143,7 +154,12 @@ func (h *Handler) postWorkspaceBuildLink(w http.ResponseWriter, r *http.Request,
 		if build.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
+		if build.LinkRequestID != claimID {
+			return errBuildTurn{http.StatusConflict, "version"}
+		}
 		now := deps.Store.Now()
+		build.LinkRequestID = ""
+		invalidateBuildAttachment(build)
 		build.Link = &personalassistant.BuildLink{Observation: *observation}
 		build.Append(personalassistant.BuildTranscriptEntry{
 			Role: personalassistant.BuildRoleForm, Text: fmt.Sprintf(buildCopyLinkAttached, observation.SafeLabel()), At: now,
@@ -186,8 +202,10 @@ func (h *Handler) postWorkspaceBuildLinkDetach(w http.ResponseWriter, r *http.Re
 		if build.Version != req.Version {
 			return errBuildTurn{http.StatusConflict, "version"}
 		}
-		if build.Link != nil {
+		if build.Link != nil || build.LinkRequestID != "" {
 			now := deps.Store.Now()
+			invalidateBuildAttachment(build)
+			build.LinkRequestID = ""
 			build.Link = nil
 			build.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: buildCopyLinkRemoved, At: now})
 			build.Applied = nil

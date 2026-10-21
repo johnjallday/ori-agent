@@ -51,7 +51,7 @@
     removeFolder: 'Remove folder',
     folderTitle: 'Add a folder',
     folderDisclosure:
-      'Ori records file and folder names, kinds, counts and project markers locally. File contents are not read. Send shares this metadata with your configured model. Ordinary creation only links the folder. File Janitor offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
+      'Choosing a folder records file and folder names, kinds, counts and project markers. File contents are not read. Ori first checks for a supported setup plan; otherwise this metadata, and any attached link metadata, is shared with your configured model to suggest a draft. Ordinary creation only links the folder. File Janitor offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
     folderLoading: 'Loading folder choices…',
     folderPickerLabel: 'Pick another folder…',
     folderPathLabel: 'or paste a folder path',
@@ -149,7 +149,7 @@
     linkCancel: 'Cancel',
     linkEmpty: 'Paste a link first.',
     linkDisclosure:
-      'Ori fetches the page’s title and description once, or a GitHub repository’s public details. Nothing else is read. Send shares that with your configured model.',
+      'Ori fetches the page’s title and description once, or a GitHub repository’s public details. Nothing else is read. Send, or a later folder suggestion, shares that metadata with your configured model.',
     linkAttached:
       'Link attached — I can see what it says about itself, not the page. Tell me what this workspace should do, or just press Send.',
     linkSend: 'Set it up from the attached link.',
@@ -470,8 +470,34 @@
       els.log.appendChild(renderEntry(entry, index));
     });
     els.showEarlier.hidden = view.hiddenCount === 0;
-    els.status.textContent = view.status;
-    els.status.classList.toggle('is-busy', view.busy);
+    const proposal = state.session?.proposal;
+    const suggestion =
+      state.suggestion ||
+      (proposal
+        ? {
+            message:
+              {
+                pending: 'Folder attached. Review its setup or request a suggestion.',
+                running: 'Suggesting a workspace from folder metadata…',
+                ready: 'Suggested setup — review and edit before creating.',
+                clarifying:
+                  state.session.pending_question?.question || 'Choose a purpose for this folder.',
+                failed:
+                  'The suggestion could not finish. Your draft is kept; edit it manually or retry.',
+                invalidated:
+                  'The context changed. Your draft is kept; review it or request a fresh suggestion.'
+              }[proposal.status] || '',
+            retry:
+              ['pending', 'failed', 'invalidated'].includes(proposal.status) && proposal.attempt < 3
+          }
+        : null);
+    const statusText = suggestion?.message || view.status;
+    if (els.status.textContent !== statusText) els.status.textContent = statusText;
+    els.status.classList.toggle('is-busy', view.busy || proposal?.status === 'running');
+    if (els.suggestionRetry) {
+      els.suggestionRetry.hidden = !suggestion?.retry;
+      els.suggestionRetry.disabled = view.busy || state.folderBusy || state.linkBusy;
+    }
     els.input.disabled = view.composerDisabled;
     // A turn waits for an attachment in flight (submitComposer refuses it), so
     // Send says so instead of dropping the press.
@@ -505,9 +531,8 @@
   function emptySendText() {
     const folder = attachedFolder();
     const link = attachedLink();
-    if (folder && link) return COPY.bothSend;
+    if (folder) return '';
     if (link) return COPY.linkSend;
-    if (folder) return COPY.folderSend;
     return '';
   }
 
@@ -535,7 +560,7 @@
     els.linkSummary.hidden = !summary;
     const empty = !text(els.input?.value);
     els.linkHint.textContent = attachedFolder() ? COPY.bothSendHint : COPY.linkSendHint;
-    els.linkHint.hidden = !link || !empty;
+    els.linkHint.hidden = !link || !empty || Boolean(attachedFolder());
     els.linkInput.disabled = state.linkBusy;
     els.linkAttach.disabled = state.linkBusy;
     els.linkAttach.textContent = state.linkBusy ? COPY.linkChecking : COPY.linkAttach;
@@ -583,11 +608,7 @@
     );
     // With a link attached too, the link's hint speaks for both. A ready plan
     // has its own Set it up, so an empty Send is not offered as one.
-    els.folderHint.hidden =
-      !folder ||
-      Boolean(attachedLink()) ||
-      Boolean(text(els.input?.value)) ||
-      state.session?.plan?.ready === true;
+    els.folderHint.hidden = true;
   }
 
   // renderPlan draws the setup plan the server computed for a recognized
@@ -1281,6 +1302,15 @@
     const planEls = renderPlanBlock();
     root.appendChild(transcript);
     root.appendChild(status);
+    const suggestionRetry = createElement(
+      'button',
+      'modern-btn modern-btn-secondary',
+      'Retry suggestion'
+    );
+    suggestionRetry.type = 'button';
+    suggestionRetry.dataset.buildControl = 'suggest-retry';
+    suggestionRetry.hidden = true;
+    root.appendChild(suggestionRetry);
     root.appendChild(groupEls.group);
     root.appendChild(planEls.plan);
     root.appendChild(composer);
@@ -1289,6 +1319,7 @@
       showEarlier,
       log,
       status,
+      suggestionRetry,
       composer,
       input,
       send,
@@ -1333,6 +1364,8 @@
           emit('workspace-build-setup', {});
         } else if (kind === 'setup-entry' && !control.disabled) {
           emit('workspace-build-setup', { entry_name: text(control.dataset.entryName) });
+        } else if (kind === 'suggest-retry' && !control.disabled) {
+          emit('workspace-build-action', { action: 'suggest_again' });
         } else if (kind === 'folder-again' && !control.disabled) {
           emit('workspace-build-folder-open');
         } else if (kind === 'prepare-group' && !control.disabled && !state.groupBusy) {
@@ -1758,6 +1791,11 @@
     render();
   }
 
+  function setSuggestion(value) {
+    state.suggestion = value || null;
+    render();
+  }
+
   function setBusy(busy, options = {}) {
     state.busy = Boolean(busy);
     state.pendingText = state.busy ? text(options.pendingText) : '';
@@ -1961,6 +1999,7 @@
     state.session = null;
     state.localLines = [];
     state.pendingText = '';
+    state.suggestion = null;
     state.els = {};
     state.busy = false;
     state.collapsed = false;
@@ -1984,6 +2023,7 @@
     VISIBLE_ENTRIES,
     mount,
     applySession,
+    setSuggestion,
     setBusy,
     focusComposer,
     showLine,

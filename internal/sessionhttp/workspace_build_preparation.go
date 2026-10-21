@@ -316,6 +316,7 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 		if current == nil || current.Status != personalassistant.WorkspaceBuildOpen || current.Version != p.build.Version || current.Preparation != nil {
 			return errors.New("review changed")
 		}
+		current.InvalidateBuildInference(true)
 		current.Preparation, current.Status = claim, personalassistant.WorkspaceBuildPreparing
 		current.CreateNow, current.Ready = false, false
 		current.Touch(h.workspaceBuild.Store.Now())

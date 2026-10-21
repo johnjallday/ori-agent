@@ -114,7 +114,7 @@ func TestWorkspaceBuildLink_AttachKeepsTheObservationAndTheModelReadsIt(t *testi
 		t.Fatalf("attach: %d %v", status, body)
 	}
 	attached := sessionOf(t, body)
-	if attached.Link == nil || attached.Link.Observation.Repo == nil || attached.Link.Observation.Repo.FullName != "acme/widgets" || attached.Version != build.Version+1 {
+	if attached.Link == nil || attached.Link.Observation.Repo == nil || attached.Link.Observation.Repo.FullName != "acme/widgets" || attached.Version != build.Version+2 {
 		t.Fatalf("attached session %+v", attached)
 	}
 	if len(links.asked) != 1 || links.asked[0] != "  https://github.com/acme/widgets/issues  " {
@@ -204,11 +204,13 @@ func TestWorkspaceBuildLink_RefusalsLeaveTheDraftAndTheAttachedLinkAlone(t *test
 	}
 	for err, want := range cases {
 		links.err = err
+		attached = readProposalBuild(t, f, attached.ID)
 		status, body := f.attachLink(t, attached, "http://127.0.0.1/admin")
 		if status != http.StatusUnprocessableEntity || body["code"] != "link" || !strings.Contains(body["error"].(string), want) {
 			t.Fatalf("refusal for %v: %d %v", err, status, body)
 		}
 	}
+	attached = readProposalBuild(t, f, attached.ID)
 	links.err = nil
 	links.observation = &linkcontext.Observation{Version: linkcontext.Version, ID: "bad", URL: "https://example.com", Host: "example.com", Kind: "readme"}
 	if status, body := f.attachLink(t, attached, "https://example.com"); status != http.StatusUnprocessableEntity || body["code"] != "link" {
@@ -220,7 +222,7 @@ func TestWorkspaceBuildLink_RefusalsLeaveTheDraftAndTheAttachedLinkAlone(t *test
 		t.Fatalf("read: %v", err)
 	}
 	kept := doc.Session(build.ID)
-	if kept == nil || kept.Version != attached.Version || kept.Link == nil || kept.Link.Observation.Repo.FullName != "acme/widgets" || len(kept.Transcript) != len(attached.Transcript) {
+	if kept == nil || kept.Version != attached.Version+2 || kept.Link == nil || kept.Link.Observation.Repo.FullName != "acme/widgets" || len(kept.Transcript) != len(attached.Transcript) {
 		t.Fatalf("refusals changed the build: %+v", kept)
 	}
 }

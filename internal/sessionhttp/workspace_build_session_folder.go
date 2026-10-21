@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -147,8 +149,11 @@ const buildReasonFolderAttached = "a folder is already attached; it is linked at
 var errBuildFoldersOff = errors.New("workspace build: folders are not available")
 
 type buildFolderRequest struct {
-	Mode string `json:"mode"`
-	Chip string `json:"chip,omitempty"`
+	// RequestID identifies this tab's pending picker for scoped cancellation.
+	// It is not authority; version/owner and the held selection remain required.
+	RequestID string `json:"request_id,omitempty"`
+	Mode      string `json:"mode"`
+	Chip      string `json:"chip,omitempty"`
 	// SelectionToken goes with mode "selection": the receipt the folder-picker
 	// endpoint issued for a typed path it checked. Never a path.
 	SelectionToken string `json:"selection_token,omitempty"`
@@ -230,6 +235,10 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 	if !decodeBuildBody(w, r, &req) {
 		return
 	}
+	if req.RequestID != "" && !validBuildOperationID(req.RequestID) {
+		_ = orihttp.RespondBadRequest(w, "Invalid folder request identity")
+		return
+	}
 	req.Mode, req.Chip, req.SelectionToken = strings.TrimSpace(req.Mode), strings.TrimSpace(req.Chip), strings.TrimSpace(req.SelectionToken)
 	choice := ""
 	switch req.Mode {
@@ -285,6 +294,12 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": buildErrorText("version"), "code": "version"})
 		return
 	}
+	claimID, err := h.claimBuildAttachment(ctx, userID, id, req.Version, req.RequestID, true)
+	if err != nil {
+		respondBuildMutationError(w, err, id, "claimed")
+		return
+	}
+	defer h.releaseBuildAttachment(ctx, userID, id, claimID, true)
 	target := buildFolderTarget(userID, readiness.projection, current.ID)
 	observation, err := deps.Folders.Observe(ctx, target, req.Mode, choice)
 	if err != nil {
@@ -294,6 +309,10 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 	}
 	if observation == nil {
 		// The dialog was cancelled: nothing changes, and the pane hears so.
+		h.releaseBuildAttachment(ctx, userID, id, claimID, true)
+		if latest, readErr := deps.Store.Read(ctx, userID); readErr == nil {
+			current = latest.Session(id)
+		}
 		h.respondBuildSession(r.Context(), w, http.StatusOK, current, map[string]any{"cancelled": true})
 		return
 	}
@@ -318,8 +337,17 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		if build.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
+		if build.FolderRequestID != claimID {
+			return errBuildTurn{http.StatusConflict, "version"}
+		}
 		now := deps.Store.Now()
+		build.FolderRequestID = ""
+		build.InvalidateBuildInference(false)
 		build.Folder = &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition}
+		build.Proposal = nil
+		if genericBuildFolder(build) && build.Setup == nil {
+			build.Proposal = &personalassistant.BuildProposal{ID: uuid.NewString(), FolderID: observation.ID, ContextVersion: build.ContextVersion, Status: "pending"}
+		}
 		build.Append(personalassistant.BuildTranscriptEntry{
 			Role: personalassistant.BuildRoleForm, Text: fmt.Sprintf(buildCopyFolderAttached, observation.Folder), At: now,
 		})
@@ -368,8 +396,11 @@ func (h *Handler) postWorkspaceBuildFolderDetach(w http.ResponseWriter, r *http.
 		if build.Version != req.Version {
 			return errBuildTurn{http.StatusConflict, "version"}
 		}
-		if build.Folder != nil {
+		if build.Folder != nil || build.FolderRequestID != "" {
 			now := deps.Store.Now()
+			build.InvalidateBuildInference(false)
+			build.FolderRequestID = ""
+			build.Proposal = nil
 			build.Folder = nil
 			build.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleForm, Text: buildCopyFolderRemoved, At: now})
 			build.Applied = nil
