@@ -66,7 +66,10 @@ const (
 // SourceRef records what a follow-up came from. It is provenance and dedup
 // input, never the operational owner or lifecycle authority.
 type SourceRef struct {
-	Type      string `json:"type"` // email_thread | manual | journal
+	// Type is email_thread | manual | journal | note_item. A note_item's ID is
+	// the open item's content hash in the user's notes (secondbrain.ItemID),
+	// so accepting it twice, or again after a later look, folds into one row.
+	Type      string `json:"type"`
 	ID        string `json:"id,omitempty"`
 	AccountID string `json:"account_id,omitempty"`
 }

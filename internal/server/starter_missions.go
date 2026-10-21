@@ -88,6 +88,16 @@ func (b *ServerBuilder) starterMissionContext() progression.MissionContext {
 		mission.FolderFirstTask = b.missionFirstTask(ctx)
 	}
 
+	// Connect your second brain names the vault Ori found (FR34). Detection is
+	// cached for five minutes, so the widget's polling costs one sidecar read.
+	if b.personalAssistantSecondBrain != nil &&
+		(b.progressionEngine == nil || b.progressionEngine.MissionUnresolved(progression.SecondBrainQuestID)) {
+		if view, err := b.personalAssistantSecondBrain.Status(ctx, userprofile.LocalUserID); err == nil &&
+			view.Status == personalassistant.SecondBrainNotConnected && len(view.Detected) > 0 {
+			mission.SecondBrainVault = view.Detected[0].Name
+		}
+	}
+
 	return mission
 }
 

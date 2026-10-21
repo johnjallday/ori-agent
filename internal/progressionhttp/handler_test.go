@@ -75,8 +75,8 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(raw.Missions) != 5 {
-		t.Fatalf("missions = %d, want 5 (body=%s)", len(raw.Missions), rec.Body.String())
+	if len(raw.Missions) != 6 {
+		t.Fatalf("missions = %d, want 6 (body=%s)", len(raw.Missions), rec.Body.String())
 	}
 	for i, mission := range raw.Missions {
 		if order, _ := mission["order"].(float64); int(order) != i+1 {
@@ -94,7 +94,7 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 		// See what your assistant found waits on the folder, not on the hire.
 		wantReason := "Starter first"
 		switch mission["id"] {
-		case progression.ShowFolderQuestID:
+		case progression.SecondBrainQuestID, progression.ShowFolderQuestID:
 			wantReason = "Build your HQ first"
 			action, _ := mission["locked_action"].(map[string]any)
 			if action["kind"] != "hq_card" || action["label"] != "Build My HQ" {
@@ -107,11 +107,12 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 			t.Fatalf("missions[%d].locked_reason = %v, want %q", i, mission["locked_reason"], wantReason)
 		}
 	}
-	if raw.Missions[2]["id"] != progression.FolderFirstLookQuestID {
-		t.Fatalf("missions[2] = %v, want See what your assistant found", raw.Missions[2]["id"])
+	if raw.Missions[3]["id"] != progression.FolderFirstLookQuestID {
+		t.Fatalf("missions[3] = %v, want See what your assistant found", raw.Missions[3]["id"])
 	}
-	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[1]["id"] != progression.ShowFolderQuestID {
-		t.Fatalf("missions[0], [1] = %v, %v", raw.Missions[0]["id"], raw.Missions[1]["id"])
+	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[1]["id"] != progression.SecondBrainQuestID ||
+		raw.Missions[2]["id"] != progression.ShowFolderQuestID {
+		t.Fatalf("missions[0..2] = %v, %v, %v", raw.Missions[0]["id"], raw.Missions[1]["id"], raw.Missions[2]["id"])
 	}
 	if _, present := raw.Missions[0]["locked_reason"]; present {
 		t.Fatalf("an unlocked mission sent a lock reason: %v", raw.Missions[0])

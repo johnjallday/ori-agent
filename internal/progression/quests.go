@@ -50,7 +50,14 @@ const (
 	// FirstBriefQuestID is Mission 05: the Daily Brief station in My HQ showing
 	// a brief.
 	FirstBriefQuestID = "pa-first-brief"
+	// SecondBrainQuestID is the optional Connect your second brain mission,
+	// between Build My HQ and Show your assistant a folder. It completes when
+	// a notes folder is connected to the HQ, observed on the server.
+	SecondBrainQuestID = "pa-second-brain"
 )
+
+// SecondBrainActionURL opens Home with the assistant's second-brain chooser.
+const SecondBrainActionURL = "/?quest=second-brain"
 
 // MeetAssistantActionURL starts Ori's deterministic Mission 01 walkthrough from
 // its first step, on Home: Ori points at the Agents nav entry and the user
@@ -99,6 +106,9 @@ type MissionContext struct {
 	// recently set up from the assistant's offer. The zero value means there is
 	// none.
 	FolderFirstTask MissionFirstTask
+	// SecondBrainVault names the Obsidian vault Ori found, for the second-brain
+	// mission's card ("Found: Second Brain"); "" when none was found.
+	SecondBrainVault string
 }
 
 // MissionWorkspace identifies a workspace a mission points at.
@@ -357,7 +367,23 @@ func PersonalAssistantGraph() Graph {
 		},
 		buildHQ,
 		{
-			ID: ShowFolderQuestID, Tier: 1, Featured: true, Order: 2, Optional: true,
+			ID: SecondBrainQuestID, Tier: 1, Featured: true, Order: 2, Optional: true,
+			// The notes are read into the HQ, so the HQ comes first.
+			LockedUntil:  BuildHQQuestID,
+			LockedReason: "Build your HQ first",
+			LockedAction: &LockedAction{Kind: LockedActionHQCard, Label: "Build My HQ"},
+			Title:        "Connect your second brain",
+			Why:          "Point Ori at your notes and it tells you what's open.",
+			ActionURL:    SecondBrainActionURL,
+			ActionLabel:  "Start",
+			// Live, a connect completes it and "I don't keep notes" skips it,
+			// both from server hooks. An install already connected is
+			// grandfathered.
+			Satisfied: func(s Snapshot) bool { return s.SecondBrainConnected },
+			Resolve:   resolveSecondBrain,
+		},
+		{
+			ID: ShowFolderQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
 			// Every folder path needs the user's HQ (the assistant keeps what it
 			// learns there), and only a real build opens the lock: deferring the
 			// HQ card with Not now leaves it. Building the HQ needs the hire, so
@@ -382,7 +408,7 @@ func PersonalAssistantGraph() Graph {
 			},
 		},
 		{
-			ID: FolderFirstLookQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			ID: FolderFirstLookQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
 			// Waits on the folder itself: there is nothing to look at before
 			// one is shown. A skipped Show a folder keeps it locked.
 			LockedUntil: ShowFolderQuestID,
@@ -402,7 +428,7 @@ func PersonalAssistantGraph() Graph {
 		{
 			// The Daily loop tier: it opens once every Starter mission is
 			// resolved, which is also what waiting for the hire means.
-			ID: ConnectSourceQuestID, Tier: 2, Featured: true, Order: 4, Optional: true,
+			ID: ConnectSourceQuestID, Tier: 2, Featured: true, Order: 5, Optional: true,
 			// The static copy is the plan branch, the fallback for every focus.
 			Title:       "Plan my first day",
 			Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
@@ -419,7 +445,7 @@ func PersonalAssistantGraph() Graph {
 			Resolve: resolveConnectSource,
 		},
 		{
-			ID: FirstBriefQuestID, Tier: 2, Featured: true, Order: 5, Optional: true,
+			ID: FirstBriefQuestID, Tier: 2, Featured: true, Order: 6, Optional: true,
 			Title: "Read your first Daily Brief",
 			Why:   firstBriefWhy,
 			// The static link is the fallback for a user with no Personal HQ:
@@ -450,6 +476,14 @@ func PersonalAssistantGraph() Graph {
 	names[1] = "Starter"
 	names[2] = "Daily loop"
 	return Graph{Quests: quests, TierNames: names, TotalTiers: 2}
+}
+
+// resolveSecondBrain names the vault Ori found on the mission card (FR34).
+func resolveSecondBrain(ctx MissionContext) MissionPresentation {
+	if vault := strings.TrimSpace(ctx.SecondBrainVault); vault != "" {
+		return MissionPresentation{Hint: "Found: " + vault}
+	}
+	return MissionPresentation{}
 }
 
 // folderFirstLookWhy is Mission 03's static why line.

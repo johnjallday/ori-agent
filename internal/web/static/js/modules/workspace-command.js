@@ -58,6 +58,10 @@ import {
   readMemoryStationBaseline,
   writeMemoryStationBaseline
 } from './memory-station.js';
+
+// The HQ's Notes station: the user's connected notes folder. Its key is not
+// "notes", which names the workspace's own notes section on the map.
+export const NOTES_STATION = 'second-brain';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -7505,6 +7509,122 @@ export class WorkspaceCommandView {
     if (this.active) this.render();
   }
 
+  // --- Notes station (connect your second brain, FR33) ----------------------
+  // The user's notes folder as an HQ building beside Email. It joins the
+  // registry after Memory, so no station the user never dragged moves, and
+  // stands by Email through its own default position. Its badge reads the
+  // connection; activating it opens the connection's card in the assistant
+  // drawer (personal-assistant-second-brain.js), which also asks when nothing
+  // is connected.
+  notesStation() {
+    return {
+      key: NOTES_STATION,
+      label: 'Notes',
+      icon: 'bi-journal-text',
+      defaultX: 0.76,
+      defaultY: 0.39,
+      state: () => this.notesStationState(),
+      action: trigger => this.openNotesStation(trigger)
+    };
+  }
+
+  notesState() {
+    const hqWorkspaceID = this.watchtowerWorkspaceID();
+    if (!this._notes || this._notes.hqWorkspaceID !== hqWorkspaceID) {
+      this._notes = { hqWorkspaceID, status: 'idle', secondBrain: null };
+    }
+    return this._notes;
+  }
+
+  notesStationState() {
+    const state = this.notesState();
+    if (state.status === 'idle' && this.active) this.requestNotesData();
+    if (state.status === 'error') {
+      return { value: 'Notes', description: 'status unavailable', tone: 'degraded' };
+    }
+    if (state.status !== 'ready' || !state.secondBrain) {
+      return { value: '—', description: 'checking notes', tone: 'loading' };
+    }
+    const secondBrain = state.secondBrain;
+    const name = String(secondBrain.source?.name || '');
+    if (secondBrain.status === 'missing' && name) {
+      return { value: "Can't find " + name, description: 'needs attention', tone: 'attention' };
+    }
+    if (secondBrain.status === 'connected' && name) {
+      const since = this.formatRelativeTime(secondBrain.last_look?.at);
+      return {
+        value: name,
+        description: since ? 'connected · last look ' + since : 'connected',
+        tone: 'clear'
+      };
+    }
+    return { value: 'Not set up', description: 'connect your notes' };
+  }
+
+  // Fetch the notes connection once for the active HQ; a stale response after
+  // a workspace switch is ignored, and a failure degrades only this badge.
+  requestNotesData(force = false) {
+    if (!this.isPersonalHQ()) return;
+    // The drawer says when it connected, looked, or disconnected; the badge
+    // then reads the connection again rather than waiting for a reload.
+    if (
+      !this.boundNotesChanged &&
+      typeof document !== 'undefined' &&
+      typeof document.addEventListener === 'function'
+    ) {
+      this.boundNotesChanged = () => this.requestNotesData(true);
+      document.addEventListener('personal-assistant:second-brain', this.boundNotesChanged);
+    }
+    const state = this.notesState();
+    if (state.status === 'loading' || (!force && state.status === 'ready')) return;
+    if (typeof fetch !== 'function') {
+      state.status = 'error';
+      return;
+    }
+    state.status = 'loading';
+    const requestID = (this._notesRequestID || 0) + 1;
+    this._notesRequestID = requestID;
+    Promise.resolve(fetch('/api/personal-assistant/second-brain'))
+      .then(async response => {
+        if (!response || !response.ok) throw new Error('notes status unavailable');
+        return response.json();
+      })
+      .then(payload => {
+        const current = this.notesState();
+        if (this._notesRequestID !== requestID || current.hqWorkspaceID !== state.hqWorkspaceID)
+          return;
+        current.status = 'ready';
+        current.secondBrain = (payload && payload.second_brain) || null;
+        if (this.active) this.render();
+      })
+      .catch(() => {
+        const current = this.notesState();
+        if (this._notesRequestID !== requestID || current.hqWorkspaceID !== state.hqWorkspaceID)
+          return;
+        current.status = 'error';
+        if (this.active) this.render();
+      });
+  }
+
+  // Opens the connection's card in the assistant drawer. Where the drawer
+  // cannot open here, Home opens it from the mission's link.
+  openNotesStation(trigger) {
+    const panel = typeof window !== 'undefined' ? window.PersonalAssistantPanel : null;
+    const notes = typeof window !== 'undefined' ? window.PersonalAssistantSecondBrain : null;
+    if (
+      panel &&
+      typeof panel.open === 'function' &&
+      notes &&
+      typeof notes.openManage === 'function'
+    ) {
+      if (panel.open(trigger || null, { focus: false })) {
+        void notes.openManage();
+        return;
+      }
+    }
+    this.navigateTo('/?quest=second-brain');
+  }
+
   // Returns the active HQ workspace id without trusting a stale page-level
   // workspaceId. The Watchtower API uses this id as a server-side HQ gate.
   watchtowerWorkspaceID() {
@@ -8241,6 +8361,8 @@ export class WorkspaceCommandView {
     const fallback = this.hqStationDefaultPosition(index);
     const preferredX = Number(registry[index]?.defaultX);
     if (Number.isFinite(preferredX)) fallback.x = clampFraction(preferredX);
+    const preferredY = Number(registry[index]?.defaultY);
+    if (Number.isFinite(preferredY)) fallback.y = clampFraction(preferredY);
     const layout = (this.page && this.page.workspace && this.page.workspace.layout) || null;
     const saved = layout && layout.station_positions ? layout.station_positions[key] : null;
     if (!saved) return fallback;
@@ -8364,7 +8486,10 @@ export class WorkspaceCommandView {
     return [
       ...(this.isPersonalHQ() ? this.hqStationRegistry() : []),
       ...this.workspaceStationRegistry(),
-      ...(memory ? [memory] : [])
+      ...(memory ? [memory] : []),
+      // Appended after Memory for the same reason; it stands by Email through
+      // its own default position.
+      ...(this.isPersonalHQ() ? [this.notesStation()] : [])
     ];
   }
 

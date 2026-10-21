@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -160,6 +161,21 @@ func (b *ServerBuilder) completeProgressionWiring() {
 			}
 		})
 	}
+	// Connect your second brain: a connected notes folder completes it and
+	// "I don't keep notes" skips it, both observed on the server (FR8, FR34).
+	if b.personalAssistantSecondBrain != nil {
+		if b.personalAssistantToday != nil {
+			b.personalAssistantToday.SetSecondBrainReader(b.personalAssistantSecondBrain)
+		}
+		b.personalAssistantSecondBrain.OnConnected(func(context.Context, string, secondbrain.Source) {
+			engine.Complete(progression.SecondBrainQuestID)
+		})
+		b.personalAssistantSecondBrain.OnDeclined(func(context.Context, string) {
+			if err := engine.Skip(progression.SecondBrainQuestID); err != nil {
+				logger.Debug("Second-brain mission not skipped", logger.Fields{"error": err.Error()})
+			}
+		})
+	}
 	// Show your assistant a folder (Mission 03): any accepted outcome — a
 	// workspace linked to the folder or a tidy — completes it (FR42). The
 	// File Janitor wizard reaching ready completes it too, via the setup
@@ -169,9 +185,22 @@ func (b *ServerBuilder) completeProgressionWiring() {
 			b.personalAssistantToday.SetFolderDigestReader(b.personalAssistantFolderDigest)
 		}
 		b.personalAssistantFolderDigest.SetMissionUnresolved(engine.MissionUnresolved)
+		// The second-brain ask is the first message after HQ; the folder
+		// hand-over is never shown as a message beside it.
+		if b.personalAssistantSecondBrain != nil {
+			b.personalAssistantFolderDigest.SetFirstPromptOwned(b.personalAssistantSecondBrain.OwnsFirstPrompt)
+		}
 		if b.progressionHandler != nil {
+			// SetAfterReset holds one callback: Reset Getting Started re-arms
+			// both first-message receipts, never the notes connection.
 			b.progressionHandler.SetAfterReset(func(ctx context.Context) error {
-				return b.personalAssistantFolderDigest.ClearFirstPrompt(ctx, userprofile.LocalUserID)
+				if err := b.personalAssistantFolderDigest.ClearFirstPrompt(ctx, userprofile.LocalUserID); err != nil {
+					return err
+				}
+				if b.personalAssistantSecondBrain != nil {
+					return b.personalAssistantSecondBrain.ResetAsk(ctx, userprofile.LocalUserID)
+				}
+				return nil
 			})
 		}
 		b.personalAssistantFolderDigest.SetOnOutcome(func(context.Context, string, personalassistant.FolderOffer) {
@@ -315,6 +344,13 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	// Mission 05: HQ already has a Daily Brief revision.
 	if b.dailyBriefService != nil {
 		snap.HasBriefRevision = briefRevisionExists(b.dailyBriefService, hqWorkspaceID)
+	}
+
+	// Connect your second brain: a notes folder is already connected.
+	if b.personalAssistantSecondBrain != nil {
+		if _, connected, err := b.personalAssistantSecondBrain.ConnectedSource(context.Background(), userprofile.LocalUserID); err == nil {
+			snap.SecondBrainConnected = connected
+		}
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".

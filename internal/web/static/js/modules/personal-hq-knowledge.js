@@ -86,6 +86,7 @@ function sourceLabel(item) {
   if (item.source_kind === 'saved_app') return 'Saved app evidence';
   if (item.source_kind === 'file_janitor') return 'Approved File Janitor actions';
   if (item.source_kind === 'folder_scan') return 'A folder you showed Ori';
+  if (item.source_kind === 'second_brain') return 'Your connected notes';
   if (item.source_kind === 'explicit') return 'You told Ori';
   if (item.source_kind === 'workspace_agent') return 'Proposed by a workspace agent';
   return 'Source not available';
@@ -118,6 +119,7 @@ const APPROVED_SOURCE_CHIPS = {
   interview: 'From your interview',
   workspace_agent: 'From a workspace',
   folder_scan: 'From a folder scan',
+  second_brain: 'From your notes',
   saved_app: 'From saved apps',
   file_janitor: 'From File Janitor'
 };
@@ -303,7 +305,33 @@ export function mountPersonalHQKnowledge(root = document) {
         }
         list.replaceChildren(empty);
       }
-      renderDossierSources(sourcesElement, payload.sources, capabilities?.capabilities);
+      // The notes folder's own status, for its Sources row (FR35).
+      const notes = await request('/api/personal-assistant/second-brain').catch(() => null);
+      renderDossierSources(
+        sourcesElement,
+        notes?.second_brain
+          ? { ...payload.sources, second_brain: notes.second_brain }
+          : payload.sources,
+        capabilities?.capabilities,
+        {
+          onNotesDisconnect: async () => {
+            try {
+              await request('/api/personal-assistant/second-brain/disconnect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  request_id: `disconnect-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+                  if_version: notes.second_brain.version || 0
+                })
+              });
+            } finally {
+              // The drawer's own card and the HQ's Notes station follow.
+              await window.PersonalAssistantSecondBrain?.changed?.();
+              await reload();
+            }
+          }
+        }
+      );
       queueElement.replaceChildren();
       factsElement.replaceChildren();
       if (!queue.length) {

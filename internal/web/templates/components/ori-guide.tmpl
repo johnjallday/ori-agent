@@ -321,6 +321,7 @@
            as a turn of its own. Nothing is shown while it is idle. Whichever
            of the two was used last is kept nearest the composer. -->
       <div id="personalAssistantThread" class="personal-assistant-panel__thread">
+        {{template "personal-assistant-second-brain.tmpl" .}}
         <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity">
           {{template "ask-ori-activity.tmpl" .}}
         </div>

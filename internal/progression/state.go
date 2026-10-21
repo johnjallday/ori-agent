@@ -70,6 +70,9 @@ type Snapshot struct {
 	ProjectWorkspaces int
 	// HasBriefRevision is true when HQ already has a Daily Brief revision.
 	HasBriefRevision bool
+	// SecondBrainConnected is true when a notes folder is connected to the
+	// HQ, which grandfathers the second-brain mission.
+	SecondBrainConnected bool
 	// LegacyFirstDayCompleted is true when the retired Plan my first day quest
 	// was completed before the starter missions replaced it.
 	LegacyFirstDayCompleted bool

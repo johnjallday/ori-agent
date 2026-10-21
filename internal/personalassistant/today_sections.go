@@ -54,6 +54,9 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			needs = append(needs, TodayItem{ID: view.Offer.ID, Kind: "folder_offer", Title: "Look at " + view.Offer.Folder})
 		}
 	}
+	notesWorking, notesNeeds, notesDone := s.secondBrainItems(ctx, userID, now)
+	working = append(working, notesWorking...)
+	needs = append(needs, notesNeeds...)
 	if item, ok := s.unfinishedBuildItem(ctx, userID, out); ok {
 		needs = append(needs, item)
 	}
@@ -166,7 +169,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 	}
 	// What the agent found comes first: it is the news, the setup receipt is not.
 	sort.SliceStable(folderResults, func(i, j int) bool { return folderResults[i].SourceAt.After(folderResults[j].SourceAt) })
-	done := append(folderResults, out.Results.Items...)
+	done := append(append(folderResults, notesDone...), out.Results.Items...)
 	if hq.CreatedAt.After(now.Add(-todayFolderReceiptWindow)) && !hq.CreatedAt.After(now) {
 		done = append([]TodayItem{{ID: "hq-receipt-" + hq.ID, Kind: "hq_setup",
 			Title: "Set up " + hq.Name, Detail: hqBriefSchedule(relationship), Route: hqRoute,

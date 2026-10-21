@@ -161,6 +161,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-hq-card.js',
       'internal/web/static/js/modules/personal-assistant-folder.js',
       'internal/web/static/js/modules/first-look-report.js',
+      'internal/web/static/js/modules/personal-assistant-second-brain.js',
       'internal/web/static/js/modules/show-folder-quest.js',
       'internal/web/static/js/modules/personal-assistant-folder-chooser.js',
       'internal/web/static/js/modules/folder-path-entry.js',

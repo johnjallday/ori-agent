@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderpath"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
+	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -32,6 +33,9 @@ func (p assistantFolderPaths) Find(message string) (agenthttp.FolderPathFound, b
 	return agenthttp.FolderPathFound{
 		Path: found.Path, Name: found.Name, Text: found.Text, Start: found.Start, End: found.End,
 		Warning: found.Warning, WarningNote: folderpath.WarningNote(found.Warning), Refusal: found.Refusal,
+		// One Lstat of .obsidian inside a folder that passed the rules; nothing
+		// in the folder is read.
+		Obsidian: found.Usable() && secondbrain.IsObsidianVault(found.Path),
 	}, true
 }
 

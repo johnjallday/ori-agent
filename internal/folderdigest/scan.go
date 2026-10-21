@@ -52,6 +52,11 @@ var skippedFolders = map[string]bool{
 	".Trash":       true,
 }
 
+// IsDataless reports whether a file's Lstat result is an evicted iCloud Drive
+// placeholder, whose contents only the cloud holds. Opening one would start a
+// download, so a reader that opens files skips it. Always false off macOS.
+func IsDataless(info os.FileInfo) bool { return isDataless(info) }
+
 // Options tunes one scan. Zero values take the defaults above.
 type Options struct {
 	MaxDepth   int

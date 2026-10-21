@@ -1,0 +1,16 @@
+{{define "personal-assistant-second-brain.tmpl"}}
+<!-- Connect your second brain, as the assistant's first message after Personal
+     HQ: the ask, the chooser, the consent card, "Reading …" and the result are
+     steps of this one card, built by personal-assistant-second-brain.js from
+     server text with textContent only. A vault is named by its id and any other
+     folder by a selection token, never by a path. The card is one element: it
+     opens the conversation while the user is in the turn, and the module moves
+     the same element into Needs you when a page loads onto a result that is
+     still waiting for a decision. -->
+<section id="personalAssistantSecondBrain" class="pa-thread pa-thread__reply pa-specialist-offer pa-second-brain"
+         data-phase="idle" aria-label="Your notes" hidden>
+  <div id="personalAssistantSecondBrainBody"></div>
+  <p id="personalAssistantSecondBrainStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
+  <p id="personalAssistantSecondBrainError" class="pa-specialist-offer__error" role="alert" hidden></p>
+</section>
+{{end}}

@@ -492,8 +492,11 @@ the UI ("Missions · Starter", "Missions · Daily loop"). **Starter** is the fol
 story: Mission 01 hires the assistant (the only required mission), Mission 02
 shows it a folder, Mission 03 is what it found. **Daily loop** is Missions 04
 and 05, listed locked ("Starter first") beneath Starter and open once every
-Starter mission is resolved, completed or skipped. All five are featured, the
-others are optional, and each ends with Ori visibly doing something.
+Starter mission is resolved, completed or skipped. Starter also holds the
+unnumbered, optional **Connect your second brain** between Mission 01 and
+Mission 02 (see [Connect your second brain](#connect-your-second-brain)). All
+six are featured, the others are optional, and each ends with Ori visibly
+doing something.
 
 Locking is presentation only: `Match`, `Complete`, and backfill still run for a
 locked quest. The status view marks a locked mission `locked` with a
@@ -516,6 +519,7 @@ place, and a `t1-plan-first-day` completion counts as evidence for Mission 04.
 | Order | ID | Card | Completes when |
 | --- | --- | --- | --- |
 | 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
+| — | `pa-second-brain` | Connect your second brain, `/?quest=second-brain`, which opens the drawer on the second-brain chooser; names a detected vault ("Found: Second Brain"). **Locked until the HQ is built**, like Mission 02 | a notes folder connected to the HQ (`SecondBrainService.OnConnected`); "I don't keep notes" skips it; an existing connection grandfathers it |
 | 02 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`, which opens the one-card chooser; while an offer is pending, the offer itself renders on the card with its own buttons. **Locked until the HQ is built** ("Build your HQ first", action **Build My HQ**) | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
 | 03 | `pa-folder-first-look` | See what your assistant found; locked until Mission 02 is **completed**. Its card follows the latest folder workspace's first look (below) | a folder first task finishing with a non-empty result, observed from `task.completed` (`folderFirstTaskFinished`), wherever it was started |
 | 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
@@ -810,13 +814,17 @@ assistant makes one explained offer.
   authority re-validates against the offer's key, the workspace's primary
   directory, and the marker on disk, and a hidden or moved folder turns the
   fact into "Needs review".
-- **First prompt.** After HQ becomes active, the chooser appears once per
-  relationship as the assistant's first message in the conversation, "Now
+- **First prompt.** The assistant's first message after HQ becomes active is
+  the second-brain ask (below), which replaces this hand-over: while the
+  second-brain record can be read, `prompt_first_folder` stays false and the
+  folder chooser is never shown as an unprompted message, so a declined ask is
+  not followed by it. Only on a server without the second brain does the
+  chooser appear once per relationship as the assistant's first message, "Now
   let's explore a folder you're working in.", with no request from the user
   above it and without folding the top of the drawer. The
-  `POST /api/personal-assistant/folder-digest/prompted` receipt persists this
+  `POST /api/personal-assistant/folder-digest/prompted` receipt persists that
   presentation server-side; Reset Getting Started clears it. No chooser opens
-  before HQ exists, and further visits do not show it again: the chip is how a
+  before HQ exists, and the **Explore a folder** chip and Mission 02 stay how a
   folder is asked for.
 - **Mission.** See Mission 02 above. Every completion is server-observed.
 
@@ -831,6 +839,40 @@ for the current build) directory. On reload the current workspace and schedule
 are read from the server; the previous setup directory is not inferred from a
 possibly changed root. Both honor the results cap; a failed receipt read does
 not erase healthy results.
+
+## Connect your second brain
+
+Source: `tasks/prd-connect-second-brain.md`; the full contract is
+[second-brain.md](second-brain.md). The user's notes — an Obsidian vault found
+in Obsidian's own vault list, or any Markdown folder picked or pasted — are
+connected **read-only to the Personal HQ** as a source only the assistant's look
+service reads. There is no project workspace, no agent access, and no chat tool
+over them.
+
+- **The ask.** The assistant's first message after HQ is active, once per
+  relationship while nothing is connected: "Do you keep a second brain? I found
+  your Obsidian vault "{name}"…" with **Read {name}**, **Another folder…**,
+  **Not now** and **I don't keep notes**, or the nothing-detected form with
+  **Choose folder…**. The `POST /api/personal-assistant/second-brain/prompted`
+  receipt is recorded once the drawer is open while the ask shows. Not now is
+  offered again after a week; I don't keep notes skips the mission. Reset
+  Getting Started clears the ask and the missions, never the connection.
+- **Consent first.** Before anything is read a card names the folder, says it is
+  read-only, what is read, what leaves the machine (short excerpts to the named
+  system model, or "counts only" with none), and what Ori keeps (the path and the
+  open items, not the notes).
+- **One headline, one action.** The look reads within fixed bounds, extracts open
+  items, decisions, stale notes and people without a model, and leads with one
+  headline (the model's, validated, or the rules-only line) and **Add N as
+  follow-ups**; everything else is behind **Show everything**. It never ends
+  waiting on the user. Accepted items become `note_item` follow-ups once; a later
+  look completes those finished in the notes with "Done in your notes."
+- **Surfaces.** The drawer turn (a waiting result is placed once under Needs
+  you); Home Today ("Reading {name}…", "Looked at {name} · N open items");
+  the HQ map's **Notes** station beside Email; the Profile's Sources row with
+  Disconnect; the `second_brain` fact "You keep your notes in…", sent back to
+  review on Disconnect. A folder Ori can no longer find reads "Can't find
+  {name}" with Choose again, with no dialog.
 
 ## Surfaces and routing
 

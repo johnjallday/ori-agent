@@ -19,6 +19,9 @@ type FolderPathFound struct {
 	// Refusal is set instead of Path when the folder is real but one Ori will
 	// not open: the sentence that says why.
 	Refusal string
+	// Obsidian says the folder is an Obsidian vault (it holds .obsidian), so
+	// the card can also offer to connect it as the user's second brain.
+	Obsidian bool
 }
 
 // FolderPaths is the host's side of a folder path written in the chat. The
@@ -71,6 +74,11 @@ type HomeFolderProposal struct {
 	WarningNote    string `json:"warning_note,omitempty"`
 	WorkspaceID    string `json:"workspace_id,omitempty"`
 	WorkspaceName  string `json:"workspace_name,omitempty"`
+	// SecondBrainToken is a second, unbound selection of the same folder, held
+	// only for an Obsidian vault, for the card's Connect as my second brain.
+	// It names the folder to the second-brain connect the way the other token
+	// names it to explore or link.
+	SecondBrainToken string `json:"second_brain_token,omitempty"`
 }
 
 type folderPathTurnKey struct{}
@@ -240,6 +248,12 @@ func (t *folderPathTurn) finalize(response *HomeAssistantAskResponse) {
 		Kind: t.kind, SelectionToken: token, FolderName: t.found.Name, Path: t.found.Path,
 		Warning: t.found.Warning, WarningNote: t.found.WarningNote,
 		WorkspaceID: t.workspaceID, WorkspaceName: t.workspaceName,
+	}
+	if t.found.Obsidian {
+		// Best-effort: without it the card offers explore or link as before.
+		if second, err := t.paths.Hold(t.found.Path, ""); err == nil {
+			response.FolderProposal.SecondBrainToken = strings.TrimSpace(second)
+		}
 	}
 }
 
