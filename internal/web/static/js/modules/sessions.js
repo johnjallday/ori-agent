@@ -5057,6 +5057,15 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
+      if (data.group_requirement?.state === 'resource_workspace_exists') {
+        // The Home already has its one resource workspace: open it rather
+        // than ask for a team for a second one.
+        this.showWorkspaceCreateError(
+          `${String(data.group_requirement.summary || 'This Home already has it.')} Opening it…`
+        );
+        if (await this.openExistingResourceWorkspace(data.group_requirement.existing_workspace_id))
+          return;
+      }
       this.applyHomeInputDefaults(data.group_requirement?.home?.input_defaults || null);
       if (draft && api) api.setPlanReady(draft, blueprintKey, data);
       await this.ensureEditAgentModelOptions();
@@ -10189,6 +10198,27 @@ const sessionManager = {
   // commits: a review prepared by the click is used by the same click. A quiet
   // review reports nothing; whatever is not ready is left for Create to say.
   // Returns true when the request carries a reviewed placement and may be sent.
+  // A Home holds one resource workspace. When it already exists, the wizard
+  // opens that workspace's page instead of creating another; a page is routed
+  // by its folder slug, so the ID is read once to find it.
+  async openExistingResourceWorkspace(workspaceID) {
+    const id = String(workspaceID || '').trim();
+    if (!id) return false;
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return false;
+      const body = await response.json().catch(() => ({}));
+      const slug = String((body?.data ?? body)?.folder_slug || '').trim();
+      if (!slug) return false;
+      window.location.assign(`/workspaces/${encodeURIComponent(slug)}`);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  },
+
   async prepareGroupRequirementCommit(endpoint, payload, { quiet = false } = {}) {
     const draft = this.groupRequirementDraft;
     if (!draft || window.SetupWorkspaceCreator?.isActive()) return true;
@@ -10244,6 +10274,16 @@ const sessionManager = {
       );
       this.goToWizardStep(2);
       document.getElementById('workspaceGroupDestinationTitle')?.focus();
+      return false;
+    }
+    if (review.state === 'resource_workspace_exists') {
+      // The Home already has its one resource workspace: open that instead
+      // of offering a second one.
+      if (quiet) return false;
+      this.showWorkspaceCreateError(
+        `${String(review.summary || 'This Home already has it.')} Opening it…`
+      );
+      await this.openExistingResourceWorkspace(review.existing_workspace_id);
       return false;
     }
     if (review.state !== 'ready_grouped' && review.state !== 'ready_standalone') {
@@ -15786,6 +15826,16 @@ const sessionManager = {
           result = {};
         }
         if (!response.ok) this.mirrorWorkspaceBuildError(result.error || result.message);
+
+        if (response.status === 409 && result.code === 'resource_workspace_exists') {
+          // Another request created the Home's one resource workspace first;
+          // the server rolled this copy back. Open that one.
+          this.showWorkspaceCreateError(
+            `${String(result.error || 'This Home already has it.')} Opening it…`
+          );
+          await this.openExistingResourceWorkspace(result.existing_workspace_id);
+          return;
+        }
 
         if (response.status === 409 && importEnabled && result.duplicate) {
           this.showImportDuplicateWarning(result.duplicate);
@@ -21437,9 +21487,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (openCreate || openImport) {
       const blueprint = String(params.get('blueprint') || '').trim();
+      // A Home's "Set up" action names itself as the locked parent of the
+      // blueprint it opens. The server still decides whether that Home may
+      // hold it; the parameter only preselects.
+      const parent = String(params.get('parent') || '').trim();
+      const lockedParent =
+        openCreate && blueprint && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(parent) ? parent : '';
       params.delete('create');
       params.delete('import');
       params.delete('blueprint');
+      params.delete('parent');
       const qs = params.toString();
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
@@ -21452,7 +21509,8 @@ document.addEventListener('DOMContentLoaded', () => {
               ? `${blueprint.replace(/-/g, '_')}_cta`
               : 'home_first_run',
           blueprint: blueprint && !openImport ? blueprint : undefined,
-          importMode: openImport
+          importMode: openImport,
+          ...(lockedParent ? { parentId: lockedParent, parentLocked: true } : {})
         })
       );
     }

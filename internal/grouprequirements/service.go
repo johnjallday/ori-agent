@@ -38,6 +38,9 @@ const (
 	StateSourceUnavailable          State = "source_unavailable"
 	StateTargetAmbiguous            State = "target_ambiguous"
 	StateContractInvalid            State = "contract_invalid"
+	// StateResourceWorkspaceExists means the Home already has the one
+	// resource workspace this template would create; open it instead.
+	StateResourceWorkspaceExists State = "resource_workspace_exists"
 )
 
 type Action string
@@ -54,6 +57,8 @@ const (
 	ActionChangeTemplate Action = "change_template"
 	ActionManagePlugins  Action = "manage_plugins"
 	ActionRetry          Action = "retry"
+	// ActionOpenExistingWorkspace routes to Evaluation.ExistingWorkspaceID.
+	ActionOpenExistingWorkspace Action = "open_existing_workspace"
 )
 
 type OperationKind string
@@ -86,6 +91,9 @@ type Input struct {
 	// inert Group Template provenance in the same write as the Home.
 	GroupTemplateID       string
 	GroupTemplateRevision string
+	// replayChildWorkspaceID is the child an idempotent replay already made.
+	// It is that operation's own resource workspace, never a second one.
+	replayChildWorkspaceID string
 }
 
 type IndependentHomeResolution struct {
@@ -123,6 +131,7 @@ type Evaluation struct {
 	HomeWorkspaceID     string                                   `json:"home_workspace_id,omitempty"`
 	HomeName            string                                   `json:"home_name,omitempty"`
 	HomeWillBeCreated   bool                                     `json:"home_will_be_created,omitempty"`
+	ExistingWorkspaceID string                                   `json:"existing_workspace_id,omitempty"`
 	Summary             string                                   `json:"summary"`
 	Detail              string                                   `json:"detail,omitempty"`
 	Actions             []Action                                 `json:"actions,omitempty"`
@@ -373,6 +382,19 @@ func (s *Service) Evaluate(input Input) Evaluation {
 		}
 		if requested := strings.TrimSpace(input.RequestedParentID); requested != "" && requested != home.ID {
 			return unavailable(StateContractInvalid, "The requested parent is not the template's canonical group.", ActionRetry)
+		}
+		if evaluation.ProjectOwner != nil && evaluation.ProjectOwner.IsResource() {
+			existing, existingErr := programs.ActiveResourceWorkspace(home.ID, evaluation.ProjectOwner)
+			if existingErr != nil {
+				return unavailable(StateSourceUnavailable, "The Home's workspaces could not be read.", ActionRetry)
+			}
+			if existing != nil && existing.ID != input.replayChildWorkspaceID && (targetWorkspace == nil || targetWorkspace.ID != existing.ID) {
+				return Evaluation{
+					State: StateResourceWorkspaceExists, Policy: requirement.Policy, HomeWorkspaceID: home.ID, HomeName: home.Name,
+					ExistingWorkspaceID: existing.ID, Summary: "This Home already has it.",
+					Actions: []Action{ActionOpenExistingWorkspace},
+				}
+			}
 		}
 		evaluation.State = StateReadyGrouped
 		evaluation.HomeWorkspaceID = home.ID
@@ -713,7 +735,9 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 		if existing.InputDigest != receipt.InputDigest || existing.ReviewDigest != receipt.ReviewDigest {
 			return Claim{}, ErrOperationConflict
 		}
-		current := s.Evaluate(input)
+		replay := input
+		replay.replayChildWorkspaceID = existing.ChildWorkspaceID
+		current := s.Evaluate(replay)
 		if err := receiptMatches(receipt, input, current); err != nil {
 			return Claim{}, err
 		}
@@ -730,6 +754,10 @@ func (s *Service) Claim(ctx context.Context, input Input, token, idempotencyKey 
 	}
 
 	current := s.Evaluate(input)
+	if current.State == StateResourceWorkspaceExists {
+		// Another request made the one resource workspace after this review.
+		return Claim{}, &workspace.ResourceWorkspaceExistsError{WorkspaceID: current.ExistingWorkspaceID}
+	}
 	if err := receiptMatches(receipt, input, current); err != nil {
 		return Claim{}, err
 	}

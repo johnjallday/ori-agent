@@ -122,6 +122,9 @@
 }
 .ws-cmd-nav {
   flex: 1 0 100%;
+  /* Never wider than the bar: a long group name shortens, it does not push
+     the row (and the page) past a phone's width. */
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -149,13 +152,35 @@
   border-color: var(--ws-faction-deep);
   text-decoration: none;
 }
+/* Inside the border: the clip-path above cuts away anything drawn outside it,
+   which used to include the whole focus ring. */
 .ws-cmd-nav-btn:focus-visible {
   outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
+  outline-offset: -4px;
 }
 .ws-cmd-nav-btn:disabled {
   cursor: progress;
   opacity: 0.6;
+}
+/* The parent group link. A long name gives way first; the link's text and
+   title still carry all of it. The name keeps the case its owner chose. */
+.ws-cmd-nav-parent {
+  gap: 6px;
+  min-width: 0;
+  max-width: min(320px, 100%);
+}
+.ws-cmd-nav-parent-arrow {
+  flex: none;
+}
+.ws-cmd-nav-parent-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-nav-parent-name {
+  text-transform: none;
+  letter-spacing: 0.5px;
 }
 .ws-cmd-view-switch {
   margin-left: auto;
@@ -6469,11 +6494,22 @@ button.ws-cmd-rpg-class-card:focus-visible {
     flex: 1 1 calc(50% - 8px);
     justify-content: center;
   }
+  /* Five views (with Dashboard and Plans) are wider than a phone: the tabs
+     wrap onto a second row instead of pushing the page sideways. */
   .ws-cmd-view-switch {
     flex: 1 1 100%;
+    flex-wrap: wrap;
   }
+  /* The name gets its own line rather than being squeezed to nothing by the
+     badges and the status chip beside it. */
+  .ws-cmd-title-row {
+    flex-wrap: wrap;
+  }
+  /* Equal widths when they fit, but never narrower than the label: a tab that
+     does not fit wraps rather than cutting its word in half. */
   .ws-cmd-view-btn {
     flex: 1 1 0;
+    min-width: max-content;
   }
   .ws-cmd-opmap {
     min-height: 560px;

@@ -63,6 +63,23 @@ export class AssistantProgramEntry {
       switcher.insertBefore(link, plans || null);
     }
     this.renderProfileLink(switcher, plans, homeName);
+    this.renderCatalogLink(switcher, plans);
+  }
+
+  // A resource workspace holds a catalog on its own page.
+  renderCatalogLink(switcher, plans) {
+    if (
+      !this.program?.resource_workspace ||
+      switcher.querySelector('[data-resource-catalog-entry]')
+    )
+      return;
+    const link = document.createElement('a');
+    link.className = 'ws-cmd-view-btn ws-cmd-view-link';
+    link.dataset.resourceCatalogEntry = '';
+    link.href = workspacePageURL(this.workspaceSlug, ['catalog']);
+    link.textContent = 'Catalog';
+    link.setAttribute('aria-label', 'Open this workspace’s catalog');
+    switcher.insertBefore(link, plans || null);
   }
 
   // A Home whose package declares a profile card gets a second link, named by

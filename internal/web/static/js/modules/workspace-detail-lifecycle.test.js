@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
+import { flattenWorkspaceTree } from './workspace-map-snapshot.js';
 
 globalThis.window = { location: { search: '', pathname: '/workspaces/workspace-slug' } };
 globalThis.document = {};
-const { WorkspaceDetailPage } = await import('./workspace-detail.js');
+const { WorkspaceDetailPage, resolveParentGroup } = await import('./workspace-detail.js');
 
 function deferred() {
   let resolve;
@@ -1170,4 +1171,337 @@ test('owned global listeners and delayed callbacks are removed and ignore late d
   assert.equal(listeners.size, 0);
   assert.equal(timers.size, 0);
   assert.equal(calls, 1);
+});
+
+// --- Parent group navigation (workspace-parent-group-navigation) -------------
+//
+// Ids, names, and slugs are deliberately distinct so a test can tell which one
+// ended up where: the link is built from the group's slug, never its UUID.
+
+const STUDIO_GROUP = {
+  id: '4c7f0e2a-studio-group',
+  name: 'Studio Sessions',
+  kind: 'group',
+  folder_slug: 'studio-sessions'
+};
+const LABEL_GROUP = {
+  id: '9a13d6b8-label-group',
+  name: 'Label Releases',
+  kind: 'group',
+  folder_slug: 'label-releases'
+};
+
+// The page's own workspace ('ws') as a member of `group`, plus a standalone.
+function memberTree(group = STUDIO_GROUP) {
+  return {
+    folders: [
+      {
+        ...group,
+        children: [
+          {
+            id: 'ws',
+            name: 'Drum Tracking',
+            kind: 'workspace',
+            folder_slug: 'workspace-slug',
+            parent_id: group.id,
+            children: [{ id: 'take-uuid', name: 'Take 3', folder_slug: 'take-3' }]
+          }
+        ]
+      },
+      { id: 'solo-uuid', name: 'Solo Notes', kind: 'workspace', folder_slug: 'solo-notes' }
+    ]
+  };
+}
+
+const descriptorFor = group => ({
+  workspaceId: 'ws',
+  id: group.id,
+  name: group.name,
+  slug: group.folder_slug
+});
+
+function watchParentSyncs(view) {
+  view.syncs = 0;
+  window.workspaceCommand.syncParentGroupLink = () => view.syncs++;
+}
+
+test('resolveParentGroup returns the immediate group, or nothing a link could not honestly use', () => {
+  const nested = [
+    {
+      ...LABEL_GROUP,
+      children: [
+        {
+          ...STUDIO_GROUP,
+          parent_id: LABEL_GROUP.id,
+          children: [
+            // No parent_id: the containing node is the parent (flattenWorkspaceTree).
+            { id: 'leaf-uuid', name: 'Track 07', kind: 'workspace', folder_slug: 'track-07' }
+          ]
+        }
+      ]
+    },
+    { id: 'root-uuid', name: 'Root Desk', kind: 'workspace', folder_slug: 'root-desk' }
+  ];
+  const rows = flattenWorkspaceTree(nested);
+  assert.deepEqual(resolveParentGroup(rows, 'leaf-uuid'), {
+    workspaceId: 'leaf-uuid',
+    id: STUDIO_GROUP.id,
+    name: 'Studio Sessions',
+    slug: 'studio-sessions'
+  });
+  assert.deepEqual(
+    resolveParentGroup(rows, STUDIO_GROUP.id),
+    {
+      workspaceId: STUDIO_GROUP.id,
+      id: LABEL_GROUP.id,
+      name: 'Label Releases',
+      slug: 'label-releases'
+    },
+    'a nested group goes one level up'
+  );
+  assert.equal(resolveParentGroup(rows, LABEL_GROUP.id), null, 'a top-level group');
+  assert.equal(resolveParentGroup(rows, 'root-uuid'), null, 'an ungrouped workspace');
+  assert.equal(resolveParentGroup(rows, 'missing-uuid'), null, 'not in the tree');
+  assert.equal(resolveParentGroup(rows, ''), null);
+  assert.equal(resolveParentGroup(null, 'leaf-uuid'), null);
+
+  const parentWith = (parent, child = {}) =>
+    resolveParentGroup(
+      flattenWorkspaceTree([
+        { ...parent, children: [{ id: 'child-uuid', name: 'Child', ...child }] }
+      ]),
+      'child-uuid'
+    );
+  assert.equal(
+    parentWith({ id: 'plain-uuid', name: 'Plain', kind: 'workspace', folder_slug: 'plain' }),
+    null,
+    'a parent that is not a group'
+  );
+  assert.equal(parentWith({ ...STUDIO_GROUP, folder_slug: '' }), null, 'a group without a slug');
+  assert.equal(parentWith({ ...STUDIO_GROUP, folder_slug: '   ' }), null);
+  assert.equal(
+    parentWith(STUDIO_GROUP, { parent_id: 'child-uuid' }),
+    null,
+    'a workspace naming itself as its parent'
+  );
+  assert.equal(
+    parentWith(STUDIO_GROUP, { parent_id: 'pruned-uuid' }),
+    null,
+    'a parent the tree does not contain'
+  );
+  assert.equal(
+    parentWith({ ...STUDIO_GROUP, name: '' }).name,
+    'studio-sessions',
+    'an unnamed group is named by its slug'
+  );
+});
+
+test('the tree read that lists children also resolves the parent group, with no other fetch', async t => {
+  const { page, view } = makePage(t);
+  watchParentSyncs(view);
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    urls.push(url);
+    return response(memberTree());
+  });
+  await page.loadChildren();
+  assert.deepEqual(urls, ['/api/workspaces?tree=true']);
+  assert.deepEqual(page.parentGroup, descriptorFor(STUDIO_GROUP));
+  assert.equal(page.children[0].name, 'Take 3', 'children come from the same read');
+  assert.equal(view.syncs, 1);
+
+  // The same answer again changes nothing, so the header is not touched.
+  await page.loadChildren();
+  assert.deepEqual(page.parentGroup, descriptorFor(STUDIO_GROUP));
+  assert.equal(view.syncs, 3, 'cleared as the read began, then set again');
+  view.syncs = 0;
+  page.publishParentGroup(descriptorFor(STUDIO_GROUP));
+  assert.equal(view.syncs, 0, 'an equal descriptor is not republished');
+});
+
+test('a full workspace load resolves the parent through the real header render path', async t => {
+  const { page, view } = makePage(t);
+  page.renderWorkspaceInfo = WorkspaceDetailPage.prototype.renderWorkspaceInfo;
+  watchParentSyncs(view);
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    urls.push(url);
+    return response(url.includes('tree=true') ? memberTree() : workspace('loaded'));
+  });
+  await page.loadWorkspace();
+  assert.deepEqual(urls, ['/api/orchestration/workspace?id=ws', '/api/workspaces?tree=true']);
+  assert.deepEqual(page.parentGroup, descriptorFor(STUDIO_GROUP));
+  assert.equal(view.refreshes, 1);
+});
+
+test('a new tree read removes the previous parent before it answers', async t => {
+  const { page, view } = makePage(t);
+  page.parentGroup = descriptorFor(STUDIO_GROUP);
+  watchParentSyncs(view);
+  const pending = deferred();
+  t.mock.method(globalThis, 'fetch', () => pending.promise);
+  const read = page.loadChildren();
+  assert.equal(page.parentGroup, null, 'no render during the read can show the old group');
+  assert.equal(view.syncs, 1, 'the removal is published at once');
+  // The workspace has since left its group.
+  pending.resolve(
+    response({ folders: [{ id: 'ws', name: 'Drum Tracking', folder_slug: 'workspace-slug' }] })
+  );
+  await read;
+  assert.equal(page.parentGroup, null);
+  assert.equal(view.syncs, 1);
+});
+
+for (const [label, reply] of [
+  ['an HTTP error', async () => ({ ok: false, status: 500, json: async () => memberTree() })],
+  [
+    'a network failure',
+    async () => {
+      throw new TypeError('Failed to fetch');
+    }
+  ],
+  [
+    'an unreadable body',
+    async () => ({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError('Unexpected token');
+      }
+    })
+  ],
+  ['a tree without this workspace', async () => response({ folders: [STUDIO_GROUP] })],
+  ['an empty body', async () => response({})]
+]) {
+  test(`${label} leaves no parent link`, async t => {
+    const { page, view } = makePage(t);
+    page.parentGroup = descriptorFor(STUDIO_GROUP);
+    watchParentSyncs(view);
+    t.mock.method(globalThis, 'fetch', reply);
+    await page.loadChildren();
+    assert.equal(page.parentGroup, null);
+    assert.deepEqual(page.children, []);
+    assert.equal(view.syncs, 1);
+  });
+}
+
+for (const outcome of ['response', 'failure']) {
+  test(`an obsolete tree ${outcome} cannot replace or clear the newer parent`, async t => {
+    const { page, view } = makePage(t);
+    watchParentSyncs(view);
+    const pending = deferred();
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', () =>
+      ++calls === 1 ? pending.promise : Promise.resolve(response(memberTree(LABEL_GROUP)))
+    );
+    const oldRead = page.loadChildren();
+    await page.loadChildren();
+    assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+    const syncs = view.syncs;
+    if (outcome === 'response') pending.resolve(response(memberTree(STUDIO_GROUP)));
+    else pending.reject(new Error('obsolete failure'));
+    await oldRead;
+    assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+    assert.equal(view.syncs, syncs);
+    assert.equal(view.errors.length, 0);
+  });
+}
+
+test('a workspace read removes the parent as it begins, before its tree read', async t => {
+  const { page, view } = makePage(t);
+  page.parentGroup = descriptorFor(STUDIO_GROUP);
+  watchParentSyncs(view);
+  const pending = deferred();
+  t.mock.method(globalThis, 'fetch', () => pending.promise);
+  const read = page.loadWorkspace();
+  assert.equal(page.parentGroup, null);
+  assert.equal(view.syncs, 1);
+  // A failed workspace read never reaches the tree, so the link stays gone.
+  pending.reject(new Error('offline'));
+  await read;
+  assert.equal(page.parentGroup, null);
+  assert.equal(view.syncs, 1);
+});
+
+test('a newer workspace read silences the tree read that depended on the older one', async t => {
+  const { page, view } = makePage(t);
+  watchParentSyncs(view);
+  const parent = page.beginResourceRequest('workspace');
+  const tree = deferred();
+  const newerWorkspace = deferred();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', () => (++calls === 1 ? tree.promise : newerWorkspace.promise));
+  const read = page.loadChildren(parent);
+  const newer = page.loadWorkspace(); // supersedes `parent`, and with it the tree read
+  tree.resolve(response(memberTree()));
+  await read;
+  assert.equal(page.parentGroup, null);
+  assert.equal(view.syncs, 0);
+  page.destroy();
+  newerWorkspace.resolve(response(workspace('new')));
+  await newer;
+  assert.equal(page.parentGroup, null);
+});
+
+test('a tree read finishing after teardown publishes nothing', async t => {
+  const { page, view } = makePage(t);
+  watchParentSyncs(view);
+  const pending = deferred();
+  t.mock.method(globalThis, 'fetch', () => pending.promise);
+  const read = page.loadChildren();
+  page.destroy();
+  pending.resolve(response(memberTree()));
+  await read;
+  assert.equal(page.parentGroup, null);
+  assert.equal(view.syncs, 0);
+});
+
+test('a header refresh outside a full load (an inline edit) also publishes the parent', async t => {
+  const { page, view } = makePage(t);
+  page.renderWorkspaceInfo = WorkspaceDetailPage.prototype.renderWorkspaceInfo;
+  page.parentGroup = descriptorFor(STUDIO_GROUP);
+  watchParentSyncs(view);
+  // The workspace moved to another group since the page loaded.
+  t.mock.method(globalThis, 'fetch', async () => response(memberTree(LABEL_GROUP)));
+  await page.renderWorkspaceInfo(); // what saveWorkspaceIdentityField runs after a rename
+  assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+  assert.equal(view.syncs, 2, 'removed as the read began, then the new group');
+  assert.equal(view.refreshes, 0, 'only the link is updated; no full Command render');
+});
+
+test('an older full load cannot overwrite the group a newer full load resolved', async t => {
+  const { page, view } = makePage(t);
+  page.renderWorkspaceInfo = WorkspaceDetailPage.prototype.renderWorkspaceInfo;
+  watchParentSyncs(view);
+  const oldTree = deferred();
+  let trees = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (!url.includes('tree=true')) return response(workspace('loaded'));
+    return ++trees === 1 ? oldTree.promise : response(memberTree(LABEL_GROUP));
+  });
+  const oldLoad = page.loadWorkspace();
+  while (trees === 0) await flush(); // the old load is waiting on its tree read
+  await page.loadWorkspace();
+  assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+  const syncs = view.syncs;
+  oldTree.resolve(response(memberTree(STUDIO_GROUP)));
+  await oldLoad;
+  assert.deepEqual(page.parentGroup, descriptorFor(LABEL_GROUP));
+  assert.equal(view.syncs, syncs);
+});
+
+test('an unrelated Command refresh during a pending tree read cannot show the old group', async t => {
+  const dataLoader = { loadTasks: async () => ({ tasks: [{ id: 'task-1' }] }) };
+  const { page, view } = makePage(t, { dataLoader });
+  page.parentGroup = descriptorFor(STUDIO_GROUP);
+  watchParentSyncs(view);
+  const seenByRefresh = [];
+  window.workspaceCommand.refresh = () => seenByRefresh.push(page.parentGroup);
+  const tree = deferred();
+  t.mock.method(globalThis, 'fetch', () => tree.promise);
+  const read = page.loadChildren();
+  await page.loadTasks(); // re-renders the whole Command view mid-read
+  assert.deepEqual(seenByRefresh, [null]);
+  tree.resolve(response(memberTree()));
+  await read;
+  assert.deepEqual(page.parentGroup, descriptorFor(STUDIO_GROUP));
 });

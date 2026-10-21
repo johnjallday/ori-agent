@@ -101,6 +101,21 @@
   cursor: pointer;
 }
 
+/* "Ready to move as of <date, time>" is wider than a phone's title column:
+   there it wraps inside the chip instead of running off the page. */
+@media (max-width: 640px) {
+  .ws-cmd-continuity-mount {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .ws-cmd-continuity-mount .workspace-continuity-chip {
+    white-space: normal;
+    line-height: 1.3;
+    text-align: left;
+  }
+}
+
 /* A workspace's own Daily Brief history (workspace-daily-briefs.js). */
 .workspace-brief-history {
   margin-bottom: 1rem;

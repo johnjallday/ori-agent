@@ -29,19 +29,27 @@ type HomeUpgradeChange struct {
 	// installed one does not have; HomeProfileTitle is that card's title.
 	AddsHomeProfile  bool
 	HomeProfileTitle string
+	// AddedResourceAttachments are resource attachments the newer release
+	// appends after every existing attachment, in declaration order.
+	AddedResourceAttachments []AssistantProgramAllowedProjectAttachment
 }
 
 // AcceptedHomeChange compares two releases of one Home declaration and accepts
-// exactly two classes of difference, alone or together:
+// exactly three classes of difference, alone or together:
 //
 //   - guidance only: role prompts changed (GuidanceOnlyHomeChange);
 //   - additive profile: the newer release adds a `home_profile` section and
-//     the installed one has none.
+//     the installed one has none;
+//   - additive resource attachment: the newer release appends resource
+//     attachments after the installed ones, which stay byte-identical and in
+//     the same order.
 //
 // Anything else is ErrHomeUpgradeNotGuidanceOnly: a profile section that was
-// changed or removed, or any other difference. An added profile is inert for
-// the Homes it reaches: it only declares a card, and nothing is detected or
-// read until the owner opens it.
+// changed or removed, an existing attachment that was widened, reordered or
+// removed, an appended project attachment, or any other difference. Both
+// additions are inert for the Homes they reach: a card that reads nothing
+// until it is opened, and an allowance that creates nothing until the owner
+// sets the resource workspace up.
 func AcceptedHomeChange(current, next AssistantProgramHome) (HomeUpgradeChange, error) {
 	change := HomeUpgradeChange{}
 	if current.HomeProfile == nil && next.HomeProfile != nil {
@@ -49,6 +57,18 @@ func AcceptedHomeChange(current, next AssistantProgramHome) (HomeUpgradeChange, 
 		// Set the added section aside; everything else must still be
 		// guidance-only.
 		next.HomeProfile = nil
+	}
+	if added := len(next.AllowedProjectAttachments) - len(current.AllowedProjectAttachments); added > 0 {
+		appended := next.AllowedProjectAttachments[len(current.AllowedProjectAttachments):]
+		for _, attachment := range appended {
+			if !attachment.IsResource() {
+				return HomeUpgradeChange{}, ErrHomeUpgradeNotGuidanceOnly
+			}
+		}
+		change.AddedResourceAttachments = append([]AssistantProgramAllowedProjectAttachment(nil), appended...)
+		// The existing entries are compared byte for byte below with the
+		// rest of the declaration, so only an append is set aside.
+		next.AllowedProjectAttachments = next.AllowedProjectAttachments[:len(current.AllowedProjectAttachments):len(current.AllowedProjectAttachments)]
 	}
 	prompts, err := GuidanceOnlyHomeChange(current, next)
 	if err != nil {

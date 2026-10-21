@@ -1,0 +1,6 @@
+{
+  "name": "reaper-plugin",
+  "version": "0.11.0-fixture",
+  "description": "Test fixture: a REAPER Studio catalog provider whose service answers from fixed data. It reads no folder and talks to no REAPER. Not the published plugin.",
+  "author": "Ori contributors"
+}

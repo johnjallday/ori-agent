@@ -190,9 +190,7 @@ func independentRolesPackaged(skills []string, roles []workspace.AssistantProgra
 func independentHomeAllowsProject(home projecttemplates.AssistantProgramHome, project workspace.AssistantProjectProviderOwner) bool {
 	matches := 0
 	for _, allowed := range home.AllowedProjectAttachments {
-		if allowed.ProviderPluginID == project.PluginID && allowed.BlueprintID == project.BlueprintID &&
-			allowed.ProjectTeamID == project.ProjectTeamID && allowed.ProjectTeamSchemaVersion == project.ProjectTeamSchema &&
-			project.ProjectTeamVersion >= allowed.MinProjectTeamVersion && project.ProjectTeamVersion <= allowed.MaxProjectTeamVersion {
+		if allowed.Accepts(project.PluginID, project.BlueprintID, project.ProjectTeamID, project.ProjectTeamSchema, project.ProjectTeamVersion, project.WorkspaceKind) {
 			matches++
 		}
 	}

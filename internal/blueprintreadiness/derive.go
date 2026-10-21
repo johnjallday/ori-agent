@@ -373,9 +373,7 @@ func independentHomeReadiness(template projecttemplates.Template, projectPlugin 
 		}
 		attachments := 0
 		for _, allowed := range home.AllowedProjectAttachments {
-			if allowed.ProviderPluginID == projectPlugin.Name && allowed.BlueprintID == blueprintID &&
-				allowed.ProjectTeamID == project.ID && allowed.ProjectTeamSchemaVersion == project.SchemaVersion &&
-				project.Version >= allowed.MinProjectTeamVersion && project.Version <= allowed.MaxProjectTeamVersion {
+			if allowed.Accepts(projectPlugin.Name, blueprintID, project.ID, project.SchemaVersion, project.Version, project.WorkspaceKind) {
 				attachments++
 			}
 		}

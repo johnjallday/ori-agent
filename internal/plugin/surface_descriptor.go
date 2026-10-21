@@ -67,6 +67,12 @@ const (
 	// decodes either key strictly and rejects the whole package, so a release
 	// that uses one declares this feature and is refused before install.
 	HostFeatureHomeProfileV1 = "home_profile_v1"
+	// HostFeatureResourceWorkspacesV1 gates resource workspaces: a Home
+	// attachment's workspace_kind/label/description, a blueprint team's
+	// workspace_kind, and a top-level `resource_catalog`. An older host rejects
+	// those fields strictly, so a release that uses them is refused before
+	// install and its resolver steps down to an older release.
+	HostFeatureResourceWorkspacesV1 = "resource_workspaces_v1"
 )
 
 // hostFeatures is what this build advertises. It is the one list: a second copy
@@ -83,6 +89,7 @@ var hostFeatures = []string{
 	HostFeatureBlueprintIntakeV1,
 	HostFeatureIndependentProgramHomesV1,
 	HostFeatureHomeProfileV1,
+	HostFeatureResourceWorkspacesV1,
 }
 
 // HostFeatures returns the features this build advertises, newest last.
@@ -175,7 +182,11 @@ type SurfaceContribution struct {
 	// HomeProfileFacts names the one read-only operation that reports facts
 	// about this plugin's own application for a Home profile. A manifest that
 	// declares it must require the home_profile_v1 host feature.
-	HomeProfileFacts      *HomeProfileFactsRef                    `json:"home_profile_facts,omitempty"`
+	HomeProfileFacts *HomeProfileFactsRef `json:"home_profile_facts,omitempty"`
+	// ResourceCatalog is a resource workspace's catalog declaration, held raw
+	// so it is decoded by its own strict reader (duplicate keys included). A
+	// manifest that declares it must require resource_workspaces_v1.
+	ResourceCatalog       json.RawMessage                         `json:"resource_catalog,omitempty"`
 	Blueprints            []ContributedBlueprint                  `json:"blueprints,omitempty"`
 	AssistantProgramHomes []projecttemplates.AssistantProgramHome `json:"assistant_program_homes,omitempty"`
 	SetupQuests           []SetupQuest                            `json:"setup_quests,omitempty"`
@@ -445,6 +456,11 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "home_profile_facts requires home_profile_v1", nil)
 		}
 	}
+	if c.declaresResourceWorkspaceFields() {
+		if _, declared := seenHostFeatures[HostFeatureResourceWorkspacesV1]; !declared {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "resource workspace declarations require resource_workspaces_v1", nil)
+		}
+	}
 	if err := validateSetupQuests(c); err != nil {
 		return contributionError(CodeContributionInvalid, "manifest", "setup_quests", "setup quest declarations are invalid", err)
 	}
@@ -489,6 +505,9 @@ func validateContributionComponents(c *SurfaceContribution) error {
 		}
 	}
 	if err := validateHomeProfileFacts(c.HomeProfileFacts, services); err != nil {
+		return err
+	}
+	if err := validateResourceCatalog(c, services); err != nil {
 		return err
 	}
 

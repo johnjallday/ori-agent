@@ -394,6 +394,14 @@ export function templatesView(view, { locale, timeZone } = {}) {
   }
 }
 
+// catalogTemplatesNote is the templates row once the Home's resource catalog
+// holds the current list: its count and freshness, in its own name.
+export function catalogTemplatesNote(evidence, { locale, timeZone } = {}) {
+  const when = evidence?.inspectedAt ? profileDate(evidence.inspectedAt, locale, timeZone) : '';
+  const partial = evidence?.state === 'partial' ? ' The last read was partial.' : '';
+  return `${countOf(Number(evidence?.present) || 0, 'template')} in ${evidence?.label || 'the catalog'}${when ? `, inspected ${when}` : ''}.${partial}`;
+}
+
 // What the status line says after an action finished.
 export function profileStatus(action, view) {
   switch (action) {
@@ -606,7 +614,19 @@ export class HomeProfilePanel {
     return section;
   }
 
+  // setCatalogTemplates hands the row to the Home's resource catalog once it
+  // has a current read of templates (contract §12): the row then shows that
+  // count and link, and the list it read itself stays as an earlier list.
+  setCatalogTemplates(evidence) {
+    this.catalogTemplates = evidence || null;
+    if (this.view) this.render();
+  }
+
   renderTemplates(section) {
+    if (this.catalogTemplates) {
+      this.renderCatalogTemplates(section, this.catalogTemplates);
+      return;
+    }
     const view = templatesView(this.view);
     section.dataset.state = view.state;
     section.append(element('p', 'home-profile-note home-profile-templates-note', view.note));
@@ -625,6 +645,38 @@ export class HomeProfilePanel {
     if (view.canReadAgain) actions.append(button('Read again', 'read-templates', '', off));
     if (view.canForget) actions.append(button('Forget', 'forget-templates', '', off));
     if (actions.childElementCount) section.append(actions);
+  }
+
+  renderCatalogTemplates(section, evidence) {
+    const view = templatesView(this.view);
+    section.dataset.state = 'catalog';
+    section.append(
+      element('p', 'home-profile-note home-profile-templates-note', catalogTemplatesNote(evidence))
+    );
+    const open = element('a', 'modern-btn modern-btn-secondary', `Open ${evidence.label}`);
+    open.href = evidence.url;
+    const actions = element('div', 'home-profile-actions');
+    actions.append(open);
+    if (view.canForget)
+      actions.append(
+        button('Forget earlier list', 'forget-templates', '', this.busy || view.disabled)
+      );
+    const earlier = [...view.project, ...view.track];
+    if (earlier.length) {
+      const read = profileDate(this.view?.profile?.templates?.read_at);
+      const line = element('p', 'home-profile-templates home-profile-templates-earlier');
+      line.append(
+        element(
+          'span',
+          'home-profile-templates-kind',
+          read ? `Earlier list (read ${read})` : 'Earlier list'
+        ),
+        ' ',
+        earlier.join(', ')
+      );
+      section.append(line);
+    }
+    section.append(actions);
   }
 
   // The consent dialog: the application, the folders, one sentence, and one

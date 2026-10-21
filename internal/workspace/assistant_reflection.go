@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -106,12 +107,30 @@ func (service *AssistantReflectionService) EnsureSchedule(stationID string) erro
 	if service == nil || service.store == nil {
 		return ErrAssistantReflectionUnavailable
 	}
+	// Reflection needs songs; read which linked children are resource
+	// workspaces before the write, since a store read inside it could wait on
+	// the write's own lock.
+	resources := map[string]bool{}
+	if station, err := service.store.Get(stationID); err == nil && station != nil {
+		if state := station.GetAssistantProgramState(); state != nil {
+			songs := SongProjectIDs(service.store, state.LinkedProjectIDs)
+			for _, id := range state.LinkedProjectIDs {
+				resources[id] = !slices.Contains(songs, id)
+			}
+		}
+	}
 	return service.store.Update(stationID, func(current *Workspace) error {
 		state := current.GetAssistantProgramState()
 		if state == nil || state.Declaration == nil {
 			return ErrAssistantStationNotFound
 		}
-		if !state.Hired || len(NormalizeAssistantProjectIDs(state.LinkedProjectIDs)) < state.Declaration.Reflection.MinimumProjects {
+		songCount := 0
+		for _, id := range NormalizeAssistantProjectIDs(state.LinkedProjectIDs) {
+			if !resources[id] {
+				songCount++
+			}
+		}
+		if !state.Hired || songCount < state.Declaration.Reflection.MinimumProjects {
 			return nil
 		}
 		changed := false
@@ -182,7 +201,9 @@ func (service *AssistantReflectionService) snapshot(station *Workspace, state *A
 		return AssistantReflectionSnapshot{}, ErrAssistantReflectionUnavailable
 	}
 	config := state.Declaration.Reflection
-	projectIDs := NormalizeAssistantProjectIDs(state.LinkedProjectIDs)
+	// Only songs are evidence: a resource workspace neither takes one of the
+	// MaxProjects slots nor counts toward MinimumProjects.
+	projectIDs := SongProjectIDs(service.store, NormalizeAssistantProjectIDs(state.LinkedProjectIDs))
 	if len(projectIDs) > config.MaxProjects {
 		projectIDs = projectIDs[:config.MaxProjects]
 	}
@@ -197,7 +218,7 @@ func (service *AssistantReflectionService) snapshot(station *Workspace, state *A
 			continue
 		}
 		link := project.GetAssistantProjectLink()
-		if link == nil || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
+		if link == nil || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() || AssistantProjectLinkIsResource(link) {
 			continue
 		}
 		projectEvents := make([]AssistantReflectionEvent, 0)
@@ -464,7 +485,7 @@ func (service *AssistantReflectionService) pauseScheduleBelowMinimum(stationID s
 	if state == nil || state.Declaration == nil {
 		return
 	}
-	projects, err := NewAssistantProgramStore(service.store).LinkedProjects(stationID)
+	projects, err := NewAssistantProgramStore(service.store).LinkedSongProjects(stationID)
 	if err != nil || len(projects) >= state.Declaration.Reflection.MinimumProjects {
 		return
 	}

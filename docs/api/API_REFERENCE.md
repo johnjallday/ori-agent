@@ -2694,9 +2694,52 @@ Every part but `request_id` and `if_revision` is optional; what is absent is lef
 
 **Related.** `POST /api/workspaces/template-agent-plan` adds `group_requirement.home.input_defaults: { values: { tempo, time_signature }, note }` when the destination Home has saved defaults the selected blueprint's own inputs accept; the Create dialog shows them in fields the person has not changed. The Home's agents receive the profile in their context block, and its primary Manager has the read-only tool `home_profile_read`.
 
+## Home Resource Workspaces API
+
+A Home may allow one resource workspace (REAPER Studio; contract `docs/architecture/reaper-studio.md`). It is created through the ordinary Create Workspace flow with the Home locked as its required parent; a second one is refused with `409` and code `resource_workspace_exists`, carrying `existing_workspace_id`. The same state (`resource_workspace_exists`, action `open_existing_workspace`) is returned by the creation review.
+
+### Get Resource Workspaces
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/resource-workspaces`
+
+Owner of that exact Home only (anything else is `404`). Reads installed plugins and the Home's own children; it creates, inspects and calls nothing.
+
+```json
+{
+  "resource_workspaces": [
+    {
+      "attachment": { "provider_plugin_id": "reaper-plugin", "blueprint_id": "reaper-studio", "label": "REAPER Studio", "description": "…" },
+      "state": "not_created",
+      "template_id": "plugin:reaper-plugin:reaper-studio"
+    }
+  ]
+}
+```
+
+`state` is `available` (it exists; `workspace` is `{id, name, url}`), `not_created` (`template_id` opens Create Workspace), `provider_missing`, `provider_disabled`, `provider_incompatible` (the project plugin lacks a matching resource blueprint), or `home_unavailable` (the Home's pinned package is unavailable; existing resource workspaces are still listed with their names). An existing workspace is returned with every state so it can be opened.
+
+### Resource Catalog (the Studio's own page)
+
+Owner of that exact resource workspace only; anything else is `404`. GETs read Ori's own files and call no plugin operation. POSTs take strict JSON (unknown fields, duplicate keys and trailing data are `400`). The page is `/workspaces/<slug>/catalog`, and `?entry=<entry_id>` opens one entry. Contract: `docs/architecture/reaper-studio.md` §6–§8.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/workspaces/{workspaceID}/resource-catalog` | Words, category states and counts, this computer's approved sources with their last read, provider availability, the running or last inspection |
+| `GET …/resource-catalog/entries?q=&category=&kind=&source=&favorites=1&state=&cursor=&limit=` | Rows (default 25, at most 100); `cursor` is bound to both revisions, and a stale one is `409 page_stale`. A row whose name repeats within its source and kind carries `identity_hint` (the plugin's native identity) |
+| `GET …/resource-catalog/entries/{entryID}` | One entry with its attributed description, owner-only source location and note |
+| `POST …/resource-catalog/sources/review` `{}` | Calls the plugin's sources operation only; returns `review_token` (10 minutes), the installation and every source with its location |
+| `POST …/resource-catalog/sources/commit` `{review_token, idempotency_key, source_ids}` | Approves those sources on this computer and starts reading them |
+| `POST …/resource-catalog/inspections` `{idempotency_key, mode: "refresh"\|"continue", source_ids?}` | Reads approved sources again, or continues ones a bound stopped |
+| `GET …/resource-catalog/inspections/{operationID}` · `POST …/{operationID}/cancel` `{}` | Progress; cancel keeps finished sources and reports the inspection cancelled |
+| `POST …/resource-catalog/sources/{sourceID}/withdraw/review` `{}` · `…/withdraw/commit` `{review_token}` | Withdraw access on this computer: no further reads or publication of that source, and its entries leave counts and lookups |
+| `POST …/resource-catalog/folders` `{category, path}` | Adds a folder of the owner's own to a category the plugin opens to folders (the overview's `folder_categories`). The path, typed or picked, passes the shared typed-path rules; the answer is `{folder: {id, category, path}, warning_note}`. Nothing is read until a review approves it. At most 8 per Studio on this computer |
+| `DELETE …/resource-catalog/folders/{folderID}` | Forgets the folder on this computer and withdraws it if approved; its entries stay readable as Access withdrawn. Returns the overview |
+
+Refusals are `409` with `code`: `not_attached`, `provider_unavailable`, `scope_review_required`, `review_stale`, `inspection_active` (carries `operation`), `page_stale`, `folder_limit`; `400 folder_refused` with the typed-path rule's own sentence; and `500 catalog_unreadable` for a saved file Ori cannot read (it is left as it is). The overview also carries `folder_categories`, `can_add_folder`, and `folder: true` on each owner folder's source.
+
 ## Home Package Upgrade API
 
-Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Two kinds of change are accepted: guidance (Home role prompts and packaged skill text), and a release that adds a `home_profile` card to a Home that has none (the review then lists it under `additions`). The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Three kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, and a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones. The review lists either addition under `additions`; neither creates, staffs or reads anything. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
 
 | Code | Meaning |
 | --- | --- |

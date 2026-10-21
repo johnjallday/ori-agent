@@ -762,6 +762,13 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A resource workspace's catalog. The page reads the
+	// catalog API; a workspace without a catalog shows that it has none.
+	if len(parts) == 2 && parts[1] == "catalog" {
+		s.serveWorkspaceCatalog(w, workspaceID, workspaceSlug)
+		return
+	}
+
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
@@ -839,6 +846,19 @@ func (s *Server) serveWorkspaceAssistant(w http.ResponseWriter, workspaceID, wor
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-assistant", data)
+}
+
+// serveWorkspaceCatalog renders a resource workspace's catalog. Every word
+// about its resources comes from the catalog API and the provider's
+// declaration; the host compiles in no product vocabulary.
+func (s *Server) serveWorkspaceCatalog(w http.ResponseWriter, workspaceID, workspaceSlug string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Catalog - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
+	s.renderAndWritePage(w, "workspace-catalog", data)
 }
 
 // serveWorkspacePlans renders the canonical Plans destination for a workspace:

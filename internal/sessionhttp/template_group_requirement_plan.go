@@ -32,6 +32,9 @@ type templateGroupRequirementPlan struct {
 	Home                *templateGroupRequirementHomePlan         `json:"home,omitempty"`
 	RequiredHomeRoles   templateGroupRequirementRequiredRolesPlan `json:"required_home_roles"`
 	Actions             []grouprequirements.Action                `json:"actions,omitempty"`
+	// ExistingWorkspaceID is the Home's one resource workspace when it
+	// already exists, so the dialog opens it instead of asking for a team.
+	ExistingWorkspaceID string `json:"existing_workspace_id,omitempty"`
 }
 
 type templateGroupRequirementHomePlan struct {
@@ -235,6 +238,10 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 	case grouprequirements.StateHomeRequired:
 		plan.Home = &templateGroupRequirementHomePlan{Exists: false}
 		plan.RequiredHomeRoles = absentRequiredHomeRoles(effective)
+		return plan
+	case grouprequirements.StateResourceWorkspaceExists:
+		plan.ExistingWorkspaceID = evaluation.ExistingWorkspaceID
+		plan.RequiredHomeRoles = unavailableRequiredHomeRoles()
 		return plan
 	case grouprequirements.StateReadyGrouped:
 		// Continue below only when Evaluate resolved one exact existing Home.

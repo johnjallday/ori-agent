@@ -273,9 +273,11 @@ func compatibleProjectBlueprint(installed []plugin.InstalledPlugin, homeOwner *w
 			blueprint := &candidate.ResolvedBlueprints[i]
 			template := blueprint.Template
 			project := template.AssistantProject
+			// A resource workspace's team is never a song team, even if it
+			// shares the Home: counting it would make every song ambiguous.
 			if template.GroupRequirement == nil || template.GroupRequirement.Policy != projecttemplates.GroupPolicyRequired ||
 				template.GroupRequirement.SchemaVersion != projecttemplates.SplitGroupRequirementSchemaVersion ||
-				project == nil || template.GroupRequirement.AssistantProjectID != project.ID ||
+				project == nil || project.IsResource() || template.GroupRequirement.AssistantProjectID != project.ID ||
 				template.PluginOwner == nil || template.PluginOwner.PluginID != candidate.Name ||
 				template.PluginOwner.PluginVersion != candidate.Version || template.PluginOwner.BlueprintID != blueprint.ID ||
 				template.PluginOwner.BlueprintVersion != blueprint.Version ||

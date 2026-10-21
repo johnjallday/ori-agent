@@ -909,6 +909,25 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant", s.Handlers.Session.ReAddAssistantLibrarySharing)
 		// The Home's song-details switch: off clears every stored song fact.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/song-details", s.Handlers.Session.SetAssistantLibrarySongDetails)
+		// The Home's resource workspaces (one optional per attachment): whether
+		// each can be set up and the one that exists. Reads only.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/resource-workspaces", s.Handlers.Session.GetAssistantResourceWorkspaces)
+		// A resource workspace's catalog (the resource catalog contract in docs/architecture):
+		// owner-only; GETs read Ori's own files and call no plugin operation.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog", s.Handlers.Session.GetResourceCatalog)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog/entries", s.Handlers.Session.ListResourceCatalogEntries)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog/entries/{entryID}", s.Handlers.Session.GetResourceCatalogEntry)
+		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/resource-catalog/entries/{entryID}/annotation", s.Handlers.Session.SetResourceCatalogAnnotation)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/entries/{entryID}/annotation/move", s.Handlers.Session.MoveResourceCatalogAnnotation)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/review", s.Handlers.Session.ReviewResourceCatalogSources)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/commit", s.Handlers.Session.CommitResourceCatalogSources)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/folders", s.Handlers.Session.AddResourceCatalogFolder)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/resource-catalog/folders/{folderID}", s.Handlers.Session.RemoveResourceCatalogFolder)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/{sourceID}/withdraw/review", s.Handlers.Session.ReviewResourceCatalogWithdrawal)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/sources/{sourceID}/withdraw/commit", s.Handlers.Session.CommitResourceCatalogWithdrawal)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/inspections", s.Handlers.Session.StartResourceCatalogInspection)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/resource-catalog/inspections/{operationID}", s.Handlers.Session.GetResourceCatalogInspection)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/resource-catalog/inspections/{operationID}/cancel", s.Handlers.Session.CancelResourceCatalogInspection)
 		// The Home profile card: owner-only on that exact Home.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/profile", s.Handlers.Session.GetAssistantProfile)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/profile/detect", s.Handlers.Session.DetectAssistantProfile)

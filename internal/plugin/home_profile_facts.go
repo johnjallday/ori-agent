@@ -63,25 +63,45 @@ func (l *SurfaceLifecycle) HomeProfileFacts(ctx context.Context, installed Insta
 	if l == nil || l.services == nil || !DeclaresHomeProfileFacts(installed) {
 		return nil, ErrHomeProfileFactsUnavailable
 	}
+	ref := installed.WorkspaceSurfaces.HomeProfileFacts
+	output, err := l.machineReadOnlyCall(ctx, installed, ref.ServiceID, ref.Operation, input)
+	if errors.Is(err, errMachineOperationUnavailable) {
+		return nil, ErrHomeProfileFactsUnavailable
+	}
+	return output, err
+}
+
+// errMachineOperationUnavailable means the named operation cannot be called
+// now: undeclared, not read_only, or without an available artifact.
+var errMachineOperationUnavailable = errors.New("plugin operation is unavailable")
+
+// machineReadOnlyCall calls one declared read_only operation of an installed
+// plugin as a machine-level call, like a prerequisites check: it carries no
+// workspace, project, grant or scope. The declared input schema, timeout
+// class, output byte limit and output schema all apply. Interpreting the
+// output is the caller's job.
+func (l *SurfaceLifecycle) machineReadOnlyCall(ctx context.Context, installed InstalledPlugin, serviceID, operationID string, input json.RawMessage) (json.RawMessage, error) {
+	if l == nil || l.services == nil || !installed.Enabled || installed.WorkspaceSurfaces == nil {
+		return nil, errMachineOperationUnavailable
+	}
 	contribution := installed.WorkspaceSurfaces
-	ref := contribution.HomeProfileFacts
 	var service *ContributedService
 	for index := range contribution.Services {
-		if contribution.Services[index].ID == ref.ServiceID {
+		if contribution.Services[index].ID == serviceID {
 			service = &contribution.Services[index]
 		}
 	}
 	if service == nil {
-		return nil, ErrHomeProfileFactsUnavailable
+		return nil, errMachineOperationUnavailable
 	}
 	var declared *ContributedOperation
 	for index := range service.Operations {
-		if service.Operations[index].ID == ref.Operation {
+		if service.Operations[index].ID == operationID {
 			declared = &service.Operations[index]
 		}
 	}
 	if declared == nil || declared.Policy != string(workspacesurface.PolicyReadOnly) {
-		return nil, ErrHomeProfileFactsUnavailable
+		return nil, errMachineOperationUnavailable
 	}
 	var artifact *ResolvedArtifact
 	for index := range installed.ResolvedArtifacts {
@@ -90,7 +110,7 @@ func (l *SurfaceLifecycle) HomeProfileFacts(ctx context.Context, installed Insta
 		}
 	}
 	if artifact == nil || !artifact.Available {
-		return nil, ErrHomeProfileFactsUnavailable
+		return nil, errMachineOperationUnavailable
 	}
 	operation := runtimeOperation(*declared)
 	if err := workspacesurface.ValidateOperationInput(operation, input); err != nil {

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "installation": {
+    "id": "inst_8f3c2a91d4e7b605",
+    "label": "REAPER 7.28",
+    "layout": "per_user",
+    "app_installed": true,
+    "app_version": "7.28"
+  },
+  "sources": [
+    {
+      "id": "project_templates",
+      "category": "templates",
+      "label": "Project templates",
+      "location": "~/Library/Application Support/REAPER/ProjectTemplates",
+      "access": "file",
+      "state": "ready"
+    },
+    {
+      "id": "folder_96e14ca9ccd35869",
+      "category": "templates",
+      "label": "Templates Archive",
+      "location": "~/Music/Templates Archive",
+      "access": "file",
+      "state": "ready"
+    }
+  ]
+}

@@ -149,13 +149,21 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 		return nil, ErrNotGuidanceOnly
 	}
 	programs := make([]PlanProgram, 0, len(currentHomes))
-	addsProfile := false
+	addsProfile, addsResource := false, false
 	for index := range currentHomes {
 		change, err := projecttemplates.AcceptedHomeChange(currentHomes[index], nextHomes[index])
 		if err != nil {
 			return nil, ErrNotGuidanceOnly
 		}
 		addsProfile = addsProfile || change.AddsHomeProfile
+		addsResource = addsResource || len(change.AddedResourceAttachments) > 0
+		added := make([]PlanResourceAttachment, 0, len(change.AddedResourceAttachments))
+		for _, attachment := range change.AddedResourceAttachments {
+			added = append(added, PlanResourceAttachment{
+				ProviderPluginID: attachment.ProviderPluginID, BlueprintID: attachment.BlueprintID,
+				Label: attachment.Label, Description: attachment.Description,
+			})
+		}
 		home := currentHomes[index]
 		programs = append(programs, PlanProgram{
 			ProgramID: home.ID,
@@ -168,26 +176,31 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 			ToDeclarationDigest: projecttemplates.AssistantProgramHomeDigest(nextHomes[index]),
 			RolePrompts:         change.RolePrompts,
 			AddsHomeProfile:     change.AddsHomeProfile, HomeProfileTitle: change.HomeProfileTitle,
+			AddsResourceAttachments: added,
 		})
 	}
 	// Everything outside the Home declarations must be byte-identical, with one
-	// exception that belongs to the additive profile class: a release that adds
-	// a profile card must also start requiring the host feature that gates it.
-	// That one feature is set aside, and only when a card was actually added
-	// and the installed release did not already require it.
-	withoutHomes := func(contribution plugin.SurfaceContribution, setAsideProfileFeature bool) ([]byte, error) {
+	// exception per additive class: a release that adds a profile card or a
+	// resource attachment must also start requiring the host feature that
+	// gates it. That feature is set aside only when the addition actually
+	// happened and the installed release did not already require it.
+	withoutHomes := func(contribution plugin.SurfaceContribution, setAside []string) ([]byte, error) {
 		contribution.Name, contribution.Version, contribution.AssistantProgramHomes = "", "", nil
-		if setAsideProfileFeature {
-			contribution.RequiresHostFeatures = slices.DeleteFunc(slices.Clone(contribution.RequiresHostFeatures),
-				func(feature string) bool { return feature == plugin.HostFeatureHomeProfileV1 })
-		}
+		contribution.RequiresHostFeatures = slices.DeleteFunc(slices.Clone(contribution.RequiresHostFeatures),
+			func(feature string) bool { return slices.Contains(setAside, feature) })
 		return json.Marshal(contribution)
 	}
-	current, err := withoutHomes(*installed.WorkspaceSurfaces, false)
+	current, err := withoutHomes(*installed.WorkspaceSurfaces, nil)
 	if err != nil {
 		return nil, ErrNotGuidanceOnly
 	}
-	setAside := addsProfile && !slices.Contains(installed.WorkspaceSurfaces.RequiresHostFeatures, plugin.HostFeatureHomeProfileV1)
+	var setAside []string
+	if addsProfile && !slices.Contains(installed.WorkspaceSurfaces.RequiresHostFeatures, plugin.HostFeatureHomeProfileV1) {
+		setAside = append(setAside, plugin.HostFeatureHomeProfileV1)
+	}
+	if addsResource && !slices.Contains(installed.WorkspaceSurfaces.RequiresHostFeatures, plugin.HostFeatureResourceWorkspacesV1) {
+		setAside = append(setAside, plugin.HostFeatureResourceWorkspacesV1)
+	}
 	candidate, err := withoutHomes(*next.WorkspaceSurfaces, setAside)
 	if err != nil || !bytes.Equal(current, candidate) {
 		return nil, ErrNotGuidanceOnly
