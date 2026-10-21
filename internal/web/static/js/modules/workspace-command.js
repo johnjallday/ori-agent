@@ -1436,6 +1436,74 @@ export class WorkspaceCommandView {
     return slug ? workspaceRootURL(slug) + suffix : '#';
   }
 
+  // The group this workspace sits in, as the page resolved it from its tree
+  // read. Null until then, and for a descriptor resolved for another workspace.
+  parentGroupNav() {
+    const group = this.page && this.page.parentGroup;
+    const workspaceId = this.workspaceId();
+    const slug = String((group && group.slug) || '').trim();
+    if (!group || !slug || !workspaceId) return null;
+    if (group.workspaceId !== workspaceId || group.id === workspaceId) return null;
+    const name = String(group.name || '').trim() || slug;
+    // The group's own root route: none of this page's query, task, or hash.
+    return { name, href: workspaceRootURL(slug), title: 'Open the group ' + name };
+  }
+
+  // One level up, right after Home. A real link, so Back, new-tab, and
+  // keyboard activation behave natively; the visible name may be cut short
+  // by CSS, but the link's text and title keep all of it.
+  parentGroupLinkHTML() {
+    const group = this.parentGroupNav();
+    if (!group) return '';
+    return (
+      '<a class="ws-cmd-nav-btn ws-cmd-nav-parent" data-cmd-parent-group href="' +
+      escapeHtml(group.href) +
+      '" title="' +
+      escapeHtml(group.title) +
+      '"><span class="ws-cmd-nav-parent-arrow" aria-hidden="true">←</span>' +
+      '<span class="ws-cmd-nav-parent-label">Group: <span class="ws-cmd-nav-parent-name">' +
+      escapeHtml(group.name) +
+      '</span></span></a>'
+    );
+  }
+
+  // Called by the page when its parent group changes. Patches just that link
+  // in the rendered header, so the selected mode and any mounted surface stay
+  // as they are; a full render reads the same state through commandBarHTML.
+  syncParentGroupLink() {
+    const nav = this.container?.querySelector?.('.ws-cmd-nav');
+    if (!nav) return;
+    const existing = nav.querySelector('[data-cmd-parent-group]');
+    const group = this.parentGroupNav();
+    if (
+      existing &&
+      group &&
+      existing.getAttribute('href') === group.href &&
+      existing.getAttribute('title') === group.title
+    )
+      return;
+    const hadFocus = Boolean(existing) && this.isFocused(existing);
+    existing?.remove();
+    if (group)
+      nav
+        .querySelector('[data-cmd-nav-home]')
+        ?.insertAdjacentHTML('afterend', this.parentGroupLinkHTML());
+    if (hadFocus) this.restoreParentGroupFocus(nav);
+  }
+
+  isFocused(element) {
+    return typeof document !== 'undefined' && document.activeElement === element;
+  }
+
+  // Focus follows the link to its replacement, or to Home when it is gone.
+  // Only ever called when the link itself had focus, so it never steals it.
+  restoreParentGroupFocus(root) {
+    const target =
+      root?.querySelector?.('[data-cmd-parent-group]') ||
+      root?.querySelector?.('[data-cmd-nav-home]');
+    target?.focus?.({ preventScroll: true });
+  }
+
   hasAttentionTasks() {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
@@ -1685,7 +1753,8 @@ export class WorkspaceCommandView {
       // Back action from a workspace-scoped page points at Home, the canonical
       // workspace overview, and says so (PRD FR11/FR12). It used to say
       // "Workspaces" and rely on the /workspaces compatibility redirect.
-      '<a class="ws-cmd-nav-btn" href="/" aria-label="Back to the workspace map on Home">Home</a>' +
+      '<a class="ws-cmd-nav-btn" data-cmd-nav-home href="/" aria-label="Back to the workspace map on Home">Home</a>' +
+      this.parentGroupLinkHTML() +
       '<a class="ws-cmd-nav-btn" href="' +
       escapeHtml(this.workspaceRoute('/canvas')) +
       '">Canvas</a>' +
@@ -2235,6 +2304,9 @@ export class WorkspaceCommandView {
       typeof document !== 'undefined'
         ? document.activeElement?.getAttribute?.('data-cmd-work-key')
         : null;
+    const parentGroupFocus =
+      typeof document !== 'undefined' &&
+      Boolean(document.activeElement?.hasAttribute?.('data-cmd-parent-group'));
     const admin = this.container.querySelector?.('[data-cmd-admin]');
     if (admin) this.adminExpanded = admin.open;
     this.rememberCapabilityInspectorFocus();
@@ -2309,6 +2381,7 @@ export class WorkspaceCommandView {
       );
       replacement?.focus({ preventScroll: true });
     }
+    if (parentGroupFocus) this.restoreParentGroupFocus(this.container.querySelector('.ws-cmd-nav'));
     this.bindBuildSummary();
     this.bindReadout();
     this.bindMissionPanel();

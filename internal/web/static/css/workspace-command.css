@@ -157,6 +157,26 @@
   cursor: progress;
   opacity: 0.6;
 }
+/* The parent group link. A long name gives way first; the link's text and
+   title still carry all of it. The name keeps the case its owner chose. */
+.ws-cmd-nav-parent {
+  gap: 6px;
+  min-width: 0;
+  max-width: min(320px, 100%);
+}
+.ws-cmd-nav-parent-arrow {
+  flex: none;
+}
+.ws-cmd-nav-parent-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-nav-parent-name {
+  text-transform: none;
+  letter-spacing: 0.5px;
+}
 .ws-cmd-view-switch {
   margin-left: auto;
   display: inline-flex;
