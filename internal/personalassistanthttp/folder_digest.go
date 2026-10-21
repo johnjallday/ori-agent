@@ -823,11 +823,17 @@ func (h *Handler) ResolveFolderDigest(w http.ResponseWriter, r *http.Request) {
 // outside allowed. The refusal is deliberate and named: a folder path from
 // the browser is never accepted by this feature (FR48).
 func decodeFolderDigestBody(w http.ResponseWriter, r *http.Request, target any, allowed ...string) bool {
+	return decodeClosedBody(w, r, maxFolderDigestBodyBytes, target, allowed...)
+}
+
+// decodeClosedBody is decodeFolderDigestBody with the size bound named by
+// the caller.
+func decodeClosedBody(w http.ResponseWriter, r *http.Request, limit int64, target any, allowed ...string) bool {
 	if r.Body == nil {
 		orihttp.BadRequest(w, "A JSON body is required")
 		return false
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxFolderDigestBodyBytes))
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		orihttp.BadRequest(w, "Request body is too large")
 		return false

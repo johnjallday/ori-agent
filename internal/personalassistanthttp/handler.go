@@ -116,6 +116,8 @@ type Handler struct {
 	interviewOffer             InterviewOffer
 	interview                  *personalassistant.KnowledgeInterviewService
 	folderDigest               FolderDigestService
+	secondBrain                SecondBrainService
+	secondBrainOrigin          func(*http.Request) error
 	folderHomeProvider         FolderHomeProviderSetup
 	folderProjectSelections    FolderProjectSelectionIssuer
 	provider                   userprofile.UserProvider

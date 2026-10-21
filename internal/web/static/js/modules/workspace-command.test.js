@@ -4755,6 +4755,67 @@ test('Email station portal reflects legacy, loading, CTA, and Email Ops states',
   }
 });
 
+test('the Notes station says whether notes are set up, connected, or missing', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const notes = secondBrain => {
+      hq._notes = { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain };
+      return hq.notesStationState();
+    };
+    assert.deepEqual(notes({ status: 'not_connected' }), {
+      value: 'Not set up',
+      description: 'connect your notes'
+    });
+    const connected = notes({
+      status: 'connected',
+      source: { name: 'Second Brain' },
+      last_look: { at: new Date(Date.now() - 2 * 3600000).toISOString() }
+    });
+    assert.deepEqual(connected, {
+      value: 'Second Brain',
+      description: 'connected · last look 2h ago',
+      tone: 'clear'
+    });
+    assert.deepEqual(notes({ status: 'missing', source: { name: 'Second Brain' } }), {
+      value: "Can't find Second Brain",
+      description: 'needs attention',
+      tone: 'attention'
+    });
+    hq._notes = { hqWorkspaceID: 'hq-1', status: 'error', secondBrain: null };
+    assert.equal(hq.notesStationState().tone, 'degraded');
+    hq._notes = { hqWorkspaceID: 'hq-1', status: 'loading', secondBrain: null };
+    assert.equal(hq.notesStationState().tone, 'loading');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Notes station opens the connection card in the drawer, or Home without one', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const calls = [];
+    globalThis.window = {
+      location: { assign: p => calls.push('nav ' + p) },
+      PersonalAssistantPanel: {
+        open: (_trigger, options) => calls.push('open ' + options.focus) || true
+      },
+      PersonalAssistantSecondBrain: { openManage: async () => calls.push('manage') }
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.runHQStationAction('second-brain');
+    assert.deepEqual(calls, ['open false', 'manage']);
+
+    calls.length = 0;
+    globalThis.window = { location: { assign: p => calls.push('nav ' + p) } };
+    hq.runHQStationAction('second-brain');
+    assert.deepEqual(calls, ['nav /?quest=second-brain']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('Email station portal routes by state: legacy modal, workspace nav, CTA deep-link', () => {
   const originalWindow = globalThis.window;
   try {
@@ -5169,9 +5230,10 @@ test('renderMapHQStations emits fractional coordinates as CSS custom props and i
     const html = hq.renderMapHQStations();
     assert.match(html, /--station-x:50\.00%/);
     assert.match(html, /--station-y:25\.00%/);
-    // Every registered station renders; the unknown key contributes nothing.
+    // Every registered station renders (the four HQ stations and Notes); the
+    // unknown key contributes nothing.
     assert.doesNotMatch(html, /data-cmd-hq-station="journal"/);
-    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 4);
+    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 5);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -5910,7 +5972,7 @@ test('every workspace ends its station registry with Memory; the HQ four keep th
     const hq = makeHQCommandView({ id: 'hq-1' });
     assert.deepEqual(
       hq.mapStationRegistry().map(station => station.key),
-      ['watchtower', 'email', 'calendar-ops', 'daily-brief', 'memory']
+      ['watchtower', 'email', 'calendar-ops', 'daily-brief', 'memory', 'second-brain']
     );
     ['watchtower', 'email', 'calendar-ops', 'daily-brief'].forEach((key, slot) => {
       assert.deepEqual(hq.hqStationPosition(key), hq.hqStationDefaultPosition(slot));
@@ -5918,6 +5980,8 @@ test('every workspace ends its station registry with Memory; the HQ four keep th
     const memory = hq.hqStationPosition('memory');
     assert.equal(memory.x, 0.9);
     assert.ok(Math.abs(memory.y - 0.9) < 1e-9, 'Memory takes the fifth slot');
+    // Notes joins after Memory, so no default slot moves, and stands by Email.
+    assert.deepEqual(hq.hqStationPosition('second-brain'), { x: 0.76, y: 0.39 });
     assert.equal(hq.hqStationRegistry().length, 4, 'Memory is not an HQ-only station');
 
     // A capability station keeps its slot; Memory follows it.

@@ -350,6 +350,20 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // "Connect your second brain" reads its ask for an active relationship.
+    // The README user already answered it and keeps no notes folder, so no
+    // ask joins the drawer and the scenes stay as photographed.
+    if (url.pathname === '/api/personal-assistant/second-brain') {
+      await json(route, {
+        second_brain: {
+          status: 'not_connected',
+          detected: [],
+          ask: { state: 'declined' },
+          version: 1
+        }
+      });
+      return;
+    }
     if (url.pathname === '/api/personal-assistant/today') {
       await json(route, {
         today: {

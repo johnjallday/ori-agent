@@ -71,6 +71,34 @@ export function sourceCapabilityDisclosures(kind, card) {
     }));
 }
 
+// notesSourceView is the Profile's row for the connected notes folder (FR35,
+// FR38): its name and kind with Disconnect, a folder Ori can no longer find
+// with Choose again, or nothing connected. The label stays "Notes"; the term
+// "second brain" belongs to the ask and the mission.
+export function notesSourceView(secondBrain) {
+  const source = secondBrain?.source;
+  if (!source?.name || secondBrain?.status === 'not_connected') {
+    return {
+      summary: 'Your notes are not connected.',
+      action: { label: 'Connect your notes', route: '/?quest=second-brain' },
+      disconnect: false
+    };
+  }
+  if (secondBrain.status === 'missing') {
+    return {
+      summary: `Can't find ${source.name}. It may have been moved or renamed.`,
+      action: { label: 'Choose again', route: '/?quest=second-brain' },
+      disconnect: true
+    };
+  }
+  const kind = source.kind === 'obsidian' ? 'Obsidian' : 'Markdown folder';
+  return {
+    summary: `Second brain: ${source.name} (${kind}). Read-only: Ori keeps the folder path and the open items it found, not your notes.`,
+    action: null,
+    disconnect: true
+  };
+}
+
 function node(tag, text, className) {
   const element = document.createElement(tag);
   if (text !== undefined) element.textContent = text;
@@ -78,7 +106,7 @@ function node(tag, text, className) {
   return element;
 }
 
-export function renderDossierSources(container, sources, capabilities) {
+export function renderDossierSources(container, sources, capabilities, { onNotesDisconnect } = {}) {
   if (!container) return;
   const cards = Array.isArray(capabilities?.cards) ? capabilities.cards : [];
   const byKey = new Map(cards.map(card => [card.key, card]));
@@ -120,6 +148,30 @@ export function renderDossierSources(container, sources, capabilities) {
         link.href = route;
         card.append(link);
       }
+    }
+    container.append(card);
+  }
+  // The notes folder joins the sources once its status was read.
+  if (sources?.second_brain !== undefined) {
+    const view = notesSourceView(sources.second_brain);
+    const card = node('div', undefined, 'reviewed-dossier-source');
+    card.dataset.source = 'second_brain';
+    card.append(node('strong', 'Notes'), node('p', view.summary));
+    if (view.action && safeDossierRoute(view.action.route)) {
+      const link = node('a', view.action.label);
+      link.href = view.action.route;
+      card.append(link);
+    }
+    if (view.disconnect && typeof onNotesDisconnect === 'function') {
+      const button = node('button', 'Disconnect', 'btn btn-sm btn-link');
+      button.type = 'button';
+      button.addEventListener('click', () => {
+        button.disabled = true;
+        Promise.resolve(onNotesDisconnect()).finally(() => {
+          button.disabled = false;
+        });
+      });
+      card.append(' ', button);
     }
     container.append(card);
   }

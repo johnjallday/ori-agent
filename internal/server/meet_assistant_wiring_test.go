@@ -68,10 +68,11 @@ func TestMeetAssistant_RealBuilderCompletesTheMissionFromTheHireOnce(t *testing.
 				t.Fatalf("the first look must wait on the folder: %+v", mission)
 			}
 			continue
-		case progression.ShowFolderQuestID:
-			// Showing a folder needs the HQ, which the hire does not build.
+		case progression.ShowFolderQuestID, progression.SecondBrainQuestID:
+			// Showing a folder or connecting notes needs the HQ, which the hire
+			// does not build.
 			if !mission.Locked || mission.LockedReason != "Build your HQ first" {
-				t.Fatalf("Show a folder must wait on the HQ: %+v", mission)
+				t.Fatalf("%s must wait on the HQ: %+v", mission.ID, mission)
 			}
 			continue
 		case progression.ConnectSourceQuestID, progression.FirstBriefQuestID:
