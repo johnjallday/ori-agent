@@ -634,15 +634,50 @@ function placeFirstLookReports(
   list = document.getElementById('personalAssistantNeedsYouReports')
 ) {
   const host = els?.needsCards;
-  if (!host || !list) return;
-  if (els.sections?.hidden && els.summary && !els.summary.hidden) {
-    if (list.previousElementSibling !== els.summary) els.summary.after(list);
+  if (!host) return;
+  // A folder card waiting on its answer is acted on in place too.
+  const folder = document.getElementById('personalAssistantFolderOffer');
+  const waiting = folder?.dataset.placement === 'needs' ? folder : null;
+  if (todayFolded(els)) {
+    const slot = foldedNeedsSlot(els);
+    if (list && slot.firstElementChild !== list) slot.prepend(list);
+    if (waiting && waiting.parentElement !== slot) slot.append(waiting);
     return;
   }
+  if (waiting && waiting.parentElement !== host) host.append(waiting);
+  if (!list) return;
   const build = document.getElementById('personalAssistantNeedsYouBuild');
   if (build?.parentElement === host) {
     if (build.nextElementSibling !== list) build.after(list);
   } else if (host.firstElementChild !== list) host.prepend(list);
+}
+
+// todayFolded: Today rests behind its summary line (after a conversation
+// started), so Needs you is hidden.
+function todayFolded(els) {
+  return Boolean(els?.sections?.hidden && els.summary && !els.summary.hidden);
+}
+
+// foldedNeedsSlot is right under the summary line, where the cards the user
+// acts on wait while Today is folded: a hired agent's report and a folder card
+// waiting on its answer. Opening the drawer always shows them (FR20).
+function foldedNeedsSlot(els) {
+  let slot = document.getElementById('personalAssistantNeedsFolded');
+  if (!slot) {
+    slot = document.createElement('div');
+    slot.id = 'personalAssistantNeedsFolded';
+    slot.className = 'personal-assistant-today__reports';
+  }
+  if (slot.previousElementSibling !== els.summary) els.summary.after(slot);
+  return slot;
+}
+
+// needsHost is where a card in Needs you sits now: the folded slot while Today
+// rests behind its summary line, else Needs you itself. The folder card asks
+// it, so the two never move the card back and forth.
+function needsHost(els = elements()) {
+  if (!els?.needsCards) return null;
+  return todayFolded(els) ? foldedNeedsSlot(els) : els.needsCards;
 }
 
 function renderCompactRows(list, rows, skipCards = false) {
@@ -886,7 +921,11 @@ function syncNeedsYou(els = elements()) {
   // the summary line while Today is folded).
   const reports = document.getElementById('personalAssistantNeedsYouReports');
   const reported = reports && !reports.hidden ? reports.childElementCount : 0;
-  const count = cards + reported + queued;
+  // A folder card waiting under the summary line while Today is folded.
+  const folded = Array.from(
+    document.getElementById('personalAssistantNeedsFolded')?.children || []
+  ).filter(card => card !== reports && !card.hidden).length;
+  const count = cards + reported + folded + queued;
   const hidden = count === 0;
   if (els.needsSection.hidden !== hidden) els.needsSection.hidden = hidden;
   if (els.needsCount && els.needsCount.textContent !== String(count)) {
@@ -1293,7 +1332,9 @@ function init() {
   window.PersonalAssistantToday = {
     refresh: loadToday,
     // Shows Needs you again when something under it has to be seen.
-    expand: () => applyFold({ type: 'expand' })
+    expand: () => applyFold({ type: 'expand' }),
+    // Where a card in Needs you sits now (under the summary line while folded).
+    needsHost: () => needsHost()
   };
   void keepTodaysBriefPrepared();
 }

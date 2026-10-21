@@ -2856,9 +2856,13 @@ function renderOffer(place) {
   });
   const firstLook = receipt.firstLook || { visible: false };
   // The one offer card is a reply in the conversation while the flow runs
-  // there, and a card in Needs you when it was found waiting on load. It is
+  // there, and a card in Needs you when it was found waiting on load (right
+  // under Today's summary line while Today is folded, as Home says). It is
   // moved, never copied, so its controls and their handlers stay the same.
-  const home = state.reviewSlot || (place === 'needs' && els.needs ? els.needs : els.root);
+  const needs = place === 'needs' && els.needs;
+  const home =
+    state.reviewSlot ||
+    (needs ? window.PersonalAssistantToday?.needsHost?.() || els.needs : els.root);
   if (els.offer.parentElement !== home) home.append(els.offer);
   els.offer.dataset.placement = place;
   els.offer.hidden = !view.visible || place === 'none';

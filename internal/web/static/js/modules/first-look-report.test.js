@@ -171,13 +171,20 @@ test('Home draws reports as Needs you cards that count, and the drawer draws the
   assert.match(home, /row\.kind !== FIRST_LOOK_REPORT_KIND/);
   assert.match(home, /card\.id === 'personalAssistantNeedsYouReports'/);
   // Opening the drawer shows a report (FR20): while Today is folded behind its
-  // summary line, the cards wait right under that line, and still count.
+  // summary line, the cards (and a folder card waiting on its answer) wait in
+  // a slot right under that line, and still count.
   assert.match(
     home,
-    /if \(list\.previousElementSibling !== els\.summary\) els\.summary\.after\(list\);/
+    /if \(slot\.previousElementSibling !== els\.summary\) els\.summary\.after\(slot\);/
   );
+  assert.match(home, /if \(list && slot\.firstElementChild !== list\) slot\.prepend\(list\);/);
+  assert.match(home, /if \(waiting && waiting\.parentElement !== slot\) slot\.append\(waiting\);/);
   assert.match(home, /placeFirstLookReports\(els\);\n\}/);
-  assert.match(home, /const count = cards \+ reported \+ queued;/);
+  assert.match(home, /const count = cards \+ reported \+ folded \+ queued;/);
+  assert.match(home, /needsHost: \(\) => needsHost\(\)/);
+  // The folder card asks Home where Needs you is, so the two agree.
+  const folder = read('personal-assistant-folder.js');
+  assert.match(folder, /window\.PersonalAssistantToday\?\.needsHost\?\.\(\) \|\| els\.needs/);
   const panel = read('personal-assistant-panel.js');
   assert.match(
     panel,
