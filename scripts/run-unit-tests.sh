@@ -3,7 +3,7 @@
 # this wrapper owns a separate, newly allocated evidence directory.
 set -euo pipefail
 if [[ $# -ne 0 ]]; then
-  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux)\n' >&2
+  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux; ORI_UNIT_TEST_PARALLEL caps packages run at once)\n' >&2
   exit 2
 fi
 if [[ -n "${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]; then
@@ -11,6 +11,11 @@ if [[ -n "${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]; then
     printf 'Sharding requires both positive shard settings and full (non-macOS) scope\n' >&2
     exit 2
   fi
+fi
+# Unset keeps Go's default (one package per CPU), which CI uses; ci-local sets it.
+if [[ -n "${ORI_UNIT_TEST_PARALLEL:-}" && ! "${ORI_UNIT_TEST_PARALLEL}" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'ORI_UNIT_TEST_PARALLEL must be a positive number of packages\n' >&2
+  exit 2
 fi
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 cd "$script_dir/.."
@@ -130,7 +135,7 @@ fi
 {
   printf 'scope=%s\nrevision=%s\n' "$scope" "$(git rev-parse HEAD)"
   go version
-  printf 'flags=-json -short -race -timeout 30m -count=1 -covermode=atomic\n'
+  printf 'flags=-json -short -race -timeout 30m -count=1 -covermode=atomic%s\n' "${ORI_UNIT_TEST_PARALLEL:+ -p $ORI_UNIT_TEST_PARALLEL}"
 } >> "$artifacts/metadata.txt"
 start=$SECONDS
 test_status=0
@@ -140,6 +145,7 @@ run_owned bash -c '
   artifacts=$1
   shift
   exec go test -json -short -race -timeout 30m -count=1 \
+    ${ORI_UNIT_TEST_PARALLEL:+-p "$ORI_UNIT_TEST_PARALLEL"} \
     -covermode=atomic -coverprofile="$artifacts/coverage.txt" "$@" \
     > "$artifacts/events.json" 2> "$artifacts/stderr.txt"
 ' unit-capture "$artifacts" "${packages[@]}" || test_status=$?
