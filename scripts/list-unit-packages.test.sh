@@ -69,11 +69,19 @@ assert_platform_included 'ori-agent/internal/platform$'
 assert_platform_included 'ori-agent/internal/nativemenubar$'
 assert_platform_included 'ori-agent/cmd/menubar$'
 assert_platform_included 'ori-agent/cmd/server$'
+assert_platform_included 'ori-agent/internal/backuprecovery$'      # _darwin_arm64 provider and helper
+assert_platform_included 'ori-agent/internal/workspacecontinuity$' # rename_darwin.go vs rename_linux.go
 assert_platform_excluded 'ori-agent/tools/herdr-devflow/'
 assert_platform_excluded 'ori-devtools'
 assert_platform_excluded 'ori-agent/internal/sessionhttp$'
 assert_platform_excluded 'ori-agent/internal/llm$'
 assert_platform_excluded 'node_modules'
+# Variants that exist only for Windows (or behind opt-in tags) compile to the
+# same code on darwin and linux, so the ubuntu leg already covers them. These
+# three were the heaviest packages the old "host excluded a file" rule let in.
+assert_platform_excluded 'ori-agent/internal/projectlibrary$'          # !darwin && !linux fallbacks
+assert_platform_excluded 'ori-agent/internal/personalassistant$'       # _windows.go only
+assert_platform_excluded 'ori-agent/internal/testutil/processfixture$' # //go:build race constant
 
 if [[ "$(wc -l <<<"$platform_output")" -ge "$(wc -l <<<"$output")" ]]; then
 	printf 'Expected the --platform selection to be a strict subset of the full one.\n' >&2

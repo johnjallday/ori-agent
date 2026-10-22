@@ -1,7 +1,6 @@
 package projectlibrary
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -533,10 +532,7 @@ func TestStudioSessions_SharedRecapRefusesSplitChildRoleMirrorAtReviewAndCommit(
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := database.Open(context.Background(), &database.Config{Path: filepath.Join(t.TempDir(), "ori.db"), WALMode: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	defer func() { _ = db.Close() }()
 	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
 	for _, id := range []string{scope.HomeID, child.WorkspaceID} {

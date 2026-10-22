@@ -24,8 +24,11 @@ case "$1" in
     ;;
   list)
     [[ "${LIST_STATUS:-0}" -eq 0 ]] || exit "$LIST_STATUS"
-    if [[ "$*" == *IgnoredGoFiles* ]]; then
-      printf 'github.com/johnjallday/ori-agent/internal/platform\n'
+    if [[ -n "${GOOS:-}" ]]; then
+      # The platform selector lists compiled files per GOOS and keeps the differences.
+      printf 'github.com/johnjallday/ori-agent/internal/platform |trash_%s.go||||\n' "$GOOS"
+      printf 'github.com/johnjallday/ori-agent/internal/one |same.go||||\n'
+      printf 'github.com/johnjallday/ori-agent/internal/two |same.go||||\n'
     else
       printf 'github.com/johnjallday/ori-agent/internal/one\ngithub.com/johnjallday/ori-agent/internal/two\n'
     fi
@@ -92,6 +95,12 @@ RUNNER_OS=macOS check_case platform 0 0 0
 grep -qx 'github.com/johnjallday/ori-agent/internal/platform' "$TEST_ARGUMENTS"
 grep -qx 'github.com/johnjallday/ori-agent/cmd/server' "$TEST_ARGUMENTS"
 if grep -q 'internal/one' "$TEST_ARGUMENTS"; then exit 1; fi
+# The platform leg keeps the race detector but never produces coverage.
+for flag in -json -short -race -timeout 30m -count=1; do
+  grep -qx -- "$flag" "$TEST_ARGUMENTS"
+done
+if grep -q -- '-cover' "$TEST_ARGUMENTS"; then printf 'Platform leg requested coverage\n' >&2; exit 1; fi
+grep -qx 'flags=-json -short -race -timeout 30m -count=1' "$root/artifacts"/ori-unit.*/metadata.txt
 status=0
 BUILD_STATUS=23 "$runner" > "$root/build-failure.log" 2>&1 || status=$?
 [[ "$status" -eq 23 ]]

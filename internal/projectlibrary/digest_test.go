@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -375,10 +375,7 @@ func TestSummary_ReadsPersistedStateOnlyAndDropsDisconnectedDigest(t *testing.T)
 // Home with a folder mirror must still read as agreeing after a scan.
 func TestDigest_MirroredHomeStaysInAgreementAfterScan(t *testing.T) {
 	_, scope, roots, file, _, installed := activationFixture(t)
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "digest.db"), WALMode: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	defer func() {
 		if err := db.Close(); err != nil {
 			t.Errorf("close SQLite digest fixture: %v", err)
