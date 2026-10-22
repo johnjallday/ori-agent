@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentcatalog"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -29,7 +30,30 @@ func CatalogHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	orihttp.WriteJSON(w, map[string]any{
 		"entries": agentcatalog.Registry(),
+		"hire":    hireCatalog(),
 	})
+}
+
+// hireCatalog is what the Hire card needs beside the roles: each role's
+// default brief and the blueprint its workspace starts from, and the bounds
+// the hire enforces, so the card states exactly what the server will do.
+func hireCatalog() map[string]any {
+	roles := map[string]any{}
+	for _, entry := range agentcatalog.Registry() {
+		blueprint := hireBlueprintFor(entry.Slug)
+		roles[string(entry.Slug)] = map[string]any{
+			"default_brief":   personalassistant.HireDefaultBrief(entry.Slug, ""),
+			"blueprint":       blueprint.ID,
+			"blueprint_label": blueprint.Label,
+			"open_roles":      blueprint.OpenRoles,
+		}
+	}
+	return map[string]any{
+		"roles":              roles,
+		"domain_brief":       personalassistant.HireDomainBrief(),
+		"brief_max":          personalassistant.WorkspaceGoalMaxRunes,
+		"workspace_name_max": personalassistant.HireWorkspaceNameMaxRunes,
+	}
 }
 
 // SetModelCategoryStore wires model-category resolution for catalog-create

@@ -43,6 +43,20 @@ const (
 	hireWorkspaceNameTries = 99
 )
 
+// hireBlueprint is the workspace a role's hire starts from, as the card names
+// it: its id, its label, and how many of its declared roles stay open.
+type hireBlueprint struct {
+	ID        string
+	Label     string
+	OpenRoles int
+}
+
+// hireBlueprintFor is the role's default blueprint: a workspace with the hired
+// agent as its only member.
+func hireBlueprintFor(types.AgentRole) hireBlueprint {
+	return hireBlueprint{ID: personalassistant.HireBlueprintBlank, Label: "Blank"}
+}
+
 // hireRequest is POST /api/agents/hire.
 type hireRequest struct {
 	// RequestID is fresh per opened card; a retry with the same id returns the
@@ -194,7 +208,7 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 	record, err := h.hireRecords.Create(ctx, personalassistant.HireRecord{
 		ID: uuid.NewString(), UserID: userID, RequestID: requestID,
 		AgentName: plan.name, WorkspaceID: ws.ID, Brief: plan.brief,
-		Role: string(plan.entry.Slug), Blueprint: personalassistant.HireBlueprintBlank,
+		Role: string(plan.entry.Slug), Blueprint: hireBlueprintFor(plan.entry.Slug).ID,
 		State: personalassistant.HireStateLooking,
 	})
 	if err != nil {

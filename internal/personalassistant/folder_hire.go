@@ -89,15 +89,22 @@ var roleDefaultBriefs = map[types.AgentRole]string{
 	types.RoleSpecialist:   "Act as the expert this workspace needs.",
 }
 
+// hireDomainBrief is a Specialist's default brief once it has a domain.
+const hireDomainBrief = "Act as the {domain} expert for this workspace."
+
 // HireDefaultBrief is the brief a hire card starts from for a catalog role.
 // A Specialist with a domain is that domain's expert. Empty for a role the
 // catalog does not have.
 func HireDefaultBrief(role types.AgentRole, domain string) string {
 	if domain = strings.Join(strings.Fields(domain), " "); role == types.RoleSpecialist && domain != "" {
-		return truncateRunes("Act as the "+domain+" expert for this workspace.", WorkspaceGoalMaxRunes)
+		return truncateRunes(strings.Replace(hireDomainBrief, "{domain}", domain, 1), WorkspaceGoalMaxRunes)
 	}
 	return roleDefaultBriefs[role]
 }
+
+// HireDomainBrief is the Specialist's domain brief with a "{domain}"
+// placeholder, for a card that fills it in as the user types.
+func HireDomainBrief() string { return hireDomainBrief }
 
 // HireWorkspaceNameMaxRunes bounds the name of a workspace a hire creates.
 const HireWorkspaceNameMaxRunes = 80

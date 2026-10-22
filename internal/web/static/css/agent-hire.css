@@ -1,0 +1,257 @@
+/* The Hire card (agents-hire-with-a-brief) and the tabs it sits behind, on the
+   Agents roster's Create Agent modal and the /agents/create page. The role
+   cards are the catalog's own, and the plan lines are the folder card's rows
+   (home-command.css), here in the page theme's colours. */
+
+/* ---------- Hire / Advanced tabs ---------- */
+.agent-create-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.agent-create-tabs[hidden] {
+  display: none;
+}
+
+.agent-create-tab {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 10px 10px 0 0;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.agent-create-tab:hover {
+  color: var(--text-primary);
+}
+
+.agent-create-tab.is-active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-bottom-color: var(--bg-primary);
+  box-shadow: 0 -2px 0 var(--primary-color) inset;
+}
+
+.agent-create-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 24%, transparent);
+}
+
+/* ---------- Catalog role cards ---------- */
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.catalog-card {
+  --catalog-accent: var(--primary-color);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 16px 16px 14px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, var(--primary-color) 18%);
+  border-radius: 14px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 12px,
+    100% 100%,
+    12px 100%,
+    0 calc(100% - 12px)
+  );
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.catalog-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--catalog-accent) 55%, var(--border-color) 45%);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
+}
+
+.catalog-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--catalog-accent) 32%, transparent);
+}
+
+.catalog-card.is-selected {
+  border-color: var(--catalog-accent);
+  background: color-mix(in srgb, var(--catalog-accent) 10%, var(--bg-secondary));
+  box-shadow: 0 0 0 1px var(--catalog-accent);
+}
+
+.catalog-card-emblem {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 18px;
+  color: var(--catalog-accent);
+  background: color-mix(in srgb, var(--catalog-accent) 16%, transparent);
+}
+
+.catalog-card-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.catalog-card-tagline {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- The card ---------- */
+.agent-hire-card__roles {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+/* Six roles sit in two even rows of three (three rows of two on a phone),
+   never a row with one card left over. */
+.agent-hire-card__grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 575.98px) {
+  .agent-hire-card__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.agent-hire-card__grid .catalog-card {
+  padding: 12px 12px 10px;
+  gap: 6px;
+}
+
+.agent-hire-card__note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary-color) 10%, var(--bg-secondary));
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.agent-hire-card__note[hidden],
+.agent-hire-card__error[hidden] {
+  display: none;
+}
+
+.agent-hire-card__plan-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.agent-hire-card__error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--danger-color, #dc2626);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* ---------- Plan lines (the folder card's rows) ---------- */
+.agent-hire-card .pa-folder__plan {
+  display: grid;
+  gap: 6px;
+  margin: 0.5rem 0 0.25rem;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.agent-hire-card .pa-folder__plan li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-hire-card .pa-folder__plan-kind,
+.agent-hire-card .pa-folder__plan-icon {
+  flex: none;
+  width: 1.1em;
+  color: var(--text-muted);
+  font-weight: 750;
+  text-align: center;
+}
+
+.agent-hire-card .pa-folder__plan-text {
+  min-width: 0;
+}
+
+.agent-hire-card .pa-folder__plan-text small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-hire-card .pa-folder__plan li[data-state="working"] {
+  border-color: var(--primary-color);
+}
+
+.agent-hire-card .pa-folder__plan li[data-state="working"] .pa-folder__plan-icon {
+  color: var(--warning-color, #d97706);
+  animation: agent-hire-plan-working 1.2s ease-in-out infinite;
+}
+
+.agent-hire-card .pa-folder__plan li[data-state="done"] .pa-folder__plan-icon {
+  color: var(--success-color, #16a34a);
+}
+
+.agent-hire-card .pa-folder__plan li[data-state="failed"] {
+  border-color: var(--danger-color, #dc2626);
+}
+
+.agent-hire-card .pa-folder__plan li[data-state="failed"] .pa-folder__plan-icon {
+  color: var(--danger-color, #dc2626);
+}
+
+@keyframes agent-hire-plan-working {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-hire-card .pa-folder__plan li[data-state="working"] .pa-folder__plan-icon {
+    animation: none;
+  }
+}

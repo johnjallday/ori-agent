@@ -461,8 +461,144 @@ function selectAgent(agentName) {
   event.target.closest('.agent-item').style.background = 'var(--primary-color-light)';
 }
 
+// ---- Hire tab (agents-hire-with-a-brief) ----------------------------------
+// The modal offers Hire (default) beside Advanced — the form below, unchanged
+// — when its caller asks (options.hire), the page loaded the Hire card
+// (agent-hire-card.js), and a personal assistant is hired. Otherwise it is the
+// form alone, exactly as before.
+let agentHireCard = null;
+let agentHireTabsBound = false;
+let agentHireOpenToken = 0;
+let agentHireSavedTitle = '';
+
+function agentHireElements() {
+  return {
+    modal: document.getElementById('addAgentModal'),
+    tabs: document.getElementById('agentCreateTabs'),
+    hireTab: document.getElementById('agentCreateHireTab'),
+    advancedTab: document.getElementById('agentCreateAdvancedTab'),
+    panel: document.getElementById('agentHirePanel'),
+    form: document.getElementById('addAgentForm'),
+    hireBtn: document.getElementById('hireAgentBtn'),
+    createBtn: document.getElementById('createAgentBtn'),
+    title: document.getElementById('addAgentModalTitleText')
+  };
+}
+
+function selectAgentCreateTab(tab) {
+  const els = agentHireElements();
+  const api = window.OriAgentHire;
+  if (!api || !els.hireTab || !els.advancedTab) return;
+  api.selectTab([els.hireTab, els.advancedTab], tab);
+  const hiring = tab === els.hireTab;
+  if (els.createBtn) els.createBtn.hidden = hiring;
+  if (els.hireBtn) els.hireBtn.hidden = !hiring;
+  if (els.title) els.title.textContent = hiring ? 'Hire an agent' : agentHireSavedTitle;
+}
+
+// leaveAgentHireTabs hands the modal back as the plain form. It runs when the
+// modal closes and when a caller opens it without asking for Hire.
+function leaveAgentHireTabs() {
+  agentHireOpenToken += 1;
+  const els = agentHireElements();
+  agentHireCard?.destroy();
+  agentHireCard = null;
+  if (els.tabs && !els.tabs.hidden && els.title && agentHireSavedTitle) {
+    els.title.textContent = agentHireSavedTitle;
+  }
+  if (els.tabs) els.tabs.hidden = true;
+  if (els.panel) {
+    els.panel.hidden = true;
+    els.panel.replaceChildren();
+  }
+  if (els.form) els.form.hidden = false;
+  if (els.createBtn) els.createBtn.hidden = false;
+  if (els.hireBtn) {
+    els.hireBtn.hidden = true;
+    els.hireBtn.disabled = false;
+    els.hireBtn.removeAttribute('aria-busy');
+    els.hireBtn.textContent = 'Hire and start';
+  }
+}
+
+// offerAgentHireTab shows the Hire tab when the relationship allows a hire.
+// A caller that already read the assistant passes it (hire.assistant), so the
+// tab is up before the modal shows; otherwise it is read first.
+async function offerAgentHireTab(hire) {
+  const api = window.OriAgentHire;
+  const els = agentHireElements();
+  if (!hire || !api || !els.tabs || !els.panel || !els.hireBtn || !els.form) {
+    leaveAgentHireTabs();
+    return;
+  }
+  leaveAgentHireTabs();
+  const token = agentHireOpenToken;
+  let assistant = hire.assistant;
+  try {
+    if (assistant === undefined) {
+      const response = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      assistant = response.ok ? (await response.json())?.personal_assistant : null;
+    }
+  } catch (_) {
+    assistant = null;
+  }
+  if (token !== agentHireOpenToken || !api.assistantAllowsHire(assistant)) return;
+
+  if (!agentHireTabsBound) {
+    api.bindTablist([els.hireTab, els.advancedTab], selectAgentCreateTab);
+    agentHireTabsBound = true;
+  }
+  agentHireSavedTitle = els.title?.textContent || 'Create New Agent';
+  els.tabs.hidden = false;
+  els.panel.innerHTML = '<p class="form-helper">Loading roles…</p>';
+  selectAgentCreateTab(els.hireTab);
+  els.hireBtn.disabled = true;
+
+  let catalog;
+  try {
+    catalog = await api.loadHireCatalog();
+  } catch (error) {
+    agentsLog.error('Could not load the role catalog for Hire', error);
+    if (token === agentHireOpenToken) {
+      els.panel.innerHTML =
+        '<p class="form-helper" role="alert">Could not load the roles. Use Advanced, or close and try again.</p>';
+    }
+    return;
+  }
+  if (token !== agentHireOpenToken) return;
+  agentHireCard = api.mountHireCard(els.panel, {
+    catalog,
+    prefill: hire.prefill || {},
+    idPrefix: 'agentHire',
+    takenNames: () =>
+      typeof hire.takenNames === 'function' ? hire.takenNames() : allAgents.map(getAgentName),
+    takenCharacterIds: standaloneTakenCharacterIds,
+    onChange: view => {
+      els.hireBtn.disabled = view.busy;
+      els.hireBtn.textContent = view.buttonLabel;
+      if (view.busy) els.hireBtn.setAttribute('aria-busy', 'true');
+      else els.hireBtn.removeAttribute('aria-busy');
+    },
+    onHired: result => {
+      const message = api.hiredMessage(result);
+      if (els.modal && typeof bootstrap !== 'undefined') {
+        bootstrap.Modal.getOrCreateInstance(els.modal).hide();
+      }
+      if (typeof window.notifyToast === 'function') window.notifyToast(message, 'success');
+      // The page that shows agents refreshes itself (the roster selects the
+      // new one); the sidebar list is this module's own.
+      window.dispatchEvent(new CustomEvent('ori:agent-hired', { detail: { ...result, message } }));
+      void loadAgentsForSidebar();
+    }
+  });
+  if (els.modal?.classList.contains('show')) agentHireCard.focus();
+}
+
 // Show add agent modal
 function showAddAgentModal(options = {}) {
+  void offerAgentHireTab(options.hire);
   pendingAgentCreationFlow = normalizeAgentCreationFlowOptions(options);
   systemModelPreferencePromise = null;
   cachedSystemModelPreference = null;
@@ -520,7 +656,10 @@ function showAddAgentModal(options = {}) {
 
   // Focus on input after modal is shown
   setTimeout(() => {
-    if (agentNameInput) {
+    const hirePanel = document.getElementById('agentHirePanel');
+    if (agentHireCard && hirePanel && !hirePanel.hidden) {
+      agentHireCard.focus();
+    } else if (agentNameInput) {
       agentNameInput.focus();
     }
   }, 500);
@@ -2253,7 +2392,9 @@ function setupAgentManagement() {
   if (addAgentBtn) {
     addAgentBtn.addEventListener('click', () => {
       agentsLog.debug('Add agent clicked');
-      showAddAgentModal();
+      // Hire is offered where the page has the Hire card; elsewhere this is
+      // the plain form, as before.
+      showAddAgentModal({ hire: {} });
     });
   }
 
@@ -2262,6 +2403,14 @@ function setupAgentManagement() {
   if (createAgentBtn) {
     createAgentBtn.addEventListener('click', () => {
       createNewAgent();
+    });
+  }
+
+  // Hire and start, while the Hire tab is up.
+  const hireAgentBtn = document.getElementById('hireAgentBtn');
+  if (hireAgentBtn) {
+    hireAgentBtn.addEventListener('click', () => {
+      void agentHireCard?.submit();
     });
   }
 
@@ -2277,6 +2426,7 @@ function setupAgentManagement() {
   const addAgentModal = document.getElementById('addAgentModal');
   if (addAgentModal) {
     addAgentModal.addEventListener('hidden.bs.modal', () => {
+      leaveAgentHireTabs();
       clearPendingAgentCreationFlow();
       // A cancelled open must not keep a staged file (and its object URL)
       // alive until the next one.

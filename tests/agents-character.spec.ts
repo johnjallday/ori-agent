@@ -15,12 +15,18 @@ import { mockHiredAssistant } from './helpers/hired-assistant';
  * costs the user their uploaded avatar.
  */
 
-// New Agent opens the shared Create Agent modal for a user with a hired
-// assistant (see helpers/hired-assistant.ts); before the hire it opens Mission
-// 01's preset instead.
+// Hire opens the shared Create Agent modal for a user with a hired assistant
+// (see helpers/hired-assistant.ts), on its Hire tab; the full form is one tab
+// away under Advanced. Before the hire it opens Mission 01's preset instead.
 test.beforeEach(async ({ page }) => {
   await mockHiredAssistant(page);
 });
+
+async function openAdvancedCreate(page: Page) {
+  await page.locator('#newAgentBtn').click();
+  await page.locator('#agentCreateAdvancedTab').click();
+  await expect(page.locator('#agentName')).toBeVisible();
+}
 
 async function skipOnboarding(page: Page) {
   await page.route('**/api/onboarding/status', route =>
@@ -260,7 +266,7 @@ test.describe('creating an agent with a character', () => {
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
     const name = unique('PWCreate');
-    await page.locator('#newAgentBtn').click();
+    await openAdvancedCreate(page);
     await page.locator('#agentName').fill(name);
 
     await page.locator('#agentCreateAppearance-character-choose').click();
@@ -283,7 +289,7 @@ test.describe('creating an agent with a character', () => {
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
     const name = unique('PWFace');
-    await page.locator('#newAgentBtn').click();
+    await openAdvancedCreate(page);
     await page.locator('#agentName').fill(name);
     await page.locator('#agentRole').selectOption('researcher');
 
@@ -309,7 +315,7 @@ test.describe('creating an agent with a character', () => {
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
     const name = unique('PWSkip');
-    await page.locator('#newAgentBtn').click();
+    await openAdvancedCreate(page);
     await page.locator('#agentName').fill(name);
 
     // Generated is a choice, not the absence of one (FR-5). Making it is a

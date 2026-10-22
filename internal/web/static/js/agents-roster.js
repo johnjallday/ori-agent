@@ -2800,9 +2800,27 @@
     window.showAddAgentModal({
       onCreated: function (created) {
         reloadThenSelect(created && created.name);
+      },
+      // Hire (agents-hire-with-a-brief) leads once an assistant is hired; the
+      // relationship read above decides, so the tab is up before the modal.
+      hire: {
+        assistant: assistant.known ? assistant.state : undefined,
+        takenNames: function () {
+          return state.agents.map(function (a) {
+            return a.name;
+          });
+        }
       }
     });
   }
+
+  // A hire from the Hire card lands in the collection like a create: the
+  // roster reloads with the hired agent selected, and says what happens next.
+  window.addEventListener('ori:agent-hired', function (event) {
+    var detail = (event && event.detail) || {};
+    reloadThenSelect(detail.agent_name);
+    if (detail.message) announce(detail.message);
+  });
 
   // The staged appearance for the hire preset. Nothing is persisted before the
   // hire succeeds.

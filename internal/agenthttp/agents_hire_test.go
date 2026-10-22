@@ -319,6 +319,43 @@ func TestHire_UnwiredRecordsAnswerUnavailable(t *testing.T) {
 	}
 }
 
+func TestCatalog_CarriesWhatTheHireCardNeedsPerRole(t *testing.T) {
+	rr := httptest.NewRecorder()
+	CatalogHandler(rr, httptest.NewRequest(http.MethodGet, "/api/agents/catalog", nil))
+	var payload struct {
+		Entries []struct {
+			Slug string `json:"slug"`
+		} `json:"entries"`
+		Hire struct {
+			Roles map[string]struct {
+				DefaultBrief   string `json:"default_brief"`
+				Blueprint      string `json:"blueprint"`
+				BlueprintLabel string `json:"blueprint_label"`
+			} `json:"roles"`
+			DomainBrief      string `json:"domain_brief"`
+			BriefMax         int    `json:"brief_max"`
+			WorkspaceNameMax int    `json:"workspace_name_max"`
+		} `json:"hire"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Entries) == 0 || len(payload.Hire.Roles) != len(payload.Entries) {
+		t.Fatalf("%d roles for %d entries", len(payload.Hire.Roles), len(payload.Entries))
+	}
+	for _, entry := range payload.Entries {
+		role := payload.Hire.Roles[entry.Slug]
+		if role.DefaultBrief != personalassistant.HireDefaultBrief(types.AgentRole(entry.Slug), "") ||
+			role.Blueprint == "" || role.BlueprintLabel == "" {
+			t.Errorf("%s: %+v", entry.Slug, role)
+		}
+	}
+	if payload.Hire.DomainBrief != "Act as the {domain} expert for this workspace." ||
+		payload.Hire.BriefMax != 300 || payload.Hire.WorkspaceNameMax != 80 {
+		t.Fatalf("hire block %+v", payload.Hire)
+	}
+}
+
 func TestCreate_RefusesTheNameTheHireRouteAnswers(t *testing.T) {
 	h := catalogTestHandler(t)
 	rr := httptest.NewRecorder()

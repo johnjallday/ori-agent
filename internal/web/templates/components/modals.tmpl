@@ -21,6 +21,16 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
       </div>
       <div class="modal-body">
+        <!-- Hire (default) and Advanced: offered only where the page loads the
+             Hire card (agent-hire-card.js) and only once a personal assistant
+             is hired. Advanced is the form below, unchanged. -->
+        <div id="agentCreateTabs" class="agent-create-tabs" role="tablist" aria-label="How to add an agent" hidden>
+          <button type="button" class="agent-create-tab is-active" id="agentCreateHireTab" role="tab"
+                  aria-selected="true" aria-controls="agentHirePanel" tabindex="0">Hire</button>
+          <button type="button" class="agent-create-tab" id="agentCreateAdvancedTab" role="tab"
+                  aria-selected="false" aria-controls="addAgentForm" tabindex="-1">Advanced</button>
+        </div>
+        <section id="agentHirePanel" class="agent-hire-panel" role="tabpanel" aria-labelledby="agentCreateHireTab" hidden></section>
         <section id="agentCreateDraftContext" class="agent-create-draft-context" aria-labelledby="agentCreateDraftContextTitle" hidden>
           <div class="agent-create-draft-heading">
             <div id="agentCreateDraftPortrait" class="agent-create-draft-portrait" aria-hidden="true"></div>
@@ -200,12 +210,23 @@
           </svg>
           Create Agent
         </button>
+        <button type="button" id="hireAgentBtn" class="modern-btn modern-btn-primary" hidden>Hire and start</button>
       </div>
     </div>
   </div>
 </div>
 
 <style>
+  /* The Hire tab's chrome stays out of every page that does not offer it:
+     .modern-btn's display would otherwise beat the hidden attribute. */
+  #agentCreateTabs[hidden],
+  #agentHirePanel[hidden],
+  #addAgentForm[hidden],
+  #createAgentBtn[hidden],
+  #hireAgentBtn[hidden] {
+    display: none;
+  }
+
   /* The Profile block sits between the model settings and Review Skills, set
      off by a rule rather than a card so the Appearance editor inside it keeps
      the plain modal background its contrast was tuned for. */
