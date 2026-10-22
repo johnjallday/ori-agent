@@ -183,6 +183,8 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	}
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetHireRecords(personalassistant.NewSQLiteHireRecords(s.Storage.SessionStore.DB()))
+		// A hire the assistant offered in a conversation marks its proposal.
+		agentHandler.SetHireProposals(personalassistant.NewSQLiteHireProposals(s.Storage.SessionStore.DB()))
 	}
 	// A hired agent runs on a model that is set up, so its first look can run.
 	if s.Core != nil {

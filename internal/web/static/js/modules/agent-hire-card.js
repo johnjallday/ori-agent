@@ -115,6 +115,38 @@
     return base;
   }
 
+  // prefillState is the card's starting state from a prefill: a role, and any
+  // of name, domain, brief and workspace name already written (the assistant's
+  // proposal, say). A brief or workspace name that was given counts as edited,
+  // so a role change keeps it. requestId, when given, is the hire's request
+  // id (a proposal's id); otherwise the card mints one.
+  function prefillState(prefill = {}, requestId = '') {
+    const brief = oneLine(prefill.brief);
+    const workspaceName = oneLine(prefill.workspaceName);
+    return {
+      role: '',
+      name: oneLine(prefill.name),
+      domain: oneLine(prefill.domain),
+      brief,
+      workspaceName,
+      edited: { name: false, brief: Boolean(brief), workspaceName: Boolean(workspaceName) },
+      requestId: oneLine(requestId) || newRequestId(),
+      phase: 'idle',
+      failedStep: '',
+      error: '',
+      note: oneLine(prefill.note)
+    };
+  }
+
+  // suggestedNameFor is the name a role gets while the user has not typed one:
+  // the prefilled name for the prefilled role (it comes back with that role),
+  // else the role's own name.
+  function suggestedNameFor(entry, prefill, takenNames) {
+    const given = oneLine(prefill?.name);
+    if (given && entry?.slug === oneLine(prefill?.role)) return given;
+    return suggestAgentName(entry?.display_name, takenNames);
+  }
+
   // planLines is what Hire and start does, line by line, in the folder
   // card's line kinds.
   function planLines({ name, roleLabel, blueprintLabel, openRoles, workspaceName, brief }) {
@@ -192,6 +224,8 @@
     }
     const running = state.phase === 'running';
     return {
+      // The card's current words, for a host that heads the card with them.
+      fields: { role: state.role, name, domain: oneLine(state.domain), brief, workspaceName },
       roles: entries.map(candidate => ({
         slug: candidate.slug,
         label: candidate.display_name,
@@ -285,8 +319,9 @@
   }
 
   // mountHireCard draws the card into host and runs its one request.
-  // options: { catalog, prefill: { role, note }, takenNames(), idPrefix,
-  //   onChange(view), onHired(result), fetchImpl, doc }
+  // options: { catalog, prefill: { role, name, domain, brief, workspaceName,
+  //   note }, requestId, appearance (false leaves the face out), takenNames(),
+  //   idPrefix, onChange(view), onHired(result), fetchImpl, doc }
   // The caller owns the Hire and start button and calls submit().
   function mountHireCard(host, options = {}) {
     const doc = options.doc || document;
@@ -294,19 +329,8 @@
     const id = suffix => `${options.idPrefix || 'hire'}${suffix}`;
     const catalog = options.catalog || { entries: [] };
     const taken = () => (typeof options.takenNames === 'function' ? options.takenNames() : []);
-    const state = {
-      role: '',
-      name: '',
-      domain: '',
-      brief: '',
-      workspaceName: '',
-      edited: { name: false, brief: false, workspaceName: false },
-      requestId: newRequestId(),
-      phase: 'idle',
-      failedStep: '',
-      error: '',
-      note: options.prefill?.note || ''
-    };
+    const prefill = options.prefill || {};
+    const state = prefillState(prefill, options.requestId);
     let appearanceEditor = null;
 
     host.replaceChildren();
@@ -368,12 +392,13 @@
     function refreshDefaults() {
       const entry = entryFor(state.role);
       if (!entry) return;
-      if (!state.edited.name) state.name = suggestAgentName(entry.display_name, taken());
+      if (!state.edited.name) state.name = suggestedNameFor(entry, prefill, taken());
       if (!state.edited.brief) state.brief = defaultBriefFor(catalog, entry, state.domain);
       if (!state.edited.workspaceName) state.workspaceName = hireWorkspaceName(state.brief);
       els.name.value = state.name;
       els.brief.value = state.brief;
       els.workspaceName.value = state.workspaceName;
+      if (els.domain.value !== state.domain) els.domain.value = state.domain;
     }
 
     function render() {
@@ -457,9 +482,12 @@
     });
 
     // The same Appearance editor as the Advanced form, with a face suggested
-    // for the role. No upload: the hire is one request.
+    // for the role. No upload: the hire is one request. A host that keeps the
+    // card short (the conversation) leaves the face out.
     const appearanceHost = card.querySelector(`#${id('AppearanceHost')}`);
-    if (globalThis.AgentAppearanceEditor && appearanceHost) {
+    if (options.appearance === false) {
+      appearanceHost?.remove();
+    } else if (globalThis.AgentAppearanceEditor && appearanceHost) {
       appearanceEditor = globalThis.AgentAppearanceEditor.create({
         host: appearanceHost,
         idPrefix: id('Appearance'),
@@ -551,6 +579,8 @@
     hireWorkspaceName,
     defaultBriefFor,
     suggestAgentName,
+    prefillState,
+    suggestedNameFor,
     planLines,
     progressLines,
     hireCardView,

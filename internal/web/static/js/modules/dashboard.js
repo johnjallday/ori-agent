@@ -10565,7 +10565,18 @@
         unanswered && conversations && typeof conversations.unansweredTurnLine === 'function'
           ? conversations.unansweredTurnLine(data)
           : '';
+      // An offer to hire is one line of prose and the card. The card says the
+      // rest, so the reply's own description of it stays off the bubble.
+      var hireOffer =
+        data &&
+        data.requires_confirmation &&
+        data.confirmation &&
+        data.confirmation.action_type === 'hire_agent' &&
+        window.PersonalAssistantHireOffer
+          ? data.confirmation
+          : null;
       var responseText = unansweredLine || String((data && data.response) || '').trim();
+      if (hireOffer) responseText = window.PersonalAssistantHireOffer.lead(responseText);
       var assistantRow = responseText
         ? appendHomeAssistantMessage('assistant', responseText)
         : null;
@@ -10716,15 +10727,21 @@
         });
       }
 
-      if (data && data.requires_confirmation && data.confirmation) {
+      // The assistant's offer to hire: the shared Hire card under the reply,
+      // with its own Hire and start, Not now and Adjust. Nothing is hired
+      // until the user presses Hire and start on it.
+      if (hireOffer && assistantRow) {
         inlineReview = true;
-        confirmHomeAction(
-          data.confirmation,
-          routeContext,
-          intent,
-          String(data.response || '').trim() === String(data.confirmation.summary || '').trim(),
-          // A guided setup the reply named is still offered, ahead of the
-          // proposal's own review button.
+        renderHireProposalCard(
+          assistantRow,
+          hireOffer,
+          hireProposalCardOptions(
+            String((data.conversation && data.conversation.id) || ''),
+            routeContext
+          )
+        );
+        setHomeAssistantRoutingSummary('', '');
+        renderHomeAssistantActions(
           buildHomeActionButtons(
             (Array.isArray(data.actions) ? data.actions : []).filter(function (action) {
               return action && action.type === 'open_setup_quest';
@@ -10733,14 +10750,29 @@
             intent
           )
         );
-        // This review belongs to the saved proposal, not the activity header
-        // above the entire transcript. Settle scrolling after mounting it.
-        if (
-          conversationRef &&
-          assistantRow &&
-          data.confirmation.action_type === 'prepare_workspace'
-        )
-          mountPersonalTurnStatus(assistantRow);
+        // The card belongs to the saved reply, not the activity header above
+        // the entire transcript. Settle scrolling after mounting it.
+        if (conversationRef) mountPersonalTurnStatus(assistantRow);
+        return;
+      }
+
+      if (data && data.requires_confirmation && data.confirmation) {
+        inlineReview = true;
+        confirmHomeAction(
+          data.confirmation,
+          routeContext,
+          intent,
+          String(data.response || '').trim() === String(data.confirmation.summary || '').trim(),
+          // A guided setup the reply named is still offered, ahead of the
+          // confirmation's own buttons.
+          buildHomeActionButtons(
+            (Array.isArray(data.actions) ? data.actions : []).filter(function (action) {
+              return action && action.type === 'open_setup_quest';
+            }),
+            routeContext,
+            intent
+          )
+        );
         return;
       }
 
@@ -11063,6 +11095,45 @@
     };
   }
 
+  // hireProposalCardOptions is what the assistant's hire card needs from this
+  // page: whether its reply is still current, and what Adjust opens. Adjust
+  // is the existing prefilled workspace form; nothing is created until that
+  // form's own Create.
+  function hireProposalCardOptions(conversationId, routeContext) {
+    var conversations = window.PersonalAssistantConversation;
+    var page = String(window.location.pathname || '/');
+    var expected = normalizeHomeRouteContext(routeContext);
+    return {
+      isCurrent: function () {
+        return (
+          !homeAssistantState.busy &&
+          Boolean(conversations) &&
+          conversations.currentId() === String(conversationId || '') &&
+          String(window.location.pathname || '/') === page
+        );
+      },
+      adjust: function (proposal) {
+        openPreparedWorkspaceReview(
+          {
+            conversation_id: String(conversationId || ''),
+            state_version: proposal.stateVersion,
+            name: proposal.workspaceName,
+            description: proposal.brief
+          },
+          expected
+        );
+      }
+    };
+  }
+
+  // renderHireProposalCard draws the assistant's offer to hire an agent as the
+  // shared Hire card under its reply (personal-assistant-hire-offer.js).
+  function renderHireProposalCard(row, confirmation, options) {
+    var hire = window.PersonalAssistantHireOffer;
+    if (!row || !hire || typeof hire.render !== 'function') return null;
+    return hire.render(row, confirmation, options || {});
+  }
+
   // A prepared proposal only pre-fills the existing manual wizard. It does
   // not start a build/model, inherit a parent/binding, or submit Create.
   function openPreparedWorkspaceReview(args, routeContext) {
@@ -11108,32 +11179,23 @@
   // confirmHomeAction shows an explicit confirm/cancel step before executing a
   // state-changing action; on confirm it re-calls /ask with confirmed_action.
   // A build_workspace confirmation is the exception: the server never runs it,
-  // and Confirm opens the assistant's build in this browser (FR41).
+  // and Confirm opens the assistant's build in this browser (FR41). The
+  // assistant's hire offer never comes here: it is its own card.
   // leadingButtons are offered before the confirm step: a guided setup the
   // reply named comes ahead of the workspace it also proposed.
   function confirmHomeAction(confirmation, routeContext, intent, summaryShown, leadingButtons) {
-    if (!summaryShown && confirmation.action_type !== 'prepare_workspace')
+    if (!summaryShown)
       appendHomeAssistantMessage(
         'assistant',
         String(confirmation.summary || 'Confirm this change?')
       );
-    var prepared = confirmation.action_type === 'prepare_workspace';
-    setHomeAssistantRoutingSummary(
-      prepared ? 'Review' : 'Confirm',
-      prepared
-        ? 'Review an editable proposal; nothing is created yet.'
-        : 'Review and confirm this change.'
-    );
+    setHomeAssistantRoutingSummary('Confirm', 'Review and confirm this change.');
     var args = confirmation.arguments || {};
     var confirmButtons = [
       {
-        label: prepared ? 'Review workspace setup' : 'Confirm',
+        label: 'Confirm',
         variant: 'primary',
         onClick: async function () {
-          if (prepared) {
-            openPreparedWorkspaceReview(args, routeContext);
-            return;
-          }
           if (confirmation.action_type === 'build_workspace') {
             var first = String(args.first_message || homeAssistantState.pendingPrompt || '');
             if (await openBuildWithAssistant(first)) return;
@@ -11187,8 +11249,8 @@
       return 'The conversation changed or could not be saved. Nothing was created.';
     if (data?.model_unavailable) {
       var failures = {
-        invalid_workspace_proposal:
-          'The proposal could not be used. Open the workspace form manually.',
+        invalid_hire_proposal:
+          'The hire proposal could not be used. Nothing was hired; try again or hire from the Agents page.',
         model_timeout: 'The model timed out. Your draft is kept.',
         provider_overloaded: 'The model is at capacity. Your draft is kept.',
         request_cancelled: 'Request cancelled. Your draft is kept.',
@@ -14688,6 +14750,11 @@
   }
 
   window.OriAskRouting = window.OriAskRouting || {};
+  // What the assistant's hire card needs from this page when a reloaded
+  // conversation draws it again (personal-assistant-hire-offer.js hydrate).
+  window.OriAskRouting.hireCardOptions = function (conversationId) {
+    return hireProposalCardOptions(conversationId, buildHomeRouteContext());
+  };
   window.OriAskRouting.open = function () {
     window.PersonalAssistantPanel?.openActivity?.();
     openHomeAssistantThinkingModal();

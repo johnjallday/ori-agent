@@ -8,7 +8,7 @@ const summary = vm.runInNewContext(
   `(${source.slice(source.indexOf('function formatHomeAskSummary('), source.indexOf('async function createWorkspaceChatSessionWithMessage(')).trim()})`
 );
 for (const failure of [
-  'invalid_workspace_proposal',
+  'invalid_hire_proposal',
   'model_timeout',
   'request_cancelled',
   'model_not_configured',

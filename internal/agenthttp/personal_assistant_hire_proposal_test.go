@@ -420,6 +420,34 @@ func TestHireProposalSavedProposalIsReturnedOnReloadAndToldToTheModel(t *testing
 	}
 }
 
+func TestHireProposalReloadLinksAHiredCardToItsWorkspace(t *testing.T) {
+	f, _, _, proposals := newHireProposalFixture(t)
+	f.provider.script = []llm.ChatResponse{hireProposalReply(hireProposalFixture)}
+	first := askHire(f, "help me compare three CRMs")
+	id := first.Confirmation.Arguments["proposal_id"].(string)
+	if _, err := proposals.Update(context.Background(), id, func(p *personalassistant.HireProposal) error {
+		p.State, p.HireID, p.AgentName, p.WorkspaceID = personalassistant.HireProposalHired, "hire-1", "Ruth", f.alpha.ID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/home-assistant/conversations/canonical", nil)
+	req.SetPathValue("id", "canonical")
+	f.handler.ConversationHandler(rr, req)
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	card := body["hire_proposals"].([]any)[0].(map[string]any)
+	if card["state"] != "hired" || card["hire_id"] != "hire-1" || card["workspace_id"] != f.alpha.ID {
+		t.Fatalf("hired card: %v", card)
+	}
+	if route := workspaceRoute(f.alpha); route != "" && card["workspace_route"] != route {
+		t.Fatalf("hired card route %v, want %q", card["workspace_route"], route)
+	}
+}
+
 func TestHireProposalUnreadableHistoryStillOffersTheTool(t *testing.T) {
 	f, _, _, proposals := newHireProposalFixture(t)
 	proposals.listErr = errors.New("database is locked")

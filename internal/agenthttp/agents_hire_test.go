@@ -84,6 +84,7 @@ type hireFixture struct {
 	agents     store.Store
 	workspaces workspace.Store
 	records    *personalassistant.SQLiteHireRecords
+	proposals  *personalassistant.SQLiteHireProposals
 	assistant  *fakeAssistantReader
 	blueprints *fakeHireWorkspaces
 }
@@ -107,14 +108,63 @@ func newHireFixture(t *testing.T) *hireFixture {
 	f := &hireFixture{
 		h: New(agents), agents: agents, workspaces: workspaces,
 		records:    personalassistant.NewSQLiteHireRecords(db),
+		proposals:  personalassistant.NewSQLiteHireProposals(db),
 		assistant:  &fakeAssistantReader{state: personalassistant.APIStateActive},
 		blueprints: &fakeHireWorkspaces{store: workspaces, taken: map[string]bool{}},
 	}
 	f.h.SetWorkspaceStore(workspaces)
 	f.h.SetPersonalAssistantSupport(f.assistant, nil)
 	f.h.SetHireRecords(f.records)
+	f.h.SetHireProposals(f.proposals)
 	f.h.SetHireWorkspaces(f.blueprints)
 	return f
+}
+
+// A hire made from the assistant's offer in a conversation (the request id is
+// the proposal's id) marks that proposal hired with what it became, as the
+// card was hired: role, name and brief as sent. A replay changes nothing
+// more, and a proposal of another user is left alone.
+func TestHire_MarksTheConversationProposalItCameFrom(t *testing.T) {
+	f := newHireFixture(t)
+	for _, proposal := range []personalassistant.HireProposal{
+		{ID: "proposal-1", UserID: "local", ConversationID: "conv-1", MessageID: "m-1", Role: "researcher", Name: "Ruth", Brief: "Compare the CRMs.", WorkspaceName: "CRM comparison", Blueprint: "research-project", BlueprintLabel: "Research Project", OpenRoles: 2, State: personalassistant.HireProposalOffered},
+		{ID: "proposal-2", UserID: "someone-else", ConversationID: "conv-2", MessageID: "m-2", Role: "validator", Name: "Rita", Brief: "Check it.", WorkspaceName: "Check It", Blueprint: "blank", BlueprintLabel: "Blank", State: personalassistant.HireProposalOffered},
+	} {
+		if _, err := f.proposals.Create(t.Context(), proposal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The user changed the role on the card before pressing Hire and start.
+	rr, got := f.hire(t, `{"request_id":"proposal-1","role":"validator","name":"Rita","brief":"Check the CRM shortlist for mistakes.","workspace_name":"CRM check"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	marked, err := f.proposals.Get(t.Context(), "proposal-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.State != personalassistant.HireProposalHired || marked.HireID != got["hire_id"] || marked.AgentName != "Rita" || marked.WorkspaceID != got["workspace_id"] {
+		t.Fatalf("proposal not marked with the hire: %+v / %v", marked, got)
+	}
+	if marked.Role != "validator" || marked.Name != "Rita" || marked.Brief != "Check the CRM shortlist for mistakes." || marked.WorkspaceName != "CRM check" || marked.Blueprint != "blank" || marked.BlueprintLabel != "Blank" || marked.OpenRoles != 0 {
+		t.Fatalf("proposal does not say what was hired: %+v", marked)
+	}
+	// Another user's proposal: refused as a foreign request id, untouched.
+	rr, _ = f.hire(t, `{"request_id":"proposal-2","role":"validator","name":"Rita 2","brief":"Check it."}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	if foreign, _ := f.proposals.Get(t.Context(), "proposal-2"); foreign.State != personalassistant.HireProposalOffered {
+		t.Fatalf("another user's proposal was marked: %+v", foreign)
+	}
+	// A replay answers with the first hire and leaves the marking as it is.
+	rr, replayed := f.hire(t, `{"request_id":"proposal-1","role":"validator","name":"Rita","brief":"Check the CRM shortlist for mistakes."}`)
+	if rr.Code != http.StatusOK || replayed["replayed"] != true {
+		t.Fatalf("replay: %d %v", rr.Code, replayed)
+	}
+	if again, _ := f.proposals.Get(t.Context(), "proposal-1"); again.HireID != marked.HireID || again.UpdatedAt != marked.UpdatedAt {
+		t.Fatalf("replay rewrote the proposal: %+v", again)
+	}
 }
 
 func (f *hireFixture) hire(t *testing.T, body string) (*httptest.ResponseRecorder, map[string]any) {

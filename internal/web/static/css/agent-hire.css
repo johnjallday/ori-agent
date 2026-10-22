@@ -124,6 +124,98 @@
   overflow: hidden;
 }
 
+/* ---------- The card in the assistant's conversation ---------- */
+/* The assistant's offer to hire (personal-assistant-hire.js) sits inside the
+   reply's bubble like the folder proposal does, drawn with the same card the
+   Agents page uses, two roles to a row for the drawer's width. */
+.personal-assistant-hire {
+  margin-top: 14px;
+  padding: 14px 0 4px;
+  border-top: 1px solid color-mix(in srgb, var(--ori-ink, var(--text-primary)) 18%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  /* The reply bubble keeps the model's line breaks (pre-wrap); the card's own
+     markup must not turn its template whitespace into gaps. */
+  white-space: normal;
+  text-align: left;
+}
+
+.personal-assistant-hire__headline {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.personal-assistant-hire__detail {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.personal-assistant-hire[data-state="declined"] .personal-assistant-hire__headline,
+.personal-assistant-hire[data-state="adjusted"] .personal-assistant-hire__headline {
+  color: var(--text-secondary);
+}
+
+.personal-assistant-hire .agent-hire-card__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.personal-assistant-hire .agent-hire-card__grid .catalog-card {
+  padding: 10px 10px 8px;
+}
+
+.personal-assistant-hire .catalog-card-tagline {
+  -webkit-line-clamp: 2;
+}
+
+.personal-assistant-hire__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.personal-assistant-hire__actions button {
+  min-height: 44px;
+  padding: 7px 12px;
+  color: var(--pa-accent-text, var(--ori-accent-strong, var(--primary-color)));
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+}
+
+.personal-assistant-hire__actions button[data-hire-primary] {
+  color: var(--bg-primary, #fff);
+  background: var(--pa-accent-text, var(--ori-accent-strong, var(--primary-color)));
+  border-color: transparent;
+}
+
+.personal-assistant-hire__actions button:disabled {
+  opacity: 0.6;
+}
+
+.personal-assistant-hire__actions button:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--ori-accent-strong, var(--primary-color)));
+  outline-offset: 3px;
+}
+
+.personal-assistant-hire__status {
+  margin: 8px 0 0;
+}
+
+.personal-assistant-hire__status:empty {
+  display: none;
+}
+
+.personal-assistant-hire__link {
+  font-weight: 600;
+}
+
 /* ---------- The card ---------- */
 .agent-hire-card__roles {
   border: 0;

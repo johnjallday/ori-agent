@@ -418,7 +418,14 @@ func (h *HomeAssistantAskHandler) hireProposalsForConversation(ctx context.Conte
 	}
 	views := make([]map[string]any, 0, len(proposals))
 	for _, proposal := range proposals {
-		views = append(views, hireProposalView(proposal))
+		view := hireProposalView(proposal)
+		// A hired card links to the workspace it made, by its current slug.
+		if proposal.State == personalassistant.HireProposalHired && h.Sources.Workspaces != nil {
+			if ws, err := h.Sources.Workspaces.Get(proposal.WorkspaceID); err == nil && ws != nil {
+				view["workspace_route"] = workspaceRoute(ws)
+			}
+		}
+		views = append(views, view)
 	}
 	return views
 }
