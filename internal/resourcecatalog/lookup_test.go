@@ -79,7 +79,7 @@ func (f *catalogFixture) bindAgent(t *testing.T, workspaceID, roleID, agentName 
 func newLookupFixture(t *testing.T) (*catalogFixture, LookupCaller) {
 	t.Helper()
 	f := newCatalogFixture(t)
-	f.homeAvailable = true
+	f.setHomeAvailable(true)
 	f.service = f.newService(f.dataDir)
 	f.approveAll(t)
 	_, caller := f.linkTestChild(t, "song-one", "", "reaper-assistant", "REAPER Assistant")
@@ -198,11 +198,11 @@ func TestLookup_FollowsWithdrawalProvidersAndApproval(t *testing.T) {
 		t.Fatalf("disabled plugin err = %v", err)
 	}
 	f.provider.set(func(p *fakeProvider) { p.status = newFakeProvider(t).status })
-	f.homeAvailable = false
+	f.setHomeAvailable(false)
 	if _, err := f.service.Search(caller, LookupQuery{}); lookupReason(err) != LookupProviderUnavailable {
 		t.Fatalf("unavailable Home package err = %v", err)
 	}
-	f.homeAvailable = true
+	f.setHomeAvailable(true)
 	// Another computer: the same folders, no approval there.
 	elsewhere := f.newService(t.TempDir())
 	if _, err := elsewhere.Search(caller, LookupQuery{}); lookupReason(err) != LookupNothingApproved {
