@@ -1192,6 +1192,16 @@ async function captureScene(
   }
 }
 
+// Home's header primary appears only once the assistant relationship has been
+// read, and its label follows that state. Both Home scenes photograph the
+// header, so wait for the fixture's active assistant to settle it on its final
+// label; otherwise the two captures of one run can differ by that button.
+async function expectFinalHomePrimary(page: Page) {
+  const primary = page.locator('#cockpitPrimaryActionBtn');
+  await expect(primary).toBeVisible();
+  await expect(primary).toHaveText('Hire an agent');
+}
+
 test.afterAll(() => {
   if (!captureEnvironmentReady) return;
   mkdirSync(sidecarDirectory, { recursive: true });
@@ -1212,6 +1222,7 @@ test('captures the Home command bridge and the Personal Assistant drawer', async
     '.home-command-bridge',
     'Resolve launch readiness risks',
     async scenePage => {
+      await expectFinalHomePrimary(scenePage);
       await scenePage.locator('#personalAssistantLauncher').click();
       await expect(scenePage.locator('#personalAssistantToday')).toBeVisible();
       // The context line settles after its own request; wait for its final text
@@ -1262,6 +1273,7 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
     '#cockpitMap',
     'Northstar Personal HQ',
     async scenePage => {
+      await expectFinalHomePrimary(scenePage);
       const selectedTile = scenePage.locator('.ws-map-tile[data-ws-id]').first();
       await selectedTile.click();
       await expect(scenePage.locator('#cockpitContextModal')).toBeVisible();

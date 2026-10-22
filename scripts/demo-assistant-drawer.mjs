@@ -854,11 +854,11 @@ async function folder() {
   console.log('after Set up:', new URL(page.url()).pathname + new URL(page.url()).search);
   await shot('09-set-up');
 
-  // The toolbar's button starts the same turn.
+  // The toolbar's primary, "Hire an agent" once the HQ exists, starts the same turn.
   await page.goto(`${base}/`);
-  await page.locator('#cockpitShowFolderBtn').waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('#cockpitPrimaryActionBtn').waitFor({ state: 'visible', timeout: 20000 });
   await applyTheme();
-  await page.locator('#cockpitShowFolderBtn').click();
+  await page.locator('#cockpitPrimaryActionBtn').click();
   await chooser.waitFor({ state: 'visible' });
   check(await request.isVisible(), 'the toolbar button starts the same turn, with the request');
   check(await page.locator(SECTIONS).isHidden(), 'and folds the top');

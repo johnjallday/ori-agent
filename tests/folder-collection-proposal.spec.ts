@@ -249,7 +249,7 @@ test.describe('a folder of projects attached in the assistant', () => {
   });
 });
 
-test.describe("a folder of projects explored from Home's Explore a folder", () => {
+test.describe("a folder of projects explored from Home's folder link", () => {
   test.skip(phase !== 'home', 'runs in the home phase');
   const root = join(sandbox, 'Music');
 

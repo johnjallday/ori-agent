@@ -66,6 +66,11 @@ Contract when photographed paths changed. README validation includes Node tests,
 `make readme-check`, disposable capture and the tracked-files check.
 `CI_LOCAL_ARGS="--readme"` forces capture; `--no-readme` skips it;
 `--keep-going` runs all gates. `make test` alone is not enough.
+Worktrees share one machine, so the full unit gate runs one at a time: it holds
+a lock in `$TMPDIR`, and another worktree's gate waits, naming the holder, and
+clears a lock whose gate has died (`ORI_CI_LOCAL_LOCK=0` turns the queue off).
+It tests half the CPUs' worth of packages at once (`ORI_UNIT_TEST_PARALLEL=N`
+overrides); CI keeps Go's default.
 
 **Both static checks have large pre-existing baselines; scope them to the change.**
 `make lint-new` uses `--new-from-merge-base=origin/dev`, as CI does. Do not use
