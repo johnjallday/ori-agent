@@ -216,7 +216,10 @@ test('Create Workspace builds and staffs the required Home before two project te
       await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
       await captureEvidence(page, 'music-producer-07-map-placement.png');
     } else {
-      await expect(page.locator('#createFolderBtn')).toHaveText(`Create “${workspaceName}”`);
+      // The project roles were staged as Create on Team, so Review hires.
+      await expect(page.locator('#createFolderBtn')).toHaveText(
+        `Hire and create “${workspaceName}”`
+      );
     }
 
     const createPromise = page.waitForResponse(
