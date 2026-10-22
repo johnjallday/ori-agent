@@ -25,8 +25,8 @@
       <!--
         Two rows with two jobs. The first says where you are and what you can
         make: the Workspace Map/Tree identity, the view switch, the capture and
-        Summary actions, and creation (New Workspace first, Explore a folder
-        beside it). The second is the quieter readout row: the App Guide and
+        Summary actions, and creation (the hire-first primary, then New
+        Workspace). The second is the quieter readout row: the App Guide and
         signal filters on the left; Updates, Quests, and the city's resources
         on the right. Every control
         keeps its id — coachmarks, progression, setup quests, and the specs all
@@ -56,14 +56,15 @@
               <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
                       aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
             </div>
-            <!-- Creation. New Workspace is the primary action; Explore a folder
-                 (shown only once an assistant relationship makes it useful —
-                 see cockpitFolderActionView) sits beside it as the secondary. -->
+            <!-- Creation. The primary is the next step in the hire-first story,
+                 chosen from the assistant relationship (cockpitPrimaryActionView):
+                 Meet your assistant before a hire, Build My HQ after it, and
+                 Hire an agent once the HQ exists. It stays hidden until that
+                 state is known, so it never flashes a wrong label. New Workspace
+                 is the secondary in every state. -->
             <div class="cockpit-area-actions__create">
-              <button id="cockpitShowFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" hidden>
-                Explore a folder
-              </button>
-              <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button"
+              <button id="cockpitPrimaryActionBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" hidden></button>
+              <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button"
                       data-bs-toggle="modal" data-bs-target="#addFolderModal"
                       data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create"
                       data-workspace-map-eligible="true">

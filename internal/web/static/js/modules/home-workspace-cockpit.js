@@ -4,6 +4,10 @@ import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 import { createLibraryBadgeLoader, libraryShelfRoute } from './home-library-badges.js';
 import { workspacePageURL } from './workspace-routes.js';
 import {
+  MEET_ASSISTANT_AGENTS_ROUTE,
+  MEET_ASSISTANT_QUEST_ROUTE
+} from './personal-assistant-hire.js';
+import {
   normalizeKind,
   isGroupWorkspace,
   flattenWorkspaceTree,
@@ -68,13 +72,44 @@ export function formatCount(value) {
   return value === null || value === undefined ? '—' : String(value);
 }
 
-// Home's primary action follows the durable relationship, not the number of
-// workspace tiles. A hire without HQ opens its confirmation instead of an
-// unusable folder chooser; before a hire the button is absent.
-export function cockpitFolderActionView(personalAssistant) {
+// Home's primary action is the next step in the hire-first story, read from the
+// durable assistant relationship, never from the number of workspace tiles.
+// Before a hire it starts Mission 01; a hire without HQ opens the HQ card
+// instead of an unusable folder chooser; a ready assistant opens the folder
+// chooser, which lands on a hire card for a recognized project. An unknown or
+// not-yet-loaded state shows no primary, and New Workspace is left to offer
+// creation on its own.
+const PRIMARY_ACTIONS = {
+  needs_hire: { label: 'Meet your assistant', kind: 'navigate', href: MEET_ASSISTANT_QUEST_ROUTE },
+  hiring: {
+    label: 'Resume meeting your assistant',
+    kind: 'navigate',
+    href: MEET_ASSISTANT_QUEST_ROUTE
+  },
+  // The Ori guide's wording for the same state and route.
+  repair_needed: {
+    label: 'Repair personal assistant',
+    kind: 'navigate',
+    href: MEET_ASSISTANT_AGENTS_ROUTE
+  },
+  needs_hq: { label: 'Build My HQ', kind: 'hq', href: '' },
+  provisioning_hq: { label: 'Resume HQ setup', kind: 'hq', href: '' },
+  active: { label: 'Hire an agent', kind: 'folder', href: '' },
+  paused: { label: 'Hire an agent', kind: 'folder', href: '' }
+};
+
+export function cockpitPrimaryActionView(personalAssistant) {
   const state = String(personalAssistant?.state || '').trim();
-  if (state === 'needs_hq' || state === 'provisioning_hq') return { visible: true, target: 'hq' };
-  if (state === 'active' || state === 'paused') return { visible: true, target: 'folder' };
+  const action = Object.hasOwn(PRIMARY_ACTIONS, state) ? PRIMARY_ACTIONS[state] : null;
+  if (!action) return { visible: false, label: '', kind: '', href: '' };
+  return { visible: true, ...action };
+}
+
+// The drawer-opening subset of the primary, which the /?folder=show deep link
+// and window.OriHomeFolder.open still consume whatever the primary reads.
+export function cockpitFolderActionView(personalAssistant) {
+  const { kind } = cockpitPrimaryActionView(personalAssistant);
+  if (kind === 'hq' || kind === 'folder') return { visible: true, target: kind };
   return { visible: false, target: '' };
 }
 
@@ -1807,7 +1842,7 @@ import {
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
-    showFolderBtn: document.getElementById('cockpitShowFolderBtn'),
+    primaryActionBtn: document.getElementById('cockpitPrimaryActionBtn'),
     // Updates: the header trigger keeps the retired "Today" toggle's id for
     // compatibility (PRD FR2); its flyout and body are new (Issue #334).
     railToggle: document.getElementById('cockpitRailToggle'),
@@ -4878,6 +4913,7 @@ import {
   // The same Today and folder controllers serve the cockpit, the assistant
   // launcher, and the Map's empty hint. There is no second chooser here.
   let folderAction = { visible: false, target: '' };
+  let primaryAction = cockpitPrimaryActionView(null);
   function openHomeFolder() {
     if (!folderAction.visible) return false;
     // Module initialization and relationship status may race on a deep link.
@@ -4886,7 +4922,7 @@ import {
     if (folderAction.target === 'folder' && !window.PersonalAssistantFolder?.openChooser)
       return false;
     if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
-    const opened = window.PersonalAssistantPanel?.open?.(els.showFolderBtn);
+    const opened = window.PersonalAssistantPanel?.open?.(els.primaryActionBtn);
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
     else window.PersonalAssistantFolder.openChooser();
@@ -4908,17 +4944,31 @@ import {
     }
   }
   window.OriHomeFolder = { open: openHomeFolder };
-  els.showFolderBtn?.addEventListener('click', openHomeFolder);
+  // Mission 01's steps live on their own routes; the HQ card and the folder
+  // chooser open in the drawer through the deep link's own guarded path.
+  function runPrimaryAction() {
+    if (primaryAction.kind === 'navigate') {
+      window.location.assign(primaryAction.href);
+      return true;
+    }
+    return openHomeFolder();
+  }
+  // The label is plain visible text and not announced: the button is outside
+  // any live region, and it changes only when the relationship does.
+  function applyAssistantState(personalAssistant) {
+    primaryAction = cockpitPrimaryActionView(personalAssistant);
+    folderAction = cockpitFolderActionView(personalAssistant);
+    if (!els.primaryActionBtn) return;
+    if (primaryAction.visible) els.primaryActionBtn.textContent = primaryAction.label;
+    els.primaryActionBtn.hidden = !primaryAction.visible;
+  }
+  els.primaryActionBtn?.addEventListener('click', runPrimaryAction);
   document.addEventListener('personal-assistant:status', event => {
-    folderAction = cockpitFolderActionView(event.detail?.personalAssistant);
-    if (els.showFolderBtn) els.showFolderBtn.hidden = !folderAction.visible;
+    applyAssistantState(event.detail?.personalAssistant);
     consumeFolderDeepLink();
   });
   const initialAssistant = window.PersonalAssistantPanel?._state?.personalAssistant;
-  if (initialAssistant) {
-    folderAction = cockpitFolderActionView(initialAssistant);
-    if (els.showFolderBtn) els.showFolderBtn.hidden = !folderAction.visible;
-  }
+  if (initialAssistant) applyAssistantState(initialAssistant);
   window.addEventListener('load', consumeFolderDeepLink);
 
   // Personal HQ provisioning can complete while Home is open; re-read the

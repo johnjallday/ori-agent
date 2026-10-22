@@ -23,6 +23,7 @@ import {
   updatesBadgeView,
   contextModalShouldShow,
   cockpitFolderActionView,
+  cockpitPrimaryActionView,
   parseViewFromQuery,
   moveDeepLinkTarget,
   searchForView,
@@ -92,6 +93,43 @@ const cockpitCSS = readFileSync(
 // ---------------------------------------------------------------------------
 // View state (FR6, FR25, FR26, FR27)
 // ---------------------------------------------------------------------------
+
+test('Home primary action follows each step of the assistant relationship', () => {
+  const ladder = [
+    ['needs_hire', 'Meet your assistant', 'navigate', '/?quest=meet-assistant'],
+    ['hiring', 'Resume meeting your assistant', 'navigate', '/?quest=meet-assistant'],
+    ['repair_needed', 'Repair personal assistant', 'navigate', '/agents?quest=meet-assistant'],
+    ['needs_hq', 'Build My HQ', 'hq', ''],
+    ['provisioning_hq', 'Resume HQ setup', 'hq', ''],
+    ['active', 'Hire an agent', 'folder', ''],
+    ['paused', 'Hire an agent', 'folder', '']
+  ];
+  for (const [state, label, kind, href] of ladder) {
+    assert.deepEqual(
+      cockpitPrimaryActionView({ state }),
+      { visible: true, label, kind, href },
+      state
+    );
+  }
+  // Surrounding whitespace in a server state is not a different state.
+  assert.equal(cockpitPrimaryActionView({ state: ' active ' }).label, 'Hire an agent');
+});
+
+test('Home primary action stays hidden until a known relationship state arrives', () => {
+  const hidden = { visible: false, label: '', kind: '', href: '' };
+  for (const input of [
+    { state: 'unavailable' },
+    { state: 'constructor' },
+    { state: '' },
+    {},
+    null,
+    undefined,
+    'active',
+    42
+  ]) {
+    assert.deepEqual(cockpitPrimaryActionView(input), hidden, JSON.stringify(input));
+  }
+});
 
 test('Home folder action appears after hire and opens the right existing card', () => {
   for (const state of ['needs_hire', 'hiring', 'repair_needed', 'unavailable']) {
