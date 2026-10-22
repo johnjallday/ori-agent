@@ -557,6 +557,16 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	if folderTurn != nil {
 		h.prepareContinuity(ctx, prompt, conversation)
+		// A folder Ori recognizes as something it can set up is answered by the
+		// folder's own card (#689: the hire card, or the review it offers while
+		// its plugin is missing), so the request's hire offer stays out of the
+		// way; any other folder leaves it available, as a link does.
+		if h.folderOwnsTheOffer(ctx, folderTurn) {
+			ctx = context.WithValue(ctx, hireProposalWithheldKey{}, true)
+		} else if proposal := h.hireProposalTurn(ctx, conversation); proposal != nil {
+			ctx = context.WithValue(ctx, hireProposalKey{}, proposal)
+			defer func() { proposal.finalize(ctx, &response) }()
+		}
 		return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
 	}
 
@@ -671,11 +681,16 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 		answer = withHostLeads(ctx, answer)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "answered"})
-		return HomeAssistantAskResponse{
+		reply := HomeAssistantAskResponse{
 			Response: answer, Intent: intent, Identity: identity,
 			Conversation: h.storeTurn(ctx, conversation, prompt, answer),
 			DraftContext: draftContext,
 		}
+		// Without tools the model cannot offer a hire; the host's chip can.
+		if chip := h.hireChipForRequest(prompt); chip != nil {
+			reply.Actions = append(reply.Actions, *chip)
+		}
+		return reply
 	}
 
 	window := NormalizeHomeDateWindow(req.DateWindow, DefaultHomeDateWindowForPrompt(prompt))
@@ -898,7 +913,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
 	proposalPrompt := hireProposalManualInstructions
-	if proposal != nil && provider.Capabilities().SupportsTools {
+	if hireProposalWithheld(ctx) {
+		proposalPrompt = hireProposalFolderInstructions
+	} else if proposal != nil && provider.Capabilities().SupportsTools {
 		proposalPrompt = hireProposalInstructions
 	}
 	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt))

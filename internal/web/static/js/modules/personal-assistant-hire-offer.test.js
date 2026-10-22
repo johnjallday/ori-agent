@@ -514,6 +514,18 @@ test('the drawer routes a hire_agent reply to the card and no longer knows the w
   assert.doesNotMatch(dashboard, /window\.PersonalAssistantHire\b[^O]/);
   assert.match(dashboard, /invalid_hire_proposal/);
   assert.match(dashboard, /OriAskRouting\.hireCardOptions = function/);
+  // Not now and Adjust record the offer's state through its own routes, and
+  // Adjust hands the form the blueprint, the goal and the staffed seat.
+  assert.match(dashboard, /\/api\/personal-assistant\/hire-proposals\//);
+  assert.match(dashboard, /settle\(proposal, 'decline'\)/);
+  assert.match(dashboard, /settle\(proposal, 'adjust'\)/);
+  assert.match(dashboard, /hireAdjustArguments\(conversationId, proposal\)/);
+  assert.match(dashboard, /entry_point: 'assistant_hire_adjust'/);
+  // The Agents page opens its card from the no-tools chip's link.
+  const roster = read('../agents-roster.js');
+  assert.match(roster, /arrival\.get\('hire'\) === '1'/);
+  assert.match(roster, /prefill: options\.prefill \|\| undefined/);
+  assert.match(read('./agent-hire-card.js'), /prefill\.requireRole/);
   assert.doesNotMatch(dashboard, /prepare_workspace/);
   assert.doesNotMatch(dashboard, /Review workspace setup/);
   assert.doesNotMatch(dashboard, /invalid_workspace_proposal/);

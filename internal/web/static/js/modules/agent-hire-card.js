@@ -499,11 +499,21 @@
       });
     }
 
-    const prefillRole = entryFor(options.prefill?.role)
-      ? options.prefill.role
-      : catalog.entries?.[0]?.slug;
+    // A prefill that asks the user to choose the role (the assistant's chip
+    // on a model without tools) starts with none selected and the brief as
+    // given; otherwise the prefilled role, else the first.
+    const prefillRole = entryFor(prefill.role)
+      ? prefill.role
+      : prefill.requireRole
+        ? ''
+        : catalog.entries?.[0]?.slug;
     if (prefillRole) chooseRole(prefillRole);
-    else render();
+    else {
+      els.name.value = state.name;
+      els.brief.value = state.brief;
+      els.workspaceName.value = state.workspaceName;
+      render();
+    }
 
     async function submit() {
       const view = hireCardView(catalog, state);

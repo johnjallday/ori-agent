@@ -269,7 +269,7 @@ func TestHireProposalValidatesLikeTheHire(t *testing.T) {
 		"two values":         {args: hireProposalFixture + " {}"},
 		"secret in brief":    {args: `{"role":"researcher","name":"Ruth","brief":"use api_key=private-sentinel to log in","workspace_name":"Plan"}`},
 		"control character":  {args: `{"role":"researcher","name":"Ruth","brief":"unsafe\u0000text","workspace_name":"Plan"}`},
-		"format character":   {args: `{"role":"researcher","name":"Ruth","brief":"unsafe‮text","workspace_name":"Plan"}`},
+		"format character":   {args: `{"role":"researcher","name":"Ruth","brief":"unsafe` + string(rune(0x202e)) + `text","workspace_name":"Plan"}`},
 		"long brief bounded": {args: `{"role":"researcher","name":"Ruth","brief":"` + strings.Repeat("word ", 100) + `","workspace_name":"Plan"}`, valid: true, briefPrefix: "word word", workspace: "Plan"},
 		"empty brief":        {args: `{"role":"validator","name":"Rita","brief":"  ","workspace_name":""}`, valid: true, role: "validator", name: "Rita", brief: personalassistant.HireDefaultBrief("validator", ""), workspace: personalassistant.HireWorkspaceName(personalassistant.HireDefaultBrief("validator", ""))},
 		"invalid name":       {args: `{"role":"synthesizer","name":"R/u:th","brief":"Write the launch post.","workspace_name":"Launch post"}`, valid: true, role: "synthesizer", name: "Writer", brief: "Write the launch post.", workspace: "Launch post"},

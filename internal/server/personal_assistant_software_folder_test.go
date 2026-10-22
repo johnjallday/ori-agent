@@ -186,9 +186,12 @@ func TestAssistantSoftwareFolder_DiscussionAndSetupWordingSuggestAndCreateNothin
 		}
 	}
 	// A recognized folder's turn carries no hire-proposal tool (the folder's
-	// own card is the offer) and no execution authority.
+	// own card is the offer, and the rules say so) and no execution authority.
 	if hasTool(call, "assistant_propose_hire") || hasTool(call, "assistant_propose_workspace") {
 		t.Fatalf("a folder turn offered the general hire proposal: %v", toolNames(call))
+	}
+	if !strings.Contains(call.SystemPrompt+call.Messages[0].Content, "folder's own setup card is the offer") {
+		t.Fatal("the recognized folder's turn was not told the folder card is the offer")
 	}
 	assertNoPanelExecutionAuthority(t, call)
 	before.assertUnchanged(t, f.draftServerFixture, stage, "after discussing the folder")

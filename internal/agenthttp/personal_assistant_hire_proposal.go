@@ -29,9 +29,11 @@ import (
 // proposal's id as the request id; nothing is hired, created or started by the
 // proposal itself.
 
-// A route hint, not an authorization gate. Natural requests can also propose
-// a hire through the ordinary conversational tool protocol. Neither path
-// hires or creates a workspace without a separate user click.
+// A route hint, not an authorization gate: a request that asks for a
+// workspace or a hire in so many words stays a conversation turn, where the
+// model may propose a hire (or, without tools, the host offers its chip).
+// Natural requests reach the same offer through the ordinary tool protocol.
+// Neither path hires or creates a workspace without a separate user click.
 func isAssistantWorkspaceReviewRequest(prompt string) bool {
 	text := stripCompositionPolitePrefixes(strings.ToLower(strings.TrimSpace(prompt)))
 	text = strings.TrimPrefix(text, "yes, ")
@@ -45,7 +47,7 @@ func isAssistantWorkspaceReviewRequest(prompt string) bool {
 			return true
 		}
 	}
-	return false
+	return isHireRequestHint(prompt)
 }
 
 const hireProposalTool = "assistant_propose_hire"

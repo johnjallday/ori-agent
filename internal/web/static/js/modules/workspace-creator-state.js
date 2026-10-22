@@ -62,6 +62,13 @@
     return agentNames.length && reason ? { agentNames, reason } : null;
   }
 
+  // normalizeStaffPrimaryRole keeps a primary-seat proposal as a name, or null.
+  function normalizeStaffPrimaryRole(value) {
+    if (!value || typeof value !== 'object') return null;
+    const name = String(value.name || '').trim();
+    return name ? { name } : null;
+  }
+
   // teamLockReason returns the lock reason when originalName is locked, or ''.
   function teamLockReason(context, originalName) {
     const lock = normalizeTeamLock(context?.teamLock);
@@ -123,6 +130,10 @@
       connectionOnly: Boolean(options.connectionOnly),
       // stageBlueprintRoles proposes the blueprint's whole team once in the draft.
       stageBlueprintRoles: Boolean(options.stageBlueprintRoles),
+      // staffPrimaryRole proposes one new agent, by this name, in the
+      // blueprint's primary role (the assistant's hire card taken to the form
+      // by Adjust); the other roles stay open. Nothing exists until Create.
+      staffPrimaryRole: normalizeStaffPrimaryRole(options.staffPrimaryRole),
       blueprintRolesStaged: false,
       // buildSession is the assistant's build session for this open, or null
       // for the manual wizard. buildFirstMessage is a sentence the opener

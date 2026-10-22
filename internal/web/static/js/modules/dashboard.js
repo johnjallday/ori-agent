@@ -11103,6 +11103,17 @@
     var conversations = window.PersonalAssistantConversation;
     var page = String(window.location.pathname || '/');
     var expected = normalizeHomeRouteContext(routeContext);
+    // The offer's state routes. A refusal names what happened to the offer
+    // (hired, put aside) and the card shows it instead of changing.
+    function settle(proposal, action) {
+      return API.post(
+        '/api/personal-assistant/hire-proposals/' +
+          encodeURIComponent(String(proposal.proposalId || '')) +
+          '/' +
+          action,
+        {}
+      );
+    }
     return {
       isCurrent: function () {
         return (
@@ -11112,17 +11123,36 @@
           String(window.location.pathname || '/') === page
         );
       },
-      adjust: function (proposal) {
-        openPreparedWorkspaceReview(
-          {
-            conversation_id: String(conversationId || ''),
-            state_version: proposal.stateVersion,
-            name: proposal.workspaceName,
-            description: proposal.brief
-          },
-          expected
-        );
+      // Not now: put the offer aside. The assistant is told for the rest of
+      // this conversation; a new conversation starts clean.
+      decline: function (proposal) {
+        return settle(proposal, 'decline');
+      },
+      // Adjust: the existing workspace form, prefilled from the card, and the
+      // offer recorded as taken there. Nothing is created until its Create.
+      adjust: async function (proposal) {
+        if (!openPreparedWorkspaceReview(hireAdjustArguments(conversationId, proposal), expected))
+          throw new Error(
+            'Reopen the conversation this offer belongs to before adjusting it. Nothing was created.'
+          );
+        await settle(proposal, 'adjust');
       }
+    };
+  }
+
+  // hireAdjustArguments is what Adjust hands the workspace form: the role's
+  // blueprint (none for Blank), the workspace name, the brief as the goal, and
+  // one new agent, by the card's name, in the blueprint's primary seat.
+  function hireAdjustArguments(conversationId, proposal) {
+    var blueprint = String(proposal.blueprint || '');
+    return {
+      conversation_id: String(conversationId || ''),
+      state_version: proposal.stateVersion,
+      entry_point: 'assistant_hire_adjust',
+      name: proposal.workspaceName,
+      description: proposal.brief,
+      blueprint: blueprint && blueprint !== 'blank' ? blueprint : '',
+      staff_primary_role: proposal.name ? { name: proposal.name } : null
     };
   }
 
@@ -11135,11 +11165,23 @@
   }
 
   // A prepared proposal only pre-fills the existing manual wizard. It does
-  // not start a build/model, inherit a parent/binding, or submit Create.
+  // not start a build/model, inherit a parent/binding, or submit Create. The
+  // assistant's hire card's Adjust comes here too, with the role's blueprint
+  // and one staffed primary seat (hireAdjustArguments). Returns whether the
+  // form opened.
   function openPreparedWorkspaceReview(args, routeContext) {
     var conversations = window.PersonalAssistantConversation;
     var name = String(args.name || '').trim();
     var description = String(args.description || '').trim();
+    var blueprint = String(args.blueprint || '').trim();
+    var staffed =
+      args.staff_primary_role && String(args.staff_primary_role.name || '').trim()
+        ? { name: String(args.staff_primary_role.name).trim() }
+        : null;
+    var entryPoint =
+      args.entry_point === 'assistant_hire_adjust'
+        ? 'assistant_hire_adjust'
+        : 'assistant_workspace_review';
     var currentPage = buildHomeRouteContext();
     var expected = normalizeHomeRouteContext(routeContext);
     var panel = window.PersonalAssistantPanel;
@@ -11165,15 +11207,19 @@
         conversations.notify(
           'Reopen the original conversation before reviewing this workspace proposal. Nothing was created.'
         );
-      return;
+      return false;
     }
     panel.close({ restoreFocus: false });
-    window.sessionManager.showAddWorkspaceModal({
-      entryPoint: 'assistant_workspace_review',
+    var seed = {
+      entryPoint: entryPoint,
       name: name,
       description: description,
       stayAfterCreate: true
-    });
+    };
+    if (blueprint) seed.blueprint = blueprint;
+    if (staffed) seed.staffPrimaryRole = staffed;
+    window.sessionManager.showAddWorkspaceModal(seed);
+    return true;
   }
 
   // confirmHomeAction shows an explicit confirm/cancel step before executing a

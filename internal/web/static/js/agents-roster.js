@@ -208,14 +208,32 @@
     // Mission 01's links (Home's card and repair banners, Ori's hand-off) land
     // here with ?quest=meet-assistant. Read now: the roster's own URL sync
     // rewrites the query once the collection loads, and drops it.
-    var arrivedForMission =
-      new URLSearchParams(window.location.search).get('quest') === 'meet-assistant';
+    var arrival = new URLSearchParams(window.location.search);
+    var arrivedForMission = arrival.get('quest') === 'meet-assistant';
+    // The assistant's "Hire an agent for this" chip (a reply on a model that
+    // cannot propose a hire itself) lands here with ?hire=1&brief=…: the Hire
+    // card opens with that brief and no role chosen. Nothing is hired by the
+    // arrival; the card's Hire and start is.
+    var arrivedToHire = arrival.get('hire') === '1';
+    var arrivalBrief = String(arrival.get('brief') || '').trim();
     loadAssistantState().then(function () {
       // A repair or a partial hire has nothing to walk through: the arrival
       // opens its one-button view directly, where the link promised it.
       var mode = assistantPresetView().mode;
       if (arrivedForMission && (mode === 'reconnect' || mode === 'blocked' || mode === 'resume')) {
         renderCreate('assistant');
+        return;
+      }
+      if (arrivedToHire) {
+        openCreateModal({
+          prefill: {
+            brief: arrivalBrief,
+            requireRole: true,
+            note: arrivalBrief
+              ? 'From your request to your assistant. Choose a role for it.'
+              : 'Choose a role and say what the agent should do.'
+          }
+        });
       }
     });
 
@@ -2785,7 +2803,10 @@
   // the created agent is focused in the collection once the modal closes
   // (FR65). Coming from the preset ("Create a different kind of agent
   // instead"), the open modal swaps its content in place.
-  function openCreateModal() {
+  // options.prefill, when given, seeds the Hire card (a brief from the
+  // assistant's chip, say); the ordinary form ignores it.
+  function openCreateModal(options) {
+    options = options || {};
     leaveHireMode();
     // As a sheet the Inspector covers the whole page, above the modal's layer.
     if (isSheetMode() && state.inspectorOpen) closeInspector();
@@ -2806,6 +2827,7 @@
       // relationship read above decides, so the tab is up before the modal.
       hire: {
         assistant: assistant.known ? assistant.state : undefined,
+        prefill: options.prefill || undefined,
         takenNames: function () {
           return state.agents.map(function (a) {
             return a.name;
