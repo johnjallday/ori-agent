@@ -129,9 +129,9 @@ test('specialists remain individually selectable in a stable grid (FR75)', () =>
   assert.match(html, /data-cmd-map-select-agent="Editor"/);
 });
 
-test('empty roster (no agents at all) keeps the existing empty state', () => {
+test('empty roster (no agents at all) offers a hire', () => {
   const view = makeView();
   const html = view.renderMapAgentUnits([]);
-  assert.match(html, /No agents in this workspace/);
-  assert.match(html, /data-cmd-add-agent/);
+  assert.match(html, /No one works here yet\./);
+  assert.match(html, /data-cmd-add-agent>Hire an agent</);
 });

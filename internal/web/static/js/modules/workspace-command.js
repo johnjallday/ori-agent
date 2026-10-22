@@ -75,6 +75,9 @@ import { readRailSection, resolveRailSection, writeRailSection } from './workspa
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
 const AGENT_TAB_KEYS = ['overview', 'tasks', 'loadout', 'recent'];
+// What an empty roster says, wherever it is drawn (see hireOffer()).
+const EMPTY_ROSTER_HEADING = 'No one works here yet.';
+const EMPTY_ROSTER_LINE = 'Hire someone for this workspace.';
 // Tickets is a first-class view, not a panel inside one
 // (tasks/prd-workspace-ticket-management.md FR-65): it is the destination
 // where durable work is managed, so it sits beside Details and Map rather than
@@ -618,7 +621,10 @@ export class WorkspaceCommandView {
   // next load (FR42).
   ensureRoleRoster() {
     void this.loadRoleRoster(true).then(() => {
-      if (this.active) this.mountRoleRoster();
+      // An empty roster's hire offer names a role from this answer, so it is
+      // redrawn; otherwise only the roster itself needs mounting.
+      if (this.active && !this.agentGroups().agents.length) this.render();
+      else if (this.active) this.mountRoleRoster();
       this.showGroupTemplateLanding();
       // The role form names the template its instructions come from, so it
       // opens once the group's template status has been read (or failed).
@@ -3471,7 +3477,20 @@ export class WorkspaceCommandView {
   agentRowsHTML() {
     const page = this.page || {};
     const groups = this.agentRowData();
-    if (!groups.length) return this.modalEmptyHTML('No agents yet. Add one to build the roster.');
+    if (!groups.length) {
+      const offer = this.hireOffer();
+      return (
+        '<div class="ws-cmd-modal-empty"><p>' +
+        EMPTY_ROSTER_HEADING +
+        ' ' +
+        EMPTY_ROSTER_LINE +
+        '</p><button type="button" class="ws-cmd-agent-action is-primary" data-cmd-modal-action="hire" data-cmd-id="' +
+        escapeHtml(offer.roleId) +
+        '">' +
+        escapeHtml(offer.label) +
+        '</button></div>'
+      );
+    }
     return groups
       .map(group => {
         const name = String(group.name || 'Agent');
@@ -3730,6 +3749,9 @@ export class WorkspaceCommandView {
         if (a === 'add') {
           this.closeStatModal();
           if (typeof page.openAddAgentModal === 'function') page.openAddAgentModal();
+        } else if (a === 'hire') {
+          this.closeStatModal();
+          this.requestHire(id);
         } else if (a === 'edit') {
           this.closeStatModal();
           if (typeof page.openAgentModelModal === 'function') page.openAgentModelModal(id);
@@ -5102,7 +5124,9 @@ export class WorkspaceCommandView {
       void this.ensureGroupTemplateStatus();
       // The workspace's own agent list changed, so re-read it rather than
       // letting the deck describe a team the roster has already moved past.
-      await this.page?.loadAgents?.();
+      // The agents live on the workspace record, so it is the record that is
+      // re-read.
+      await this.page?.loadWorkspace?.();
       this.render();
       return { ok: true };
     } catch (err) {
@@ -5158,7 +5182,7 @@ export class WorkspaceCommandView {
       this.mountRoleRoster();
       this.announceRoleChange(roleId, 'Nobody fills');
       void this.ensureGroupTemplateStatus();
-      await this.page?.loadAgents?.();
+      await this.page?.loadWorkspace?.();
       this.render();
     } catch (err) {
       this.announceRole('That role change could not be confirmed. Showing its current state.');
@@ -5202,6 +5226,69 @@ export class WorkspaceCommandView {
     );
   }
 
+  // ---------- Hire offer ----------
+  //
+  // An empty roster says what the user is about to do, not what the workspace
+  // lacks. A blueprint role nobody fills is named and opens that role's own
+  // Create; without one, the offer opens the Add Agent modal. It is an
+  // invitation: an empty blueprint workspace is a supported end state.
+
+  // The roster's own order (required roles first), skipping a role the user
+  // cannot fill from here — the same rows the roster offers Create on.
+  firstOpenRole() {
+    const component = typeof window === 'undefined' ? null : window.WorkspaceRoleRoster;
+    if (!component || !this.roleRoster) return null;
+    return (
+      component
+        .rowsFrom(this.roleRoster)
+        .find(row => row.state !== 'filled' && !row.readOnly && !row.needsClear && row.label) ||
+      null
+    );
+  }
+
+  hireOffer() {
+    const role = this.firstOpenRole();
+    return role
+      ? { roleId: role.roleId, label: 'Hire for ' + role.label }
+      : { roleId: '', label: 'Hire an agent' };
+  }
+
+  // A role that has been filled or removed since the offer was drawn falls
+  // back to Add Agent rather than opening a Create the server would refuse.
+  requestHire(roleId) {
+    const id = String(roleId || '');
+    const row = id
+      ? (window.WorkspaceRoleRoster?.rowsFrom(this.roleRoster) || []).find(
+          item => item.roleId === id && item.state !== 'filled'
+        )
+      : null;
+    if (row) {
+      this.openRoleCreateModal(row.roleId, row);
+      return;
+    }
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (page && typeof page.openAddAgentModal === 'function') page.openAddAgentModal();
+  }
+
+  // Keeps data-cmd-add-agent so every existing click path still reaches it;
+  // data-cmd-hire-role tells that path which role the offer named.
+  emptyRosterHireHTML() {
+    const offer = this.hireOffer();
+    return (
+      '<strong>' +
+      EMPTY_ROSTER_HEADING +
+      '</strong>' +
+      '<span>' +
+      EMPTY_ROSTER_LINE +
+      '</span>' +
+      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent' +
+      (offer.roleId ? ' data-cmd-hire-role="' + escapeHtml(offer.roleId) + '"' : '') +
+      '>' +
+      escapeHtml(offer.label) +
+      '</button>'
+    );
+  }
+
   renderGarrison() {
     if (!AGENT_TAB_KEYS.includes(this.activeAgentTab)) this.activeAgentTab = 'overview';
     const groups = this.agentGroups();
@@ -5211,9 +5298,8 @@ export class WorkspaceCommandView {
       return (
         this.roleRosterHostHTML() +
         '<div class="ws-cmd-deck-empty"><div class="ws-cmd-deck-empty-glyph">◇</div>' +
-        '<strong>No agents in this workspace</strong>' +
-        '<span>Add an agent to begin assigning work.</span>' +
-        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Add Agent</button></div>'
+        this.emptyRosterHireHTML() +
+        '</div>'
       );
     }
     const agents = groups.agents.map(group => this.agentViewModel(group)).filter(Boolean);
@@ -9021,11 +9107,7 @@ export class WorkspaceCommandView {
   renderMapAgentUnits(agents) {
     if (!agents.length) {
       return (
-        '<div class="ws-cmd-map-empty is-agent-empty">' +
-        '<strong>No agents in this workspace</strong>' +
-        '<span>Add an agent to begin assigning work.</span>' +
-        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Add Agent</button>' +
-        '</div>'
+        '<div class="ws-cmd-map-empty is-agent-empty">' + this.emptyRosterHireHTML() + '</div>'
       );
     }
 
@@ -11419,8 +11501,8 @@ export class WorkspaceCommandView {
         return;
       }
       const addAgentBtn = event.target.closest('[data-cmd-add-agent]');
-      if (addAgentBtn && page && typeof page.openAddAgentModal === 'function') {
-        page.openAddAgentModal();
+      if (addAgentBtn) {
+        this.requestHire(addAgentBtn.getAttribute('data-cmd-hire-role'));
         return;
       }
       const addTaskBtn = event.target.closest('[data-cmd-add-task]');
@@ -11744,8 +11826,8 @@ export class WorkspaceCommandView {
         return;
       }
       const addAgentBtn = event.target.closest('[data-cmd-add-agent]');
-      if (addAgentBtn && page && typeof page.openAddAgentModal === 'function') {
-        page.openAddAgentModal();
+      if (addAgentBtn) {
+        this.requestHire(addAgentBtn.getAttribute('data-cmd-hire-role'));
         return;
       }
       const promptBtn = event.target.closest('[data-cmd-view-prompt]');

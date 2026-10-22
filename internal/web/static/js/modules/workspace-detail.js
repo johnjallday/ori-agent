@@ -4486,11 +4486,17 @@ export class WorkspaceDetailPage {
         this.elements.agentsList.innerHTML =
           '<div class="workspace-detail-loading">Loading agents...</div>';
       } else {
+        // The Command view owns the role roster, so it decides what the offer
+        // names; without it the offer is a plain Add Agent.
+        const offer = window.workspaceCommand?.hireOffer?.() || {
+          roleId: '',
+          label: 'Hire an agent'
+        };
         this.elements.agentsList.innerHTML = `
           <div class="workspace-detail-empty">
-            No agents yet. Add an agent to this workspace to assign tasks.
+            <strong>No one works here yet.</strong> Hire someone for this workspace.
             <div class="mt-2">
-              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.openAddAgentModal()">Add Agent</button>
+              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.hireForEmptyRoster('${encodeURIComponent(offer.roleId)}')">${this.escapeHtml(offer.label)}</button>
             </div>
           </div>
         `;
@@ -6406,6 +6412,15 @@ export class WorkspaceDetailPage {
 
     this.clearEntryAgentPromptDismissal();
     this.openWorkspaceEntryAgentCreateFlow();
+  }
+
+  hireForEmptyRoster(encodedRoleId = '') {
+    const command = window.workspaceCommand;
+    if (command && typeof command.requestHire === 'function') {
+      command.requestHire(decodeURIComponent(encodedRoleId));
+      return;
+    }
+    void this.openAddAgentModal();
   }
 
   async openAddAgentModal() {
