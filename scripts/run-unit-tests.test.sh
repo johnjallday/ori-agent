@@ -5,7 +5,8 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/ori-unit-wrapper-test.XXXXXX")"
 trap 'rm -rf -- "$root"' EXIT
 mkdir -p "$root/repo/scripts" "$root/bin" "$root/artifacts" "$root/tmp"
 cp "$script_dir/run-unit-tests.sh" "$script_dir/run-test-command.sh" "$script_dir/prune-test-cache.sh" "$script_dir/list-unit-packages.sh" "$script_dir/unit-shards.py" "$script_dir/unit-shard-weights.json" "$root/repo/scripts/"
-unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT # Do not inherit the enclosing CI shard.
+# Do not inherit the enclosing CI shard or the local gate's package cap.
+unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT ORI_UNIT_TEST_PARALLEL
 cat > "$root/reporter" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null

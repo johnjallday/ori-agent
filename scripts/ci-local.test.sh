@@ -76,7 +76,9 @@ exit "${UNIT_STATUS:-0}"
 STUB
 chmod 700 "$unit_sandbox/scripts/run-unit-tests.sh"
 # The tests own their lock directory, so a real gate running on this machine
-# neither blocks them nor sees their locks.
+# neither blocks them nor sees their locks, and a caller's queue or package
+# settings do not leak in.
+unset ORI_CI_LOCAL_LOCK ORI_UNIT_TEST_PARALLEL
 export ORI_CI_LOCAL_LOCK_DIR="$unit_sandbox/locks" ORI_CI_LOCAL_LOCK_POLL=0.1 UNIT_RAN="$unit_sandbox/ran"
 lock="$ORI_CI_LOCAL_LOCK_DIR/ori-ci-local-unit-tests.lock"
 run_unit_gate() {
