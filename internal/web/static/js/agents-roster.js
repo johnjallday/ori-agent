@@ -802,6 +802,7 @@
         return {
           id: String((w && w.id) || ''),
           name: String((w && w.name) || '').trim(),
+          slug: String((w && w.folder_slug) || '').trim(),
           entryPoint: !!(w && w.entry_point)
         };
       })
@@ -3807,6 +3808,12 @@
       { label: 'Open', action: 'open' },
       { label: 'Open full page', action: 'open-full' },
       menuDivider(),
+      // The page's one verb about work: a task for this agent, where it works.
+      {
+        label: 'Give a task…',
+        action: 'give-task',
+        disabled: vm.builtIn || vm.workspaceOwned || vm.unreadable
+      },
       {
         label: vm.favorite ? 'Unfavorite' : 'Favorite',
         action: 'favorite',
@@ -3998,6 +4005,9 @@
         // the membership editor rather than the top of the page.
         window.location.href = '/agents/' + encodeURIComponent(name) + '?tab=workspaces';
         return;
+      case 'give-task':
+        giveTask(name, vm);
+        return;
       case 'delete':
         // The existing confirmation flow, scoped to this agent, so a
         // context-menu delete is exactly as guarded as a bulk delete.
@@ -4008,7 +4018,57 @@
         openBulkDelete();
         return;
       default:
+        // A workspace picked in Give a task…'s chooser.
+        if (action.indexOf(GIVE_TASK_IN) === 0) {
+          var api = window.OriAgentGiveTask;
+          var href = api ? api.newTaskHref(action.slice(GIVE_TASK_IN.length), name) : '';
+          if (href) window.location.href = href;
+        }
     }
+  }
+
+  var GIVE_TASK_IN = 'give-task-in:';
+
+  // giveTask is Give a task… (agents-hire-with-a-brief FR18): the agent's one
+  // workspace opens with its task form and this agent chosen; with several,
+  // the workspaces are offered in the card's own menu first; with none, the
+  // Hire card opens for this agent's role, since work happens in a workspace.
+  function giveTask(name, vm) {
+    var api = window.OriAgentGiveTask;
+    if (!api) return;
+    var target = api.giveTaskTarget(name, vm.workspaces);
+    if (target.kind === 'workspace') {
+      window.location.href = target.href;
+      return;
+    }
+    if (target.kind === 'choose') {
+      var card =
+        els.list && els.list.querySelector('.roster-card[data-name="' + CSS.escape(name) + '"]');
+      if (!card) return;
+      var rect = card.getBoundingClientRect();
+      openCardMenu(card, { x: rect.left + 12, y: rect.top + rect.height - 8 }, null, {
+        label: 'Give ' + name + ' a task in',
+        items: target.workspaces.map(function (ws) {
+          return { label: ws.name, action: GIVE_TASK_IN + ws.slug };
+        })
+      });
+      return;
+    }
+    if (typeof window.showAddAgentModal !== 'function') return;
+    window.showAddAgentModal({
+      onCreated: function (created) {
+        reloadThenSelect(created && created.name);
+      },
+      hire: {
+        assistant: assistant.known ? assistant.state : undefined,
+        prefill: { role: vm.role, note: target.note },
+        takenNames: function () {
+          return state.agents.map(function (a) {
+            return a.name;
+          });
+        }
+      }
+    });
   }
 
   function handleMenuKey(e) {
@@ -4086,7 +4146,9 @@
     });
   }
 
-  function openCardMenu(card, at, event) {
+  // custom, when set ({items, label}), replaces the card's own items: Give a
+  // task…'s workspace chooser opens in the same place with the same keys.
+  function openCardMenu(card, at, event, custom) {
     closeCardMenu({ restoreFocus: false });
     if (!els.menuHost || !card) return false;
     var name = card.dataset.name;
@@ -4094,7 +4156,9 @@
     if (!agent) return false;
     var vm = viewFor(agent);
 
-    els.menuHost.innerHTML = menuHTML(cardMenuItems(vm), 'Actions for ' + vm.name);
+    els.menuHost.innerHTML = custom
+      ? menuHTML(custom.items, custom.label)
+      : menuHTML(cardMenuItems(vm), 'Actions for ' + vm.name);
     var menu = els.menuHost.querySelector('[data-roster-menu]');
     if (!menu) {
       els.menuHost.innerHTML = '';

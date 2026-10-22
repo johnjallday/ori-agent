@@ -558,6 +558,32 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !startedSetupTask) {
       this.showFolderFirstTaskBanner();
     }
+    // Give a task… on the Agents page arrives here with the agent named; its
+    // task form opens once nothing of the blueprint's own goes first.
+    if (!restoredBlockedTask && !setupOwned && !startedSetupTask) {
+      this.checkAutoOpenNewTaskFor();
+    }
+  }
+
+  /**
+   * Check for ?newTaskFor=<agent> (Give a task… on the Agents page,
+   * agent-give-task.js) and open the task form with that agent chosen.
+   * The parameter is removed so a reload does not open it again.
+   */
+  checkAutoOpenNewTaskFor() {
+    const params = new URLSearchParams(window.location.search);
+    const agentName = String(params.get('newTaskFor') || '').trim();
+    if (!agentName) return false;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('newTaskFor');
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`
+    );
+    if (agentName.length > 100) return false;
+    this.showAddTaskModalForAgent(encodeURIComponent(agentName));
+    return true;
   }
 
   /**
