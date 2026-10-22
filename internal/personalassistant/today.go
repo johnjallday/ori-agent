@@ -282,6 +282,8 @@ type TodayService struct {
 	folderDigest       FolderDigestReader
 	secondBrain        SecondBrainTodayReader
 	workspaceBuilds    WorkspaceBuildReader
+	hires              HireRecordReader
+	hireLookRunning    func(workspaceID string) bool
 	meetings           TodayMeetingReader
 	backups            dailybrief.BackupSource
 	backupCoverage     dailybrief.BackupCoverageSource
@@ -414,9 +416,19 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		// read as broken: this is an expected setup stage.
 		out.State = "needs_hq"
 		out.Links = TodayLinks{PersonalHQ: "/?quest=build-hq", Advanced: "/agents"}
-		out.NeedsYou = TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{{
+		// A hire from the Agents page needs no HQ, so its look and report
+		// show here too.
+		hireNeeds, hireWorking, hireDone := s.hireItems(ctx, userID, now, out)
+		needs := append(hireNeeds, TodayItem{
 			ID: "personal-hq", Kind: "hq_setup", Title: "Build My HQ", Route: "/?panel=today",
-		}}}
+		})
+		out.NeedsYou = TodaySection{Health: todayHealthForItems(needs, now), Items: needs}
+		if len(hireWorking) > 0 {
+			out.WorkingOn = TodaySection{Health: todayHealthForItems(hireWorking, now), Items: hireWorking}
+		}
+		if len(hireDone) > 0 {
+			out.Done = TodaySection{Health: todayHealthForItems(hireDone, now), Items: hireDone}
+		}
 		return out, nil
 	case APIStateRepairNeeded:
 		out.State = "repair_needed"

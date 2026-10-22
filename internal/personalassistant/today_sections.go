@@ -125,6 +125,11 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		working = append(working, TodayItem{ID: ws.ID, Kind: "folder_workspace", Title: ws.Name,
 			Detail: detail, Route: route})
 	}
+	// An agent hired from the Agents page reports its first look the same way.
+	hireNeeds, hireWorking, hireDone := s.hireItems(ctx, userID, now, out)
+	needs = append(needs, hireNeeds...)
+	working = append(working, hireWorking...)
+	folderResults = append(folderResults, hireDone...)
 	for _, row := range janitorRows {
 		if item, ok := janitorTodayItem(row, now); ok {
 			working = append(working, TodayItem{ID: item.ID, Kind: "janitor_work", Title: item.Attribution,

@@ -11,7 +11,7 @@ import {
   dailyBriefStripStatus
 } from './daily-brief-station.js';
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
-import { FIRST_LOOK_REPORT_KIND, mountFirstLookReports } from './first-look-report.js';
+import { isFirstLookReportKind, mountFirstLookReports } from './first-look-report.js';
 
 // The drawer's shared link check lives with the drawer; it is re-exported here
 // for the callers and tests that have always read it from Home.
@@ -1077,13 +1077,9 @@ function renderToday(today) {
     els.banner.textContent =
       'Your existing assistant or Personal HQ needs repair before work can continue.';
   } else if (view.needsHQ) {
-    els.banner.replaceChildren(
-      `${view.displayName} is hired and needs a home base before Today can prepare a brief. `
-    );
-    const link = document.createElement('a');
-    link.href = '/?quest=build-hq';
-    link.textContent = 'Build Personal HQ';
-    els.banner.append(link);
+    // The HQ confirm card under Needs you is the one Build action; Today here
+    // carries only what a hire reports before the HQ exists.
+    els.banner.replaceChildren();
   } else if (view.needsHire) {
     renderNeedsHireBanner(els);
   } else if (view.unavailable) {
@@ -1120,7 +1116,7 @@ function renderToday(today) {
   renderCompactRows(
     els.needsItems,
     sections.needs.filter(
-      row => row.kind !== 'workspace_build' && row.kind !== FIRST_LOOK_REPORT_KIND
+      row => row.kind !== 'workspace_build' && !isFirstLookReportKind(row.kind)
     ),
     true
   );
@@ -1204,6 +1200,9 @@ function renderRelationship(personalAssistant, view) {
     // alternate, but a second Build link here would compete with the card.
     els.banner.replaceChildren();
     els.banner.hidden = true;
+    // An agent hired from the Agents page needs no HQ, so its first look
+    // reports in Today before the HQ exists.
+    void loadToday();
     return;
   }
   if (!view.available) {

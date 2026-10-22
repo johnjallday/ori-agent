@@ -1241,6 +1241,11 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		// A hired agent's first-look report: Start this and Not now.
 		mux.HandleFunc("POST /api/personal-assistant/first-look/{taskID}/start-suggestion", s.Handlers.PersonalAssistant.StartFirstLookSuggestion)
 		mux.HandleFunc("POST /api/personal-assistant/first-look/{taskID}/dismiss", s.Handlers.PersonalAssistant.DismissFirstLookSuggestion)
+		// An agent hired from the Agents page reports the same way, keyed by
+		// its hire: Start this, Not now, and Retry for a look that stopped.
+		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/start-suggestion", s.Handlers.PersonalAssistant.StartHireLookSuggestion)
+		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/dismiss", s.Handlers.PersonalAssistant.DismissHireLook)
+		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/retry", s.Handlers.PersonalAssistant.RetryHireLook)
 		mux.HandleFunc("GET /api/personal-assistant/protection-options", s.Handlers.PersonalAssistant.GetProtectionOptions)
 		// A workspace's read-only Protection fact, from the same stored reader.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/protection", s.Handlers.PersonalAssistant.GetWorkspaceProtection)

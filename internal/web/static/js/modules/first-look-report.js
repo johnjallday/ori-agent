@@ -8,9 +8,20 @@
 // summary are words a model wrote, so they are set as text, never as markup.
 
 export const FIRST_LOOK_REPORT_KIND = 'folder_first_look';
-const REPORT_ACTIONS = ['start_this', 'not_now'];
+// An agent hired from the Agents page reports through the same card, keyed by
+// its hire (agents-hire-with-a-brief); a look that did not finish offers Retry.
+export const HIRE_LOOK_REPORT_KIND = 'hire_first_look_report';
+const REPORT_ACTIONS = ['start_this', 'not_now', 'retry'];
 // A task's own page in a workspace, and nothing else.
 const REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
+// A workspace's own page, and nothing else.
+const WORKSPACE_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*$/;
+
+// isFirstLookReportKind says whether a Today item is drawn as a report card
+// rather than a row.
+export function isFirstLookReportKind(kind) {
+  return kind === FIRST_LOOK_REPORT_KIND || kind === HIRE_LOOK_REPORT_KIND;
+}
 const LOOK_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const WORKSPACE_ID = /^[A-Za-z0-9_-]{1,200}$/;
 
@@ -71,7 +82,10 @@ export function finishedAgo(sourceAt, now = new Date()) {
 // firstLookReportView is the render decision for one Today item, or null for
 // an item that is not a finished first look's report.
 export function firstLookReportView(item, now = new Date()) {
-  if (!item || item.kind !== FIRST_LOOK_REPORT_KIND || item.state !== 'finished') return null;
+  if (!item || !isFirstLookReportKind(item.kind)) return null;
+  const hire = item.kind === HIRE_LOOK_REPORT_KIND;
+  const failed = hire && item.state === 'failed';
+  if (item.state !== 'finished' && !failed) return null;
   const lookId = String(item.ref?.entity_id || '').trim();
   if (!LOOK_ID.test(lookId)) return null;
   const agent = String(item.attribution || '').trim() || 'Your agent';
@@ -88,37 +102,59 @@ export function firstLookReportView(item, now = new Date()) {
   // Without a suggestion there is nothing to start.
   if (suggestion && offered.includes('start_this'))
     actions.push({ id: 'start_this', label: 'Start this', primary: true });
-  if (offered.includes('not_now'))
+  if (offered.includes('not_now') && !failed)
     actions.push({ id: 'not_now', label: 'Not now', primary: false });
+  if (failed && offered.includes('retry'))
+    actions.push({ id: 'retry', label: 'Retry', primary: true });
   const route = String(item.report_route || '').trim();
+  const workspaceRoute = String(item.route || '').trim();
+  let report = null;
+  if (hire && WORKSPACE_ROUTE.test(workspaceRoute))
+    report = { label: 'Open workspace', href: workspaceRoute };
+  else if (!hire && REPORT_ROUTE.test(route))
+    report = { label: 'Read the full report', href: route };
   return {
+    kind: hire ? 'hire' : 'folder',
     lookId,
     agent,
     initials: initialsOf(agent) || 'A',
-    meta: [workspace, ago].filter(Boolean).join(' · '),
-    title: String(item.title || '').trim() || 'Finished its first look',
+    meta: [workspace, failed ? '' : ago].filter(Boolean).join(' · '),
+    title:
+      String(item.title || '').trim() ||
+      (failed ? 'First look did not finish' : 'Finished its first look'),
     summary: String(item.detail || '').trim(),
-    suggestion,
+    suggestion: failed ? null : suggestion,
     actions,
-    report: REPORT_ROUTE.test(route) ? { label: 'Read the full report', href: route } : null,
+    report,
     map: mapPlacementView({ agent, home: item.home, workspaceId: item.ref?.workspace_id })
   };
+}
+
+const ACTION_VERBS = { start_this: 'start-suggestion', not_now: 'dismiss', retry: 'retry' };
+
+// reportActionPath is where one report's action posts: a folder look by its
+// task, a hire by its hire id. Retry is the hire's alone.
+function reportActionPath(view, action) {
+  const verb = ACTION_VERBS[action];
+  if (!verb) return '';
+  if (view.kind === 'hire')
+    return `/api/personal-assistant/hires/${encodeURIComponent(view.lookId)}/${verb}`;
+  if (action === 'retry') return '';
+  return `/api/personal-assistant/first-look/${encodeURIComponent(view.lookId)}/${verb}`;
 }
 
 // firstLookReportAction posts Start this or Not now for one look. The request
 // names only the look; the server reads the suggestion again from the look.
 export async function firstLookReportAction(view, action, fetchImpl = fetch) {
   if (!view?.lookId || !REPORT_ACTIONS.includes(action)) return { ok: false, payload: null };
-  const verb = action === 'start_this' ? 'start-suggestion' : 'dismiss';
+  const path = reportActionPath(view, action);
+  if (!path) return { ok: false, payload: null };
   try {
-    const response = await fetchImpl(
-      `/api/personal-assistant/first-look/${encodeURIComponent(view.lookId)}/${verb}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: '{}'
-      }
-    );
+    const response = await fetchImpl(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: '{}'
+    });
     let payload = null;
     try {
       payload = await response.json();
@@ -140,6 +176,7 @@ export function renderFirstLookReport(view, doc = document, { onAction } = {}) {
   const card = doc.createElement('article');
   card.className = 'first-look-report';
   card.dataset.lookId = view.lookId;
+  card.dataset.reportKind = view.kind || 'folder';
   const titleId = `firstLookReportTitle-${view.lookId}`;
   card.setAttribute('aria-labelledby', titleId);
 
