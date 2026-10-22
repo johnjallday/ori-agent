@@ -353,7 +353,7 @@ async function openAssistant(page: Page) {
 }
 
 // attach adds a folder in the assistant's composer, the entry that Home's
-// "Explore a folder" opens now. The retired digest-scan chooser
+// "Hire an agent" opens now. The retired digest-scan chooser
 // (#personalAssistantFolderChooser) no longer exists on this host.
 async function attach(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
   await openAssistant(page);

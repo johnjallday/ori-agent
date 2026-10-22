@@ -171,6 +171,37 @@ async function skipOnboarding(page: Page) {
   );
 }
 
+// The assistant relationship, route-mocked so Home's state-driven primary is
+// exact. The real hire → HQ ladder runs in home-hire-first-ladder.spec.ts.
+function routeAssistant(page: Page, state: string, name = 'Atlas') {
+  return page.route(/\/api\/personal-assistant$/, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        personal_assistant: {
+          state,
+          state_version: 1,
+          assistant_id: 'spec-assistant',
+          display_name: name,
+          hq_workspace_id: 'hq-1',
+          next_action: 'ask',
+          availability: { model: { status: 'not_configured', available: false } }
+        }
+      })
+    })
+  );
+}
+
+// The ids of the creation group's buttons a person can see, in DOM order.
+function visibleCreationButtons(page: Page) {
+  return page
+    .locator('.cockpit-area-actions__create > button')
+    .evaluateAll(buttons =>
+      buttons.filter(button => !(button as HTMLElement).hidden).map(button => button.id)
+    );
+}
+
 async function dismissCreator(page: Page) {
   // Bootstrap marks the shell visible before its transition finishes; wait for
   // that short transition so the test does not ask Modal.hide() while it is
@@ -241,7 +272,7 @@ test.describe('Home onboarding workspace gate', () => {
     expect(workspaceDerivedRequests).toEqual([]);
   });
 
-  test('authoritative empty renders the real Map and routes both canvas actions', async ({
+  test('authoritative empty renders the real Map, leads with the hire, and keeps New Workspace', async ({
     page
   }) => {
     let populated = false;
@@ -252,6 +283,7 @@ test.describe('Home onboarding workspace gate', () => {
       children: []
     };
     await skipOnboarding(page);
+    await routeAssistant(page, 'needs_hire');
     await page.route('**/api/workspaces?tree=true', route =>
       route.fulfill({
         status: 200,
@@ -270,20 +302,29 @@ test.describe('Home onboarding workspace gate', () => {
     await page.goto('/');
 
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
-    // Until a hire, the folder action is absent; New Workspace is the header's
-    // primary creation action either way.
-    await expect(page.locator('#cockpitShowFolderBtn')).toBeHidden();
-    await expect(page.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-primary/);
+    // Before a hire the header's primary starts Mission 01, and New Workspace
+    // sits after it as the secondary: primary first in reading order.
+    const primary = page.locator('#cockpitPrimaryActionBtn');
+    await expect(primary).toHaveText('Meet your assistant');
+    await expect(primary).toHaveClass(/modern-btn-primary/);
+    const create = page.locator('#cockpitCreateWorkspaceBtn');
+    await expect(create).toHaveClass(/modern-btn-secondary/);
+    expect(await visibleCreationButtons(page)).toEqual([
+      'cockpitPrimaryActionBtn',
+      'cockpitCreateWorkspaceBtn'
+    ]);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
     await expect(page.locator('.ws-map-tile[data-ws-id]')).toHaveCount(0);
     await expect(page.getByText('No workspaces yet.', { exact: true })).toHaveCount(0);
     await expect(page.getByText(/No workspaces yet — build your first one/)).toHaveCount(0);
+    // One message: the header owns creation, and the blank canvas draws no
+    // create card or pad of its own to disagree with it (#582).
+    const mapCreate = page.locator(
+      '.cockpit-empty-map-actions, #cockpitMap [data-ws-map-create], #cockpitMap .ws-map-pad'
+    );
+    await expect(mapCreate).toHaveCount(0);
 
-    const actions = page.locator('.cockpit-empty-map-actions');
-    await expect(actions).toHaveCount(1);
-    const create = actions.getByRole('button', { name: 'New Workspace' });
-    const importFolder = actions.getByRole('button', { name: 'Import Folder' });
     await create.click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
     await expect(page.locator('#addFolderModal')).toHaveAttribute('data-import-mode', 'false');
@@ -293,28 +334,18 @@ test.describe('Home onboarding workspace gate', () => {
     await page.locator('#addFolderModal [data-bs-dismiss="modal"]').first().click();
     await expect(page.locator('#addFolderModal')).toBeHidden();
 
-    await importFolder.click();
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('#addFolderModal')).toHaveAttribute('data-import-mode', 'true');
-    expect(await page.evaluate(() => (window as any).sessionManager?.importEntryPoint)).toBe(
-      'home_cockpit_import'
-    );
-    await page.locator('#addFolderModal [data-bs-dismiss="modal"]').first().click();
-    await expect(page.locator('#addFolderModal')).toBeHidden();
-
     await page.getByRole('button', { name: 'Tree' }).click();
-    await expect(actions).toBeHidden();
     await expect(page.locator('#cockpitTree')).toContainText('No workspaces yet');
     await page.getByRole('button', { name: 'Map' }).click();
 
     populated = true;
     await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
     await expect(page.locator(`.ws-map-tile[data-ws-id="${seeded.id}"]`)).toBeVisible();
-    await expect(actions).toHaveCount(0);
+    await expect(mapCreate).toHaveCount(0);
     await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
   });
 
-  test('a late Personal HQ response preserves one empty action group and one canvas', async ({
+  test('a late Personal HQ response keeps one canvas and draws no create card', async ({
     page
   }) => {
     await skipOnboarding(page);
@@ -333,7 +364,7 @@ test.describe('Home onboarding workspace gate', () => {
     await page.goto('/');
 
     await expect(page.locator('[data-hq-site]')).toBeVisible();
-    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(1);
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
     await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
     await page.locator('[data-hq-site]').click();
     await expect(page.getByRole('button', { name: /Build My HQ/i })).toBeVisible();
@@ -1298,16 +1329,16 @@ test.describe('Responsive and regression hardening', () => {
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
-    // Identity row (view switch, then actions, creation last), then the
-    // readout row (App Guide, filters, Updates, Quests, resources).
+    // Identity row (view switch, then actions, creation last with the
+    // hire-first primary before New Workspace), then the readout row (filters,
+    // Updates, Quests, resources). Help moved to the navbar in #630.
     const ids = [
       'cockpitViewMap',
       'cockpitViewTree',
       'cockpitCaptureBtn',
       'cockpitSummaryBtn',
-      'cockpitShowFolderBtn',
+      'cockpitPrimaryActionBtn',
       'cockpitCreateWorkspaceBtn',
-      'oriGuideMapTrigger',
       'cockpitSignalFilters',
       'cockpitRailToggle',
       'cockpitQuestsToggle',
@@ -1376,9 +1407,10 @@ test.describe('Header hierarchy', () => {
     await skipOnboarding(page);
   });
 
-  test('groups identity, actions, and readouts, with New Workspace as the primary creation action', async ({
+  test('groups identity, actions, and readouts, with the hire-first step as the primary creation action', async ({
     page
   }) => {
+    await routeAssistant(page, 'active');
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
@@ -1389,28 +1421,101 @@ test.describe('Header hierarchy', () => {
     await expect(main.locator('#cockpitViewMap')).toBeVisible();
     await expect(main.locator('#cockpitCaptureBtn')).toBeVisible();
     await expect(main.locator('#cockpitSummaryBtn')).toBeVisible();
-    await expect(main.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-primary/);
     await expect(utility.locator('#cockpitSignalFilters')).toBeVisible();
     await expect(utility.locator('#cockpitRailToggle')).toBeVisible();
-    await expect(utility.locator('#oriGuideMapTrigger')).toContainText('App Guide');
 
-    // Explore a folder appears once an assistant relationship makes it useful:
-    // secondary, and before the primary New Workspace.
-    await page.evaluate(() =>
-      document.dispatchEvent(
-        new CustomEvent('personal-assistant:status', {
-          detail: { personalAssistant: { state: 'active' } }
-        })
-      )
-    );
-    const folder = main.locator('#cockpitShowFolderBtn');
-    await expect(folder).toBeVisible();
-    await expect(folder).toHaveClass(/modern-btn-secondary/);
-    const [folderBox, createBox] = await Promise.all([
-      folder.boundingBox(),
-      main.locator('#cockpitCreateWorkspaceBtn').boundingBox()
+    // The primary is the next hire-first step and comes before New Workspace,
+    // which stays beside it as the secondary.
+    const primary = main.locator('#cockpitPrimaryActionBtn');
+    await expect(primary).toHaveText('Hire an agent');
+    await expect(primary).toHaveClass(/modern-btn-primary/);
+    const create = main.locator('#cockpitCreateWorkspaceBtn');
+    await expect(create).toHaveClass(/modern-btn-secondary/);
+    const [primaryBox, createBox] = await Promise.all([
+      primary.boundingBox(),
+      create.boundingBox()
     ]);
-    expect(folderBox!.x).toBeLessThan(createBox!.x);
+    expect(primaryBox!.x).toBeLessThan(createBox!.x);
+  });
+
+  // One case per rung of the ladder. Mission 01's steps are routes; the HQ card
+  // and the folder chooser open in the assistant drawer.
+  for (const [state, label, opens] of [
+    ['needs_hire', 'Meet your assistant', '/?quest=meet-assistant'],
+    ['hiring', 'Resume meeting your assistant', '/?quest=meet-assistant'],
+    ['repair_needed', 'Repair personal assistant', '/agents?quest=meet-assistant'],
+    ['needs_hq', 'Build My HQ', '#personalAssistantHQCard'],
+    ['provisioning_hq', 'Resume HQ setup', '#personalAssistantHQCard'],
+    ['active', 'Hire an agent', '#personalAssistantContextChooser'],
+    ['paused', 'Hire an agent', '#personalAssistantContextChooser']
+  ] as const) {
+    test(`a "${state}" assistant makes "${label}" the primary, and it opens that step`, async ({
+      page
+    }) => {
+      await routeAssistant(page, state);
+      await ensureWorkspace(page);
+      await page.goto('/');
+      const primary = page.locator('#cockpitPrimaryActionBtn');
+      await expect(primary).toHaveText(label);
+      await expect(page.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-secondary/);
+      expect(await visibleCreationButtons(page)).toEqual([
+        'cockpitPrimaryActionBtn',
+        'cockpitCreateWorkspaceBtn'
+      ]);
+      if (opens.startsWith('/')) {
+        await primary.click();
+        await page.waitForURL(url => url.pathname + url.search === opens);
+        return;
+      }
+      // The press uses the deep link's guard: nothing opens until the drawer's
+      // card and chooser controllers are mounted.
+      await page.waitForFunction(() =>
+        Boolean(
+          (window as any).PersonalAssistantHQCard?.show &&
+          (window as any).PersonalAssistantFolder?.openChooser
+        )
+      );
+      await primary.click();
+      await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+      await expect(page.locator(opens)).toBeVisible();
+    });
+  }
+
+  test('an unknown assistant state shows no primary, and New Workspace still creates', async ({
+    page
+  }) => {
+    await routeAssistant(page, 'unavailable');
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+    // Hidden must be the answer to the state, not to a status still in flight.
+    await page.waitForFunction(
+      () =>
+        (window as any).PersonalAssistantPanel?._state?.personalAssistant?.state === 'unavailable'
+    );
+    await expect(page.locator('#cockpitPrimaryActionBtn')).toBeHidden();
+    expect(await visibleCreationButtons(page)).toEqual(['cockpitCreateWorkspaceBtn']);
+    await page.locator('#cockpitCreateWorkspaceBtn').click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).sessionManager?.importEntryPoint)).toBe(
+      'home_cockpit_create'
+    );
+  });
+
+  test('at 390px the longest primary and New Workspace both fit without overflow', async ({
+    page
+  }) => {
+    await routeAssistant(page, 'hiring');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await expect(page.locator('#cockpitPrimaryActionBtn')).toHaveText(
+      'Resume meeting your assistant'
+    );
+    await expect(page.locator('#cockpitCreateWorkspaceBtn')).toBeVisible();
+    const geometry = await headerGeometry(page);
+    expect(geometry.overflow).toBeLessThanOrEqual(1);
+    expect(geometry.clipped).toEqual([]);
   });
 
   test('Map and Tree keep the same header; only the Map-only filters step out', async ({
@@ -1595,26 +1700,6 @@ test.describe('Sparse map invitation and compact assistant', () => {
         body: JSON.stringify({ status })
       });
     });
-  }
-
-  function routeAssistant(page: Page, state: string, name = 'Atlas') {
-    return page.route(/\/api\/personal-assistant$/, route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          personal_assistant: {
-            state,
-            state_version: 1,
-            assistant_id: 'spec-assistant',
-            display_name: name,
-            hq_workspace_id: 'hq-1',
-            next_action: 'ask',
-            availability: { model: { status: 'not_configured', available: false } }
-          }
-        })
-      })
-    );
   }
 
   test.beforeEach(async ({ page }) => {
