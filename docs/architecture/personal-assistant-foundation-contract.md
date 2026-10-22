@@ -54,15 +54,17 @@ supplement bounded recent history; they are not Profile/HQ memory. See
 [conversation context](assistant-conversation-context.md) for lifecycle and
 bounds and [workspace awareness](assistant-workspace-awareness.md#conversation-discovery-amendment)
 for source, provider and manual-setup boundaries. Conversation may proactively
-suggest an optional workspace review when an agreed goal becomes actionable.
-The built-in `assistant_propose_workspace` tool produces bounded editable
-name/brief data within the current conversational turn, not a phrase-triggered
-second generation or an installed skill. Ori offers that review only after a
-successful canonical atomic save. Prose alone, historical instructions and a
-bare yes cannot create anything. The existing creator still owns blueprint,
-placement, team and final Create; cancellation creates nothing, and proposed
-starter work is not automatically saved or assigned. A permanent **Open workspace
-form manually** drawer option needs no model and passes no inferred fields.
+offer to hire an agent when a request describes work beyond an answer. The
+built-in `assistant_propose_hire` tool produces bounded editable role/name/
+brief/workspace-name data within the current conversational turn, not a
+phrase-triggered second generation or an installed skill. Ori saves that offer
+on the conversation and shows it as the Hire card only after a successful
+canonical atomic save. Prose alone, historical instructions and a bare yes
+cannot hire or create anything: the card's own Hire and start is the user's
+`POST /api/agents/hire`, Not now puts the offer aside for that conversation, and
+Adjust hands the existing creator a prefilled form that still owns blueprint,
+placement, team and final Create. A permanent **Open workspace form manually**
+drawer option needs no model and passes no inferred fields.
 Failures preserve the draft, expose bounded honest reasons and offer the same
 blank-form recovery; they are not reported as successful app-data answers.
 

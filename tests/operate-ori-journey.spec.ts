@@ -264,16 +264,17 @@ test('wt demo: the whole journey for a non-entry agent, with a second tab open a
   expect(chat.operation).toBeUndefined();
   expect(chat.requires_confirmation).toBeFalsy();
 
-  // Asking for a workspace in other words than "create" gets the same
-  // reviewed proposal. It used to be handed to the system assistant, which
-  // answered the user with an implementation brief for a developer. Operate
-  // Ori does not create workspaces: this is the existing proposal, and
-  // nothing exists until the user reviews the form and presses Create.
+  // Asking for a workspace in other words than "create" gets the assistant's
+  // offer to hire an agent for it (assistant-hires-from-a-request). It used to
+  // be handed to the system assistant, which answered the user with an
+  // implementation brief for a developer. Operate Ori does not create
+  // workspaces: this is the hire card, and nothing exists until the user
+  // presses Hire and start on it.
   //
   // Ori reads only the opening ("build a workspace for"). The purpose reaches
   // the model in the user's words; the stand-in model repeats it and
-  // recognizes no subject, so "research about ok go" in the proposal shows
-  // that Ori passed it on, not that anything here understood it.
+  // recognizes no subject, so "research about ok go" in the offer shows that
+  // Ori passed it on, not that anything here understood it.
   const routes: any[] = [];
   const recordRoute = async (response: any) => {
     if (new URL(response.url()).pathname === '/api/home-assistant/route')
@@ -284,33 +285,30 @@ test('wt demo: the whole journey for a non-entry agent, with a second tab open a
   page.off('response', recordRoute);
   expect(routes.at(-1)).toMatchObject({ intent: 'workspace_create', route_mode: 'workspace_task' });
   expect(routes.at(-1).reasons ?? []).not.toContain('fallback to system assistant');
-  expect(build.confirmation).toMatchObject({ action_type: 'prepare_workspace' });
-  expect(build.response).toContain('Workspace proposal');
+  expect(build.confirmation).toMatchObject({ action_type: 'hire_agent' });
+  expect(build.response).toContain('Offer: hire');
   expect(build.response).toContain('Research about ok go');
-  expect(build.response).toContain('Goal: research about ok go.');
+  expect(build.response).toContain('Nothing is hired until you press Hire and start');
   expect(build.operation).toBeUndefined();
   const transcript = page.locator('#homeAssistantConversation');
-  await expect(transcript).toContainText('Goal: research about ok go.');
+  const offer = transcript.locator('.personal-assistant-hire').last();
+  await expect(offer).toContainText('Research about ok go');
+  await expect(offer).toContainText('Goal: Research about ok go.');
   await expect(transcript).not.toContainText('implementation work');
   await expect(transcript).not.toContainText('Starter actions');
-  await expect(
-    page.getByRole('button', { name: 'Review workspace setup', exact: true }).last()
-  ).toBeVisible();
+  await expect(offer.getByRole('button', { name: 'Hire and start', exact: true })).toBeVisible();
   expect((await listWorkspaces(request)).length).toBe(workspacesBefore);
   facts.buildAWorkspace = {
     route: { intent: routes.at(-1).intent, route_mode: routes.at(-1).route_mode },
     confirmation: build.confirmation.action_type,
     workspaces: workspacesBefore
   };
-  // The reply is taller than the transcript: one frame for the proposal, one
-  // for its review control.
-  await transcript.getByText('Workspace proposal').last().scrollIntoViewIfNeeded();
-  await shot('07-build-a-workspace-gets-a-proposal.png');
-  await page
-    .getByRole('button', { name: 'Review workspace setup', exact: true })
-    .last()
-    .scrollIntoViewIfNeeded();
-  await shot('08-the-proposal-is-reviewed-before-anything-exists.png');
+  // The reply is taller than the transcript: one frame for the offer's
+  // headline, one for its buttons.
+  await offer.locator('.personal-assistant-hire__headline').scrollIntoViewIfNeeded();
+  await shot('07-build-a-workspace-gets-a-hire-offer.png');
+  await offer.getByRole('button', { name: 'Hire and start', exact: true }).scrollIntoViewIfNeeded();
+  await shot('08-the-offer-is-the-users-to-take-before-anything-exists.png');
   await page.getByRole('button', { name: 'Help' }).first().click();
   await expect(page.locator('#oriGuidePanel')).toBeVisible();
   await expect(page.locator('#oriGuideTitle')).toHaveText('Help');

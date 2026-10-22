@@ -42,6 +42,8 @@ PLAIN_DEMOS = {
                         "ORI_WORKSPACE_FOLDERRESPONSE_SANDBOX", "folder-response.log"),
     "folder_response_baseline": ("tests/personal-assistant-folder-response-prototype.spec.ts",
                                  "ORI_WORKSPACE_FOLDERBASELINE_SANDBOX", "folder-response-baseline.log"),
+    "hire_request": ("tests/assistant-hires-from-a-request.spec.ts",
+                     "ORI_WORKSPACE_HIREREQUEST_SANDBOX", "hire-request.log"),
     "placement": ("tests/personal-assistant-workspace-placement.spec.ts",
                   "ORI_WORKSPACE_PLACEMENT_SANDBOX", "group3-wt-demo-placement.log"),
     "sources": ("tests/personal-assistant-workspace-sources.spec.ts",
@@ -520,7 +522,8 @@ def hire_proposal(own_words, history, requested):
     its Researcher, and a routed "build a workspace" request its stated purpose.
     """
     if requested:
-        return {"role": "orchestrator", "name": "Cora", "brief": requested["description"][:300],
+        brief = requested["description"].removeprefix("Goal: ")
+        return {"role": "orchestrator", "name": "Cora", "brief": (brief[:1].upper() + brief[1:])[:300],
                 "workspace_name": requested["name"][:80]}
     if "okgo band" in history:
         return {"role": "researcher", "name": "Ruth",
@@ -731,8 +734,6 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     history = request["messages"][1:-1]
                     body = "\n".join(message.get("content", "") for message in history)
                     tool_offered = any(tool.get("function", {}).get("name") == "assistant_propose_hire" for tool in request.get("tools", []))
-                    if not tool_offered:
-                        raise ValueError("hire proposal tool missing")
                     audit_path = state_dir / "workspace-proposal-input.json"
                     prior = json.loads(audit_path.read_text()) if audit_path.exists() else {}
                     audit_path.write_text(json.dumps({
@@ -752,7 +753,15 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                     if (state_dir / "workspace-proposal-slow").exists():
                         (state_dir / "workspace-proposal-slow").unlink()
                         time.sleep(13)  # Cross the former hard 12-second failure.
-                    proposal_step = {"tool": "assistant_propose_hire", "arguments": proposal}
+                    # A well-behaved model: no offer where Ori withheld the tool (a
+                    # recognized folder's turn), and none again for work the user
+                    # put aside in this conversation (Ori lists it in the turn).
+                    if not tool_offered:
+                        proposal_step = {"answer": "Deterministic fixture: this turn offers no hire; the attached folder's own card, or the Agents page, is the way to one."}
+                    elif "put aside by the user" in user["content"]:
+                        proposal_step = {"answer": "Deterministic fixture: you put that hire aside, so here is a plain answer instead. Nothing was hired."}
+                    else:
+                        proposal_step = {"tool": "assistant_propose_hire", "arguments": proposal}
                 step = (proposal_step or (operate_step(own_words, results, request.get("tools") or []) if operate else None) or
                         (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
                         (continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
@@ -836,6 +845,9 @@ def main():
                         help="wt demo: exploratory discussion, same canonical thread and an unconfirmed setup review")
     parser.add_argument("--conversation-first", action="store_true",
                         help="wt demo: chronology, passive reply geometry, delayed generation and inline setup")
+    parser.add_argument("--hire-request", action="store_true",
+                        help="wt demo: a plain request becomes the hire card, Hire and start hires, Not now is "
+                             "remembered, a recognized folder keeps its own card, and a reload redraws the card")
     parser.add_argument("--reaper-source")
     parser.add_argument("--music-source")
     parser.add_argument("--new-home", action="store_true", help="Confirm a declared new Home with exact staged candidates")
