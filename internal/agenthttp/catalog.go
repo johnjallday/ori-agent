@@ -80,7 +80,7 @@ func (h *Handler) handleCatalogCreate(w http.ResponseWriter, name, catalogRole, 
 		return
 	}
 
-	created, err := h.createCatalogAgent(name, entry, domain, nil)
+	created, err := h.createCatalogAgent(name, entry, domain, nil, nil)
 	if err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
@@ -116,12 +116,25 @@ func (c catalogAgent) ModelNotice() string {
 	return fmt.Sprintf("No model is configured for the %q tier yet; used your default model instead.", c.Entry.ModelTier)
 }
 
+// RunnableModelChooser picks the provider and model a hired agent runs on: the
+// tier's model on a configured provider that offers it, else the system model,
+// so the hire's first look can run. It returns the tier's model unchanged, with
+// no provider, when nothing configured can run.
+type RunnableModelChooser func(tierModel string) (provider, model string)
+
+// SetRunnableModelChooser wires the hire's model choice (server: the LLM
+// factory and the system model). Catalog create never uses it.
+func (h *Handler) SetRunnableModelChooser(choose RunnableModelChooser) {
+	h.runnableModel = choose
+}
+
 // createCatalogAgent creates the agent a catalog entry describes and applies
 // its role, resolved model, starter prompt and starter skills, and (Specialist
 // only) its domain. appearance, when set, is the agent's validated look; nil
 // leaves the store's default. Catalog create and the hire share it so an agent
-// hired from the Agents page is exactly the one catalog create would make.
-func (h *Handler) createCatalogAgent(name string, entry agentcatalog.Entry, domain string, appearance *types.AgentAppearance) (catalogAgent, error) {
+// hired from the Agents page is the one catalog create would make, except that
+// a hire passes choose so its agent runs on a model that is set up.
+func (h *Handler) createCatalogAgent(name string, entry agentcatalog.Entry, domain string, appearance *types.AgentAppearance, choose RunnableModelChooser) (catalogAgent, error) {
 	systemPrompt := entry.StarterPrompt
 	domain = strings.TrimSpace(domain)
 	if entry.SupportsDomain && domain != "" {
@@ -133,10 +146,18 @@ func (h *Handler) createCatalogAgent(name string, entry agentcatalog.Entry, doma
 		modelAssignments = h.modelCategoryStore.GetAllModelAssignments()
 	}
 	resolvedModel, modelResolved := agentcatalog.ResolveModel(entry.ModelTier, modelAssignments)
+	provider := ""
+	if choose != nil {
+		var chosen string
+		provider, chosen = choose(resolvedModel)
+		modelResolved = modelResolved && chosen == resolvedModel
+		resolvedModel = chosen
+	}
 
 	config := &store.CreateAgentConfig{
 		Role:         entry.Slug,
 		Model:        resolvedModel, // "" falls back to the store's default model
+		LLMProvider:  provider,
 		SystemPrompt: systemPrompt,
 		Appearance:   appearance,
 	}

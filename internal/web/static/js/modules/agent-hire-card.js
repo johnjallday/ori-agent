@@ -228,6 +228,10 @@
   // hiredMessage is what the user is told once the hire is done.
   function hiredMessage(result) {
     const name = oneLine(result?.agent_name) || 'Your agent';
+    if (result?.look_state === 'failed') {
+      const reason = oneLine(result.look_failure);
+      return `Hired ${name}, but the first look did not start${reason ? `: ${reason}` : '.'} Your assistant can retry it.`;
+    }
     return `Hired. ${name} is taking a first look; your assistant will report back.`;
   }
 

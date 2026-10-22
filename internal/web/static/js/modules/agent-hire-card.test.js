@@ -294,6 +294,14 @@ test('Hire and start sends one request with the card and keeps the request id fo
     hire.hiredMessage({ agent_name: 'Rita' }),
     'Hired. Rita is taking a first look; your assistant will report back.'
   );
+  assert.equal(
+    hire.hiredMessage({
+      agent_name: 'Rita',
+      look_state: 'failed',
+      look_failure: 'Choose a model for Rita before the goal can run.'
+    }),
+    'Hired Rita, but the first look did not start: Choose a model for Rita before the goal can run. Your assistant can retry it.'
+  );
 });
 
 test('a suggested name avoids the names already taken', () => {

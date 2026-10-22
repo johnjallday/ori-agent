@@ -29,6 +29,13 @@ const (
 	MissionMaxTaskSuggestions = 5
 	// MissionMaxFindings caps the findings one run may store.
 	MissionMaxFindings = 5
+	// HireFirstLookMaxSuggestions caps a hired agent's first look: a few
+	// first tasks, and no findings.
+	HireFirstLookMaxSuggestions = 3
+	// missionSummaryMax and missionNextMax bound a run's summary, its next
+	// task and the reason it comes first.
+	missionSummaryMax = 600
+	missionNextMax    = 200
 	// MissionRunHistoryLimit is how many run records a workspace keeps.
 	MissionRunHistoryLimit = 10
 	// MissionOutputTailLimit bounds the raw output kept for a failed run.
@@ -69,10 +76,52 @@ type MissionTaskSuggestion struct {
 
 // MissionRunOutput is a parsed goal-run answer. Rejected counts items that
 // were present but unusable (unknown kind, no title, an invalid enum value).
+// Summary, Next and NextWhy are what a hired agent's first look says about
+// itself; other runs leave them empty.
 type MissionRunOutput struct {
 	Tasks    []MissionTaskSuggestion
 	Findings []Opportunity
 	Rejected int
+	Summary  string
+	Next     string
+	NextWhy  string
+}
+
+// MissionSuggestionLimits is how many tasks and findings a run of this
+// origin may store.
+func MissionSuggestionLimits(origin string) (tasks, findings int) {
+	if origin == MissionOriginHireFirstLook {
+		return HireFirstLookMaxSuggestions, 0
+	}
+	return MissionMaxTaskSuggestions, MissionMaxFindings
+}
+
+// MissionRunSummary is the summary a run record keeps: the answer's summary,
+// ending in a "Next:" line that names the task to start first — the one the
+// answer named, else the first suggestion stored. Empty when the answer gave
+// neither. softwareassessment.NextTask reads the line back.
+func MissionRunSummary(output MissionRunOutput, stored []MissionTaskSuggestion) string {
+	next := output.Next
+	if next == "" && len(stored) > 0 {
+		next = stored[0].Title
+	}
+	lines := []string{}
+	if output.Summary != "" {
+		lines = append(lines, output.Summary)
+	}
+	if next != "" {
+		lines = append(lines, "Next: "+next)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// missionOneLine flattens model text to one bounded line.
+func missionOneLine(value string, max int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if runes := []rune(value); len(runes) > max {
+		value = strings.TrimSpace(string(runes[:max]))
+	}
+	return value
 }
 
 // ParseStatus summarizes how cleanly the answer parsed.
@@ -100,6 +149,11 @@ type MissionRunRecord struct {
 	// OutputTail is the end of the raw answer, kept only when it could not be
 	// read, so the user can see what the model actually said.
 	OutputTail string `json:"output_tail,omitempty"`
+	// Summary is what a hired agent's first look found, ending in a "Next:"
+	// line (MissionRunSummary); NextWhy is its one sentence on why that task
+	// comes first. Other runs leave both empty.
+	Summary string `json:"summary,omitempty"`
+	NextWhy string `json:"next_why,omitempty"`
 }
 
 // RecordMissionRun prepends a run record and keeps the newest
@@ -191,10 +245,16 @@ func ParseMissionRunOutput(workspaceID, sourceRunID, raw string) (MissionRunOutp
 		var envelope struct {
 			Items    *[]missionItem `json:"items"`
 			Findings *[]missionItem `json:"findings"`
+			Summary  string         `json:"summary"`
+			Next     string         `json:"next"`
+			NextWhy  string         `json:"next_why"`
 		}
 		if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
 			return out, fmt.Errorf("goal run output: %w", err)
 		}
+		out.Summary = missionOneLine(envelope.Summary, missionSummaryMax)
+		out.Next = missionOneLine(envelope.Next, missionNextMax)
+		out.NextWhy = missionOneLine(envelope.NextWhy, missionSummaryMax)
 		switch {
 		case envelope.Items != nil:
 			items = *envelope.Items

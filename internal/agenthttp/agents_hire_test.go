@@ -319,6 +319,75 @@ func TestHire_UnwiredRecordsAnswerUnavailable(t *testing.T) {
 	}
 }
 
+func TestHire_StartsTheFirstLookAndRecordsItsRun(t *testing.T) {
+	f := newHireFixture(t)
+	var started []string
+	f.h.SetHireLookStarter(func(workspaceID string) (string, error) {
+		started = append(started, workspaceID)
+		return "run-1", nil
+	})
+	rr, got := f.hire(t, `{"request_id":"req-1","role":"researcher","name":"Rosa","brief":"Compare the three note apps."}`)
+	if rr.Code != http.StatusCreated || got["look_state"] != "looking" || got["look_failure"] != nil {
+		t.Fatalf("(%d) %v", rr.Code, got)
+	}
+	if len(started) != 1 || started[0] != got["workspace_id"] {
+		t.Fatalf("looks started %v for %v", started, got["workspace_id"])
+	}
+	record, _ := f.records.Get(t.Context(), got["hire_id"].(string))
+	if record.RunID != "run-1" || record.State != personalassistant.HireStateLooking {
+		t.Fatalf("record %+v", record)
+	}
+	// A replay starts nothing.
+	if rr, _ := f.hire(t, `{"request_id":"req-1","role":"researcher","name":"Rosa","brief":"Compare the three note apps."}`); rr.Code != http.StatusOK || len(started) != 1 {
+		t.Fatalf("replay (%d) started %d looks", rr.Code, len(started))
+	}
+}
+
+func TestHire_ABlockedLookMarksTheHireFailedAndKeepsIt(t *testing.T) {
+	f := newHireFixture(t)
+	f.h.SetHireLookStarter(func(string) (string, error) {
+		return "", &workspace.MissionBlockedError{Code: "goal_no_model", Reason: "Choose a model for Rosa before the goal can run."}
+	})
+	rr, got := f.hire(t, `{"request_id":"req-1","role":"researcher","name":"Rosa","brief":"Compare the three note apps."}`)
+	if rr.Code != http.StatusCreated || got["look_state"] != "failed" || got["look_failure"] != "Choose a model for Rosa before the goal can run." {
+		t.Fatalf("(%d) %v", rr.Code, got)
+	}
+	if _, ok := f.agents.GetAgent("Rosa"); !ok || f.workspaceCount(t) != 1 {
+		t.Fatal("a look that did not start undid the hire")
+	}
+	record, _ := f.records.Get(t.Context(), got["hire_id"].(string))
+	if record.State != personalassistant.HireStateFailed || record.RunID != "" || record.FinishedAt.IsZero() ||
+		record.Failure != "Choose a model for Rosa before the goal can run." {
+		t.Fatalf("record %+v", record)
+	}
+}
+
+func TestHire_RunsTheAgentOnAModelThatIsSetUp(t *testing.T) {
+	f := newHireFixture(t)
+	var asked []string
+	f.h.SetRunnableModelChooser(func(tierModel string) (string, string) {
+		asked = append(asked, tierModel)
+		return "codex", "gpt-5.6-luna"
+	})
+	if rr, got := f.hire(t, `{"request_id":"req-1","role":"researcher","name":"Rosa","brief":"Compare apps."}`); rr.Code != http.StatusCreated {
+		t.Fatalf("(%d) %v", rr.Code, got)
+	}
+	ag, _ := f.agents.GetAgent("Rosa")
+	if ag.Settings.Provider != "codex" || ag.Settings.Model != "gpt-5.6-luna" || len(asked) != 1 {
+		t.Fatalf("hired on %q/%q (asked %v)", ag.Settings.Provider, ag.Settings.Model, asked)
+	}
+
+	// Catalog create keeps choosing exactly as before.
+	rr := httptest.NewRecorder()
+	f.h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/agents", strings.NewReader(`{"name":"Plain","catalog_role":"researcher"}`)))
+	if rr.Code != http.StatusOK || len(asked) != 1 {
+		t.Fatalf("catalog create (%d) asked the chooser: %v", rr.Code, asked)
+	}
+	if plain, _ := f.agents.GetAgent("Plain"); plain.Settings.Provider == "codex" {
+		t.Fatal("catalog create took the hire's model choice")
+	}
+}
+
 func TestCatalog_CarriesWhatTheHireCardNeedsPerRole(t *testing.T) {
 	rr := httptest.NewRecorder()
 	CatalogHandler(rr, httptest.NewRequest(http.MethodGet, "/api/agents/catalog", nil))

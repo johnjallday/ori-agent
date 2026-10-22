@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -183,6 +184,23 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetHireRecords(personalassistant.NewSQLiteHireRecords(s.Storage.SessionStore.DB()))
 	}
+	// A hired agent runs on a model that is set up, so its first look can run.
+	if s.Core != nil {
+		var systemModel func() (string, string)
+		if s.Core.ConfigManager != nil {
+			systemModel = s.Core.ConfigManager.GetSystemModel
+		}
+		agentHandler.SetRunnableModelChooser(hireRunnableModel(s.Core.LLMFactory, systemModel))
+	}
+	// A hire's first look is a goal run with its own origin, started by the
+	// same scheduler as every goal run. Read at call time, so the scheduler's
+	// wiring order does not matter.
+	agentHandler.SetHireLookStarter(func(workspaceID string) (string, error) {
+		if s.Workflow == nil || s.Workflow.TaskScheduler == nil {
+			return "", errors.New("goal runs are not available on this server")
+		}
+		return s.Workflow.TaskScheduler.StartMissionRun(workspaceID, workspace.MissionOriginHireFirstLook)
+	})
 	appearanceUploadHandler := agenthttp.NewAppearanceUploadHandler(s.Storage.AgentStore, s.Storage.WorkspaceStore)
 	mux.Handle("/api/agents", agentHandler)
 	mux.HandleFunc("/api/agents/catalog", agenthttp.CatalogHandler)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -81,6 +82,8 @@ type hireResult struct {
 	Brief          string `json:"brief"`
 	Blueprint      string `json:"blueprint"`
 	LookState      string `json:"look_state"`
+	// LookFailure says why the first look did not start; the hire stands.
+	LookFailure string `json:"look_failure,omitempty"`
 	// Replayed is a repeated request id answered with the first hire.
 	Replayed              bool   `json:"replayed,omitempty"`
 	ModelCategoryFallback bool   `json:"model_category_fallback,omitempty"`
@@ -101,6 +104,17 @@ type hirePlan struct {
 // hire endpoint answers 503: a hire nobody can report on is not offered.
 func (h *Handler) SetHireRecords(records personalassistant.HireRecordStore) {
 	h.hireRecords = records
+}
+
+// HireLookStarter starts a hired agent's first look — a goal run with the
+// hire's origin on its new workspace — and returns the run's id once it is
+// admitted. The run itself goes on in the background.
+type HireLookStarter func(workspaceID string) (runID string, err error)
+
+// SetHireLookStarter wires the goal-run scheduler for the first look. Unwired,
+// the workspace's armed first goal run starts when the workspace is opened.
+func (h *Handler) SetHireLookStarter(start HireLookStarter) {
+	h.hireLookStarter = start
 }
 
 // writeHireFailure answers a refused or failed hire. code is stable for the
@@ -181,7 +195,7 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 	// (a) The agent, exactly as catalog create makes it. Only this request's
 	// agent is ever removed again: the name was checked free just above, so
 	// a pre-existing agent is never the one created here.
-	created, err := h.createCatalogAgent(plan.name, plan.entry, plan.domain, plan.appearance)
+	created, err := h.createCatalogAgent(plan.name, plan.entry, plan.domain, plan.appearance, h.runnableModel)
 	if err != nil {
 		writeHireFailure(w, http.StatusInternalServerError, "hire_failed", "Could not create "+plan.name+": "+err.Error(), hireStepAgent)
 		return
@@ -220,13 +234,57 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Agent hired", logger.Fields{"agent": plan.name, "role": string(plan.entry.Slug), "workspace": ws.ID, "hire": record.ID})
+	// (e) continued: the first look, started under the hire's consent. A look
+	// that cannot start leaves the hire as it is and says why on the record;
+	// the assistant's report offers Retry.
+	record = h.startHireLook(ctx, record)
+
+	logger.Info("Agent hired", logger.Fields{"agent": plan.name, "role": string(plan.entry.Slug), "workspace": ws.ID, "hire": record.ID, "look": record.State})
 	result := h.hireResultOf(record)
 	result.WorkspaceName, result.WorkspaceRoute = ws.Name, workspaceRoute(ws)
 	if !created.ModelResolved {
 		result.ModelCategoryFallback, result.Notice = true, created.ModelNotice()
 	}
 	_ = orihttp.RespondJSON(w, http.StatusCreated, result)
+}
+
+// startHireLook starts the hire's first look and records its run, or why it
+// did not start. It returns the record as it now stands.
+func (h *Handler) startHireLook(ctx context.Context, record personalassistant.HireRecord) personalassistant.HireRecord {
+	if h.hireLookStarter == nil {
+		return record
+	}
+	runID, startErr := h.hireLookStarter(record.WorkspaceID)
+	updated, err := h.hireRecords.Update(ctx, record.ID, func(r *personalassistant.HireRecord) error {
+		if startErr != nil {
+			r.State, r.Failure, r.FinishedAt = personalassistant.HireStateFailed, hireLookFailure(startErr), time.Now().UTC()
+			return nil
+		}
+		r.RunID = runID
+		return nil
+	})
+	if err != nil {
+		logger.Error("Hire: could not record its first look", logger.Fields{"hire": record.ID, "run": runID, "start_err": startErr, "err": err})
+		return record
+	}
+	if startErr != nil {
+		logger.Warn("Hire: the first look did not start", logger.Fields{"hire": record.ID, "workspace": record.WorkspaceID, "err": startErr})
+	}
+	return updated
+}
+
+// hireLookFailure is why a first look did not start, in words for the user.
+func hireLookFailure(err error) string {
+	reason := err.Error()
+	var blocked *workspace.MissionBlockedError
+	if errors.As(err, &blocked) && strings.TrimSpace(blocked.Reason) != "" {
+		reason = blocked.Reason
+	}
+	reason = strings.Join(strings.Fields(reason), " ")
+	if runes := []rune(reason); len(runes) > 400 {
+		reason = string(runes[:400])
+	}
+	return reason
 }
 
 // planHire validates a request into a hire. A non-empty code is a refusal with
@@ -400,7 +458,7 @@ func (h *Handler) hireResultOf(record personalassistant.HireRecord) hireResult {
 	result := hireResult{
 		HireID: record.ID, AgentName: record.AgentName, Role: record.Role,
 		WorkspaceID: record.WorkspaceID, Brief: record.Brief, Blueprint: record.Blueprint,
-		LookState: string(record.State),
+		LookState: string(record.State), LookFailure: record.Failure,
 	}
 	if ws, err := h.workspaceStore.Get(record.WorkspaceID); err == nil && ws != nil {
 		result.WorkspaceName, result.WorkspaceRoute = ws.Name, workspaceRoute(ws)

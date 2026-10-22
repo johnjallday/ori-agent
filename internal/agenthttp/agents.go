@@ -130,8 +130,10 @@ type Handler struct {
 	editCarrier EditCarrier
 	// hireRecords keeps hires from the Agents page (agents_hire.go); hireMu
 	// runs one hire at a time so a repeated request id finds the first.
-	hireRecords personalassistant.HireRecordStore
-	hireMu      sync.Mutex
+	hireRecords     personalassistant.HireRecordStore
+	hireLookStarter HireLookStarter
+	runnableModel   RunnableModelChooser
+	hireMu          sync.Mutex
 }
 
 func New(state store.Store) *Handler {
