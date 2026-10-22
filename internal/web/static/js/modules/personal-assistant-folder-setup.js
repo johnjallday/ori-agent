@@ -702,7 +702,13 @@ async function review(candidateId, close = false, offerId, placement) {
     return;
   }
   if (!result?.conversation?.stored) {
-    closeChoices(shouldFocus);
+    // Choices are already closed. Keep the error beside the originating flow
+    // instead of parking it above a long planning panel. Reveal it only if the
+    // user has not moved focus (for example, to type a newer draft).
+    if (shouldFocus && elements.notice?.textContent) {
+      elements.notice.tabIndex = -1;
+      focusLocal(elements.notice, true);
+    }
     return;
   }
   const focusBeforeHydration = document.activeElement;

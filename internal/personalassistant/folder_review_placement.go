@@ -69,6 +69,14 @@ func (s *FolderObservationService) PendingElsewhere(ctx context.Context, target 
 		if review == nil || review.Target.UserID != target.UserID || review.Target.WorkspaceID != target.WorkspaceID || review.Target.AgentName != target.AgentName || review.Target.ConversationID == target.ConversationID || (offer.Status != FolderOfferPending && offer.Status != FolderOfferAwaitingOutcome) {
 			continue
 		}
+		// Build-owned offers have no chat conversation to reopen. In particular,
+		// abandoning a build can leave its confirmed run awaiting an outcome;
+		// the conversation guard cannot vouch for it and must not block unrelated
+		// reviews. Leave the offer untouched: Review still protects any pending
+		// build through the shared single-pending-offer check.
+		if IsBuildReview(review.Target) {
+			continue
+		}
 		if s.reviewGuard == nil || s.reviewGuard(ctx, offer) != nil {
 			return nil, foldercontext.ErrInvalid
 		}
