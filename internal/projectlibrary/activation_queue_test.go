@@ -1,7 +1,6 @@
 package projectlibrary
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -121,10 +120,7 @@ func TestActivationQueue_OutcomeHistoryIsBoundedAndDoesNotRetainEntryIDs(t *test
 func TestActivationQueue_SQLitePrimaryAndFolderMirrorDivergenceRefusesProgress(t *testing.T) {
 	a, scope, _, file, tree, _ := activationFixture(t)
 	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
-	db, err := database.Open(context.Background(), &database.Config{Path: filepath.Join(t.TempDir(), "queue.db"), WALMode: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	defer func() {
 		if err := db.Close(); err != nil {
 			t.Errorf("close SQLite queue fixture: %v", err)

@@ -48,7 +48,7 @@ finish() {
   else
     printf '## Unit tests did not complete\n\nSetup/capture exited %s. See raw artifacts.\n' "$test_status" > "$artifacts/summary.md" || output_status=1
   fi
-  printf '\nSelection: %s (%s packages). Full-suite coverage comes from Ubuntu; macOS runs only the platform subset.\n' "$scope" "$package_count" >> "$artifacts/summary.md" || output_status=1
+  printf '\nSelection: %s (%s packages). Full-suite coverage comes from Ubuntu; macOS runs only the platform subset, without coverage instrumentation.\n' "$scope" "$package_count" >> "$artifacts/summary.md" || output_status=1
   printf '\nWall clocks: reporter build %s s; test command %s s (includes compilation). Setup/cache/save and whole job are timed by Actions step/job timers; package durations overlap.\n' "$reporter_build_seconds" "$test_command_seconds" >> "$artifacts/summary.md" || output_status=1
   printf '\nTest command exit status: %s. Reporter exit status: %s. Diagnostic/output status: %s.\n' "$test_status" "$report_status" "$output_status" >> "$artifacts/summary.md" || output_status=1
   cat "$artifacts/summary.md" || output_status=1
@@ -127,11 +127,23 @@ if [[ "$package_count" -eq 0 ]]; then
   finish 2
   exit 2
 fi
+# Coverage is merged from the Ubuntu shards only (unit-shards.py checks these
+# exact flags there). The platform leg's profile was never consumed, and atomic
+# counters cost it ~40% of its race-mode wall clock, so it runs without them.
+flags=(-json -short -race -timeout 30m -count=1)
+if [[ "$scope" != platform ]]; then
+  flags+=(-covermode=atomic)
+fi
 {
   printf 'scope=%s\nrevision=%s\n' "$scope" "$(git rev-parse HEAD)"
   go version
-  printf 'flags=-json -short -race -timeout 30m -count=1 -covermode=atomic\n'
+  printf 'flags=%s\n' "${flags[*]}"
 } >> "$artifacts/metadata.txt"
+# The per-run profile path stays out of the recorded flag identity above.
+test_args=("${flags[@]}")
+if [[ "$scope" != platform ]]; then
+  test_args+=(-coverprofile="$artifacts/coverage.txt")
+fi
 start=$SECONDS
 test_status=0
 # Capture inside the owned runner so its cleanup messages cannot corrupt JSON.
@@ -139,10 +151,8 @@ test_status=0
 run_owned bash -c '
   artifacts=$1
   shift
-  exec go test -json -short -race -timeout 30m -count=1 \
-    -covermode=atomic -coverprofile="$artifacts/coverage.txt" "$@" \
-    > "$artifacts/events.json" 2> "$artifacts/stderr.txt"
-' unit-capture "$artifacts" "${packages[@]}" || test_status=$?
+  exec go test "$@" > "$artifacts/events.json" 2> "$artifacts/stderr.txt"
+' unit-capture "$artifacts" "${test_args[@]}" "${packages[@]}" || test_status=$?
 metadata_status=0
 test_command_seconds="$((SECONDS-start))"
 printf 'test_command_seconds=%s\ntest_exit=%s\n' "$test_command_seconds" "$test_status" >> "$artifacts/metadata.txt" || metadata_status=1

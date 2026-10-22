@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
@@ -35,11 +36,14 @@ func (s *localFixtureSecrets) Get(key vault.SecretKey) (string, error) {
 
 func newLocalStoreFixture(t *testing.T) (*localStore, *localFixtureSecrets) {
 	t.Helper()
-	db, err := database.Open(t.Context(), &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	// A pre-migrated clone: a fresh in-memory open re-ran every migration
+	// through the race detector, ~3s per test, and nothing here tests opening.
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	root := filepath.Join(t.TempDir(), "data")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)

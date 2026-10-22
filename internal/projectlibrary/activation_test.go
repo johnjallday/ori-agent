@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -445,10 +445,7 @@ func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *te
 func TestActivation_SQLitePrimarySplitHomeMirrorRefusesCreatorRepairUntilExplicitReconciliation(t *testing.T) {
 	a, scope, _, file, tree, installed := activationFixture(t)
 	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "activation.db"), WALMode: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	defer func() {
 		if err := db.Close(); err != nil {
 			t.Errorf("close SQLite activation fixture: %v", err)
@@ -640,10 +637,7 @@ func TestActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRu
 func testActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRun(t *testing.T, readOnly bool) {
 	a, scope, _, file, tree, installed := activationFixture(t)
 	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "failed-final-write.db"), WALMode: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	defer func() {
 		if err := db.Close(); err != nil {
 			t.Errorf("close SQLite fixture: %v", err)
