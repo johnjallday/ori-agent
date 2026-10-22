@@ -6,11 +6,12 @@ import {
   finishedAgo,
   firstLookReportAction,
   firstLookReportView,
-  hiredLine,
   isFirstLookReportKind,
   mapPlacementView,
   reportedLine
 } from './first-look-report.js';
+
+import './folder-setup-visual.js';
 
 const read = name => readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
 const now = new Date('2026-10-21T10:00:00Z');
@@ -235,21 +236,16 @@ test('Start this and Not now name only the look', async () => {
   assert.equal((await firstLookReportAction(view, 'start_this', refused)).ok, false);
 });
 
-test('the assistant says the hire is made, and points at the report when it lands', () => {
-  assert.equal(
-    hiredLine('Development Assistant'),
-    "Hired. Development Assistant is on it. I'll tell you here when it has something."
-  );
+test('acceptance claims no hire; a completed look points at its report separately', () => {
+  const accepted = globalThis.OriFolderSetupVisual.setupAcceptedLine('Project');
+  assert.match(accepted, /Setup accepted for Project/);
+  assert.doesNotMatch(accepted, /Hired|assigned|is reading|finished its first look/);
   assert.equal(
     reportedLine('Development Assistant', 'elite_school'),
     "Development Assistant finished its first look at elite_school. It's under Needs you, with what it suggests first."
   );
   const folder = read('personal-assistant-folder.js');
-  // Host lines, no model turn: written straight into the conversation.
-  assert.match(
-    folder,
-    /if \(hire\) sayInConversation\(hiredLine\(hire\.agent_name \|\| hire\.role_label\)\);/
-  );
+  assert.doesNotMatch(folder, /sayInConversation\(hiredLine/);
   assert.match(folder, /before === 'running' &&\s+after === 'finished'/);
   assert.match(folder, /window\.OriAskRouting\?\.appendMessage\?\.\('assistant', line\)/);
 });

@@ -27,12 +27,7 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
-import {
-  hiredLine,
-  mapPlacementView,
-  renderMapPlacement,
-  reportedLine
-} from './first-look-report.js';
+import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import {
   declinedLine,
@@ -236,18 +231,19 @@ export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFold
 
 const SETUP_STOP_COPY = {
   plan_changed:
-    'What Set up would do now differs from the plan you approved, so I stopped before going further.',
+    'What Set up would do now differs from the plan you approved, so I stopped before going further. Review the changed setup before continuing.',
   needs_pick: subject =>
     `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
   needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
-  needs_model: 'The workspace and folder are set up. The agent needs a model before it can start.',
+  needs_model:
+    'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
   install_failed:
-    'The integration could not be installed or enabled, so nothing after it ran. If you install it from Plugins, Try again continues from there.',
+    'The integration could not be installed or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
   interrupted: 'Setup was interrupted before it finished.',
   consent_stale:
-    'The workspace and folder are set up. Your shared assistant was approved for an older version of this blueprint, so I did not add it. Continue setup to choose the agent yourself.',
+    'Your shared agent was approved for an older version of this blueprint. Completed work is kept; Continue setup to review staffing yourself.',
   assistant_missing:
-    'The workspace and folder are set up. The shared assistant this Home used is gone, so I did not add one on my own. Continue setup to choose the agent yourself.',
+    'The shared agent this Home used is no longer available. Completed work is kept; Continue setup to choose the agent yourself.',
   failed: 'A step did not finish.'
 };
 
@@ -297,6 +293,10 @@ function structureStoppedActions(reason) {
       return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
     case 'member_failed':
       return [{ ...retry, label: 'Continue' }];
+    case 'plan_changed':
+      return [
+        { id: 'review-saved', label: 'Review saved workspaces', style: 'primary', href: '/' }
+      ];
     default:
       return [retry];
   }
@@ -330,6 +330,7 @@ function stoppedActions(reason, setup) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
   switch (reason) {
     case 'plan_changed':
+      return [{ ...CONTINUE_SETUP, label: 'Review changed setup', style: 'primary' }];
     case 'consent_stale':
     case 'assistant_missing':
       return [{ ...CONTINUE_SETUP, style: 'primary' }];
@@ -374,10 +375,18 @@ export function setupRunView(
 ) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
+  if (status === 'done')
+    return {
+      status,
+      lines,
+      statusLine: 'Setup finished; checking the saved result.',
+      question: 'Checking the saved result…',
+      actions: []
+    };
   if (status !== 'stopped') {
     const working = lines.find(line => line.state === 'working');
     return {
-      status: status === 'done' ? 'running' : status,
+      status,
       lines,
       statusLine: working ? `Working on: ${working.name}` : 'Starting…',
       question: `Setting up ${subject}…`,
@@ -425,7 +434,8 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   const software = Boolean(offer.software);
   const run = setupRunView(offer.setup, subject, {
     portfolio: Boolean(offer.portfolio),
-    software
+    software,
+    structure: Boolean(offerStructure(offer))
   });
   const steps = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
@@ -433,23 +443,22 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
     // The run is over, so every line it reached is done, except a step that
     // was allowed to fail without stopping it (the Home's profile): that one
     // keeps saying it did not finish, and is not counted.
-    const settled = run.lines.map(line => ({
-      ...line,
-      state: line.state === 'failed' ? 'failed' : line.state ? 'done' : ''
-    }));
-    const unfinished = settled.filter(line => line.state === 'failed').length;
+    const settled = run.lines;
+    const completed = settled.filter(line => line.state === 'done').length;
     // A hire ends on its agent at work: the look it started, or why it waits.
     const hired = receipt.hireLook?.visible ? offer.first_task : null;
     const agent = String(hired?.agent || '').trim();
     const done = {
       visible: true,
       phase: 'done',
-      eyebrow: hired ? 'Hired' : 'All set',
+      eyebrow: 'Setup ready',
       title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
       status: hired
-        ? hired.state === 'running' || hired.state === 'finished'
-          ? `${agent || 'Your agent'} is reading ${subject}, read-only. I'll tell you here when it has something.`
-          : `Here is what I set up. ${String(hired.message || '').trim() || 'Its first look has not started.'}`
+        ? hired.state === 'finished'
+          ? `${agent || 'Your agent'} finished the first look. Open the report to see what it found.`
+          : hired.state === 'running'
+            ? `${agent || 'Your agent'} is reading ${subject}, read-only. I'll tell you here when it has something.`
+            : `Here is what I set up. ${String(hired.message || '').trim() || 'Its first look has not started.'}`
         : receipt.home
           ? 'Here is what I set up. Open a project from the library when you want to work on it.'
           : software
@@ -457,8 +466,7 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
             : receipt.group
               ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
               : 'Here is what I set up. The first task starts when you open the workspace.',
-      count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
-      percent: 100,
+      count: steps ? `${completed} of ${steps} steps finished` : '',
       lines: settled,
       profile: receipt.profile || null,
       receiptRows: receipt.rows,
@@ -496,7 +504,6 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
     // The count line already says how many steps finished.
     status: stopped ? run.question.replace(/^\d+ of \d+ steps finished\. /, '') : run.statusLine,
     count: steps ? `${finished} of ${steps} steps finished` : '',
-    percent: steps ? Math.round((finished / steps) * 100) : 0,
     lines: run.lines,
     receiptRows: [],
     route: '',
@@ -2532,20 +2539,11 @@ function announceFinishedRun() {
   window.sessionManager?.notifyWorkspacesChanged?.({ workspaceId });
 }
 
-function openRunModal() {
-  const els = runModalElements();
-  const Modal = globalThis.bootstrap?.Modal;
-  if (!els || !Modal) return;
-  runModal.wanted = true;
-  runModal.error = '';
-  if (!runModal.bound) {
-    els.root.addEventListener('hidden.bs.modal', () => {
-      runModal.wanted = false;
-    });
-    runModal.bound = true;
-  }
-  renderRunModal();
-  Modal.getOrCreateInstance(els.root).show();
+function revealRunSurface() {
+  const card = elements()?.offer;
+  // A reply arriving after closure must not reopen the drawer.
+  if (!card || card.hidden || document.getElementById('personalAssistantPanel')?.hidden) return;
+  window.PersonalAssistantTranscript?.revealControl?.(card, true);
 }
 
 function closeRunModal() {
@@ -2580,8 +2578,6 @@ function renderRunModal() {
   setText(els.count, view.count);
   setText(els.status, (view.songs?.length && runSongs.message) || view.status, false);
   renderProfileLine(els.profile, done ? view.profile : null);
-  els.bar.setAttribute('aria-valuenow', String(view.percent));
-  els.fill.style.width = `${view.percent}%`;
   renderSetupLines(els.steps, view.lines);
   els.steps.hidden = done || !view.lines.length;
   renderReceiptRows(els.receipt, view.receiptRows);
@@ -2877,7 +2873,13 @@ function renderOffer(place) {
   els.offer.dataset.status = view.status;
   if (els.headline) {
     els.headline.replaceChildren();
-    view.headline.forEach(part => {
+    const headline = view.setup
+      ? segments([
+          { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
+          view.setup.status === 'stopped' ? ' needs you' : ' · setting up'
+        ])
+      : view.headline;
+    headline.forEach(part => {
       if (part.strong) {
         const strong = document.createElement('strong');
         strong.textContent = part.text;
@@ -2890,7 +2892,7 @@ function renderOffer(place) {
   renderHire(els, view.hire, state.offer);
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
-    diagram.hidden = !state.offer?.plan || Boolean(state.offer?.setup) || receipt.visible;
+    diagram.hidden = !(state.offer?.plan || state.offer?.setup) || receipt.visible;
     if (!diagram.hidden)
       globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
     els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
@@ -2898,6 +2900,10 @@ function renderOffer(place) {
   globalThis.OriFolderSetupVisual.renderConsequences(
     document.getElementById('personalAssistantFolderConsequences'),
     !state.offer?.setup && !receipt.visible ? state.offer?.plan : null
+  );
+  globalThis.OriFolderSetupVisual.renderProgress(
+    document.getElementById('personalAssistantFolderProgress'),
+    state.offer?.setup
   );
   const details = document.getElementById('personalAssistantFolderDetails');
   if (details && details.dataset.offer !== state.offer?.id) {
@@ -3336,6 +3342,7 @@ function runAction(action) {
 
 const SETUP_POLL_MS = 1500;
 let setupPollTimer = null;
+const acceptedSetups = new Set();
 
 // Bound setup replies/polls cannot take over a different conversation's card.
 // Existing standalone journeys retain their independent lifetime.
@@ -3387,11 +3394,16 @@ async function startOneCardSetup(action) {
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
-      // The assistant says, in its own words and once, that the hire is made.
-      const hire = offer.plan?.hire;
-      if (hire) sayInConversation(hiredLine(hire.agent_name || hire.role_label));
-      // Show the run in a pop-up so it is plain that the assistant is working.
-      openRunModal();
+      // Acceptance is not a hire or proof of membership. Retry/poll/reload must
+      // not repeat the announcement or manufacture a completed assignment.
+      const key = `${offer.conversation_id || ''}:${offer.id}`;
+      if (!acceptedSetups.has(key)) {
+        acceptedSetups.add(key);
+        sayInConversation(
+          globalThis.OriFolderSetupVisual.setupAcceptedLine(offer.subject?.name || offer.folder)
+        );
+      }
+      revealRunSurface();
       return;
     }
     if (payload?.plan_changed && payload.offer) {

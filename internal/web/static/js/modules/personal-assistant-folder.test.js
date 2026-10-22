@@ -126,7 +126,7 @@ test('the run pop-up says the assistant is working and counts finished steps', (
   assert.equal(view.eyebrow, 'Your assistant is working');
   assert.equal(view.title, 'Setting up Session');
   assert.equal(view.count, '2 of 4 steps finished');
-  assert.equal(view.percent, 50);
+  assert.equal(view.percent, undefined);
   assert.equal(view.status, 'Working on: Step 3');
   assert.deepEqual(view.actions, []);
 });
@@ -143,7 +143,7 @@ test('a stopped run keeps its progress and offers the way forward in the pop-up'
   });
   assert.equal(view.phase, 'stopped');
   assert.equal(view.title, 'Session needs you');
-  assert.equal(view.percent, 50);
+  assert.equal(view.percent, undefined);
   assert.match(view.status, /needs a model/);
   assert.doesNotMatch(JSON.stringify(view), /needs_model/);
   assert.deepEqual(
@@ -164,7 +164,7 @@ test('a finished run shows the receipt and the Open link in the pop-up', () => {
     }
   });
   assert.equal(view.phase, 'done');
-  assert.equal(view.percent, 100);
+  assert.equal(view.percent, undefined);
   assert.equal(view.route, '/workspaces/session');
   assert.equal(view.openLabel, 'Open Session');
   assert.equal(view.receiptRows.length, 1);
@@ -385,7 +385,7 @@ test('a finished Home run ends on the six songs saved most recently', () => {
   const view = setupModalView(homeRunOffer(), { songs: rows, total: 12, now: today });
   assert.equal(view.visible, true);
   assert.equal(view.phase, 'done');
-  assert.equal(view.eyebrow, 'All set');
+  assert.equal(view.eyebrow, 'Setup ready');
   assert.equal(view.title, 'Pick a song to start with');
   assert.equal(
     view.status,

@@ -104,6 +104,45 @@ test('visible consequences retain install/read/token/shared-agent and profile co
   assert.doesNotMatch(effects.join(' '), /from 1/);
 });
 
+test('run milestones use applicable line evidence, not timers, profiles or first-look guesses', () => {
+  const setup = {
+    status: 'done',
+    lines: [
+      { kind: 'workspace', name: 'Workspace', state: 'done' },
+      { kind: 'profile', name: 'Optional profile', state: 'failed' },
+      { kind: 'agents', name: 'Staffing', state: 'waiting' },
+      { kind: 'task', name: 'First look', state: 'done' },
+      { kind: 'future', name: 'Unknown', state: 'done' }
+    ]
+  };
+  const stages = globalThis.OriFolderSetupVisual.setupMilestones(setup);
+  assert.deepEqual(
+    stages.map(row => [row.kind, row.state]),
+    [
+      ['workspace', 'done'],
+      ['profile', 'failed'],
+      ['agents', 'waiting']
+    ]
+  );
+  const view = visualView({
+    offer: { plan, setup: { ...setup, visual: plan.visual, hire: plan.hire } }
+  });
+  assert.equal(view.entity.status, 'Created');
+  assert.equal(view.agent.status, 'Proposed new agent');
+  assert.match(view.footer, /separate from the first look/);
+  assert.doesNotMatch(JSON.stringify(view), /percent|first look complete|Assigned/);
+  const group = globalThis.OriFolderSetupVisual.setupMilestones({
+    lines: [
+      { kind: 'member', name: 'Child A', state: 'working' },
+      { kind: 'task', name: 'No task is created', state: 'done' }
+    ]
+  });
+  assert.deepEqual(
+    group.map(row => row.label),
+    ['Child A']
+  );
+});
+
 function documentFixture() {
   const doc = {
     createElement: tag => ({

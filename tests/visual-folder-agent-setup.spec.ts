@@ -217,6 +217,128 @@ test('fixture late confirmation response cannot reopen a parked review or replac
   ).toBe('Exact unsent goal');
 });
 
+test('fixture lost response can retry; a late acceptance never reopens the closed drawer', async ({
+  page
+}) => {
+  const offer = reviewOffer();
+  const accepted = {
+    ...offer,
+    plan: undefined,
+    status: 'awaiting_outcome',
+    setup: {
+      status: 'running',
+      plan_digest: offer.plan.digest,
+      visual: offer.plan.visual,
+      hire: offer.plan.hire,
+      lines: offer.plan.lines.map(line => ({ ...line, state: 'waiting' }))
+    }
+  };
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const requests: any[] = [];
+  await page.route('**/folder-digest/offers/visual-review-fixture/setup', async route => {
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) return route.abort('connectionreset');
+    await held;
+    await route.fulfill({ json: { offer: accepted } });
+  });
+  await page.route('**/folder-digest?*', route =>
+    route.fulfill({ json: { folder_digest: { offer: accepted } } })
+  );
+  const card = await mountReview(page, offer);
+  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  await confirm.click();
+  await expect(card.locator('#personalAssistantFolderOfferError')).toContainText(
+    'could not be started'
+  );
+  await confirm.click();
+  await expect.poll(() => requests.length).toBe(2);
+  await page.locator('#personalAssistantClose').click();
+  release();
+  await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+    'Workspace · Waiting'
+  );
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await expect(page.locator('#folderSetupRunModal')).toBeHidden();
+  await page.evaluate(() =>
+    (window as any).PersonalAssistantPanel.open(
+      document.getElementById('personalAssistantLauncher')
+    )
+  );
+  await expect(card.locator('#personalAssistantFolderProgress')).toBeVisible();
+  expect(requests.map(row => row.plan_digest)).toEqual([offer.plan.digest, offer.plan.digest]);
+});
+
+test('fixture update failure and retry keep one surface and the same reviewed plan', async ({
+  page
+}) => {
+  const requests: any[] = [];
+  const offer = reviewOffer();
+  const run = (stopped: boolean) => ({
+    ...offer,
+    plan: undefined,
+    status: 'awaiting_outcome',
+    setup: {
+      plan_digest: offer.plan.digest,
+      status: stopped ? 'stopped' : 'running',
+      stop_reason: stopped ? 'install_failed' : '',
+      visual: offer.plan.visual,
+      destination: offer.plan.destination,
+      hire: offer.plan.hire,
+      lines: offer.plan.lines.map((line, index) => ({
+        ...line,
+        state: index === 0 ? (stopped ? 'failed' : 'done') : 'waiting'
+      }))
+    }
+  });
+  await page.route('**/folder-digest/offers/visual-review-fixture/setup', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ json: { offer: run(requests.length === 1) } });
+  });
+  await page.route('**/folder-digest?*', route =>
+    route.fulfill({ json: { folder_digest: { offer: run(false) } } })
+  );
+  const card = await mountReview(page, offer);
+  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+    'Integration · Did not finish'
+  );
+  await expect(card.locator('.folder-visual')).toBeVisible();
+  await expect(page.locator('#folderSetupRunModal')).toBeHidden();
+  await expect(card).not.toContainText('Assigned to workspace');
+  await expect(page.locator('#homeAssistantConversation')).not.toContainText('Hired.');
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.evaluate(() =>
+      (window as any).PersonalAssistantTranscript?.revealControl(
+        document.getElementById('personalAssistantFolderOfferHeadline'),
+        true
+      )
+    );
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/03-fixture-update-blocked.png`
+    });
+  }
+  await card.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+    'Integration · Complete'
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests.map(row => row.plan_digest)).toEqual([offer.plan.digest, offer.plan.digest]);
+  await page.locator('#personalAssistantClose').click();
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await page.evaluate(() =>
+    (window as any).PersonalAssistantPanel.open(
+      document.getElementById('personalAssistantLauncher')
+    )
+  );
+  await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+    'Integration · Complete'
+  );
+  expect(requests).toHaveLength(2); // Reopening is observational, not another setup.
+});
+
 test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {
   const card = await mountReview(page, reviewOffer('bind'));
   await expect(card.getByRole('button', { name: 'Assign & start', exact: true })).toBeVisible();

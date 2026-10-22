@@ -8,8 +8,41 @@ import {
   folderReceiptView,
   hireLookView,
   hireView,
-  setupModalView
+  setupModalView,
+  setupRunView
 } from './personal-assistant-folder.js';
+
+test('stop families keep distinct reviewed recovery actions and never guess a plugin update', () => {
+  const cases = [
+    ['needs_pick', {}, ['repick', 'resume']],
+    ['needs_choice', {}, ['choose-0', 'resume']],
+    ['needs_model', {}, ['model', 'retry', 'resume']],
+    ['plan_changed', {}, ['resume']],
+    ['consent_stale', {}, ['resume']],
+    ['assistant_missing', {}, ['resume']],
+    ['install_failed', {}, ['retry', 'resume']],
+    ['unknown_failure', {}, ['retry', 'resume']],
+    ['member_failed', { structure: true }, ['retry']],
+    ['plan_changed', { structure: true }, ['review-saved']],
+    ['plan_changed', { software: true }, ['review']],
+    ['interrupted', { software: true }, ['retry']]
+  ];
+  for (const [reason, variant, ids] of cases) {
+    const view = setupRunView(
+      { status: 'stopped', stop_reason: reason, entry_candidates: ['Actual.rpp'] },
+      'Project',
+      variant
+    );
+    assert.deepEqual(
+      view.actions.map(action => action.id),
+      ids,
+      reason
+    );
+    if (reason.includes('_')) assert.doesNotMatch(view.question, new RegExp(reason));
+    assert.ok(!view.actions.some(action => action.label === 'Retry update'));
+    if (reason === 'needs_choice') assert.equal(view.actions[0].entry, 'Actual.rpp');
+  }
+});
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
 const template = readFileSync(
@@ -362,7 +395,7 @@ test('a running hired look can be stopped from the receipt, and Start first look
 
 test('the run pop-up ends a hire on its agent at work, or on why the look waits', () => {
   const running = setupModalView(hiredOffer());
-  assert.equal(running.eyebrow, 'Hired');
+  assert.equal(running.eyebrow, 'Setup ready');
   assert.equal(
     running.status,
     "Development Assistant is reading elite_school, read-only. I'll tell you here when it has something."
@@ -377,5 +410,8 @@ test('the run pop-up ends a hire on its agent at work, or on why the look waits'
     blocked.status,
     'Here is what I set up. Choose a model that can read without tools.'
   );
-  assert.equal(setupModalView(hiredOffer({}, null)).eyebrow, 'All set');
+  assert.equal(setupModalView(hiredOffer({}, null)).eyebrow, 'Setup ready');
+  const finished = setupModalView(hiredOffer({ state: 'finished' }));
+  assert.match(finished.status, /finished the first look/);
+  assert.doesNotMatch(finished.status, /is reading/);
 });

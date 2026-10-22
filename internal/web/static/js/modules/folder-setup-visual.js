@@ -15,7 +15,12 @@
       proposed && kinds[proposed.kind] && operations[proposed.operation]
         ? { kind: proposed.kind, name: text(proposed.name), status: operations[proposed.operation] }
         : null;
-    const destination = offer?.setup?.destination || plan?.destination || offer?.destination;
+    const setup = offer?.setup;
+    const done = kind =>
+      list(setup?.lines).some(line => line.kind === kind && line.state === 'done');
+    if (entity && done(entity.kind))
+      entity.status = proposed.operation === 'reuse' ? 'Reused' : 'Created';
+    const destination = setup?.destination || plan?.destination || offer?.destination;
     let parent = 'Destination not yet reviewed';
     if (
       destination?.status === 'standalone' ||
@@ -39,6 +44,8 @@
                   : 'Proposed new agent'
           }
         : null;
+    if (agent && done('agents'))
+      agent.status = 'Planned agent · staffing complete; identity awaits receipt';
     const source =
       text(offer?.subject?.name) ||
       text(observation?.folder) ||
@@ -60,15 +67,19 @@
         name: text(row.name),
         kind: row.kind === 'folder' ? 'Folder' : 'File'
       })),
-      sourceNote: observed
-        ? 'Observed names only · contents not read'
-        : 'Source folder · kept in place',
+      sourceNote: done('folder')
+        ? 'Folder link complete · kept in place'
+        : observed && !setup
+          ? 'Observed names only · contents not read'
+          : 'Source folder · kept in place',
       summary: entity
-        ? `${source} → ${entity.status.toLowerCase()} ${kinds[entity.kind].toLowerCase()} ${entity.name}. ${parent}.${agent ? ` ${agent.status}: ${agent.name || agent.role || 'agent not yet known'}.` : ''} Nothing here proves creation or assignment.`
-        : `${source}. Destination and agent are not yet reviewed. No setup has started.`,
-      footer: entity
-        ? 'Proposed setup · nothing created or assigned yet'
-        : 'Review a supported setup to see its destination and agent.'
+        ? `${source} → ${entity.status.toLowerCase()} ${kinds[entity.kind].toLowerCase()} ${entity.name}. ${parent}.${agent ? ` ${agent.status}: ${agent.name || agent.role || 'agent not yet known'}.` : ''}${setup ? ' Status comes from the saved run.' : ' Nothing here proves creation or assignment.'}`
+        : `${source}. Destination and agent are not yet reviewed.${setup ? ' Setup status comes from the saved run.' : ' No setup has started.'}`,
+      footer: setup
+        ? 'Setup is separate from the first look. Completed work is kept.'
+        : entity
+          ? 'Proposed setup · nothing created or assigned yet'
+          : 'Review a supported setup to see its destination and agent.'
     };
   }
 
@@ -217,6 +228,70 @@
     container.append(list);
   }
 
+  // Reduce only applicable line kinds, preserving the order actually reported
+  // by the runner. A task line is not evidence that a first look ran/finished.
+  function setupMilestones(setup) {
+    const labels = {
+      integration: 'Integration',
+      provider: 'Home plugin',
+      home: 'Home',
+      workspace: 'Workspace',
+      group: 'Workspace group',
+      workspaces: 'Member workspaces',
+      member: 'Member workspace',
+      folder: 'Folder access',
+      mode: 'Access mode',
+      agents: 'Workspace staffing',
+      assistant: 'Shared-agent setup',
+      profile: 'Home profile',
+      library: 'Library',
+      songs: 'Listed projects'
+    };
+    return list(setup?.lines)
+      .filter(line => labels[line.kind])
+      .map(line => ({
+        kind: line.kind,
+        label: line.kind === 'member' ? text(line.name) || labels.member : labels[line.kind],
+        state: ['waiting', 'working', 'done', 'failed'].includes(line.state) ? line.state : '',
+        detail: text(line.name)
+      }));
+  }
+
+  function renderProgress(container, setup) {
+    if (!container) return;
+    container.hidden = !setup;
+    const signature = JSON.stringify(setupMilestones(setup));
+    if (container.dataset.signature === signature) return;
+    container.dataset.signature = signature;
+    container.replaceChildren();
+    if (!setup) return;
+    const doc = container.ownerDocument;
+    const list = doc.createElement('ul');
+    list.className = 'folder-setup-milestones';
+    list.setAttribute('aria-label', 'Saved setup progress');
+    const states = {
+      waiting: 'Waiting',
+      working: 'In progress',
+      done: 'Complete',
+      failed: 'Did not finish'
+    };
+    for (const stage of setupMilestones(setup)) {
+      const row = doc.createElement('li');
+      row.dataset.state = stage.state;
+      row.textContent = `${stage.label} · ${states[stage.state] || 'Not reported'}`;
+      list.append(row);
+    }
+    const note = doc.createElement('p');
+    note.className = 'folder-visual__note';
+    note.textContent =
+      'Closing this panel does not cancel setup. Reopen it to see the saved result.';
+    container.append(list, note);
+  }
+
+  function setupAcceptedLine(subject) {
+    return `Setup accepted for ${text(subject) || 'this folder'}. The saved result below shows what actually finished.`;
+  }
+
   function briefError(value) {
     return Array.from(String(value ?? '')).length > 300
       ? 'Keep the brief to 300 characters or fewer. Your draft is kept.'
@@ -228,6 +303,9 @@
     renderDiagram,
     reviewConsequences,
     renderConsequences,
-    briefError
+    briefError,
+    setupMilestones,
+    renderProgress,
+    setupAcceptedLine
   });
 })();

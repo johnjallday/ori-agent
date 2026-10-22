@@ -201,6 +201,29 @@
   margin-top: 0.5rem;
 }
 
+.folder-setup-milestones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.8rem 0;
+}
+
+.folder-setup-milestones li {
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.folder-setup-milestones [data-state="working"],
+.folder-setup-milestones [data-state="failed"] {
+  border-color: var(--pa-accent-text, var(--text-primary));
+  font-weight: 700;
+}
+
 .folder-setup-details {
   margin-top: 0.8rem;
 }
