@@ -460,7 +460,8 @@ test('first-time UI prepares and staffs the exact Home before one reviewed proje
   // One card, one confirm: the placement was reviewed as Review was shown, the
   // card says so, and the one Create button commits it.
   await expect(page.locator('#workspaceReviewReadiness')).toContainText('Reviewed destination:');
-  await expect(page.locator('#createFolderBtn')).toHaveText(`Create “${projectName}”`);
+  // The Research Lead was staged as Create on Team, so Review hires.
+  await expect(page.locator('#createFolderBtn')).toHaveText(`Hire and create “${projectName}”`);
 
   const createPromise = page.waitForResponse(
     response =>

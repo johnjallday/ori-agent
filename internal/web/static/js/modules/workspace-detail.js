@@ -4512,11 +4512,17 @@ export class WorkspaceDetailPage {
         this.elements.agentsList.innerHTML =
           '<div class="workspace-detail-loading">Loading agents...</div>';
       } else {
+        // The Command view owns the role roster, so it decides what the offer
+        // names; without it the offer is a plain Add Agent.
+        const offer = window.workspaceCommand?.hireOffer?.() || {
+          roleId: '',
+          label: 'Hire an agent'
+        };
         this.elements.agentsList.innerHTML = `
           <div class="workspace-detail-empty">
-            No agents yet. Add an agent to this workspace to assign tasks.
+            <strong>No one works here yet.</strong> Hire someone for this workspace.
             <div class="mt-2">
-              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.openAddAgentModal()">Add Agent</button>
+              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" onclick="window.workspaceDetail?.hireForEmptyRoster('${encodeURIComponent(offer.roleId)}')">${this.escapeHtml(offer.label)}</button>
             </div>
           </div>
         `;
@@ -5972,6 +5978,14 @@ export class WorkspaceDetailPage {
     }
   }
 
+  dismissEntryAgentPrompt() {
+    try {
+      window.sessionStorage?.setItem(this.getEntryAgentPromptDismissalStorageKey(), '1');
+    } catch (_error) {
+      // A browser that refuses storage simply offers again on the next load.
+    }
+  }
+
   shouldPromptForMissingEntryAgent() {
     const entryAgentName = String(this.workspace?.entry_agent_name || '').trim();
     if (entryAgentName) {
@@ -5980,11 +5994,9 @@ export class WorkspaceDetailPage {
     }
 
     // A workspace whose blueprint declares ROLES is not broken for having none
-    // of them filled — that is a supported end state, and its roster is the
-    // place to fix it. This mandatory prompt says the workspace "cannot
-    // function" and offers to mint a Commander on the spot, which is exactly
-    // the automatic staffing the vacancy model replaces: it would undo the
-    // user's choice to create the workspace empty, moments after they made it.
+    // of them filled — that is a supported end state, and its roster (with its
+    // own hire offer) is the place to staff it. Offering a generic Commander
+    // on top would second-guess the user's choice to create it empty.
     if (this.declaresBlueprintRoles()) {
       return false;
     }
@@ -6405,33 +6417,46 @@ export class WorkspaceDetailPage {
     // The roster load is what tells us whether this workspace has roles at all,
     // and it is in flight while the page boots. Waiting for it here is the
     // difference between "no roles declared" and "not answered yet" — without
-    // it, an empty-by-design workspace gets the mandatory Commander prompt on
-    // every load purely because the fetch had not landed.
+    // it, an empty-by-design workspace gets the Commander offer on every load
+    // purely because the fetch had not landed.
     await this.awaitBlueprintRoles();
     if (!this.shouldPromptForMissingEntryAgent()) return;
 
-    const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
+    const workspaceName = String(this.workspace?.name || '').trim();
     const entryAgentDefaults = this.buildWorkspaceEntryAgentDefaults();
-    // A Commander is required for the workspace to operate, so this prompt is
-    // mandatory: there is no "create later" escape and it resolves only when the
-    // user proceeds to create one.
-    await this.showTaskConfirmDialog({
-      eyebrow: 'Workspace Setup',
-      title: 'Create a Commander for this workspace?',
-      message: `"${workspaceName}" cannot function until it has a Commander.`,
-      confirmLabel: 'Create Commander',
-      mandatory: true,
-      metaItems: [workspaceName, entryAgentDefaults.seedName, 'No Commander'],
+    // An offer, not a gate: the workspace stays usable without a Commander, so
+    // "Not now" (or closing) is always available. Declining is remembered for
+    // this browser session, so the offer returns next session, not next load.
+    const hire = await this.showTaskConfirmDialog({
+      eyebrow: 'Workspace setup',
+      title: 'Hire a Commander for this workspace?',
+      message: `${workspaceName || 'This workspace'} routes chats and tasks through its Commander. The first agent you hire here takes that seat.`,
+      confirmLabel: 'Hire a Commander',
+      cancelLabel: 'Not now',
+      mandatory: false,
+      metaItems: [workspaceName || 'This workspace', entryAgentDefaults.seedName],
       details: [
-        'The Commander is required for this workspace to operate normally.',
-        'Chats, routing, and task orchestration depend on having a Commander.',
-        'The first agent you add here will become the workspace Commander automatically.',
-        'You can rename or replace it later.'
+        'The Commander receives chats and dispatches tasks.',
+        'You can rename or replace it later.',
+        'Nothing is created until you finish the form.'
       ]
     });
 
+    if (!hire) {
+      this.dismissEntryAgentPrompt();
+      return;
+    }
     this.clearEntryAgentPromptDismissal();
     this.openWorkspaceEntryAgentCreateFlow();
+  }
+
+  hireForEmptyRoster(encodedRoleId = '') {
+    const command = window.workspaceCommand;
+    if (command && typeof command.requestHire === 'function') {
+      command.requestHire(decodeURIComponent(encodedRoleId));
+      return;
+    }
+    void this.openAddAgentModal();
   }
 
   async openAddAgentModal() {

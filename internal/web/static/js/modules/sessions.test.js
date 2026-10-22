@@ -2510,6 +2510,46 @@ test('the guided group button creates the group once its review is shown', () =>
   assert.equal(manager.workspaceCreateCtaLabel(), 'Use existing group “Music Production Home”');
 });
 
+test('the Review button says Hire and create when pressing it creates agents', () => {
+  const nameInput = { value: 'Code Lab' };
+  const manager = loadSessionManager(
+    undefined,
+    {},
+    {
+      getElementById: id => (id === 'folderNameInput' ? nameInput : null)
+    }
+  );
+  let roster = null;
+  manager.teamView = () => (roster ? { roleRoster: roster } : null);
+  const counts = over => ({ created_count: 0, auto_created_count: 0, assigned_count: 0, ...over });
+
+  // A role the user chose to create, or one the create fills by itself.
+  roster = counts({ created_count: 1 });
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Hire and create “Code Lab”');
+  roster = counts({ auto_created_count: 1 });
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Hire and create “Code Lab”');
+  nameInput.value = '';
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Hire and create');
+
+  // Nothing created: attaching saved agents or reusing Ask Ori is not a hire.
+  nameInput.value = 'Code Lab';
+  roster = counts({ assigned_count: 2 });
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create “Code Lab”');
+  roster = null;
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create “Code Lab”');
+  nameInput.value = '';
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create Workspace');
+
+  // Import and groups keep their own labels whatever the draft holds.
+  nameInput.value = 'Code Lab';
+  roster = counts({ created_count: 1 });
+  manager.importModeEnabled = true;
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create “Code Lab”');
+  manager.importModeEnabled = false;
+  manager.isGroupCreator = () => true;
+  assert.equal(manager.workspaceCreateCtaLabel(), 'Create group “Code Lab”');
+});
+
 test('a placement review asked for by showing Review reports nothing that is not ready', async () => {
   const states = [
     { state: 'home_creation_review_required', home_name: 'Music Production Home' },
@@ -7702,6 +7742,49 @@ test('folder review shows the actual effective team and constrains recognized pl
   };
   await manager.actOnWorkspaceBuildFolderReview();
   assert.equal(prerequisites, 1);
+});
+
+test('the folder review primary says Hire and create when its draft team creates agents', () => {
+  const { manager, nodes, window } = prepareProposalWizard();
+  for (const id of [
+    'workspaceBuildFolderPurpose',
+    'workspaceBuildFolderTeam',
+    'workspaceBuildPlanReviewSetup',
+    'workspaceBuildFolderPurposeEdit',
+    'workspaceBuildFolderTeamEdit',
+    'workspaceBuildFolderPlacementEdit',
+    'workspaceBuildFolderGoalField'
+  ])
+    nodes.set(id, new BuildNode('div', id));
+  manager.workspaceBuild.session.folder = { observation: { folder: 'elite_school', files: 3 } };
+  manager.workspaceBuildGateProblem = () => '';
+  window.ProjectTemplateCard = { getSelectedTemplate: () => ({ name: 'Code Project' }) };
+  let roleRoster = {
+    total_count: 1,
+    created_count: 0,
+    auto_created_count: 1,
+    roles: [{ label: 'Development Assistant', state: 'filled', agent: { name: 'Dev' } }]
+  };
+  manager.teamView = () => ({ planStatus: 'ready', roleRoster, roster: [{ name: 'Ask Ori' }] });
+  const action = () => nodes.get('workspaceBuildPlanReviewSetup').textContent;
+
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(action(), 'Hire and create');
+
+  // A draft that creates nobody (Ask Ori reused, or saved agents attached).
+  roleRoster = { total_count: 0, created_count: 0, auto_created_count: 0, roles: [] };
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(action(), 'Create workspace');
+
+  // A recognized plan that names a hire keeps its own label.
+  roleRoster = { ...roleRoster, created_count: 1 };
+  manager.workspaceBuild.session.plan = {
+    ready: true,
+    hire: { mode: 'create', agent_name: 'Song Assistant' }
+  };
+  manager.workspaceBuild.session.folder.recognition = { verdict: 'project' };
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(action(), 'Hire and start');
 });
 
 test('changing purpose cannot refill earlier explicitly cleared name or description', () => {

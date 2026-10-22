@@ -76,11 +76,10 @@ function fixtureFolder(label: string, files: Record<string, string>): string {
  * ordinary agent already on its roster.
  *
  * The agent exists purely to keep two unrelated dialogs off the screen. A
- * workspace with no agents shows a blocking "Create a Commander for this
- * workspace?" prompt with no dismissal, and creating that Commander in the
- * browser then starts the workspace's first task, which raises the Execution
- * Check autonomy gate on top. Both cover the surface under test and swallow
- * every click.
+ * workspace with no agents offers "Hire a Commander for this workspace?", and
+ * hiring that Commander in the browser then starts the workspace's first task,
+ * which raises the Execution Check autonomy gate on top. Both cover the
+ * surface under test and swallow every click.
  *
  * This is a real finding about the path to a newly installed capability, not
  * test scaffolding — it is recorded in the manual test guide. File Janitor
@@ -139,28 +138,22 @@ const consoleBody = (page: Page) => page.locator('#fileJanitorConsoleBody');
  *
  * Two of them, neither belonging to File Janitor:
  *
- *   1. "Create a Commander for this workspace?" — a workspace with no agents
- *      shows this and offers no dismissal, because it genuinely cannot operate
- *      without one.
- *   2. The Execution Check autonomy gate — creating that Commander starts the
+ *   1. "Hire a Commander for this workspace?" — a workspace with no agents
+ *      offers this once per session; "Not now" declines it.
+ *   2. The Execution Check autonomy gate — hiring that Commander starts the
  *      workspace's first task, which asks for confirmation before it runs.
  *
  * Both sit over the surface under test and swallow every click, so the spec
- * clears them exactly as a user would.
- *
- * Worth stating plainly because it is a real finding rather than test
- * scaffolding: installing File Janitor into a brand-new, agent-less workspace
- * means meeting both dialogs first. The capability itself needs no agent
- * (FR-37), and these tests prove it by never using the Commander afterwards —
- * but the path to the card is not as clear as it should be.
+ * clears them exactly as a user would. The capability itself needs no agent
+ * (FR-37), and these tests prove it by declining the Commander.
  */
 async function clearBlockingModals(page: Page) {
-  const nudge = page.getByRole('button', { name: 'Create Commander' });
-  if (await nudge.isVisible().catch(() => false)) {
-    await nudge.click();
-    await expect(nudge).toBeHidden({ timeout: 15000 });
-  }
   const gate = page.locator('#workspace-detail-task-confirm-modal');
+  const notNow = gate.getByRole('button', { name: 'Not now' });
+  if (await notNow.isVisible().catch(() => false)) {
+    await notNow.click();
+    await expect(gate).toBeHidden({ timeout: 15000 });
+  }
   if (await gate.isVisible().catch(() => false)) {
     await page.locator('#workspace-detail-task-confirm-close').click();
     await expect(gate).toBeHidden({ timeout: 15000 });

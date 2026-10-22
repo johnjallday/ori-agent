@@ -5727,6 +5727,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   letter-spacing: 0.8px;
   color: var(--ws-ink-faint);
 }
+.ws-cmd-modal-empty p {
+  margin: 0 0 12px;
+}
 .ws-cmd-modal-foot {
   padding: 11px 14px;
   border-top: 1px solid var(--ws-line);

@@ -217,7 +217,8 @@ class TaskModalController {
       const newWorkspaceId = e.target.value;
       if (newWorkspaceId) {
         this.workspaceId = newWorkspaceId;
-        this.showWorkspaceBadge(newWorkspaceId);
+        // Awaited: it also learns the workspace's Commander, the new default.
+        await this.showWorkspaceBadge(newWorkspaceId);
         // Re-populate agent dropdown for new workspace
         await this.populateAgentDropdown(newWorkspaceId);
         this.refreshSubtaskAssignmentOptions();
@@ -782,6 +783,10 @@ class TaskModalController {
     const nameSpan = document.getElementById('taskModalWorkspaceName');
     const selector = document.getElementById('taskModalWorkspaceSelector');
 
+    // Read with the workspace this badge already fetches: a new task defaults
+    // to the workspace's Commander (see newTaskAssignmentValue).
+    this.workspaceEntryAgentName = '';
+
     if (!badge || !nameSpan) return;
 
     // Hide selector when showing badge
@@ -799,6 +804,7 @@ class TaskModalController {
         const workspace = await response.json();
         nameSpan.textContent = workspace.name || 'Unknown Workspace';
         badge.style.display = 'block';
+        this.workspaceEntryAgentName = String(workspace.entry_agent_name || '').trim();
       } else {
         // Fallback: try to get from sessionManager if available
         if (window.sessionManager?.folders) {
@@ -806,6 +812,7 @@ class TaskModalController {
           if (folder) {
             nameSpan.textContent = folder.name;
             badge.style.display = 'block';
+            this.workspaceEntryAgentName = String(folder.entry_agent_name || '').trim();
             return;
           }
         }
@@ -819,6 +826,7 @@ class TaskModalController {
         if (folder) {
           nameSpan.textContent = folder.name;
           badge.style.display = 'block';
+          this.workspaceEntryAgentName = String(folder.entry_agent_name || '').trim();
           return;
         }
       }
@@ -897,6 +905,12 @@ class TaskModalController {
       ? createOptions.draftMainInputRefs.filter(value => String(value || '').trim() !== '')
       : [];
     const draftAssignmentValue = String(createOptions.draftAssignmentValue || '').trim();
+    // A caller that names an assignment (even "nobody") wins over the
+    // workspace's default agent.
+    const explicitAssignment = Object.prototype.hasOwnProperty.call(
+      createOptions,
+      'draftAssignmentValue'
+    );
     const shouldForceAutoMode = Boolean(createOptions.forceAutoMode);
     const prefillAutoDescription = String(createOptions.prefillAutoDescription || '');
     const shouldForceManualMode =
@@ -911,6 +925,8 @@ class TaskModalController {
 
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
+    // Learned again by showWorkspaceBadge, never carried over from another open.
+    this.workspaceEntryAgentName = '';
     this.onSaveCallback = onSave;
     this.initialFormState = null;
     this.currentTask = null;
@@ -997,7 +1013,7 @@ class TaskModalController {
     if (draftAssignmentValue && createOptions.draftAssignmentLabel) {
       this.ensureAssignmentOption(draftAssignmentValue, createOptions.draftAssignmentLabel);
     }
-    if (assignmentInput) assignmentInput.value = draftAssignmentValue;
+    if (assignmentInput && explicitAssignment) assignmentInput.value = draftAssignmentValue;
 
     // Reset subtasks
     this.resetSubtasks();
@@ -2258,7 +2274,7 @@ class TaskModalController {
     }
 
     const assignment = String(options.assignment || '').trim();
-    const assignmentLabel = assignment || 'Unassigned';
+    const assignmentLabel = assignment || 'By hand';
     const assignmentState = options.assignmentState || (assignment ? 'assigned' : 'unassigned');
 
     if (elements.eyebrow)
@@ -5371,7 +5387,7 @@ class TaskModalController {
     const assignLabel = document.createElement('label');
     assignLabel.className = 'task-modal-label';
     assignLabel.setAttribute('for', `${rowId}-assignment`);
-    assignLabel.textContent = 'Assign to Agent';
+    assignLabel.textContent = 'Assign to agent';
     const assignmentSelect = document.createElement('select');
     assignmentSelect.id = `${rowId}-assignment`;
     assignmentSelect.className = 'task-modal-input task-modal-subtask-assignment';
@@ -5380,7 +5396,7 @@ class TaskModalController {
     if (options.length === 0) {
       const optionEl = document.createElement('option');
       optionEl.value = '';
-      optionEl.textContent = '-- No agent (manual task) --';
+      optionEl.textContent = "No agent — I'll do this by hand";
       assignmentSelect.appendChild(optionEl);
     } else {
       options.forEach(opt => {
@@ -5575,7 +5591,7 @@ class TaskModalController {
     if (!selectEl) return;
 
     // Start with default option
-    const options = [{ label: '-- No agent (manual task) --', value: '' }];
+    const options = [{ label: "No agent — I'll do this by hand", value: '' }];
 
     try {
       // Fetch all available agents (not workspace-specific)
@@ -5609,9 +5625,22 @@ class TaskModalController {
       // Try to match by agent name
       const nodeId = `${task.to}-node-1`;
       selectEl.value = `node:${nodeId}`;
+    } else if (!task && !this.editingTaskId) {
+      selectEl.value = this.newTaskAssignmentValue(options);
     } else {
       selectEl.value = '';
     }
+  }
+
+  /**
+   * A new task goes to the workspace's Commander when it has one listed here;
+   * otherwise it starts with nobody, to be done by hand.
+   */
+  newTaskAssignmentValue(options = []) {
+    const name = String(this.workspaceEntryAgentName || '').trim();
+    if (!name) return '';
+    const value = this.getAssignmentValueFromTask({ to: name });
+    return options.some(option => option.value === value) ? value : '';
   }
 
   /**

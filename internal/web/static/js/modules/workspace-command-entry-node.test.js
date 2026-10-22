@@ -100,7 +100,7 @@ test('missing entry agent shows a repair state, not a promoted specialist (FR77)
   const html = view.renderMapAgentUnits([spec]);
   assert.match(html, /ws-cmd-map-command-repair/);
   assert.match(html, /No Commander/);
-  assert.match(html, /data-cmd-add-agent/);
+  assert.match(html, /data-cmd-add-agent>Hire a Commander</);
   assert.ok(
     !html.includes('is-command-node'),
     'no specialist is visually promoted to the command position'
@@ -129,9 +129,9 @@ test('specialists remain individually selectable in a stable grid (FR75)', () =>
   assert.match(html, /data-cmd-map-select-agent="Editor"/);
 });
 
-test('empty roster (no agents at all) keeps the existing empty state', () => {
+test('empty roster (no agents at all) offers a hire', () => {
   const view = makeView();
   const html = view.renderMapAgentUnits([]);
-  assert.match(html, /No agents in this workspace/);
-  assert.match(html, /data-cmd-add-agent/);
+  assert.match(html, /No one works here yet\./);
+  assert.match(html, /data-cmd-add-agent>Hire an agent</);
 });

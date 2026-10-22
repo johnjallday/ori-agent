@@ -9864,7 +9864,19 @@ const sessionManager = {
     }
     if (this.usesManagedGroupTemplate()) return window.GroupTemplateCreator.ctaLabel(this);
     if (this.isGroupCreator()) return name ? `Create group “${name}”` : 'Create Group';
+    if (!this.importModeEnabled && this.workspaceReviewCreatesAgents()) {
+      return name ? `Hire and create “${name}”` : 'Hire and create';
+    }
     return name ? `Create “${name}”` : 'Create Workspace';
+  },
+
+  // Whether pressing Create also creates agents — chosen on the Team step or
+  // filled by the create itself — so the button can say the user is hiring.
+  // Reusing or attaching agents someone already has is not a hire.
+  workspaceReviewCreatesAgents() {
+    const roster = this.teamView()?.roleRoster;
+    if (!roster) return false;
+    return (roster.created_count || 0) + (roster.auto_created_count || 0) > 0;
   },
 
   async refreshWorkspaceSurfacesAfterGroupPreparation() {
@@ -13245,7 +13257,9 @@ const sessionManager = {
                       : 'Create & scan folder'
             : groupNeeded
               ? 'Review required group'
-              : 'Create workspace';
+              : this.workspaceReviewCreatesAgents()
+                ? 'Hire and create'
+                : 'Create workspace';
       action.disabled =
         busy ||
         (!frozen &&

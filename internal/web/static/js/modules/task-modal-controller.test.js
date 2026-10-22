@@ -501,7 +501,7 @@ test('a named agent instance is added to the assignment list instead of becoming
   const added = [];
   const select = {
     options: [
-      { value: '', textContent: '-- No agent (manual task) --' },
+      { value: '', textContent: "No agent — I'll do this by hand" },
       { value: 'node:Mixer-node-1', textContent: 'Mixer' }
     ],
     appendChild(option) {
@@ -758,4 +758,112 @@ test('a transient operation error keeps the binding, and other errors are untouc
   );
   assert.equal(parsed.code, 'operation_expired');
   assert.equal(parsed.message, 'Ran out of time.');
+});
+
+// ---- who a new task goes to ----
+
+/**
+ * Opens the real create form with its unrelated plumbing stubbed. The
+ * workspace record names `entryAgent` as its Commander and the agent list
+ * offers `agents`.
+ */
+async function openNewTask({ entryAgent = '', agents = [], options = {} } = {}) {
+  const { Controller, elements } = loadController({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ agents: agents.map(name => ({ name })) })
+    })
+  });
+  const controller = new Controller();
+  const select = { innerHTML: '', value: 'stale' };
+  elements.set('taskModal', makeElement());
+  elements.set('taskModalAssignment', select);
+  controller.showWorkspaceBadge = async () => {
+    controller.workspaceEntryAgentName = entryAgent;
+  };
+  const noop = () => {};
+  const asyncNoop = async () => {};
+  Object.assign(controller, {
+    init: noop,
+    resetResultSection: noop,
+    checkLlmAvailability: asyncNoop,
+    handleModeChange: noop,
+    syncTaskModalTags: noop,
+    refreshSubtaskAssignmentOptions: noop,
+    loadWorkspaceTasks: asyncNoop,
+    populateMainInputTasks: noop,
+    refreshSubtaskInputOptions: noop,
+    resetSubtasks: noop,
+    resetScheduleFields: noop,
+    resetAutoSaveFields: noop,
+    fetchWorkspaceOutputPath: asyncNoop,
+    resetFiles: noop,
+    showModal: noop,
+    captureInitialFormState: noop
+  });
+  await controller.openForCreate('ws-1', '', null, options);
+  return { controller, select };
+}
+
+test('a new task in a workspace with a Commander is assigned to it by default', async () => {
+  const { select } = await openNewTask({ entryAgent: 'Engineer', agents: ['Mixer', 'Engineer'] });
+  assert.equal(select.value, 'node:Engineer-node-1');
+  assert.match(select.innerHTML, /<option value="">No agent — I'll do this by hand<\/option>/);
+});
+
+test('a new task without a listed Commander starts with nobody, to be done by hand', async () => {
+  const none = await openNewTask({ agents: ['Mixer'] });
+  assert.equal(none.select.value, '');
+  // A Commander the agent list does not offer is not invented as an option.
+  const unlisted = await openNewTask({ entryAgent: 'Ask Ori', agents: ['Mixer'] });
+  assert.equal(unlisted.select.value, '');
+});
+
+test('an assignment the caller names wins over the Commander default, even nobody', async () => {
+  const named = await openNewTask({
+    entryAgent: 'Engineer',
+    agents: ['Mixer', 'Engineer'],
+    options: { draftAssignmentValue: 'node:Mixer-node-1' }
+  });
+  assert.equal(named.select.value, 'node:Mixer-node-1');
+  const nobody = await openNewTask({
+    entryAgent: 'Engineer',
+    agents: ['Mixer', 'Engineer'],
+    options: { draftAssignmentValue: '' }
+  });
+  assert.equal(nobody.select.value, '');
+});
+
+test('an existing task keeps its own assignee, or nobody', async () => {
+  const { Controller, elements } = loadController({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ agents: [{ name: 'Mixer' }, { name: 'Engineer' }] })
+    })
+  });
+  const controller = new Controller();
+  controller.workspaceEntryAgentName = 'Engineer';
+  const select = { innerHTML: '', value: '' };
+  elements.set('taskModalAssignment', select);
+
+  controller.editingTaskId = 'task-1';
+  await controller.populateAgentDropdown('ws-1', { id: 'task-1', to: 'Mixer' });
+  assert.equal(select.value, 'node:Mixer-node-1');
+  await controller.populateAgentDropdown('ws-1', { id: 'task-2' });
+  assert.equal(select.value, '');
+  // Switching workspace while editing re-reads the list but keeps nobody.
+  await controller.populateAgentDropdown('ws-2');
+  assert.equal(select.value, '');
+});
+
+test('the auto-parse review says By hand when nobody is assigned', () => {
+  const { Controller, elements } = loadController();
+  const controller = new Controller();
+  const assignment = makeElement();
+  elements.set('taskAutoConfirm', makeElement());
+  elements.set('taskAutoConfirmAssignment', assignment);
+  void controller.showAutoParseConfirmDialog({ assignment: '' });
+  assert.equal(assignment.textContent, 'By hand');
+  void controller.showAutoParseConfirmDialog({ assignment: 'Engineer' });
+  assert.equal(assignment.textContent, 'Engineer');
 });
