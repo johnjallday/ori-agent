@@ -276,22 +276,23 @@ func trimmableSegmentLabels(segs []promptSegment) []string {
 // window budget by compacting the oldest tool-result messages (head+tail marker)
 // until it fits (WS2.10a). It mutates message content in place — never removing a
 // message, so assistant tool_call / tool_result pairing stays intact — and never
-// touches the system prompt (index 0), the initial task message (index 1), or the
-// most recent message. Returns how many messages were compacted and whether the
-// conversation still overflows after compacting every eligible one. A
-// non-positive window disables eviction.
-func evictConversationForContext(conversation []llm.Message, window int, tools []llm.Tool) (compacted int, overflow bool) {
+// touches the initial task message (index 0) or the most recent message. The
+// system prompt travels apart from the conversation; it is counted against the
+// budget and never compacted. Returns how many messages were compacted and
+// whether the conversation still overflows after compacting every eligible one.
+// A non-positive window disables eviction.
+func evictConversationForContext(systemPrompt string, conversation []llm.Message, window int, tools []llm.Tool) (compacted int, overflow bool) {
 	budget := promptBudget(window)
 	if budget <= 0 {
 		return 0, false
 	}
 
-	total := estimateToolTokens(tools) + estimateConversationTokens(conversation)
+	total := estimateTokens(systemPrompt) + estimateToolTokens(tools) + estimateConversationTokens(conversation)
 	if total <= budget {
 		return 0, false
 	}
 
-	const protectedHead = 2 // system prompt + initial task message
+	const protectedHead = 1 // initial task message
 	lastIdx := len(conversation) - 1
 	for i := protectedHead; i < lastIdx && total > budget; i++ {
 		if conversation[i].Role != llm.RoleTool {

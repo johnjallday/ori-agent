@@ -47,7 +47,7 @@ func TestAssistantFolderFocus_ActualProviderAndCanonicalImmutableReplay(t *testi
 	if !second.Conversation.Stored || second.Conversation.FolderFocus.Topics[0].Names[0] != "Notes.md" {
 		t.Fatal(second)
 	}
-	earlier := f.provider.requests[1].Messages[1].Content
+	earlier := f.provider.requests[1].Messages[0].Content
 	if !strings.Contains(earlier, "<earlier_folder_focus>") || !strings.Contains(earlier, "Aurora") || strings.Contains(earlier, "Notes.md") {
 		t.Fatal("earlier focus was replaced", earlier)
 	}

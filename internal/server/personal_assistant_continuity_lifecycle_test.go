@@ -24,7 +24,7 @@ func (p *continuityProbeProvider) Capabilities() llm.ProviderCapabilities {
 	return llm.ProviderCapabilities{SupportsSystemPrompt: true, SupportsTools: p.tools}
 }
 func (p *continuityProbeProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
-	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "Select a compact conversation recap") {
+	if strings.Contains(req.SystemPrompt, "Select a compact conversation recap") {
 		return p.onSummary(ctx, req)
 	}
 	return p.Provider.Chat(ctx, req)

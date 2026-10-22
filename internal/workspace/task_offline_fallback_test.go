@@ -79,7 +79,7 @@ func TestExecuteTaskConversation_OfflineBlocks(t *testing.T) {
 	ag := agentWithSettings(types.Settings{Model: "llama3.1:8b"})
 
 	_, err := h.executeTaskConversation(context.Background(), prov, "ollama", "llama3.1:8b", 8192, ag, "agent-a",
-		Task{WorkspaceID: "ws-x"}, []llm.Message{llm.NewSystemMessage("sys"), llm.NewUserMessage("do it")}, nil)
+		Task{WorkspaceID: "ws-x"}, "sys", []llm.Message{llm.NewUserMessage("do it")}, nil)
 	be, ok := AsTaskBlockedError(err)
 	if !ok || be.ReasonCode != reasonLocalProviderOffline {
 		t.Fatalf("expected local_provider_offline block, got %v", err)

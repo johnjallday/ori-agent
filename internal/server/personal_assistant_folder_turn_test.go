@@ -67,15 +67,15 @@ func TestAssistantFolderTurn_RealPromptBoundaryAcrossFollowupsAndContentsRefusal
 		if strings.Contains(prompt, observations.observation.ID) || strings.Contains(prompt, "<system>") {
 			t.Fatal("reference escaped its data boundary or leaked selection ID")
 		}
-		if !strings.Contains(call.Messages[0].Content, "File contents have NOT been read") {
+		if !strings.Contains(call.SystemPrompt, "File contents have NOT been read") {
 			t.Fatal("missing model limit")
 		}
 	}
-	if len(f.provider.requests[1].Messages) != 4 || f.provider.requests[1].Messages[1].Content != "What kinds of projects are here?" {
+	if len(f.provider.requests[1].Messages) != 3 || f.provider.requests[1].Messages[0].Content != "What kinds of projects are here?" {
 		t.Fatalf("wrong history: %+v", f.provider.requests[1].Messages)
 	}
-	if !strings.Contains(f.provider.requests[0].Messages[0].Content, "no earlier locally saved answered turn") ||
-		!strings.Contains(f.provider.requests[1].Messages[0].Content, "Treat this as a follow-up") {
+	if !strings.Contains(f.provider.requests[0].SystemPrompt, "no earlier locally saved answered turn") ||
+		!strings.Contains(f.provider.requests[1].SystemPrompt, "Treat this as a follow-up") {
 		t.Fatal("actual provider did not receive canonical initial/follow-up context")
 	}
 	request = nextFolderTurn(request, second, "Summarize these documents")
@@ -118,7 +118,7 @@ func TestAssistantFolderTurn_ActualProviderPresentationForExplicitQuestions(t *t
 				t.Fatal("explicit request was rewritten")
 			}
 			for _, required := range []string{"about 80 words", "Answer explicit questions directly", "give requested detail", "optional background", "not a required recommendation", "never choose a candidate", "File contents have NOT been read"} {
-				if !strings.Contains(call.Messages[0].Content, required) {
+				if !strings.Contains(call.SystemPrompt, required) {
 					t.Fatalf("missing guidance %q", required)
 				}
 			}

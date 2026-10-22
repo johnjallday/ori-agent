@@ -119,10 +119,8 @@ func TestExecuteTask_ClaudeCodeRunCallsBrokeredMemoryTool(t *testing.T) {
 	if !hasMemoryWrite {
 		t.Fatalf("expected the task request to carry memory_write, got %#v", first.Tools)
 	}
-	for _, msg := range first.Messages {
-		if strings.Contains(msg.Content, "Tool calling is unavailable for this model") {
-			t.Fatalf("a claude_code run must not be told tools are unavailable: %q", msg.Content)
-		}
+	if strings.Contains(first.SystemPrompt, "Tool calling is unavailable for this model") {
+		t.Fatalf("a claude_code run must not be told tools are unavailable: %q", first.SystemPrompt)
 	}
 
 	args := readFakeClaudeArgs(t, cliDir, 1)
