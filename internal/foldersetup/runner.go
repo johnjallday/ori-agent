@@ -73,6 +73,9 @@ type Config struct {
 	Plan personalassistant.FolderSetupPlan
 	// WorkspaceName is the name the plan shows for the new workspace.
 	WorkspaceName string
+	// Brief is the goal the user gave the hire; the project workspace is created
+	// with it. Empty creates the workspace without one.
+	Brief string
 	// EntryName names the project file when the user or the scan chose one.
 	EntryName string
 	// RunID is the plugin quest run an earlier attempt of this setup used, so a
@@ -702,7 +705,7 @@ func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyP
 	}
 	input, err := json.Marshal(projectconnection.Request{
 		ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token,
-		EntryName: s.entryName, WorkspaceName: s.cfg.WorkspaceName, GroupComposition: composition,
+		EntryName: s.entryName, WorkspaceName: s.cfg.WorkspaceName, GroupComposition: composition, Goal: s.cfg.Brief,
 	})
 	if err != nil {
 		return err

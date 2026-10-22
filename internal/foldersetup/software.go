@@ -89,17 +89,14 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 		Kind: personalassistant.FolderPlanWorkspace, Name: "Creates a " + facts.BlueprintLabel + " workspace named " + facts.WorkspaceName,
 		Detail: "The workspace lives in Ori. Nothing is created in the project folder.",
 	}
-	folder := personalassistant.FolderPlanLine{
-		Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.ProjectName + " where it is",
-		Detail: "Read-only. Nothing is moved, copied or written into it.",
-	}
+	folder := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: FolderLinkLine, Detail: "Read-only."}
 	if facts.Linked {
 		folder.Detail += " This is one checkout; other worktrees of the same repository are not included."
 	}
 	agents := assistantLine(facts.Assistant)
 	task := personalassistant.FolderPlanLine{
-		Kind: personalassistant.FolderPlanTask, Name: "Queues a first assessment for you to start",
-		Detail: "When you press Start it reads this project's README, instructions and build files and reports what it found. Model tokens are spent only then.",
+		Kind: personalassistant.FolderPlanTask, Name: FirstLookLine,
+		Detail: "It reads this project's README, instructions and build files and reports what it found, with one suggested first task. Model tokens are spent then; nothing in the project is run.",
 	}
 
 	if existing := facts.Existing; existing != nil {

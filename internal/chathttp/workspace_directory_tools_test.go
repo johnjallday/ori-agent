@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -334,5 +335,38 @@ func TestDirectoryTools_PresentOnlyWithAUserVisibleLinkedDirectory(t *testing.T)
 	}
 	if _, err := internalProvider.directoryReadTool().Call(context.Background(), fmt.Sprintf(`{"directory_id":%q,"path":"paper.pdf"}`, internal.DirectoryReferences[0].ID)); err == nil || !strings.Contains(err.Error(), "capability") {
 		t.Fatalf("internal directory read err=%v", err)
+	}
+}
+
+// Two linked directories can share a name (a workspace's own folder and the
+// project folder it was set up for). The project folder is marked primary, so
+// a folder's first look reads the folder the user showed.
+func TestWorkspaceDirectories_MarksTheProjectFolderPrimary(t *testing.T) {
+	f := newDirectoryToolFixture(t)
+	ws := &workspace.Workspace{ID: "ws-twins", Name: "Twins", Status: workspace.StatusActive}
+	for _, path := range []string{f.outside, f.root} {
+		if err := ws.AddDirectoryReference(workspace.DirectoryReference{Name: "Papers", Path: path}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ws.SharedData = map[string]any{projecttemplates.PrimaryDirectoryIDKey: ws.DirectoryReferences[1].ID}
+	if err := f.store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	out, err := NewWorkspaceToolProvider(nil, f.store, ws.ID).readDirectoriesTool().Call(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Directories []struct {
+			ID      string `json:"id"`
+			Primary bool   `json:"primary"`
+		} `json:"directories"`
+	}
+	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Directories) != 2 {
+		t.Fatalf("directories = %s err=%v", out, err)
+	}
+	if listed.Directories[0].Primary || !listed.Directories[1].Primary || listed.Directories[1].ID != ws.DirectoryReferences[1].ID {
+		t.Fatalf("primary marker = %s", out)
 	}
 }

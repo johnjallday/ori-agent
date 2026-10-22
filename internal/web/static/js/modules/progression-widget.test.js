@@ -770,6 +770,29 @@ test('firstMissionOfferView: the folder mission shows a pending offer inline', (
   assert.equal(firstMissionOfferView(view, dump, 'tidy').actions[0].id, 'setup');
 });
 
+// A first folder's plan that names a hire is the same hire on the mission card:
+// its question is asked there too, and Adjust follows the card's own actions.
+test('firstMissionOfferView: a hire keeps its question and Adjust on the mission card', () => {
+  const view = firstMissionView({ missions: [folderMission] });
+  const offer = firstMissionOfferView(view, {
+    ...pendingProjectOffer,
+    subject: { name: 'My Song' },
+    capability: { recognized: 'REAPER song', workspace: 'REAPER Song workspace' },
+    plan: {
+      digest: 'abc',
+      lines: [{ kind: 'workspace', name: 'Creates a REAPER Song workspace named My Song' }],
+      hire: { mode: 'create', agent_name: 'Song Assistant', role_label: 'Producer' },
+      brief_default: "Understand this song's project and suggest the next production step."
+    }
+  });
+  assert.equal(offer.headline.map(part => part.text).join(''), 'Hire Song Assistant for My Song');
+  assert.equal(offer.hire.brief.label, 'What should it do with it?');
+  assert.deepEqual(
+    offer.actions.map(action => action.label),
+    ['Hire and start', 'Not now', 'Adjust']
+  );
+});
+
 // A first folder is shown on the mission card, which says the folder card's
 // Recognized and Needs lines too.
 test('firstMissionOfferView: a recognized song says what it is and what its plan needs', () => {

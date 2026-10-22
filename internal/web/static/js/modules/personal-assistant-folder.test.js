@@ -25,14 +25,14 @@ import {
   portfolioProviderAction,
   profileReceiptLine,
   setupModalView,
-  finishedRunPlacement,
+  finishedRunWorkspace,
   arrangedStructure,
   conversationFolderOfferView
 } from './personal-assistant-folder.js';
 
-// A finished Explore run is placed on the Map once, as the build's Set it up
-// is: the song workspace and the Home it went inside.
-test('a run this page followed is placed once it finished and its pop-up closed', () => {
+// A finished Explore run is drawn where the Map's automatic layout puts it:
+// the Map is told once, and nothing asks where it sits (FR22).
+test('a run this page followed is drawn on the Map once it finished, without a placement ask', () => {
   const offer = {
     id: 'offer-1',
     status: 'resolved',
@@ -45,44 +45,50 @@ test('a run this page followed is placed once it finished and its pop-up closed'
     }
   };
   const followed = { followed: 'offer-1' };
-  assert.deepEqual(finishedRunPlacement(offer, followed), {
-    token: 'folder:offer-1',
-    memberId: 'ws-song',
-    memberName: 'Ori Music Demo',
-    homeId: 'ws-home',
-    homeName: 'Music Production Home'
-  });
-  // The done pop-up or the assistant drawer still covers the Map, it was
-  // placed already, or this page never saw the run going (a reload of a run
+  assert.equal(finishedRunWorkspace(offer, followed), 'ws-song');
+  // Told already, or this page never saw the run going (a reload of a run
   // finished long ago): nothing.
-  assert.equal(finishedRunPlacement(offer, { ...followed, covered: true }), null);
-  assert.equal(finishedRunPlacement(offer, { ...followed, placed: ['offer-1'] }), null);
-  assert.equal(finishedRunPlacement(offer, {}), null);
-  // Still running.
-  assert.equal(finishedRunPlacement({ ...offer, status: 'pending' }, followed), null);
-  // A standalone project places only itself; a Home or group outcome nothing.
-  assert.deepEqual(
-    finishedRunPlacement(
-      {
-        ...offer,
-        outcome: { ...offer.outcome, parent: { status: 'standalone', workspace_id: 'x' } }
-      },
-      followed
-    ),
-    {
-      token: 'folder:offer-1',
-      memberId: 'ws-song',
-      memberName: 'Ori Music Demo',
-      homeId: '',
-      homeName: ''
-    }
-  );
+  assert.equal(finishedRunWorkspace(offer, { ...followed, announced: ['offer-1'] }), '');
+  assert.equal(finishedRunWorkspace(offer, {}), '');
+  // Still running; a Home or group outcome is drawn by its own path.
+  assert.equal(finishedRunWorkspace({ ...offer, status: 'pending' }, followed), '');
   for (const kind of ['home', 'group']) {
     assert.equal(
-      finishedRunPlacement({ ...offer, outcome: { ...offer.outcome, kind } }, followed),
-      null
+      finishedRunWorkspace({ ...offer, outcome: { ...offer.outcome, kind } }, followed),
+      ''
     );
   }
+  // The module no longer asks the Map to place anything.
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /beginPlacement|placeCreatedOnWorkspaceMap/);
+});
+
+// The receipt says where the automatic layout put the building, with Move.
+test('a project receipt has an On the Map row with Move', () => {
+  const offer = {
+    id: 'offer-1',
+    status: 'resolved',
+    subject: { name: 'Ori Music Demo' },
+    setup: { hire: { mode: 'create', agent_name: 'REAPER Assistant' } },
+    outcome: {
+      kind: 'project',
+      workspace_id: 'ws-song',
+      route: '/workspaces/ori-music-demo',
+      receipt: [{ kind: 'workspace', name: 'Ori Music Demo' }],
+      parent: { status: 'new', workspace_id: 'ws-home', name: 'Music Production Home' }
+    }
+  };
+  assert.deepEqual(folderReceiptView(offer).map, {
+    label: 'On the Map',
+    text: "REAPER Assistant's building sits inside Music Production Home.",
+    move: { label: 'Move', href: '/?move=ws-song' }
+  });
+  const standalone = folderReceiptView({
+    ...offer,
+    setup: undefined,
+    outcome: { ...offer.outcome, parent: { status: 'standalone' } }
+  });
+  assert.equal(standalone.map.text, 'Its building was placed automatically.');
 });
 
 test('setup busy text names the reviewed project, not its observation root', () => {

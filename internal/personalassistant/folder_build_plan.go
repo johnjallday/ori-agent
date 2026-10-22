@@ -41,6 +41,10 @@ type BuildFolderPlan struct {
 	// is no plan; UnavailableSubject names what it waits on.
 	Unavailable        string `json:"unavailable,omitempty"`
 	UnavailableSubject string `json:"unavailable_subject,omitempty"`
+	// Hire is who Hire and start hires for the folder and BriefDefault the goal
+	// its question starts with, as on Home's card; neither is in the digest.
+	Hire         *FolderHire `json:"hire,omitempty"`
+	BriefDefault string      `json:"brief_default,omitempty"`
 }
 
 // BuildPlan reads the setup plan for a recognized project in a held selection,
@@ -97,6 +101,11 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 		Placement: view.Plan.Intent.Placement, Evidence: view.Reason, Ready: true,
 		Needs: folderPlanNeeds(offer.Subject, view.Plan.Intent),
 	}
+	if hire := view.Plan.Hire; hire != nil {
+		copied := *hire
+		plan.Hire = &copied
+	}
+	plan.BriefDefault = view.Plan.BriefDefault
 	if destination := view.Plan.Destination; destination != nil && (destination.Status == "new" || destination.Status == "existing") {
 		plan.Home = &BuildFolderHome{Name: destination.Name, Status: destination.Status}
 	}

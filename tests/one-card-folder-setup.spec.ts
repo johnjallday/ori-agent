@@ -2,9 +2,9 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// One card, one click: a recognized project folder shows its whole plan, Set up
-// runs it on the server, and the card ends on a receipt that opens the workspace
-// and starts the agent's first task.
+// One card, one click: a recognized project folder shows its whole plan as a
+// hire, Hire and start runs it on the server, and the card ends on a receipt
+// that opens the workspace and starts the agent's first task.
 //
 // Run it against the isolated demo sandbox (the folders are written into the
 // server's HOME, which is the sandbox):
@@ -106,8 +106,16 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
   expect(text).toMatch(/agents/);
   expect(text).toMatch(/first read-only task/);
   expect(text).not.toMatch(/\/Users\/|\/var\/|\/private\//);
-  await expect(card.getByRole('button', { name: 'Set up', exact: true })).toBeVisible();
-  await expect(card.getByRole('button', { name: 'Adjust…' })).toBeVisible();
+  // The plan is a hire: who is hired for the folder, one labelled question that
+  // starts from a default brief, and the lines under their heading.
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    /^(Hire|Assign) .+ (for|to) Desktop$/
+  );
+  await expect(card.getByLabel('What should it do with it?')).toHaveValue(/\S/);
+  await expect(card.locator('#personalAssistantFolderPlanHeading')).toContainText(/^Also, /);
+  await expect(card.getByRole('button', { name: 'Hire and start', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Not now', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Adjust', exact: true })).toBeVisible();
 
   // Phone width: the plan wraps instead of scrolling the page sideways.
   await page.setViewportSize({ width: 390, height: 900 });
@@ -131,7 +139,7 @@ test('Adjust… opens today’s step-by-step journey instead of running the plan
   await scan(request, 'desktop');
   const before = await pluginNames();
   const card = await openCard(page);
-  await card.getByRole('button', { name: 'Adjust…' }).click();
+  await card.getByRole('button', { name: 'Adjust', exact: true }).click();
   const modal = page.locator('#specialistSetupJourneyModal');
   await expect(modal).toBeVisible();
   await expect(page.locator('#specialistSetupJourneyTitle')).not.toBeEmpty();
@@ -147,7 +155,7 @@ test('Adjust… opens today’s step-by-step journey instead of running the plan
   await page.reload();
   const resumed = await openCard(page);
   await expect(resumed).toContainText('Project setup has not finished');
-  await expect(resumed.getByRole('button', { name: 'Set up', exact: true })).toBeVisible();
+  await expect(resumed.getByRole('button', { name: 'Hire and start', exact: true })).toBeVisible();
   await expect(resumed.getByRole('button', { name: 'Continue setup' })).toBeVisible();
   await expect(resumed.locator('#personalAssistantFolderPlan li').first()).toBeVisible();
 });
@@ -162,7 +170,7 @@ test('Set up without a model stops with one plain sentence and a way forward', a
   expect(offer.plan?.digest).toBeTruthy();
 
   const card = await openCard(page);
-  await card.getByRole('button', { name: 'Set up', exact: true }).click();
+  await card.getByRole('button', { name: 'Hire and start', exact: true }).click();
   // Set up opens a pop-up that watches the run: no click per step, and it says
   // the assistant is working.
   const runModal = page.locator('#folderSetupRunModal');
@@ -194,11 +202,20 @@ test('Set up without a model stops with one plain sentence and a way forward', a
   modelReady = await modelAvailable(request);
 });
 
-test('Try again after a model is set finishes the run on the same card, then Start first look starts the first task', async ({
+test('Try again after a model is set finishes the run on the same card, and the hire starts the first look', async ({
   page,
   request
 }) => {
   test.skip(!modelReady, 'no model provider is available on this machine');
+  const startCalls: string[] = [];
+  page.on('response', async response => {
+    if (
+      response.url().endsWith('/folder-first-task/start') &&
+      response.request().method() === 'POST'
+    ) {
+      startCalls.push(JSON.stringify(await response.json().catch(() => ({}))));
+    }
+  });
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Try again' }).click();
   const receipt = card.locator('#personalAssistantFolderReceipt li');
@@ -209,40 +226,28 @@ test('Try again after a model is set finishes the run on the same card, then Sta
   // The song's agent is the Home's one shared assistant, not "<label> · <song>".
   expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
   expect(rows).toMatch(/First task/);
-  expect(rows).toMatch(/Starts when you press Start first look/);
 
-  const startCalls: string[] = [];
-  page.on('response', async response => {
-    if (
-      response.url().endsWith('/folder-first-task/start') &&
-      response.request().method() === 'POST'
-    ) {
-      startCalls.push(JSON.stringify(await response.json().catch(() => ({}))));
-    }
-  });
-  // The pop-up that watched the run ends on the same receipt and Open link.
+  // The pop-up that watched the run ends on the hired agent at work.
   const runModal = page.locator('#folderSetupRunModal');
   await expect(runModal).toBeVisible();
-  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('All set');
+  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('Hired', {
+    timeout: 30_000
+  });
   await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', '100');
-  // The receipt offers the click that spends tokens, and the workspace beside it.
-  // Nothing has started yet: opening a page never starts the look.
+  // The hire's consent started the look on the server; the page never asked to.
   const receiptCard = page.locator('#personalAssistantFolderOffer');
-  const start = receiptCard.getByRole('button', { name: 'Start first look' });
-  await expect(start).toBeVisible();
+  await expect(receiptCard.locator('#personalAssistantFolderPlan')).toContainText(
+    'Reading the project, read-only'
+  );
+  await expect(receiptCard.getByRole('button', { name: 'Start first look' })).toHaveCount(0);
   expect(startCalls).toEqual([]);
   const open = receiptCard.getByRole('link', { name: /^Open / });
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
-
-  await start.click();
-  await expect
-    .poll(() => startCalls.some(call => call.includes('"started":true')), { timeout: 60_000 })
-    .toBe(true);
-  // The card follows the run on Home, with no page change.
+  // The card follows the look on Home, with no page change.
   await expect(receiptCard.locator('#personalAssistantFolderReceipt')).toContainText(
-    /Running…|Done/,
+    /Running…|Done|Did not finish/,
     {
       timeout: 60_000
     }
@@ -259,7 +264,7 @@ test('Try again after a model is set finishes the run on the same card, then Sta
   expect(startCalls.length).toBe(before);
 });
 
-test('keyboard only: Set up runs from the focused button and the card announces its progress', async ({
+test('keyboard only: Hire and start runs from the focused button and the card announces its progress', async ({
   page,
   request
 }) => {
@@ -267,12 +272,16 @@ test('keyboard only: Set up runs from the focused button and the card announces 
   seedProject('Documents', 'Fourth');
   await scan(request, 'documents');
   const card = await openCard(page);
+  // A later song in the same Home is assigned the Home's one shared assistant.
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    'Assign REAPER Assistant to Fourth'
+  );
   // The status line is a polite live region, so progress is spoken, not just shown.
   await expect(card.locator('#personalAssistantFolderOfferNote')).toHaveAttribute(
     'aria-live',
     'polite'
   );
-  const setUp = card.getByRole('button', { name: 'Set up', exact: true });
+  const setUp = card.getByRole('button', { name: 'Hire and start', exact: true });
   await setUp.focus();
   await expect(setUp).toBeFocused();
   await page.keyboard.press('Enter');

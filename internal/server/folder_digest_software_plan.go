@@ -127,7 +127,9 @@ func (h *folderSetupHost) softwarePlan(ctx context.Context, req personalassistan
 		Name: roster.Assistant, Action: roster.Action, Provider: roster.Provider, Model: roster.Model, RosterRevision: roster.PlanRevision,
 	}
 	facts.Prerequisites = h.softwarePrerequisites(ctx, facts, roster, review)
-	return foldersetup.BuildSoftwarePlan(facts), nil
+	plan := foldersetup.BuildSoftwarePlan(facts)
+	plan.Hire, plan.BriefDefault = h.softwareHire(plan, roster, row)
+	return plan, nil
 }
 
 // softwareExisting re-reads the one workspace already linked to the folder, so

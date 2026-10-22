@@ -204,8 +204,10 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 		}
 		if pending := doc.Pending(); pending != nil {
 			// An open arrangement review is closed explicitly (Keep chatting), never
-			// silently retired by an unrelated manual review.
-			if pending.ConversationReview == nil || pending.ConversationReview.Target != target || pending.Structure.Arranged() {
+			// silently retired by an unrelated manual review. This conversation's
+			// own review, and a card waiting on Home for this very project, give
+			// way to the review the user just asked for here.
+			if !ownConversationReview(pending, target) && !sameProjectHomeOffer(pending, offer.Subject.Key) {
 				return ErrFolderReviewPending
 			}
 			// Retirement is not a decline, tombstone or memory preference.
@@ -380,59 +382,138 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 	}
 	var options []FolderReviewOption
 	for _, project := range held.observation.Projects {
-		// A folder that was lost, or a single folder the user said never to ask
-		// about again, has nothing to describe; a collection's root still has its
-		// group. A supporting link is not a new setup.
-		offer, err := s.prepareReviewOffer(ctx, held, target, project.ID)
-		if err != nil || offer.ConversationReview.Operation == FolderOperationSupport {
-			continue
+		if option, ok := s.reviewOption(ctx, held, target, project.ID); ok {
+			options = append(options, option)
 		}
-		// Describe without a canonical review/root grant: that grant can only
-		// exist after the user's later Review click is successfully persisted.
-		view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
-		s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
-		option := FolderReviewOption{CandidateID: project.ID, WorkspaceType: "Blank workspace", Presentation: folderReviewPresentation(offer, view)}
-		// An option that cannot be set up right now is still listed, with its
-		// reason (PRD FR10). It is never a control that leads nowhere: its state
-		// says it is unavailable.
-		unavailable := func(reason string) {
-			if reason == "" {
-				reason = FolderAvailabilityPlanUnavailable
-			}
-			option.Presentation = unavailableReviewPresentation(option.Presentation, reason, folderAvailabilitySubject(offer, reason))
-		}
-		row, software := softwareCapability(offer.Subject)
-		switch {
-		case offer.Structure.ProposesWorkspaces():
-			// A structure never waits on a plugin, only on a host that can set
-			// one up at all.
-			option.WorkspaceType = offer.Structure.summary()
-			option.Declined = offer.Declined.clone()
-			if view.Plan == nil {
-				unavailable(view.Availability)
-			} else {
-				option.Structure = offer.Structure.view()
-			}
-		case software:
-			// A software project's setup is reviewed on its own card; the option
-			// only names what that review is for.
-			option.WorkspaceType = row.Builtin.Workspace
-			if s.digest.deps.InspectSoftware == nil || s.digest.deps.Setup == nil {
-				unavailable(FolderAvailabilityPlanUnavailable)
-			}
-		case view.Capability != nil:
-			option.WorkspaceType = view.Capability.Workspace
-			if view.Plan == nil {
-				unavailable(view.Availability)
-			}
-		case !view.CreateAvailable:
-			unavailable(FolderAvailabilityPlanUnavailable)
-		case view.BlueprintLabel != "":
-			option.WorkspaceType = view.BlueprintLabel + " workspace"
-		}
-		options = append(options, option)
 	}
 	return options
+}
+
+// reviewOption describes one observed project as a review option. ok is false
+// for a folder that was lost, a single folder the user said never to ask about
+// again (a collection's root still has its group), and a supporting link,
+// which is not a new setup.
+func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFolderObservation, target foldercontext.Target, candidateID string) (FolderReviewOption, bool) {
+	offer, err := s.prepareReviewOffer(ctx, held, target, candidateID)
+	if err != nil || offer.ConversationReview.Operation == FolderOperationSupport {
+		return FolderReviewOption{}, false
+	}
+	// Describe without a canonical review/root grant: that grant can only
+	// exist after the user's later Review click is successfully persisted.
+	view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
+	s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
+	option := FolderReviewOption{CandidateID: candidateID, WorkspaceType: "Blank workspace", Presentation: folderReviewPresentation(offer, view)}
+	// An option that cannot be set up right now is still listed, with its
+	// reason (PRD FR10). It is never a control that leads nowhere: its state
+	// says it is unavailable.
+	unavailable := func(reason string) {
+		if reason == "" {
+			reason = FolderAvailabilityPlanUnavailable
+		}
+		option.Presentation = unavailableReviewPresentation(option.Presentation, reason, folderAvailabilitySubject(offer, reason))
+	}
+	row, software := softwareCapability(offer.Subject)
+	switch {
+	case offer.Structure.ProposesWorkspaces():
+		// A structure never waits on a plugin, only on a host that can set
+		// one up at all.
+		option.WorkspaceType = offer.Structure.summary()
+		option.Declined = offer.Declined.clone()
+		if view.Plan == nil {
+			unavailable(view.Availability)
+		} else {
+			option.Structure = offer.Structure.view()
+		}
+	case software:
+		// A software project's setup is reviewed on its own card; the option
+		// only names what that review is for.
+		option.WorkspaceType = row.Builtin.Workspace
+		if s.digest.deps.InspectSoftware == nil || s.digest.deps.Setup == nil {
+			unavailable(FolderAvailabilityPlanUnavailable)
+		}
+	case view.Capability != nil:
+		option.WorkspaceType = view.Capability.Workspace
+		if view.Plan == nil {
+			unavailable(view.Availability)
+		}
+	case !view.CreateAvailable:
+		unavailable(FolderAvailabilityPlanUnavailable)
+	case view.BlueprintLabel != "":
+		option.WorkspaceType = view.BlueprintLabel + " workspace"
+	}
+	return option, true
+}
+
+// FolderHireCandidate is what attaching one folder answers with: the project
+// whose review opens at once, or why it cannot open now. Both are empty for
+// any folder that is not one project Ori sets up as a hire.
+type FolderHireCandidate struct {
+	CandidateID string
+	// Unavailable is FolderStructureReviewPending while another setup review
+	// waits for its answer, the one thing that keeps the card away.
+	Unavailable string
+}
+
+// HireCandidate is the one project an attached folder is, when its setup can be
+// presented as a hire right away: a host capability with a plan, or a software
+// project whose card offers its review. The composer opens that review as soon
+// as the folder is attached, so the hire card answers the attach. It reads
+// only, like ReviewOptions. A review this conversation already has open does
+// not stand in the way: reviewing another folder retires it (Review). Nothing
+// for a collection, a folder of no kind Ori sets up, a folder the user said no
+// to, or one that cannot be set up now.
+func (s *FolderObservationService) HireCandidate(ctx context.Context, target foldercontext.Target, observationID string) FolderHireCandidate {
+	recognition, err := s.Recognize(ctx, target, observationID)
+	if err != nil || recognition == nil || recognition.Verdict != BuildFolderProject || recognition.CandidateID == "" {
+		return FolderHireCandidate{}
+	}
+	if recognition.IntegrationKey == "" && recognition.Shape != string(folderdigest.ShapeCode) {
+		return FolderHireCandidate{}
+	}
+	held, _, err := s.resolve(ctx, target, observationID)
+	if err != nil {
+		return FolderHireCandidate{}
+	}
+	doc, err := s.digest.store.Read(ctx, target.UserID)
+	if err != nil {
+		return FolderHireCandidate{}
+	}
+	if pending := doc.Pending(); pending != nil && !ownConversationReview(pending, target) {
+		// A card waiting on Home for this very project gives way to the review
+		// (Review closes it); any other waiting card keeps it away.
+		offer, err := s.prepareReviewOffer(ctx, held, target, recognition.CandidateID)
+		if err != nil || !sameProjectHomeOffer(pending, offer.Subject.Key) {
+			return FolderHireCandidate{Unavailable: FolderStructureReviewPending}
+		}
+	}
+	option, ok := s.reviewOption(ctx, held, target, recognition.CandidateID)
+	if !ok || (option.Presentation != nil && option.Presentation.State == "unavailable") {
+		return FolderHireCandidate{}
+	}
+	return FolderHireCandidate{CandidateID: option.CandidateID}
+}
+
+// sameProjectHomeOffer is a card waiting on Home (Explore a folder) for the
+// very project a conversation now reviews. The conversation's review takes its
+// place, so the same folder never has two cards and the user is never told to
+// finish a setup that is the one they are asking for. A collection's or an
+// arranged card is never this: its subject is the whole folder.
+func sameProjectHomeOffer(pending *FolderOffer, subjectKey string) bool {
+	return pending.ConversationReview == nil && pending.Structure == nil && pending.Portfolio == nil &&
+		subjectKey != "" && pending.Subject.Key == subjectKey
+}
+
+// ownConversationReview is a pending review this conversation opened, which a
+// new review in the same conversation retires (Review). An arranged review is
+// closed explicitly, and any other pending card waits for its own answer.
+func ownConversationReview(pending *FolderOffer, target foldercontext.Target) bool {
+	review := pending.ConversationReview
+	if review == nil || pending.Structure.Arranged() || target.ConversationID == "" {
+		return false
+	}
+	own := target
+	own.DraftID = ""
+	return review.Target == own
 }
 
 // folderRootCandidateID is the root's id in every scan: the root is the first

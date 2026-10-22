@@ -165,12 +165,12 @@ func (o buildFolderObservations) ReviewSetup(ctx context.Context, draft folderco
 	return service.ReviewBuild(ctx, draft, sessionID, observationID, candidateID, workspaceName)
 }
 
-func (o buildFolderObservations) StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName string) (personalassistant.FolderOfferView, error) {
+func (o buildFolderObservations) StartSetup(ctx context.Context, userID, offerID, planDigest, requestID, entryName, brief string) (personalassistant.FolderOfferView, error) {
 	service := o.service()
 	if service == nil {
 		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderOutcomeUnavailable
 	}
-	return service.StartBuildSetup(ctx, userID, offerID, planDigest, requestID, entryName)
+	return service.StartBuildSetup(ctx, userID, offerID, planDigest, requestID, entryName, brief)
 }
 
 func (o buildFolderObservations) ReadSetup(ctx context.Context, review foldercontext.Target, offerID string) (*personalassistant.FolderOfferView, error) {

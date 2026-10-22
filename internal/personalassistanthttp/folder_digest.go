@@ -547,12 +547,14 @@ type folderSetupRequest struct {
 	RequestID  string `json:"request_id"`
 	PlanDigest string `json:"plan_digest"`
 	EntryName  string `json:"entry_name"`
+	Brief      string `json:"brief"`
 }
 
-// SetupFolderDigest is the click on Set up. The body carries the digest of the
-// plan the card showed, a request id, and optionally the project file chosen
-// from the names the server offered; the folder itself is never accepted. A
-// digest that no longer matches is a 409 carrying the fresh offer.
+// SetupFolderDigest is the click on Set up (Hire and start). The body carries
+// the digest of the plan the card showed, a request id, optionally the project
+// file chosen from the names the server offered, and the brief the user typed;
+// the folder itself is never accepted. A digest that no longer matches is a 409
+// carrying the fresh offer and the brief, so the card keeps what was typed.
 func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
@@ -567,7 +569,7 @@ func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req folderSetupRequest
-	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name") {
+	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name", "brief") {
 		return
 	}
 	userID, ok := h.currentUserID(w, r)
@@ -575,12 +577,12 @@ func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offer, err := h.folderDigest.StartSetup(r.Context(), userID, offerID, personalassistant.FolderSetupInput{
-		RequestID: req.RequestID, PlanDigest: req.PlanDigest, EntryName: req.EntryName,
+		RequestID: req.RequestID, PlanDigest: req.PlanDigest, EntryName: req.EntryName, Brief: req.Brief,
 	})
 	if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 			"error":        "What Set up would do has changed. Review the new plan",
-			"plan_changed": true, "offer": offer,
+			"plan_changed": true, "offer": offer, "brief": req.Brief,
 		})
 		return
 	}

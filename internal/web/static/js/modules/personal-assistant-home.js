@@ -11,6 +11,7 @@ import {
   dailyBriefStripStatus
 } from './daily-brief-station.js';
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+import { FIRST_LOOK_REPORT_KIND, mountFirstLookReports } from './first-look-report.js';
 
 // The drawer's shared link check lives with the drawer; it is re-exported here
 // for the callers and tests that have always read it from Home.
@@ -609,6 +610,76 @@ function renderUnfinishedBuild(els, rows) {
   renderCompactRows(list, builds);
 }
 
+// A hired agent's finished first look is news the user acts on in place, so its
+// report is a card at the top of Needs you, after any unfinished build, never a
+// row in the collapsed queue. items are the section's raw Today items.
+function renderFirstLookReports(els, items) {
+  const host = els?.needsCards;
+  if (!host) return;
+  let list = document.getElementById('personalAssistantNeedsYouReports');
+  if (!list) {
+    list = document.createElement('div');
+    list.id = 'personalAssistantNeedsYouReports';
+    list.className = 'personal-assistant-today__reports';
+  }
+  placeFirstLookReports(els, list);
+  mountFirstLookReports(list, items, { onDone: () => void loadToday() });
+}
+
+// placeFirstLookReports keeps a report in view (FR20: opening the drawer shows
+// it). While Today rests behind its summary line the report cards sit right
+// under that line; shown, they are at the top of Needs you again.
+function placeFirstLookReports(
+  els,
+  list = document.getElementById('personalAssistantNeedsYouReports')
+) {
+  const host = els?.needsCards;
+  if (!host) return;
+  // A folder card waiting on its answer is acted on in place too.
+  const folder = document.getElementById('personalAssistantFolderOffer');
+  const waiting = folder?.dataset.placement === 'needs' ? folder : null;
+  if (todayFolded(els)) {
+    const slot = foldedNeedsSlot(els);
+    if (list && slot.firstElementChild !== list) slot.prepend(list);
+    if (waiting && waiting.parentElement !== slot) slot.append(waiting);
+    return;
+  }
+  if (waiting && waiting.parentElement !== host) host.append(waiting);
+  if (!list) return;
+  const build = document.getElementById('personalAssistantNeedsYouBuild');
+  if (build?.parentElement === host) {
+    if (build.nextElementSibling !== list) build.after(list);
+  } else if (host.firstElementChild !== list) host.prepend(list);
+}
+
+// todayFolded: Today rests behind its summary line (after a conversation
+// started), so Needs you is hidden.
+function todayFolded(els) {
+  return Boolean(els?.sections?.hidden && els.summary && !els.summary.hidden);
+}
+
+// foldedNeedsSlot is right under the summary line, where the cards the user
+// acts on wait while Today is folded: a hired agent's report and a folder card
+// waiting on its answer. Opening the drawer always shows them (FR20).
+function foldedNeedsSlot(els) {
+  let slot = document.getElementById('personalAssistantNeedsFolded');
+  if (!slot) {
+    slot = document.createElement('div');
+    slot.id = 'personalAssistantNeedsFolded';
+    slot.className = 'personal-assistant-today__reports';
+  }
+  if (slot.previousElementSibling !== els.summary) els.summary.after(slot);
+  return slot;
+}
+
+// needsHost is where a card in Needs you sits now: the folded slot while Today
+// rests behind its summary line, else Needs you itself. The folder card asks
+// it, so the two never move the card back and forth.
+function needsHost(els = elements()) {
+  if (!els?.needsCards) return null;
+  return todayFolded(els) ? foldedNeedsSlot(els) : els.needsCards;
+}
+
 function renderCompactRows(list, rows, skipCards = false) {
   if (!list) return;
   list.replaceChildren();
@@ -845,12 +916,20 @@ function syncNeedsYou(els = elements()) {
   if (!els?.needsSection) return 0;
   const queued = syncNeedsQueue(els);
   const cards = Array.from(els.needsCards?.children || []).reduce((count, card) => {
-    if (card.hidden) return count;
+    if (card.hidden || card.id === 'personalAssistantNeedsYouReports') return count;
     // The unfinished-build list is one element holding one row per build.
     if (card.id === 'personalAssistantNeedsYouBuild') return count + card.childElementCount;
     return count + 1;
   }, 0);
-  const count = cards + queued;
+  // One card per hired agent's report, wherever the list sits (it waits under
+  // the summary line while Today is folded).
+  const reports = document.getElementById('personalAssistantNeedsYouReports');
+  const reported = reports && !reports.hidden ? reports.childElementCount : 0;
+  // A folder card waiting under the summary line while Today is folded.
+  const folded = Array.from(
+    document.getElementById('personalAssistantNeedsFolded')?.children || []
+  ).filter(card => card !== reports && !card.hidden).length;
+  const count = cards + reported + folded + queued;
   const hidden = count === 0;
   if (els.needsSection.hidden !== hidden) els.needsSection.hidden = hidden;
   if (els.needsCount && els.needsCount.textContent !== String(count)) {
@@ -899,6 +978,7 @@ function syncSummary(els = elements()) {
     }
     els.summaryToggle.setAttribute('aria-expanded', strip.expanded ? 'true' : 'false');
   }
+  placeFirstLookReports(els);
 }
 
 function applyFold(event) {
@@ -1036,9 +1116,12 @@ function renderToday(today) {
   } else if (els.setup) els.needsQueueCards?.append(els.setup);
   renderCompactRows(els.workingItems, sections.working);
   renderUnfinishedBuild(els, sections.needs);
+  renderFirstLookReports(els, today?.needs_you?.items);
   renderCompactRows(
     els.needsItems,
-    sections.needs.filter(row => row.kind !== 'workspace_build'),
+    sections.needs.filter(
+      row => row.kind !== 'workspace_build' && row.kind !== FIRST_LOOK_REPORT_KIND
+    ),
     true
   );
   renderCompactRows(els.doneItems, sections.done);
@@ -1253,7 +1336,9 @@ function init() {
   window.PersonalAssistantToday = {
     refresh: loadToday,
     // Shows Needs you again when something under it has to be seen.
-    expand: () => applyFold({ type: 'expand' })
+    expand: () => applyFold({ type: 'expand' }),
+    // Where a card in Needs you sits now (under the summary line while folded).
+    needsHost: () => needsHost()
   };
   void keepTodaysBriefPrepared();
 }

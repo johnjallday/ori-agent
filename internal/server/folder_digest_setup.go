@@ -259,6 +259,7 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 			}
 			facts.Provider = &provider
 		}
+		facts.Hire, facts.BriefDefault = h.pluginHire(req.UserID, target, integration)
 		cached = cachedPlanFacts{at: time.Now(), facts: facts}
 		h.mu.Lock()
 		if h.cache == nil {
@@ -465,7 +466,7 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 		}}
 	}
 	config := foldersetup.Config{
-		Plan: req.Plan, WorkspaceName: setupWorkspaceName(req), EntryName: req.EntryName,
+		Plan: req.Plan, WorkspaceName: setupWorkspaceName(req), EntryName: req.EntryName, Brief: req.Brief,
 	}
 	if req.Offer.Setup != nil {
 		config.RunID, config.HomeID = req.Offer.Setup.RunID, req.Offer.Setup.HomeID

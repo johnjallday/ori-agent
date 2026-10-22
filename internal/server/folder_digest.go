@@ -92,6 +92,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		HomeJourney: folderHomeVerifier{builder: b},
 		Setup:       setupHost,
 		FirstTask:   folderFirstTaskSeeder{builder: b},
+		FirstLook:   folderFirstLookStarter{builder: b},
 		// Read at call time: the session handler and the assistant's model
 		// reading are both wired in other phases.
 		FirstTaskView: func(ctx context.Context, workspaceID string) (personalassistant.FolderFirstTaskView, bool) {

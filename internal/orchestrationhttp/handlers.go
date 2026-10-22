@@ -499,6 +499,15 @@ func (h *Handler) StartTaskAsync(workspaceID, taskID string) error {
 	return h.taskHandlerSub.StartTaskAsync(workspaceID, taskID)
 }
 
+// StopTaskToReady stops a task's run and puts the task back to Ready (see
+// TaskHandler.StopTaskToReady).
+func (h *Handler) StopTaskToReady(ctx context.Context, workspaceID, taskID string) error {
+	if h == nil || h.taskHandlerSub == nil {
+		return fmt.Errorf("task execution not available")
+	}
+	return h.taskHandlerSub.StopTaskToReady(ctx, workspaceID, taskID)
+}
+
 // TasksPathHandler handles requests to /api/orchestration/tasks/{id}...
 // Routes to appropriate handler based on path and method
 // Delegates to TaskHandler for modular organization

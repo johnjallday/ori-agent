@@ -148,6 +148,54 @@ test('a typed folder is selected by its token; the drawer never sends a path', a
   assert.doesNotMatch(source, /\bpath\s*:/);
 });
 
+test('one project Ori can hire for is reviewed on attach; a group or any other folder is not', async () => {
+  let result = { observation: observation('song'), revision: '', hire_candidate: 'root' };
+  const { controller } = fixture(async () => result);
+  assert.equal(await controller.select('selection', '', 'tok-song'), true);
+  assert.equal(controller.state.hireCandidate, 'root');
+  // A proposed group is reviewed from its own card, never as one project.
+  result = {
+    observation: observation('albums'),
+    revision: '',
+    structure: { version: 1 },
+    hire_candidate: 'root'
+  };
+  await controller.select('chip', 'music');
+  assert.equal(controller.state.hireCandidate, '');
+  result = { observation: observation('notes'), revision: '' };
+  await controller.select('chip', 'documents');
+  assert.equal(controller.state.hireCandidate, '');
+  // While another setup review waits, the drawer says so in one line.
+  result = { observation: observation('song-2'), revision: '', hire_unavailable: 'review_pending' };
+  await controller.select('selection', '', 'tok-song-2');
+  assert.equal(controller.state.hireCandidate, '');
+  assert.equal(controller.state.hireUnavailable, 'review_pending');
+  assert.deepEqual(structureCardView(controller.state), {
+    kind: 'unavailable',
+    key: 'song-2:unavailable',
+    line: 'Another setup review is open. Finish or close it to set up this folder.'
+  });
+  await controller.remove();
+  assert.equal(controller.state.hireCandidate, '');
+  assert.equal(controller.state.hireUnavailable, '');
+
+  // The attach opens that review in the conversation instead of the tree.
+  const source = readFileSync(
+    new URL('./personal-assistant-folder-context.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(source, /window\.PersonalAssistantFolderSetup\?\.reviewCandidate\?\.\(hire\)/);
+  assert.match(source, /!reviewed &&\s+!controller\.state\.structure &&/);
+  const setup = readFileSync(
+    new URL('./personal-assistant-folder-setup.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(setup, /export function reviewCandidate\(candidateId\)/);
+  assert.match(setup, /reviewFrom\(elements\.open, candidateId\);/);
+  // Review setup on such a folder brings the same review back, with no chooser.
+  assert.match(setup, /else if \(!reviewCandidate\(current\?\.hireCandidate\)\) openChoices\(\);/);
+});
+
 test('cancel and failed replacement retain the exact previous selection', async () => {
   let result = { observation: observation('a') };
   const { controller } = fixture(async () => {

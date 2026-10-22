@@ -39,6 +39,38 @@ func TestDelegatedSubtaskAutonomyGate(t *testing.T) {
 	}
 }
 
+// A task that asks for the workspace's gate (one started from a folder's first
+// look) runs under the workspace's policy, and under Watch when the workspace
+// has none or cannot be read: it reads and reports, and changes nothing.
+func TestTaskAskingForTheWorkspaceGateRunsUnderWatch(t *testing.T) {
+	store := NewInMemoryStore()
+	if err := store.Save(delegationPolicyWorkspace("unset", "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(delegationPolicyWorkspace("propose", AutonomyPropose)); err != nil {
+		t.Fatal(err)
+	}
+	h := &LLMTaskHandler{workspaceStore: store}
+	asked := func(workspaceID string) Task {
+		return Task{WorkspaceID: workspaceID, AssignmentMode: TaskAssignmentModeManual,
+			Context: map[string]any{TaskContextAutonomyGate: TaskAutonomyGateWorkspace}}
+	}
+	for _, id := range []string{"unset", "missing"} {
+		if got := h.delegatedSubtaskAutonomyPolicy(asked(id)); got != AutonomyWatch {
+			t.Fatalf("%s: policy = %q, want watch", id, got)
+		}
+		if err := h.evaluateExecutionAutonomyGate(asked(id), "delete_record"); err == nil {
+			t.Fatalf("%s: Watch must block a write", id)
+		}
+		if err := h.evaluateExecutionAutonomyGate(asked(id), "get_record"); err != nil {
+			t.Fatalf("%s: Watch must allow a read: %v", id, err)
+		}
+	}
+	if got := h.delegatedSubtaskAutonomyPolicy(asked("propose")); got != AutonomyPropose {
+		t.Fatalf("a workspace's own policy applies: %q", got)
+	}
+}
+
 func TestDelegatedSubtaskGateNotAppliedWithoutPolicy(t *testing.T) {
 	store := NewInMemoryStore()
 	if err := store.Save(delegationPolicyWorkspace("ws", "")); err != nil {

@@ -1071,7 +1071,8 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
 			Name: "workspace_directories",
-			Description: "List directories linked to the current workspace. Returns directory ids, names, and filesystem paths. " +
+			Description: "List directories linked to the current workspace. Returns directory ids, names, and filesystem paths; " +
+				"the project folder the workspace was set up for is marked primary. " +
 				"Use the id with workspace_directory_list and workspace_directory_read to browse and read files inside one.",
 			Parameters: map[string]any{
 				"type":       "object",
@@ -1084,6 +1085,9 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 				return "", fmt.Errorf("workspace not found: %w", err)
 			}
 
+			// The project folder a setup linked is told apart from any other
+			// directory of the same name (the workspace's own folder, say).
+			primary, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string)
 			items := make([]map[string]any, 0, len(ws.DirectoryReferences))
 			for _, d := range ws.DirectoryReferences {
 				// Directories with an internal purpose (a capability's sample
@@ -1091,11 +1095,15 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 				if strings.TrimSpace(d.Purpose) != "" {
 					continue
 				}
-				items = append(items, map[string]any{
+				item := map[string]any{
 					"id":   d.ID,
 					"name": d.Name,
 					"path": d.Path,
-				})
+				}
+				if primary != "" && d.ID == primary {
+					item["primary"] = true
+				}
+				items = append(items, item)
 			}
 			if len(items) == 0 {
 				return `{"directories":[],"message":"No directories in this workspace."}`, nil

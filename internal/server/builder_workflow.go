@@ -876,6 +876,9 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	// execution path as the manual execute endpoint.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTemplateSetupTaskStarter(handler.StartTaskAsync)
+		// Stop on a folder's first look stops the run this handler started and
+		// puts the task back to wait for Start first look.
+		b.sessionHandler.SetFolderFirstTaskStopper(handler.StopTaskToReady)
 		// Whether a first task under a host recipe could start is asked of the
 		// task handler that would run it: the same checks, made before the click.
 		if b.taskHandler != nil {

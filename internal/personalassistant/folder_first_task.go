@@ -483,6 +483,30 @@ func FolderFirstTaskExcerpt(result string) string {
 	return strings.TrimRight(string(line[:FolderFirstTaskExcerptMax-1]), " ") + "…"
 }
 
+// FolderFirstTaskMessageFor is FolderFirstTaskMessage for a look whose agent
+// is known: the sentence names the agent doing the look rather than "the
+// first look" alone.
+func FolderFirstTaskMessageFor(reason, workspaceName, agent string) string {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		return FolderFirstTaskMessage(reason, workspaceName)
+	}
+	name := strings.TrimSpace(workspaceName)
+	if name == "" {
+		name = "the workspace"
+	}
+	switch reason {
+	case FolderFirstTaskReasonNeedsInput:
+		return agent + " is waiting for your answer. Open " + name + " to continue."
+	case FolderFirstTaskReasonStartFailed:
+		return agent + "'s first look could not start. Try again."
+	case FolderFirstTaskReasonRunFailed:
+		return agent + "'s first look did not finish. Try again."
+	default:
+		return FolderFirstTaskMessage(reason, workspaceName)
+	}
+}
+
 // FolderFirstTaskMessage is the one sentence shown for a reason. An unknown
 // reason says nothing rather than guessing.
 func FolderFirstTaskMessage(reason, workspaceName string) string {

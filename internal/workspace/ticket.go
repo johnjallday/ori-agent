@@ -240,20 +240,33 @@ const (
 	TicketSourceBlueprintIntake = "blueprint_intake"
 	// TicketSourceMigration marks records that predate provenance tracking.
 	TicketSourceMigration = "migration"
+	// TicketSourceFirstLookSuggestion records a task started from what a
+	// folder's first look suggested (Start this). The source ID is the first
+	// look's own task.
+	TicketSourceFirstLookSuggestion = "first_look_suggestion"
+)
+
+// TaskContextAutonomyGate on a task's context asks for every tool call of its
+// run to pass the workspace's own autonomy policy (Watch when none is set), as
+// a delegated subtask's do. Its one value is TaskAutonomyGateWorkspace.
+const (
+	TaskContextAutonomyGate   = "autonomy_gate"
+	TaskAutonomyGateWorkspace = "workspace"
 )
 
 // validTicketSources gates the provenance field so an arbitrary caller
 // string cannot become a permanent, unfilterable value.
 var validTicketSources = map[string]struct{}{
-	TicketSourceManual:           {},
-	TicketSourceAssistant:        {},
-	TicketSourceActionCenter:     {},
-	TicketSourceMarkdown:         {},
-	TicketSourceHomeQuickCapture: {},
-	TicketSourceNote:             {},
-	TicketSourceBlueprintIntake:  {},
-	TicketSourceMigration:        {},
-	TicketSourceGoalSuggestion:   {},
+	TicketSourceManual:              {},
+	TicketSourceAssistant:           {},
+	TicketSourceActionCenter:        {},
+	TicketSourceMarkdown:            {},
+	TicketSourceHomeQuickCapture:    {},
+	TicketSourceNote:                {},
+	TicketSourceBlueprintIntake:     {},
+	TicketSourceMigration:           {},
+	TicketSourceGoalSuggestion:      {},
+	TicketSourceFirstLookSuggestion: {},
 }
 
 // NormalizeTicketSource validates provenance, defaulting empty to manual.

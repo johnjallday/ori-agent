@@ -50,13 +50,39 @@ func (w *Workspace) recordDismissedSuggestionLocked(task Task, reason string, at
 	if key == "" {
 		return
 	}
-	entry := DismissedSuggestion{
+	w.rememberDismissedLocked(DismissedSuggestion{
 		NormalizedTitle: key,
 		Title:           strings.TrimSpace(task.Description),
 		Reason:          normalizeSuggestionReason(reason),
 		DismissedAt:     at.UTC(),
 		RunID:           strings.TrimSpace(task.SourceID),
+	})
+}
+
+// RememberDismissedSuggestion records a suggestion the user turned down before
+// it ever became a ticket (Not now on a folder's first look), so goal runs do
+// not suggest it again either. sourceID names where it was suggested (the
+// first look's task). A title already in the ledger is refreshed in place.
+func (w *Workspace) RememberDismissedSuggestion(title, reason, sourceID string, at time.Time) {
+	key := NormalizeSuggestionTitle(title)
+	if w == nil || key == "" {
+		return
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.rememberDismissedLocked(DismissedSuggestion{
+		NormalizedTitle: key,
+		Title:           strings.Join(strings.Fields(title), " "),
+		Reason:          normalizeSuggestionReason(reason),
+		DismissedAt:     at.UTC(),
+		RunID:           strings.TrimSpace(sourceID),
+	})
+}
+
+// rememberDismissedLocked puts entry first in the bounded ledger, replacing an
+// entry of the same normalized title. Callers hold w.mu.
+func (w *Workspace) rememberDismissedLocked(entry DismissedSuggestion) {
+	key := entry.NormalizedTitle
 	kept := make([]DismissedSuggestion, 0, len(w.DismissedSuggestions)+1)
 	kept = append(kept, entry)
 	for _, existing := range w.DismissedSuggestions {

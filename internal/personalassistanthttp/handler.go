@@ -103,6 +103,7 @@ type Handler struct {
 	hqSetup                    HQSetupService
 	assignments                AssignmentPreviewService
 	today                      TodayReader
+	firstLook                  FirstLookActioner
 	continuity                 ContinuityService
 	renamer                    RenameService
 	capabilities               CapabilityReader

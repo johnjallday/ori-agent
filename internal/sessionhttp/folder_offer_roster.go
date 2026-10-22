@@ -3,6 +3,10 @@ package sessionhttp
 import (
 	"errors"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // FolderOfferRoster is the entry assistant a folder-offer workspace would get
@@ -28,6 +32,10 @@ type FolderOfferRoster struct {
 	Provider    string
 	Model       string
 	ModelSource string
+	// Role is the role the blueprint gives the assistant, and Goal the
+	// blueprint's own workspace goal; either may be empty.
+	Role string
+	Goal string
 }
 
 // SavedAgentModel reads the provider and model a saved agent is set to use.
@@ -78,5 +86,88 @@ func (h *Handler) FolderOfferRoster(templateID, assistantName string) (FolderOff
 		PlanRevision: h.buildTemplateAgentPlan(raw).Revision,
 		DeclaredName: declared, Assistant: strings.TrimSpace(entry.Name), Action: entry.Action,
 		Provider: entry.Provider, Model: entry.Model, ModelSource: entry.ModelSource,
+		Role: strings.TrimSpace(entry.Role), Goal: strings.TrimSpace(raw.Goal),
 	}, nil
 }
+
+// FolderOfferHire is who a project made from an installed blueprint would get
+// for its project role, read the way the Create Workspace review previews it:
+// a new agent, or the Home's shared assistant its standing consent names. Mode
+// is "create" or "bind". Reading it creates nothing and grants nothing.
+type FolderOfferHire struct {
+	Mode      string
+	AgentName string
+	RoleLabel string
+	Model     string
+	// Goal is the blueprint's own workspace goal; it may be empty.
+	Goal string
+}
+
+// FolderOfferHire previews the project-role hire of an installed blueprint for
+// one owner in the given composition ("grouped" or "standalone"). A blueprint
+// whose roles are not scoped falls back to its roster's entry assistant.
+func (h *Handler) FolderOfferHire(templateID, ownerUserID, composition string) (FolderOfferHire, error) {
+	if h == nil || strings.TrimSpace(templateID) == "" {
+		return FolderOfferHire{}, ErrFolderOfferRoster
+	}
+	source, err := h.resolveProjectTemplate(templateID, "")
+	if err != nil {
+		return FolderOfferHire{}, ErrFolderOfferRoster
+	}
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	effective := source
+	if strings.TrimSpace(composition) == "standalone" && source.GroupRequirement != nil {
+		if standalone, standaloneErr := projecttemplates.StandaloneTemplate(source); standaloneErr == nil {
+			effective = standalone
+		}
+	}
+	var ownerErr error
+	if ownerUserID == "" {
+		ownerErr = grouprequirements.ErrUnavailable
+	}
+	h.buildTemplateGroupRequirementPlan(source, composition, ownerUserID, ownerErr, &effective)
+	roster := h.buildTemplateAgentPlanForOwner(effective, ownerUserID)
+	hire := FolderOfferHire{Goal: strings.TrimSpace(source.Goal)}
+	for _, fill := range h.planRoleAutoFills(source, effective, composition, ownerUserID) {
+		if fill.Scope != string(agentworkspace.AssistantRoleScopeProject) || strings.TrimSpace(fill.AgentName) == "" {
+			continue
+		}
+		hire.Mode, hire.AgentName, hire.RoleLabel = FolderOfferHireCreate, strings.TrimSpace(fill.AgentName), strings.TrimSpace(fill.Label)
+		if fill.Outcome == roleAutoFillExisting {
+			hire.Mode = FolderOfferHireBind
+		}
+		break
+	}
+	if hire.AgentName == "" {
+		if len(roster.Agents) == 0 || strings.TrimSpace(roster.Agents[0].Name) == "" {
+			return FolderOfferHire{}, ErrFolderOfferRoster
+		}
+		entry := roster.Agents[0]
+		hire.Mode, hire.AgentName, hire.RoleLabel = FolderOfferHireCreate, strings.TrimSpace(entry.Name), strings.TrimSpace(entry.Role)
+		if entry.Action == "reuse" {
+			hire.Mode = FolderOfferHireBind
+		}
+	}
+	// The model the agent would run on: a saved agent's own, a roster agent's
+	// resolved one, else the model new agents get.
+	if _, model, found := h.SavedAgentModel(hire.AgentName); found {
+		hire.Model = model
+	} else {
+		for _, agent := range roster.Agents {
+			if strings.EqualFold(strings.TrimSpace(agent.Name), hire.AgentName) {
+				hire.Model = strings.TrimSpace(agent.Model)
+			}
+		}
+		if hire.Model == "" && h.systemModelReader != nil {
+			_, hire.Model = h.systemModelReader.GetSystemModel()
+		}
+	}
+	hire.Model = strings.TrimSpace(hire.Model)
+	return hire, nil
+}
+
+// The modes FolderOfferHire reports.
+const (
+	FolderOfferHireCreate = "create"
+	FolderOfferHireBind   = "bind"
+)

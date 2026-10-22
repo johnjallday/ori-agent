@@ -96,10 +96,16 @@ func (fx *buildSetupFixture) waitSettled(t *testing.T) FolderOffer {
 func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *testing.T) {
 	fx := newBuildSetupFixture(t)
 	ctx := context.Background()
+	fx.setup.hire = &FolderHire{Mode: FolderHireCreate, AgentName: "Song Assistant", RoleLabel: "Song"}
+	fx.setup.briefDefault = "Keep the session tidy."
 
 	plan, err := fx.service.BuildPlan(ctx, fx.draft, fx.observation.ID, fx.candidate, "Summer Demos")
 	if err != nil || !plan.Ready {
 		t.Fatalf("plan %+v %v", plan, err)
+	}
+	// The build shows the same hire and brief as Home's card.
+	if plan.Hire == nil || plan.Hire.AgentName != "Song Assistant" || plan.BriefDefault != "Keep the session tidy." {
+		t.Fatalf("plan hire %+v brief %q", plan.Hire, plan.BriefDefault)
 	}
 	view, err := fx.service.ReviewBuild(ctx, fx.draft, "session-1", fx.observation.ID, fx.candidate, "Summer Demos")
 	if err != nil || view.ID == "" {
@@ -123,7 +129,7 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 		t.Fatalf("plan after the move %+v %v (was %s)", again, err, plan.Digest)
 	}
 
-	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", ""); err != nil {
+	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", "", " Mix the  chorus first. "); err != nil {
 		t.Fatal(err)
 	}
 	settled := fx.waitSettled(t)
@@ -131,7 +137,8 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 		t.Fatalf("observer heard %+v", settled.Setup)
 	}
 	ran := fx.setup.ran
-	if len(ran) != 1 || ran[0].Path != fx.song || ran[0].WorkspaceName != "Summer Demos" || ran[0].Offer.ID != view.ID {
+	if len(ran) != 1 || ran[0].Path != fx.song || ran[0].WorkspaceName != "Summer Demos" || ran[0].Offer.ID != view.ID ||
+		ran[0].Brief != "Mix the chorus first." {
 		t.Fatalf("the run got %+v", ran)
 	}
 	fx.mu.Lock()
@@ -158,12 +165,105 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 	if rebound.ConversationReview.ObservationID != fresh.ID || rebound.ConversationReview.WorkspaceName != "Summer Demos" {
 		t.Fatalf("rebound review %+v", rebound.ConversationReview)
 	}
-	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-2", ""); err != nil {
+	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-2", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	fx.waitSettled(t)
 	if len(fx.setup.ran) != 2 || fx.setup.ran[1].WorkspaceName != "Summer Demos" {
 		t.Fatalf("the retry ran %+v", fx.setup.ran)
+	}
+}
+
+// An attached song with a plan is the review the composer opens as soon as the
+// folder is attached; a folder the user said no to and a project no reviewed
+// tool owns are not.
+func TestFolderHireCandidate_ARecognizedProjectWithAPlanIsReviewedOnAttach(t *testing.T) {
+	fx := newBuildSetupFixture(t)
+	ctx := context.Background()
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{CandidateID: fx.candidate}) || fx.candidate == "" {
+		t.Fatalf("song: %+v, want %q", got, fx.candidate)
+	}
+	// Reading created nothing: no offer and no review.
+	if doc, err := fx.store.Read(ctx, "local"); err != nil || len(doc.Offers) != 0 {
+		t.Fatalf("the candidate was read with a write: %+v %v", doc.Offers, err)
+	}
+
+	// Another card waiting for its answer keeps the review away, and says why.
+	waiting, err := fx.service.digest.ScanChip(ctx, "local", "documents")
+	if err != nil || waiting.ID == "" || waiting.Status != FolderOfferPending {
+		t.Fatalf("a card waiting on Home: %+v %v", waiting, err)
+	}
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{Unavailable: FolderStructureReviewPending}) {
+		t.Fatalf("while a card waits: %+v", got)
+	}
+	closeOffer := func(id string) {
+		t.Helper()
+		if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+			for i := range d.Offers {
+				if d.Offers[i].ID == id {
+					d.Offers[i].Status = FolderOfferClosed
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	closeOffer(waiting.ID)
+
+	// A card waiting on Home for this very song is no reason to refuse: the
+	// conversation's review takes its place.
+	fx.service.digest.deps.ResolveSelection = func(string) (string, error) { return fx.song, nil }
+	home, err := fx.service.digest.ScanSelection(ctx, "local", "song-token")
+	if err != nil || home.Status != FolderOfferPending {
+		t.Fatalf("the song's card on Home: %+v %v", home, err)
+	}
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{CandidateID: fx.candidate}) {
+		t.Fatalf("with the same song's card on Home: %+v", got)
+	}
+	closeOffer(home.ID)
+
+	// A folder the user said never to ask about again stays unasked.
+	if _, err := fx.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+		d.Tombstones = append(d.Tombstones, FolderTombstone{Key: FolderKey(fx.song), Name: "Ori Music Demo", CreatedAt: fx.now})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{}) {
+		t.Fatalf("declined: %+v", got)
+	}
+
+	// An Ableton set is a project, but no reviewed tool sets it up.
+	bounce := filepath.Join(fx.home, "Music", "Bounce")
+	writeFolderFiles(t, bounce, "Bounce.als", "Samples/kick.wav")
+	ableton := observeSelected(t, fx.folderDigestFixture, fx.service, fx.draft, bounce)
+	if got := fx.service.HireCandidate(ctx, fx.draft, ableton.ID); got != (FolderHireCandidate{}) {
+		t.Fatalf("unowned project: %+v", got)
+	}
+}
+
+// The review this conversation already has open is retired by the next one it
+// opens (Review), so it does not keep a newly attached folder's card away;
+// a card on Home or in another conversation does.
+func TestFolderHireCandidate_OnlyThisConversationsOwnReviewGivesWay(t *testing.T) {
+	conversation := foldercontext.Target{UserID: "local", WorkspaceID: "hq-1", AgentName: "Atlas", ConversationID: "c-1"}
+	own := &FolderOffer{Status: FolderOfferPending, ConversationReview: &FolderConversationReview{Target: conversation}}
+	if !ownConversationReview(own, conversation) {
+		t.Fatal("this conversation's own review gives way")
+	}
+	other := conversation
+	other.ConversationID = "c-2"
+	if ownConversationReview(own, other) {
+		t.Fatal("another conversation's review waits for its answer")
+	}
+	draft := conversation
+	draft.ConversationID, draft.DraftID = "", "draft-1"
+	if ownConversationReview(own, draft) {
+		t.Fatal("a draft has no review of its own")
+	}
+	if ownConversationReview(&FolderOffer{Status: FolderOfferPending}, conversation) {
+		t.Fatal("a card on Home waits for its answer")
 	}
 }
 
@@ -181,7 +281,7 @@ func TestFolderBuildSetup_AGuardThatNoLongerVouchesStopsTheSetup(t *testing.T) {
 	fx.mu.Lock()
 	fx.guardErr = errors.New("the build was abandoned")
 	fx.mu.Unlock()
-	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", ""); err == nil {
+	if _, err := fx.service.StartBuildSetup(ctx, "local", view.ID, plan.Digest, "build-setup-1", "", ""); err == nil {
 		t.Fatal("a build that no longer vouches cannot start the run")
 	}
 	if fx.setup.runCount() != 0 {

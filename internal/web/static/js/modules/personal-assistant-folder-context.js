@@ -78,6 +78,8 @@ export function createFolderContextController({
       structure: null,
       declined: null,
       structureUnavailable: '',
+      hireCandidate: '',
+      hireUnavailable: '',
       focusIDs: [],
       accepted: saved.observation || null,
       offerId: saved.offer_id || '',
@@ -121,6 +123,11 @@ export function createFolderContextController({
       state.structureUnavailable = state.structure
         ? ''
         : String(result.structure_unavailable || '');
+      // One project Ori can set up as a hire: its review opens on attach.
+      state.hireCandidate = state.structure ? '' : String(result.hire_candidate || '');
+      // Or why it cannot open now (another setup review waits), said in one line.
+      state.hireUnavailable =
+        state.structure || state.hireCandidate ? '' : String(result.hire_unavailable || '');
       state.focusIDs = [];
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
@@ -170,6 +177,8 @@ export function createFolderContextController({
       state.structure = null;
       state.declined = null;
       state.structureUnavailable = '';
+      state.hireCandidate = '';
+      state.hireUnavailable = '';
       state.focusIDs = [];
       state.accepted = null;
       state.offerId = '';
@@ -474,6 +483,11 @@ const STRUCTURE_UNAVAILABLE = {
   setup_unavailable: 'Setting up workspaces is not available here.'
 };
 
+// Why the hire card for an attached project could not open, in one line.
+const HIRE_UNAVAILABLE = {
+  review_pending: 'Another setup review is open. Finish or close it to set up this folder.'
+};
+
 // structureCardView is the whole decision for the card shown as soon as a
 // collection is attached, before Send: the proposal and its three controls, the
 // one line that says why there is none, or nothing. parkedId is the folder the
@@ -513,7 +527,10 @@ export function structureCardView(state, parkedId = '') {
       ]
     };
   }
-  const line = STRUCTURE_UNAVAILABLE[state.structureUnavailable] || '';
+  const line =
+    STRUCTURE_UNAVAILABLE[state.structureUnavailable] ||
+    HIRE_UNAVAILABLE[state.hireUnavailable] ||
+    '';
   return line ? { kind: 'unavailable', key: `${id}:unavailable`, line } : { kind: 'none', key: '' };
 }
 
@@ -820,9 +837,22 @@ async function open() {
       closeChooser();
       const selectedGeneration = chooserGeneration;
       const selected = await controller.select(mode, chip, selectionToken);
-      // A folder Ori proposed a group for stays on the chat side, where that
-      // proposal is shown; its tree is one press away (Tree + Chat).
-      if (selected && !controller.state.structure && folderTreeView(controller.state.observation))
+      // One project Ori can set up as a hire is answered by its hire card: its
+      // review opens in the conversation, as Review setup would. A folder Ori
+      // proposed a group for, or whose hire waits on another open review,
+      // stays on the chat side, where that card or line is shown; any other
+      // folder opens its tree (Tree + Chat).
+      const hire = selected ? controller.state.hireCandidate : '';
+      const reviewed = Boolean(
+        hire && window.PersonalAssistantFolderSetup?.reviewCandidate?.(hire)
+      );
+      if (
+        selected &&
+        !reviewed &&
+        !controller.state.structure &&
+        !controller.state.hireUnavailable &&
+        folderTreeView(controller.state.observation)
+      )
         explorer?.explore({ automatic: true });
       // Disabling Add during selection can move focus to body. Restore it
       // only if the user has not moved elsewhere or left this conversation.

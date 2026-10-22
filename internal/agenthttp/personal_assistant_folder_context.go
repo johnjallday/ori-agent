@@ -353,8 +353,29 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 		}
 	} else if proposal.Unavailable != "" {
 		response["structure_unavailable"] = proposal.Unavailable
+	} else if hire := h.folderHireCandidate(r.Context(), target, observation); hire.CandidateID != "" {
+		// One project Ori can set up as a hire: the drawer opens its review at
+		// once, so attaching the folder is answered by the hire card. Opening
+		// it is the user's own review click, made for them; nothing is created.
+		response["hire_candidate"] = hire.CandidateID
+	} else if hire.Unavailable != "" {
+		// Another setup review waits for its answer: the drawer says so in one
+		// line instead of opening nothing.
+		response["hire_unavailable"] = hire.Unavailable
 	}
 	orihttp.WriteJSON(w, response)
+}
+
+// folderHireCandidate is the project a live selection is reviewed as straight
+// away, or why it cannot be now (FolderObservationService.HireCandidate).
+func (h *HomeAssistantAskHandler) folderHireCandidate(ctx context.Context, target foldercontext.Target, observation *foldercontext.Observation) personalassistant.FolderHireCandidate {
+	reader, ok := h.FolderSetups.(interface {
+		HireCandidate(context.Context, foldercontext.Target, string) personalassistant.FolderHireCandidate
+	})
+	if !ok || observation == nil {
+		return personalassistant.FolderHireCandidate{}
+	}
+	return reader.HireCandidate(ctx, target, observation.ID)
 }
 
 // folderStructure reads the proposed group for a live selection: empty when

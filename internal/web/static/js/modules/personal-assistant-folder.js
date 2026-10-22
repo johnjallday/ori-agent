@@ -26,6 +26,12 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
+import {
+  hiredLine,
+  mapPlacementView,
+  renderMapPlacement,
+  reportedLine
+} from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import {
   declinedLine,
@@ -225,7 +231,7 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
 // setupLinesView normalizes the server's plan or run lines for rendering, and
 // renderSetupLines draws them: the shared plan lines the Create Workspace build
 // pane draws too (folder-plan-lines.js).
-export const { setupLinesView, renderSetupLines } = globalThis.OriFolderPlanLines;
+export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFolderPlanLines;
 
 const SETUP_STOP_COPY = {
   plan_changed:
@@ -431,23 +437,31 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       state: line.state === 'failed' ? 'failed' : line.state ? 'done' : ''
     }));
     const unfinished = settled.filter(line => line.state === 'failed').length;
+    // A hire ends on its agent at work: the look it started, or why it waits.
+    const hired = receipt.hireLook?.visible ? offer.first_task : null;
+    const agent = String(hired?.agent || '').trim();
     const done = {
       visible: true,
       phase: 'done',
-      eyebrow: 'All set',
+      eyebrow: hired ? 'Hired' : 'All set',
       title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
-      status: receipt.home
-        ? 'Here is what I set up. Open a project from the library when you want to work on it.'
-        : software
-          ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
-          : receipt.group
-            ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
-            : 'Here is what I set up. The first task starts when you open the workspace.',
+      status: hired
+        ? hired.state === 'running' || hired.state === 'finished'
+          ? `${agent || 'Your agent'} is reading ${subject}, read-only. I'll tell you here when it has something.`
+          : `Here is what I set up. ${String(hired.message || '').trim() || 'Its first look has not started.'}`
+        : receipt.home
+          ? 'Here is what I set up. Open a project from the library when you want to work on it.'
+          : software
+            ? 'Here is what I set up. Nothing in the project was run or changed, and the first assessment waits for you to start it.'
+            : receipt.group
+              ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
+              : 'Here is what I set up. The first task starts when you open the workspace.',
       count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
       percent: 100,
       lines: settled,
       profile: receipt.profile || null,
       receiptRows: receipt.rows,
+      map: receipt.map || null,
       route: receipt.route,
       openLabel: receipt.openLabel,
       actions: []
@@ -490,32 +504,17 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   };
 }
 
-// finishedRunPlacement is what the Map is asked to place once a run this page
-// followed has finished, as Create Workspace's Set it up does: the project
-// workspace the run made and, unless it stands alone, the Home it went
-// inside. `followed` is the offer whose run this page saw going, `placed` the
-// offers already handed on, `covered` whether the run's pop-up or the
-// assistant drawer still covers the Map (closing it is the moment). null when
-// there is nothing to place yet, or nothing at all: a Home or group outcome
-// places nothing.
-export function finishedRunPlacement(offer, { followed = '', placed = [], covered = false } = {}) {
+// finishedRunWorkspace is the project workspace a run this page followed made,
+// once it has finished, so the Map draws it where its automatic layout puts
+// it (nothing asks where it sits; the receipt's "On the Map" row offers
+// Move). `followed` is the offer whose run this page saw going, `announced`
+// the offers already handed on. '' when there is nothing to draw yet, or at
+// all: a Home or group outcome is drawn by its own path.
+export function finishedRunWorkspace(offer, { followed = '', announced = [] } = {}) {
   const id = String(offer?.id || '');
-  if (!id || id !== followed || placed.includes(id) || covered) return null;
-  if (offer.status !== 'resolved' || offer.outcome?.kind !== 'project') return null;
-  const memberId = String(offer.outcome.workspace_id || '').trim();
-  if (!memberId) return null;
-  const rows = Array.isArray(offer.outcome.receipt) ? offer.outcome.receipt : [];
-  const workspace = rows.find(row => row?.kind === 'workspace');
-  const parent = offer.outcome.parent;
-  const homeId =
-    parent && parent.status !== 'standalone' ? String(parent.workspace_id || '').trim() : '';
-  return {
-    token: `folder:${id}`,
-    memberId,
-    memberName: String(workspace?.name || offer.subject?.name || '').trim(),
-    homeId,
-    homeName: homeId ? String(parent.name || '').trim() : ''
-  };
+  if (!id || id !== followed || announced.includes(id)) return '';
+  if (offer.status !== 'resolved' || offer.outcome?.kind !== 'project') return '';
+  return String(offer.outcome.workspace_id || '').trim();
 }
 
 // Display-only canonical disclosure. The browser never sends this name or any
@@ -546,6 +545,8 @@ export function folderSetupDestinationLabel(offer) {
 // the card is the one consent: Set up runs the whole setup on the server and
 // Adjust… opens the step-by-step journey. Without one it opens the existing
 // install → project-setup journey. It never uses the blank-workspace creator.
+// A plan that names a hire is shown as one: Hire and start, Not now, and Adjust
+// beside the plan's lines.
 function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
   const portfolio = offer.portfolio;
@@ -556,6 +557,10 @@ function capabilityConfirmView(offer, base, subject) {
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const continuing = base.status === 'awaiting_outcome';
+  const hire =
+    hasPlan && !portfolio && (continuing || !base.decided)
+      ? hireView(offer.plan, subject, { needs: offer.needs })
+      : null;
   const decline = {
     id: 'no',
     label: String(capability.decline_label || 'No thanks'),
@@ -568,13 +573,19 @@ function capabilityConfirmView(offer, base, subject) {
   else if (continuing && hasPlan)
     // Adjust… was pressed earlier: the one-click plan stays, beside the journey.
     actions = [
-      { id: 'setup', label: 'Set up', style: 'primary', oneCard: true },
+      { id: 'setup', label: hire ? 'Hire and start' : 'Set up', style: 'primary', oneCard: true },
       { id: 'resume', label: 'Continue setup', style: 'outline', journey: true }
     ];
   else if (continuing)
     actions = [{ id: 'resume', label: 'Continue setup', style: 'primary', journey: true }];
   else if (base.decided) actions = [];
-  else if (hasPlan)
+  else if (hire) {
+    actions = [
+      { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+      { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
+    ];
+    hire.adjust = { id: 'adjust', label: 'Adjust', style: 'link', journey: true };
+  } else if (hasPlan)
     actions = [
       {
         id: 'setup',
@@ -598,13 +609,18 @@ function capabilityConfirmView(offer, base, subject) {
       decline,
       later
     ];
-  const headline = portfolio
-    ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
-    : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
+  const headline = hire
+    ? hire.headline
+    : portfolio
+      ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
+      : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
   let question = portfolio
     ? String(capability.question || `Set up a ${capability.workspace}?`)
     : `Set up ${subject} as a ${capability.workspace}?`;
   if (hasPlan) question += ' Here is everything Set up will do:';
+  // A hire asks its one question in its own field; this line says what the
+  // folder was recognized as.
+  if (hire) question = `${subject} looks like a ${capability.recognized} project.`;
   if (run) question = run.question;
   else if (capability.revived)
     question = `You said no before, but this is a whole collection now. ${question}`;
@@ -644,6 +660,7 @@ function capabilityConfirmView(offer, base, subject) {
     actions,
     resume: continuing,
     plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    hire,
     setup: run
   };
 }
@@ -1219,6 +1236,27 @@ export function softwareOfferView(offer, view, { subject, folder }) {
   }
   const workspace = `${String(offer.blueprint_label || 'Code project').trim()} workspace`;
   const available = software.setup_available === true;
+  const hire = available ? hireView(offer.plan, subject) : null;
+  if (hire) {
+    // The reviewed plan as a hire: who is hired, the one question, what was
+    // read, and the plan's lines under their heading with Adjust beside it.
+    hire.adjust = { id: 'adjust', label: 'Adjust', style: 'link', softwareAdjust: true };
+    return {
+      ...reviewed,
+      headline: hire.headline,
+      question: completable
+        ? `This completes your workspace ${String(completable.name).trim()}. What I read in ${subject}:`
+        : `What I read in ${subject}:`,
+      hire,
+      actions: [
+        { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+        ...(view.decided ? [] : [{ id: 'no', label: 'Not now', style: 'outline', decision: 'no' }]),
+        reviewAction('Review again', 'link'),
+        ...openExisting,
+        ...elsewhere
+      ]
+    };
+  }
   let question = completable
     ? `Complete your workspace ${String(completable.name).trim()} for ${subject}? Here is everything Set up will do:`
     : `Set up ${subject} as a ${workspace}? Here is everything Set up will do:`;
@@ -1590,6 +1628,27 @@ export function folderReceiptView(offer, options = {}) {
     message: options.message
   });
   const liveDetail = firstLook.visible ? String(offer.first_task.detail || '').trim() : '';
+  const hireLook = hireLookView(offer);
+  // A look the hire started can be stopped from the card while it runs.
+  if (firstLook.visible && hireLook.stoppable)
+    firstLook.actions = [
+      {
+        id: 'stop-first-look',
+        label: 'Stop',
+        style: 'outline',
+        stop: true,
+        busy: options.busy === true
+      },
+      ...firstLook.actions
+    ];
+  // The automatic layout placed the workspace; the receipt says where, with
+  // Move (FR23).
+  const parent = offer.outcome.parent;
+  const map = mapPlacementView({
+    agent: offer.setup?.hire?.agent_name || offer.first_task?.agent,
+    home: parent && parent.status !== 'standalone' ? parent.name : '',
+    workspaceId: offer.outcome.workspace_id
+  });
   return {
     visible: true,
     rows: rows.map(row => ({
@@ -1600,7 +1659,69 @@ export function folderReceiptView(offer, options = {}) {
     route,
     homeRoute: verifiedHomeRoute,
     openLabel,
+    ...(map ? { map } : {}),
+    ...(hireLook.visible ? { hireLook } : {}),
     ...(firstLook.visible ? { firstLook } : {})
+  };
+}
+
+// The footnote under a hired agent's first look while it reads.
+export const FIRST_LOOK_FOOTNOTE =
+  'Reads only. Nothing in the folder is run or changed. Stop at any time.';
+
+// hireLookView is a hired agent's first look as two more lines under the
+// hire's receipt: reading the project, then writing its first suggestion. It
+// is shown only for a setup that hired someone (the outcome records what the
+// hire did about the look), and every state is read from where the look stands
+// now: running, waiting on the user with its question, finished, did not
+// finish with its reason, or not started (stopped, or waiting on a repair).
+export function hireLookView(offer) {
+  const record = offer?.outcome?.first_look;
+  const look = offer?.first_task;
+  const state = String(look?.state || '');
+  if (!record || typeof record !== 'object' || !look || !FIRST_LOOK_STATES.includes(state))
+    return { visible: false, lines: [], footnote: '', stoppable: false };
+  const said = String(look.message || '').trim();
+  const read = {
+    kind: 'first_look_read',
+    name: 'Reading the project, read-only',
+    detail: '',
+    state: 'waiting'
+  };
+  const suggest = {
+    kind: 'first_look_suggest',
+    name: 'Writes its first suggestion',
+    detail: '',
+    state: 'waiting'
+  };
+  switch (state) {
+    case 'running':
+      read.state = 'working';
+      break;
+    case 'waiting':
+      read.detail = said || 'Waiting for your answer.';
+      break;
+    case 'finished': {
+      read.state = 'done';
+      suggest.state = 'done';
+      const next = String(look.next_request || '').trim();
+      suggest.detail = next ? `Suggests: ${next}` : 'It did not name one next task.';
+      break;
+    }
+    case 'failed':
+      read.state = 'failed';
+      read.detail = said;
+      break;
+    default:
+      // Not started: put back by Stop, or waiting on what its reason names.
+      read.detail =
+        said || (record.started === true ? 'Stopped. Nothing in the folder was changed.' : '');
+  }
+  return {
+    visible: true,
+    lines: [read, suggest],
+    footnote: state === 'running' ? FIRST_LOOK_FOOTNOTE : '',
+    stoppable: state === 'running'
   };
 }
 
@@ -2008,6 +2129,9 @@ const state = {
   // assistant's name as typed. The workspace name shares workspaceName above.
   softwareAdjusting: '',
   assistantName: '',
+  // The brief typed on a hire card: which offer, and the text. Untouched, the
+  // card shows the plan's default and sends nothing, so the server's applies.
+  brief: { offerId: '', value: '', typed: false },
   digest: null,
   offer: null,
   busy: false,
@@ -2087,6 +2211,15 @@ function renderProfileLine(node, line, doc = document) {
 
 // renderReceiptRows draws the receipt's rows (what Set up made) into a list.
 // Shared by the card and the run pop-up so both say the same thing.
+// renderMapRow draws a receipt's "On the Map" row (mapPlacementView) into its
+// host, or empties and hides it.
+function renderMapRow(host, view) {
+  if (!host) return;
+  host.hidden = !view;
+  if (view) host.replaceChildren(renderMapPlacement(view, document, 'pa-folder__map'));
+  else host.replaceChildren();
+}
+
 function renderReceiptRows(list, rows, doc = document) {
   if (!list) return;
   list.replaceChildren();
@@ -2141,6 +2274,13 @@ function elements() {
     status: document.getElementById('personalAssistantFolderStatus'),
     offer: document.getElementById('personalAssistantFolderOffer'),
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
+    hire: document.getElementById('personalAssistantFolderHire'),
+    hireInitials: document.getElementById('personalAssistantFolderHireInitials'),
+    hireDetail: document.getElementById('personalAssistantFolderHireDetail'),
+    briefField: document.getElementById('personalAssistantFolderBriefField'),
+    brief: document.getElementById('personalAssistantFolderBrief'),
+    planHeading: document.getElementById('personalAssistantFolderPlanHeading'),
+    planHeadingText: document.getElementById('personalAssistantFolderPlanHeadingText'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     structure: document.getElementById('personalAssistantFolderOfferStructure'),
     nameLabel: document.getElementById('personalAssistantFolderWorkspaceNameLabel'),
@@ -2156,8 +2296,10 @@ function elements() {
     hidden: document.getElementById('personalAssistantFolderOfferHidden'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
+    map: document.getElementById('personalAssistantFolderMap'),
     result: document.getElementById('personalAssistantFolderFirstLookResult'),
     plan: document.getElementById('personalAssistantFolderPlan'),
+    lookNote: document.getElementById('personalAssistantFolderLookNote'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
     error: document.getElementById('personalAssistantFolderOfferError')
@@ -2250,6 +2392,7 @@ function runModalElements() {
     songs: document.getElementById('folderSetupRunSongs'),
     more: document.getElementById('folderSetupRunMore'),
     receipt: document.getElementById('folderSetupRunReceipt'),
+    map: document.getElementById('folderSetupRunMap'),
     error: document.getElementById('folderSetupRunError'),
     actions: document.getElementById('folderSetupRunActions')
   };
@@ -2375,34 +2518,17 @@ function renderRunSongs(els, view) {
 }
 
 // The run this page saw going, and the runs already handed to the Map.
-const runPlacement = { followed: '', placed: [] };
+const finishedRuns = { followed: '', announced: [] };
 
-// placeFinishedRun hands a finished run to the Map once (finishedRunPlacement),
-// through the same placement the build's Set it up uses.
-function placeFinishedRun() {
+// announceFinishedRun tells the Map once that a run made its workspace
+// (finishedRunWorkspace), so it is drawn where the automatic layout puts it.
+function announceFinishedRun() {
   const offer = state.offer;
-  if (offer?.setup && offer.status !== 'resolved') runPlacement.followed = String(offer.id || '');
-  const placement = finishedRunPlacement(offer, {
-    followed: runPlacement.followed,
-    placed: runPlacement.placed,
-    covered: runModal.wanted || Boolean(window.PersonalAssistantPanel?.isOpen?.())
-  });
-  if (!placement) return;
-  runPlacement.placed.push(String(offer.id));
-  const manager = typeof window !== 'undefined' ? window.sessionManager : null;
-  // The Map draws what the run made before it asks where it sits.
-  manager?.notifyWorkspacesChanged?.({ workspaceId: placement.memberId });
-  if (typeof manager?.placeCreatedOnWorkspaceMap === 'function') {
-    manager.placeCreatedOnWorkspaceMap(placement.token, placement);
-    return;
-  }
-  window.OriWorkspaceMap?.beginPlacement?.({
-    token: placement.token,
-    created: {
-      member: { id: placement.memberId, name: placement.memberName },
-      group: placement.homeId ? { id: placement.homeId, name: placement.homeName } : null
-    }
-  });
+  if (offer?.setup && offer.status !== 'resolved') finishedRuns.followed = String(offer.id || '');
+  const workspaceId = finishedRunWorkspace(offer, finishedRuns);
+  if (!workspaceId) return;
+  finishedRuns.announced.push(String(offer.id));
+  window.sessionManager?.notifyWorkspacesChanged?.({ workspaceId });
 }
 
 function openRunModal() {
@@ -2414,7 +2540,6 @@ function openRunModal() {
   if (!runModal.bound) {
     els.root.addEventListener('hidden.bs.modal', () => {
       runModal.wanted = false;
-      placeFinishedRun();
     });
     runModal.bound = true;
   }
@@ -2460,6 +2585,7 @@ function renderRunModal() {
   els.steps.hidden = done || !view.lines.length;
   renderReceiptRows(els.receipt, view.receiptRows);
   els.receipt.hidden = !done || !view.receiptRows.length;
+  renderMapRow(els.map, done ? view.map : null);
   renderRunSongs(els, view);
   els.error.textContent = runModal.error;
   els.error.hidden = !runModal.error;
@@ -2680,6 +2806,31 @@ export function conversationFolderOfferView(offer, options = {}) {
   return { ...view, actions };
 }
 
+// briefFor is the brief the user typed on an offer's hire card, or null when
+// they left the field as the plan wrote it.
+function briefFor(offer) {
+  return offer?.id && state.brief.offerId === offer.id && state.brief.typed
+    ? state.brief.value
+    : null;
+}
+
+// renderHire draws who the card hires and its one question. The field keeps
+// what the user typed across re-renders (polls, a refused stale plan) and is
+// never rewritten while it has focus.
+function renderHire(els, hire, offer) {
+  if (!els.hire) return;
+  els.hire.hidden = !hire;
+  if (!hire) return;
+  setText(els.hireInitials, hire.agent.initials, false);
+  setText(els.hireDetail, hire.agent.detail, false);
+  if (els.briefField) els.briefField.hidden = !hire.brief;
+  if (els.brief && hire.brief && document.activeElement !== els.brief) {
+    const typed = briefFor(offer);
+    els.brief.value = typed === null ? hire.brief.value : typed;
+  }
+  if (els.brief) els.brief.disabled = state.busy;
+}
+
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
@@ -2705,9 +2856,13 @@ function renderOffer(place) {
   });
   const firstLook = receipt.firstLook || { visible: false };
   // The one offer card is a reply in the conversation while the flow runs
-  // there, and a card in Needs you when it was found waiting on load. It is
+  // there, and a card in Needs you when it was found waiting on load (right
+  // under Today's summary line while Today is folded, as Home says). It is
   // moved, never copied, so its controls and their handlers stay the same.
-  const home = state.reviewSlot || (place === 'needs' && els.needs ? els.needs : els.root);
+  const needs = place === 'needs' && els.needs;
+  const home =
+    state.reviewSlot ||
+    (needs ? window.PersonalAssistantToday?.needsHost?.() || els.needs : els.root);
   if (els.offer.parentElement !== home) home.append(els.offer);
   els.offer.dataset.placement = place;
   els.offer.hidden = !view.visible || place === 'none';
@@ -2731,6 +2886,7 @@ function renderOffer(place) {
       }
     });
   }
+  renderHire(els, view.hire, state.offer);
   setText(els.question, view.question, false);
   if (els.structure) {
     // The proposed group and its member workspaces, drawn by the same renderer
@@ -2775,6 +2931,7 @@ function renderOffer(place) {
     els.receipt.dataset.layout = receipt.visible && receipt.group ? 'list' : 'grid';
     renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
+  renderMapRow(els.map, receipt.visible ? receipt.map : null);
   // What the agent found, once its first look has finished, and for an
   // assessment the one next request it suggested. Both are text the model
   // wrote: they are set as text, never as markup.
@@ -2786,20 +2943,56 @@ function renderOffer(place) {
     els.result.hidden = false;
   }
   if (els.plan) {
-    const lines = view.setup?.lines || view.plan?.lines || [];
+    // After a hire, its agent's first look follows the receipt as two lines.
+    const look = !view.setup && !view.plan && receipt.visible ? receipt.hireLook : null;
+    const lines = view.setup?.lines || view.plan?.lines || (look?.visible ? look.lines : []);
     renderSetupLines(els.plan, lines);
     els.plan.hidden = !lines.length;
-    els.plan.dataset.mode = view.setup ? view.setup.status : 'plan';
+    els.plan.dataset.mode = view.setup ? view.setup.status : look?.visible ? 'look' : 'plan';
+    setText(els.lookNote, look?.visible ? look.footnote : '');
+    // A hire's lines are what happens besides the hire, under their heading.
+    const heading = !view.setup && lines.length ? view.hire?.linesHeading || '' : '';
+    els.plan.setAttribute('aria-label', heading || 'What Set up does');
+    if (els.planHeading) {
+      els.planHeading.hidden = !heading;
+      setText(els.planHeadingText, heading, false);
+      els.planHeading.querySelector('[data-folder-action]')?.remove();
+      const adjust = heading ? view.hire.adjust : null;
+      if (adjust) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-link pa-folder__plan-adjust';
+        button.dataset.folderAction = adjust.id;
+        button.textContent = adjust.label;
+        button.disabled = state.busy;
+        button.addEventListener('click', () => runAction(adjust));
+        els.planHeading.append(button);
+      }
+    }
   }
   if (els.actions) {
-    els.actions.replaceChildren();
     els.actions.hidden =
       view.decided &&
       !receipt.route &&
       !receipt.homeRoute &&
       !(firstLook.visible && firstLook.actions.length) &&
       (!view.resume || !(view.actions || []).length);
-    if (firstLook.visible) {
+    const showView = !receipt.route && !receipt.homeRoute && (!view.decided || view.resume);
+    // The row is rebuilt only when what it offers changes: a poll that redraws
+    // a running look's card must not swap Stop out from under a click.
+    const signature = JSON.stringify({
+      offer: state.offer?.id || '',
+      look: firstLook.visible ? firstLook.actions : null,
+      route: receipt.route || '',
+      open: receipt.openLabel || '',
+      home: receipt.homeRoute || '',
+      actions: showView ? view.actions : null,
+      busy: state.busy
+    });
+    const rebuild = els.actions.dataset.signature !== signature;
+    els.actions.dataset.signature = signature;
+    if (rebuild) els.actions.replaceChildren();
+    if (rebuild && firstLook.visible) {
       // The first look's own actions: its one primary (Start first look, Try
       // again, or the report) and the workspace as the other.
       firstLook.actions.forEach(action => {
@@ -2813,25 +3006,28 @@ function renderOffer(place) {
         } else {
           control.type = 'button';
           control.disabled = action.busy === true;
-          control.addEventListener('click', () => void startFirstLook());
+          control.addEventListener(
+            'click',
+            () => void (action.stop ? stopFirstLook() : startFirstLook())
+          );
         }
         els.actions.append(control);
       });
-    } else if (receipt.route) {
+    } else if (rebuild && receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = receipt.route;
       open.textContent = receipt.openLabel;
       els.actions.append(open);
     }
-    if (receipt.homeRoute) {
+    if (rebuild && receipt.homeRoute) {
       const home = document.createElement('a');
       home.className = 'btn btn-sm btn-outline-secondary';
       home.href = receipt.homeRoute;
       home.textContent = 'Review this link in the Home library';
       els.actions.append(home);
     }
-    if (!receipt.route && !receipt.homeRoute && (!view.decided || view.resume)) {
+    if (rebuild && showView) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -2914,7 +3110,7 @@ function render() {
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderRunModal();
-  placeFinishedRun();
+  announceFinishedRun();
   syncSetupPolling();
 }
 
@@ -3151,9 +3347,16 @@ async function startOneCardSetup(action) {
   try {
     const body = { plan_digest: digest };
     if (action?.entry) body.entry_name = action.entry;
+    // The brief the user typed; untouched, the server applies the plan's own
+    // default, and a cleared field is sent empty for the same default.
+    const brief = offer.plan?.brief_default ? briefFor(offer) : null;
+    if (brief !== null) body.brief = brief;
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
+      // The assistant says, in its own words and once, that the hire is made.
+      const hire = offer.plan?.hire;
+      if (hire) sayInConversation(hiredLine(hire.agent_name || hire.role_label));
       // Show the run in a pop-up so it is plain that the assistant is working.
       openRunModal();
       return;
@@ -3276,6 +3479,29 @@ async function refreshFirstLook(offerID) {
   render();
   announceOffer();
   if (before !== after) firstLookMoved();
+  // A hired agent's look that this page watched finish: the assistant points
+  // at its report.
+  if (
+    before === 'running' &&
+    after === 'finished' &&
+    state.offer?.id === id &&
+    state.offer?.outcome?.first_look
+  ) {
+    const look = state.offer.first_task;
+    sayInConversation(reportedLine(look?.agent, state.offer.subject?.name || look?.folder_name));
+  }
+}
+
+// sayInConversation adds one line the host wrote to the assistant's
+// conversation on this page. No model turn is spent on it, and it is not part
+// of the stored history.
+function sayInConversation(line) {
+  if (typeof window === 'undefined' || !line) return;
+  try {
+    window.OriAskRouting?.appendMessage?.('assistant', line);
+  } catch (_) {
+    // A page without the conversation shows the card alone.
+  }
 }
 
 // startFirstLook is the one click that spends model tokens on a folder's first
@@ -3348,6 +3574,46 @@ async function startFirstLook() {
   // already running, or finished, somewhere else: the card then shows that.
   await refreshFirstLook(look.offer_id);
   return { started, message };
+}
+
+// FIRST_LOOK_NOT_STOPPED is what a Stop the server could not carry out says.
+const FIRST_LOOK_NOT_STOPPED = 'The first look could not be stopped. Try again.';
+
+// stopFirstLook is Stop on a running first look: the run is stopped and the
+// same look is put back to wait for Start first look. The workspace, its agent
+// and the folder link stay as they are.
+async function stopFirstLook() {
+  const look = currentFirstLook();
+  if (!look || look.state !== 'running' || state.firstLookBusy) return false;
+  const workspaceID = String(look.workspace_id || '').trim();
+  if (!workspaceID) return false;
+  state.firstLookBusy = true;
+  state.firstLookMessage = '';
+  render();
+  let stopped = false;
+  try {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspaceID)}/folder-first-task/stop`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      }
+    );
+    const payload = await readJSON(response);
+    // A look that already ended is not running to stop: the read below says so.
+    stopped = response.ok && (payload?.stopped === true || payload?.reason === 'not_running');
+  } catch (_) {
+    stopped = false;
+  }
+  state.firstLookBusy = false;
+  await refreshFirstLook(look.offer_id);
+  if (stopped) firstLookMoved();
+  else {
+    state.firstLookMessage = FIRST_LOOK_NOT_STOPPED;
+    render();
+  }
+  return stopped;
 }
 
 async function pollSetup() {
@@ -3592,7 +3858,10 @@ function startManualTidy() {
 function act(actionId) {
   const view = folderOfferView(state.offer, { confirm: state.confirm });
   if (!view.visible || (view.decided && !view.resume)) return false;
-  const action = (view.actions || []).find(candidate => candidate.id === actionId);
+  // A hire's Adjust sits beside its lines rather than in the action row.
+  const action = [...(view.actions || []), ...(view.hire?.adjust ? [view.hire.adjust] : [])].find(
+    candidate => candidate.id === actionId
+  );
   if (!action) return false;
   runAction(action);
   return true;
@@ -4226,9 +4495,6 @@ function init() {
     const look = currentFirstLook();
     if (look?.state === 'running') void refreshFirstLook(look.offer_id);
   });
-  // A run that finished inside the drawer is placed once the drawer stops
-  // covering the Map.
-  document.addEventListener('personal-assistant:closed', placeFinishedRun);
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   els.assistantName?.addEventListener('input', () => {
@@ -4236,6 +4502,9 @@ function init() {
   });
   els.workspaceName?.addEventListener('input', () => {
     state.workspaceName = els.workspaceName.value;
+  });
+  els.brief?.addEventListener('input', () => {
+    state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };
   });
   window.PersonalAssistantFolder = {
     open: openChooser,
@@ -4287,7 +4556,18 @@ function init() {
       closeRunModal();
       render();
     },
-    act
+    act,
+    // The brief typed for an offer's hire, shared by every surface that asks
+    // the hire's question (the drawer's card and the mission card): null while
+    // it is the plan's own default.
+    brief: offer => briefFor(offer),
+    setBrief: (offerId, value) => {
+      if (!offerId) return;
+      state.brief = { offerId: String(offerId), value: String(value ?? ''), typed: true };
+      const els = elements();
+      if (els?.brief && document.activeElement !== els.brief && state.offer?.id === offerId)
+        els.brief.value = state.brief.value;
+    }
   };
 }
 

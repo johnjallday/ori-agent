@@ -62,6 +62,8 @@ func TestReviewContext_StatusAndControlsAreReadOnly(t *testing.T) {
 func TestReviewContext_ASoftwareProjectCardIsDescribedAsItStands(t *testing.T) {
 	reviewed := &personalassistant.FolderSoftwareReviewView{FolderSoftwareReview: personalassistant.FolderSoftwareReview{EvidenceRevision: "revision-1"}}
 	plan := &personalassistant.FolderSetupPlan{Lines: []personalassistant.FolderPlanLine{{Name: "Creates the workspace Widget"}}}
+	hired := *plan
+	hired.Hire = &personalassistant.FolderHire{Mode: personalassistant.FolderHireCreate, AgentName: "Development Assistant"}
 	linked := personalassistant.FolderExistingProject{WorkspaceID: "ws-1", Name: "Widget", Route: "/workspaces/widget"}
 	software := linked
 	software.Software = true
@@ -78,6 +80,8 @@ func TestReviewContext_ASoftwareProjectCardIsDescribedAsItStands(t *testing.T) {
 			"awaiting_confirmation", "", []string{"Review setup", "Keep chatting"}},
 		{"reviewed with a plan", personalassistant.FolderSoftwareView{SetupAvailable: true, Review: reviewed}, plan, "",
 			"awaiting_confirmation", "", []string{"Set up", "Adjust names…", "Review again", "Keep chatting"}},
+		{"reviewed with a hire", personalassistant.FolderSoftwareView{SetupAvailable: true, Review: reviewed}, &hired, "",
+			"awaiting_confirmation", "", []string{"Hire and start", "Adjust", "Not now", "Review again", "Keep chatting"}},
 		{"reviewed where setup cannot run", personalassistant.FolderSoftwareView{Review: reviewed}, plan, "",
 			"setup_unavailable", "setup_path_unavailable", []string{"Adjust names…", "Review again", "Keep chatting"}},
 		{"reviewed, no plan", personalassistant.FolderSoftwareView{SetupAvailable: true, Review: reviewed}, nil, "assistant_unavailable",
@@ -110,6 +114,27 @@ func TestReviewContext_ASoftwareProjectCardIsDescribedAsItStands(t *testing.T) {
 				t.Fatalf("detached: %+v", detached)
 			}
 		})
+	}
+}
+
+// A recognized project whose plan names a hire is described with the hire
+// card's own controls; one without keeps Set up.
+func TestReviewContext_AHiredPlanIsDescribedWithHireAndStart(t *testing.T) {
+	plan := &personalassistant.FolderSetupPlan{Lines: []personalassistant.FolderPlanLine{{Name: "Creates a song workspace"}}}
+	hired := *plan
+	hired.Hire = &personalassistant.FolderHire{Mode: personalassistant.FolderHireCreate, AgentName: "Song Assistant"}
+	for _, test := range []struct {
+		plan     *personalassistant.FolderSetupPlan
+		controls []string
+	}{
+		{&hired, []string{"Hire and start", "Adjust", "Keep chatting"}},
+		{plan, []string{"Set up", "Adjust…", "Keep chatting"}},
+	} {
+		view := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending, Subject: personalassistant.FolderSubjectView{Name: "My Song"},
+			Capability: &personalassistant.FolderCapabilityView{}, Plan: test.plan}
+		if got := projectReviewContext(view, true); got.Status != "awaiting_confirmation" || !reflect.DeepEqual(got.Controls, test.controls) {
+			t.Fatalf("hire %v: %+v", test.plan.Hire != nil, got)
+		}
 	}
 }
 

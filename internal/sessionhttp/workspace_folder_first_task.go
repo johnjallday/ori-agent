@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -96,7 +97,7 @@ func (h *Handler) folderFirstTaskStartsOnClick(ws *agentworkspace.Workspace) boo
 			return false
 		}
 		assignee := strings.TrimSpace(task.To)
-		if task.Status != agentworkspace.TaskStatusPending || assignee == "" || strings.EqualFold(assignee, "unassigned") {
+		if !waitsToStart(task) || assignee == "" || strings.EqualFold(assignee, "unassigned") {
 			return false
 		}
 		return !h.setupWizardOpening(ws.ID) && h.firstTaskRecipeReason(task) == ""
@@ -143,32 +144,59 @@ func (h *Handler) handleFolderFirstTaskRead(w http.ResponseWriter, r *http.Reque
 }
 
 // handleFolderFirstTaskStart serves POST /api/workspaces/{id}/folder-first-task/start,
-// the Start first look click for a shown folder's first task. Inside one store
-// update it finds the unconsumed task and stamps the marker, then starts the task
-// through the same manual-execution path as pressing Start on it. It is
-// idempotent across clicks and tabs. A task with no agent, or a setup wizard
-// still open, is left seeded and unconsumed so a later click starts it.
+// the Start first look click for a shown folder's first task. The start itself
+// is StartFolderFirstTask, which a folder setup also calls under its consent.
 func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	if r.Method != http.MethodPost {
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
+	start := h.StartFolderFirstTask(r.Context(), workspaceID)
+	body := map[string]any{"success": true, "started": start.Started}
+	if start.Reason != "" {
+		body["reason"] = start.Reason
+	}
+	if start.TaskID != "" {
+		body["task_id"] = start.TaskID
+	}
+	_ = orihttp.RespondSuccess(w, body)
+}
+
+// FolderFirstTaskStart is how one start of a folder's first task went:
+// started, or the reason it was not, with the task when there is one.
+type FolderFirstTaskStart struct {
+	Started bool
+	Reason  string
+	TaskID  string
+}
+
+// waitsToStart says the task has not begun: its ticket is Ready, assigned or
+// not. A task stopped mid-run is put back there with its agent kept.
+func waitsToStart(task *agentworkspace.Task) bool {
+	return task.CanonicalState() == agentworkspace.TicketStateReady &&
+		(task.Status == agentworkspace.TaskStatusPending || task.Status == agentworkspace.TaskStatusAssigned)
+}
+
+// StartFolderFirstTask starts a shown folder's first task, once. Inside one
+// store update it finds the unconsumed task and stamps the marker, then starts
+// the task through the same manual-execution path as pressing Start on it. It
+// is idempotent across clicks, tabs and a setup that starts it under its
+// consent. A task with no agent, or a setup wizard still open, is left seeded
+// and unconsumed so a later click starts it.
+func (h *Handler) StartFolderFirstTask(ctx context.Context, workspaceID string) FolderFirstTaskStart {
 	store := h.taskMutationStore()
 	if store == nil {
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "no_task_store"})
-		return
+		return FolderFirstTaskStart{Reason: "no_task_store"}
 	}
-	if err := agentworkspace.RequireWorkspaceExecution(r.Context(), store, workspaceID, true); err != nil {
+	if err := agentworkspace.RequireWorkspaceExecution(ctx, store, workspaceID, true); err != nil {
 		reason := "admission_unavailable"
 		if errors.Is(err, agentworkspace.ErrWorkspaceExecutionInactive) {
 			reason = "local_activation_required"
 		}
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": reason})
-		return
+		return FolderFirstTaskStart{Reason: reason}
 	}
 	if h.setupWizardOpening(workspaceID) {
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "setup_wizard_opening"})
-		return
+		return FolderFirstTaskStart{Reason: "setup_wizard_opening"}
 	}
 
 	var (
@@ -185,7 +213,7 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 				reason = "already_consumed"
 				return errFolderFirstTaskNoChange
 			}
-			if task.Status != agentworkspace.TaskStatusPending {
+			if !waitsToStart(task) {
 				// Already started by hand (or finished): not this trigger's to run.
 				reason = "not_pending"
 				return errFolderFirstTaskNoChange
@@ -209,12 +237,10 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 	})
 	if err != nil && !errors.Is(err, errFolderFirstTaskNoChange) {
 		logger.Warn("Folder first task start sweep failed", logger.Fields{"workspace_id": workspaceID, "error": err})
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "workspace_unavailable"})
-		return
+		return FolderFirstTaskStart{Reason: "workspace_unavailable"}
 	}
 	if taskID == "" {
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": reason})
-		return
+		return FolderFirstTaskStart{Reason: reason}
 	}
 
 	// The marker is committed: from here the outcome is started or
@@ -222,17 +248,78 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 	if h.templateSetupStarter == nil {
 		logger.Warn("Folder first task consumed but no starter is wired", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
 		h.markFolderFirstTaskStartFailed(store, workspaceID, taskID)
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "execution_unavailable", "task_id": taskID})
-		return
+		return FolderFirstTaskStart{Reason: "execution_unavailable", TaskID: taskID}
 	}
 	if err := h.templateSetupStarter(workspaceID, taskID); err != nil {
 		logger.Warn("Folder first task failed to start", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "error": err})
 		h.markFolderFirstTaskStartFailed(store, workspaceID, taskID)
-		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "start_failed", "task_id": taskID})
-		return
+		return FolderFirstTaskStart{Reason: "start_failed", TaskID: taskID}
 	}
 	logger.Info("Folder first task started", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": true, "task_id": taskID})
+	return FolderFirstTaskStart{Started: true, TaskID: taskID}
+}
+
+// handleFolderFirstTaskStop serves POST /api/workspaces/{id}/folder-first-task/stop:
+// Stop on a running first look. The run is cancelled and the same task is put
+// back to wait for Start first look; the workspace, its agent and the folder
+// link stay as they are.
+func (h *Handler) handleFolderFirstTaskStop(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	stopped, reason, taskID := h.StopFolderFirstTask(r.Context(), workspaceID)
+	body := map[string]any{"success": true, "stopped": stopped}
+	if reason != "" {
+		body["reason"] = reason
+	}
+	if taskID != "" {
+		body["task_id"] = taskID
+	}
+	_ = orihttp.RespondSuccess(w, body)
+}
+
+// StopFolderFirstTask stops a running first look and makes it startable again:
+// its run is cancelled and its ticket put back to Ready, then its one-start
+// marker is cleared, so Start first look starts the same task once more. A look
+// that is not running is left as it is.
+func (h *Handler) StopFolderFirstTask(ctx context.Context, workspaceID string) (stopped bool, reason, taskID string) {
+	store := h.taskMutationStore()
+	if store == nil || h.firstTaskStopper == nil {
+		return false, "stop_unavailable", ""
+	}
+	ws, err := store.Get(workspaceID)
+	if err != nil || ws == nil {
+		return false, "workspace_unavailable", ""
+	}
+	task := personalassistant.FindFolderFirstTask(ws)
+	if task == nil {
+		return false, "no_first_task", ""
+	}
+	taskID = task.ID
+	if personalassistant.FolderFirstTaskStateOf(task) != personalassistant.FolderFirstTaskRunning {
+		return false, "not_running", taskID
+	}
+	if err := h.firstTaskStopper(ctx, workspaceID, taskID); err != nil {
+		logger.Warn("Folder first task could not be stopped", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "error": err})
+		return false, "stop_failed", taskID
+	}
+	err = store.Update(workspaceID, func(ws *agentworkspace.Workspace) error {
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == taskID && isFolderFirstTask(&ws.Tasks[i]) {
+				delete(ws.Tasks[i].Context, taskContextFolderFirstTaskConsumedAt)
+				delete(ws.Tasks[i].Context, personalassistant.FolderFirstTaskStartFailedKey)
+				return nil
+			}
+		}
+		return errFolderFirstTaskNoChange
+	})
+	if err != nil {
+		logger.Warn("Stopped folder first task kept its start marker", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "error": err})
+		return false, "stop_failed", taskID
+	}
+	logger.Info("Folder first task stopped", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
+	return true, "", taskID
 }
 
 // markFolderFirstTaskStartFailed records that the spent start never began, so

@@ -7169,61 +7169,10 @@ test('Set it up runs the reviewed plan and follows the run until it made the wor
   ]);
   assert.equal(hidden.length, 1);
   assert.equal(queue.length, 0);
-  // The dialog closes onto the Map, which asks where the Home and the song sit.
-  assert.deepEqual(JSON.parse(JSON.stringify(begun)), [
-    {
-      token: 'build:build-1',
-      created: {
-        member: { id: 'ws-song', name: 'Ori Music Demo' },
-        group: { id: 'ws-home', name: 'Music Production Home' }
-      }
-    }
-  ]);
-});
-
-test('the Map asks only once the dialog has hidden, so its canvas keeps the keyboard', () => {
-  const listeners = {};
-  const modal = {
-    classList: { contains: name => name === 'show' },
-    addEventListener: (type, fn, options) => (listeners[type] = { fn, options })
-  };
-  let hidden = 0;
-  const begun = [];
-  const manager = loadSessionManager(
-    undefined,
-    {
-      bootstrap: { Modal: { getInstance: () => ({ hide: () => hidden++ }) } },
-      OriWorkspaceMap: { beginPlacement: spec => (begun.push(spec.token), true) }
-    },
-    { getElementById: id => (id === 'addFolderModal' ? modal : null) }
-  );
-  manager.notifyWorkspacesChanged = () => {};
-  manager.showToast = () => {};
-  manager.finishWorkspaceBuildSetupInDialog(
-    { session: { plan: { home: { name: 'Music Production Home' } } } },
-    { id: 'b1', status: 'created', created_workspace_id: 'ws-song', home_workspace_id: 'ws-home' }
-  );
-  assert.equal(hidden, 1);
-  assert.deepEqual(begun, [], 'nothing is asked while the dialog is still closing');
-  assert.equal(listeners['hidden.bs.modal'].options.once, true);
-  listeners['hidden.bs.modal'].fn();
-  assert.deepEqual(begun, ['build:b1']);
-});
-
-test('without a Map on screen the automatic layout stands and the toast says so', () => {
-  for (const map of [undefined, { beginPlacement: () => false }]) {
-    const manager = loadSessionManager(undefined, map ? { OriWorkspaceMap: map } : {});
-    const toasts = [];
-    manager.showToast = (message, type) => toasts.push([message, type]);
-    assert.equal(
-      manager.placeCreatedOnWorkspaceMap('build:b', { memberId: 'ws-song', memberName: 'Song' }),
-      false
-    );
-    assert.deepEqual(toasts, [['Placed automatically on the Map', 'info']]);
-  }
-  const manager = loadSessionManager();
-  manager.showToast = () => assert.fail('nothing was made, nothing is said');
-  assert.equal(manager.placeCreatedOnWorkspaceMap('build:b', {}), false);
+  // The dialog closes onto the Map, whose automatic layout places what the
+  // run made: nothing asks where it sits (FR22).
+  assert.deepEqual(begun, []);
+  assert.equal(typeof manager.placeCreatedOnWorkspaceMap, 'undefined');
 });
 
 test('a refused Set it up says why and does not follow anything', async () => {
@@ -7274,6 +7223,42 @@ test('a refused Set it up says why and does not follow anything', async () => {
   await manager.setUpWorkspaceBuild({ entry_name: 'Take Two.rpp' });
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
     { version: 4, plan_digest: 'run-digest', entry_name: 'Take Two.rpp' }
+  ]);
+});
+
+test('Hire and start sends the brief the pane shows, from either button', async () => {
+  const manager = loadSessionManager();
+  let paneBrief = 'Mix the chorus first.';
+  manager.workspaceBuildPane = () => ({
+    COPY: {},
+    applySession() {},
+    setBusy() {},
+    showLine() {},
+    setupBrief: () => paneBrief
+  });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.workspaceBuildScheduler = () => {};
+  const build = plannedBuild();
+  build.session.id = 'build-1';
+  build.session.version = 4;
+  build.session.plan.digest = 'digest-1';
+  manager.workspaceBuild = build;
+  const sent = [];
+  manager.workspaceBuildTransport = {
+    setup: async (id, body) => (sent.push(body), { ok: false, status: 409, body: {} })
+  };
+  // The pane's own button sends what its field holds.
+  await manager.setUpWorkspaceBuild({ brief: ' Find the risky parts. ' });
+  // The folder review's button reads the pane's field.
+  await manager.setUpWorkspaceBuild({});
+  // A plan that asks no question sends none.
+  paneBrief = null;
+  await manager.setUpWorkspaceBuild({});
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
+    { version: 4, plan_digest: 'digest-1', brief: 'Find the risky parts.' },
+    { version: 4, plan_digest: 'digest-1', brief: 'Mix the chorus first.' },
+    { version: 4, plan_digest: 'digest-1' }
   ]);
 });
 
@@ -7673,6 +7658,40 @@ test('folder review shows the actual effective team and constrains recognized pl
   assert.equal(nodes.get('workspaceBuildFolderTeamEdit').hidden, true);
   assert.equal(nodes.get('workspaceBuildFolderGoalField').hidden, true);
   assert.equal(nodes.get('workspaceBuildFolderPlacement').textContent, 'Music Production Home');
+  // A plan that names a hire titles the review with it, shows its agent and
+  // question (drawn by the pane), and is pressed as Hire and start.
+  for (const id of [
+    'workspaceBuildPlanReviewTitle',
+    'workspaceBuildPlanReviewSetup',
+    'workspaceBuildFolderEffects',
+    'workspaceBuildPlanReviewHire'
+  ])
+    nodes.set(id, new BuildNode('div', id));
+  const pane = manager.workspaceBuildPane;
+  const hosts = [];
+  const hire = {
+    headline: [
+      { text: 'Hire ' },
+      { text: 'Song Assistant' },
+      { text: ' for ' },
+      { text: 'Ori Music Demo' }
+    ]
+  };
+  manager.workspaceBuildPane = () => ({
+    ...pane?.(),
+    renderReviewHire: host => (hosts.push(host), hire)
+  });
+  manager.workspaceBuild.session.plan.hire = { mode: 'create', agent_name: 'Song Assistant' };
+  manager.syncWorkspaceBuildFolderReview();
+  assert.equal(hosts.at(-1), nodes.get('workspaceBuildPlanReviewHire'));
+  assert.equal(
+    nodes.get('workspaceBuildPlanReviewTitle').textContent,
+    'Hire Song Assistant for Ori Music Demo'
+  );
+  assert.equal(nodes.get('workspaceBuildPlanReviewSetup').textContent, 'Hire and start');
+  assert.match(nodes.get('workspaceBuildFolderEffects').textContent, /^Only Hire and start runs/);
+  manager.workspaceBuildPane = pane;
+  delete manager.workspaceBuild.session.plan.hire;
   manager.workspaceBuild.session.plan.ready = false;
   manager.syncWorkspaceBuildFolderReview();
   assert.equal(nodes.get('workspaceBuildFolderTeamEdit').hidden, true);

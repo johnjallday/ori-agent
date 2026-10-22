@@ -547,14 +547,21 @@ func TestFolderSetup_AcceptsOnlyTheDigestAndAnEntryNameAndNeverAPath(t *testing.
 	if !strings.Contains(w.Body.String(), `"running"`) {
 		t.Fatalf("the run state must reach the card: %s", w.Body.String())
 	}
-	// A stale plan is a 409 carrying the fresh offer, so the card can re-render.
-	stale := post(`{"request_id":"r2","plan_digest":"old"}`)
+	// The brief the user typed reaches the service as their words.
+	if w := post(`{"request_id":"r1b","plan_digest":"current","brief":"Get the mix ready."}`); w.Code != http.StatusOK ||
+		fake.setups[len(fake.setups)-1].Brief != "Get the mix ready." {
+		t.Fatalf("brief => %d %+v", w.Code, fake.setups)
+	}
+	// A stale plan is a 409 carrying the fresh offer, so the card can re-render,
+	// and the brief, so the field keeps what was typed.
+	stale := post(`{"request_id":"r2","plan_digest":"old","brief":"Get the mix ready."}`)
 	var body struct {
 		PlanChanged bool                              `json:"plan_changed"`
 		Offer       personalassistant.FolderOfferView `json:"offer"`
+		Brief       string                            `json:"brief"`
 	}
 	if stale.Code != http.StatusConflict || json.Unmarshal(stale.Body.Bytes(), &body) != nil || !body.PlanChanged ||
-		body.Offer.Plan == nil || len(body.Offer.Plan.Lines) != 1 {
+		body.Offer.Plan == nil || len(body.Offer.Plan.Lines) != 1 || body.Brief != "Get the mix ready." {
 		t.Fatalf("stale plan => %d %s", stale.Code, stale.Body.String())
 	}
 	// A folder the server no longer holds asks to be picked again.

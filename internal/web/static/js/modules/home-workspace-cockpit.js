@@ -315,6 +315,14 @@ export function parseViewFromQuery(search) {
 }
 
 /**
+ * The workspace a `?move=<id>` link asks Home to move on the Map: a folder
+ * setup's "On the Map · Move". '' without one.
+ */
+export function moveDeepLinkTarget(search) {
+  return String(new URLSearchParams(String(search || '')).get('move') || '').trim();
+}
+
+/**
  * Build the search string for a view change.
  *
  * Tree is explicit (`view=tree`); Map is the default and therefore REMOVES the
@@ -5083,7 +5091,33 @@ import {
     void refreshWorkspaceRoot();
     void refreshHQStatus();
     await refresh();
+    consumeMoveDeepLink();
     return state.onboardingGate;
+  }
+
+  // A folder setup's Move link (`?move=<id>`): the automatic layout placed the
+  // building, so once the Map has drawn it, it is selected with Move on. The
+  // parameter is dropped either way, so a reload never re-enters the move.
+  let moveDeepLinkRetries = 0;
+  function consumeMoveDeepLink() {
+    const id = moveDeepLinkTarget(window.location.search);
+    if (!id) return;
+    const started =
+      state.view === VIEW_MAP &&
+      Boolean(findWorkspace(state.flattened, id)) &&
+      Boolean(window.OriWorkspaceMap?.beginMove?.(id));
+    if (started) {
+      selectItem(id, { fromMap: true, openModal: false });
+      // The arrow keys go to the canvas, whatever the rail drew meanwhile.
+      els.map?.querySelector?.('[data-ws-map-viewport]')?.focus?.();
+    } else if (state.view === VIEW_MAP && moveDeepLinkRetries++ < 50) {
+      // The Map draws once its layout loads; try again shortly.
+      window.setTimeout(consumeMoveDeepLink, 200);
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete('move');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
   }
 
   applyView(state.view, { pushUrl: false });

@@ -54,7 +54,7 @@ var (
 	ErrBuildProviderUnavailable = errors.New("the Home's plugin cannot be installed right now")
 )
 
-const buildCopyProviderInstalled = "Installed %s %s. Set it up can run the plan now."
+const buildCopyProviderInstalled = "Installed %s %s. Hire and start can run the plan now."
 
 type buildHomeProviderRequest struct {
 	Version         int64  `json:"version"`

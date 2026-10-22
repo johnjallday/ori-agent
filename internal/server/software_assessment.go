@@ -81,9 +81,12 @@ func (r softwareAssessmentRunner) Brief(ctx context.Context, task workspace.Task
 		}
 	}
 
-	brief := softwareassessment.Build(assessmentProjectName(ws), evidence, softwareassessment.TierFull)
+	// What the owner asked the hired assistant to do is the workspace's goal:
+	// the brief from its hire card, or whatever they changed it to since.
+	intent := strings.TrimSpace(ws.Mission)
+	brief := softwareassessment.BuildWithIntent(assessmentProjectName(ws), intent, evidence, softwareassessment.TierFull)
 	if !brief.Fits(contextWindow) {
-		brief = softwareassessment.Build(assessmentProjectName(ws), evidence, softwareassessment.TierCompact)
+		brief = softwareassessment.BuildWithIntent(assessmentProjectName(ws), intent, evidence, softwareassessment.TierCompact)
 	}
 	if !brief.Fits(contextWindow) {
 		return workspace.RecipeBrief{}, &workspace.TaskBlockedError{

@@ -163,6 +163,10 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.handleFolderFirstTaskStart(w, r, id)
 				return
 			}
+			if len(parts) == 3 && parts[2] == "stop" {
+				h.handleFolderFirstTaskStop(w, r, id)
+				return
+			}
 			if len(parts) == 2 {
 				h.handleFolderFirstTaskRead(w, r, id)
 				return

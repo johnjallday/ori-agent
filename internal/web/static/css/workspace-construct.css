@@ -2969,10 +2969,15 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   gap: 8px;
   min-height: 0;
 }
-.workspace-create-modal .workspace-build-pane .workspace-build-plan__lines {
-  flex: 1 1 auto;
-  min-height: 0;
+/* The body scrolls as one, a hire's question included, so the title and the
+   button stay put without covering it. */
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__body {
   overflow-y: auto;
+}
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__lines,
+.workspace-create-modal .workspace-build-pane .workspace-build-plan__hire {
+  flex: none;
+  overflow: visible;
 }
 /* The sketch is for the wide pane; narrow, the lines and Set it up come first. */
 .workspace-create-modal .workspace-build-plan__sketch[hidden],
@@ -3031,6 +3036,36 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+/* A plan that names a hire is titled by it, in sentence case, with the agent's
+   badge and the one question under it (create-workspace-build-pane.js). The
+   card's own rules are Home's (home-command.css); these give them the
+   dialog's colours. */
+.workspace-create-modal .workspace-build-plan__title--hire {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+.workspace-create-modal .workspace-build-plan__hire {
+  margin: 0;
+}
+.workspace-create-modal .workspace-build-plan__hire .pa-folder__hire-agent,
+.workspace-create-modal .workspace-build-plan__hire .pa-folder__note {
+  margin: 0;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-build-plan__hire .pa-folder__hire-initials {
+  border-color: var(--wc-line);
+  background: var(--wc-panel-deep);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-build-plan__hire .pa-folder__brief-label {
+  color: var(--wc-ink);
 }
 /* The kickers over the sketch ("You'll get") and the lines ("Ori will"). */
 .workspace-create-modal .workspace-build-plan__kicker {

@@ -74,7 +74,13 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 	if view.Recipe != "" {
 		h.describeRecipeFirstTask(ctx, ws, task, &view)
 	} else {
-		view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, ws.Name)
+		view.Message = personalassistant.FolderFirstTaskMessageFor(view.Reason, ws.Name, view.Agent)
+		if state == personalassistant.FolderFirstTaskFinished {
+			// A generic look ends with the same one suggested next task an
+			// assessment does; a reply without one still finished.
+			view.ReportRoute = route + "/task/" + url.PathEscape(task.ID)
+			view.NextRequest = softwareassessment.NextTask(task.Result)
+		}
 	}
 	view.Detail = personalassistant.FolderFirstTaskViewDetail(view, task.Result)
 	return view, true

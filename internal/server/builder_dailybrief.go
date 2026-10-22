@@ -294,6 +294,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssignment.SetBriefService(briefService)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
+	b.personalAssistantHandler.SetFirstLookActions(firstLookActionsHost{builder: b})
 	b.personalAssistantHandler.SetRecoveryService(recovery)
 	b.personalAssistantHandler.SetHQSetupService(b.personalAssistantHQSetup)
 	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)

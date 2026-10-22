@@ -50,6 +50,54 @@ func reviewedObservation(t *testing.T, chip, candidateName string) (*folderDiges
 	return f, service, target, offer.ID, creator, active
 }
 
+// A card waiting on Home for the very song a conversation now reviews gives
+// way: it is closed and the conversation's review is the one card. A card for
+// another folder still keeps the review away.
+func TestFolderConversationReview_TheSameSongsHomeCardGivesWay(t *testing.T) {
+	f, service, source := observationFixture(t)
+	ctx := context.Background()
+	song := filepath.Join(f.home, "Music", "Ori Music Demo")
+	other := filepath.Join(f.home, "Music", "Second Song")
+	writeFolderFiles(t, song, "Ori Music Demo.rpp", "Media/take.wav")
+	writeFolderFiles(t, other, "Second Song.rpp", "Media/take.wav")
+	homeCard := func(root string) FolderOfferView {
+		t.Helper()
+		f.service.deps.ResolveSelection = func(string) (string, error) { return root, nil }
+		view, err := f.service.ScanSelection(ctx, "local", "token")
+		if err != nil || view.Status != FolderOfferPending {
+			t.Fatalf("Home card for %s: %+v %v", root, view, err)
+		}
+		return view
+	}
+
+	waiting := homeCard(other)
+	observation := observeSelected(t, f, service, source, song)
+	candidate := observation.Projects[0].ID
+	if _, err := service.Review(ctx, source, "conversation", observation.ID, candidate); !errors.Is(err, ErrFolderReviewPending) {
+		t.Fatalf("another folder's card waits for its own answer: %v", err)
+	}
+	if _, err := f.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+		d.Offer(waiting.ID).Status = FolderOfferClosed
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	same := homeCard(song)
+	observation = observeSelected(t, f, service, source, song)
+	view, err := service.Review(ctx, source, "conversation", observation.ID, observation.Projects[0].ID)
+	if err != nil || view.ConversationID != "conversation" || view.Status != FolderOfferPending {
+		t.Fatalf("the conversation's review: %+v %v", view, err)
+	}
+	doc, _ := f.store.Read(ctx, "local")
+	if closed := doc.Offer(same.ID); closed == nil || closed.Status != FolderOfferClosed {
+		t.Fatalf("the same song's Home card: %+v", closed)
+	}
+	if pending := doc.Pending(); pending == nil || pending.ID != view.ID {
+		t.Fatalf("one card for the song: %+v", pending)
+	}
+}
+
 func TestFolderConversationReview_ReadCancelAndRetryDoNotCreateOrLearn(t *testing.T) {
 	f, service, target, id, creator, _ := reviewedObservation(t, "desktop", "Desktop")
 	ctx := context.Background()

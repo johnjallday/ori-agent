@@ -317,6 +317,209 @@ body.home-command-page .home-command-bridge * {
   display: none;
 }
 
+/* A recognized project's plan as a hire: the agent's badge and role, then the
+   one question whose answer becomes the workspace goal. */
+.pa-folder__hire {
+  display: grid;
+  gap: 10px;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.pa-folder__hire[hidden],
+.pa-folder__brief[hidden],
+.pa-folder__plan-heading[hidden] {
+  display: none;
+}
+
+.pa-folder__hire-agent {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  min-width: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pa-folder__hire-initials {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 8px;
+  background: var(--hc-panel);
+  color: var(--hc-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.pa-folder__brief {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pa-folder__brief-label {
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.pa-folder__brief textarea {
+  width: 100%;
+  min-height: 4.5em;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+/* What happens besides the hire: the plan's lines under a quieter heading, with
+   Adjust beside it. */
+.pa-folder__plan-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.5rem 0 -0.25rem;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pa-folder__plan-adjust {
+  padding: 0;
+  font-size: 12px;
+}
+
+/* A hired agent's first-look report, under Needs you on Home and in the
+   drawer on every other page: who did it, what it found, what it suggests
+   first, and its actions. It wraps rather than scrolls at phone width. */
+.personal-assistant-today__reports,
+.personal-assistant-panel__reports {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.personal-assistant-panel__reports {
+  margin: 0 0 0.75rem;
+}
+
+.personal-assistant-today__reports[hidden],
+.personal-assistant-panel__reports[hidden] {
+  display: none;
+}
+
+.first-look-report {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 10px;
+  background: var(--hc-panel);
+  overflow-wrap: anywhere;
+}
+
+.first-look-report__by {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.first-look-report__initials {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 8px;
+  color: var(--hc-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.first-look-report__agent {
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.first-look-report__meta,
+.first-look-report__evidence {
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+}
+
+.first-look-report__title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.first-look-report__summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.first-look-report__suggestion {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--hc-line);
+  border-radius: 8px;
+  background: var(--hc-panel-raised);
+}
+
+.first-look-report__eyebrow {
+  color: var(--hc-ink-dim);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.first-look-report__suggestion-text {
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.first-look-report__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.first-look-report__report {
+  font-size: 12.5px;
+  justify-self: start;
+}
+
+/* Where the hired agent's building sits on the Map, and Move (FR23). The same
+   row closes a folder setup's receipt. */
+.first-look-report__map,
+.pa-folder__map {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.first-look-report__map-label,
+.pa-folder__map-label {
+  color: var(--hc-ink);
+  font-weight: 650;
+}
+
 /* Connect your second brain: the vaults Obsidian lists, the folder the consent
    card names, and the open items behind Show everything. */
 .pa-second-brain__vaults {

@@ -44,6 +44,21 @@
   <section id="personalAssistantFolderOffer" class="pa-thread__reply pa-specialist-offer pa-folder__offer"
            aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
     <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
+    <!-- A recognized project's plan as a hire: the agent the setup hires for the
+         folder, and the one question whose answer becomes the workspace goal.
+         Text only, from the server's hire facts. -->
+    <div id="personalAssistantFolderHire" class="pa-folder__hire" hidden>
+      <p class="pa-folder__hire-agent">
+        <span id="personalAssistantFolderHireInitials" class="pa-folder__hire-initials" aria-hidden="true"></span>
+        <span id="personalAssistantFolderHireDetail"></span>
+      </p>
+      <div id="personalAssistantFolderBriefField" class="pa-folder__brief" hidden>
+        <label for="personalAssistantFolderBrief" class="pa-folder__brief-label">What should it do with it?</label>
+        <textarea id="personalAssistantFolderBrief" class="form-control form-control-sm" rows="3" maxlength="300"
+                  aria-describedby="personalAssistantFolderBriefHint"></textarea>
+        <p id="personalAssistantFolderBriefHint" class="pa-folder__note">This becomes the workspace goal. You can change it later.</p>
+      </div>
+    </div>
     <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
     <!-- A folder of several projects: the proposed group and its member
          workspaces. Text only, written by the server. -->
@@ -67,9 +82,17 @@
          (folder-recognition-lines.js). Text only, from server facts. -->
     <p id="personalAssistantFolderOfferRecognition" class="pa-folder__note pa-folder__recognition" hidden></p>
     <p id="personalAssistantFolderOfferNeeds" class="pa-folder__note pa-folder__needs" hidden></p>
+    <!-- A hire's plan lines sit under their own heading, with Adjust beside it. -->
+    <div id="personalAssistantFolderPlanHeading" class="pa-folder__plan-heading" hidden>
+      <span id="personalAssistantFolderPlanHeadingText"></span>
+    </div>
     <ul id="personalAssistantFolderPlan" class="pa-folder__plan" aria-label="What Set up does" hidden></ul>
+    <!-- Under a hired agent's first look while it reads. -->
+    <p id="personalAssistantFolderLookNote" class="pa-folder__note pa-folder__look-note" hidden></p>
     <ul id="personalAssistantFolderPrerequisites" class="pa-folder__facts" aria-label="What this setup needs" hidden></ul>
     <ul id="personalAssistantFolderReceipt" class="pa-folder__receipt" hidden></ul>
+    <!-- On the Map: where the automatic layout put the building, with Move. -->
+    <div id="personalAssistantFolderMap" hidden></div>
     <!-- What the agent found on its first look, one line; the full report is the
          task's ticket. Text only, written by the server. -->
     <p id="personalAssistantFolderFirstLookResult" class="pa-folder__first-look" hidden></p>

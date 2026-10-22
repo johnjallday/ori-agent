@@ -40,15 +40,25 @@ func (h *LLMTaskHandler) evaluateMissionGate(task Task, toolName string) error {
 // applies to a delegated subtask, or "" when the task isn't a delegated subtask
 // or the workspace has no policy configured (then the gate does not apply, so
 // delegation in non-policy workspaces behaves like ordinary task execution).
+// A task whose context asks for the workspace's gate (a suggestion started
+// from a folder's first look) always gets it, Watch when none is set.
 func (h *LLMTaskHandler) delegatedSubtaskAutonomyPolicy(task Task) AutonomyPolicy {
-	if task.AssignmentMode != TaskAssignmentModeDynamicDelegation || h.workspaceStore == nil {
+	asked := task.Context[TaskContextAutonomyGate] == TaskAutonomyGateWorkspace
+	if !asked && task.AssignmentMode != TaskAssignmentModeDynamicDelegation {
 		return ""
 	}
-	ws, err := h.workspaceStore.Get(task.WorkspaceID)
-	if err != nil || ws == nil {
-		return ""
+	var policy AutonomyPolicy
+	if h.workspaceStore != nil {
+		if ws, err := h.workspaceStore.Get(task.WorkspaceID); err == nil && ws != nil {
+			policy = ws.AutonomyPolicy
+		}
 	}
-	return ws.AutonomyPolicy
+	if asked {
+		// It fails closed: a workspace that cannot be read is Watch, never
+		// ungated.
+		return EffectiveAutonomyPolicy(policy)
+	}
+	return policy
 }
 
 // evaluateExecutionAutonomyGate applies the autonomy gate to a tool call. Mission

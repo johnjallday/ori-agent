@@ -74,7 +74,9 @@
     songs: 'bi-music-note-list',
     profile: 'bi-sliders',
     unavailable: 'bi-dash-circle',
-    arrangement: 'bi-bookmark-check'
+    arrangement: 'bi-bookmark-check',
+    first_look_read: 'bi-search',
+    first_look_suggest: 'bi-lightbulb'
   };
 
   // setupLineKindIcon is the Bootstrap icon class for one line kind.
@@ -125,10 +127,79 @@
     });
   }
 
+  const HIRE_MODES = ['create', 'bind', 'pending'];
+
+  // initialsOf is the two letters an agent's badge shows.
+  function initialsOf(name) {
+    const words = String(name || '')
+      .split(/\s+/)
+      .filter(word => /^[\p{L}\p{N}]/u.test(word));
+    return words
+      .slice(0, 2)
+      .map(word => Array.from(word)[0].toUpperCase())
+      .join('');
+  }
+
+  function segments(parts) {
+    return parts.map(part =>
+      typeof part === 'string'
+        ? { text: part, strong: false }
+        : { text: String(part.text), strong: true }
+    );
+  }
+
+  // hireView is a recognized project's plan presented as a hire: who the setup
+  // hires (or assigns) for the folder, the one question whose answer becomes the
+  // workspace goal, and the heading the plan's lines sit under. All of it is
+  // written from the server's hire facts; null when the plan names no hire.
+  // Home's card, the composer's card and the build pane show the same view.
+  function hireView(plan, subject, { needs = [] } = {}) {
+    const hire = plan?.hire;
+    if (!hire || typeof hire !== 'object' || !HIRE_MODES.includes(hire.mode)) return null;
+    const name = String(hire.agent_name || '').trim();
+    const role = String(hire.role_label || '').trim();
+    const model = String(hire.model || '').trim();
+    let headline;
+    if (name && hire.mode === 'bind')
+      headline = segments(['Assign ', { text: name }, ' to ', { text: subject }]);
+    else if (name) headline = segments(['Hire ', { text: name }, ' for ', { text: subject }]);
+    else {
+      const kind = role || 'project';
+      const article = /^[aeiou]/i.test(kind) ? 'an' : 'a';
+      headline = segments([`Hire ${article} ${kind} assistant for `, { text: subject }]);
+    }
+    const detail = name
+      ? [role ? `${role} role` : '', model ? `uses ${model}` : 'no model yet']
+          .filter(Boolean)
+          .join(' · ')
+      : `${role || 'Project'} role · named once its plugin is installed`;
+    // A plan that installs or enables a plugin first says its other lines happen
+    // once that is done.
+    const waits =
+      hire.mode === 'pending' ||
+      (Array.isArray(needs) && needs.some(need => need && need.state && need.state !== 'ready'));
+    const brief = String(plan.brief_default || '').trim();
+    return {
+      mode: hire.mode,
+      headline,
+      agent: { initials: initialsOf(name || role || 'Agent'), detail },
+      brief: brief
+        ? {
+            label: 'What should it do with it?',
+            value: brief,
+            hint: 'This becomes the workspace goal. You can change it later.'
+          }
+        : null,
+      linesHeading: waits ? 'Also, once installed' : 'Also, in the background',
+      adjust: null
+    };
+  }
+
   globalThis.OriFolderPlanLines = {
     setupLinesView,
     satisfiedLinesView,
     renderSetupLines,
-    setupLineKindIcon
+    setupLineKindIcon,
+    hireView
   };
 })();

@@ -119,6 +119,9 @@ type Handler struct {
 	// orchestration task handler); used by the template-setup first-open
 	// auto-start after the consumed marker is stamped.
 	templateSetupStarter func(workspaceID, taskID string) error
+	// firstTaskStopper stops a running folder first look and puts its task
+	// back to Ready (Stop on the card).
+	firstTaskStopper func(ctx context.Context, workspaceID, taskID string) error
 	// firstTaskRecipeGate answers, for a first task seeded under a host recipe,
 	// why it could not be run within that recipe's restriction right now ("" when
 	// it could). Unset means no recipe can run here: such a task stays seeded and
@@ -373,6 +376,12 @@ func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 // the manual-execution path, used by the template-setup first-open auto-start.
 func (h *Handler) SetTemplateSetupTaskStarter(fn func(workspaceID, taskID string) error) {
 	h.templateSetupStarter = fn
+}
+
+// SetFolderFirstTaskStopper injects the function that stops a running task
+// and puts it back to Ready, used by Stop on a folder's first look.
+func (h *Handler) SetFolderFirstTaskStopper(fn func(ctx context.Context, workspaceID, taskID string) error) {
+	h.firstTaskStopper = fn
 }
 
 // SetFirstTaskRecipeGate injects the check a first task under a host recipe
