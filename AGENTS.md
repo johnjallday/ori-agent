@@ -70,7 +70,10 @@ Worktrees share one machine, so the full unit gate runs one at a time: it holds
 a lock in `$TMPDIR`, and another worktree's gate waits, naming the holder, and
 clears a lock whose gate has died (`ORI_CI_LOCAL_LOCK=0` turns the queue off).
 It tests half the CPUs' worth of packages at once (`ORI_UNIT_TEST_PARALLEL=N`
-overrides); CI keeps Go's default.
+overrides), starts the heaviest packages first, and lets packages whose inputs
+did not change come back from Go's test cache (`ORI_UNIT_TEST_CACHE=0` reruns
+every package, as CI does; use it when chasing a flake). CI keeps Go's default
+parallelism and always reruns.
 
 **Both static checks have large pre-existing baselines; scope them to the change.**
 `make lint-new` uses `--new-from-merge-base=origin/dev`, as CI does. Do not use
