@@ -52,10 +52,46 @@ type hireBlueprint struct {
 	OpenRoles int
 }
 
-// hireBlueprintFor is the role's default blueprint: a workspace with the hired
-// agent as its only member.
-func hireBlueprintFor(types.AgentRole) hireBlueprint {
+// hireBlueprints is the default blueprint per catalog role (PRD requirement
+// 11): a Researcher's work is a Research Project and a Writer's a Writing
+// Project, with the hired agent in the primary role and the blueprint's other
+// two roles left open. Every other role gets a Blank workspace with the hired
+// agent as its only member. Code Project is never chosen: it needs a
+// repository, which is the folder hire's job. OpenRoles must match the
+// starter blueprints (TestHireBlueprintsMatchTheStarterLibrary).
+var hireBlueprints = map[types.AgentRole]hireBlueprint{
+	types.RoleResearcher:  {ID: "research-project", Label: "Research Project", OpenRoles: 2},
+	types.RoleSynthesizer: {ID: "writing-project", Label: "Writing Project", OpenRoles: 2},
+}
+
+// hireBlueprintFor is the role's default blueprint.
+func hireBlueprintFor(role types.AgentRole) hireBlueprint {
+	if blueprint, ok := hireBlueprints[role]; ok {
+		return blueprint
+	}
 	return hireBlueprint{ID: personalassistant.HireBlueprintBlank, Label: "Blank"}
+}
+
+// ErrHireWorkspaceNameTaken is a workspace name whose folder is in use; the
+// hire tries the next free name.
+var ErrHireWorkspaceNameTaken = errors.New("a workspace folder with that name already exists")
+
+// HireWorkspaces creates and removes a hire's blueprint workspace through the
+// ordinary creation pipeline (server: sessionhttp's strict team request).
+type HireWorkspaces interface {
+	// CreateHireWorkspace creates the blueprint's workspace with the brief as
+	// its goal and agentName in the primary role, every other role open. A
+	// taken name is ErrHireWorkspaceNameTaken.
+	CreateHireWorkspace(ctx context.Context, name, blueprintID, mission, agentName string) (workspaceID string, err error)
+	// DeleteHireWorkspace removes a workspace the hire created but could not
+	// finish, as the UI's delete does.
+	DeleteHireWorkspace(ctx context.Context, workspaceID string) error
+}
+
+// SetHireWorkspaces wires blueprint workspaces for Researcher and Writer
+// hires. Unwired, such a hire fails at its workspace step and is undone.
+func (h *Handler) SetHireWorkspaces(workspaces HireWorkspaces) {
+	h.hireWorkspaces = workspaces
 }
 
 // hireRequest is POST /api/agents/hire.
@@ -226,9 +262,7 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 		State: personalassistant.HireStateLooking,
 	})
 	if err != nil {
-		if delErr := h.workspaceStore.Delete(ws.ID); delErr != nil {
-			logger.Error("Hire rollback: could not remove the workspace it created", logger.Fields{"workspace": ws.ID, "err": delErr})
-		}
+		h.removeHireWorkspace(ctx, ws.ID, hireBlueprintFor(plan.entry.Slug).ID)
 		rollbackAgent()
 		writeHireFailure(w, http.StatusInternalServerError, "hire_failed", "Could not record the hire: "+err.Error(), hireStepRecord)
 		return
@@ -345,10 +379,15 @@ func (h *Handler) planHire(req hireRequest) (hirePlan, int, string, string) {
 	return plan, 0, "", ""
 }
 
-// createHireWorkspace creates a top-level workspace whose only member and entry
-// agent is the hired agent and whose goal is the brief, armed for its first
-// goal run. A name already taken gets the first free " N" suffix.
+// createHireWorkspace creates the hire's top-level workspace: the role's
+// blueprint with the hired agent in its primary role, or a Blank workspace
+// whose only member is the hired agent. Either way the agent is the entry
+// agent and the brief is the goal, armed for its first goal run. A name
+// already taken gets the first free " N" suffix.
 func (h *Handler) createHireWorkspace(ctx context.Context, plan hirePlan) (*workspace.Workspace, error) {
+	if blueprint := hireBlueprintFor(plan.entry.Slug); blueprint.ID != personalassistant.HireBlueprintBlank {
+		return h.createHireBlueprintWorkspace(ctx, plan, blueprint)
+	}
 	taken := h.takenWorkspaceSlugs()
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -375,6 +414,47 @@ func (h *Handler) createHireWorkspace(ctx context.Context, plan hirePlan) (*work
 		lastErr = err
 	}
 	return nil, lastErr
+}
+
+// createHireBlueprintWorkspace creates the role's blueprint workspace through
+// the wired pipeline and reads it back.
+func (h *Handler) createHireBlueprintWorkspace(ctx context.Context, plan hirePlan, blueprint hireBlueprint) (*workspace.Workspace, error) {
+	if h.hireWorkspaces == nil {
+		return nil, fmt.Errorf("%s workspaces are not available on this server", blueprint.Label)
+	}
+	taken := h.takenWorkspaceSlugs()
+	for attempt := 0; attempt < 3; attempt++ {
+		name := freeHireWorkspaceName(plan.workspaceName, taken)
+		id, err := h.hireWorkspaces.CreateHireWorkspace(ctx, name, blueprint.ID, plan.brief, plan.name)
+		if errors.Is(err, ErrHireWorkspaceNameTaken) {
+			taken[strings.ToLower(workspace.Slugify(name))] = true
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		ws, err := h.workspaceStore.Get(id)
+		if err != nil || ws == nil {
+			h.removeHireWorkspace(ctx, id, blueprint.ID)
+			return nil, fmt.Errorf("the new %s workspace could not be read back", blueprint.Label)
+		}
+		return ws, nil
+	}
+	return nil, ErrHireWorkspaceNameTaken
+}
+
+// removeHireWorkspace undoes the workspace a failed hire created, through the
+// path that created it.
+func (h *Handler) removeHireWorkspace(ctx context.Context, workspaceID, blueprintID string) {
+	var err error
+	if blueprintID != personalassistant.HireBlueprintBlank && h.hireWorkspaces != nil {
+		err = h.hireWorkspaces.DeleteHireWorkspace(ctx, workspaceID)
+	} else {
+		err = h.workspaceStore.Delete(workspaceID)
+	}
+	if err != nil {
+		logger.Error("Hire rollback: could not remove the workspace it created", logger.Fields{"workspace": workspaceID, "err": err})
+	}
 }
 
 // takenWorkspaceSlugs are the top-level workspace folder names in use, with

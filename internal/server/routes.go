@@ -192,6 +192,9 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		}
 		agentHandler.SetRunnableModelChooser(hireRunnableModel(s.Core.LLMFactory, systemModel))
 	}
+	// A Researcher or Writer hire gets its role's blueprint through the
+	// ordinary create pipeline, with the hired agent in the primary role.
+	agentHandler.SetHireWorkspaces(hireWorkspaces{server: s})
 	// A hire's first look is a goal run with its own origin, started by the
 	// same scheduler as every goal run. Read at call time, so the scheduler's
 	// wiring order does not matter.

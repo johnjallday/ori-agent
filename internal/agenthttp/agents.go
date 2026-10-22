@@ -133,6 +133,7 @@ type Handler struct {
 	hireRecords     personalassistant.HireRecordStore
 	hireLookStarter HireLookStarter
 	runnableModel   RunnableModelChooser
+	hireWorkspaces  HireWorkspaces
 	hireMu          sync.Mutex
 }
 
