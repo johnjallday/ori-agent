@@ -614,6 +614,75 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
   await expect(handoff).toHaveCount(0);
 });
 
+test('browser fixture: composer review errors stay visible past a long planning panel', async ({
+  page,
+  request
+}) => {
+  await ensureAssistant(request);
+  await installFixture(page);
+  let release: (() => Promise<void>) | undefined;
+  await page.route('**/api/home-assistant/folder-context/review', route => {
+    release = () =>
+      route.fulfill({
+        status: 409,
+        json: { message: 'Fixture: review unavailable. Pick the folder again.' }
+      });
+  });
+  await open(page);
+  await choose(page);
+  // Like Suggest arrangement, a long local panel follows the notice's parking
+  // slot. Returning the error there hides it above the currently visible pane.
+  await page.evaluate(() => {
+    const panel = document.createElement('section');
+    panel.id = 'long-planning-fixture';
+    panel.style.height = '1200px';
+    panel.textContent = 'Planning disclosure fixture';
+    document.getElementById('personalAssistantScroll')!.append(panel);
+  });
+  const input = page.locator('#personalAssistantInput');
+  const review = page.locator('#personalAssistantReviewFolderSetup');
+  const notice = page.locator('#personalAssistantContextStatus');
+  await input.fill('Keep this draft');
+  await review.click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await release!();
+  await expect(notice).toContainText('review unavailable');
+  await expect(notice).toBeFocused();
+  await expect(notice).toBeInViewport();
+  await expect(
+    page.locator('[data-setup-composer-origin] #personalAssistantContextStatus')
+  ).toBeVisible();
+  await expect(input).toHaveValue('Keep this draft');
+  await expect(review).toBeEnabled();
+  const evidence = process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR;
+  if (evidence) {
+    await mkdir(evidence, { recursive: true });
+    await page.locator('#personalAssistantPanel').screenshot({
+      path: join(evidence, 'review-error-visible.png')
+    });
+  }
+
+  // A reply to a retry must not steal focus from newer typing.
+  release = undefined;
+  await review.click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await input.fill('A newer draft');
+  await release!();
+  await expect(notice).toContainText('review unavailable');
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('A newer draft');
+
+  // A late failure from the previous conversation cannot reopen its flow.
+  release = undefined;
+  await review.click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await page.locator('#personalAssistantConversationNew').click();
+  await release!();
+  await expect(page.locator('[data-setup-composer-origin]')).toHaveCount(0);
+  await expect(notice).not.toContainText('review unavailable');
+  await expect(input).toHaveValue('A newer draft');
+});
+
 test('browser fixture: a new turn retires setup authority without hiding its focused native choice', async ({
   page
 }) => {
