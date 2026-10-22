@@ -62,7 +62,7 @@ func TestAssistantDiscoveryRoute_DiscussionAndActionPairs(t *testing.T) {
 					if answer.Conversation == nil || answer.Conversation.ID != "same-thread" || !answer.Conversation.Stored {
 						t.Fatalf("lost canonical conversation: %+v", answer.Conversation)
 					}
-					if len(f.provider.requests) != 1 || !strings.Contains(f.provider.last().Messages[1].Content, "not talent coaching") {
+					if len(f.provider.requests) != 1 || !strings.Contains(f.provider.last().Messages[0].Content, "not talent coaching") {
 						t.Fatal("discussion did not use canonical correction in one model call")
 					}
 					if f.mutator.writes != 0 || len(f.memory.requests) != 0 || len(f.store.sessions) != 1 || len(st.ListAgents()) != before {

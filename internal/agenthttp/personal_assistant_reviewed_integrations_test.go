@@ -125,8 +125,8 @@ func TestReviewedIntegration_FirstMentionIsNamedBackWithItsGuidedSetup(t *testin
 			t.Errorf("user message lacks %q:\n%s", want, user)
 		}
 	}
-	if !strings.Contains(request.Messages[0].Content, reviewedIntegrationsTool+" BEFORE proposing any catalog lookup") {
-		t.Error("the standing rule is missing from the system message")
+	if !strings.Contains(request.SystemPrompt, reviewedIntegrationsTool+" BEFORE proposing any catalog lookup") {
+		t.Error("the standing rule is missing from the system prompt")
 	}
 	if !toolNames(request)[reviewedIntegrationsTool] {
 		t.Errorf("tools=%v, want the reviewed-integration reader offered", toolNames(request))
@@ -467,7 +467,7 @@ func TestReviewedIntegration_AbsentReaderIsInvisible(t *testing.T) {
 	if toolNames(f.provider.requests[0])[reviewedIntegrationsTool] || len(resp.Actions) != 0 || resp.Response != "Sure." {
 		t.Fatalf("tools=%v response=%+v", toolNames(f.provider.requests[0]), resp)
 	}
-	if strings.Contains(f.provider.requests[0].Messages[0].Content, reviewedIntegrationsTool) {
+	if strings.Contains(f.provider.requests[0].SystemPrompt, reviewedIntegrationsTool) {
 		t.Fatal("the rule names a reader this host does not have")
 	}
 }
