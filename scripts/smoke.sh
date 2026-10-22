@@ -2130,6 +2130,67 @@ smoke_specialist() {
   echo "PASS specialist"
 }
 
+# smoke_hire hires an agent from the Agents page through the API on a demo
+# sandbox (agents-hire-with-a-brief): it skips onboarding, optionally sets the
+# system model, hires the personal assistant when it is not hired yet, hires
+# one agent with a brief, waits for its first look's run record, and prints the
+# record (summary with its Next line, the reason) and the Backlog suggestions.
+# A real look needs a model: start the sandbox with CODEX_HOME and pass
+# codex/gpt-5.6-luna. Without one the look does not start, and it says so.
+#
+# Usage: ./scripts/smoke.sh hire <base-url> [role] [name] [brief] [provider/model]
+smoke_hire() {
+  local role="${3:-researcher}" name="${4:-Rosa}" brief="${5:-}" model="${6:-}"
+  [[ -n "$brief" ]] || brief="Compare the three note-taking apps I am considering and recommend one"
+  smoke_show_wait
+  expect_status 200 POST "$BASE_URL/api/onboarding/skip"
+  if [[ -n "$model" ]]; then
+    expect_status 200 POST "$BASE_URL/api/settings/system-model" \
+      "{\"provider\":\"${model%%/*}\",\"model\":\"${model#*/}\"}"
+  fi
+  local assistant version
+  assistant=$(curl -s "$BASE_URL/api/personal-assistant")
+  if [[ "$(printf '%s' "$assistant" | json_field 'personal_assistant.state')" == "needs_hire" ]]; then
+    version=$(printf '%s' "$assistant" | json_field 'personal_assistant.state_version')
+    expect_status 201 POST "$BASE_URL/api/personal-assistant/hire" \
+      "{\"request_id\":\"smoke-hire-assistant\",\"if_version\":${version:-0},\"display_name\":\"Atlas\",\"mandate\":\"Help me with my work.\",\"focus_areas\":[\"plan_my_day\"]}"
+  fi
+  local body hire workspace look started
+  body=$(python3 -c 'import json,sys; print(json.dumps({"request_id": "smoke-hire-" + sys.argv[2], "role": sys.argv[1], "name": sys.argv[2], "brief": sys.argv[3]}))' \
+    "$role" "$name" "$brief")
+  started=$(date +%s)
+  hire=$(curl -s -X POST "$BASE_URL/api/agents/hire" -H 'Content-Type: application/json' -d "$body")
+  workspace=$(printf '%s' "$hire" | json_field 'workspace_id')
+  [[ -n "$workspace" ]] || fail "hire failed: $hire"
+  look=$(printf '%s' "$hire" | json_field 'look_state')
+  echo "hired $name ($role) -> $(printf '%s' "$hire" | json_field 'workspace_route') [$(printf '%s' "$hire" | json_field 'blueprint')], look $look"
+  if [[ "$look" == "failed" ]]; then
+    echo "the first look did not start: $(printf '%s' "$hire" | json_field 'look_failure')"
+    return 0
+  fi
+  local waited=0
+  # Until the look finishes there is no run in the list, which json_field
+  # reports on stderr; the empty answer is what the loop waits on.
+  until [[ -n "$(curl -s "$BASE_URL/api/workspaces/$workspace/mission" | json_field 'mission_runs.0.run_id' 2>/dev/null)" ]]; do
+    ((waited++ < 120)) || fail "no first look finished within 600s"
+    sleep 5
+  done
+  echo "look finished $(($(date +%s) - started))s after the hire"
+  curl -s "$BASE_URL/api/workspaces/$workspace/mission" | python3 -c '
+import json, sys
+run = (json.load(sys.stdin).get("mission_runs") or [{}])[0]
+for key in ("origin", "succeeded", "parse_status", "tasks_created", "dropped_by_cap", "error", "summary", "next_why"):
+    print(f"{key}: {run.get(key)}")'
+  curl -s "$BASE_URL/api/workspaces/$workspace" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for task in (d.get("workspace", d).get("tasks") or []):
+    if task.get("source_type") == "goal_suggestion":
+        why = ((task.get("context") or {}).get("goal_suggestion") or {}).get("why")
+        title = task.get("description")
+        print(f"- {title} | why: {why}")'
+}
+
 # smoke_interview_seed gets a fresh demo sandbox to the state the interview
 # wizard needs: a confirmed Workspace Directory, a hired assistant and a built
 # Personal HQ. Until then GET .../knowledge/interview answers 409. It prints the
@@ -4197,6 +4258,7 @@ agentseed) smoke_agentseed "${3:-default}" ;;
 agentmap) smoke_agentmap ;;
 specialist) smoke_specialist ;;
 interview-seed) smoke_interview_seed ;;
+hire) smoke_hire "$@" ;;
 interview-folder-seed) smoke_interview_folder_seed "$@" ;;
 seed) seed_demo ;;
 rootswitch) smoke_rootswitch "${3:-}" ;;
