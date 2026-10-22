@@ -23,16 +23,16 @@ test.describe.serial('Global memory across workspaces', () => {
     );
   }
 
-  // A brand-new workspace without agents asks for a Commander, and creating
-  // one starts a first task behind a confirmation. Clear both the way a user
-  // would (see tests/file-janitor.spec.ts).
+  // A brand-new workspace without agents offers to hire a Commander, and
+  // hiring one starts a first task behind a confirmation. Clear both the way a
+  // user would (see tests/file-janitor.spec.ts).
   async function clearBlockingModals(page: Page) {
-    const nudge = page.getByRole('button', { name: 'Create Commander' });
-    if (await nudge.isVisible().catch(() => false)) {
-      await nudge.click();
-      await expect(nudge).toBeHidden({ timeout: 15000 });
-    }
     const gate = page.locator('#workspace-detail-task-confirm-modal');
+    const notNow = gate.getByRole('button', { name: 'Not now' });
+    if (await notNow.isVisible().catch(() => false)) {
+      await notNow.click();
+      await expect(gate).toBeHidden({ timeout: 15000 });
+    }
     if (await gate.isVisible().catch(() => false)) {
       await page.locator('#workspace-detail-task-confirm-close').click();
       await expect(gate).toBeHidden({ timeout: 15000 });

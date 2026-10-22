@@ -9099,7 +9099,7 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-command-repair">' +
       '<strong>No Commander</strong>' +
       '<span>Chats, routing, and task orchestration need a Commander.</span>' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Create Commander</button>' +
+      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Hire a Commander</button>' +
       '</div>'
     );
   }

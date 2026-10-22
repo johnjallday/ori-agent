@@ -100,7 +100,7 @@ test('missing entry agent shows a repair state, not a promoted specialist (FR77)
   const html = view.renderMapAgentUnits([spec]);
   assert.match(html, /ws-cmd-map-command-repair/);
   assert.match(html, /No Commander/);
-  assert.match(html, /data-cmd-add-agent/);
+  assert.match(html, /data-cmd-add-agent>Hire a Commander</);
   assert.ok(
     !html.includes('is-command-node'),
     'no specialist is visually promoted to the command position'
