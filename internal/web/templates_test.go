@@ -1,6 +1,7 @@
 package web
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -516,6 +517,109 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 				t.Errorf("page %s loads %s after %s; draft helpers must come first",
 					page, helper, sessions)
 			}
+		}
+	}
+}
+
+// navbarMarkup returns the rendered top bar, from its opening tag to </nav>.
+func navbarMarkup(t *testing.T, html string) string {
+	t.Helper()
+	start := strings.Index(html, `<nav class="navbar`)
+	if start < 0 {
+		t.Fatal("rendered page has no navbar")
+	}
+	end := strings.Index(html[start:], `</nav>`)
+	if end < 0 {
+		t.Fatal("the navbar is never closed")
+	}
+	return html[start : start+end]
+}
+
+// hiddenAttr matches a bare hidden attribute, not aria-hidden.
+var hiddenAttr = regexp.MustCompile(`\shidden[\s>]`)
+
+// openingTag returns the tag that carries marker, from its "<" to its ">".
+func openingTag(t *testing.T, html, marker string) string {
+	t.Helper()
+	at := strings.Index(html, marker)
+	if at < 0 {
+		t.Fatalf("markup has no %s", marker)
+	}
+	start := strings.LastIndex(html[:at], "<")
+	end := strings.Index(html[at:], ">")
+	return html[start : at+end+1]
+}
+
+// The top bar is Home, Agents and a Settings gear on every page. Vaults joins
+// only on demand, Action Center is reached from Home, and the gear is the
+// current destination on Settings and every page its hub links to.
+func TestNavbarCollapsesToHomeAgentsAndSettingsGear(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	for _, tc := range []struct {
+		template, page string
+		gearActive     bool
+	}{
+		{"index", "index", false},
+		{"agents-roster", "agents", false},
+		{"action-center", "action-center", false},
+		{"workspace-detail", "workspaces", false},
+		{"vault", "vault", false},
+		{"settings", "settings", true},
+		{"skills", "skills", true},
+		{"plugins", "plugins", true},
+		{"profile", "profile", true},
+	} {
+		data := GetDefaultData()
+		data.CurrentPage = tc.page
+		html, err := r.RenderTemplate(tc.template, data)
+		if err != nil {
+			t.Fatalf("RenderTemplate(%s) failed: %v", tc.template, err)
+		}
+		nav := navbarMarkup(t, html)
+
+		links := nav[strings.Index(nav, `<div class="ori-navbar-links">`):strings.Index(nav, `<div class="ori-navbar-utilities">`)]
+		for _, want := range []string{`href="/"`, `id="navAgentsLink"`, `id="vaultLauncherButton"`} {
+			if strings.Count(links, want) != 1 {
+				t.Errorf("%s: link group should carry %s once", tc.template, want)
+			}
+		}
+		if got := strings.Count(links, `<a`); got != 3 {
+			t.Errorf("%s: link group has %d links, want Home, Agents and the Vaults launcher", tc.template, got)
+		}
+		for _, gone := range []string{`href="/action-center"`, `id="systemModelIndicator"`, `id="sidebarToggle"`, `navbar-sidebar-toggle`} {
+			if strings.Contains(nav, gone) {
+				t.Errorf("%s: top bar still carries %s", tc.template, gone)
+			}
+		}
+
+		launcher := openingTag(t, links, `id="vaultLauncherButton"`)
+		divider := openingTag(t, links, `id="vaultLauncherDivider"`)
+		onVaultPage := tc.page == "vault"
+		if hiddenAttr.MatchString(launcher) == onVaultPage || hiddenAttr.MatchString(divider) == onVaultPage {
+			t.Errorf("%s: Vaults launcher hidden=%v, want hidden everywhere but the vault page", tc.template, !onVaultPage)
+		}
+
+		if strings.Count(nav, `id="navSettingsLink"`) != 1 {
+			t.Fatalf("%s: top bar should carry exactly one Settings gear", tc.template)
+		}
+		gear := openingTag(t, nav, `id="navSettingsLink"`)
+		for _, want := range []string{`href="/settings"`, `aria-label="Settings"`, `title="Settings"`} {
+			if !strings.Contains(gear, want) {
+				t.Errorf("%s: Settings gear is missing %s", tc.template, want)
+			}
+		}
+		if strings.Contains(gear, `aria-current="page"`) != tc.gearActive {
+			t.Errorf("%s: Settings gear current=%v, want %v", tc.template, !tc.gearActive, tc.gearActive)
+		}
+		if tc.gearActive && strings.Contains(links, `aria-current`) {
+			t.Errorf("%s: a link is marked current on a Settings hub page", tc.template)
+		}
+		help := strings.Index(nav, `id="oriGuideLauncher"`)
+		if at := strings.Index(nav, `id="navSettingsLink"`); help < 0 || at < help {
+			t.Errorf("%s: the Settings gear should follow Help in the utilities row", tc.template)
 		}
 	}
 }

@@ -47,6 +47,28 @@ type TemplateData struct {
 	DarkModeIconFill       string
 }
 
+// settingsHubPages are the CurrentPage values the navbar's Settings gear owns:
+// Settings itself and the configuration pages its Tools & integrations group
+// links to.
+var settingsHubPages = map[string]bool{
+	"settings":  true,
+	"workflows": true,
+	"skills":    true,
+	"templates": true,
+	"usage":     true,
+	"review":    true,
+	"models":    true,
+	"mcp":       true,
+	"plugins":   true,
+	"profile":   true,
+}
+
+// InSettingsHub reports whether the page belongs to Settings, so the navbar
+// marks the gear as the current destination.
+func (d TemplateData) InSettingsHub() bool {
+	return settingsHubPages[d.CurrentPage]
+}
+
 // TemplateRenderer handles template rendering
 type TemplateRenderer struct {
 	templates map[string]*template.Template

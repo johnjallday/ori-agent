@@ -298,47 +298,6 @@ body::after {
   min-width: 0;
 }
 
-.ori-navbar-model-group {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.ori-navbar-system-model {
-  display: inline-flex !important;
-  align-items: center;
-  gap: 0.6rem;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.ori-navbar-system-model svg {
-  flex: 0 0 auto;
-}
-
-[data-bs-theme="dark"] .ori-navbar-system-model {
-  background: rgba(31, 33, 40, 0.88) !important;
-  border-color: rgba(92, 92, 94, 0.32) !important;
-}
-
-[data-bs-theme="dark"] #navSystemModelProvider {
-  background: rgba(31, 107, 78, 0.18) !important;
-  color: var(--text-secondary) !important;
-}
-
-#systemModelName {
-  display: inline-block;
-  max-width: 10rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#navSystemModelProvider {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
 .ori-navbar-actions {
   display: flex;
   align-items: center;
@@ -355,6 +314,7 @@ body::after {
   white-space: nowrap;
 }
 
+.ori-navbar-actions #navSettingsLink,
 .ori-navbar-actions #keyboardNavigationToggle,
 .ori-navbar-actions #darkModeToggle {
   display: inline-flex;
@@ -365,6 +325,9 @@ body::after {
   padding: 0;
 }
 
+/* The resting secondary button already looks like an active nav link, so the
+   current-page gear borrows the bar's "on" state instead (FR3). */
+.ori-navbar-actions #navSettingsLink[aria-current="page"],
 .ori-navbar-actions #keyboardNavigationToggle[aria-pressed="true"] {
   border-color: rgba(31, 107, 78, 0.58);
   background:
@@ -376,6 +339,7 @@ body::after {
   color: var(--primary-color);
 }
 
+[data-bs-theme="dark"] .ori-navbar-actions #navSettingsLink[aria-current="page"],
 [data-bs-theme="dark"] .ori-navbar-actions #keyboardNavigationToggle[aria-pressed="true"] {
   border-color: rgba(42, 135, 98, 0.56);
   background:
@@ -2529,28 +2493,6 @@ body[data-vault-record-dragging="true"] #vaultModal .vault-modal-folder-tree * {
   color: var(--text-primary);
 }
 
-#systemModelIndicator {
-  background: rgba(245, 246, 247, 0.8) !important;
-  border: 1px solid rgba(92, 92, 94, 0.32) !important;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
-}
-
-#systemModelIndicator:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(10, 10, 10, 0.16);
-}
-
-[data-bs-theme="dark"] #systemModelIndicator {
-  background: rgba(31, 33, 40, 0.76) !important;
-  border-color: rgba(201, 204, 209, 0.25) !important;
-  box-shadow: inset 0 0 0 1px rgba(31, 107, 78, 0.15);
-}
-
-#navSystemModelProvider {
-  background: rgba(31, 107, 78, 0.14) !important;
-  color: var(--primary-color) !important;
-}
-
 .sidebar {
   background: var(--surface-glass);
   border: 1px solid rgba(92, 92, 94, 0.26);
@@ -3032,10 +2974,6 @@ textarea.form-control:focus {
     display: none !important;
   }
 
-  #navSystemModelProvider {
-    display: none !important;
-  }
-
   .navbar-brand {
     letter-spacing: 0.03em;
   }
@@ -3071,13 +3009,8 @@ textarea.form-control:focus {
   }
 
   .ori-navbar-actions .modern-btn,
-  .ori-navbar-actions #locationIndicator,
-  .ori-navbar-system-model {
+  .ori-navbar-actions #locationIndicator {
     padding-inline: 0.8rem !important;
-  }
-
-  #systemModelName {
-    max-width: 7.25rem;
   }
 
   #homeAssistantReopenBtn [data-home-assistant-launcher-label],
@@ -3116,10 +3049,6 @@ textarea.form-control:focus {
 
   .ori-navbar-actions {
     gap: 0.5rem;
-  }
-
-  #systemModelName {
-    max-width: 6rem;
   }
 
   .main-content {
@@ -3193,15 +3122,6 @@ textarea.form-control:focus {
     letter-spacing: 0.02em;
   }
 
-  #systemModelIndicator {
-    width: 100%;
-    justify-content: center;
-  }
-
-  #systemModelName {
-    max-width: 11rem;
-  }
-
   #darkModeText {
     display: none;
   }
@@ -3271,10 +3191,6 @@ textarea.form-control:focus {
     flex-wrap: wrap;
   }
 
-  #systemModelName {
-    max-width: 5rem;
-  }
-
   .ori-navbar-links .nav-link-item {
     padding-inline: 0.75rem !important;
   }
@@ -3336,8 +3252,7 @@ textarea.form-control:focus {
 
   .modern-card,
   .modern-btn,
-  .sidebar-nav-link,
-  #systemModelIndicator {
+  .sidebar-nav-link {
     transition: none !important;
     transform: none !important;
   }

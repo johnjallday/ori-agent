@@ -3,19 +3,13 @@
   <div class="container-fluid {{if .NavbarPadding}}{{.NavbarPadding}}{{else}}{{if .NavbarFixed}}px-4{{end}}{{end}}">
     <div class="ori-navbar-shell">
       <div class="ori-navbar-left">
-        <!-- Left: Back button OR Sidebar toggle -->
+        <!-- Left: optional Back button, then the brand at the left edge -->
         {{if .ShowBackButton}}
         <a href="{{if .BackButtonURL}}{{.BackButtonURL}}{{else}}/{{end}}" class="modern-btn modern-btn-secondary" title="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}" aria-label="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
           </svg>
         </a>
-        {{else if ne .ShowSidebarToggle false}}
-        <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary navbar-sidebar-toggle {{if .SidebarToggleHideOnLg}}d-lg-none{{end}}" type="button" title="Toggle Sidebar" aria-label="Toggle sidebar menu" aria-expanded="false">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-          </svg>
-        </button>
         {{end}}
 
         <!-- Brand -->
@@ -41,18 +35,20 @@
       <!-- Center: Navigation Links (optional) -->
       {{if ne .ShowNavLinks false}}
       <div class="ori-navbar-links">
-        <!-- Home is the single canonical workspace-overview destination; the
-             separate Workspaces launcher item is retired (PRD FR8, FR9). -->
+        <!-- Home and Agents are the only fixed links. Home is the single
+             workspace overview and reaches Action Center from Needs attention;
+             configuration lives behind the Settings gear (nav-collapse FR1). -->
         <a href="/" class="nav-link-item {{if eq .CurrentPage "index"}}active{{end}}"{{if eq .CurrentPage "index"}} aria-current="page"{{end}}>Home</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
         <a href="/agents" id="navAgentsLink" class="nav-link-item {{if eq .CurrentPage "agents"}}active{{end}}"{{if eq .CurrentPage "agents"}} aria-current="page"{{end}}>Agents</a>
-        <span class="ori-navbar-divider" aria-hidden="true">|</span>
-        <a href="/action-center" class="nav-link-item {{if eq .CurrentPage "action-center"}}active{{end}}"{{if eq .CurrentPage "action-center"}} aria-current="page"{{end}}>Action Center</a>
-        <span class="ori-navbar-divider" aria-hidden="true">|</span>
+        <!-- Vaults is on demand: hidden until vault-modal.js finds a record,
+             and always shown on the vault page itself (FR6). -->
+        <span id="vaultLauncherDivider" class="ori-navbar-divider" aria-hidden="true"{{if ne .CurrentPage "vault"}} hidden{{end}}>|</span>
         <a
           href="/vaults"
           id="vaultLauncherButton"
           class="nav-link-item ori-navbar-vault-launcher {{if eq .CurrentPage "vault"}}active{{end}}"
+          {{if ne .CurrentPage "vault"}}hidden{{end}}
           {{if ne .CurrentPage "vault"}}data-bs-toggle="modal"{{end}}
           {{if ne .CurrentPage "vault"}}data-bs-target="#vaultModal"{{end}}
           {{if ne .CurrentPage "vault"}}aria-controls="vaultModal"{{end}}
@@ -74,24 +70,22 @@
       {{end}}
 
       <div class="ori-navbar-utilities">
-        <!-- Center-Right: System Model Indicator -->
-        <div class="ori-navbar-model-group">
-          <a href="/settings#system-model" id="systemModelIndicator" class="ori-navbar-system-model d-flex align-items-center gap-2 text-decoration-none" style="padding: 0.4rem 0.8rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;" title="System Model - Click to configure">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted);">
-              <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
-            </svg>
-            <span id="systemModelName" style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary);">Loading…</span>
-            <span id="navSystemModelProvider" class="badge" style="font-size: 0.7rem; padding: 0.2rem 0.4rem; background: var(--bg-tertiary); color: var(--text-muted);"></span>
-          </a>
-        </div>
-
-        <!-- Right: Location, Actions, Theme -->
+        <!-- Right: Help, Settings, Location, Actions, Theme. The system model
+             is shown and changed at /settings#system-model (FR4). -->
         <div class="ori-navbar-actions">
           <button id="oriGuideLauncher" class="modern-btn modern-btn-secondary ori-help-trigger"
                   type="button" aria-label="Help" aria-expanded="false" aria-controls="oriGuidePanel">
             <span class="ori-help-trigger__icon" aria-hidden="true">?</span>
             <span>Help</span>
           </button>
+          <!-- The gear is the bar's only way into Settings and is active on
+               Settings and on every page its hub links to (FR2, FR3). -->
+          <a href="/settings" id="navSettingsLink" class="modern-btn modern-btn-secondary{{if .InSettingsHub}} active{{end}}"
+             aria-label="Settings" title="Settings"{{if .InSettingsHub}} aria-current="page"{{end}}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+            </svg>
+          </a>
           <!-- Location Indicator (optional) -->
           {{if .ShowLocationIndicator}}
           <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">

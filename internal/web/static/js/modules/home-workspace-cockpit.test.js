@@ -1527,6 +1527,16 @@ test('renderAttentionSectionHTML renders nothing when nothing needs attention', 
   assert.equal(renderAttentionSectionHTML([]), '');
 });
 
+test('renderAttentionSectionHTML links to the full Action Center list', () => {
+  const html = renderAttentionSectionHTML([
+    { id: 'w1', name: 'W1', count: 1, href: '/workspaces/w1?panel=tasks' }
+  ]);
+  assert.match(
+    html,
+    /<a class="cockpit-today-see-all" href="\/action-center">See all in Action Center<\/a>/
+  );
+});
+
 test('the scheduled section distinguishes "unavailable" from "nothing today"', () => {
   assert.match(renderScheduledSectionHTML(null), /unavailable/i);
   // Genuinely nothing scheduled renders no section at all rather than a
