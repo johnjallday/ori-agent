@@ -21,6 +21,7 @@ func TestFolderBuildPlan_IsTheCardsPlanForTheBuildsFolderAndCreatesNothing(t *te
 	}
 	setup := &fakeFolderSetup{
 		lines:       lines,
+		visual:      &FolderSetupVisual{Entity: &FolderSetupEntity{Kind: "workspace", Name: "My Demos", Operation: "create"}},
 		destination: &FolderSetupDestination{Status: "new", Name: "Music Production Home", Kind: "plugin"},
 		intent:      FolderSetupIntent{Integration: FolderInstallReady, Provider: FolderInstallInstall, Placement: "grouped", CreatesHome: true},
 	}
@@ -51,6 +52,13 @@ func TestFolderBuildPlan_IsTheCardsPlanForTheBuildsFolderAndCreatesNothing(t *te
 	}
 	if plan.Home == nil || *plan.Home != (BuildFolderHome{Name: "Music Production Home", Status: "new"}) || plan.Placement != "grouped" || plan.Evidence == "" {
 		t.Fatalf("home/placement/evidence = %+v %q %q", plan.Home, plan.Placement, plan.Evidence)
+	}
+	if plan.Visual == nil || plan.Visual.Entity.Name != "My Demos" {
+		t.Fatalf("missing shared visual facts: %+v", plan.Visual)
+	}
+	plan.Visual.Entity.Name = "Browser display only"
+	if setup.visual.Entity.Name != "My Demos" {
+		t.Fatal("build display aliases host facts")
 	}
 	// The host plans the build's own name, and the project the build attached.
 	last := setup.planned[len(setup.planned)-1]

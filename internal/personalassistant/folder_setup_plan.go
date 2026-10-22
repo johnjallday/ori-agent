@@ -342,6 +342,7 @@ func (i FolderSoftwareIntent) Validate() error {
 // Digest back with the click and the server recomputes the plan: a mismatch
 // means the card on screen is stale and the click is refused.
 type FolderSetupPlan struct {
+	Visual      *FolderSetupVisual      `json:"visual,omitempty"`
 	Lines       []FolderPlanLine        `json:"lines"`
 	Digest      string                  `json:"digest"`
 	Destination *FolderSetupDestination `json:"destination,omitempty"`
@@ -415,6 +416,7 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	stamped.Visual = CloneFolderSetupVisual(p.Visual)
 	stamped.Prerequisites = append([]FolderPrerequisite(nil), p.Prerequisites...)
 	if p.Hire != nil {
 		hire := *p.Hire
@@ -521,6 +523,7 @@ type FolderSetupInput struct {
 
 // FolderSetupView is a run as the browser sees it.
 type FolderSetupView struct {
+	Visual *FolderSetupVisual `json:"visual,omitempty"`
 	// PlanDigest is the plan the run was confirmed on; a resume sends it back.
 	PlanDigest      string                  `json:"plan_digest"`
 	Status          string                  `json:"status"`
@@ -631,10 +634,11 @@ func looksLikeFilesystemPath(text string) bool {
 // stored with the offer so the card survives a reload. A Running status with
 // no live run (the server restarted) is reported as Stopped/interrupted.
 type FolderSetupRun struct {
-	PlanDigest string           `json:"plan_digest"`
-	Lines      []FolderPlanLine `json:"lines"`
-	Status     string           `json:"status"`
-	StopReason string           `json:"stop_reason,omitempty"`
+	Visual     *FolderSetupVisual `json:"visual,omitempty"`
+	PlanDigest string             `json:"plan_digest"`
+	Lines      []FolderPlanLine   `json:"lines"`
+	Status     string             `json:"status"`
+	StopReason string             `json:"stop_reason,omitempty"`
 	// EntryName is the project file the run uses; EntryCandidates are the file
 	// names (never paths) offered when several exist.
 	EntryName       string    `json:"entry_name,omitempty"`

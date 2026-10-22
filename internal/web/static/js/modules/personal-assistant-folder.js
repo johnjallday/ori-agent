@@ -10,6 +10,7 @@
 
 // Sets window.OriFolderPlanLines, which the plan line exports below come from.
 import './folder-plan-lines.js';
+import './folder-setup-visual.js';
 // Sets window.OriFolderRecognitionLines: the Recognized and Needs lines, in the
 // build pane's words.
 import './folder-recognition-lines.js';
@@ -2887,6 +2888,12 @@ function renderOffer(place) {
     });
   }
   renderHire(els, view.hire, state.offer);
+  const diagram = document.getElementById('personalAssistantFolderVisual');
+  if (diagram) {
+    diagram.hidden = !state.offer?.plan || Boolean(state.offer?.setup) || receipt.visible;
+    if (!diagram.hidden)
+      globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
+  }
   setText(els.question, view.question, false);
   if (els.structure) {
     // The proposed group and its member workspaces, drawn by the same renderer

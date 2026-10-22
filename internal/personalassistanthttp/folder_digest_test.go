@@ -530,6 +530,9 @@ func TestFolderSetup_AcceptsOnlyTheDigestAndAnEntryNameAndNeverAPath(t *testing.
 		`{"request_id":"r","plan_digest":"current","folder":"/private"}`,
 		`{"request_id":"r","plan_digest":"current","folder_path":"/private"}`,
 		`{"request_id":"r","plan_digest":"current","selection_token":"x"}`,
+		`{"request_id":"r","plan_digest":"current","visual":{"entity":{"kind":"workspace","name":"Injected","operation":"create"}}}`,
+		`{"request_id":"r","plan_digest":"current","hire":{"mode":"bind","agent_name":"Injected"}}`,
+		`{"request_id":"r","plan_digest":"current","destination":{"status":"standalone"}}`,
 		`not json`,
 	} {
 		if w := post(body); w.Code != http.StatusBadRequest {

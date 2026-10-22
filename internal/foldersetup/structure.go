@@ -116,6 +116,16 @@ func BuildStructurePlan(facts StructureFacts) personalassistant.FolderSetupPlan 
 		Recipe: personalassistant.FolderRecipeStructure, RecipeVersion: 1, Structure: &intent, Placement: "grouped",
 	}
 	plan.Destination = facts.Destination
+	kind, operation := "group", personalassistant.FolderSoftwareCreate
+	if facts.GroupType == personalassistant.FolderGroupHome {
+		kind = "home"
+	}
+	if facts.GroupExists {
+		operation = personalassistant.FolderSoftwareReuse
+	}
+	plan.Visual = &personalassistant.FolderSetupVisual{Entity: &personalassistant.FolderSetupEntity{
+		Kind: kind, Name: facts.GroupName, Operation: operation,
+	}}
 	return plan.Stamped()
 }
 
