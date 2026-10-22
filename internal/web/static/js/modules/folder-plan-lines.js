@@ -156,7 +156,7 @@
   function hireView(plan, subject, { needs = [] } = {}) {
     const hire = plan?.hire;
     if (!hire || typeof hire !== 'object' || !HIRE_MODES.includes(hire.mode)) return null;
-    const name = String(hire.agent_name || '').trim();
+    const name = hire.mode === 'pending' ? '' : String(hire.agent_name || '').trim();
     const role = String(hire.role_label || '').trim();
     const model = String(hire.model || '').trim();
     let headline;
@@ -181,6 +181,7 @@
     const brief = String(plan.brief_default || '').trim();
     return {
       mode: hire.mode,
+      confirmLabel: hire.mode === 'bind' ? 'Assign & start' : 'Hire & start',
       headline,
       agent: { initials: initialsOf(name || role || 'Agent'), detail },
       brief: brief

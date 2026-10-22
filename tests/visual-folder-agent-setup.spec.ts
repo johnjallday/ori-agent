@@ -54,8 +54,180 @@ async function preview(page: Page, value = observation) {
   return { card, forbidden, errors };
 }
 
+const reviewOffer = (mode = 'create') => ({
+  id: 'visual-review-fixture',
+  conversation_id: 'visual-conversation-fixture',
+  verdict: 'project',
+  status: 'pending',
+  folder: 'Session',
+  subject: { name: 'Session' },
+  capability: {
+    recognized: 'REAPER song',
+    workspace: 'REAPER Song workspace',
+    evidence: 'Session.rpp marker'
+  },
+  plan: {
+    digest: 'fixture-reviewed-digest',
+    brief_default: 'Understand the song before suggesting work.',
+    visual: {
+      entity: { kind: 'workspace', name: 'Session', operation: 'create' },
+      plugins: [
+        {
+          kind: 'integration',
+          name: 'REAPER',
+          operation: 'update',
+          installed_version: 'fixture-old',
+          version: 'fixture-new'
+        }
+      ]
+    },
+    destination: { status: 'existing', name: 'Music Home', kind: 'plugin' },
+    hire: {
+      mode,
+      agent_name: mode === 'pending' ? '' : 'Ari',
+      role_label: 'Producer',
+      model: 'Fixture model'
+    },
+    lines: [
+      {
+        kind: 'integration',
+        name: 'Update the reviewed REAPER integration',
+        detail: 'Reviewed publisher and release.'
+      },
+      { kind: 'workspace', name: 'Creates a Session workspace' },
+      { kind: 'folder', name: 'Linked where it is; nothing is moved, copied or run' },
+      {
+        kind: 'agents',
+        name: 'Adds the required agent',
+        detail: 'The same agent is shared with later projects in this Home.'
+      },
+      { kind: 'task', name: 'One read-only first look', detail: 'Reads permitted project content.' }
+    ]
+  }
+});
+
+async function mountReview(page: Page, offer = reviewOffer()) {
+  await mockHiredAssistant(page);
+  await page.goto('/?panel=today');
+  await page.waitForFunction(() =>
+    Boolean((window as any).PersonalAssistantFolder?.showConversationReview)
+  );
+  await page.evaluate(offer => {
+    const slot = document.createElement('div');
+    slot.id = 'visual-review-fixture-slot';
+    document.getElementById('personalAssistantScroll')!.append(slot);
+    (window as any).PersonalAssistantFolder.showConversationReview(slot, offer);
+    (window as any).PersonalAssistantTranscript?.revealControl(slot, true);
+  }, offer);
+  return page.locator('#personalAssistantFolderOffer');
+}
+
 test.beforeEach(async ({ request }) => {
   await request.post('/api/onboarding/skip');
+});
+
+test('fixture review preserves exact Unicode drafts and only submits the reviewed digest', async ({
+  page
+}) => {
+  const requests: Record<string, unknown>[] = [];
+  let stale = false;
+  await page.route('**/folder-digest/offers/visual-review-fixture/setup', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill(
+      stale
+        ? {
+            status: 409,
+            json: {
+              plan_changed: true,
+              error: 'Review the changed plan.',
+              offer: { ...reviewOffer(), plan: { ...reviewOffer().plan, digest: 'changed-digest' } }
+            }
+          }
+        : { status: 503, json: { error: 'Fixture failure' } }
+    );
+  });
+  const card = await mountReview(page);
+  const brief = card.getByLabel('What should it do with it?');
+  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  await expect(card.getByText('Before you start', { exact: true })).toBeVisible();
+  await expect(card.locator('#personalAssistantFolderConsequences')).toContainText(
+    'shares permitted folder content'
+  );
+  await expect(card.locator('#personalAssistantFolderConsequences')).toContainText(
+    'shared with later projects'
+  );
+  await expect(card.locator('#personalAssistantFolderPlan')).toBeHidden();
+  await card.getByText('Full setup details', { exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderPlan')).toBeVisible();
+  await brief.fill('🎼'.repeat(301));
+  await confirm.click();
+  expect(requests).toHaveLength(0);
+  await expect(brief).toHaveValue('🎼'.repeat(301));
+  await brief.fill('🎼'.repeat(300));
+  await confirm.click();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0].brief).toBe('🎼'.repeat(300));
+  await expect(brief).toHaveValue('🎼'.repeat(300));
+  await brief.fill('  A precise\nbrief  ');
+  stale = true;
+  await confirm.click();
+  await expect(card.getByRole('alert')).toContainText('changed plan');
+  await expect(brief).toHaveValue('  A precise\nbrief  ');
+  expect(requests).toHaveLength(2);
+  expect(Object.keys(requests[1]).sort()).toEqual(['brief', 'plan_digest', 'request_id']);
+  expect(requests[1].plan_digest).toBe('fixture-reviewed-digest');
+  expect(requests[1].brief).toBe('  A precise\nbrief  ');
+  await expect(confirm).toBeEnabled(); // Stale response never automatically reconfirms.
+});
+
+test('fixture late confirmation response cannot reopen a parked review or replace its draft', async ({
+  page
+}) => {
+  let respond: (() => Promise<void>) | undefined;
+  let calls = 0;
+  await page.route('**/folder-digest/offers/visual-review-fixture/setup', route => {
+    calls++;
+    respond = () =>
+      route.fulfill({
+        json: {
+          offer: {
+            ...reviewOffer(),
+            status: 'awaiting_outcome',
+            setup: { status: 'running', lines: [] }
+          }
+        }
+      });
+  });
+  const card = await mountReview(page);
+  await card.getByLabel('What should it do with it?').fill('Exact unsent goal');
+  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  await confirm.click();
+  await expect.poll(() => calls).toBe(1);
+  await expect(confirm).toBeDisabled();
+  await page.evaluate(() => (window as any).PersonalAssistantFolder.parkConversation());
+  await respond!();
+  await expect(card).toBeHidden();
+  await expect(page.locator('#folderSetupRunModal')).toBeHidden();
+  expect(calls).toBe(1);
+  expect(
+    await page.evaluate(
+      offer => (window as any).PersonalAssistantFolder.brief(offer),
+      reviewOffer()
+    )
+  ).toBe('Exact unsent goal');
+});
+
+test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {
+  const card = await mountReview(page, reviewOffer('bind'));
+  await expect(card.getByRole('button', { name: 'Assign & start', exact: true })).toBeVisible();
+  await expect(card.locator('.folder-visual__agent')).toContainText('Proposed assignment');
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    reviewOffer('pending')
+  );
+  await expect(card.locator('.folder-visual__agent')).toContainText('Identity pending');
+  await expect(card.locator('.folder-visual__agent')).not.toContainText('Ari');
+  await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
 });
 
 test('fixture preview and disclosure stay metadata-only, with neutral destination and agent', async ({

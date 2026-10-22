@@ -64,7 +64,7 @@ test('a plan that names a hire is a hire card: Hire and start, Not now, and Adju
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label]),
     [
-      ['setup', 'Hire and start'],
+      ['setup', 'Hire & start'],
       ['no', 'Not now']
     ]
   );
@@ -90,6 +90,8 @@ test('the agent row names the role and the model, or that there is no model yet'
 test('an existing agent is assigned, and a plugin not installed yet names the capability', () => {
   const assigned = hireView(hireOffer({ mode: 'bind', agent_name: 'Studio Lead' }).plan, 'My Song');
   assert.equal(text(assigned.headline), 'Assign Studio Lead to My Song');
+  assert.equal(assigned.confirmLabel, 'Assign & start');
+  assert.equal(folderOfferView(hireOffer({ mode: 'bind' })).actions[0].label, 'Assign & start');
   const pending = hireView(
     hireOffer({ mode: 'pending', agent_name: '', role_label: 'REAPER song', model: '' }).plan,
     'My Song'
@@ -145,7 +147,7 @@ test('after Adjust… the hire keeps its plan beside Continue setup', () => {
   const view = folderOfferView(hireOffer({}, { status: 'awaiting_outcome', decision: 'yes' }));
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire and start', 'Continue setup']
+    ['Hire & start', 'Continue setup']
   );
   assert.equal(view.hire.adjust, null);
 });
@@ -194,7 +196,7 @@ test('a reviewed software project is hired the same way, keeping what was read',
   assert.equal(view.question, 'What I read in widget:');
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire and start', 'Not now', 'Review again']
+    ['Hire & start', 'Not now', 'Review again']
   );
   assert.equal(view.hire.adjust.softwareAdjust, true);
   assert.ok(view.evidence.length > 0);
@@ -228,9 +230,12 @@ test('the brief field is a real labelled control, bounded like a workspace goal'
   );
   assert.match(
     template,
-    /<textarea id="personalAssistantFolderBrief"[^>]*maxlength="300"[\s\S]*?aria-describedby="personalAssistantFolderBriefHint"/
+    /<textarea id="personalAssistantFolderBrief"[\s\S]*?aria-describedby="personalAssistantFolderBriefHint"/
   );
-  assert.match(template, /This becomes the workspace goal\. You can change it later\./);
+  assert.doesNotMatch(template, /<textarea id="personalAssistantFolderBrief"[^>]*maxlength=/);
+  assert.match(template, /Up to 300 characters/);
+  assert.equal(globalThis.OriFolderSetupVisual.briefError('🎼'.repeat(300)), '');
+  assert.match(globalThis.OriFolderSetupVisual.briefError('🎼'.repeat(301)), /300 characters/);
 });
 
 // A set-up folder whose hire started its agent's first look, as the server

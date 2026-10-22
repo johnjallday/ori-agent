@@ -417,6 +417,9 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
 	stamped.Visual = CloneFolderSetupVisual(p.Visual)
+	if stamped.Visual != nil && (p.Intent.Placement == "grouped" || p.Intent.Placement == "standalone") {
+		stamped.Visual.Placement = p.Intent.Placement
+	}
 	stamped.Prerequisites = append([]FolderPrerequisite(nil), p.Prerequisites...)
 	if p.Hire != nil {
 		hire := *p.Hire

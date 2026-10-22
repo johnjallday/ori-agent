@@ -12,8 +12,9 @@ import (
 // digest; neither this projection nor a client's rendering supplies authority.
 // Older saved runs may have no snapshot and must render unknown facts neutrally.
 type FolderSetupVisual struct {
-	Entity  *FolderSetupEntity  `json:"entity,omitempty"`
-	Plugins []FolderSetupPlugin `json:"plugins,omitempty"`
+	Placement string              `json:"placement,omitempty"` // grouped, standalone; no destination authority
+	Entity    *FolderSetupEntity  `json:"entity,omitempty"`
+	Plugins   []FolderSetupPlugin `json:"plugins,omitempty"`
 }
 
 // FolderSetupEntity describes the proposed result, not a completed resource.
@@ -43,6 +44,9 @@ func CloneFolderSetupVisual(value *FolderSetupVisual) *FolderSetupVisual {
 		return nil
 	}
 	out := &FolderSetupVisual{}
+	if value.Placement == "grouped" || value.Placement == "standalone" {
+		out.Placement = value.Placement
+	}
 	if entity := value.Entity; entity != nil && visualText(entity.Name, 120) && entity.Name != "" &&
 		(entity.Kind == "workspace" || entity.Kind == "group" || entity.Kind == "home") &&
 		(entity.Operation == FolderSoftwareCreate || entity.Operation == FolderSoftwareReuse) {
@@ -69,7 +73,7 @@ func CloneFolderSetupVisual(value *FolderSetupVisual) *FolderSetupVisual {
 		seen[plugin.Kind] = true
 		out.Plugins = append(out.Plugins, plugin)
 	}
-	if out.Entity == nil && len(out.Plugins) == 0 {
+	if out.Entity == nil && len(out.Plugins) == 0 && out.Placement == "" {
 		return nil
 	}
 	return out

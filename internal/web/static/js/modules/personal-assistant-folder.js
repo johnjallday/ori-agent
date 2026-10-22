@@ -574,7 +574,7 @@ function capabilityConfirmView(offer, base, subject) {
   else if (continuing && hasPlan)
     // Adjust… was pressed earlier: the one-click plan stays, beside the journey.
     actions = [
-      { id: 'setup', label: hire ? 'Hire and start' : 'Set up', style: 'primary', oneCard: true },
+      { id: 'setup', label: hire ? hire.confirmLabel : 'Set up', style: 'primary', oneCard: true },
       { id: 'resume', label: 'Continue setup', style: 'outline', journey: true }
     ];
   else if (continuing)
@@ -582,7 +582,7 @@ function capabilityConfirmView(offer, base, subject) {
   else if (base.decided) actions = [];
   else if (hire) {
     actions = [
-      { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+      { id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true },
       { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
     ];
     hire.adjust = { id: 'adjust', label: 'Adjust', style: 'link', journey: true };
@@ -1250,7 +1250,7 @@ export function softwareOfferView(offer, view, { subject, folder }) {
         : `What I read in ${subject}:`,
       hire,
       actions: [
-        { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+        { id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true },
         ...(view.decided ? [] : [{ id: 'no', label: 'Not now', style: 'outline', decision: 'no' }]),
         reviewAction('Review again', 'link'),
         ...openExisting,
@@ -2893,8 +2893,24 @@ function renderOffer(place) {
     diagram.hidden = !state.offer?.plan || Boolean(state.offer?.setup) || receipt.visible;
     if (!diagram.hidden)
       globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
+    els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
   }
-  setText(els.question, view.question, false);
+  globalThis.OriFolderSetupVisual.renderConsequences(
+    document.getElementById('personalAssistantFolderConsequences'),
+    !state.offer?.setup && !receipt.visible ? state.offer?.plan : null
+  );
+  const details = document.getElementById('personalAssistantFolderDetails');
+  if (details && details.dataset.offer !== state.offer?.id) {
+    details.dataset.offer = state.offer?.id || '';
+    details.open = !state.offer?.plan;
+  }
+  setText(
+    els.question,
+    state.offer?.software && view.plan
+      ? 'Review the setup before anything is created.'
+      : view.question,
+    false
+  );
   if (els.structure) {
     // The proposed group and its member workspaces, drawn by the same renderer
     // as the proposal under a reply.
@@ -2964,7 +2980,7 @@ function renderOffer(place) {
       els.planHeading.hidden = !heading;
       setText(els.planHeadingText, heading, false);
       els.planHeading.querySelector('[data-folder-action]')?.remove();
-      const adjust = heading ? view.hire.adjust : null;
+      const adjust = heading && !diagram ? view.hire.adjust : null;
       if (adjust) {
         const button = document.createElement('button');
         button.type = 'button';
@@ -3035,7 +3051,11 @@ function renderOffer(place) {
       els.actions.append(home);
     }
     if (rebuild && showView) {
-      view.actions.forEach(action => {
+      const actions = [
+        ...view.actions,
+        ...(diagram && view.hire?.adjust ? [view.hire.adjust] : [])
+      ];
+      actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className =
@@ -3346,6 +3366,12 @@ async function startOneCardSetup(action) {
   const digest = String(offer.plan?.digest || offer.setup?.plan_digest || '');
   if (!digest) {
     showError('This setup has no plan to confirm. Choose Adjust… to set it up step by step.');
+    return;
+  }
+  const briefProblem = globalThis.OriFolderSetupVisual.briefError(briefFor(offer));
+  if (briefProblem) {
+    showError(briefProblem);
+    elements()?.brief?.focus();
     return;
   }
   state.busy = true;
@@ -4512,6 +4538,7 @@ function init() {
   });
   els.brief?.addEventListener('input', () => {
     state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };
+    els.brief.setCustomValidity(globalThis.OriFolderSetupVisual.briefError(els.brief.value));
   });
   window.PersonalAssistantFolder = {
     open: openChooser,

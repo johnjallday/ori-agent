@@ -174,6 +174,72 @@
   }
 }
 
+.folder-setup-decision,
+.folder-setup-diagram {
+  min-width: 0;
+}
+
+.folder-setup-consequences {
+  border-block: 1px solid var(--ori-border, var(--border-color));
+  padding-block: 0.8rem;
+  margin-block: 1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.folder-setup-consequences h4 {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.folder-setup-consequences ul {
+  padding-left: 1.2rem;
+  margin-bottom: 0;
+}
+
+.folder-setup-consequences li + li {
+  margin-top: 0.5rem;
+}
+
+.folder-setup-details {
+  margin-top: 0.8rem;
+}
+
+.folder-setup-details > summary {
+  min-height: 44px;
+  padding-block: 0.7rem;
+  cursor: pointer;
+}
+
+.folder-setup-details summary:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--text-primary));
+  outline-offset: 3px;
+}
+
+@media (min-width: 1000px) {
+  #personalAssistantPanel:has(.pa-folder__offer--visual:not([hidden])) {
+    width: min(1120px, calc(100vw - 48px));
+  }
+
+  .pa-folder__offer--visual .folder-setup-surface {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "diagram decision";
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  .pa-folder__offer--visual .folder-setup-decision {
+    grid-area: decision;
+  }
+
+  .pa-folder__offer--visual .folder-setup-diagram {
+    grid-area: diagram;
+    position: sticky;
+    top: 0.5rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .folder-visual *,
   .folder-visual *::before,

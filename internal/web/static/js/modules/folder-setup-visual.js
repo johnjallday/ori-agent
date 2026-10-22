@@ -17,7 +17,11 @@
         : null;
     const destination = offer?.setup?.destination || plan?.destination || offer?.destination;
     let parent = 'Destination not yet reviewed';
-    if (destination?.status === 'standalone') parent = 'Separate workspace · no parent Home';
+    if (
+      destination?.status === 'standalone' ||
+      (!destination && visual?.placement === 'standalone')
+    )
+      parent = 'Separate workspace · no parent Home';
     else if (['new', 'existing'].includes(destination?.status) && text(destination.name))
       parent = `${destination.status === 'new' ? 'Proposed new' : 'Existing'} ${destination.kind === 'group' ? 'group' : destination.kind === 'project' ? 'project' : 'Home'} · ${destination.name}`;
     const hire = offer?.setup?.hire || plan?.hire;
@@ -148,5 +152,82 @@
     container.replaceChildren(figure);
   }
 
-  globalThis.OriFolderSetupVisual = Object.freeze({ visualView, renderDiagram });
+  // Material effects stay outside the disclosure. The full original plan is
+  // still rendered by folder-plan-lines; this is not another consent document.
+  function reviewConsequences(plan) {
+    if (!plan) return [];
+    const effects = [];
+    const plugins = list(plan.visual?.plugins);
+    for (const line of list(plan.lines)) {
+      if (['integration', 'provider'].includes(line.kind)) {
+        const plugin = plugins.find(row => row.kind === line.kind);
+        if (plugin?.operation === 'ready') continue;
+        const verbs = { install: 'Install', update: 'Update', enable: 'Enable' };
+        effects.push(
+          plugin && verbs[plugin.operation]
+            ? `${verbs[plugin.operation]} ${text(plugin.name)}${plugin.installed_version ? ` from ${plugin.installed_version}` : ''}${plugin.version ? ` to ${plugin.version}` : ' (version not yet known)'}.`
+            : [text(line.name), text(line.detail)].filter(Boolean).join('. ')
+        );
+      } else if (
+        [
+          'workspace',
+          'home',
+          'group',
+          'workspaces',
+          'folder',
+          'mode',
+          'task',
+          'profile',
+          'library',
+          'songs',
+          'assistant'
+        ].includes(line.kind)
+      ) {
+        effects.push([text(line.name), text(line.detail)].filter(Boolean).join('. '));
+      } else if (line.kind === 'agents' && line.detail) {
+        effects.push(text(line.detail));
+      }
+    }
+    if (plan.hire && list(plan.lines).some(line => line.kind === 'task'))
+      effects.push(
+        'The first look shares permitted folder content with the configured model and uses model tokens. It does not change your source files.'
+      );
+    return effects.filter(Boolean);
+  }
+
+  function renderConsequences(container, plan) {
+    if (!container) return;
+    const effects = reviewConsequences(plan);
+    container.hidden = !effects.length;
+    const signature = JSON.stringify(effects);
+    if (container.dataset.signature === signature) return;
+    container.dataset.signature = signature;
+    container.replaceChildren();
+    if (!effects.length) return;
+    const doc = container.ownerDocument;
+    const heading = doc.createElement('h4');
+    heading.textContent = 'Before you start';
+    container.append(heading);
+    const list = doc.createElement('ul');
+    for (const effect of effects) {
+      const row = doc.createElement('li');
+      row.textContent = effect;
+      list.append(row);
+    }
+    container.append(list);
+  }
+
+  function briefError(value) {
+    return Array.from(String(value ?? '')).length > 300
+      ? 'Keep the brief to 300 characters or fewer. Your draft is kept.'
+      : '';
+  }
+
+  globalThis.OriFolderSetupVisual = Object.freeze({
+    visualView,
+    renderDiagram,
+    reviewConsequences,
+    renderConsequences,
+    briefError
+  });
 })();

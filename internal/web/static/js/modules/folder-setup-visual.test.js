@@ -85,6 +85,25 @@ test('only actual root entries are displayed, never an invented file or a child 
   assert.match(view.summary, /No setup has started/);
 });
 
+test('visible consequences retain install/read/token/shared-agent and profile consent', () => {
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences({
+    ...plan,
+    visual: { plugins: [{ kind: 'provider', name: 'Music', operation: 'update', version: '2' }] },
+    lines: [
+      { kind: 'provider', name: 'Update Music' },
+      { kind: 'folder', name: 'Link the folder', detail: 'Read-only' },
+      { kind: 'agents', name: 'Add agent', detail: 'Shared with later projects' },
+      { kind: 'task', name: 'One first look' },
+      { kind: 'profile', name: 'Home profile', detail: 'Reads the templates folder' }
+    ]
+  });
+  assert.ok(effects.includes('Update Music to 2.'));
+  assert.match(effects.join(' '), /Shared with later projects/);
+  assert.match(effects.join(' '), /Reads the templates folder/);
+  assert.match(effects.join(' '), /shares permitted folder content.*model tokens/);
+  assert.doesNotMatch(effects.join(' '), /from 1/);
+});
+
 function documentFixture() {
   const doc = {
     createElement: tag => ({
