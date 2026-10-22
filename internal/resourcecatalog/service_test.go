@@ -167,10 +167,21 @@ type catalogFixture struct {
 	studio   *workspace.Workspace
 	home     *workspace.Workspace
 	dataDir  string
-	clock    time.Time
+	// mu guards clock and homeAvailable for every service the fixture builds:
+	// a restart test runs two, and the first one's inspection goroutine can
+	// still be ticking the clock while the second reads it.
+	mu    sync.Mutex
+	clock time.Time
 	// homeAvailable stands for the Home's own package being installed and
 	// pinned; lookups read it at call time.
 	homeAvailable bool
+}
+
+// setHomeAvailable changes whether the Home's package counts as installed.
+func (f *catalogFixture) setHomeAvailable(available bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.homeAvailable = available
 }
 
 func newCatalogFixture(t *testing.T) *catalogFixture {
@@ -238,23 +249,22 @@ func linkTestStudio(t *testing.T, store *workspace.FileStore, home *workspace.Wo
 
 func (f *catalogFixture) newService(dataDir string) *Service {
 	ids := 0
-	var mu sync.Mutex
 	return NewService(Deps{
 		Workspaces: f.store, Folders: f.store, DataDir: dataDir, Provider: f.provider,
 		HomeProviderAvailable: func(*workspace.Workspace) bool {
-			mu.Lock()
-			defer mu.Unlock()
+			f.mu.Lock()
+			defer f.mu.Unlock()
 			return f.homeAvailable
 		},
 		Now: func() time.Time {
-			mu.Lock()
-			defer mu.Unlock()
+			f.mu.Lock()
+			defer f.mu.Unlock()
 			f.clock = f.clock.Add(time.Second)
 			return f.clock
 		},
 		NewID: func() string {
-			mu.Lock()
-			defer mu.Unlock()
+			f.mu.Lock()
+			defer f.mu.Unlock()
 			ids++
 			return "id" + itoa(ids)
 		},
