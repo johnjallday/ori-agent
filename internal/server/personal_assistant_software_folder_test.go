@@ -181,7 +181,7 @@ func TestAssistantSoftwareFolder_DiscussionAndSetupWordingSuggestAndCreateNothin
 	// The model gets names and counts. It gets no path, no opaque reference, and
 	// nothing read from inside the folders.
 	for _, forbidden := range []string{os.Getenv("HOME"), stage.selection, stage.candidates["widget"], "example.invalid", "Widget is a small service", "never-read-this"} {
-		if strings.Contains(prompt, forbidden) || strings.Contains(call.Messages[0].Content, forbidden) {
+		if strings.Contains(prompt, forbidden) || strings.Contains(call.SystemPrompt, forbidden) {
 			t.Fatalf("the model was sent %q", forbidden)
 		}
 	}

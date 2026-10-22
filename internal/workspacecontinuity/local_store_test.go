@@ -12,9 +12,25 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
+// localFixture hands ordinary tests a pre-migrated clone; a fresh open re-ran
+// every migration through the race detector, which was most of each test.
 func localFixture(t *testing.T) (*database.DB, *LocalStore) {
+	t.Helper()
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return db, NewLocalStore(db)
+}
+
+// freshLocalFixture keeps the real database.Open at a test-owned path for the
+// tests whose subject is closing, resetting or reopening that same file.
+func freshLocalFixture(t *testing.T) (*database.DB, *LocalStore) {
 	t.Helper()
 	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "sessions.db"), WALMode: true})
 	must(t, err)
@@ -167,7 +183,7 @@ func TestRecordOwnershipRollsBackAndNeverClaimsForeignRows(t *testing.T) {
 }
 
 func TestInterruptedReceiptAndComponentReportSurviveReopen(t *testing.T) {
-	db, store := localFixture(t)
+	db, store := freshLocalFixture(t)
 	op, members, scope := importFixture(t, store, "incoming")
 	must(t, db.InTransaction(t.Context(), func(tx *sql.Tx) error {
 		return SetComponentOutcome(t.Context(), tx, scope, ComponentOutcome{Domain: "uploads", Status: "failed", Reason: "disk_full"})
@@ -291,7 +307,7 @@ func TestCanonicalWriteDuringPublicationFailsFreshSQLFence(t *testing.T) {
 }
 
 func TestDirtyMoveIncludesBothOwnersAndResetClearsAllLocalAuthority(t *testing.T) {
-	db, store := localFixture(t)
+	db, store := freshLocalFixture(t)
 	root, manifest, objects := fixture(t)
 	seedCanonicalWorkspace(t, db, manifest.WorkspaceID)
 	must(t, store.RegisterNative(t.Context(), manifest.WorkspaceID))

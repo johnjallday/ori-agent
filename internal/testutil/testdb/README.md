@@ -95,6 +95,25 @@ sample (assistantops 754 → 756 of 880 statements; setupjourney 3431 → 3432 o
 speedup evidence. Compilation is excluded and package executions overlap.
 Hosted cold/warm measurements and repeated samples remain necessary.
 
+`backuprecovery.newLocalStoreFixture`, `workspacecontinuity.localFixture` and
+the SQLite-primary fixtures in `projectlibrary` followed on 2026-10-22, after
+the macOS unit leg's profile showed `database.(*DB).migrate` taking ~3 s of
+every ~3.4 s test under the race detector. `workspacecontinuity` keeps a
+`freshLocalFixture` for its three close/reopen and reset tests; `projectlibrary`
+keeps real opens for its reopen round trip and the cross-process fence
+contract. Same local Darwin arm64 Go 1.26.0 method, one package per run:
+
+| Package | Before | After |
+| --- | ---: | ---: |
+| `internal/backuprecovery` | 596.571 s | 93.931 s |
+| `internal/workspacecontinuity` | 117.603 s | 31.255 s |
+| `internal/projectlibrary` | 519.473 s | 396.085 s |
+
+All 495, 92 and 440 test/subtest outcomes matched, and covered coverage blocks
+were unchanged (backuprecovery 2074 → 2075 of 3137, projectlibrary 3412 of
+4357). projectlibrary's remaining time is in catalog and arrangement stress
+tests that never open a database.
+
 ## Measurement
 
 `BenchmarkOpenFresh` retains the real production initialization path for memory

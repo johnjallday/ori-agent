@@ -1,16 +1,15 @@
 package projectlibrary
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -192,10 +191,7 @@ func TestLinkedAssociation_SQLitePrimaryRejectsChangedChildMirrorAndRetriesFinal
 		t.Fatal(err)
 	}
 	childID := connectExistingSong(t, scope, file, plugins, outside)
-	db, err := database.Open(context.Background(), &database.Config{Path: filepath.Join(t.TempDir(), "ori.db"), WALMode: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	defer func() { _ = db.Close() }()
 	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
 	for _, id := range []string{scope.HomeID, childID} {

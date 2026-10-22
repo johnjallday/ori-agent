@@ -307,8 +307,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      # Ubuntu partitions the full canonical list; macOS keeps --platform.
-      # Neither test flags nor assertions change. Required names live on the
+      # Ubuntu partitions the full canonical list with coverage; macOS keeps
+      # --platform and skips coverage, which only the Linux merge below ever
+      # consumed. Assertions never change. Required names live on the
       # fail-closed aggregation jobs below, outside this execution matrix.
       - name: Run unit tests
         id: unit

@@ -146,38 +146,65 @@ func TestBudgetPromptSegments_OverflowWhenProtectedTooBig(t *testing.T) {
 func TestEvictConversationForContext(t *testing.T) {
 	big := strings.Repeat("T", 160000) // ~40000 tokens each, together over budget
 	conversation := []llm.Message{
-		llm.NewSystemMessage("system"),                // 0 protected
-		llm.NewUserMessage("do the task"),             // 1 protected
-		{Role: llm.RoleAssistant, Content: "calling"}, // 2
-		llm.NewToolMessage("t1", big),                 // 3 evictable
-		llm.NewToolMessage("t2", big),                 // 4 evictable
-		llm.NewUserMessage("continue"),                // 5 (most recent, protected)
+		llm.NewUserMessage("do the task"),             // 0 protected
+		{Role: llm.RoleAssistant, Content: "calling"}, // 1
+		llm.NewToolMessage("t1", big),                 // 2 evictable
+		llm.NewToolMessage("t2", big),                 // 3 evictable
+		llm.NewUserMessage("continue"),                // 4 (most recent, protected)
 	}
-	compacted, overflow := evictConversationForContext(conversation, 40000, nil)
+	compacted, overflow := evictConversationForContext("system", conversation, 40000, nil)
 	if compacted == 0 {
 		t.Fatalf("expected at least one message compacted")
 	}
 	if overflow {
 		t.Fatalf("did not expect overflow after compaction")
 	}
-	// System + task message untouched.
-	if conversation[0].Content != "system" || conversation[1].Content != "do the task" {
-		t.Fatalf("protected head messages were modified")
+	// Task message untouched.
+	if conversation[0].Content != "do the task" {
+		t.Fatalf("protected head message was modified")
 	}
 	// At least one tool message shrank and carries a marker.
-	if len(conversation[3].Content) >= 40000 && len(conversation[4].Content) >= 40000 {
+	if len(conversation[2].Content) >= 40000 && len(conversation[3].Content) >= 40000 {
 		t.Fatalf("no tool message was compacted")
+	}
+}
+
+// The system prompt travels apart from the conversation but still fills the
+// window: it is counted, and it is never what gets compacted.
+func TestEvictConversationForContext_CountsTheSystemPrompt(t *testing.T) {
+	conversation := func() []llm.Message {
+		return []llm.Message{
+			llm.NewUserMessage("do the task"),
+			{Role: llm.RoleAssistant, Content: "calling"},
+			llm.NewToolMessage("t1", strings.Repeat("T", 100000)), // ~25000 tokens
+			llm.NewUserMessage("continue"),
+		}
+	}
+	// 40000 window → 30000 budget: the conversation alone fits.
+	if compacted, overflow := evictConversationForContext("", conversation(), 40000, nil); compacted != 0 || overflow {
+		t.Fatalf("a fitting conversation was compacted=%d overflow=%v", compacted, overflow)
+	}
+	// A ~10000-token system prompt pushes it over, so the tool result is cut.
+	withPrompt := conversation()
+	if compacted, overflow := evictConversationForContext(strings.Repeat("S", 40000), withPrompt, 40000, nil); compacted != 1 || overflow {
+		t.Fatalf("the system prompt was not counted: compacted=%d overflow=%v", compacted, overflow)
+	}
+	if len(withPrompt[2].Content) >= 100000 {
+		t.Fatal("the tool result was not compacted")
+	}
+	// A system prompt larger than the budget overflows whatever is compacted.
+	if _, overflow := evictConversationForContext(strings.Repeat("S", 140000), conversation(), 40000, nil); !overflow {
+		t.Fatal("an oversized system prompt did not overflow")
 	}
 }
 
 func TestEvictConversationForContext_UnknownWindowDisabled(t *testing.T) {
 	conversation := []llm.Message{
-		llm.NewSystemMessage("system"),
 		llm.NewUserMessage("task"),
 		llm.NewToolMessage("t1", strings.Repeat("X", 100000)),
 		llm.NewUserMessage("last"),
 	}
-	compacted, overflow := evictConversationForContext(conversation, 0, nil)
+	compacted, overflow := evictConversationForContext("system", conversation, 0, nil)
 	if compacted != 0 || overflow {
 		t.Fatalf("window 0 should disable eviction, got compacted=%d overflow=%v", compacted, overflow)
 	}

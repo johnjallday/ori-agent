@@ -46,11 +46,9 @@ func (h *LLMTaskHandler) callTaskOutputAssistant(ctx context.Context, task Task,
 	modelName := h.normalizeModelForProvider(providerName, ag.Settings.Model)
 
 	chatReq := llm.ChatRequest{
-		Model: modelName,
-		Messages: []llm.Message{
-			llm.NewSystemMessage("You normalize task results into strict JSON for storage. Return only one JSON object. Do not include markdown fences or commentary."),
-			llm.NewUserMessage(prompt),
-		},
+		Model:           modelName,
+		SystemPrompt:    "You normalize task results into strict JSON for storage. Return only one JSON object. Do not include markdown fences or commentary.",
+		Messages:        []llm.Message{llm.NewUserMessage(prompt)},
 		Temperature:     0,
 		ReasoningEffort: ag.Settings.EffectiveReasoningEffort(providerName),
 	}

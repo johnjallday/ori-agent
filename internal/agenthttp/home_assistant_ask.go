@@ -892,10 +892,8 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()
 	}
-	// The operating skill is loaded only beside the operations it names, and
-	// it travels as the request's system prompt: every provider sends that,
-	// while the Anthropic API provider drops system-role messages. Tools must
-	// never reach a model without the rules for using them.
+	// The operating skill is loaded only beside the operations it names. Tools
+	// must never reach a model without the rules for using them.
 	operatingSkill := ""
 	if operations != nil {
 		operatingSkill = operations.prompt(tools)
@@ -911,14 +909,20 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		scope.ledger.charge(evidenceSize(overview))
 	}
 
-	conversation := make([]llm.Message, 0, len(turn.history)+2)
+	// The turn's rules travel as the request's system prompt, which every
+	// provider sends; a system-role message is not part of every provider's
+	// contract. Notes added later in the turn are appended to systemText, and
+	// each request rebuilds its system prompt from it. The hire offer's rules
+	// are among them: the tool's where it is offered, the folder card's where
+	// a recognized folder owns the offer, the chip's where there are no tools.
 	proposalPrompt := hireProposalManualInstructions
 	if hireProposalWithheld(ctx) {
 		proposalPrompt = hireProposalFolderInstructions
 	} else if proposal != nil && provider.Capabilities().SupportsTools {
 		proposalPrompt = hireProposalInstructions
 	}
-	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)+proposalPrompt))
+	systemText := turn.system + plainTextReplies + researchSystemPrompt(research, provider.Capabilities().SupportsTools) + proposalPrompt
+	conversation := make([]llm.Message, 0, len(turn.history)+1)
 	conversation = append(conversation, turn.history...)
 	researchEvidence := ""
 	if research != nil && research.result != nil {
@@ -931,7 +935,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence+
 		reviewedIntegrationTurnFromContext(ctx).referencePrompt()+folderPathTurnFromContext(ctx).referencePrompt()+recallPrompt+proposal.prompt()))
 	if len(tools) == 0 && scope != nil {
-		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
+		systemText += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}
 
 	for round := 0; round < homeMaxToolRounds; round++ {
@@ -943,7 +947,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		}
 		resp, chatErr := provider.Chat(ctx, llm.ChatRequest{
 			Model:        model,
-			SystemPrompt: operatingSkill,
+			SystemPrompt: assistantSystemPrompt(systemText, operatingSkill),
 			Messages:     conversation,
 			Tools:        tools,
 			Temperature:  turn.temperature,
@@ -1017,11 +1021,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if scope != nil {
 		// Readers are gone for the rest of this turn. Say so, or the model may
 		// present what it managed to read as the whole picture.
-		conversation[0].Content += readerRoundsExhausted
+		systemText += readerRoundsExhausted
 	}
 	// The closing reply of an operating turn still needs the skill's rules for
 	// reporting what Ori returned.
-	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, SystemPrompt: operatingSkill, Messages: conversation, Temperature: turn.temperature})
+	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, SystemPrompt: assistantSystemPrompt(systemText, operatingSkill), Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr
 	}
@@ -1032,6 +1036,16 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		return "I gathered some data but couldn't compose a final summary. Try narrowing the question.", nil
 	}
 	return scope.finishAnswer(resp.Content), nil
+}
+
+// assistantSystemPrompt is one request's system prompt: the turn's rules, then
+// the operating skill when the turn offers operations, so the skill's tool
+// rules close the prompt.
+func assistantSystemPrompt(systemText, operatingSkill string) string {
+	if strings.TrimSpace(operatingSkill) == "" {
+		return systemText
+	}
+	return systemText + "\n\n" + operatingSkill
 }
 
 func (h *HomeAssistantAskHandler) resolveProvider() (llm.Provider, string, error) {

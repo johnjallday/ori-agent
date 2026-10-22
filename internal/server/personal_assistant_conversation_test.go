@@ -150,7 +150,7 @@ func TestAssistantConversation_IsACanonicalSessionInPersonalHQ(t *testing.T) {
 		t.Fatalf("after restart: %+v", second.Conversation)
 	}
 	request := f.provider.requests[len(f.provider.requests)-1]
-	if len(request.Messages) != 4 || request.Messages[1].Content != "생일 축하 인사를 써줘 🎂" {
+	if len(request.Messages) != 3 || request.Messages[0].Content != "생일 축하 인사를 써줘 🎂" {
 		t.Fatalf("history after restart: %+v", request.Messages)
 	}
 

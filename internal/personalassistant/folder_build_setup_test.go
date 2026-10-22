@@ -174,6 +174,37 @@ func TestFolderBuildSetup_TheHeldPickRunsHomesJourneyThroughTheBuildsReview(t *t
 	}
 }
 
+// Build reviews never supply an "Open existing conversation" handoff. A
+// pending build remains protected by Review's single-pending-offer check.
+func TestFolderBuildSetup_PendingBuildIsNotAConversationHandoff(t *testing.T) {
+	fx := newBuildSetupFixture(t)
+	ctx := context.Background()
+	offer, err := fx.service.ReviewBuild(ctx, fx.draft, "session-1", fx.observation.ID, fx.candidate, "Summer Demos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := fx.draft
+	chat.DraftID = "chat-draft"
+	before, err := fx.store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elsewhere, err := fx.service.PendingElsewhere(ctx, chat); err != nil || elsewhere != nil {
+		t.Fatalf("build exposed as a conversation: %+v %v", elsewhere, err)
+	}
+	observation, err := fx.service.Observe(ctx, chat, "chip", "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.service.Review(ctx, chat, "chat", observation.ID, observation.Projects[0].ID); !errors.Is(err, ErrFolderReviewPending) {
+		t.Fatalf("unconfirmed build was not protected: %v", err)
+	}
+	after, err := fx.store.Read(ctx, "local")
+	if err != nil || after.Version != before.Version || after.Pending() == nil || after.Pending().ID != offer.ID {
+		t.Fatalf("build offer changed: %+v %v", after.Pending(), err)
+	}
+}
+
 // An attached song with a plan is the review the composer opens as soon as the
 // folder is attached; a folder the user said no to and a project no reviewed
 // tool owns are not.

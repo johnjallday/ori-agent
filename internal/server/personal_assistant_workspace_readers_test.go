@@ -364,13 +364,13 @@ func TestAssistantWorkspaceReaders_RoundLimitEndsReadingAndSaysSo(t *testing.T) 
 	}
 	const limit = "reader limit for this turn has been reached"
 	for index, request := range f.provider.requests[:4] {
-		if len(request.Tools) == 0 || strings.Contains(request.Messages[0].Content, limit) {
+		if len(request.Tools) == 0 || strings.Contains(request.SystemPrompt, limit) {
 			t.Fatalf("round %d: readers withdrawn or limit announced early", index+1)
 		}
 	}
 	last := f.provider.requests[4]
 	assertNoPanelExecutionAuthority(t, last)
-	if len(last.Tools) != 0 || !strings.Contains(last.Messages[0].Content, limit) {
+	if len(last.Tools) != 0 || !strings.Contains(last.SystemPrompt, limit) {
 		t.Fatalf("the final call still offered readers or did not state the limit: %d tools", len(last.Tools))
 	}
 	sources := replySources(t, reply["workspace_context"])

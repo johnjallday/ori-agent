@@ -132,7 +132,7 @@ func TestExecuteTaskConversation_RuntimeScopeDoesNotRequireBroadNativeMCP(t *tes
 		WorkspaceID: "ws-runtime-scope", AssignedNodeID: "reaper-1",
 		RequiredCapabilities: []string{"reaper_live_control"},
 	}
-	if _, err := handler.executeTaskConversation(context.Background(), provider, "codex", "gpt-5.5", 0, agent, "reaper", task, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+	if _, err := handler.executeTaskConversation(context.Background(), provider, "codex", "gpt-5.5", 0, agent, "reaper", task, "", []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !provider.called || provider.gotReq.ExecutionScope == nil {
@@ -165,7 +165,7 @@ func TestExecuteTaskConversation_FileFallbackUsesOnlyConfinedRoot(t *testing.T) 
 		WorkspaceID:      "ws-fallback",
 		RuntimeExecution: &TaskRuntimeExecution{WorkspaceRoot: stage, DisableTools: true, FileOnly: true, Filename: "song.rpp"},
 	}
-	if _, err := handler.executeTaskConversation(context.Background(), provider, "codex", "model", 0, nativeMCPAgent(true), "reaper", task, []llm.Message{llm.NewUserMessage("edit the file")}, []llm.Tool{{Name: "unrelated"}}); err != nil {
+	if _, err := handler.executeTaskConversation(context.Background(), provider, "codex", "model", 0, nativeMCPAgent(true), "reaper", task, "", []llm.Message{llm.NewUserMessage("edit the file")}, []llm.Tool{{Name: "unrelated"}}); err != nil {
 		t.Fatal(err)
 	}
 	if !provider.called || provider.gotReq.ExecutionScope == nil || provider.gotReq.ExecutionScope.WorkspaceRoot != stage || provider.gotReq.ExecutionScope.NetworkPosture != llm.CLINetworkDisabled {
@@ -187,7 +187,7 @@ func TestExecuteTaskConversation_RuntimeScopeNeverReachesNonCLIProviderOrUnrelat
 	agent := nativeMCPAgent(false)
 
 	nonCLI := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: false}}
-	if _, err := handler.executeTaskConversation(context.Background(), nonCLI, "openai", "model", 0, agent, "worker", Task{WorkspaceID: ws.ID, AssignedNodeID: "worker-1", RequiredCapabilities: []string{"runtime"}}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+	if _, err := handler.executeTaskConversation(context.Background(), nonCLI, "openai", "model", 0, agent, "worker", Task{WorkspaceID: ws.ID, AssignedNodeID: "worker-1", RequiredCapabilities: []string{"runtime"}}, "", []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if resolver.calls != 0 || nonCLI.gotReq.ExecutionScope != nil {
@@ -195,7 +195,7 @@ func TestExecuteTaskConversation_RuntimeScopeNeverReachesNonCLIProviderOrUnrelat
 	}
 
 	cli := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
-	if _, err := handler.executeTaskConversation(context.Background(), cli, "codex", "model", 0, agent, "worker", Task{WorkspaceID: ws.ID, AssignedNodeID: "worker-1"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+	if _, err := handler.executeTaskConversation(context.Background(), cli, "codex", "model", 0, agent, "worker", Task{WorkspaceID: ws.ID, AssignedNodeID: "worker-1"}, "", []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if resolver.calls != 0 || cli.gotReq.ExecutionScope != nil {
@@ -225,7 +225,7 @@ func TestExecuteTaskConversation_NativeMCPWiring(t *testing.T) {
 	ag.MCPServers = []string{runtime}
 
 	out, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", 0, ag, "reaper",
-		Task{WorkspaceID: "ws-x"}, []llm.Message{llm.NewUserMessage("create project")}, nil)
+		Task{WorkspaceID: "ws-x"}, "", []llm.Message{llm.NewUserMessage("create project")}, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestExecuteTaskConversation_NativeMCPGatedOff(t *testing.T) {
 	ag.MCPServers = []string{runtime}
 
 	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", 0, ag, "reaper",
-		Task{WorkspaceID: "ws-y"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		Task{WorkspaceID: "ws-y"}, "", []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if len(prov.gotReq.MCPServers) != 0 {
@@ -289,7 +289,7 @@ func TestExecuteTaskConversation_SkillOnlyElevated(t *testing.T) {
 	ag.MCPServers = nil        // skill-only: no MCP servers bound
 
 	if _, err := h.executeTaskConversation(context.Background(), prov, "codex", "gpt-5.5", 0, ag, "reaper",
-		Task{WorkspaceID: "ws-s"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		Task{WorkspaceID: "ws-s"}, "", []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if prov.gotReq.WorkspaceID != "ws-s" {

@@ -192,7 +192,7 @@ func TestResearchHostSnapshotOnlyNoToolNoSearchFallback(t *testing.T) {
 	if len(snapshot.requests) != 1 || len(snapshot.requests[0].Tools) != 0 || source.externalCalls != 0 || source.localCalls != 0 || resp.ResearchReview != nil || resp.ResearchCapability.BrokerTools || resp.ResearchCapability.BroaderSearch != "disabled_unconfigured" {
 		t.Fatalf("snapshot escalation: %+v", resp)
 	}
-	if !strings.Contains(snapshot.requests[0].Messages[0].Content, "snapshot-only") {
+	if !strings.Contains(snapshot.requests[0].SystemPrompt, "snapshot-only") {
 		t.Fatal("provider limitation omitted")
 	}
 }

@@ -29,7 +29,9 @@ set -euo pipefail
 # re-run the whole suite. Measured 2026-08-07: the macOS leg of `Unit Tests`
 # spent ~8.5 min re-running the identical 150 packages the ubuntu leg already
 # covers, at 10x the per-minute rate - 88% of all macOS Actions minutes. The
-# packages below are 22s of that.
+# packages below were 22s of that. Measured again 2026-10-22: the subset had
+# grown back to ~9 min because 13 of its 23 packages differed from linux only
+# by Windows fallbacks; the comparison below is what keeps that from recurring.
 
 usage() {
 	printf 'usage: %s [--platform]\n' "$(basename "$0")" >&2
@@ -65,12 +67,22 @@ if [[ "$scope" == "all" ]]; then
 	exit 0
 fi
 
-# A package is platform-conditional when the toolchain had to *exclude* one of
-# its files for the host GOOS - that is exactly the set with _darwin/_windows/
-# _unix variants or build-tagged stubs (internal/platform, internal/location,
-# internal/nativemenubar, cmd/menubar, ...).
+# A package is platform-conditional when the toolchain compiles a different
+# set of files for GOOS=darwin than for GOOS=linux - _darwin/_linux/_unix
+# variants, build-tagged stubs, darwin-only test files (internal/platform,
+# internal/location, internal/nativemenubar, cmd/menubar, ...).
 # Deriving it means a package that grows a platform variant later is picked up
 # without anyone remembering to edit this list.
+#
+# Comparing the two file sets, rather than asking whether the host *excluded*
+# anything, keeps out the packages whose only variants are Windows fallbacks
+# (`//go:build windows`, `!unix`, `!darwin && !linux`) or opt-in tags
+# (`integration`, `live`, `race`): those compile to identical code on both
+# unix legs, so the ubuntu run already covers them. A package that fails to
+# list for either GOOS is kept - a darwin-only package whose linux stub is
+# missing is still this leg's business. CGO_ENABLED is pinned because a
+# cross-GOOS listing would otherwise disable cgo and report every cgo package
+# as different.
 #
 # Packages whose *sources* are platform-neutral but whose *tests* are gated on
 # darwin have to be named explicitly - `go list` cannot see inside a
@@ -84,7 +96,22 @@ darwin_gated_tests=(
 	github.com/johnjallday/ori-agent/cmd/server
 )
 
-platform_packages="$(go list -e -f '{{if or .IgnoredGoFiles .IgnoredOtherFiles}}{{.ImportPath}}{{end}}' ./...)"
+# One line per package: import path, then every file the toolchain would
+# compile or test for that GOOS (an unlistable package is marked instead).
+compiled_files() {
+	CGO_ENABLED=1 GOOS="$1" go list -e -f '{{.ImportPath}} {{if .Error}}error{{end}}|{{join .GoFiles ","}}|{{join .CgoFiles ","}}|{{join .SFiles ","}}|{{join .TestGoFiles ","}}|{{join .XTestGoFiles ","}}' ./...
+}
+
+darwin_files="$(compiled_files darwin)"
+linux_files="$(compiled_files linux)"
+platform_packages="$(awk '
+	NR == FNR { darwin[$1] = $2; next }
+	{ linux[$1] = $2 }
+	END {
+		for (p in darwin) if (!(p in linux) || darwin[p] != linux[p]) print p
+		for (p in linux) if (!(p in darwin)) print p
+	}
+' <(printf '%s\n' "$darwin_files") <(printf '%s\n' "$linux_files"))"
 {
 	printf '%s\n' "$platform_packages"
 	printf '%s\n' "${darwin_gated_tests[@]}"

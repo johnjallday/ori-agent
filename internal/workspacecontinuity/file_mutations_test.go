@@ -92,7 +92,7 @@ func TestFileMutationFailureSurvivesTriggersAndSuccessfulReplacementClearsOnlyIt
 }
 
 func TestFileMutationRecoveryRequiresExactBarrierAndCanonicalValidation(t *testing.T) {
-	db, store := localFixture(t)
+	db, store := freshLocalFixture(t)
 	seedCanonicalWorkspace(t, db, "source")
 	must(t, store.RegisterNative(t.Context(), "source"))
 	old, err := store.BeginFileMutation(t.Context(), "source", "workspace.json")

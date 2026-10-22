@@ -174,7 +174,10 @@ func CheckIsolatedRequest(req ChatRequest) error {
 	// system-role message is not sent by all of them (the Anthropic API takes
 	// its system text apart from the messages), and one that silently dropped
 	// the rules of an isolated call would leave the model with the evidence
-	// alone. Tool turns have no place in a call that has no tools.
+	// alone. The Claude API provider now folds them into its system text
+	// (claudeSystemText), but that is a backstop, not the contract: keep this
+	// refusal so an isolated call never depends on a provider's backstop.
+	// Tool turns have no place in a call that has no tools.
 	for _, message := range req.Messages {
 		if (message.Role != RoleUser && message.Role != RoleAssistant) || len(message.ToolCalls) > 0 || message.ToolCallID != "" {
 			return fmt.Errorf("%w: an isolated call carries its instructions in SystemPrompt and only user or assistant messages", ErrIsolationUnsupported)
