@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -123,10 +124,10 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Add system prompt if specified
-	if req.SystemPrompt != "" {
+	if system := claudeSystemText(req); system != "" {
 		params.System = []anthropic.TextBlockParam{
 			{
-				Text: req.SystemPrompt,
+				Text: system,
 			},
 		}
 	}
@@ -156,6 +157,24 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 // StreamChat streams a chat completion response (not yet implemented)
 func (p *ClaudeProvider) StreamChat(ctx context.Context, req ChatRequest) (StreamReader, error) {
 	return nil, fmt.Errorf("streaming not yet implemented for Claude provider")
+}
+
+// claudeSystemText is the system text a request sends: SystemPrompt first, then
+// the content of every system-role message in order, joined by a blank line,
+// with empty ones left out. The Anthropic API takes its system text apart from
+// the messages, so a system-role message that was only skipped would lose its
+// caller's instructions without an error, while every other provider sends it.
+func claudeSystemText(req ChatRequest) string {
+	var parts []string
+	if strings.TrimSpace(req.SystemPrompt) != "" {
+		parts = append(parts, req.SystemPrompt)
+	}
+	for _, msg := range req.Messages {
+		if msg.Role == RoleSystem && strings.TrimSpace(msg.Content) != "" {
+			parts = append(parts, msg.Content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // convertMessages converts unified messages to Claude format
@@ -213,8 +232,8 @@ func (p *ClaudeProvider) convertMessages(messages []Message) []anthropic.Message
 			))
 
 		case RoleSystem:
-			// System messages are handled via the System parameter, not in Messages array
-			// Skip them here as they should be passed via req.SystemPrompt
+			// Sent as part of the System parameter by claudeSystemText, never as
+			// a message: the Anthropic API has no system role in Messages.
 			continue
 		}
 	}

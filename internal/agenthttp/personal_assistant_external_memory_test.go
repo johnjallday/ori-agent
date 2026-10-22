@@ -59,8 +59,8 @@ func TestExternalMemory_HomeAndDrawerTurnsGetTheBlockAndTheTool(t *testing.T) {
 			if !strings.Contains(user, "<untrusted_external_memory>") || !strings.Contains(user, externalBlockSentinel) {
 				t.Fatalf("the external block is missing from the turn's data:\n%s", user)
 			}
-			if strings.Contains(first.Messages[0].Content, externalBlockSentinel) {
-				t.Fatal("the external block must travel with the user-message data, not the system message")
+			if strings.Contains(first.SystemPrompt, externalBlockSentinel) {
+				t.Fatal("the external block must travel with the user-message data, not the system prompt")
 			}
 			if !strings.Contains(user, "memory_recall searches what the user's other coding agents") {
 				t.Fatal("the turn does not tell the model when to search other agents' memory")

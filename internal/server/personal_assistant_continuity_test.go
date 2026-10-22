@@ -100,7 +100,7 @@ func TestAssistantContinuityProductionProviderInputIsGroundedBoundedAndToolFree(
 		t.Fatal("unbounded model calls", len(f.provider.requests)-before)
 	}
 	summary, answer := f.provider.requests[before], f.provider.requests[before+1]
-	if len(summary.Tools) != 0 || len(summary.MCPServers) != 0 || summary.WorkspaceID != "" || summary.Model != "sonnet" || summary.MaxTokens != 1800 || !strings.Contains(summary.Messages[0].Content, "Select a compact conversation recap") {
+	if len(summary.Tools) != 0 || len(summary.MCPServers) != 0 || summary.WorkspaceID != "" || summary.Model != "sonnet" || summary.MaxTokens != 1800 || !strings.Contains(summary.SystemPrompt, "Select a compact conversation recap") || len(summary.Messages) != 1 || summary.Messages[0].Role != llm.RoleUser {
 		t.Fatal("summary escalated or changed model", summary)
 	}
 	assertNoPanelExecutionAuthority(t, summary)
@@ -110,7 +110,7 @@ func TestAssistantContinuityProductionProviderInputIsGroundedBoundedAndToolFree(
 		t.Fatal("provider omitted grounded correction", input)
 	}
 	historyRunes := 0
-	for _, message := range answer.Messages[1 : len(answer.Messages)-1] {
+	for _, message := range answer.Messages[:len(answer.Messages)-1] {
 		historyRunes += utf8.RuneCountInString(message.Content)
 		if message.Role == llm.RoleSystem {
 			t.Fatal("recap promoted into system instructions")

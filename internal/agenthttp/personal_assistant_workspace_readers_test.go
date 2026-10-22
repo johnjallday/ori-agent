@@ -141,6 +141,37 @@ func readerResult(t *testing.T, registry *panelToolRegistry, name string, args m
 	return result
 }
 
+// When the reader rounds run out, the closing tool-free request is told so in
+// its system prompt, which every provider sends; the earlier rounds were not.
+func TestWorkspaceReaders_ExhaustedRoundsReachTheClosingSystemPrompt(t *testing.T) {
+	f := newReaderFixture(t)
+	for range homeMaxToolRounds {
+		f.provider.script = append(f.provider.script, toolCall(readerNote, map[string]any{"title": "release plan"}))
+	}
+	f.provider.script = append(f.provider.script, llm.ChatResponse{Content: "I read the release plan; the tasks are left."})
+	f.handler.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "Review everything in this workspace", Intent: "assistant_conversation", Context: f.refs})
+	if len(f.provider.requests) != homeMaxToolRounds+1 {
+		t.Fatalf("model rounds: %d", len(f.provider.requests))
+	}
+	for i, request := range f.provider.requests {
+		closing := i == homeMaxToolRounds
+		if strings.Contains(request.SystemPrompt, readerRoundsExhausted) != closing {
+			t.Fatalf("round %d: reader-limit note in the system prompt = %v, want %v", i+1, !closing, closing)
+		}
+		if closing && len(request.Tools) != 0 {
+			t.Fatal("the closing request still offers tools")
+		}
+		if !strings.Contains(request.SystemPrompt, "Do not use Markdown markup") {
+			t.Fatalf("round %d lost the turn's rules", i+1)
+		}
+		for _, message := range request.Messages {
+			if message.Role == llm.RoleSystem || strings.Contains(message.Content, readerRoundsExhausted) {
+				t.Fatalf("round %d carries system text in a message: %q", i+1, message.Content)
+			}
+		}
+	}
+}
+
 // A substantive question reads the whole note and the task, the reply's
 // citations are checked against what was read, and nothing is written.
 func TestWorkspaceReaders_FullNoteAndTaskAreReadCitedAndUnchanged(t *testing.T) {

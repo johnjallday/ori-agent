@@ -40,8 +40,8 @@ func (o *Orchestrator) PlanTask(ctx context.Context, request string) (*types.Pla
 	req := llm.ChatRequest{
 		Model:           systemModel.Model,
 		ReasoningEffort: reasoningEffort,
+		SystemPrompt:    systemPrompt,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: systemPrompt},
 			{Role: llm.RoleUser, Content: fmt.Sprintf("Request: %s", request)},
 		},
 	}

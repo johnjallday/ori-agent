@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 func coreTool(name string) llm.Tool { return llm.Tool{Name: name} }
@@ -139,6 +141,50 @@ func TestParseTextToolCall(t *testing.T) {
 	// Empty name.
 	if _, _, ok := parseTextToolCall(`{"tool_call": {"name": "", "arguments": {}}}`); ok {
 		t.Fatal("empty name should not parse")
+	}
+}
+
+// recordingLocalProvider is a local provider that rejects any request carrying
+// tools and answers one without, recording every request.
+type recordingLocalProvider struct {
+	fakeLocalProvider
+	requests []llm.ChatRequest
+}
+
+func (p *recordingLocalProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	p.requests = append(p.requests, req)
+	if len(req.Tools) > 0 {
+		return nil, errors.New("registry.ollama.ai/library/llama2 does not support tools")
+	}
+	return &llm.ChatResponse{Content: "done"}, nil
+}
+
+// With the text tool protocol on, a model that rejects tools is retried with
+// the protocol instruction added to the system prompt it is sent, not to a
+// system-role message.
+func TestExecuteTaskConversation_TextToolProtocolExtendsTheSystemPrompt(t *testing.T) {
+	t.Setenv("ORI_LOCAL_TEXT_TOOL_PROTOCOL", "true")
+	prov := &recordingLocalProvider{fakeLocalProvider: fakeLocalProvider{name: "ollama"}}
+	if _, err := (&LLMTaskHandler{}).executeTaskConversation(context.Background(), prov, "ollama", "llama2", 8192,
+		agentWithSettings(types.Settings{Model: "llama2"}), "agent-a", Task{WorkspaceID: "ws-x"},
+		"sys", []llm.Message{llm.NewUserMessage("do it")}, []llm.Tool{{Name: "workspace_notes"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.requests) != 2 {
+		t.Fatalf("expected the rejected request and its tool-less retry, got %d", len(prov.requests))
+	}
+	if prov.requests[0].SystemPrompt != "sys" {
+		t.Fatalf("first request system prompt = %q", prov.requests[0].SystemPrompt)
+	}
+	if retry := prov.requests[1]; retry.SystemPrompt != "sys"+textToolProtocolInstruction || len(retry.Tools) != 0 {
+		t.Fatalf("retry system prompt = %q tools = %d", retry.SystemPrompt, len(retry.Tools))
+	}
+	for _, request := range prov.requests {
+		for _, message := range request.Messages {
+			if message.Role == llm.RoleSystem || message.Content != "do it" {
+				t.Fatalf("unexpected message %+v", message)
+			}
+		}
 	}
 }
 

@@ -68,7 +68,7 @@ func TestClaudeCodeAssistant_ResearchBrokersTools(t *testing.T) {
 	if len(f.provider.requests) == 0 || len(f.provider.requests[0].Tools) == 0 {
 		t.Fatal("a claude_code research turn was offered no tools")
 	}
-	if strings.Contains(f.provider.requests[0].Messages[0].Content, "snapshot-only") {
+	if strings.Contains(f.provider.requests[0].SystemPrompt, "snapshot-only") {
 		t.Fatal("a claude_code research turn was told it is snapshot-only")
 	}
 	if source.externalCalls != 0 {

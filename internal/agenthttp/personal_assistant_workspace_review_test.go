@@ -169,7 +169,7 @@ func TestWorkspaceReviewSnapshotOnlyDoesNotAddAnotherModelOrTools(t *testing.T) 
 	snapshot := &scriptedProvider{answers: []string{"Open workspace form manually from More assistant options. Nothing is created."}}
 	f.handler.LLMFactory.Register("fake", snapshot)
 	response := f.handler.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "prepare a workspace review", Intent: homeAssistantConversationIntent.Key, Context: f.refs, Conversation: &HomeAssistantConversationRef{ID: "canonical"}})
-	if response.Confirmation != nil || len(snapshot.requests) != 1 || len(snapshot.requests[0].Tools) != 0 || !strings.Contains(snapshot.requests[0].Messages[0].Content, workspaceProposalManualInstructions) {
+	if response.Confirmation != nil || len(snapshot.requests) != 1 || len(snapshot.requests[0].Tools) != 0 || !strings.Contains(snapshot.requests[0].SystemPrompt, workspaceProposalManualInstructions) {
 		t.Fatal("snapshot path escalated or added proposal generation")
 	}
 }

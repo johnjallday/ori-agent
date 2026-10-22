@@ -247,7 +247,7 @@ func TestConversation_FollowUpsContinueTheSameThread(t *testing.T) {
 	if record.WorkspaceID != "hq-owned" || record.AgentName != "nova-profile-key" {
 		t.Fatalf("conversation is not bound to the hired assistant's HQ: %+v", record)
 	}
-	if got := roles(f.provider.last().Messages); got != "system,user" {
+	if got := roles(f.provider.last().Messages); got != "user" {
 		t.Fatalf("a new conversation has no history: %s", got)
 	}
 
@@ -256,21 +256,21 @@ func TestConversation_FollowUpsContinueTheSameThread(t *testing.T) {
 		t.Fatalf("second turn left the thread: %+v", second.Conversation)
 	}
 	request := f.provider.last()
-	if got := roles(request.Messages); got != "system,user,assistant,user" {
+	if got := roles(request.Messages); got != "user,assistant,user" {
 		t.Fatalf("follow-up history roles=%s", got)
 	}
-	if request.Messages[1].Content != "Write a short birthday greeting for my friend Mina." || request.Messages[2].Content != "Happy birthday, Mina!" {
-		t.Fatalf("follow-up did not carry the draft: %+v", request.Messages[1:3])
+	if request.Messages[0].Content != "Write a short birthday greeting for my friend Mina." || request.Messages[1].Content != "Happy birthday, Mina!" {
+		t.Fatalf("follow-up did not carry the draft: %+v", request.Messages[0:2])
 	}
-	if !strings.HasPrefix(request.Messages[3].Content, "make it warmer") {
-		t.Fatalf("current turn=%q", request.Messages[3].Content)
+	if !strings.HasPrefix(request.Messages[2].Content, "make it warmer") {
+		t.Fatalf("current turn=%q", request.Messages[2].Content)
 	}
 
 	third := f.say("give it to me in Korean", conv.ID)
 	if third.Response != "생일 축하해, 미나야! 🎂" || third.Conversation.ID != conv.ID {
 		t.Fatalf("third turn: %+v", third)
 	}
-	if got := roles(f.provider.last().Messages); got != "system,user,assistant,user,assistant,user" {
+	if got := roles(f.provider.last().Messages); got != "user,assistant,user,assistant,user" {
 		t.Fatalf("third turn history roles=%s", got)
 	}
 
@@ -294,11 +294,11 @@ func TestConversation_NewConversationStartsEmpty(t *testing.T) {
 	if a.Conversation.ID == b.Conversation.ID || !b.Conversation.Started {
 		t.Fatalf("no conversation ID must start a new thread: a=%+v b=%+v", a.Conversation, b.Conversation)
 	}
-	if got := roles(f.provider.last().Messages); got != "system,user" {
+	if got := roles(f.provider.last().Messages); got != "user" {
 		t.Fatalf("new conversation inherited history: %s", got)
 	}
-	if strings.Contains(f.provider.last().Messages[1].Content, "Sam") {
-		t.Fatalf("new conversation saw the other thread: %q", f.provider.last().Messages[1].Content)
+	if strings.Contains(f.provider.last().Messages[0].Content, "Sam") {
+		t.Fatalf("new conversation saw the other thread: %q", f.provider.last().Messages[0].Content)
 	}
 }
 
@@ -426,7 +426,7 @@ func TestConversation_AppDetourStaysInTheThread(t *testing.T) {
 		t.Fatalf("app-status answer lost its grounding")
 	}
 	after := f.say("now make it shorter", first.Conversation.ID)
-	if got := roles(f.provider.last().Messages); got != "system,user,assistant,user,assistant,user" || after.Conversation.ID != first.Conversation.ID {
+	if got := roles(f.provider.last().Messages); got != "user,assistant,user,assistant,user" || after.Conversation.ID != first.Conversation.ID {
 		t.Fatalf("thread after detour: roles=%s state=%+v", got, after.Conversation)
 	}
 }
@@ -536,7 +536,7 @@ func TestConversation_PausedStillAnswersADirectRequest(t *testing.T) {
 	if resp.Response != "the draft" || resp.Identity == nil || resp.Identity.State != "paused" || !resp.Conversation.Stored {
 		t.Fatalf("paused turn: %+v", resp)
 	}
-	if !strings.Contains(f.provider.last().Messages[0].Content, "proactive relationship is paused") {
+	if !strings.Contains(f.provider.last().SystemPrompt, "proactive relationship is paused") {
 		t.Fatalf("paused boundary missing from the conversation prompt")
 	}
 }
@@ -586,7 +586,7 @@ func TestConversation_TranscriptGrantsNoAuthority(t *testing.T) {
 	if resp.RequiresConfirmation || len(f.memory.requests) != 0 || f.mutator.writes != 0 || len(f.provider.requests) != 1 {
 		t.Fatalf("history acted as approval: %+v memory=%d", resp, len(f.memory.requests))
 	}
-	for _, message := range f.provider.last().Messages[1:] {
+	for _, message := range f.provider.last().Messages {
 		if strings.Contains(message.Content, "confirmed_action remember approved") {
 			t.Fatalf("stored system-role text was replayed: %q", message.Content)
 		}
@@ -715,7 +715,7 @@ func TestConversationPrompt_AnswersTheRequestInsteadOfRecitingTheApp(t *testing.
 	f := newConversationFixture(t, "the draft")
 	f.say("Write a short birthday greeting for my friend Mina.", "")
 	request := f.provider.last()
-	system, user := request.Messages[0].Content, request.Messages[1].Content
+	system, user := request.SystemPrompt, request.Messages[0].Content
 
 	for _, want := range []string{`displayed as "Nova"`, "give the finished text itself", "never promise to remind", "does not change their language preference", "Never invent personal facts"} {
 		if !strings.Contains(system, want) {
@@ -729,6 +729,9 @@ func TestConversationPrompt_AnswersTheRequestInsteadOfRecitingTheApp(t *testing.
 	}
 	if !strings.HasPrefix(user, "Write a short birthday greeting for my friend Mina.") || !strings.Contains(user, "<untrusted_personal_hq_memory>") {
 		t.Fatalf("user turn must be the request plus eligible personal context: %q", user)
+	}
+	if strings.Contains(system, "nova-profile-key") || strings.Contains(system, "hq-owned") {
+		t.Fatalf("binding keys leaked into the system prompt: %q", system)
 	}
 	for _, message := range request.Messages {
 		if strings.Contains(message.Content, "nova-profile-key") || strings.Contains(message.Content, "hq-owned") {

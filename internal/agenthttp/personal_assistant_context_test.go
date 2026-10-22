@@ -103,8 +103,8 @@ func TestAsk_PersonalAssistantContextUsesCurrentUserAndPausedIdentity(t *testing
 	if provider.userID != "user-a" || resp.Identity == nil || resp.Identity.DisplayName != "Nova" || resp.Identity.State != "paused" {
 		t.Fatalf("wrong scoped identity: provider user=%q response=%+v", provider.userID, resp.Identity)
 	}
-	if len(capture.request.Messages) < 2 || !strings.Contains(capture.request.Messages[0].Content, "proactive relationship is paused") {
-		t.Fatalf("paused boundary missing from model request: %+v", capture.request.Messages)
+	if len(capture.request.Messages) < 1 || !strings.Contains(capture.request.SystemPrompt, "proactive relationship is paused") {
+		t.Fatalf("paused boundary missing from model request: %q", capture.request.SystemPrompt)
 	}
 }
 

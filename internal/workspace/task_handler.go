@@ -445,12 +445,14 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 		h.reportPromptTrims(task, agentName, contextWindow, trims)
 	}
 
+	// The task system prompt travels as the request's SystemPrompt, which every
+	// provider sends; a system-role message is not part of every provider's
+	// contract.
 	messages := []llm.Message{
-		llm.NewSystemMessage(taskSystemPrompt),
 		llm.NewUserMessage(renderPromptSegments(segments)),
 	}
 
-	return h.executeTaskConversation(ctx, provider, providerName, modelName, contextWindow, ag, agentName, task, messages, tools)
+	return h.executeTaskConversation(ctx, provider, providerName, modelName, contextWindow, ag, agentName, task, taskSystemPrompt, messages, tools)
 }
 
 // resolveExecutionAgent and the rest of the agent-resolution helpers live
@@ -512,6 +514,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	ag *resolvedTaskAgent,
 	agentName string,
 	task Task,
+	systemPrompt string,
 	messages []llm.Message,
 	tools []llm.Tool,
 ) (string, error) {
@@ -559,7 +562,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		// compacting the oldest tool-result messages before sending (WS2.10a). If
 		// it still overflows after compaction, block instead of letting the server
 		// truncate mid-task.
-		if compacted, stillOver := evictConversationForContext(conversation, contextWindow, requestTools); compacted > 0 || stillOver {
+		if compacted, stillOver := evictConversationForContext(systemPrompt, conversation, contextWindow, requestTools); compacted > 0 || stillOver {
 			h.reportConversationEviction(task, agentName, round+1, compacted, stillOver)
 			if stillOver {
 				return "", h.buildContextOverflowError(task, contextWindow, []string{"conversation_history"})
@@ -580,6 +583,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 
 		chatReq := llm.ChatRequest{
 			Model:               modelName,
+			SystemPrompt:        systemPrompt,
 			Messages:            conversation,
 			Temperature:         ag.Settings.Temperature,
 			ReasoningEffort:     ag.Settings.EffectiveReasoningEffort(providerName),
@@ -688,9 +692,11 @@ func (h *LLMTaskHandler) executeTaskConversation(
 			if taskResponseSchema != nil {
 				chatReq.ResponseSchema = taskResponseSchema
 			}
-			// Optionally switch the model to the prompt-based tool protocol.
-			if textToolProtocol && len(conversation) > 0 && conversation[0].Role == llm.RoleSystem {
-				conversation[0].Content += textToolProtocolInstruction
+			// Optionally switch the model to the prompt-based tool protocol. The
+			// instruction stays in systemPrompt for every later round.
+			if textToolProtocol {
+				systemPrompt += textToolProtocolInstruction
+				chatReq.SystemPrompt = systemPrompt
 			}
 			resp, err = provider.Chat(ctx, chatReq)
 		}

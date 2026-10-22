@@ -216,7 +216,7 @@ func TestPanelWorkspaceModel_CapabilitiesAndNoNativeOptIn(t *testing.T) {
 				if !strings.Contains(string(encoded), alpha.Name) {
 					t.Fatalf("%s omitted context", intent)
 				}
-				if !supportsTools && !strings.Contains(string(encoded), "cannot execute Ori-brokered readers") {
+				if !supportsTools && !strings.Contains(req.SystemPrompt, "cannot execute Ori-brokered readers") {
 					t.Fatal("snapshot limitation missing")
 				}
 			}

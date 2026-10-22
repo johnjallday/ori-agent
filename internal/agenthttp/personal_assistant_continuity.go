@@ -80,7 +80,7 @@ func (h *HomeAssistantAskHandler) prepareContinuity(ctx context.Context, prompt 
 				summaryCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 				// Direct tool-free system-model call: no registry, MCP flags,
 				// workspace ID, native authority or inherited profile loadout.
-				result, callErr := provider.Chat(summaryCtx, llm.ChatRequest{Model: model, Messages: []llm.Message{llm.NewSystemMessage(recapInstructions), llm.NewUserMessage(string(data))}, Temperature: 0, MaxTokens: 1800})
+				result, callErr := provider.Chat(summaryCtx, llm.ChatRequest{Model: model, SystemPrompt: recapInstructions, Messages: []llm.Message{llm.NewUserMessage(string(data))}, Temperature: 0, MaxTokens: 1800})
 				cancel()
 				if callErr == nil && result != nil && len(result.ToolCalls) == 0 {
 					updated, parseErr := assistantcontext.DecodeRecap(result.Content)

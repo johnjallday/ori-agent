@@ -49,7 +49,7 @@ func TestAssistantFolderSuggestion_RealSendHydrationAndExplicitReview(t *testing
 		t.Fatal("opaque reference sent to model")
 	}
 	for _, required := range []string{"about 80 words", "not a repeated inventory", "optional background", "Do not prefer a child", "no earlier locally saved answered turn"} {
-		if !strings.Contains(call.Messages[0].Content, required) {
+		if !strings.Contains(call.SystemPrompt, required) {
 			t.Fatalf("missing conversational presentation guidance %q", required)
 		}
 	}

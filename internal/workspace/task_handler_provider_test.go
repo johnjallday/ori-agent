@@ -378,8 +378,75 @@ func TestExecuteTask_HostOwnedToollessRunPinsSkillAndExposesNoTools(t *testing.T
 	if len(provider.requests) != 1 || len(provider.requests[0].Tools) != 0 {
 		t.Fatalf("tool-less host run exposed tools: %+v", provider.requests)
 	}
-	if len(provider.requests[0].Messages) == 0 || !strings.Contains(provider.requests[0].Messages[0].Content, "PINNED INTAKE SKILL") {
-		t.Fatalf("pinned skill text did not reach the task system prompt: %+v", provider.requests[0].Messages)
+	if len(provider.requests[0].Messages) == 0 || !strings.Contains(provider.requests[0].SystemPrompt, "PINNED INTAKE SKILL") {
+		t.Fatalf("pinned skill text did not reach the task system prompt: %q", provider.requests[0].SystemPrompt)
+	}
+}
+
+// The result normaliser's instruction travels as the request's SystemPrompt.
+func TestNormalizeTaskOutputSpec_SendsItsInstructionAsTheSystemPrompt(t *testing.T) {
+	provider := &scriptedProviderStub{name: "openai", responses: []llm.ChatResponse{{Content: `{"title":"x"}`}}}
+	factory := llm.NewFactory()
+	factory.Register("openai", provider)
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Ori": {Settings: types.Settings{Provider: "openai", Model: "gpt-test"}},
+	}}
+	handler := &LLMTaskHandler{agentStore: agentStore, llmFactory: factory}
+	if _, err := handler.NormalizeTaskOutputSpec(context.Background(), Task{ID: "t", To: "Ori", Description: "summarize"}, "RAW-RESULT"); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("requests: %d", len(provider.requests))
+	}
+	request := provider.requests[0]
+	if !strings.Contains(request.SystemPrompt, "normalize task results into strict JSON") {
+		t.Fatalf("system prompt = %q", request.SystemPrompt)
+	}
+	if len(request.Messages) != 1 || request.Messages[0].Role != llm.RoleUser || !strings.Contains(request.Messages[0].Content, "RAW-RESULT") {
+		t.Fatalf("messages = %+v", request.Messages)
+	}
+}
+
+// The task system prompt travels as the request's SystemPrompt on every round,
+// which every provider sends; a system-role message is not part of every
+// provider's contract (the Anthropic API takes its system text apart).
+func TestExecuteTask_SendsTheTaskSystemPromptAsTheRequestSystemPrompt(t *testing.T) {
+	searchTool := &taskHandlerToolFunc{name: "web_search", result: `{"results":[{"title":"Plan","url":"https://example.test/plan"}]}`}
+	provider := &scriptedProviderStub{name: "openai", responses: []llm.ChatResponse{
+		{ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "web_search", Arguments: `{"query":"plan"}`}}},
+		{Content: "The plan is at https://example.test/plan."},
+	}}
+	factory := llm.NewFactory()
+	factory.Register("openai", provider)
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Ori": {Settings: types.Settings{Provider: "openai", Model: "gpt-test", SystemPrompt: "AGENT-PROMPT-7c1e: you are {{agent.name}}."}},
+	}}
+	handler := &LLMTaskHandler{agentStore: agentStore, llmFactory: factory}
+	handler.SetUtilityToolProvider(taskUtilityProviderStub{tools: map[string]toolapi.Tool{"web_search": searchTool}})
+
+	if _, err := handler.ExecuteTask(context.Background(), "Ori", Task{
+		ID: "task-plan", To: "Ori", Description: "find the release plan",
+		RuntimeSkillPrompts: []ResolvedSkill{{Name: "release-notes", Prompt: "SKILL-PROMPT-3b9d", Enabled: true, Trusted: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("expected a tool round and a final round, got %d requests", len(provider.requests))
+	}
+	for i, request := range provider.requests {
+		for _, want := range []string{"AGENT-PROMPT-7c1e: you are Ori.", "SKILL-PROMPT-3b9d"} {
+			if !strings.Contains(request.SystemPrompt, want) {
+				t.Fatalf("round %d system prompt lacks %q: %q", i+1, want, request.SystemPrompt)
+			}
+		}
+		if len(request.Messages) == 0 || request.Messages[0].Role != llm.RoleUser || !strings.Contains(request.Messages[0].Content, "find the release plan") {
+			t.Fatalf("round %d does not open with the task message: %+v", i+1, request.Messages)
+		}
+		for _, message := range request.Messages {
+			if message.Role == llm.RoleSystem || strings.Contains(message.Content, "AGENT-PROMPT-7c1e") {
+				t.Fatalf("round %d carries the system prompt in a message: %+v", i+1, message)
+			}
+		}
 	}
 }
 
