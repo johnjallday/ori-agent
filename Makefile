@@ -338,7 +338,7 @@ ci-local: ## Run CI's gates locally, in CI's order, with CI's pins (wt pr runs t
 ci-local-quick: ## The fast subset of ci-local: gofmt, vet, lint-new, test-unit, JS tests, lint and format
 	@bash scripts/ci-local.sh --quick $(CI_LOCAL_ARGS)
 
-test-ci-local: ## Test the local CI gate runner: gosec pin, README gate selection, plan order
+test-ci-local: ## Test the local CI gate runner: gosec pin, README gate selection, plan order, unit-test lock
 	@./scripts/ci-local.test.sh
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)

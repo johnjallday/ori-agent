@@ -17,7 +17,11 @@
 #   unit-tests  CI's canonical scripts/run-unit-tests.sh, with the full package
 #               scope, race detector and atomic coverage (not make test, which
 #               also runs suites CI does not gate on); --quick runs make
-#               test-unit (the same packages without -race) instead
+#               test-unit (the same packages without -race) instead. One full
+#               run at a time per machine: a lock in $TMPDIR queues other
+#               worktrees' gates (ORI_CI_LOCAL_LOCK=0 turns the queue off), and
+#               half the CPUs' worth of packages run at once
+#               (ORI_UNIT_TEST_PARALLEL=N overrides)
 #   devtools    make test-devtools (fake-tool wrappers and Ori-owned adapters)
 #   test-js     make test-js (npm run test:modules), as CI's Frontend Lint
 #   lint-js     npm run lint, as CI's Frontend Lint
@@ -99,6 +103,118 @@ ci_local_gosec_bin() {
     fi
   fi
   printf '%s\n' "$bin"
+}
+
+# The full unit-test gate is the one heavy step: a -race run over every package.
+# Two at once on one machine starve each other's tests past their deadlines (a
+# package's 30m alarm, a child process's 20s), so the gate holds a machine-wide
+# lock and later worktrees queue behind it. The lock is a symlink whose target
+# records the owner, so taking it and saying who holds it are one atomic step:
+#   pid|start time|epoch|HH:MM|branch|worktree
+ci_local_unit_lock_path() {
+  local dir="${ORI_CI_LOCAL_LOCK_DIR:-${TMPDIR:-/tmp}}"
+  printf '%s/ori-ci-local-unit-tests.lock\n' "${dir%/}"
+}
+
+# ci_local_process_started prints when a process started, or nothing when it
+# is gone. Comparing it, not just the pid, keeps a reused pid from looking like
+# the owner.
+ci_local_process_started() {
+  local started=""
+  read -r started < <(ps -o lstart= -p "$1" 2>/dev/null) || true
+  printf '%s\n' "$started"
+}
+
+# ci_local_unit_lock_acquire waits until this process holds the unit-test lock,
+# clearing a lock whose gate is gone.
+ci_local_unit_lock_acquire() {
+  local lock started mine record pid owner_started clock branch worktree
+  lock="$(ci_local_unit_lock_path)"
+  started="$(ci_local_process_started "$$")"
+  if [[ -z "$started" ]]; then
+    echo "ci-local: cannot read process start times with ps; unit tests run without the machine-wide lock"
+    return 0
+  fi
+  mine="$$|$started|$(date +%s)|$(date +%H:%M)|$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)|$PWD"
+  local poll="${ORI_CI_LOCAL_LOCK_POLL:-15}" queued_at=$SECONDS reported_at=$SECONDS last_owner="" misses=0
+  while ! ln -sn "$mine" "$lock" 2>/dev/null; do
+    if ! record="$(readlink "$lock" 2>/dev/null)"; then
+      # Released between ln and readlink: try again straight away. Missing
+      # again and again means the lock cannot be created at all.
+      misses=$(( misses + 1 ))
+      if (( misses >= 3 )); then
+        echo "ci-local: cannot create $lock; unit tests run without the machine-wide lock"
+        return 0
+      fi
+      continue
+    fi
+    misses=0
+    IFS='|' read -r pid owner_started _ clock branch worktree <<<"$record"
+    if [[ "$pid" == "$$" && "$owner_started" == "$started" ]]; then
+      return 0
+    fi
+    if [[ -z "$owner_started" || "$(ci_local_process_started "$pid")" != "$owner_started" ]]; then
+      # Its gate crashed or was killed. Clear it only if nobody replaced it
+      # since it was read.
+      if [[ "$(readlink "$lock" 2>/dev/null)" == "$record" ]]; then
+        rm -f "$lock"
+        echo "ci-local: cleared a unit-test lock left by ${worktree##*/} ($branch); its gate (pid $pid) is gone"
+      fi
+      continue
+    fi
+    if [[ "$record" != "$last_owner" ]]; then
+      echo "ci-local: unit tests queued behind ${worktree##*/} ($branch), running since $clock (pid $pid); checking every ${poll}s"
+      last_owner="$record"
+      reported_at=$SECONDS
+    elif (( SECONDS - reported_at >= 300 )); then
+      echo "ci-local: still queued behind ${worktree##*/} ($branch), $(( (SECONDS - queued_at) / 60 ))m so far"
+      reported_at=$SECONDS
+    fi
+    sleep "$poll"
+  done
+  if [[ -n "$last_owner" ]]; then
+    echo "ci-local: waited $(( (SECONDS - queued_at) / 60 ))m $(( (SECONDS - queued_at) % 60 ))s for the unit-test lock"
+  fi
+}
+
+# ci_local_unit_lock_release removes the unit-test lock if this process holds
+# it, and leaves anyone else's alone.
+ci_local_unit_lock_release() {
+  local lock record pid owner_started rest
+  lock="$(ci_local_unit_lock_path)"
+  record="$(readlink "$lock" 2>/dev/null)" || return 0
+  IFS='|' read -r pid owner_started rest <<<"$record"
+  if [[ "$pid" == "$$" && -n "$owner_started" && "$owner_started" == "$(ci_local_process_started "$$")" ]]; then
+    rm -f "$lock"
+  fi
+}
+
+# ci_local_with_unit_lock runs a command holding the unit-test lock, unless
+# ORI_CI_LOCAL_LOCK=0 turns the queue off.
+ci_local_with_unit_lock() {
+  if [[ "${ORI_CI_LOCAL_LOCK:-1}" == "0" ]]; then
+    "$@"
+    return
+  fi
+  ci_local_unit_lock_acquire
+  local status=0
+  "$@" || status=$?
+  ci_local_unit_lock_release
+  return "$status"
+}
+
+# ci_local_unit_parallel prints how many packages the local unit gate tests at
+# once: half the CPUs, at least two. Go's default runs one -race binary per CPU,
+# each with a thread per CPU, which on its own oversubscribes a laptop.
+ci_local_unit_parallel() {
+  local cpus
+  cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  [[ "$cpus" =~ ^[1-9][0-9]*$ ]] || cpus=4
+  if (( cpus / 2 > 2 )); then
+    printf '%s\n' "$(( cpus / 2 ))"
+  else
+    printf '2\n'
+  fi
 }
 
 ci_local_main() {
@@ -200,6 +316,11 @@ ci_local_main() {
     return 0
   fi
 
+  # An interrupted or failed run must not leave other worktrees queued behind it.
+  trap 'ci_local_unit_lock_release' EXIT
+  trap 'ci_local_unit_lock_release; exit 130' INT
+  trap 'ci_local_unit_lock_release; exit 143' TERM
+
   local -a results
   results=()
   local failed=0 gate started elapsed status
@@ -287,7 +408,10 @@ ci_local_run_gate() {
     unit-tests)
       # Keep coverage/count/timeout flags and reporting in CI's one runner.
       # A caller's hosted-runner scope or shard must not narrow the local gate.
-      RUNNER_OS= ORI_UNIT_SHARD= ORI_UNIT_SHARD_COUNT= ./scripts/run-unit-tests.sh
+      local parallel="${ORI_UNIT_TEST_PARALLEL:-$(ci_local_unit_parallel)}"
+      echo "ci-local: unit tests run $parallel packages at a time (ORI_UNIT_TEST_PARALLEL overrides)"
+      ci_local_with_unit_lock env RUNNER_OS= ORI_UNIT_SHARD= ORI_UNIT_SHARD_COUNT= \
+        ORI_UNIT_TEST_PARALLEL="$parallel" ./scripts/run-unit-tests.sh
       ;;
     test-unit)
       make test-unit

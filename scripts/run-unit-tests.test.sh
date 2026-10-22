@@ -5,7 +5,8 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/ori-unit-wrapper-test.XXXXXX")"
 trap 'rm -rf -- "$root"' EXIT
 mkdir -p "$root/repo/scripts" "$root/bin" "$root/artifacts" "$root/tmp"
 cp "$script_dir/run-unit-tests.sh" "$script_dir/run-test-command.sh" "$script_dir/prune-test-cache.sh" "$script_dir/list-unit-packages.sh" "$script_dir/unit-shards.py" "$script_dir/unit-shard-weights.json" "$root/repo/scripts/"
-unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT # Do not inherit the enclosing CI shard.
+# Do not inherit the enclosing CI shard or the local gate's package cap.
+unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT ORI_UNIT_TEST_PARALLEL
 cat > "$root/reporter" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
@@ -84,6 +85,8 @@ for flag in -json -short -race -timeout 30m -count=1 -covermode=atomic; do
   grep -qx -- "$flag" "$TEST_ARGUMENTS"
 done
 grep -q -- '-coverprofile=.*/ori-unit\..*/coverage.txt' "$TEST_ARGUMENTS"
+# Unset, Go keeps its own package parallelism (CI's runs).
+if grep -qx -- '-p' "$TEST_ARGUMENTS"; then printf 'Unrequested -p\n' >&2; exit 1; fi
 grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"
 RUNNER_OS=macOS check_case platform 0 0 0
 grep -qx 'github.com/johnjallday/ori-agent/internal/platform' "$TEST_ARGUMENTS"
@@ -127,6 +130,22 @@ for settings in 'ORI_UNIT_SHARD=0 ORI_UNIT_SHARD_COUNT=2' \
     exit 1
   fi
   [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid shard ran tests\n' >&2; exit 1; }
+done
+
+# A local cap on packages run at once reaches go test and the recorded flags.
+ORI_UNIT_TEST_PARALLEL=3 check_case parallel 0 0 0
+grep -A1 -x -- '-p' "$TEST_ARGUMENTS" | grep -qx '3' || { printf 'ORI_UNIT_TEST_PARALLEL did not reach go test\n' >&2; exit 1; }
+for flag in -json -short -race -timeout 30m -count=1 -covermode=atomic; do
+  grep -qx -- "$flag" "$TEST_ARGUMENTS"
+done
+grep -qx 'flags=-json -short -race -timeout 30m -count=1 -covermode=atomic -p 3' "$root/artifacts"/ori-unit.*/metadata.txt
+for parallel in 0 -2 two 1.5; do
+  rm -f "$TEST_ARGUMENTS"
+  if ORI_UNIT_TEST_PARALLEL="$parallel" "$runner" > "$root/invalid-parallel.log" 2>&1; then
+    printf 'Invalid ORI_UNIT_TEST_PARALLEL accepted: %s\n' "$parallel" >&2
+    exit 1
+  fi
+  [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid ORI_UNIT_TEST_PARALLEL ran tests\n' >&2; exit 1; }
 done
 
 WAIT_FOR_SIGNAL=1 "$runner" > "$root/cancel.log" 2>&1 &
