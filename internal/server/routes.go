@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -179,9 +181,35 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		agentHandler.SetSkillsManager(s.Handlers.Skills.Manager())
 	}
+	if s.Storage.SessionStore != nil {
+		agentHandler.SetHireRecords(personalassistant.NewSQLiteHireRecords(s.Storage.SessionStore.DB()))
+	}
+	// A hired agent runs on a model that is set up, so its first look can run.
+	if s.Core != nil {
+		var systemModel func() (string, string)
+		if s.Core.ConfigManager != nil {
+			systemModel = s.Core.ConfigManager.GetSystemModel
+		}
+		agentHandler.SetRunnableModelChooser(hireRunnableModel(s.Core.LLMFactory, systemModel))
+	}
+	// A Researcher or Writer hire gets its role's blueprint through the
+	// ordinary create pipeline, with the hired agent in the primary role.
+	agentHandler.SetHireWorkspaces(hireWorkspaces{server: s})
+	// A hire's first look is a goal run with its own origin, started by the
+	// same scheduler as every goal run. Read at call time, so the scheduler's
+	// wiring order does not matter.
+	agentHandler.SetHireLookStarter(func(workspaceID string) (string, error) {
+		if s.Workflow == nil || s.Workflow.TaskScheduler == nil {
+			return "", errors.New("goal runs are not available on this server")
+		}
+		return s.Workflow.TaskScheduler.StartMissionRun(workspaceID, workspace.MissionOriginHireFirstLook)
+	})
 	appearanceUploadHandler := agenthttp.NewAppearanceUploadHandler(s.Storage.AgentStore, s.Storage.WorkspaceStore)
 	mux.Handle("/api/agents", agentHandler)
 	mux.HandleFunc("/api/agents/catalog", agenthttp.CatalogHandler)
+	// Hire from the Agents page. Exact path, like /bulk, so it is never read as
+	// an agent named "hire".
+	mux.HandleFunc("/api/agents/hire", agentHandler.HandleHire)
 	if s.Handlers.Evolution != nil {
 		mux.HandleFunc("/api/evolution/assistant", s.Handlers.Evolution.GetAssistantProgress)
 		mux.HandleFunc("/api/evolution/suggestions", s.Handlers.Evolution.GetSuggestions)
@@ -1216,6 +1244,11 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		// A hired agent's first-look report: Start this and Not now.
 		mux.HandleFunc("POST /api/personal-assistant/first-look/{taskID}/start-suggestion", s.Handlers.PersonalAssistant.StartFirstLookSuggestion)
 		mux.HandleFunc("POST /api/personal-assistant/first-look/{taskID}/dismiss", s.Handlers.PersonalAssistant.DismissFirstLookSuggestion)
+		// An agent hired from the Agents page reports the same way, keyed by
+		// its hire: Start this, Not now, and Retry for a look that stopped.
+		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/start-suggestion", s.Handlers.PersonalAssistant.StartHireLookSuggestion)
+		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/dismiss", s.Handlers.PersonalAssistant.DismissHireLook)
+		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/retry", s.Handlers.PersonalAssistant.RetryHireLook)
 		mux.HandleFunc("GET /api/personal-assistant/protection-options", s.Handlers.PersonalAssistant.GetProtectionOptions)
 		// A workspace's read-only Protection fact, from the same stored reader.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/protection", s.Handlers.PersonalAssistant.GetWorkspaceProtection)

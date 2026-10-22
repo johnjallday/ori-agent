@@ -35,14 +35,15 @@ export const PROMPT_QUEST = 'meet-assistant';
 // The whole walkthrough is six steps: this one, then five on the Agents page.
 export const TOTAL_STEPS = 6;
 
-// The six clicks, as the briefing lists them.
+// The six clicks, as the briefing lists them. The Agents page's button reads
+// Hire; the preset's own button, the last click, reads Hire assistant.
 export const STEP_LABELS = Object.freeze([
   'Open Agents',
-  'New Agent',
+  'Hire',
   'Name',
   'Face',
   'Focus',
-  'Hire'
+  'Hire assistant'
 ]);
 
 export const FIRST_STEP = Object.freeze({
@@ -51,7 +52,7 @@ export const FIRST_STEP = Object.freeze({
   total: TOTAL_STEPS,
   title: 'Click Agents',
   body: 'Your assistant works from the Agents page.',
-  note: 'Nothing is created until you press Hire.',
+  note: 'Nothing is created until you press Hire assistant.',
   laterLabel: 'Not now'
 });
 
@@ -159,7 +160,7 @@ export function briefingCopy({ onboarding = {}, mission = null, missions = [] } 
       'Your assistant is the one agent that owns your ongoing work. Make them yours.',
     steps: [...STEP_LABELS],
     unlocks,
-    note: 'Nothing is created until you press Hire.',
+    note: 'Nothing is created until you press Hire assistant.',
     startLabel: 'Start mission',
     laterLabel: 'Not now'
   };

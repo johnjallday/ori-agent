@@ -170,17 +170,26 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 	openOpps = filterOpenOpportunities(openOpps, b.maxOpenInContext)
 	openWork, recentlyCompleted := workspace.MissionWorkSnapshot(ws)
 
+	origin := missionRunOrigin(opts)
+	autonomy := workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy)
+	if origin == workspace.MissionOriginHireFirstLook {
+		// A hired agent's first look only reads, whatever the workspace
+		// allows later: the user agreed to a look, not to changes.
+		autonomy = workspace.AutonomyWatch
+	}
+
 	systemPrompt := workspace.BuildMissionSystemPrompt(workspace.MissionPromptInputs{
 		WorkspaceManagerPrompt: basePrompt,
 		Mission:                ws.Mission,
 		CycleOrdinal:           cycleOrdinal,
 		OpenOpportunities:      openOpps,
 		TriggeringEvent:        opts.Event,
-		AutonomyPolicy:         workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy),
+		AutonomyPolicy:         autonomy,
 		AgentNames:             missionAgentNames(ws),
 		OpenWork:               openWork,
 		RecentlyCompleted:      recentlyCompleted,
 		DismissedTitles:        ws.DismissedSuggestionTitles(),
+		Origin:                 origin,
 	})
 
 	// Build a synthetic task to feed into the OriAgentExecutor. The task is
@@ -201,9 +210,10 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 		// (the synthetic task itself is otherwise indistinguishable from
 		// a normal task).
 		Context: map[string]any{
-			workspace.MissionTaskContextOriginKey:  workspace.MissionTaskContextOriginValue,
-			workspace.MissionTaskContextPolicyKey:  string(workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy)),
-			workspace.MissionTaskContextOrdinalKey: cycleOrdinal,
+			workspace.MissionTaskContextOriginKey:    workspace.MissionTaskContextOriginValue,
+			workspace.MissionTaskContextPolicyKey:    string(autonomy),
+			workspace.MissionTaskContextOrdinalKey:   cycleOrdinal,
+			workspace.MissionTaskContextRunOriginKey: origin,
 		},
 	}
 	payload, err := json.Marshal(task)
@@ -217,7 +227,7 @@ func (b *MissionBridge) StartMissionRun(ctx context.Context, workspaceID string,
 	}
 	rawConfig := RawConfig(cfgPayload)
 
-	policy := buildMissionRunPolicy(workspace.EffectiveAutonomyPolicy(ws.AutonomyPolicy))
+	policy := buildMissionRunPolicy(autonomy)
 
 	run, err := b.service.CreateRun(ctx, workspaceID, CreateRunRequest{
 		ProfileID: ProfileGeneral,
@@ -308,7 +318,9 @@ func (b *MissionBridge) executeMissionRun(ctx context.Context, workspaceID, runI
 			HoldCadence: opts.HoldCadence,
 		})
 		workspace.RecordMissionRun(w, record)
-		if record.TasksCreated > 0 {
+		// A first look reports to the assistant instead; it changes nothing
+		// beyond the Backlog and its own record.
+		if record.TasksCreated > 0 && record.Origin != workspace.MissionOriginHireFirstLook {
 			workspace.AppendOpportunity(w, suggestionSummaryRow(w, record))
 		}
 		return nil
@@ -337,11 +349,12 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 	}
 	record.ParseStatus = output.ParseStatus()
 	record.ItemsRejected = output.Rejected
+	taskLimit, findingLimit := workspace.MissionSuggestionLimits(record.Origin)
 
 	findings := output.Findings
-	if len(findings) > workspace.MissionMaxFindings {
-		record.DroppedByCap += len(findings) - workspace.MissionMaxFindings
-		findings = findings[:workspace.MissionMaxFindings]
+	if len(findings) > findingLimit {
+		record.DroppedByCap += len(findings) - findingLimit
+		findings = findings[:findingLimit]
 	}
 	for _, opp := range findings {
 		_, merged, err := b.opportunityStore.Upsert(opp)
@@ -364,9 +377,15 @@ func (b *MissionBridge) storeMissionOutput(workspaceID, runID, result string, re
 			known[key] = struct{}{}
 		}
 	}
-	suggestions, duplicates, dropped := workspace.SelectMissionSuggestions(output.Tasks, known, workspace.MissionMaxTaskSuggestions)
+	suggestions, duplicates, dropped := workspace.SelectMissionSuggestions(output.Tasks, known, taskLimit)
 	record.DuplicatesSkipped += duplicates
 	record.DroppedByCap += dropped
+	// A first look says what it found and which task comes next; other runs
+	// keep their records as before unless their answer said so itself.
+	if record.Origin == workspace.MissionOriginHireFirstLook || output.Summary != "" || output.Next != "" {
+		record.Summary = workspace.MissionRunSummary(output, suggestions)
+		record.NextWhy = output.NextWhy
+	}
 	now := time.Now()
 	for _, suggestion := range suggestions {
 		if _, err := b.backlog.Create(workspace.BacklogCreateInput{

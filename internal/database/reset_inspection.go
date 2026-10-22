@@ -62,6 +62,9 @@ func ResetRecordTables() []string {
 		// The task-run show's unopened results are app records too: resetting
 		// them clears every waiting parcel, and nothing else refers to them.
 		"result_parcels",
+		// A hire's record names the agent and workspace it made and how its
+		// first look went; the agent and workspace themselves live on disk.
+		"agent_hires",
 		"vaults",
 	}
 }

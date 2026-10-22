@@ -2,6 +2,25 @@ package workspace
 
 import "fmt"
 
+// hireFirstLookOutsideTools are tools a hired agent's first look may not use
+// although Watch allows them elsewhere: reads that reach past the workspace
+// (Personal HQ, the Home's library and profile, the resource catalog) and the
+// memory tools, which keep something. The look reads the brief and this
+// workspace, and its answer is the whole of its work.
+var hireFirstLookOutsideTools = map[string]bool{
+	"hq_overview":                   true,
+	"home_library_search":           true,
+	"home_library_detail":           true,
+	"home_library_sessions":         true,
+	"home_library_handoff_receipts": true,
+	"home_profile_read":             true,
+	"resource_catalog_search":       true,
+	"resource_catalog_detail":       true,
+	MemoryWriteToolName:             true,
+	MemoryForgetToolName:            true,
+	MemoryProposeGlobalToolName:     true,
+}
+
 // evaluateMissionGate is the LLMTaskHandler's per-tool-call autonomy check for
 // mission runs. Called only after IsMissionTask returns true. Returns nil if
 // the call should proceed; returns a non-nil error if the call must be blocked.
@@ -22,6 +41,9 @@ import "fmt"
 //     write is what the SideEffectExternal classification is for; that's why
 //     external defaults to deny under both Watch and Propose.
 func (h *LLMTaskHandler) evaluateMissionGate(task Task, toolName string) error {
+	if MissionRunOriginFromContext(task.Context) == MissionOriginHireFirstLook && hireFirstLookOutsideTools[toolName] {
+		return fmt.Errorf("mission autonomy gate blocked tool %q: a hired agent's first look reads only its workspace and changes nothing", toolName)
+	}
 	// A goal run whose workspace never chose a level runs under Watch, the
 	// same reading the prompt and the run policy give it; it is never a
 	// reason to block every tool.

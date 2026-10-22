@@ -26,7 +26,18 @@ const (
 	// Useful for logging and prompt distinction; the gate itself does not
 	// use it.
 	MissionTaskContextOrdinalKey = "mission_cycle_ordinal"
+	// MissionTaskContextRunOriginKey carries what started the run
+	// (MissionOrigin*), so the gate can hold a hired agent's first look to
+	// this workspace.
+	MissionTaskContextRunOriginKey = "mission_run_origin"
 )
+
+// MissionRunOriginFromContext is the origin a mission task's run was started
+// with, or "" when it does not say.
+func MissionRunOriginFromContext(ctx map[string]any) string {
+	origin, _ := ctx[MissionTaskContextRunOriginKey].(string)
+	return origin
+}
 
 // IsMissionTask reports whether a task's Context marks it as a mission run.
 // Centralized so multiple call sites read the same signal in lockstep.
@@ -88,6 +99,9 @@ type MissionPromptInputs struct {
 	RecentlyCompleted []MissionWorkItem
 	// DismissedTitles are suggestions the user marked Not useful (FR20).
 	DismissedTitles []string
+	// Origin is what started the run (MissionOrigin*). A hired agent's first
+	// look gets its own framing and output contract.
+	Origin string
 }
 
 // MissionWorkItem is one ticket as a goal run sees it.
@@ -194,6 +208,11 @@ const (
 	MissionOriginManual    = "manual"
 	MissionOriginFirstGoal = "first_goal"
 	MissionOriginEvent     = "event"
+	// MissionOriginHireFirstLook is the first look of an agent hired from the
+	// Agents page (agents-hire-with-a-brief): it reads the brief and this
+	// workspace only, changes nothing, suggests at most
+	// HireFirstLookMaxSuggestions tasks and says which one comes next.
+	MissionOriginHireFirstLook = "hire_first_look"
 )
 
 // MissionOptionsTrigger is a MissionTrigger that also takes run options. The
@@ -228,7 +247,10 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 		b.WriteString("\n\n")
 	}
 
-	if in.CycleOrdinal <= 1 {
+	hireLook := in.Origin == MissionOriginHireFirstLook
+	if hireLook {
+		b.WriteString("You were just hired for this workspace, and this is your FIRST LOOK. The goal above is the brief the user gave when they hired you. There is no folder or project to read: work from the brief, this workspace's own notes and memory, and what you already know. Do not read anything outside this workspace — not the user's Home, other workspaces, libraries, profile, the web or other files — and change nothing: your answer is the whole of your work. Suggest the first few tasks that would get the brief going, best first.\n\n")
+	} else if in.CycleOrdinal <= 1 {
 		b.WriteString("This is the first goal run for this workspace (the BASELINE run). Look at what the workspace holds, then suggest the few pieces of work that would move the goal forward most, and note anything the user should know.\n\n")
 	} else {
 		fmt.Fprintf(&b, "This is goal run #%d. Compare the workspace with the goal and with the work and findings listed below; suggest only work that is genuinely new, and keep a recurring finding's title so it merges.\n\n", in.CycleOrdinal)
@@ -311,6 +333,10 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	}
 
 	b.WriteString("--- OUTPUT ---\n\n")
+	if hireLook {
+		writeHireFirstLookOutput(&b)
+		return b.String()
+	}
 	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
 	b.WriteString(`  {"items": [ ... ]}` + "\n")
 	b.WriteString("Every item has a \"kind\":\n")
@@ -322,6 +348,22 @@ func BuildMissionSystemPrompt(in MissionPromptInputs) string {
 	b.WriteString("If nothing is worth suggesting, answer {\"items\": []}.\n")
 
 	return b.String()
+}
+
+// writeHireFirstLookOutput is a first look's output contract: a short summary,
+// the one task to start first and why, and at most
+// HireFirstLookMaxSuggestions tasks. Still one JSON object, so the answer is
+// read like any goal run's.
+func writeHireFirstLookOutput(b *strings.Builder) {
+	b.WriteString("Answer with ONE JSON object and nothing else, no prose before or after it:\n")
+	b.WriteString(`  {"summary": string, "next": string, "next_why": string, "items": [ ... ]}` + "\n")
+	b.WriteString("- \"summary\": at most two sentences on how you read the brief and what you found in this workspace.\n")
+	b.WriteString("- \"next\": the exact title of the one task to start first, which is your first item.\n")
+	b.WriteString("- \"next_why\": one sentence on why that task comes first.\n")
+	b.WriteString("Every item is a task that moves the brief forward and that you could do in this workspace:\n")
+	b.WriteString(`    {"kind": "task", "title": string, "why": string, "evidence": string, "priority": "low"|"medium"|"high"|"critical", "confidence": "low"|"medium"|"high", "effort": "small"|"medium"|"large", "suggested_agent": string, "first_step": string}` + "\n")
+	fmt.Fprintf(b, "Suggest at most %d tasks and no findings, best first. \"evidence\" is what in the brief or this workspace the task rests on; give a short title that says what to do.\n", HireFirstLookMaxSuggestions)
+	b.WriteString("If nothing is worth suggesting yet, answer {\"summary\": string, \"items\": []}.\n")
 }
 
 // missionPromptLine flattens a title to one line.

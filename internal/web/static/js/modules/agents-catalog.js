@@ -1,263 +1,97 @@
 /**
- * Agents Create page: Catalog / Custom tabs.
+ * Agents Create page: Hire / Advanced tabs.
  *
- * Owns the ARIA tablist toggle and the Catalog tab (card grid fetched from
- * GET /api/agents/catalog, one-field create via POST /api/agents with
- * catalog_role). The Custom tab's form and behavior (agents-create.js) are
- * untouched by this module.
+ * Owns the ARIA tablist and the Hire tab: the same Hire card the Agents
+ * roster's Create Agent modal shows (agent-hire-card.js), sending the same
+ * POST /api/agents/hire. Hire is offered once a personal assistant is hired;
+ * until then the page is Advanced alone. The Advanced tab's form and behavior
+ * (agents-create.js) are untouched by this module.
  */
 (function () {
   'use strict';
 
-  let catalogEntries = [];
-  let selectedEntry = null;
+  let hireCard = null;
 
   function byId(id) {
     return document.getElementById(id);
   }
 
-  // ---------------------------------------------------------------------
-  // Tabs (ARIA APG tabs pattern: click + Left/Right/Home/End keyboard nav)
-  // ---------------------------------------------------------------------
+  function tabs() {
+    return [byId('catalogTabBtn'), byId('customTabBtn')].filter(Boolean);
+  }
+
   function initTabs() {
-    const tabs = [byId('catalogTabBtn'), byId('customTabBtn')];
-    const panels = {
-      catalogTabBtn: byId('catalogTabPanel'),
-      customTabBtn: byId('customTabPanel')
-    };
-    if (!tabs[0] || !tabs[1]) return;
-
-    function activate(tab) {
-      tabs.forEach(function (t) {
-        const isActive = t === tab;
-        t.classList.toggle('is-active', isActive);
-        t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-        t.tabIndex = isActive ? 0 : -1;
-        const panel = panels[t.id];
-        if (panel) panel.hidden = !isActive;
-      });
-      tab.focus();
-    }
-
-    tabs.forEach(function (tab, i) {
-      tab.addEventListener('click', function () {
-        activate(tab);
-      });
-      tab.addEventListener('keydown', function (e) {
-        let targetIndex = null;
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-          targetIndex = (i + 1) % tabs.length;
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-          targetIndex = (i - 1 + tabs.length) % tabs.length;
-        } else if (e.key === 'Home') {
-          targetIndex = 0;
-        } else if (e.key === 'End') {
-          targetIndex = tabs.length - 1;
-        }
-        if (targetIndex !== null) {
-          e.preventDefault();
-          activate(tabs[targetIndex]);
-        }
-      });
+    const api = window.OriAgentHire;
+    const list = tabs();
+    if (!api || list.length !== 2) return;
+    api.bindTablist(list, function (tab) {
+      api.selectTab(list, tab);
     });
   }
 
-  // ---------------------------------------------------------------------
-  // Catalog grid
-  // ---------------------------------------------------------------------
-  async function loadCatalog() {
-    const grid = byId('catalogGrid');
-    if (!grid) return;
+  async function readAssistant() {
     try {
-      const response = await fetch('/api/agents/catalog');
-      if (!response.ok) throw new Error('Failed to load catalog');
-      const data = await response.json();
-      catalogEntries = Array.isArray(data.entries) ? data.entries : [];
-      renderCatalogGrid();
-    } catch (error) {
-      console.error('Error loading agent catalog:', error);
-      showCatalogError('Could not load the role catalog. Try reloading the page.');
-    }
-  }
-
-  function renderCatalogGrid() {
-    const grid = byId('catalogGrid');
-    if (!grid) return;
-    grid.innerHTML = catalogEntries
-      .map(function (entry) {
-        return (
-          '<button type="button" class="catalog-card" role="radio" aria-checked="false" ' +
-          'data-slug="' +
-          escapeAttr(entry.slug) +
-          '" style="--catalog-accent: ' +
-          escapeAttr(entry.accent_color) +
-          ';">' +
-          '<span class="catalog-card-emblem"><i class="bi bi-' +
-          escapeAttr(entry.emblem) +
-          '" aria-hidden="true"></i></span>' +
-          '<span class="catalog-card-name">' +
-          escapeHtml(entry.display_name) +
-          '</span>' +
-          '<span class="catalog-card-tagline">' +
-          escapeHtml(entry.tagline) +
-          '</span>' +
-          '</button>'
-        );
-      })
-      .join('');
-
-    grid.querySelectorAll('.catalog-card').forEach(function (card) {
-      card.addEventListener('click', function () {
-        selectEntry(card.dataset.slug);
+      const response = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
       });
-    });
-  }
-
-  function selectEntry(slug) {
-    selectedEntry =
-      catalogEntries.find(function (e) {
-        return e.slug === slug;
-      }) || null;
-    if (!selectedEntry) return;
-
-    document.querySelectorAll('#catalogGrid .catalog-card').forEach(function (card) {
-      const isSelected = card.dataset.slug === slug;
-      card.classList.toggle('is-selected', isSelected);
-      card.setAttribute('aria-checked', isSelected ? 'true' : 'false');
-    });
-
-    const selectionCard = byId('catalogSelectionCard');
-    if (selectionCard) selectionCard.hidden = false;
-
-    const nameInput = byId('catalogAgentName');
-    if (nameInput && !nameInput.value.trim()) {
-      nameInput.value = selectedEntry.display_name;
-    }
-
-    const domainGroup = byId('catalogDomainGroup');
-    if (domainGroup) domainGroup.hidden = !selectedEntry.supports_domain;
-
-    renderPresetSummary();
-    hideCatalogModelNotice();
-    hideCatalogError();
-  }
-
-  function tierLabel(tier) {
-    switch (tier) {
-      case 'fast':
-        return 'Fast';
-      case 'balanced':
-        return 'Balanced';
-      case 'deep':
-        return 'Deep reasoning';
-      default:
-        return tier;
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.personal_assistant || null;
+    } catch (_) {
+      return null;
     }
   }
 
-  function renderPresetSummary() {
-    const summary = byId('catalogPresetSummary');
-    if (!summary || !selectedEntry) return;
-    const skillsLine =
-      selectedEntry.starter_skills && selectedEntry.starter_skills.length > 0
-        ? escapeHtml(selectedEntry.starter_skills.join(', '))
-        : 'none — starts with an empty loadout';
-    summary.innerHTML =
-      '<div><strong>Role:</strong> ' +
-      escapeHtml(selectedEntry.display_name) +
-      '</div>' +
-      '<div><strong>Model tier:</strong> ' +
-      escapeHtml(tierLabel(selectedEntry.model_tier)) +
-      '</div>' +
-      '<div><strong>Starter skills:</strong> ' +
-      skillsLine +
-      '</div>' +
-      '<div>' +
-      escapeHtml(selectedEntry.description) +
-      '</div>';
+  // Without an assistant there is no Hire tab: the page opens on Advanced.
+  function withoutHire() {
+    const api = window.OriAgentHire;
+    const [hireTab, advancedTab] = tabs();
+    if (api && advancedTab) api.selectTab(tabs(), advancedTab);
+    if (hireTab) hireTab.hidden = true;
   }
 
-  function showCatalogModelNotice(message) {
-    const notice = byId('catalogModelNotice');
-    if (!notice) return;
-    notice.textContent = message;
-    notice.hidden = false;
-  }
-
-  function hideCatalogModelNotice() {
-    const notice = byId('catalogModelNotice');
-    if (notice) notice.hidden = true;
-  }
-
-  function showCatalogError(message) {
-    const box = byId('catalogError');
-    if (!box) return;
-    box.textContent = message;
-    box.hidden = false;
-    box.focus();
-  }
-
-  function hideCatalogError() {
-    const box = byId('catalogError');
-    if (box) box.hidden = true;
-  }
-
-  async function createFromCatalog() {
-    if (!selectedEntry) return;
-    const nameInput = byId('catalogAgentName');
-    const name = nameInput ? nameInput.value.trim() : '';
-    const nameError = byId('catalogAgentNameError');
-    if (!name) {
-      if (nameError) nameError.textContent = 'Agent name is required.';
-      if (nameInput) nameInput.classList.add('is-invalid');
+  async function mountHire() {
+    const api = window.OriAgentHire;
+    const host = byId('hireCardHost');
+    const button = byId('hireStartBtn');
+    if (!api || !host || !button) return;
+    const assistant = await readAssistant();
+    if (!api.assistantAllowsHire(assistant)) {
+      withoutHire();
       return;
     }
-    if (nameError) nameError.textContent = '';
-    if (nameInput) nameInput.classList.remove('is-invalid');
-
-    const domainInput = byId('catalogDomain');
-    const domain = selectedEntry.supports_domain && domainInput ? domainInput.value.trim() : '';
-
-    const createBtn = byId('catalogCreateBtn');
-    if (createBtn) createBtn.disabled = true;
-    hideCatalogError();
-
+    let catalog;
     try {
-      const response = await fetch('/api/agents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name,
-          catalog_role: selectedEntry.slug,
-          domain: domain
-        })
-      });
-
-      const result = await response.json().catch(function () {
-        return {};
-      });
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to create agent');
-      }
-
-      if (result.model_category_fallback) {
-        showCatalogModelNotice(
-          result.notice ||
-            'Used your default model — the selected tier has no configured model yet.'
-        );
-      }
-
-      window.location.href = '/agents';
+      catalog = await api.loadHireCatalog();
     } catch (error) {
-      console.error('Error creating agent from catalog:', error);
-      showCatalogError(error.message || 'Failed to create agent');
-    } finally {
-      if (createBtn) createBtn.disabled = false;
+      console.error('Error loading agent catalog:', error);
+      host.innerHTML =
+        '<p class="form-help" role="alert">Could not load the roles. Try reloading the page.</p>';
+      button.disabled = true;
+      return;
     }
+    hireCard = api.mountHireCard(host, {
+      catalog,
+      idPrefix: 'pageHire',
+      onChange: function (view) {
+        button.disabled = view.busy;
+        button.textContent = view.buttonLabel;
+        if (view.busy) button.setAttribute('aria-busy', 'true');
+        else button.removeAttribute('aria-busy');
+      },
+      onHired: function (result) {
+        if (typeof window.notifyToast === 'function')
+          window.notifyToast(api.hiredMessage(result), 'success');
+        window.location.href = '/agents?agent=' + encodeURIComponent(result.agent_name || '');
+      }
+    });
+    button.addEventListener('click', function () {
+      void hireCard?.submit();
+    });
   }
 
   // While the personal assistant is unhired, point at Mission 01: it is hired
-  // from the Agents page's New Agent panel, not from this page (PRD FR40). The
+  // from the Agents page's Hire button, not from this page (PRD FR40). The
   // page stays usable for a plain agent either way, so any failure just leaves
   // the line hidden.
   async function showAssistantPointer() {
@@ -281,9 +115,7 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     initTabs();
-    loadCatalog();
+    void mountHire();
     showAssistantPointer();
-    const createBtn = byId('catalogCreateBtn');
-    if (createBtn) createBtn.addEventListener('click', createFromCatalog);
   });
 })();

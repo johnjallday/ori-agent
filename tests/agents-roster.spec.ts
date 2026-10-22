@@ -1089,7 +1089,7 @@ test.describe('Agents single-agent editing', () => {
   // and "switching cards and tabs never raises an unsaved-changes prompt"
   // above.
 
-  test('New Agent opens the shared Create Agent modal and focuses the new definition', async ({
+  test('Hire opens the shared Create Agent modal, and Advanced still creates a bare agent', async ({
     page,
     request
   }) => {
@@ -1106,18 +1106,29 @@ test.describe('Agents single-agent editing', () => {
       await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#rosterList')).toBeVisible();
 
-      // With an assistant hired, New Agent opens the shared modal with the
-      // ordinary form. Cancelling leaves the collection and the Inspector
-      // untouched.
+      // With an assistant hired, Hire opens the shared modal on its Hire tab:
+      // Hire and start in the footer, the ordinary form one tab away.
+      // Cancelling leaves the collection and the Inspector untouched.
       const modal = page.locator('#addAgentModal');
+      await expect(page.locator('#newAgentBtn')).toContainText('Hire');
       await page.locator('#newAgentBtn').click();
       await expect(modal).toBeVisible();
-      await expect(page.locator('#createAgentBtn')).toBeVisible();
+      await expect(page.locator('#agentCreateHireTab')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#addAgentModalTitleText')).toHaveText('Hire an agent');
+      await expect(page.locator('#hireAgentBtn')).toBeVisible();
+      await expect(page.locator('#createAgentBtn')).toBeHidden();
+      await expect(page.locator('#agentHirePanel .catalog-card')).toHaveCount(6);
       await expect(page.locator('#createSubmit')).toHaveCount(0);
       await page.locator('#cancelAgentBtn').click();
       await expect(modal).toBeHidden();
+      await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
 
+      // Advanced is today's form, unchanged: it creates a bare agent.
       await page.locator('#newAgentBtn').click();
+      await page.locator('#agentCreateAdvancedTab').click();
+      await expect(page.locator('#createAgentBtn')).toBeVisible();
+      await expect(page.locator('#hireAgentBtn')).toBeHidden();
+      await expect(page.locator('#addAgentModalTitleText')).toHaveText('Create New Agent');
       await page.locator('#agentName').fill(name);
       await page.locator('#agentCreateDescription').fill('Made by the Create Agent modal.');
       await page.locator('#createAgentBtn').click();
@@ -1846,7 +1857,8 @@ test.describe('Agents collection controls', () => {
     await page.waitForTimeout(150);
     await expect(menu).toBeVisible();
 
-    await expect(menu.locator('[data-menu-action]')).toHaveCount(6);
+    // Open, Open full page, Give a task…, Favorite, Set role, Assign, Delete.
+    await expect(menu.locator('[data-menu-action]')).toHaveCount(7);
     await expect(menu.locator('[data-menu-action="open"]')).toBeFocused();
   });
 

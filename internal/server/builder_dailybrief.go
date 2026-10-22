@@ -295,6 +295,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
 	b.personalAssistantHandler.SetFirstLookActions(firstLookActionsHost{builder: b})
+	b.personalAssistantHandler.SetHireLookActions(hireLookActionsHost{builder: b})
 	b.personalAssistantHandler.SetRecoveryService(recovery)
 	b.personalAssistantHandler.SetHQSetupService(b.personalAssistantHQSetup)
 	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
@@ -440,6 +441,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	// A workspace the assistant is still building asks to be finished.
 	if b.workspaceBuildStore != nil {
 		todayService.SetWorkspaceBuildReader(b.workspaceBuildStore)
+	}
+	// An agent hired from the Agents page reports its first look here, also
+	// before Personal HQ exists.
+	if b.sessionStore != nil {
+		todayService.SetHireRecordReader(personalassistant.NewSQLiteHireRecords(b.sessionStore.DB()), b.hireLookRunning)
 	}
 	// File Janitor's recent results join Today's Results section (starter
 	// missions FR36). The service is wired in Phase 17, before this runs.

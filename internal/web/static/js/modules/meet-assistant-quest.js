@@ -163,8 +163,8 @@
   function stepCopy(step) {
     if (step === STEP_NEW_AGENT) {
       return {
-        answer: 'Press New Agent. Your assistant starts as an agent like any other.',
-        note: 'Nothing is created until you press Hire.'
+        answer: 'Press Hire. Your assistant starts as an agent like any other.',
+        note: 'Nothing is created until you press Hire assistant.'
       };
     }
     if (step === STEP_NAME) {
@@ -187,9 +187,9 @@
   function calloutCopy(step) {
     if (step === STEP_NEW_AGENT) {
       return {
-        title: 'Press New Agent',
+        title: 'Press Hire',
         body: 'Your assistant starts as an agent like any other.',
-        note: 'Nothing is created until you press Hire.'
+        note: 'Nothing is created until you press Hire assistant.'
       };
     }
     if (step === STEP_NAME) return { title: 'Give them a name', body: 'You can change it later.' };

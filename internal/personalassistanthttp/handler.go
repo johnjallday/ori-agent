@@ -104,6 +104,7 @@ type Handler struct {
 	assignments                AssignmentPreviewService
 	today                      TodayReader
 	firstLook                  FirstLookActioner
+	hireLook                   HireLookActioner
 	continuity                 ContinuityService
 	renamer                    RenameService
 	capabilities               CapabilityReader

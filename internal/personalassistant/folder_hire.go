@@ -3,8 +3,11 @@ package personalassistant
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // WorkspaceGoalMaxRunes bounds a workspace goal a person types: the build
@@ -73,6 +76,85 @@ func FolderDefaultBrief(shape folderdigest.Shape, blueprintGoal string) string {
 		return goal
 	}
 	return folderDefaultBriefs[shape]
+}
+
+// roleDefaultBriefs is what an agent hired from the Agents page is asked to do
+// when the user leaves "What should it do?" as it was, by catalog role.
+var roleDefaultBriefs = map[types.AgentRole]string{
+	types.RoleOrchestrator: "Take requests for this workspace and route them to the right work.",
+	types.RoleResearcher:   "Find and summarize what's known about this topic, with sources.",
+	types.RoleAnalyzer:     "Explain what's going on in the material you're given, with your reasoning shown.",
+	types.RoleSynthesizer:  "Turn the notes and findings here into a clear draft.",
+	types.RoleValidator:    "Check the work here for mistakes and flag problems before they ship.",
+	types.RoleSpecialist:   "Act as the expert this workspace needs.",
+}
+
+// hireDomainBrief is a Specialist's default brief once it has a domain.
+const hireDomainBrief = "Act as the {domain} expert for this workspace."
+
+// HireDefaultBrief is the brief a hire card starts from for a catalog role.
+// A Specialist with a domain is that domain's expert. Empty for a role the
+// catalog does not have.
+func HireDefaultBrief(role types.AgentRole, domain string) string {
+	if domain = strings.Join(strings.Fields(domain), " "); role == types.RoleSpecialist && domain != "" {
+		return truncateRunes(strings.Replace(hireDomainBrief, "{domain}", domain, 1), WorkspaceGoalMaxRunes)
+	}
+	return roleDefaultBriefs[role]
+}
+
+// HireDomainBrief is the Specialist's domain brief with a "{domain}"
+// placeholder, for a card that fills it in as the user types.
+func HireDomainBrief() string { return hireDomainBrief }
+
+// HireWorkspaceNameMaxRunes bounds the name of a workspace a hire creates.
+const HireWorkspaceNameMaxRunes = 80
+
+// hireNameWords is how many of the brief's first words name its workspace.
+const hireNameWords = 5
+
+// hireNameSmallWords stay lower case inside a name and never end one.
+var hireNameSmallWords = map[string]bool{
+	"a": true, "about": true, "an": true, "and": true, "as": true, "at": true, "by": true, "for": true,
+	"from": true, "in": true, "into": true, "of": true, "on": true, "or": true, "the": true, "to": true, "with": true,
+}
+
+// HireWorkspaceName is the workspace name a hire derives from its brief: the
+// brief's first five words in title case, small words kept lower case and
+// dropped from the end, punctuation around words removed. The Agents page's
+// card prefills the same name (agents.js hireWorkspaceName); keep them equal.
+// Empty when the brief has no words.
+func HireWorkspaceName(brief string) string {
+	var words []string
+	for _, field := range strings.Fields(brief) {
+		word := strings.TrimFunc(field, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+		if word == "" {
+			continue
+		}
+		words = append(words, word)
+		if len(words) == hireNameWords {
+			break
+		}
+	}
+	for len(words) > 0 && hireNameSmallWords[strings.ToLower(words[len(words)-1])] {
+		words = words[:len(words)-1]
+	}
+	for i, word := range words {
+		if i > 0 && hireNameSmallWords[strings.ToLower(word)] {
+			words[i] = strings.ToLower(word)
+			continue
+		}
+		first, size := utf8.DecodeRuneInString(word)
+		words[i] = string(unicode.ToUpper(first)) + word[size:]
+	}
+	name := strings.Join(words, " ")
+	for utf8.RuneCountInString(name) > HireWorkspaceNameMaxRunes {
+		cut := strings.LastIndex(name, " ")
+		if cut <= 0 {
+			return truncateRunes(name, HireWorkspaceNameMaxRunes)
+		}
+		name = name[:cut]
+	}
+	return name
 }
 
 // NormalizeFolderBrief is the brief as it is stored and becomes the workspace

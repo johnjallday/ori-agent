@@ -58,7 +58,7 @@
     new_agent: {
       routes: ['/agents'],
       selector: '#newAgentBtn',
-      label: 'New Agent'
+      label: 'Hire'
     },
     // The roster's first card. Used by the first-visit hint that replaced the
     // header's instructional sentence: the page no longer explains card

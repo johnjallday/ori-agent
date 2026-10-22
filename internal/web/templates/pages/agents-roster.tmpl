@@ -4,6 +4,7 @@
 {{template "head.tmpl" .}}
 <link rel="stylesheet" href="/css/tag-input.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
+<link rel="stylesheet" href="/css/agent-hire.css">
 
 <!-- Bootstrap's .bg-light was dropped from the markup so the page does not flash
      the cool grey canvas before the theme script runs. It is not the whole fix:
@@ -43,8 +44,8 @@
             <div class="roster-stats" id="rosterStats" role="group" aria-label="Agent status summary" hidden>
               <!-- real summary tiles injected here -->
             </div>
-            <button type="button" id="newAgentBtn" class="collection-head__new" title="Create a new agent">
-              <span aria-hidden="true">+</span> New Agent
+            <button type="button" id="newAgentBtn" class="collection-head__new" title="Hire an agent">
+              <span aria-hidden="true">+</span> Hire
             </button>
           </div>
         </header>
@@ -446,6 +447,13 @@
   <!-- Where each entry comes from (window.AgentOrigin): a workspace-only agent
        is read-only here. Deferred, so it installs before agents-roster.js. -->
   <script defer src="/js/modules/agent-origin.js"></script>
+  <!-- The Hire card (window.OriAgentHire) and the plan lines it draws
+       (window.OriFolderPlanLines): Hire leads the Create Agent modal once a
+       personal assistant is hired. agents.js reads both at use time. -->
+  <script defer src="/js/modules/folder-plan-lines.js"></script>
+  <script defer src="/js/modules/agent-hire-card.js"></script>
+  <!-- Give a task… on a card: where it takes the user (window.OriAgentGiveTask). -->
+  <script defer src="/js/modules/agent-give-task.js"></script>
   <!-- Mission 01: the hire preset's requests and views (window.OriAssistantHire).
        agents-roster.js reads the seam at use time, never at load. -->
   <script type="module" src="/js/modules/personal-assistant-hire.js"></script>

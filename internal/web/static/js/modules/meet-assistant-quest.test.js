@@ -188,7 +188,7 @@ test('the walkthrough starts on the Agents page while the assistant is unhired',
     assert.equal(first.quest, 'meet-assistant');
     assert.equal(first.total, 6);
     assert.equal(first.coachmark, 'new_agent');
-    assert.match(first.answer, /^Press New Agent\./);
+    assert.match(first.answer, /^Press Hire\./);
     // skipGreeting: the guide's own greeting would land after and replace the step.
     assert.equal(calls.opened, 1);
     assert.equal(calls.openOptions.skipGreeting, true);
@@ -402,9 +402,9 @@ test('arriving from the Home step lights New Agent, with Ori’s panel left clos
     const lit = loaded.calls.layer[0];
     assert.equal(lit.coachmark, 'new_agent');
     assert.equal(lit.total, 6);
-    assert.equal(lit.title, 'Press New Agent');
+    assert.equal(lit.title, 'Press Hire');
     assert.equal(lit.body, 'Your assistant starts as an agent like any other.');
-    assert.equal(lit.note, 'Nothing is created until you press Hire.');
+    assert.equal(lit.note, 'Nothing is created until you press Hire assistant.');
     assert.equal(loaded.calls.opened, 0, 'Ori’s panel was opened');
     assert.deepEqual(loaded.calls.presented, []);
   }

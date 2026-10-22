@@ -208,11 +208,11 @@ test('the briefing names the user and Ori, the mission, its six steps and what i
   assert.equal(copy.reward, '+5 Craft');
   assert.equal(copy.title, 'Meet your assistant');
   assert.equal(copy.unlocks, 'Unlocks Build My HQ and 3 more missions.');
-  assert.deepEqual(copy.steps, ['Open Agents', 'New Agent', 'Name', 'Face', 'Focus', 'Hire']);
+  assert.deepEqual(copy.steps, ['Open Agents', 'Hire', 'Name', 'Face', 'Focus', 'Hire assistant']);
   assert.equal(STEP_LABELS.length, TOTAL_STEPS);
   assert.equal(copy.startLabel, 'Start mission');
   assert.equal(copy.laterLabel, 'Not now');
-  assert.equal(copy.note, 'Nothing is created until you press Hire.');
+  assert.equal(copy.note, 'Nothing is created until you press Hire assistant.');
 });
 
 test('the briefing still reads well with nothing to go on', () => {
