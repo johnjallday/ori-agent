@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -179,9 +180,15 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		agentHandler.SetSkillsManager(s.Handlers.Skills.Manager())
 	}
+	if s.Storage.SessionStore != nil {
+		agentHandler.SetHireRecords(personalassistant.NewSQLiteHireRecords(s.Storage.SessionStore.DB()))
+	}
 	appearanceUploadHandler := agenthttp.NewAppearanceUploadHandler(s.Storage.AgentStore, s.Storage.WorkspaceStore)
 	mux.Handle("/api/agents", agentHandler)
 	mux.HandleFunc("/api/agents/catalog", agenthttp.CatalogHandler)
+	// Hire from the Agents page. Exact path, like /bulk, so it is never read as
+	// an agent named "hire".
+	mux.HandleFunc("/api/agents/hire", agentHandler.HandleHire)
 	if s.Handlers.Evolution != nil {
 		mux.HandleFunc("/api/evolution/assistant", s.Handlers.Evolution.GetAssistantProgress)
 		mux.HandleFunc("/api/evolution/suggestions", s.Handlers.Evolution.GetSuggestions)

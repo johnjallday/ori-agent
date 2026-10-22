@@ -50,12 +50,54 @@ func (h *Handler) SetSkillsManager(m *skills.Manager) {
 // and the starter prompt (PRD FR A.4-6, FR "Resolved: yes" on Specialist
 // domain).
 func (h *Handler) handleCatalogCreate(w http.ResponseWriter, name, catalogRole, domain string) {
-	entry, ok := agentcatalog.Find(types.AgentRole(strings.ToLower(strings.TrimSpace(catalogRole))))
+	entry, ok := findCatalogEntry(catalogRole)
 	if !ok {
 		orihttp.BadRequest(w, fmt.Sprintf("unknown catalog role %q", catalogRole))
 		return
 	}
 
+	created, err := h.createCatalogAgent(name, entry, domain, nil)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"success":      true,
+		"message":      "Agent '" + name + "' created successfully",
+		"catalog_role": string(entry.Slug),
+	}
+	if !created.ModelResolved {
+		resp["model_category_fallback"] = true
+		resp["notice"] = created.ModelNotice()
+	}
+	orihttp.Success(w, resp)
+}
+
+// findCatalogEntry reads a Role Catalog entry by its slug, as a request names it.
+func findCatalogEntry(catalogRole string) (agentcatalog.Entry, bool) {
+	return agentcatalog.Find(types.AgentRole(strings.ToLower(strings.TrimSpace(catalogRole))))
+}
+
+// catalogAgent is an agent created from a Role Catalog entry, with the model
+// its entry's tier resolved to.
+type catalogAgent struct {
+	Entry         agentcatalog.Entry
+	Model         string
+	ModelResolved bool
+}
+
+// ModelNotice says why a catalog agent uses the default model.
+func (c catalogAgent) ModelNotice() string {
+	return fmt.Sprintf("No model is configured for the %q tier yet; used your default model instead.", c.Entry.ModelTier)
+}
+
+// createCatalogAgent creates the agent a catalog entry describes and applies
+// its role, resolved model, starter prompt and starter skills, and (Specialist
+// only) its domain. appearance, when set, is the agent's validated look; nil
+// leaves the store's default. Catalog create and the hire share it so an agent
+// hired from the Agents page is exactly the one catalog create would make.
+func (h *Handler) createCatalogAgent(name string, entry agentcatalog.Entry, domain string, appearance *types.AgentAppearance) (catalogAgent, error) {
 	systemPrompt := entry.StarterPrompt
 	domain = strings.TrimSpace(domain)
 	if entry.SupportsDomain && domain != "" {
@@ -72,12 +114,12 @@ func (h *Handler) handleCatalogCreate(w http.ResponseWriter, name, catalogRole, 
 		Role:         entry.Slug,
 		Model:        resolvedModel, // "" falls back to the store's default model
 		SystemPrompt: systemPrompt,
+		Appearance:   appearance,
 	}
 
 	if err := h.State.CreateAgent(name, config); err != nil {
 		logger.Error("CatalogCreateAgent error", logger.Fields{"error": err})
-		orihttp.BadRequest(w, err.Error())
-		return
+		return catalogAgent{}, err
 	}
 
 	ag, ok := h.State.GetAgent(name)
@@ -113,14 +155,5 @@ func (h *Handler) handleCatalogCreate(w http.ResponseWriter, name, catalogRole, 
 		}
 	}
 
-	resp := map[string]any{
-		"success":      true,
-		"message":      "Agent '" + name + "' created successfully",
-		"catalog_role": string(entry.Slug),
-	}
-	if !modelResolved {
-		resp["model_category_fallback"] = true
-		resp["notice"] = fmt.Sprintf("No model is configured for the %q tier yet; used your default model instead.", entry.ModelTier)
-	}
-	orihttp.Success(w, resp)
+	return catalogAgent{Entry: entry, Model: resolvedModel, ModelResolved: modelResolved}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -60,6 +61,13 @@ func validateAgentName(name string) error {
 		return fmt.Errorf("agent name contains invalid characters (only alphanumeric, spaces, underscores, and hyphens allowed)")
 	}
 	return nil
+}
+
+// isReservedAgentName reports a name a new agent may not take: the system
+// assistant's, or one an exact /api/agents/<name> route already answers.
+func isReservedAgentName(name string) bool {
+	name = strings.TrimSpace(name)
+	return isSystemAssistantAgent(name) || strings.EqualFold(name, "catalog") || strings.EqualFold(name, "hire")
 }
 
 func cloneAgentEvolution(ag *agent.Agent) *types.AgentEvolution {
@@ -120,6 +128,10 @@ type Handler struct {
 	// editCarrier carries a model or prompt edit into the workspace copies Ori
 	// keeps in step with the agent (see carried_edits.go).
 	editCarrier EditCarrier
+	// hireRecords keeps hires from the Agents page (agents_hire.go); hireMu
+	// runs one hire at a time so a repeated request id finds the first.
+	hireRecords personalassistant.HireRecordStore
+	hireMu      sync.Mutex
 }
 
 func New(state store.Store) *Handler {
@@ -374,7 +386,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		"catalog_role": req.CatalogRole,
 	})
 
-	if isSystemAssistantAgent(req.Name) || strings.EqualFold(strings.TrimSpace(req.Name), "catalog") {
+	if isReservedAgentName(req.Name) {
 		orihttp.BadRequest(w, "reserved agent name")
 		return
 	}
