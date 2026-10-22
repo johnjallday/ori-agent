@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Partition the canonical unit package list; validate/merge successful shards.
+"""Partition the canonical unit package list; order a run heaviest-first;
+validate/merge successful shards; refresh the weights from a full run.
 
-Weights only affect placement, never selection. No external packages required.
+Weights only affect placement and run order, never selection. Refresh them
+from a fresh (-count=1) full run's go test -json stream:
+
+    python3 scripts/unit-shards.py weights < events.json > scripts/unit-shard-weights.json
+
+No external packages required.
 """
 
 import argparse
@@ -14,6 +20,7 @@ import sys
 MODULE = "github.com/johnjallday/ori-agent/"
 FLAGS = "-json -short -race -timeout 30m -count=1 -covermode=atomic"
 WEIGHTS = Path(__file__).with_name("unit-shard-weights.json")
+DEFAULT_WEIGHT = 10
 BLOCK = re.compile(r"^(\S+):(\d+)\.(\d+),(\d+)\.(\d+) (\d+) (\d+)$")
 
 
@@ -43,15 +50,47 @@ def load_weights():
     return weights
 
 
+def order(selected, weights):
+    """Heaviest package first, ties alphabetical.
+
+    `go test -p N` starts its package list in order, so the package that decides
+    a run's wall clock must not queue behind a hundred quick ones.
+    """
+    return sorted(selected, key=lambda p: (-weights.get(p, DEFAULT_WEIGHT), p))
+
+
+def weights_from_events(text):
+    """Whole seconds per package from a go test -json stream.
+
+    Only packages above the default weight are kept, so the file stays short.
+    A cached package reports no time and drops out, so refresh from a fresh run.
+    """
+    durations = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        if event.get("Action") in ("pass", "fail") and "Test" not in event and event.get("Package"):
+            durations[event["Package"]] = event.get("Elapsed", 0)
+    if not durations:
+        raise ValueError("no package results in the event stream")
+    packages("\n".join(durations))
+    return {
+        package: math.ceil(seconds)
+        for package, seconds in sorted(durations.items())
+        if math.ceil(seconds) > DEFAULT_WEIGHT
+    }
+
+
 def partition(selected, count, weights):
     if not 1 <= count <= min(32, len(selected)):
         raise ValueError("shard count must be 1..32 with no empty shard")
     # LPT with stable ties: independent runners must compute the same partition.
     groups, totals = [[] for _ in range(count)], [0] * count
-    for package in sorted(selected, key=lambda p: (-weights.get(p, 10), p)):
+    for package in order(selected, weights):
         shard = min(range(count), key=lambda i: (totals[i], len(groups[i]), i))
         groups[shard].append(package)
-        totals[shard] += weights.get(package, 10)
+        totals[shard] += weights.get(package, DEFAULT_WEIGHT)
     return [sorted(group) for group in groups]
 
 
@@ -107,6 +146,8 @@ def main():
     select = commands.add_parser("select", help="read canonical packages from stdin")
     select.add_argument("--shard", type=int, required=True)
     select.add_argument("--count", type=int, required=True)
+    commands.add_parser("order", help="print the packages read from stdin heaviest first")
+    commands.add_parser("weights", help="print package weights from a go test -json stream on stdin")
     combine = commands.add_parser("merge", help="verify all shards before emitting coverage")
     combine.add_argument("--directory", type=Path, required=True)
     combine.add_argument("--packages", type=Path, required=True)
@@ -114,16 +155,21 @@ def main():
     combine.add_argument("--revision", required=True)
     args = parser.parse_args()
     try:
+        if args.command == "weights":
+            print(json.dumps(weights_from_events(sys.stdin.read()), indent=2))
+            return 0
         weights = load_weights()
         if args.command == "select":
             if not 1 <= args.shard <= args.count:
                 raise ValueError("shard index must be 1..count")
             groups = partition(packages(sys.stdin.read()), args.count, weights)
             print("\n".join(groups[args.shard - 1]))
+        elif args.command == "order":
+            print("\n".join(order(packages(sys.stdin.read()), weights)))
         else:
             selected = packages(args.packages.read_text())
             print(merge(args.directory, selected, args.count, weights, args.revision), end="")
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"unit shards: {error}", file=sys.stderr)
         return 1
     return 0

@@ -70,6 +70,7 @@ set -euo pipefail
 [[ $# == 0 && -z "${RUNNER_OS:-}${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]
 printf 'canonical full unit runner invoked\n'
 printf 'parallel=%s\n' "${ORI_UNIT_TEST_PARALLEL:-}"
+printf 'cache=%s\n' "${ORI_UNIT_TEST_CACHE:-}"
 printf 'lock=%s\n' "$(readlink "$ORI_CI_LOCAL_LOCK_DIR/ori-ci-local-unit-tests.lock" || true)"
 touch "$UNIT_RAN"
 exit "${UNIT_STATUS:-0}"
@@ -78,7 +79,7 @@ chmod 700 "$unit_sandbox/scripts/run-unit-tests.sh"
 # The tests own their lock directory, so a real gate running on this machine
 # neither blocks them nor sees their locks, and a caller's queue or package
 # settings do not leak in.
-unset ORI_CI_LOCAL_LOCK ORI_UNIT_TEST_PARALLEL
+unset ORI_CI_LOCAL_LOCK ORI_UNIT_TEST_PARALLEL ORI_UNIT_TEST_CACHE
 export ORI_CI_LOCAL_LOCK_DIR="$unit_sandbox/locks" ORI_CI_LOCAL_LOCK_POLL=0.1 UNIT_RAN="$unit_sandbox/ran"
 lock="$ORI_CI_LOCAL_LOCK_DIR/ori-ci-local-unit-tests.lock"
 run_unit_gate() {
@@ -103,6 +104,12 @@ grep -qx "parallel=$(ci_local_unit_parallel)" <<<"$unit_result" || fail "unit ga
 [[ "$(ci_local_unit_parallel)" -ge 2 ]] || fail "default parallelism below two"
 unit_result="$(ORI_UNIT_TEST_PARALLEL=7 run_unit_gate)"
 grep -qx 'parallel=7' <<<"$unit_result" || fail "ORI_UNIT_TEST_PARALLEL was not passed through" "$unit_result"
+
+# Go's test cache serves unchanged packages by default; the caller can insist on
+# CI's fresh run of every package.
+grep -qx 'cache=1' <<<"$unit_result" || fail "unit gate did not let unchanged packages come from the test cache" "$unit_result"
+unit_result="$(ORI_UNIT_TEST_CACHE=0 run_unit_gate)"
+grep -qx 'cache=0' <<<"$unit_result" || fail "ORI_UNIT_TEST_CACHE=0 was not passed through" "$unit_result"
 
 # The runner holds the lock, recorded as this process, and leaves none behind.
 grep -q "^lock=$$|" <<<"$unit_result" || fail "the runner did not hold the unit-test lock" "$unit_result"
