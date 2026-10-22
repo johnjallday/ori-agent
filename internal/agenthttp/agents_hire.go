@@ -142,6 +142,48 @@ func (h *Handler) SetHireRecords(records personalassistant.HireRecordStore) {
 	h.hireRecords = records
 }
 
+// SetHireProposals wires the store the assistant's conversation offers are
+// kept in, so a hire made from one (its request id is the proposal's id)
+// records on it what it became. Unwired, a hire marks nothing.
+func (h *Handler) SetHireProposals(proposals personalassistant.HireProposalStore) {
+	h.hireProposals = proposals
+}
+
+// markProposalHired records on the proposal a hire was made from what it
+// became: the hire, the agent and the workspace, and the role, name and brief
+// as they were hired. A hire from the Agents page has no proposal; a proposal
+// of another user, or one already marked, is left alone.
+func (h *Handler) markProposalHired(ctx context.Context, userID string, record personalassistant.HireRecord, workspaceName, domain string) {
+	if h.hireProposals == nil {
+		return
+	}
+	proposal, err := h.hireProposals.Get(ctx, record.RequestID)
+	if err != nil {
+		if !errors.Is(err, personalassistant.ErrHireProposalNotFound) {
+			logger.Warn("Hire: the proposal it came from could not be read", logger.Fields{"hire": record.ID, "err": err})
+		}
+		return
+	}
+	if proposal.UserID != userID || proposal.State == personalassistant.HireProposalHired {
+		return
+	}
+	blueprint := hireBlueprintFor(types.AgentRole(record.Role))
+	if _, err := h.hireProposals.Update(ctx, proposal.ID, func(p *personalassistant.HireProposal) error {
+		p.State, p.HireID, p.AgentName, p.WorkspaceID = personalassistant.HireProposalHired, record.ID, record.AgentName, record.WorkspaceID
+		p.Role, p.Name, p.Brief = record.Role, record.AgentName, record.Brief
+		p.Blueprint, p.BlueprintLabel, p.OpenRoles = blueprint.ID, blueprint.Label, blueprint.OpenRoles
+		if workspaceName != "" {
+			p.WorkspaceName = workspaceName
+		}
+		if domain != "" {
+			p.Domain = domain
+		}
+		return nil
+	}); err != nil {
+		logger.Warn("Hire: the proposal it came from could not be marked hired", logger.Fields{"hire": record.ID, "proposal": proposal.ID, "err": err})
+	}
+}
+
 // HireLookStarter starts a hired agent's first look — a goal run with the
 // hire's origin on its new workspace — and returns the run's id once it is
 // admitted. The run itself goes on in the background.
@@ -204,6 +246,7 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 		}
 		result := h.hireResultOf(record)
 		result.Replayed = true
+		h.markProposalHired(ctx, userID, record, result.WorkspaceName, "")
 		_ = orihttp.RespondJSON(w, http.StatusOK, result)
 		return
 	} else if !errors.Is(err, personalassistant.ErrHireNotFound) {
@@ -272,6 +315,9 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 	// that cannot start leaves the hire as it is and says why on the record;
 	// the assistant's report offers Retry.
 	record = h.startHireLook(ctx, record)
+	// (f) A hire the assistant offered in a conversation: its card now says
+	// what the offer became.
+	h.markProposalHired(ctx, userID, record, ws.Name, plan.domain)
 
 	logger.Info("Agent hired", logger.Fields{"agent": plan.name, "role": string(plan.entry.Slug), "workspace": ws.ID, "hire": record.ID, "look": record.State})
 	result := h.hireResultOf(record)

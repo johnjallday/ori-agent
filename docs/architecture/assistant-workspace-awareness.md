@@ -40,43 +40,53 @@ new permission boundary.
   itself before it asks for a route, and those other wordings already reach
   the assistant's conversation there
   (`asksForWorkspaceInOtherWords`, `home_assistant_workspace_request_test.go`).
-- Conversation may offer an optional workspace proposal once the user has an
-  actionable agreed goal; it must not pitch setup repeatedly or ignore a
-  decline. Natural multi-clause requests (for example, “how they started. can
-  we create a workspace”) use `assistant_propose_workspace` in the existing
-  configured-system-model conversation turn. Phrase matching is only a routing
-  hint, not the proposal gate. No second proposal generation or special
-  12-second deadline remains; the normal provider/broker bounds apply. Codex
-  uses its existing structured broker protocol, not a schema-less JSON request.
-  Strict tool arguments allow only a suggested name (80 runes) and editable
-  brief (1,600 runes). Invalid/secret-bearing arguments and mixed proposal/tool
-  batches fail before any batch call executes. A terminal validated proposal is
-  rendered by Ori, not followed by another completion. Canonical ownership and
-  revision are pinned before generation; only successful atomic attributed save
-  exposes the review. No additional Profile/HQ-memory read, catalog scan, hired
-  agent skill loadout, native authority or alternate provider is introduced.
-  The brief describes goals, latest constraints, proposed starter work and
-  unresolved questions, not grants.
-  “Review workspace setup” pre-fills only name/description in the existing
-  manual creator; thread/page/selection/relationship/folder changes refuse its
-  stale opener. No builder session, parent, blueprint, team, install or task is
-  inferred. Blueprint, placement, team and final **Create** remain that creator's
-  explicit decisions. Cancelling leaves the conversation/draft usable. A bare
-  yes never authorizes creation/execution; named creation keeps its original
-  reviewed action owner. Prose alone is never parsed into actionable prefill.
-  **More assistant options → Open workspace form manually** is always available
-  without a model, and failed/unsaved responses offer it inline. It opens the
-  existing blank manual creator without proposal text, parent or builder data.
-  Snapshot-only providers receive truthful manual guidance, not extra tools.
-  Failure responses expose bounded categories (`invalid_workspace_proposal`,
+- Conversation may offer to **hire an agent** once a request describes work
+  beyond an answer (assistant-hires-from-a-request); it must not pitch a hire
+  repeatedly, for a question or a draft edit, or after the user put one aside
+  in that conversation. Natural requests (for example, “help me compare the
+  three CRMs we're evaluating”) use `assistant_propose_hire` in the existing
+  configured-system-model conversation turn, as the only tool call in its
+  batch. Phrase matching is only a routing hint, not the offer gate. The
+  normal provider/broker bounds apply; Codex uses its existing structured
+  broker protocol. The tool's arguments are a catalog role, a short name, the
+  brief in the user's words (300 runes) and a workspace name (80 runes); Ori
+  validates them the way the Agents page's hire is validated (role in the
+  catalog, brief through the workspace-goal bound with the role's default as
+  fallback, a free agent name, a workspace name derived from the brief), bounds
+  an over-long text, and refuses an unknown role, unknown fields, secret-bearing
+  or control text and mixed batches before any batch call executes
+  (`invalid_hire_proposal`). A terminal validated offer is saved on the
+  conversation (`assistant_hire_proposals`) and rendered by Ori as the shared
+  Hire card under one line of the model's prose, not followed by another
+  completion; a reload draws the same card in whatever state it is in now.
+  Canonical ownership and revision are pinned before generation; only a
+  successful atomic attributed save exposes the card. No additional Profile/HQ
+  memory read, catalog scan, native authority or alternate provider is
+  introduced; the offer is text and cannot create, read, install or pick a
+  model. The card's **Hire and start** is the user's own
+  `POST /api/agents/hire` with the offer's id as the request id (the hire then
+  marks the offer hired); **Not now** records the offer as put aside and the
+  model is told, for the rest of that conversation, not to offer that work
+  again; **Adjust** opens the existing manual creator prefilled with the role's
+  blueprint, the workspace name, the brief as the goal and one new agent in the
+  primary seat, and nothing exists until that creator's own **Create**. A
+  recognized folder attached to the turn keeps the folder's own card as the
+  offer; a folder Ori knows nothing about, or a link, does not withhold the
+  hire. A bare yes never authorizes anything; prose alone is never parsed into
+  an offer. **More assistant options → Open workspace form manually** is
+  always available without a model, and failed/unsaved responses offer it
+  inline. A provider without tool support receives truthful manual guidance,
+  not extra tools: for a request that asks for a hire or a workspace in so many
+  words the host adds a **Hire an agent for this** chip that opens the Agents
+  page's Hire card with the request as the brief and no role chosen.
+  Failure responses expose bounded categories (`invalid_hire_proposal`,
   `model_timeout`, `request_cancelled`, `model_not_configured`,
   `provider_unavailable`, `context_changed`); logs include category only, never
   raw provider errors or private prompts. Failed responses do not claim
   “Answered from your app data.” A provider may have received a prompt before
   failing, so Ori promises no saved answer, not that nothing was sent.
   Controlled Codex-adapter, HTTP/SQLite and browser tests are not live-provider
-  reliability evidence. The user's original Codex refusal has no established
-  failure stage; the retired generic error cannot identify it retroactively.
+  reliability evidence.
 - Installed Skills-folder metadata and registered MCP configuration are narrow
   read-only observations. Compiled/cached MCP catalog reads use the existing
   source store, never an implicit refresh/server start. The same inventory,

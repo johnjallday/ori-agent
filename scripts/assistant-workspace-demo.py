@@ -42,6 +42,8 @@ PLAIN_DEMOS = {
                         "ORI_WORKSPACE_FOLDERRESPONSE_SANDBOX", "folder-response.log"),
     "folder_response_baseline": ("tests/personal-assistant-folder-response-prototype.spec.ts",
                                  "ORI_WORKSPACE_FOLDERBASELINE_SANDBOX", "folder-response-baseline.log"),
+    "hire_request": ("tests/assistant-hires-from-a-request.spec.ts",
+                     "ORI_WORKSPACE_HIREREQUEST_SANDBOX", "hire-request.log"),
     "placement": ("tests/personal-assistant-workspace-placement.spec.ts",
                   "ORI_WORKSPACE_PLACEMENT_SANDBOX", "group3-wt-demo-placement.log"),
     "sources": ("tests/personal-assistant-workspace-sources.spec.ts",
@@ -505,6 +507,51 @@ def requested_workspace(own_words):
             "description": "Goal: " + purpose + ". Proposed starter work: agree what done looks like, list what is already known, and plan the first step. Nothing has been looked up or verified."}
 
 
+# The openings of a request this fixture answers with a hire proposal. Ori
+# decides whether the hire tool is offered; the fixture only proves it was and
+# fills the card from the words at hand.
+HIRE_REQUEST_LEADS = ("prepare a workspace review", "let's set up a workspace", "help me plan", "help me compare",
+                      "i need to compare", "i need someone to")
+
+
+def hire_proposal(own_words, history, requested):
+    """The hire a stand-in model proposes for a request that describes work.
+
+    The brief repeats the user's purpose and nothing else; the role follows the
+    verb in it. A membership discussion keeps its fixed pilot, an OK Go thread
+    its Researcher, and a routed "build a workspace" request its stated purpose.
+    """
+    if requested:
+        brief = requested["description"].removeprefix("Goal: ")
+        return {"role": "orchestrator", "name": "Cora", "brief": (brief[:1].upper() + brief[1:])[:300],
+                "workspace_name": requested["name"][:80]}
+    if "okgo band" in history:
+        return {"role": "researcher", "name": "Ruth",
+                "brief": "Research how OK Go started: find interviews, build an early-years timeline, and write a sourced origin story.",
+                "workspace_name": "OK Go — How They Started"}
+    words = own_words.split("\n\n")[0].strip()
+    lowered = words.lower()
+    if lowered.startswith(("prepare a workspace review", "let's set up a workspace")):
+        return {"role": "orchestrator", "name": "Cora",
+                "brief": "Set up the recurring community membership pilot, not talent coaching.",
+                "workspace_name": "Fictional Membership Pilot"}
+    role, name = "orchestrator", "Cora"
+    if any(verb in lowered for verb in ("compare", "research", "find out", "look into")):
+        role, name = "researcher", "Ruth"
+    elif any(verb in lowered for verb in ("write", "draft")):
+        role, name = "synthesizer", "Wren"
+    brief = words
+    for lead in ("help me ", "i need to ", "i need someone to ", "please "):
+        if brief.lower().startswith(lead):
+            brief = brief[len(lead):]
+            break
+    brief = brief[:1].upper() + brief[1:]
+    if brief and brief[-1] not in ".!?":
+        brief += "."
+    return {"role": role, "name": name, "brief": brief[:300],
+            "workspace_name": " ".join(brief.rstrip(".!?").split()[:4])[:80]}
+
+
 def conversation_reply(prompt):
     """Explicit synthetic scenario only; never infer it from workspace metadata."""
     if prompt in {
@@ -675,20 +722,18 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                 if own_words == "Suggest a useful next step for our membership plan.":
                     system = request["messages"][0].get("content", "")
                     (state_dir / "workspace-offer-input.json").write_text(json.dumps({
-                        "optional_review_allowed": "may offer an optional workspace review even if" in system,
+                        "optional_review_allowed": "you may offer to hire an agent for it, even if" in system,
                         "decline_respected": "respect a decline" in system,
                     }))
-                    self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": "Deterministic discussion fixture: a workspace could organize the agreed membership pilot. Would you like a workspace proposal? Nothing is created or installed."}, "done": True,
+                    self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": "Deterministic discussion fixture: the agreed membership pilot is work someone could take on. Would you like me to hire an agent for it? Nothing is hired, created or installed."}, "done": True,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
                 proposal_step = None
                 requested = requested_workspace(own_words)
-                if own_words.lower().startswith(("prepare a workspace review", "let's set up a workspace")) or requested or own_words == "how they started. can we create a workspace":
+                if own_words.lower().startswith(HIRE_REQUEST_LEADS) or requested or own_words == "how they started. can we create a workspace":
                     history = request["messages"][1:-1]
                     body = "\n".join(message.get("content", "") for message in history)
-                    tool_offered = any(tool.get("function", {}).get("name") == "assistant_propose_workspace" for tool in request.get("tools", []))
-                    if not tool_offered:
-                        raise ValueError("proposal-only tool missing")
+                    tool_offered = any(tool.get("function", {}).get("name") == "assistant_propose_hire" for tool in request.get("tools", []))
                     audit_path = state_dir / "workspace-proposal-input.json"
                     prior = json.loads(audit_path.read_text()) if audit_path.exists() else {}
                     audit_path.write_text(json.dumps({
@@ -701,18 +746,22 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                         "latest_correction_present": "No, I want recurring membership only, not one-off sales or talent coaching." in body,
                         "history_runes": len(body),
                     }))
-                    proposal = {"name": "Fictional Membership Pilot", "description": "Goal: recurring community membership, not talent coaching. Proposed starter work: identify the audience, compare membership workflows, and outline a small pilot. Telegram compatibility remains unknown; no integration is installed."}
-                    if "okgo band" in body:
-                        proposal = {"name": "OK Go — How They Started", "description": "Goal: research how OK Go started. Proposed starter work: find interviews, build an early-years timeline, and write a sourced origin story. Dates and first-break details need verification."}
-                    if requested:
-                        proposal = requested
+                    proposal = hire_proposal(own_words, body, requested)
                     if (state_dir / "workspace-proposal-invalid").exists():
                         (state_dir / "workspace-proposal-invalid").unlink()
-                        proposal["description"] = "x" * 1601
+                        proposal["role"] = "wizard"  # Not a catalog role: Ori refuses the proposal.
                     if (state_dir / "workspace-proposal-slow").exists():
                         (state_dir / "workspace-proposal-slow").unlink()
                         time.sleep(13)  # Cross the former hard 12-second failure.
-                    proposal_step = {"tool": "assistant_propose_workspace", "arguments": proposal}
+                    # A well-behaved model: no offer where Ori withheld the tool (a
+                    # recognized folder's turn), and none again for work the user
+                    # put aside in this conversation (Ori lists it in the turn).
+                    if not tool_offered:
+                        proposal_step = {"answer": "Deterministic fixture: this turn offers no hire; the attached folder's own card, or the Agents page, is the way to one."}
+                    elif "put aside by the user" in user["content"]:
+                        proposal_step = {"answer": "Deterministic fixture: you put that hire aside, so here is a plain answer instead. Nothing was hired."}
+                    else:
+                        proposal_step = {"tool": "assistant_propose_hire", "arguments": proposal}
                 step = (proposal_step or (operate_step(own_words, results, request.get("tools") or []) if operate else None) or
                         (research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
                         (continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
@@ -796,6 +845,9 @@ def main():
                         help="wt demo: exploratory discussion, same canonical thread and an unconfirmed setup review")
     parser.add_argument("--conversation-first", action="store_true",
                         help="wt demo: chronology, passive reply geometry, delayed generation and inline setup")
+    parser.add_argument("--hire-request", action="store_true",
+                        help="wt demo: a plain request becomes the hire card, Hire and start hires, Not now is "
+                             "remembered, a recognized folder keeps its own card, and a reload redraws the card")
     parser.add_argument("--reaper-source")
     parser.add_argument("--music-source")
     parser.add_argument("--new-home", action="store_true", help="Confirm a declared new Home with exact staged candidates")

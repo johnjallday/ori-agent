@@ -175,7 +175,10 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 	allowed := map[string]bool{"home_workspaces": true, "home_tasks": true, "home_sessions": true, "home_opportunities": true, "home_usage": true, "home_agents": true, "assistant_workspace_discovery": true,
 		"assistant_workspace_notes": true, "assistant_workspace_note": true, "assistant_workspace_tasks": true, "assistant_workspace_task": true,
 		"assistant_workspace_files": true, "assistant_workspace_folder": true, "assistant_workspace_file": true,
-		"assistant_installed_capabilities": true, "assistant_mcp_catalog": true, "assistant_public_registry_sources": true, "assistant_propose_research_lookup": true, "assistant_propose_workspace": true,
+		"assistant_installed_capabilities": true, "assistant_mcp_catalog": true, "assistant_public_registry_sources": true, "assistant_propose_research_lookup": true,
+		// A text-only offer to hire an agent for the work a request described;
+		// the hire itself is the user's own click on the card.
+		"assistant_propose_hire": true,
 		// A local read of the reviewed registry and the plugin store's install
 		// state. It installs, enables and starts nothing.
 		"assistant_reviewed_integrations": true,

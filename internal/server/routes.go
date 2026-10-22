@@ -183,6 +183,8 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	}
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetHireRecords(personalassistant.NewSQLiteHireRecords(s.Storage.SessionStore.DB()))
+		// A hire the assistant offered in a conversation marks its proposal.
+		agentHandler.SetHireProposals(personalassistant.NewSQLiteHireProposals(s.Storage.SessionStore.DB()))
 	}
 	// A hired agent runs on a model that is set up, so its first look can run.
 	if s.Core != nil {
@@ -388,6 +390,10 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}", homeAssistantAskHandler.ArrangementHistoryHandler)
 	mux.HandleFunc("POST /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}/group-review", homeAssistantAskHandler.ArrangementGroupReviewHandler)
 	mux.HandleFunc("POST /api/home-assistant/conversations/{id}/arrangements/{arrangement_id}/decline", homeAssistantAskHandler.ArrangementDeclineHandler)
+	// The assistant's offer to hire: Not now and Adjust record the offer's
+	// state; Hire and start is POST /api/agents/hire with the offer's id.
+	mux.HandleFunc("POST /api/personal-assistant/hire-proposals/{proposalID}/decline", homeAssistantAskHandler.DeclineHireProposalHandler)
+	mux.HandleFunc("POST /api/personal-assistant/hire-proposals/{proposalID}/adjust", homeAssistantAskHandler.AdjustHireProposalHandler)
 	mux.HandleFunc("GET /api/home-assistant/folder-context/choices", homeAssistantAskHandler.FolderChoicesHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/select", homeAssistantAskHandler.SelectFolderContextHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/detach", homeAssistantAskHandler.DetachFolderContextHandler)

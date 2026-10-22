@@ -309,6 +309,55 @@ test('a suggested name avoids the names already taken', () => {
   assert.equal(hire.suggestAgentName('Reviewer', ['reviewer', 'Reviewer 2']), 'Reviewer 3');
 });
 
+test("a prefilled card starts from the proposal's words and keeps them across a role change", () => {
+  const state = hire.prefillState(
+    {
+      role: 'researcher',
+      name: ' Ruth ',
+      brief: ' Compare   CRMs. ',
+      workspaceName: 'CRM comparison',
+      domain: ''
+    },
+    'proposal-1'
+  );
+  assert.equal(state.requestId, 'proposal-1');
+  assert.equal(state.name, 'Ruth');
+  assert.equal(state.brief, 'Compare CRMs.');
+  assert.equal(state.workspaceName, 'CRM comparison');
+  // A given brief and workspace name count as edited, so a role change keeps
+  // them; the name follows the role until the user types one.
+  assert.deepEqual(plain(state.edited), { name: false, brief: true, workspaceName: true });
+  assert.equal(state.role, '');
+  const blank = hire.prefillState({}, '');
+  assert.deepEqual(plain(blank.edited), { name: false, brief: false, workspaceName: false });
+  assert.match(blank.requestId, /^hire-/);
+
+  const [commander, researcher] = catalog.entries;
+  const prefill = { role: 'researcher', name: 'Ruth' };
+  assert.equal(hire.suggestedNameFor(researcher, prefill, []), 'Ruth');
+  assert.equal(hire.suggestedNameFor(commander, prefill, []), 'Commander');
+  assert.equal(hire.suggestedNameFor(commander, prefill, ['Commander']), 'Commander 2');
+  assert.equal(hire.suggestedNameFor(researcher, {}, []), 'Researcher');
+});
+
+test('the view carries the words the card holds, for a host that heads it with them', () => {
+  const view = hire.hireCardView(catalog, {
+    role: 'validator',
+    name: ' Rita ',
+    domain: ' x ',
+    brief: ' Check it. ',
+    workspaceName: ' Check It ',
+    phase: 'idle'
+  });
+  assert.deepEqual(plain(view.fields), {
+    role: 'validator',
+    name: 'Rita',
+    domain: 'x',
+    brief: 'Check it.',
+    workspaceName: 'Check It'
+  });
+});
+
 test('the roster modal and the create page mount the same card and send the same request', () => {
   const agents = read('./agents.js');
   const page = read('./agents-catalog.js');

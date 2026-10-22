@@ -38,6 +38,24 @@ test('a conversational proposal only prefills editable text, without a build or 
   assert.equal(createCreatorContext({}).description, '');
 });
 
+test("the hire card's Adjust may name one new agent for the primary seat, nothing more", () => {
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(
+        createCreatorContext({ staffPrimaryRole: { name: ' Ruth ' } }).staffPrimaryRole
+      )
+    ),
+    { name: 'Ruth' }
+  );
+  for (const value of [undefined, null, 'Ruth', { name: '  ' }, { agentNames: ['Ruth'] }]) {
+    assert.equal(createCreatorContext({ staffPrimaryRole: value }).staffPrimaryRole, null);
+  }
+  assert.equal(
+    createCreatorContext({ staffPrimaryRole: { name: 'Ruth' } }).stageBlueprintRoles,
+    false
+  );
+});
+
 test('only a caller that asks for it gets a connection-only creator', () => {
   assert.equal(createCreatorContext({ connectionOnly: true }).connectionOnly, true);
   for (const options of [{}, { connectionOnly: false }, { stayAfterCreate: true }, undefined]) {

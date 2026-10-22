@@ -65,6 +65,9 @@ func ResetRecordTables() []string {
 		// A hire's record names the agent and workspace it made and how its
 		// first look went; the agent and workspace themselves live on disk.
 		"agent_hires",
+		// A hire the assistant proposed in a conversation, and what it became;
+		// the conversation itself is a session record.
+		"assistant_hire_proposals",
 		"vaults",
 	}
 }
