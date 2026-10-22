@@ -185,9 +185,10 @@ func TestAssistantSoftwareFolder_DiscussionAndSetupWordingSuggestAndCreateNothin
 			t.Fatalf("the model was sent %q", forbidden)
 		}
 	}
-	// A folder turn carries no workspace-proposal tool and no execution authority.
-	if hasTool(call, "assistant_propose_workspace") {
-		t.Fatalf("a folder turn offered the general workspace proposal: %v", toolNames(call))
+	// A recognized folder's turn carries no hire-proposal tool (the folder's
+	// own card is the offer) and no execution authority.
+	if hasTool(call, "assistant_propose_hire") || hasTool(call, "assistant_propose_workspace") {
+		t.Fatalf("a folder turn offered the general hire proposal: %v", toolNames(call))
 	}
 	assertNoPanelExecutionAuthority(t, call)
 	before.assertUnchanged(t, f.draftServerFixture, stage, "after discussing the folder")
@@ -204,8 +205,8 @@ func TestAssistantSoftwareFolder_DiscussionAndSetupWordingSuggestAndCreateNothin
 		}
 		revision = reply["folder_context"].(map[string]any)["revision"].(string)
 		last := f.provider.requests[len(f.provider.requests)-1]
-		if hasTool(last, "assistant_propose_workspace") {
-			t.Fatalf("%q offered the general workspace proposal", wording)
+		if hasTool(last, "assistant_propose_hire") {
+			t.Fatalf("%q offered the general hire proposal", wording)
 		}
 		before.assertUnchanged(t, f.draftServerFixture, stage, "after "+wording)
 	}
@@ -306,23 +307,23 @@ func TestAssistantSoftwareFolder_ReviewIsOneOfferAndADeclineIsOnlyThatProjects(t
 	}
 }
 
-// The general workspace proposal belongs to ordinary turns. With no folder in
-// the request it is offered, and accepting it is a pre-filled manual creator,
-// never a folder offer and never access to a folder.
+// The general hire proposal belongs to ordinary turns. With no folder in the
+// request it is offered, and accepting it is the user's own hire from the
+// card, never a folder offer and never access to a folder.
 func TestAssistantSoftwareFolder_TheGeneralProposalStaysSeparateFromFolderSetup(t *testing.T) {
 	f := newWorkspaceReaderFixture(t)
 	stage := stageSoftwareFolders(t, f.draftServerFixture, "widget")
 	before := readSoftwareSetupState(t, f.draftServerFixture, stage)
 
-	f.provider.script = []llm.ChatResponse{readerCall("assistant_propose_workspace", map[string]any{
-		"name": "Widget planning", "description": "Plan the next widget release. Nothing has been read or created yet.",
+	f.provider.script = []llm.ChatResponse{readerCall("assistant_propose_hire", map[string]any{
+		"role": "orchestrator", "name": "Cora", "brief": "Plan the next widget release.", "workspace_name": "Widget planning",
 	})}
-	reply := f.ask(t, "", "can we create a workspace to plan the widget release")
-	if len(f.provider.requests) != 1 || !hasTool(f.provider.requests[0], "assistant_propose_workspace") {
+	reply := f.ask(t, "", "help me plan the widget release")
+	if len(f.provider.requests) != 1 || !hasTool(f.provider.requests[0], "assistant_propose_hire") {
 		t.Fatalf("an ordinary turn did not offer the proposal in its one model call: %d %v", len(f.provider.requests), toolNames(f.provider.requests[0]))
 	}
 	confirmation, ok := reply["confirmation"].(map[string]any)
-	if !ok || confirmation["action_type"] != "prepare_workspace" {
+	if !ok || confirmation["action_type"] != "hire_agent" {
 		t.Fatalf("no proposal: %v", reply)
 	}
 	if reply["folder_setup_suggestion"] != nil || reply["folder_context"] != nil {

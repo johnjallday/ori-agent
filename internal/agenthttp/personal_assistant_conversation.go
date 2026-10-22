@@ -645,5 +645,12 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	} else {
 		body["saved"] = saved
 	}
+	// The hires the assistant offered in this conversation, drawn again as
+	// their cards in whatever state they are in now; the catalog travels with
+	// them so the role selector needs no request of its own.
+	if proposals := h.hireProposalsForConversation(r.Context(), record.ID); len(proposals) > 0 {
+		body["hire_proposals"] = proposals
+		body["hire_catalog"] = hireProposalCatalog()
+	}
 	orihttp.WriteJSON(w, body)
 }

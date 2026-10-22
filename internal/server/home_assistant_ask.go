@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -433,6 +434,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		// Hired-assistant conversations are canonical Sessions in Personal HQ.
 		if s.Storage.SessionStore != nil {
 			handler.SetConversationStore(personalAssistantConversationAdapter{store: s.Storage.SessionStore})
+			// The hires the assistant proposes in those conversations live in
+			// the same database as the hires they become.
+			handler.SetHireProposals(personalassistant.NewSQLiteHireProposals(s.Storage.SessionStore.DB()))
 		}
 		if s.Storage.PersonalAssistantFolderObservations != nil {
 			handler.SetFolderSetups(s.Storage.PersonalAssistantFolderObservations)
