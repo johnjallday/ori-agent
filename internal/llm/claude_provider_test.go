@@ -138,12 +138,12 @@ func TestClaudeProviderConvertMessages(t *testing.T) {
 			expectedLen: 2,
 		},
 		{
-			name: "System message is skipped",
+			name: "System message is left out of the messages",
 			messages: []Message{
 				NewSystemMessage("You are helpful"),
 				NewUserMessage("Hello"),
 			},
-			expectedLen: 1, // System message should be skipped
+			expectedLen: 1, // Sent as system text instead; see claudeSystemText
 		},
 		{
 			name: "Tool message converted to user message",
