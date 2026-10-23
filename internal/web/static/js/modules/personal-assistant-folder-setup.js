@@ -57,7 +57,8 @@ export function placementChoiceView(choice) {
   return {
     message: String(choice?.message || 'Choose the operation to review.'),
     options,
-    setups
+    setups,
+    ...(choice?.readiness ? { readiness: choice.readiness } : {})
   };
 }
 
@@ -132,8 +133,7 @@ function fallbackOrigin() {
   composerOrigin.className = 'personal-assistant-message__setup';
   composerOrigin.setAttribute('aria-label', 'Setup from attached folder');
   const note = document.createElement('p');
-  note.textContent =
-    'Setup from your attached folder — no assistant reply or model is required. Choose scope explicitly; discussion topics are separate.';
+  note.textContent = 'Review setup · no model is needed. Nothing is created until you confirm.';
   composerOrigin.append(note);
   // Idle shared routing targets remain hidden. This is a local UI handoff at
   // the composer's end of the same pane, not a fabricated transcript message.
@@ -656,6 +656,9 @@ async function review(candidateId, close = false, offerId, placement) {
     placementNode = document.createElement('section');
     placementNode.className = 'personal-assistant-message__setup';
     placementNode.setAttribute('aria-label', 'Choose folder placement');
+    const requirements = document.createElement('div');
+    globalThis.OriFolderSetupVisual.renderRequirements(requirements, { readiness: view.readiness });
+    placementNode.append(requirements);
     const message = document.createElement('p');
     message.textContent = view.message;
     placementNode.append(message);
@@ -682,14 +685,17 @@ async function review(candidateId, close = false, offerId, placement) {
       preview.append(button);
       placementNode.append(preview);
     }
-    // A guided setup the server attached opens in this tab, like the
-    // assistant's own setup button; it replaces a review that cannot proceed.
+    const actions = document.createElement('div');
+    actions.className = 'folder-setup-next';
+    // Keep the local folder/draft owner here while its host-guided setup opens.
     for (const setup of view.setups) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = setup.href;
-      open.textContent = setup.label;
-      placementNode.append(open);
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = `${setup.label} (new tab)`;
+      actions.append(open);
     }
     const cancel = document.createElement('button');
     cancel.type = 'button';
@@ -698,8 +704,11 @@ async function review(candidateId, close = false, offerId, placement) {
     cancel.addEventListener('click', () => {
       closeChoices();
     });
-    placementNode.append(cancel);
-    showPlacement(placementNode.querySelector('button, a'), shouldFocus);
+    actions.append(cancel);
+    placementNode.append(actions);
+    const start = requirements.querySelector('h4');
+    if (start) start.tabIndex = -1;
+    showPlacement(start || placementNode.querySelector('button, a'), shouldFocus);
     return;
   }
   if (result?.review_closed) {

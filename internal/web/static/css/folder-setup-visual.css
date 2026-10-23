@@ -1,4 +1,4 @@
-/* One fact-backed diagram, shared by the folder preview and setup surfaces.
+/* Fact-backed requirements and outcome, shared by the setup surfaces.
    Deliberately scoped: no global card, modal, or typography overrides. */
 .folder-visual {
   --fv-ink: var(--ori-ink, var(--text-primary));
@@ -7,8 +7,8 @@
   --fv-line: var(--ori-border, var(--border-color));
   --fv-accent: var(--pa-accent-text, var(--text-primary));
   color: var(--fv-ink);
-  margin: 1rem 0;
-  padding: clamp(0.75rem, 2vw, 1.5rem);
+  margin: 0.75rem 0;
+  padding: 0.75rem;
   border: 1px solid var(--fv-line);
   border-radius: 1rem;
   background: var(--fv-paper);
@@ -64,8 +64,8 @@
 .folder-visual__folder-art {
   position: relative;
   display: block;
-  width: 5rem;
-  height: 3.5rem;
+  width: 2.5rem;
+  height: 1.75rem;
   margin: 0.9rem 0 1rem;
   border: 2px solid var(--fv-accent);
   border-radius: 0.35rem 0.6rem 0.6rem 0.6rem;
@@ -112,15 +112,15 @@
 }
 
 .folder-visual__destination {
-  padding: 0.9rem;
+  padding: 0.5rem;
   border: 1px solid var(--fv-line);
   border-radius: 0.9rem;
   background: color-mix(in srgb, var(--fv-accent) 4%, var(--fv-paper));
 }
 
 .folder-visual__workspace {
-  padding: 0.85rem;
-  margin-top: 0.7rem;
+  padding: 0.5rem;
+  margin-top: 0.4rem;
   border: 1px dashed var(--fv-accent);
   border-radius: 0.7rem;
 }
@@ -142,7 +142,7 @@
 
 .folder-visual__building svg {
   max-width: 100%;
-  height: 4rem;
+  height: 2rem;
 }
 
 .folder-visual__agent {
@@ -239,28 +239,71 @@
   outline-offset: 3px;
 }
 
-@media (min-width: 1000px) {
-  #personalAssistantPanel:has(.pa-folder__offer--visual:not([hidden])) {
-    width: min(1120px, calc(100vw - 48px));
-  }
+/* Requirements and their confirmation lead at every width. The proposed
+   relationship follows the decision instead of occupying half the drawer. */
+.folder-requirements {
+  --fv-muted: var(--pa-ink-dim, var(--text-secondary));
+  margin-block: 0.75rem;
+  overflow-wrap: anywhere;
+}
 
-  .pa-folder__offer--visual .folder-setup-surface {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: "diagram decision";
-    gap: 1.5rem;
-    align-items: start;
-  }
+.folder-requirements h4 {
+  font:
+    700 1rem "Chakra Petch",
+    sans-serif;
+  margin: 0 0 0.25rem;
+}
 
-  .pa-folder__offer--visual .folder-setup-decision {
-    grid-area: decision;
-  }
+.folder-requirements__summary {
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
+}
 
-  .pa-folder__offer--visual .folder-setup-diagram {
-    grid-area: diagram;
-    position: sticky;
-    top: 0.5rem;
-  }
+.folder-requirements__list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.folder-requirements__row {
+  padding: 0.65rem 0.8rem;
+  margin-block: 0.45rem;
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-left: 3px solid var(--pa-accent-text, var(--text-primary));
+  border-radius: 0.35rem;
+  background: var(--ori-paper, var(--bg-secondary));
+}
+
+.folder-requirements__row[data-operation="ready"] {
+  border-left-width: 1px;
+}
+
+.folder-requirements__status {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0.2rem 0;
+}
+
+.folder-requirements__source summary {
+  font-size: 0.75rem;
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+  color: var(--pa-accent-text, var(--text-primary));
+}
+
+.folder-requirements__source summary:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
+.folder-setup-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-block: 0.5rem;
+  background: var(--ori-paper, var(--bg-primary));
+  border-top: 1px solid var(--ori-border, var(--border-color));
 }
 
 /* At short/zoomed viewports, keep the navbar and pinned composer usable
@@ -304,6 +347,9 @@
     > * {
     flex-shrink: 0;
     white-space: nowrap;
+    /* Entering setup must not animate shrink from 1 to 0: even the global
+       reduced-motion duration leaves one frame with overlapping labels. */
+    transition-property: color, background-color, border-color, box-shadow;
   }
 
   #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__input {

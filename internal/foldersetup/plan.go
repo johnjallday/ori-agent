@@ -250,11 +250,12 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 	}
 	plan.BriefDefault = facts.BriefDefault
 	plan.Visual = &personalassistant.FolderSetupVisual{
-		Entity:  &personalassistant.FolderSetupEntity{Kind: "workspace", Name: facts.WorkspaceName, Operation: personalassistant.FolderSoftwareCreate},
-		Plugins: []personalassistant.FolderSetupPlugin{visualPlugin(personalassistant.FolderPlanIntegration, facts.Integration)},
+		RequirementsChecked: true,
+		Entity:              &personalassistant.FolderSetupEntity{Kind: "workspace", Name: facts.WorkspaceName, Operation: personalassistant.FolderSoftwareCreate},
+		Plugins:             []personalassistant.FolderSetupPlugin{PluginVisual(personalassistant.FolderPlanIntegration, facts.Integration)},
 	}
 	if facts.Provider != nil {
-		plan.Visual.Plugins = append(plan.Visual.Plugins, visualPlugin(personalassistant.FolderPlanProvider, *facts.Provider))
+		plan.Visual.Plugins = append(plan.Visual.Plugins, PluginVisual(personalassistant.FolderPlanProvider, *facts.Provider))
 	}
 	return plan.Stamped()
 }
@@ -416,11 +417,12 @@ func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan 
 		operation = personalassistant.FolderSoftwareReuse
 	}
 	plan.Visual = &personalassistant.FolderSetupVisual{
-		Entity:  &personalassistant.FolderSetupEntity{Kind: "home", Name: facts.HomeName, Operation: operation},
-		Plugins: []personalassistant.FolderSetupPlugin{visualPlugin(personalassistant.FolderPlanProvider, facts.Provider)},
+		RequirementsChecked: true,
+		Entity:              &personalassistant.FolderSetupEntity{Kind: "home", Name: facts.HomeName, Operation: operation},
+		Plugins:             []personalassistant.FolderSetupPlugin{PluginVisual(personalassistant.FolderPlanProvider, facts.Provider)},
 	}
 	if facts.Integration != nil {
-		plan.Visual.Plugins = append(plan.Visual.Plugins, visualPlugin(personalassistant.FolderPlanIntegration, *facts.Integration))
+		plan.Visual.Plugins = append(plan.Visual.Plugins, PluginVisual(personalassistant.FolderPlanIntegration, *facts.Integration))
 	}
 	return plan.Stamped()
 }

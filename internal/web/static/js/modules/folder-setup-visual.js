@@ -220,6 +220,151 @@
     container.replaceChildren(figure);
   }
 
+  // Requirements are display facts, not another plan or action dispatcher.
+  function requirementsView({ offer, plan = offer?.plan, readiness } = {}) {
+    const saved = Boolean(offer?.setup);
+    const visual = offer?.setup?.visual || plan?.visual || offer?.readiness || readiness;
+    const statuses = {
+      install: 'Not installed · Install',
+      update: 'Update needed',
+      enable: 'Disabled · Enable · No download',
+      ready: 'Ready · No download',
+      not_checked: 'Not checked',
+      unavailable: 'Check unavailable',
+      unverified: 'Not verified'
+    };
+    const rows = [];
+    for (const plugin of list(visual?.plugins)) {
+      if (
+        !['integration', 'provider'].includes(plugin.kind) ||
+        rows.some(row => row.kind === plugin.kind)
+      )
+        continue;
+      const operation = statuses[plugin.operation] ? plugin.operation : 'not_checked';
+      const installed = text(plugin.installed_version);
+      const version = text(plugin.version);
+      rows.push({
+        kind: plugin.kind,
+        name:
+          text(plugin.name) ||
+          (plugin.kind === 'provider' ? 'Home provider' : 'Project integration'),
+        operation,
+        status: statuses[operation],
+        purpose: text(plugin.purpose),
+        source: text(plugin.source),
+        version:
+          installed && version && installed !== version
+            ? `${installed} → ${version}`
+            : installed
+              ? `Installed version ${installed}`
+              : version
+                ? `Target version ${version}`
+                : 'Version not reported'
+      });
+    }
+    // Older saved plans may have lines but no structured display identity.
+    for (const line of list(offer?.setup?.lines || plan?.lines)) {
+      if (
+        ['integration', 'provider'].includes(line.kind) &&
+        !rows.some(row => row.kind === line.kind)
+      )
+        rows.push({
+          kind: line.kind,
+          name: line.kind === 'provider' ? 'Home provider' : 'Project integration',
+          operation: 'not_checked',
+          status: 'Not checked',
+          purpose: '',
+          source: '',
+          version: 'Version not reported'
+        });
+    }
+    const complete =
+      visual?.requirements_checked === true &&
+      list(visual.plugins).length === rows.length &&
+      rows.every(row => ['install', 'update', 'enable', 'ready'].includes(row.operation));
+    const downloads = rows.filter(row => ['install', 'update'].includes(row.operation)).length;
+    const count = `${downloads} ${downloads === 1 ? 'plugin download' : 'plugin downloads'}`;
+    return {
+      rows,
+      complete,
+      downloads,
+      saved,
+      summary: saved
+        ? 'Requirements recorded for this setup'
+        : complete
+          ? downloads
+            ? `${count} for this setup`
+            : 'Nothing to download'
+          : downloads
+            ? `${count} known · other requirements not fully checked`
+            : 'Download requirements not fully checked'
+    };
+  }
+
+  function requirementsActionLabel(plan, fallback = 'Set up') {
+    const view = requirementsView({ plan });
+    if (!view.complete) return fallback;
+    const installs = view.rows.filter(row => row.operation === 'install').length;
+    const updates = view.rows.filter(row => row.operation === 'update').length;
+    const enables = view.rows.filter(row => row.operation === 'enable').length;
+    const count = installs + updates || enables;
+    if (!count) return fallback;
+    const verb =
+      installs && updates ? 'Install/update' : installs ? 'Install' : updates ? 'Update' : 'Enable';
+    return `${verb} ${count} ${count === 1 ? 'plugin' : 'plugins'} & set up`;
+  }
+
+  function renderRequirements(container, input) {
+    if (!container) return;
+    const view = requirementsView(input);
+    container.hidden = !view.rows.length;
+    const signature = JSON.stringify(view);
+    if (container.dataset.signature === signature) return;
+    container.dataset.signature = signature;
+    container.replaceChildren();
+    if (!view.rows.length) return;
+    const doc = container.ownerDocument;
+    const node = (tag, label, className = '') => {
+      const el = doc.createElement(tag);
+      el.textContent = label;
+      el.className = className;
+      return el;
+    };
+    const section = node('section', '', 'folder-requirements');
+    section.setAttribute('aria-label', 'Setup requirements');
+    section.append(
+      node('h4', 'What you need'),
+      node('p', view.summary, 'folder-requirements__summary')
+    );
+    const requirements = node('ul', '', 'folder-requirements__list');
+    for (const requirement of view.rows) {
+      const row = node('li', '', 'folder-requirements__row');
+      row.dataset.operation = requirement.operation;
+      row.append(
+        node('strong', requirement.name),
+        node('p', requirement.status, 'folder-requirements__status')
+      );
+      if (requirement.purpose) row.append(node('p', requirement.purpose, 'folder-visual__note'));
+      row.append(node('p', requirement.version, 'folder-visual__note'));
+      const details = node('details', '', 'folder-requirements__source');
+      details.append(
+        node('summary', 'Source details'),
+        node('p', requirement.source || 'Source not reported', 'folder-visual__note')
+      );
+      row.append(details);
+      requirements.append(row);
+    }
+    section.append(
+      requirements,
+      node(
+        'p',
+        'Ori plugins are separate from the desktop application, model runtime and model weights.',
+        'folder-visual__note'
+      )
+    );
+    container.append(section);
+  }
+
   // Material effects stay outside the disclosure. The full original plan is
   // still rendered by folder-plan-lines; this is not another consent document.
   function reviewConsequences(plan) {
@@ -358,6 +503,9 @@
   globalThis.OriFolderSetupVisual = Object.freeze({
     visualView,
     renderDiagram,
+    requirementsView,
+    requirementsActionLabel,
+    renderRequirements,
     reviewConsequences,
     renderConsequences,
     briefError,

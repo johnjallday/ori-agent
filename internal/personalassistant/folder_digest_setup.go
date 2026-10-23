@@ -103,6 +103,18 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	}
 }
 
+// attachSetupReadiness is deliberately separate from attachSetupPlan: the
+// latter also runs during attachment eligibility. Partial prerequisite reads
+// belong to an explicit/current review, not to a new effect on folder drop.
+func (s *FolderDigestService) attachSetupReadiness(ctx context.Context, userID string, offer FolderOffer, v *FolderOfferView) {
+	if v.Plan != nil || v.Setup != nil || v.NeedsPick || !planPending(offer) || !eligibleForOneCard(offer) {
+		return
+	}
+	if reader, ok := s.deps.Setup.(FolderSetupReadinessReader); ok {
+		v.Readiness = CloneFolderSetupVisual(reader.ReadSetupReadiness(ctx, s.setupRequest(ctx, userID, offer)))
+	}
+}
+
 // setupRequest is what the host needs to plan an offer's setup.
 func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
 	req := FolderSetupRequest{UserID: userID, Offer: offer}

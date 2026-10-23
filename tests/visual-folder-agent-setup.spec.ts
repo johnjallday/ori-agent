@@ -599,6 +599,101 @@ test('fixture bind and pending reviews do not invent a completed hire', async ({
   await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
 });
 
+test('fixture requirements keep independently known operations ahead of the proposed outcome', async ({
+  page
+}) => {
+  for (const [name, integration, provider, checked] of [
+    ['fresh', 'install', 'install', true],
+    ['update', 'ready', 'update', true],
+    ['disabled', 'ready', 'enable', true],
+    ['ready', 'ready', 'ready', true],
+    ['partial', 'ready', 'unavailable', false]
+  ] as const) {
+    const offer = reviewOffer();
+    offer.plan.visual = {
+      ...offer.plan.visual,
+      requirements_checked: checked,
+      plugins: [
+        {
+          kind: 'integration',
+          name: 'REAPER',
+          operation: integration,
+          version: 'fixture-target',
+          installed_version: integration === 'install' ? '' : 'fixture-target',
+          source: 'fixture/publisher',
+          purpose: 'Adds project tools to Ori.'
+        },
+        {
+          kind: 'provider',
+          name: 'Music Project Management',
+          operation: provider,
+          version: provider === 'unavailable' ? '' : 'fixture-target',
+          installed_version: provider === 'update' ? 'fixture-old' : '',
+          source: '<literal> fixture/publisher',
+          purpose: 'Provides the project Home.'
+        }
+      ]
+    } as typeof offer.plan.visual;
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const card = await mountReview(page, offer);
+      const requirements = card.locator('#personalAssistantFolderRequirements');
+      await expect(requirements.locator('li')).toHaveCount(2);
+      for (const plugin of ['REAPER', 'Music Project Management']) {
+        const label = requirements.getByText(plugin, { exact: true });
+        await expect(label).toBeVisible();
+        if (name === 'fresh') {
+          const bounds = await label.boundingBox();
+          const viewport = await page.locator('#personalAssistantScroll').boundingBox();
+          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport!.y + viewport!.height);
+        }
+      }
+      await expect(requirements).toContainText(
+        name === 'ready' || name === 'disabled'
+          ? 'Nothing to download'
+          : name === 'partial'
+            ? 'not fully checked'
+            : name === 'fresh'
+              ? '2 plugin downloads'
+              : '1 plugin download'
+      );
+      const action = card.locator('#personalAssistantFolderOfferActions');
+      const diagram = card.locator('#personalAssistantFolderVisual');
+      expect(
+        await action.evaluate(
+          (node, other) =>
+            Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
+          await diagram.elementHandle()
+        )
+      ).toBe(true);
+      if (process.env.ORI_VISUAL_EVIDENCE)
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/group2-${name}-${width}.png`
+        });
+      await requirements.locator('summary').last().click();
+      await expect(requirements).toContainText('<literal> fixture/publisher');
+      expect(await requirements.locator('literal').count()).toBe(0);
+      if (process.env.ORI_VISUAL_EVIDENCE && name === 'fresh' && width === 1440) {
+        await requirements
+          .locator('.folder-requirements__source p')
+          .last()
+          .scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/group2-source-disclosure.png`
+        });
+      }
+      await card.getByText('Full setup details', { exact: true }).click();
+      await expect(card.locator('#personalAssistantFolderPlan')).toBeVisible();
+      if (process.env.ORI_VISUAL_EVIDENCE && name === 'fresh' && width === 1440) {
+        await card.locator('#personalAssistantFolderConsequences').scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/group2-material-effects.png`
+        });
+      }
+    }
+  }
+});
+
 test('fixture preview and disclosure stay compact and metadata-only, with a model-free review route', async ({
   page
 }) => {
@@ -780,6 +875,9 @@ for (const theme of ['light', 'dark']) {
           return route.fulfill({ json: { offer: writes.length === 1 ? stopped : resolved } });
         });
         const card = await mountReview(page);
+        // Geometry is measured after the shipped fonts settle, without scrolling
+        // or resizing to repair the layout under test.
+        await page.evaluate(() => document.fonts.ready);
         if (width === 640) {
           // Presentation-only stress: a configured assistant adds another chip.
           // Do not shrink these controls until their labels overlap each other.
@@ -789,12 +887,30 @@ for (const theme of ['light', 'dark']) {
               document.querySelector('#personalAssistantChips')!.children
             ).filter(node => !node.hasAttribute('hidden'));
             const chips = controls.map(node => node.getBoundingClientRect());
-            return (
-              chips.every((box, n) => !n || box.left >= chips[n - 1].right) &&
-              controls.every(node => node.scrollWidth <= node.clientWidth + 1)
-            );
+            return {
+              separated:
+                chips.every((box, n) => !n || box.left >= chips[n - 1].right) &&
+                controls.every(node => node.scrollWidth <= node.clientWidth + 1),
+              controls: controls.map((node, i) => ({
+                id: node.id,
+                box: chips[i].toJSON(),
+                scroll: node.scrollWidth,
+                client: node.clientWidth,
+                display: getComputedStyle(node).display,
+                classes: node.className,
+                width: getComputedStyle(node).width,
+                minWidth: getComputedStyle(node).minWidth,
+                maxWidth: getComputedStyle(node).maxWidth,
+                shrink: getComputedStyle(node).flexShrink,
+                basis: getComputedStyle(node).flexBasis,
+                transition: getComputedStyle(node).transition
+              }))
+            };
           });
-          expect(separated, 'compact composer controls do not overlap').toBe(true);
+          expect(
+            separated.separated,
+            `compact composer controls do not overlap: ${JSON.stringify(separated.controls)}`
+          ).toBe(true);
         }
         const brief = card.getByLabel('What should it do with it?');
         await brief.focus();

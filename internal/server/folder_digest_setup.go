@@ -55,8 +55,9 @@ const planWarnInterval = 10 * time.Minute
 type folderSetupHost struct {
 	builder *ServerBuilder
 
-	mu    sync.Mutex
-	cache map[string]cachedPlanFacts
+	mu        sync.Mutex
+	cache     map[string]cachedPlanFacts
+	readiness map[string]cachedSetupReadiness
 	// apps is the last look for installed applications a plan line was worded
 	// from, and when it was made.
 	apps   []folderdigest.InstalledApp
@@ -167,18 +168,23 @@ func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, e
 	unavailable := func(availability, detail string) error {
 		return folderSetupUnavailable{reason: "integration_unavailable", availability: availability, key: entry.Key, detail: detail}
 	}
+	plugin := foldersetup.Plugin{Name: entry.DisplayName, PluginID: entry.PluginID, Source: entry.SourceLabel, State: "not_checked"}
 	if h.builder == nil || h.builder.reviewedIntegrationReader == nil {
-		return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "no integration reader")
+		return plugin, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "no integration reader")
 	}
 	read, err := h.builder.reviewedIntegrationReader.Read(ctx, setupjourney.ReadScope{
 		OwnerUserID: userID, IntegrationKey: entry.Key, ExpectedBlueprintID: entry.ExpectedBlueprintID,
 		ExpectedAssistantProgramID: entry.ExpectedProgramID,
 	})
+	plugin.State = "unavailable"
 	if err != nil || read.Integration == nil {
-		return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "the integration could not be read")
+		return plugin, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "the integration could not be read")
 	}
 	shown := read.Integration
-	plugin := foldersetup.Plugin{Name: entry.DisplayName, PluginID: entry.PluginID, Source: entry.SourceLabel}
+	plugin.InstalledVersion = shown.InstalledVersion
+	if read.BlockedReason == setupjourney.ReasonIntegrationLocalUnverified || read.BlockedReason == setupjourney.ReasonIntegrationIdentityMismatch {
+		plugin.State = "unverified"
+	}
 	if shown.DevelopmentCopy {
 		plugin.Source = "Local development copy — not release-verified"
 	}
@@ -204,9 +210,9 @@ func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, e
 		// journey explains it, the one-card path does not guess. A proposal that
 		// carries on without the integration says the true thing about it.
 		if shown.InstalledVersion == "" {
-			return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityIntegrationNotInstalled, "not installed and no reviewed install is offered")
+			return plugin, unavailable(personalassistant.FolderAvailabilityIntegrationNotInstalled, "not installed and no reviewed install is offered")
 		}
-		return foldersetup.Plugin{}, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "installed, with no reviewed action offered")
+		return plugin, unavailable(personalassistant.FolderAvailabilityPlanUnavailable, "installed, with no reviewed action offered")
 	}
 	return plugin, nil
 }
@@ -214,15 +220,18 @@ func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, e
 // providerFacts reads where the Home provider stands from the reviewed-provider
 // preview the portfolio path already uses.
 func (h *folderSetupHost) providerFacts(ctx context.Context, provider reviewedintegration.HomeProvider) (foldersetup.Plugin, error) {
+	plugin := foldersetup.Plugin{Name: provider.DisplayName, PluginID: provider.PluginID, Source: provider.SourceLabel, State: "unavailable"}
 	preview, err := (folderHomeProviderSetup{builder: h.builder}).Preview(ctx, provider.Key)
 	if err != nil {
-		return foldersetup.Plugin{}, folderSetupUnavailable{
+		return plugin, folderSetupUnavailable{
 			reason: "home_provider_unavailable", availability: personalassistant.FolderAvailabilityProviderUnverified,
 			key: provider.Key, detail: homeProviderPreviewDetail(err),
 		}
 	}
-	plugin := foldersetup.Plugin{
-		Name: provider.DisplayName, PluginID: provider.PluginID, Version: preview.Version, Source: provider.SourceLabel,
+	plugin.Version = preview.Version
+	plugin.InstalledVersion = preview.InstalledVersion
+	if preview.Installed && !preview.Update {
+		plugin.InstalledVersion = preview.Version
 	}
 	if preview.DevelopmentCopy {
 		plugin.Source = "Local development copy — not release-verified"
@@ -339,6 +348,7 @@ func reviewedHomeSharingOff(b *ServerBuilder, userID, providerKey string) bool {
 func (h *folderSetupHost) forget(userID string, entry reviewedintegration.Entry) {
 	h.mu.Lock()
 	delete(h.cache, userID+"|"+entry.Key)
+	delete(h.readiness, userID+"|"+entry.Key)
 	h.mu.Unlock()
 }
 
@@ -350,6 +360,7 @@ func (h *folderSetupHost) forgetAll() {
 	}
 	h.mu.Lock()
 	h.cache = nil
+	h.readiness = nil
 	h.mu.Unlock()
 }
 

@@ -1008,6 +1008,15 @@ export function folderOfferView(offer, options = {}) {
         : []
     };
   }
+  if (view.plan && !view.setup)
+    view.actions = view.actions.map(action =>
+      action.oneCard
+        ? {
+            ...action,
+            label: globalThis.OriFolderSetupVisual.requirementsActionLabel(offer.plan, action.label)
+          }
+        : action
+    );
   return view;
 }
 
@@ -2892,6 +2901,16 @@ function renderOffer(place) {
     });
   }
   renderHire(els, view.hire, state.offer);
+  globalThis.OriFolderSetupVisual.renderRequirements(
+    document.getElementById('personalAssistantFolderRequirements'),
+    receipt.visible ? {} : { offer: state.offer }
+  );
+  setText(
+    document.getElementById('personalAssistantFolderActionSummary'),
+    view.plan && !view.setup && !receipt.visible
+      ? 'Confirmation covers the whole setup above, not just plugin installation.'
+      : ''
+  );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
     diagram.hidden = !(state.offer?.plan || state.offer?.setup || receipt.visible);

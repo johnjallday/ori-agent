@@ -100,6 +100,9 @@ func TestFolderPlacement_ChoiceCarriesActionsOnlyWhenAttached(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writeFolderPlacementChoice(rec, "candidate-0", "Harbor Lights", "Choose.", []folderPlacementOption{{Operation: personalassistant.FolderOperationCreate, Label: "Review a separate project"}}, nil)
 	plain := decode(t, rec)
+	if plain["readiness"] != nil {
+		t.Fatal("legacy choice invented readiness", plain)
+	}
 	if _, present := plain["actions"]; present || plain["candidate_id"] != "candidate-0" || plain["subject"] != "Harbor Lights" || plain["message"] != "Choose." || len(plain["options"].([]any)) != 1 {
 		t.Fatal("plain choice shape changed", plain)
 	}
@@ -109,5 +112,15 @@ func TestFolderPlacement_ChoiceCarriesActionsOnlyWhenAttached(t *testing.T) {
 	actions, _ := blocked["actions"].([]any)
 	if len(actions) != 1 || actions[0].(map[string]any)["type"] != HomeActionOpenSetupQuest || blocked["options"] != nil {
 		t.Fatal("blocked choice shape wrong", blocked)
+	}
+	rec = httptest.NewRecorder()
+	writeFolderPlacementChoice(rec, "candidate-0", "Harbor Lights", "Check requirements.", nil, nil, &personalassistant.FolderSetupVisual{
+		RequirementsChecked: true,
+		Plugins:             []personalassistant.FolderSetupPlugin{{Kind: "provider", Name: "Music", Operation: "unavailable", Source: "/private/source"}},
+	})
+	partial := decode(t, rec)
+	readiness, _ := partial["readiness"].(map[string]any)
+	if readiness == nil || readiness["requirements_checked"] == true || partial["actions"] != nil || partial["plan"] != nil || strings.Contains(rec.Body.String(), "/private/source") {
+		t.Fatal("partial display gained authority or leaked a path", partial)
 	}
 }

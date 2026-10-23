@@ -86,8 +86,9 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 		return personalassistant.WithFolderReviewPlacement(ctx, personalassistant.FolderReviewPlacement{Operation: personalassistant.FolderOperationCreate}), true
 	}
 	subject := turn.projection.Subject
+	var readiness *personalassistant.FolderSetupVisual
 	choice := func(message string, options []folderPlacementOption, actions ...HomeAction) (context.Context, bool) {
-		writeFolderPlacementChoice(w, candidateID, preview.Subject.Name, message, options, actions)
+		writeFolderPlacementChoice(w, candidateID, preview.Subject.Name, message, options, actions, readiness)
 		return ctx, false
 	}
 	createOption := folderPlacementOption{Operation: personalassistant.FolderOperationCreate, Label: "Review a separate project"}
@@ -124,6 +125,7 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 	bound := personalassistant.WithFolderReviewPlacement(ctx, placement)
 	// Resolve the exact selected destination before allocating any offer.
 	selected, err := previewer.PreviewReview(bound, target, selectionID, candidateID)
+	readiness = selected.Readiness
 	if err != nil || selected.DestinationStatus == "unavailable" {
 		if err == nil {
 			// The destination is missing because its integration is not set

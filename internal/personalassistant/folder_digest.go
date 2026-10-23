@@ -698,8 +698,9 @@ type FolderOfferView struct {
 	Needs       []BuildFolderNeed       `json:"needs,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
-	Plan                   *FolderSetupPlan `json:"plan,omitempty"`
-	SetupUnavailableReason string           `json:"setup_unavailable_reason,omitempty"`
+	Plan                   *FolderSetupPlan   `json:"plan,omitempty"`
+	SetupUnavailableReason string             `json:"setup_unavailable_reason,omitempty"`
+	Readiness              *FolderSetupVisual `json:"readiness,omitempty"` // display only; never confirms setup
 	// Availability says, in the words a proposal uses (FolderAvailability*), why
 	// the offer has no plan: what the option is listed with instead of being
 	// dropped. Empty when a plan exists or none was looked for.
@@ -2620,11 +2621,13 @@ func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer 
 				v.DestinationStatus = "unavailable"
 				v.DestinationBlocker = review.DestinationBlocker.clone()
 			}
+			s.attachSetupReadiness(ctx, userID, offer, &v)
 			return v
 		}
 	}
 	s.attachSoftware(ctx, userID, offer, &v)
 	s.attachSetupPlan(ctx, userID, offer, &v)
+	s.attachSetupReadiness(ctx, userID, offer, &v)
 	return v
 }
 

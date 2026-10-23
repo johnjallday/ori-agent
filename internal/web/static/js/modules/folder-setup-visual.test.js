@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import './folder-setup-visual.js';
 
-const { visualView, renderDiagram } = globalThis.OriFolderSetupVisual;
+const { visualView, renderDiagram, requirementsView, renderRequirements, requirementsActionLabel } =
+  globalThis.OriFolderSetupVisual;
 const plan = {
   visual: { entity: { kind: 'workspace', name: 'Song', operation: 'create' } },
   destination: { status: 'existing', name: 'Music', kind: 'plugin' },
@@ -209,6 +210,7 @@ function documentFixture() {
       ownerDocument: doc,
       children: [],
       attributes: {},
+      dataset: {},
       textContent: '',
       setAttribute(key, value) {
         this.attributes[key] = value;
@@ -229,6 +231,116 @@ function documentFixture() {
 function nodes(node) {
   return [node, ...node.children.flatMap(nodes)];
 }
+
+test('requirements distinguish install/update/enable/ready from unchecked, unavailable and unverified', () => {
+  const labels = {
+    install: 'Not installed · Install',
+    update: 'Update needed',
+    enable: 'Disabled · Enable · No download',
+    ready: 'Ready · No download',
+    not_checked: 'Not checked',
+    unavailable: 'Check unavailable',
+    unverified: 'Not verified'
+  };
+  for (const [operation, status] of Object.entries(labels)) {
+    const plan = {
+      visual: {
+        requirements_checked: true,
+        plugins: [{ kind: 'integration', name: 'Literal plugin', operation }]
+      }
+    };
+    const view = requirementsView({ plan });
+    assert.equal(view.rows[0].status, status);
+    assert.equal(view.rows[0].version, 'Version not reported');
+    assert.equal(view.rows[0].source, '');
+    assert.equal(view.downloads, ['install', 'update'].includes(operation) ? 1 : 0);
+    assert.equal(view.complete, ['install', 'update', 'enable', 'ready'].includes(operation));
+    assert.equal(view.summary === 'Nothing to download', ['enable', 'ready'].includes(operation));
+    if (!view.complete) assert.equal(requirementsActionLabel(plan, 'Hire & start'), 'Hire & start');
+  }
+});
+
+test('partial/legacy requirements keep known rows without inventing a zero-download total', () => {
+  const plugins = [
+    {
+      kind: 'integration',
+      name: 'Integration',
+      operation: 'update',
+      installed_version: '1.0',
+      version: '2.0'
+    },
+    { kind: 'provider', name: 'Home', operation: 'unavailable' }
+  ];
+  const view = requirementsView({ readiness: { plugins } });
+  assert.equal(view.rows.length, 2);
+  assert.equal(view.rows[0].version, '1.0 → 2.0');
+  assert.match(view.summary, /1 plugin download known/);
+  const legacy = requirementsView({
+    plan: { lines: [{ kind: 'integration', name: 'Do not parse Plugin 9.9 here' }] }
+  });
+  assert.equal(legacy.rows[0].name, 'Project integration');
+  assert.equal(legacy.rows[0].version, 'Version not reported');
+  assert.equal(legacy.complete, false);
+  assert.equal(requirementsView({ plan: { lines: [{ kind: 'folder' }] } }).rows.length, 0);
+  assert.equal(
+    requirementsView({ offer: { setup: { visual: { plugins } } } }).summary,
+    'Requirements recorded for this setup'
+  );
+});
+
+test('requirements actions name only the checked operations and keep complete setup consent', () => {
+  const plan = {
+    visual: {
+      requirements_checked: true,
+      plugins: [
+        { kind: 'integration', name: 'Integration', operation: 'install' },
+        { kind: 'provider', name: 'Home', operation: 'update' }
+      ]
+    }
+  };
+  const before = JSON.stringify(plan);
+  assert.equal(requirementsActionLabel(plan), 'Install/update 2 plugins & set up');
+  assert.equal(JSON.stringify(plan), before);
+  plan.visual.plugins[0].operation = 'ready';
+  plan.visual.plugins[1].operation = 'enable';
+  assert.equal(requirementsActionLabel(plan), 'Enable 1 plugin & set up');
+  plan.visual.plugins[1].operation = 'ready';
+  assert.equal(requirementsActionLabel(plan, 'Assign & start'), 'Assign & start');
+});
+
+test('requirement identity, purpose and source are literal inert text with stable disclosures', () => {
+  const container = documentFixture().createElement('div');
+  const hostile = '<img src=x onerror=alert(1)>界';
+  const input = {
+    readiness: {
+      plugins: [
+        {
+          kind: 'integration',
+          name: hostile,
+          purpose: hostile,
+          source: hostile,
+          operation: 'install',
+          version: hostile
+        }
+      ]
+    }
+  };
+  renderRequirements(container, input);
+  const original = container.children[0];
+  const all = nodes(container);
+  assert.ok(all.some(node => node.tag === 'strong' && node.textContent === hostile));
+  assert.ok(all.some(node => node.tag === 'p' && node.textContent === hostile));
+  assert.ok(all.some(node => node.tag === 'details'));
+  assert.ok(!all.some(node => ['button', 'a', 'input', 'img'].includes(node.tag)));
+  renderRequirements(container, input);
+  assert.equal(
+    container.children[0],
+    original,
+    'unchanged polls do not collapse source disclosure'
+  );
+  renderRequirements(container, {});
+  assert.equal(container.hidden, true);
+});
 
 test('all external strings are text nodes with a semantic diagram alternative and no controls', () => {
   const doc = documentFixture();

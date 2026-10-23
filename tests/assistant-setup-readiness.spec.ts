@@ -94,6 +94,11 @@ for (const route of ['/?panel=today', '/settings']) {
         )
       });
     await review.click();
+    const requirements = page.getByRole('region', { name: 'Setup requirements' });
+    await expect(requirements).toBeVisible({ timeout: 60_000 });
+    await expect(requirements).toContainText('REAPER');
+    await expect(requirements).toContainText('Music Project Management');
+    await expect(requirements).toContainText('Ori plugins are separate');
     // The missing Home can be explained by contextual placement or a saved
     // canonical card; both must expose the host's existing guided continuation.
     await expect(
