@@ -599,12 +599,13 @@ test('fixture bind and pending reviews do not invent a completed hire', async ({
   await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
 });
 
-test('fixture preview and disclosure stay metadata-only, with neutral destination and agent', async ({
+test('fixture preview and disclosure stay compact and metadata-only, with a model-free review route', async ({
   page
 }) => {
   const { card, forbidden, errors } = await preview(page);
-  await expect(card.getByRole('figure', { name: 'Folder setup relationship' })).toBeVisible();
-  await expect(card).toContainText('Destination not yet reviewed');
+  await expect(card.getByRole('figure', { name: 'Folder setup relationship' })).toHaveCount(0);
+  await expect(card).toContainText('No model is needed to review');
+  await expect(card.getByRole('button', { name: 'Review workspace setup' })).toBeVisible();
   await expect(card).toContainText('contents not read');
   await expect(card).toContainText('30 minutes');
   const details = card.locator('summary', { hasText: 'Scan details' });
@@ -614,6 +615,38 @@ test('fixture preview and disclosure stay metadata-only, with neutral destinatio
   await expect(card).toContainText('Markers do not prove file contents');
   expect(forbidden).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+test('fixture unsupported and multiple candidates do not invent a setup choice', async ({
+  page
+}) => {
+  const unsupported = await preview(page, { ...observation, projects: [] });
+  await expect(unsupported.card).toContainText('No setup candidate was recorded');
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeHidden();
+  expect(unsupported.forbidden).toEqual([]);
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/group1-unsupported.png` });
+
+  const multiple = await preview(page, {
+    ...observation,
+    projects: [
+      ...observation.projects,
+      { id: 'candidate-1', root: false, name: 'Second session', marker: '*.rpp', files: 1 }
+    ]
+  });
+  await page.locator('#personalAssistantReviewFolderSetup').click();
+  const chooser = page.locator('#personalAssistantFolderSetupCandidate');
+  await expect(chooser).toBeVisible();
+  await expect(chooser).toHaveValue('');
+  await expect(chooser.locator('option')).toHaveCount(3);
+  expect(multiple.forbidden).toEqual([]);
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/group1-explicit-candidates.png`
+    });
+  await page.keyboard.press('Escape');
+  await expect(chooser).toBeHidden();
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeFocused();
 });
 
 test('fixture partial snapshot keeps its limits visible before details', async ({ page }) => {
@@ -647,7 +680,7 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
   for (const width of [320, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect(card).toContainText('Partial, bounded look');
-    await expect(card.locator('.folder-visual h4').first()).toHaveText(hostile);
+    await expect(card.locator('h3')).toHaveText(hostile);
     expect(await page.locator('img[src="x"]').count()).toBe(0);
     expect(
       await page.evaluate(

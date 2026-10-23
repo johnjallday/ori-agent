@@ -194,6 +194,39 @@ function allNodes(node) {
   ];
 }
 
+test('local preview is compact evidence, never an empty destination or model gate', () => {
+  for (const observation of [fixtures.rootOnly, fixtures.hostile]) {
+    const container = fixtureDocument().createElement('section');
+    renderFolderSummary(container, observation, { local: true });
+    const nodes = allNodes(container);
+    assert.equal(
+      nodes.some(node => node.tag === 'figure'),
+      false
+    );
+    assert.equal(
+      nodes.some(node => node.className === 'folder-visual-preview'),
+      false
+    );
+    assert.ok(nodes.some(node => node.textContent.includes('No model is needed to review')));
+    assert.equal(
+      nodes.some(node => /No destination proposed|Setup preview/.test(node.textContent)),
+      false
+    );
+    const details = nodes.find(node => node.tag === 'details');
+    assert.ok(allNodes(details).some(node => node.textContent.includes('Send shares')));
+  }
+  const container = fixtureDocument().createElement('section');
+  renderFolderSummary(container, { folder: 'Notes', projects: [] }, { local: true });
+  assert.ok(
+    allNodes(container).some(node => node.textContent.includes('No setup candidate was recorded'))
+  );
+  renderFolderSummary(container, fixtures.rootOnly, { historical: true });
+  assert.equal(
+    allNodes(container).some(node => node.textContent.includes('Review setup to check')),
+    false
+  );
+});
+
 test('local and saved cards build headings, semantic lists and disclosures from text nodes', () => {
   for (const local of [true, false]) {
     const container = fixtureDocument().createElement('section');

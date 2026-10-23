@@ -92,6 +92,7 @@ let candidateObservation = '';
 let choiceOptions = [];
 let choiceOrigin = null;
 let choicesMarker = null;
+let reviewLinkMarker = null;
 let noticeMarker = null;
 let composerOrigin = null;
 let uiEpoch = 0;
@@ -480,7 +481,17 @@ export function reviewLinkHidden(observation, structure) {
 
 function syncReviewLink() {
   if (!elements || !current) return;
-  elements.open.hidden = reviewLinkHidden(current.observation, currentStructure());
+  const structure = currentStructure();
+  elements.open.hidden = reviewLinkHidden(current.observation, structure);
+  // Move the one existing control beside a local preview; never clone its
+  // authority or create a second review owner. Saved context keeps the chip.
+  const previewActions = document.getElementById('personalAssistantFolderPreviewActions');
+  const parent =
+    current.preview && !structure && previewActions ? previewActions : reviewLinkMarker?.parentNode;
+  if (parent && elements.open.parentNode !== parent) {
+    if (parent === previewActions) parent.append(elements.open);
+    else parent.insertBefore(elements.open, reviewLinkMarker);
+  }
 }
 
 function renderReviewStatus() {
@@ -1049,6 +1060,8 @@ function init() {
     noticeMarker = document.createComment('folder notice parking slot');
     elements.notice.after(noticeMarker);
   }
+  reviewLinkMarker = document.createComment('single review link parking slot');
+  elements.open.after(reviewLinkMarker);
   choicesMarker = document.createComment('single setup chooser parking slot');
   elements.choices.after(choicesMarker);
   // A folder Ori proposed a group for is reviewed as that group; choosing one

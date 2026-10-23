@@ -29,6 +29,7 @@ import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
+import { setupQuestActionURL } from './setup-quest-links.js';
 import {
   declinedLine,
   proposalView,
@@ -819,10 +820,33 @@ function structureOfferView(offer, base, subject) {
   };
 }
 
+// A missing Home may have a compiled guided continuation. Use only the
+// host's matching capability and blocker; a marker/name is never a quest.
+export function blockedFolderSetupAction(offer) {
+  const capability = offer?.capability;
+  const key = offer?.destination_blocker?.integration_key;
+  if (
+    offer?.status !== 'pending' ||
+    offer.needs_pick ||
+    offer.destination_status !== 'unavailable' ||
+    !key ||
+    capability?.setup_source !== 'host' ||
+    capability.setup_quest_id !== `install_${key}`
+  )
+    return null;
+  const href = setupQuestActionURL({
+    type: 'open_setup_quest',
+    arguments: { source: 'host', quest_id: capability.setup_quest_id }
+  });
+  return href
+    ? { id: 'requirements', label: 'Open Guided Setup', style: 'primary', href, newTab: true }
+    : null;
+}
+
 // folderOfferView is the whole render decision for one offer (FR22). Every
-// string comes from the verdict and the server's counts and names; the
-// reason line is always present. options.confirm ('project' or 'tidy') shows
-// the plan card for a mixed or ambiguous offer instead of its question.
+// string comes from the verdict and the server's counts and names.
+// options.confirm ('project' or 'tidy') shows the plan card for a mixed or
+// ambiguous offer instead of its question. The reason line remains present.
 export function folderOfferView(offer, options = {}) {
   if (!offer || typeof offer !== 'object') return { visible: false };
   const verdict = String(offer.verdict || '').trim();
@@ -891,24 +915,35 @@ export function folderOfferView(offer, options = {}) {
       !view.needsPick &&
       offer.structure?.version === 1 &&
       offer.structure.group?.type === 'library';
+    const guided = blockedFolderSetupAction(offer);
+    if (view.needsPick)
+      return {
+        ...repickView(view, subject),
+        resume: status === 'awaiting_outcome',
+        actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
+      };
     return {
       ...view,
       plan: null,
-      actions: plainReview
-        ? [
-            {
-              id: 'group',
-              label: 'Review plain group instead…',
-              style: 'link',
-              structureGroup: true
-            }
-          ]
-        : [],
-      question: `${destination ? `${destination} ` : ''}${
-        offer.destination_status === 'changed'
-          ? 'The reviewed destination has changed.'
-          : 'The reviewed destination is unavailable.'
-      } Use Review workspace setup to refresh the review. Your draft is unchanged.`
+      actions: guided
+        ? [guided]
+        : plainReview
+          ? [
+              {
+                id: 'group',
+                label: 'Review plain group instead…',
+                style: 'link',
+                structureGroup: true
+              }
+            ]
+          : [],
+      question: guided
+        ? 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and review this folder again. Opening it does not confirm installation or folder setup. Your draft stays here.'
+        : `${destination ? `${destination} ` : ''}${
+            offer.destination_status === 'changed'
+              ? 'The reviewed destination has changed.'
+              : 'The reviewed destination is unavailable.'
+          } Use Review workspace setup to refresh the review. Your draft is unchanged.`
     };
   }
   if (view.visible && view.needsPick && status === 'awaiting_outcome') {
@@ -3283,7 +3318,14 @@ function runAction(action) {
     return;
   }
   if (action.href) {
-    window.location.assign(action.href);
+    if (action.newTab) {
+      const tab = window.open(action.href, '_blank');
+      if (tab) tab.opener = null;
+      else
+        showError(
+          'The setup tab was blocked. Allow a new tab and choose Open Guided Setup again. Your folder and draft are unchanged.'
+        );
+    } else window.location.assign(action.href);
     return;
   }
   if (action.candidate) {
