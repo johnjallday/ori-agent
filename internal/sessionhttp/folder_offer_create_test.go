@@ -69,7 +69,7 @@ func TestFolderOfferWorkspaceReceipt_ReadsActualCreatedRecordsAndReuse(t *testin
 	if len(blank) != 3 || blank[0].Kind != "workspace" || blank[1].Kind != "folder" || blank[1].Name != "Draft" || blank[2].Kind != "task" {
 		t.Fatalf("blank receipt = %+v", blank)
 	}
-	if blank[0].Route == "" || blank[1].Detail != "linked as primary" {
+	if blank[0].Route == "" || blank[0].Operation != "create" || blank[0].Placement != "standalone" || blank[1].Detail != "linked as primary" {
 		t.Fatalf("missing canonical route or link: %+v", blank)
 	}
 	ws, err = handler.workspaceStore.Get(id)
@@ -94,9 +94,9 @@ func TestFolderOfferWorkspaceReceipt_ReadsActualCreatedRecordsAndReuse(t *testin
 		kinds = append(kinds, row.Kind)
 	}
 	if strings.Join(kinds, ",") != "workspace,folder,blueprint,agent,agent,task" ||
-		withRoles[0].Detail != "already set up" || withRoles[2].Name != "Writing project" ||
-		withRoles[3].Name != "Editor" || withRoles[3].Detail != "Lead, added" ||
-		withRoles[4].Name != "REAPER Assistant" || withRoles[4].Detail != "joined" {
+		withRoles[0].Detail != "already set up" || withRoles[0].Operation != "reuse" || withRoles[2].Name != "Writing project" ||
+		withRoles[3].Name != "Editor" || withRoles[3].Detail != "Lead, added" || !withRoles[3].Assigned ||
+		withRoles[4].Name != "REAPER Assistant" || withRoles[4].Detail != "joined" || !withRoles[4].Assigned {
 		t.Fatalf("blueprint/reuse receipt = %+v", withRoles)
 	}
 }

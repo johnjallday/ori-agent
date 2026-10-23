@@ -227,6 +227,16 @@ func planLineNames(view map[string]any) []string {
 	return names
 }
 
+func collectionReceiptRows(outcome map[string]any, kind string) []any {
+	var rows []any
+	for _, row := range outcome["receipt"].([]any) {
+		if row.(map[string]any)["kind"] == kind {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
 func TestAssistantFolderCollection_OneReviewOneRunCreatesTheGroupAndItsWorkspaces(t *testing.T) {
 	f := newDraftServerFixture(t)
 	provider := &capturingChatProvider{}
@@ -256,13 +266,22 @@ func TestAssistantFolderCollection_OneReviewOneRunCreatesTheGroupAndItsWorkspace
 
 	resolved := setUpAndWait(t, f, offer, view, "set-up-once")
 	outcome := resolved["outcome"].(map[string]any)
-	receipt := outcome["receipt"].([]any)
+	receipt := collectionReceiptRows(outcome, "workspace")
 	if len(receipt) != 7 || receipt[0].(map[string]any)["detail"] != "group" || receipt[0].(map[string]any)["name"] != "Music" {
 		t.Fatalf("receipt: %v", receipt)
 	}
 	group, err := files.Get(outcome["workspace_id"].(string))
 	if err != nil || group.Kind != "group" || group.Name != "Music" || outcome["route"] != "/workspaces/"+group.FolderSlug {
 		t.Fatalf("group: %+v, %v", group, err)
+	}
+	agents := collectionReceiptRows(outcome, "agent")
+	if len(agents) != 1 || len(group.AgentInstances) != 1 || len(outcome["receipt"].([]any)) != len(receipt)+len(agents) {
+		t.Fatalf("membership receipt does not match the group: %v, %+v", agents, group.AgentInstances)
+	}
+	member := agents[0].(map[string]any)
+	_, model, found := f.builder.sessionHandler.SavedAgentModel(group.AgentInstances[0].Name)
+	if member["assigned"] != true || member["name"] != group.AgentInstances[0].Name || !found || member["model"] != model {
+		t.Fatalf("membership is not a canonical fact: %v", member)
 	}
 	children := map[string]*workspace.Workspace{}
 	for _, ws := range files.CachedWorkspaces() {
@@ -363,7 +382,7 @@ func TestAssistantFolderCollection_ASecondFolderWithTheSameNamesIsSetUpBesideThe
 	conversation, _, offer := reviewFolder(t, f, map[string]any{"draft_id": draft, "revision": "", "selection_id": observation["id"], "candidate_id": root})
 	second := albumsReview{conversation: conversation, offer: offer}
 	resolved := setUpAndWait(t, f, offer, second.read(t, f), "second-folder")
-	if rows := resolved["outcome"].(map[string]any)["receipt"].([]any); len(rows) != 3 || len(files.CachedWorkspaces()) != before+3 {
+	if rows := collectionReceiptRows(resolved["outcome"].(map[string]any), "workspace"); len(rows) != 3 || len(files.CachedWorkspaces()) != before+3 {
 		t.Fatalf("second setup: %v; %d workspaces (was %d)", rows, len(files.CachedWorkspaces()), before)
 	}
 }
@@ -404,7 +423,7 @@ func TestAssistantFolderCollection_AdjustedGroupCreatesOnlyWhatWasChosen(t *test
 	resolved := setUpAndWait(t, f, offer, view, "adjusted-once")
 	outcome := resolved["outcome"].(map[string]any)
 	group, err := files.Get(outcome["workspace_id"].(string))
-	if err != nil || group.Name != "Albums 2026" || len(outcome["receipt"].([]any)) != 6 || len(files.CachedWorkspaces()) != before+6 {
+	if err != nil || group.Name != "Albums 2026" || len(collectionReceiptRows(outcome, "workspace")) != 6 || len(files.CachedWorkspaces()) != before+6 {
 		t.Fatalf("adjusted setup: %+v, %v; %d workspaces (was %d)", group, err, len(files.CachedWorkspaces()), before)
 	}
 	for _, ws := range files.CachedWorkspaces() {

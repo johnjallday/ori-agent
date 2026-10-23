@@ -507,10 +507,15 @@ func (h *folderSetupHost) softwareProject(ctx context.Context, userID string, of
 func (h *folderSetupHost) softwareReceipt(ctx context.Context, ws *workspace.Workspace, intent *personalassistant.FolderSoftwareIntent, ours bool) []personalassistant.FolderReceiptRow {
 	b := h.builder
 	rows := []personalassistant.FolderReceiptRow{{
-		Kind: "workspace", Name: ws.Name, Route: "/workspaces/" + ws.FolderSlug, Detail: "created",
+		Kind: "workspace", Name: ws.Name, Route: "/workspaces/" + ws.FolderSlug, Detail: "created", Operation: "create",
 	}}
+	rows[0].Placement = "grouped"
+	if strings.TrimSpace(ws.ParentID) == "" {
+		rows[0].Placement = "standalone"
+	}
 	if !ours {
 		rows[0].Detail = "your existing workspace; no second one was made"
+		rows[0].Operation = "reuse"
 	}
 	if primary, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string); strings.TrimSpace(primary) != "" {
 		if ref, err := ws.GetDirectoryReference(primary); err == nil && ref != nil {
@@ -538,10 +543,11 @@ func (h *folderSetupHost) softwareReceipt(ctx context.Context, ws *workspace.Wor
 				detail = "your saved agent, used as it is"
 			}
 		}
-		if _, model, found := b.sessionHandler.SavedAgentModel(entry); found && strings.TrimSpace(model) == "" {
+		_, model, found := b.sessionHandler.SavedAgentModel(entry)
+		if found && strings.TrimSpace(model) == "" {
 			detail += "; it has no model yet"
 		}
-		rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: entry, Detail: detail})
+		rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: entry, Detail: detail, Assigned: true, Model: personalassistant.FolderReceiptModel(model)})
 	} else {
 		rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: "No assistant yet", Detail: "open the workspace to add one"})
 	}

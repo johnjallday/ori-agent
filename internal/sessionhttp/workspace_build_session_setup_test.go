@@ -80,9 +80,13 @@ func TestWorkspaceBuildSetup_RunsTheConfirmedPlanAndRecordsWhatItMade(t *testing
 	}
 	f.handler.SetWorkspaceStore(files)
 	folders := &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan(),
-		run: &personalassistant.FolderSetupView{Status: personalassistant.FolderSetupRunning, Lines: []personalassistant.FolderPlanLine{
-			{Kind: "home", Name: "Creates Home “Music Production Home”", State: personalassistant.FolderLineWorking},
-		}}}
+		run: &personalassistant.FolderSetupView{
+			Status:      personalassistant.FolderSetupRunning,
+			Visual:      &personalassistant.FolderSetupVisual{Entity: &personalassistant.FolderSetupEntity{Kind: "workspace", Name: "Reviewed workspace", Operation: "create"}},
+			Hire:        &personalassistant.FolderHire{Mode: personalassistant.FolderHireCreate, AgentName: "Reviewed agent"},
+			Destination: &personalassistant.FolderSetupDestination{Status: "standalone"},
+			Lines:       []personalassistant.FolderPlanLine{{Kind: "home", Name: "Creates Home “Music Production Home”", State: personalassistant.FolderLineWorking}},
+		}}
 	build := f.plannedBuild(t, folders)
 
 	// A digest the server would not show now is a changed plan: nothing runs.
@@ -112,6 +116,16 @@ func TestWorkspaceBuildSetup_RunsTheConfirmedPlanAndRecordsWhatItMade(t *testing
 	run, _ := session["setup_run"].(map[string]any)
 	if run == nil || run["status"] != "running" || session["folder_expires_at"] == nil {
 		t.Fatalf("the response carries the run and the pick's expiry: %v", session)
+	}
+	if run["visual"] == nil || run["hire"] == nil || run["destination"] == nil {
+		t.Fatalf("run lost display snapshot: %v", run)
+	}
+	projected := f.handler.readBuildSetupRun(context.Background(), "local", nil, &running)
+	projected.Visual.Entity.Name = "Client display"
+	projected.Hire.AgentName = "Client agent"
+	projected.Destination.Status = "new"
+	if folders.run.Visual.Entity.Name != "Reviewed workspace" || folders.run.Hire.AgentName != "Reviewed agent" || folders.run.Destination.Status != "standalone" {
+		t.Fatal("build projection aliases the canonical offer")
 	}
 	if got := folders.reads[len(folders.reads)-1]; got != personalassistant.BuildReviewTarget(draft, build.ID) {
 		t.Fatalf("the run is read through the build's own review: %+v", got)

@@ -181,7 +181,7 @@ func TestHomeFolderCollection_AdjustThenSetUpCreatesTheRenamedGroup(t *testing.T
 			children++
 		}
 	}
-	if children != 6 || len(outcome["receipt"].([]any)) != 7 || len(files.CachedWorkspaces()) != before+7 {
+	if children != 6 || len(collectionReceiptRows(outcome, "workspace")) != 7 || len(files.CachedWorkspaces()) != before+7 {
 		t.Fatalf("%d children, receipt %v, %d workspaces (was %d)", children, outcome["receipt"], len(files.CachedWorkspaces()), before)
 	}
 	if folderTreeHash(t, root) != hash || len(provider.requests) != 0 {

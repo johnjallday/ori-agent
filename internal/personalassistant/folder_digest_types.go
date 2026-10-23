@@ -101,6 +101,14 @@ type FolderReceiptRow struct {
 	Name   string `json:"name"`
 	Detail string `json:"detail,omitempty"`
 	Route  string `json:"route,omitempty"`
+	// Operation is create/reuse only when the canonical receipt reader knows
+	// which happened. Assigned is true only for observed workspace membership;
+	// a planned/shared agent or a profile is not membership evidence. Model and
+	// placement are recorded canonical facts, not guesses from the review plan.
+	Operation string `json:"operation,omitempty"`
+	Assigned  bool   `json:"assigned,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Placement string `json:"placement,omitempty"`
 }
 
 // FolderOutcome is what a yes produced.
@@ -473,6 +481,7 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			for _, row := range offer.Outcome.Receipt {
 				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|home|library|assistant|profile|", "|"+row.Kind+"|") ||
 					row.Kind == "" || len(row.Name) > 512 || len(row.Detail) > 512 || len(row.Route) > 1024 ||
+					len(row.Operation) > 32 || len(row.Model) > 512 || len(row.Placement) > 32 ||
 					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {
 					return fmt.Errorf("%w: receipt row", errFolderDigestInvalid)
 				}

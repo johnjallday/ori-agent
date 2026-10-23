@@ -2431,6 +2431,34 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 .workspace-create-modal .workspace-build-folder-review .workspace-build-plan-review__fields {
   gap: 8px;
 }
+.workspace-build-plan-review__decision,
+#workspaceBuildPlanReviewVisual {
+  min-width: 0;
+}
+@media (min-width: 1100px) {
+  .workspace-create-modal#addFolderModal.workspace-create-modal--folder-review:has(
+      #workspaceBuildPlanReviewVisual:not([hidden])
+    )
+    .workspace-create-modal-dialog {
+    width: min(1100px, calc(100vw - 2rem));
+    max-width: min(1100px, calc(100vw - 2rem));
+  }
+  #workspaceBuildPlanReview:not([hidden]):has(#workspaceBuildPlanReviewVisual:not([hidden])) {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+    grid-template-areas: "diagram decision";
+    gap: 24px;
+  }
+  #workspaceBuildPlanReview .workspace-build-plan-review__decision {
+    grid-area: decision;
+  }
+  #workspaceBuildPlanReviewVisual {
+    grid-area: diagram;
+    align-self: start;
+    position: sticky;
+    top: 0;
+  }
+}
 .workspace-build-folder-review__facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3189,84 +3217,11 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
     opacity: 0.35;
   }
 }
-/* The sketch: the Home box with the workspace box inside it (or the
-   workspace alone), and the workspace's parts as chips. Its words come from
-   the plan's facts and the kinds of its lines, never from the model. */
+/* The shared fact-backed folder diagram, inside the build's own surface. */
 .workspace-create-modal .workspace-build-plan__sketch {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.workspace-create-modal .workspace-build-sketch__home,
-.workspace-create-modal .workspace-build-sketch__workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.workspace-create-modal .workspace-build-sketch__home {
-  padding: 8px 9px;
-  border: 1px dashed var(--wc-line-bright);
-  background: var(--wc-panel-2);
-}
-.workspace-create-modal .workspace-build-sketch__workspace {
-  padding: 8px 10px;
-  border: 1px solid var(--wc-faction-deep);
-  background: var(--wc-panel-deep);
-  box-shadow: inset 3px 0 0 var(--wc-faction);
-}
-.workspace-create-modal .workspace-build-sketch__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--wc-ink-dim);
-  font-family: var(--wc-font-mono);
-  font-size: 10px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-.workspace-create-modal .workspace-build-sketch__label .bi {
-  color: var(--wc-faction);
-  font-size: 13px;
-}
-.workspace-create-modal .workspace-build-sketch__name {
-  color: var(--wc-ink-heading);
-  font-size: 13px;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-.workspace-create-modal .workspace-build-sketch__badge {
-  margin-left: 6px;
-  padding: 0 6px;
-  border: 1px solid var(--wc-line-bright);
-  color: var(--wc-ink-dim);
-  font-family: var(--wc-font-mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.5px;
-  vertical-align: 1px;
-}
-.workspace-create-modal .workspace-build-sketch__parts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.workspace-create-modal .workspace-build-sketch__parts li {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid var(--wc-line);
-  background: var(--wc-panel);
-  color: var(--wc-ink);
-  font-size: 11px;
-}
-.workspace-create-modal .workspace-build-sketch__parts .bi {
-  color: var(--wc-faction);
-  font-size: 12px;
 }
 /* ---------- the plan beside the conversation ----------
    A wide pane with a plan gives it its own column, the full height of the

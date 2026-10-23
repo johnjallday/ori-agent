@@ -1,16 +1,13 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
-// Recent songs at the end of setup: a one-card collection setup whose pop-up
-// stays open ends on "Pick a song to start with" (the six songs whose project
-// files were saved last, each with Open), and the Home library keeps the same
-// list at its top as "Recently saved".
-//
-// Three collections go through the card in one sandbox, so each rule gets a
-// real run: Documents is closed while it runs (it never lists songs), Desktop
-// is closed on its last screen (it never comes back), and Downloads is kept
-// open (the list, a failed open, a file choice, and the opened song).
+// Recent songs stay in the single setup card, alongside its canonical library
+// link and disclosed receipt. Closed drawers do not read shortcuts or navigate
+// on late replies; reopening reads the saved result, never repeats setup.
+// Three real collections exercise closure, completed receipts, failures and
+// project-file choice. The Home library retains the same Recently saved order.
 //
 // Run it against a fresh isolated sandbox with a model provider:
 //
@@ -96,7 +93,7 @@ async function offerStatus(request: APIRequestContext, offerID: string) {
 
 const songRows = (page: Page) =>
   page
-    .locator('#folderSetupRunSongs li')
+    .locator('#personalAssistantFolderSongs li')
     .evaluateAll(items =>
       items.map(item => [
         item.querySelector('strong')?.textContent || '',
@@ -107,7 +104,7 @@ const songRows = (page: Page) =>
 let modelReady = false;
 let libraryURL = '';
 
-test('a collection closed while it runs never lists songs, then or after', async ({
+test('closing a running collection stops background shortcut reads without stopping setup', async ({
   page,
   request
 }) => {
@@ -146,29 +143,21 @@ test('a collection closed while it runs never lists songs, then or after', async
 
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal).toBeVisible();
-  await runModal.getByRole('button', { name: /^Close/ }).click();
-  await expect(runModal).toBeHidden();
-
-  // The run goes on without the pop-up and finishes.
+  await page.locator('#personalAssistantClose').click();
+  const readsAtClose = asked.length;
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await expect
     .poll(() => offerStatus(request, offer.id), { timeout: 300_000, intervals: [2_000] })
     .toBe('resolved');
-  await expect(card.locator('#personalAssistantFolderReceipt li').first()).toBeVisible({
-    timeout: 30_000
-  });
-  await expect(runModal).toBeHidden();
-  await expect(page.locator('#folderSetupRunSongs li')).toHaveCount(0);
-  expect(asked, 'a closed pop-up never reads the songs').toEqual([]);
-
+  expect(asked, 'a closed drawer starts no further shortcut reads').toHaveLength(readsAtClose);
+  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
   await page.reload();
   await page.waitForTimeout(2_000);
-  await expect(runModal).toBeHidden();
-  expect(asked).toEqual([]);
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  expect(asked).toHaveLength(readsAtClose);
 });
 
-test('closed on its last screen, the pop-up stays closed and the card keeps its receipt', async ({
+test('closing the completed drawer keeps the receipt and never restores a nested modal', async ({
   page,
   request
 }) => {
@@ -177,8 +166,7 @@ test('closed on its last screen, the pop-up stays closed and the card keeps its 
   await scan(request, 'desktop');
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal.locator('#folderSetupRunTitle')).toHaveText('Pick a song to start with', {
+  await expect(card.locator('#personalAssistantFolderSongs li')).toHaveCount(6, {
     timeout: 300_000
   });
   expect(await songRows(page)).toEqual([
@@ -189,27 +177,26 @@ test('closed on its last screen, the pop-up stays closed and the card keeps its 
     ['Song 04', 'Saved 13 days ago'],
     ['Mix 02', 'Saved 2 weeks ago']
   ]);
-  // What was set up is folded under the songs, closed.
-  const more = runModal.locator('#folderSetupRunMore');
+  const more = card.locator('#personalAssistantFolderDetails');
   await expect(more).toBeVisible();
   await expect(more).not.toHaveAttribute('open', '');
-  await expect(more.locator('#folderSetupRunReceipt')).toBeHidden();
-
-  // Escape still closes it (focus inside the dialog). The card behind it keeps
-  // its receipt and its Home link, as before.
-  await runModal.locator('[data-folder-run-open]').first().focus();
-  await page.keyboard.press('Escape');
-  await expect(runModal).toBeHidden();
+  await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  await revealFolderSetupDetails(card);
   await expect(card.locator('#personalAssistantFolderReceipt')).toContainText(
     'Listed 6 music projects in Desktop'
   );
-  await expect(card.getByRole('link', { name: 'Open Music Production Home' })).toBeVisible();
-
-  // A reload does not bring the pop-up back.
+  await expect(card.getByRole('link', { name: 'Browse all 16 songs' })).toBeVisible();
+  await card.locator('[data-folder-run-open]').first().focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await page.reload();
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
-  await page.waitForTimeout(2_000);
-  await expect(runModal).toBeHidden();
+  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
+  await page.locator('#personalAssistantLauncher').click();
+  await revealFolderSetupDetails(card);
+  await expect(card.locator('#personalAssistantFolderReceipt')).toContainText(
+    'Listed 6 music projects in Desktop'
+  );
 });
 
 test('kept open, setup ends on the songs saved most recently and opens one', async ({
@@ -221,13 +208,12 @@ test('kept open, setup ends on the songs saved most recently and opens one', asy
   await scan(request, 'downloads');
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('All set', {
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready', {
     timeout: 300_000
   });
-  await expect(runModal.locator('#folderSetupRunTitle')).toHaveText('Pick a song to start with');
-  await expect(runModal.locator('#folderSetupRunStatus')).toHaveText(
-    'Music Production Home is ready with 24 songs. These are the ones you saved most recently.'
+  await expect(card.locator('#personalAssistantFolderSongs li')).toHaveCount(6);
+  await expect(card.locator('#personalAssistantFolderSongsNote')).toHaveText(
+    'Projects saved most recently'
   );
   expect(await songRows(page)).toEqual([
     ['Demo 01', 'Saved today'],
@@ -237,20 +223,20 @@ test('kept open, setup ends on the songs saved most recently and opens one', asy
     ['Demo 04', 'Saved 4 days ago'],
     ['Song 02', 'Saved 5 days ago']
   ]);
-  const opens = runModal.locator('[data-folder-run-open]');
+  const opens = card.locator('[data-folder-run-open]');
   await expect(opens.first()).toHaveAttribute(
     'aria-label',
     'Open Demo 01: makes its workspace and adds your assistant'
   );
-  const browse = runModal.getByRole('link', { name: 'Browse all 24 songs' });
+  const browse = card.getByRole('link', { name: 'Browse all 24 songs' });
   await expect(browse).toBeVisible();
   libraryURL = String(await browse.getAttribute('href'));
   expect(libraryURL).toMatch(/^\/workspaces\/[a-z0-9-]+\/assistant#projectLibraryPanel$/);
 
-  // Keyboard order: the songs, then "What I set up", then Browse.
-  await runModal.locator('.btn-close').focus();
+  // The single library action, songs, then the full receipt disclosure.
+  await browse.focus();
   const order: string[] = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 7; i++) {
     await page.keyboard.press('Tab');
     order.push(
       await page.evaluate(
@@ -262,9 +248,9 @@ test('kept open, setup ends on the songs saved most recently and opens one', asy
     );
   }
   expect(order.slice(0, 6).every(label => /^Open .*: makes its workspace/.test(label))).toBe(true);
-  expect(order.slice(6)).toEqual(['What I set up', 'Browse all 24 songs']);
+  expect(order.slice(6)).toEqual(['Full setup details']);
 
-  // Any other failure: the server's message in the error line, buttons back.
+  // Other failures retain the Home review route and re-enable the buttons.
   const failure = 'The REAPER integration changed. Review it on this Home, then open the song.';
   await page.route('**/assistant-program/library/projects/*/open', route =>
     route.fulfill({
@@ -274,23 +260,27 @@ test('kept open, setup ends on the songs saved most recently and opens one', asy
     })
   );
   await opens.nth(1).click();
-  await expect(runModal.locator('#folderSetupRunError')).toHaveText(failure);
+  await expect(card.locator('#personalAssistantFolderSongsNote')).toHaveText(
+    'Demo 02 could not be opened. Review it in the Home library.'
+  );
   for (const button of await opens.all()) {
     await expect(button).toBeEnabled();
     await expect(button).toHaveText('Open');
   }
-  await expect(runModal.locator('#folderSetupRunTitle')).toHaveText('Pick a song to start with');
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
   await page.unroute('**/assistant-program/library/projects/*/open');
 
   // Two project files: the names come back as chips under the song.
   await opens.first().click();
-  const chips = runModal.locator('[data-folder-run-choice] button');
+  const chips = card.locator('[data-folder-run-choice] button');
   await expect(chips).toHaveText(['Demo 01 alt.rpp', 'Demo 01.rpp']);
   await expect(chips.first()).toBeFocused();
-  await expect(runModal.locator('#folderSetupRunStatus')).toHaveText(
+  await expect(card.locator('#personalAssistantFolderSongsNote')).toHaveText(
     'Demo 01 has more than one project file. Choose the one to open.'
   );
-  await expect(runModal.locator('#folderSetupRunError')).toBeHidden();
+  await expect(card.locator('#personalAssistantFolderSongsNote')).not.toContainText(
+    'could not be opened'
+  );
   await chips.filter({ hasText: /^Demo 01\.rpp$/ }).click();
   await page.waitForURL(/\/workspaces\/demo-01$/, { timeout: 180_000 });
 

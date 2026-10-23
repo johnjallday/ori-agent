@@ -8,7 +8,7 @@ import {
   folderReceiptView,
   hireLookView,
   hireView,
-  setupModalView,
+  setupResultView as setupModalView,
   setupRunView
 } from './personal-assistant-folder.js';
 

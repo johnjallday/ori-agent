@@ -123,7 +123,7 @@ run_phase() {
 		--env "ORI_SOFTWARE_SANDBOX=$home" \
 		--env "ORI_SOFTWARE_FIXTURE_PORT=$fixture_port" \
 		--env "ORI_SOFTWARE_PHASE=$phase" \
-		tests/software-project-folder-setup.spec.ts -- --workers=1 ${pw_args[@]+"${pw_args[@]}"} \
+		tests/software-project-folder-setup.spec.ts -- --workers=1 --output "$home/results-$phase" ${pw_args[@]+"${pw_args[@]}"} \
 		>"$log" 2>&1 || status=$?
 	stop_server
 	if [[ "$tail_lines" != "0" ]]; then tail -n "$tail_lines" "$log"; else cat "$log"; fi

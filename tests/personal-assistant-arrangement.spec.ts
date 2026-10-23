@@ -505,13 +505,8 @@ test('PA arranged group → Review group → Set up → canonical receipt in the
     await expect(
       card.getByText('One workspace could not be created', { exact: false })
     ).toBeVisible({ timeout: 20000 });
-    const stoppedDialog = page.locator('#folderSetupRunModal');
-    if (await stoppedDialog.isVisible())
-      await stoppedDialog
-        .getByRole('button', { name: /^Close/ })
-        .first()
-        .click();
-    await expect(stoppedDialog).toBeHidden();
+    await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
+    await expect(card.locator('[aria-label="Saved setup progress"]')).toBeVisible();
     await expect(page.locator('.modal-backdrop')).toHaveCount(0);
     await capture(card, 'pa-arranged-stopped.png');
     expect((await ok(await request.get('/api/workspaces'))).folders.length).toBe(before + 2);
@@ -542,12 +537,9 @@ test('PA arranged group → Review group → Set up → canonical receipt in the
     await rename(`${beta}-away`, beta);
     await card.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect(card.getByText("Here's what I set up:")).toBeVisible({ timeout: 20000 });
-    // The existing run dialog reports completion; the user closes it.
-    const runDialog = page.locator('#folderSetupRunModal');
-    await expect(runDialog).toBeVisible();
-    await page.screenshot({ path: info.outputPath('pa-arranged-run-done.png'), fullPage: true });
-    await runDialog.getByRole('button', { name: 'Close. Setup keeps running.' }).click();
-    await expect(runDialog).toBeHidden();
+    // The completed receipt stays on the same surface, without a nested modal.
+    await expect(card.locator('.folder-visual')).toContainText('Created');
+    await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
     await page.screenshot({ path: info.outputPath('pa-arranged-receipt.png'), fullPage: true });
     const folders = (await ok(await request.get('/api/workspaces'))).folders;
     expect(folders.length).toBe(before + 3);

@@ -259,7 +259,13 @@ Run directly through `scripts/e2e.sh`, the spec skips unless
 `ORI_SOFTWARE_SANDBOX`, `ORI_SOFTWARE_FIXTURE_PORT` and `ORI_SOFTWARE_PHASE`
 (`first`, `restarted` or `conversation`) are set.
 
-With a real model, the whole journey in one command:
+The shared [visual setup contract](../architecture/visual-folder-setup.md) keeps
+review, saved milestones, recovery and the canonical result on one card. Use
+**Full setup details** for the complete plan/receipt. Create/bind plans use
+**Hire & start** / **Assign & start**; unknown staffing retains a generic setup
+action. Setup completion is separate from the first look and its report.
+
+With an explicitly intended real model, the whole journey in one command:
 
 ```bash
 ./scripts/demo-software-folder.sh               # a small unrelated project
@@ -275,12 +281,15 @@ and Set up finish in the conversation. The reply is printed in the sandbox's
 
 It starts an isolated demo server on a new sandbox, seeds the folders, and runs
 the walkthrough's phases in order, restarting the server where the journey
-needs it: `setup` (pauses with no model), restart, `resume`, `assess-interrupt`
-(starts the real assessment and leaves it running), restart, `assess` (the lost
-run reads "Did not finish"; Try again runs the same task; the report, the
-workspace banner and the Plans hand-off are followed), `repeat`. Like `wt
-demo`, the server is given your Codex home (`$CODEX_HOME`, else `~/.codex`), so
-the two assessment phases make real model calls. The report it got is printed
+needs it: `setup` (pauses with no model), restart, `resume` (re-pick/review if
+folder authority was lost), `assess-interrupt` (observes the first look already
+authorized by setup), restart, `assess` (Try again uses the same failed task;
+a finished look is only read), `repeat`. A look that finished before interruption
+is reported as **NOT RUN** for that interruption case, never rerun to manufacture
+it. The report, workspace banner and Plans hand-off are followed. Like `wt demo`,
+the server is given your Codex home (`$CODEX_HOME`, else `~/.codex`): confirming
+the hire and explicitly retrying its look can make real model calls. Do not use
+this live path as an implicit signed-in-provider fallback. The report is printed
 in the sandbox's `assess.log`, and screenshots go to its `shots` folder.
 
 To drive one phase by hand, start `scripts/demo-server.sh <port> <sandbox>`
@@ -295,8 +304,10 @@ Check by eye:
 1. Before Set up, the card names the workspace, the folder (linked where it
    is, read-only), the one assistant and its model, the planning-first mode and
    the first assessment, and says what was read and that no command was run.
-2. Start assessment says what it spends and that the model gets no tools. A
-   model that was never called reads "Set, not checked", never "Ready".
+2. The reviewed hire discloses its first look; accepting it may start that look
+   on the server. Reopening the card/workspace must not start it again. A model
+   configuration is not a verified connection. Observe pending/running/finished/
+   failed look state independently of the ready workspace.
 3. While it runs there is nothing to press twice. A run that does not finish
    says why in one sentence, offers Try again only when nothing has to be
    repaired first, and never shows a raw provider error or a path.

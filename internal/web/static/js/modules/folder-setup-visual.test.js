@@ -143,6 +143,65 @@ test('run milestones use applicable line evidence, not timers, profiles or first
   );
 });
 
+test('resolved visuals trust structured canonical receipts, never hire names or receipt prose', () => {
+  const offer = {
+    status: 'resolved',
+    plan,
+    subject: { name: 'Project' },
+    outcome: {
+      kind: 'project',
+      receipt: [
+        {
+          kind: 'workspace',
+          name: 'Actual workspace',
+          operation: 'reuse',
+          placement: 'standalone'
+        },
+        { kind: 'agent', name: 'No assistant yet', detail: 'added' },
+        { kind: 'agent', name: 'Actual member', assigned: true, model: 'Recorded model' }
+      ]
+    }
+  };
+  let view = visualView({ offer });
+  assert.equal(view.entity.name, 'Actual workspace');
+  assert.equal(view.entity.status, 'Reused');
+  assert.equal(view.agent.name, 'Actual member');
+  assert.equal(view.agent.model, 'Recorded model');
+  assert.match(view.parent, /Separate workspace/);
+  assert.match(view.agent.status, /Confirmed/);
+  offer.outcome.receipt = [
+    { kind: 'workspace', name: 'Old record', detail: 'created' },
+    { kind: 'agent', name: 'Legacy row' }
+  ];
+  view = visualView({ offer });
+  assert.equal(view.entity.status, 'Ready');
+  assert.equal(view.agent, null);
+  assert.match(view.summary, /membership not reported/);
+  for (const kind of ['group', 'home']) {
+    offer.outcome.kind = kind;
+    offer.outcome.receipt[0].kind = kind === 'home' ? 'home' : 'workspace';
+    view = visualView({ offer });
+    assert.equal(view.entity.kind, kind);
+    assert.match(
+      view.footer,
+      kind === 'group' ? /No automatic task/ : /does not mean every project/
+    );
+  }
+});
+
+test('an unknown or incomplete result cannot claim a workspace is ready', () => {
+  for (const outcome of [
+    { kind: 'future', receipt: [] },
+    { kind: 'project', receipt: [{ kind: 'workspace' }] }
+  ]) {
+    const view = visualView({ offer: { status: 'resolved', outcome } });
+    assert.equal(view.entity, null);
+    assert.equal(view.agent, null);
+    assert.match(view.footer, /saved receipt/);
+    assert.doesNotMatch(view.footer, /Workspace ready/);
+  }
+});
+
 function documentFixture() {
   const doc = {
     createElement: tag => ({

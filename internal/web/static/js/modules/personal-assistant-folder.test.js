@@ -24,7 +24,7 @@ import {
   portfolioLibraryURL,
   portfolioProviderAction,
   profileReceiptLine,
-  setupModalView,
+  setupResultView as setupModalView,
   finishedRunWorkspace,
   arrangedStructure,
   conversationFolderOfferView
@@ -80,7 +80,7 @@ test('a project receipt has an On the Map row with Move', () => {
   };
   assert.deepEqual(folderReceiptView(offer).map, {
     label: 'On the Map',
-    text: "REAPER Assistant's building sits inside Music Production Home.",
+    text: 'Its building sits inside Music Production Home.',
     move: { label: 'Move', href: '/?move=ws-song' }
   });
   const standalone = folderReceiptView({

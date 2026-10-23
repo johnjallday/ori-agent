@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+func TestFolderReceiptModelOmitsUnsafeLabelsWithoutInventingOne(t *testing.T) {
+	for _, value := range []string{"", "fixture-assessor", "vendor/model-1", strings.Repeat("界", 128)} {
+		if got := FolderReceiptModel(value); got != value {
+			t.Errorf("recorded model changed: %q -> %q", value, got)
+		}
+	}
+	for _, value := range []string{"/private/model", "~/.models/name", "model\nsecret", strings.Repeat("界", 129), string([]byte{0xff})} {
+		if got := FolderReceiptModel(value); got != "" {
+			t.Errorf("unsafe model retained: %q", got)
+		}
+	}
+}
+
 func TestFolderSetupVisualClonesAndDoesNotChangeConsent(t *testing.T) {
 	plan := NewFolderSetupPlan([]FolderPlanLine{{Kind: FolderPlanWorkspace, Name: "Creates a workspace"}})
 	plan.Visual = &FolderSetupVisual{

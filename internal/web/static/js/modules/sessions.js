@@ -13000,6 +13000,11 @@ const sessionManager = {
     const setUp = document.getElementById('workspaceBuildPlanReviewSetup');
     if (setUp) setUp.disabled = !this.workspaceBuildSetupPressable();
     const plan = this.workspaceBuild.session.plan || {};
+    this.workspaceBuildPane()?.renderVisualPlan?.(
+      document.getElementById('workspaceBuildPlanReviewVisual'),
+      document.getElementById('workspaceBuildPlanReviewConsequences'),
+      document.getElementById('workspaceBuildPlanReviewProgress')
+    );
     const shared = window.OriFolderPlanLines;
     const list = document.getElementById('workspaceBuildPlanReviewLines');
     if (list) list.hidden = !planReady;
@@ -13184,7 +13189,7 @@ const sessionManager = {
     setText(
       'workspaceBuildFolderEffects',
       recognized
-        ? `Only ${hire ? 'Hire and start' : 'Set it up'} runs these host-owned steps. To use another purpose, change the attached folder.`
+        ? `Only ${hire?.confirmLabel || 'Set it up'} runs these host-owned steps. To use another purpose, change the attached folder.`
         : janitor
           ? 'Creating makes Filed/ and scans top-level metadata once. Review the folder permissions below. Moves and Trash always need separate approval.'
           : 'Creating links this folder in place. No files are moved or changed by attaching it.'
@@ -13240,7 +13245,8 @@ const sessionManager = {
         : recognized
           ? planReady
             ? session.plan?.hire
-              ? 'Hire and start'
+              ? hire?.confirmLabel ||
+                (session.plan.hire.mode === 'bind' ? 'Assign & start' : 'Hire & start')
               : 'Set it up'
             : 'Review prerequisites'
           : janitor
@@ -14781,6 +14787,12 @@ const sessionManager = {
       build.session.setup?.plan_digest || build.session.plan?.digest || ''
     ).trim();
     if (!digest) return;
+    const brief = typeof detail.brief === 'string' ? detail.brief : (pane.setupBrief?.() ?? null);
+    const briefProblem = globalThis.OriFolderSetupVisual?.briefError(brief);
+    if (!build.session.setup && briefProblem) {
+      pane.showLine(briefProblem);
+      return;
+    }
     build.setupBusy = true;
     pane.setBusy?.(true);
     let result;
@@ -14792,8 +14804,7 @@ const sessionManager = {
       if (entry) body.entry_name = entry;
       // Hire and start sends the brief the pane shows, from either button; a
       // Retry sends none and continues with the one the run was given.
-      const brief = typeof detail.brief === 'string' ? detail.brief : (pane.setupBrief?.() ?? null);
-      if (typeof brief === 'string' && !build.session.setup) body.brief = brief.trim();
+      if (typeof brief === 'string' && !build.session.setup) body.brief = brief;
       try {
         result = await this.workspaceBuildApi().setup(build.session.id, body);
       } catch (_) {

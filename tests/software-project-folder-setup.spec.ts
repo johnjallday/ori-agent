@@ -350,6 +350,15 @@ async function openAssistant(page: Page) {
   if (!(await page.locator('#personalAssistantPanel').isVisible()))
     await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  // Let the automatic saved-conversation restore finish before deciding that
+  // Continue is needed; otherwise it can close the list under a pending click.
+  await page.waitForFunction(
+    () =>
+      (window as any).PersonalAssistantPanel?._state?.personalAssistant?.state === 'active' &&
+      (window as any).PersonalAssistantConversation?.isLoading?.() === false,
+    undefined,
+    { timeout: 30_000 }
+  );
 }
 
 // attach adds a folder in the assistant's composer, the entry that Home's
@@ -459,7 +468,38 @@ const press = (page: Page, name: string) =>
   card(page).getByRole('button', { name, exact: true }).click();
 
 async function review(page: Page, label = 'Review setup') {
+  const response = page.waitForResponse(
+    reply =>
+      reply.request().method() === 'POST' &&
+      /\/folder-digest\/offers\/[^/]+\/review$/.test(reply.url())
+  );
   await press(page, label);
+  const payload = await ok(await response);
+  await test
+    .info()
+    .attach('review-response', { body: JSON.stringify(payload), contentType: 'application/json' });
+  expect(payload.offer?.software?.review, JSON.stringify(payload)).toBeTruthy();
+  try {
+    await expect(page.locator('#personalAssistantFolderEvidence li').first()).toBeAttached({
+      timeout: 10_000
+    });
+  } catch (error) {
+    writeFileSync(
+      test.info().outputPath('review-response.json'),
+      JSON.stringify(
+        {
+          response: payload,
+          displayed: await page.evaluate(() => (window as any).PersonalAssistantFolder?.current?.())
+        },
+        null,
+        2
+      )
+    );
+    throw error;
+  }
+  const details = card(page).locator('#personalAssistantFolderDetails');
+  if (!(await details.evaluate(node => (node as HTMLDetailsElement).open)))
+    await details.getByText('Full setup details', { exact: true }).click();
   await expect(page.locator('#personalAssistantFolderEvidence li').first()).toBeVisible({
     timeout: 30_000
   });
@@ -522,7 +562,7 @@ test.describe('a fresh server', () => {
 
     await review(page);
     await expect(headline(page)).toHaveText('Hire Development Assistant for widget');
-    await expect(question(page)).toHaveText('What I read in widget:');
+    await expect(question(page)).toHaveText('Review the setup before anything is created.');
     const evidence = await list(page, '#personalAssistantFolderEvidence');
     expect(evidence.join('\n')).toMatch(/Built with .*Go/);
     expect(evidence.join('\n')).toMatch(/It declares .*None of these was run\./);
@@ -656,18 +696,15 @@ test.describe('a fresh server', () => {
     await review(page);
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan[2]).toContain('has no model yet');
-    await press(page, 'Hire and start');
+    await press(page, 'Hire & start');
 
-    const run = page.locator('#folderSetupRunModal');
-    await expect(run).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('#folderSetupRunTitle')).toContainText('needs you', {
-      timeout: 30_000
-    });
-    await expect(page.locator('#folderSetupRunCount')).toContainText('0 of 5 steps finished');
-    await expect(page.locator('#folderSetupRunStatus')).toContainText('has no model yet');
-    expect(
-      await page.locator('#folderSetupRunActions').locator('button, a').allInnerTexts()
-    ).toEqual(['Set up a model', 'Continue']);
+    await expect(card(page)).toBeVisible({ timeout: 30_000 });
+    await expect(headline(page)).toContainText('needs you', { timeout: 30_000 });
+    await expect(question(page)).toContainText('0 of 5 steps finished');
+    await expect(question(page)).toContainText('has no model yet');
+    await expect(card(page).locator('.folder-visual')).toBeVisible();
+    await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
+    expect(await buttons(page)).toEqual(['Set up a model', 'Continue']);
 
     expect(await workspaceCount(request)).toBe(before.workspaces);
     expect(await developmentAssistants(request)).toBe(0);
@@ -716,11 +753,10 @@ test.describe('after the server was restarted', () => {
     );
     provider.replies = ['tool', 'report'];
     await press(page, 'Continue');
-    await expect(page.locator('#folderSetupRunTitle')).toContainText('is ready', {
-      timeout: 60_000
-    });
-    await expect(page.locator('#folderSetupRunEyebrow')).toHaveText('Hired', { timeout: 30_000 });
-    const receipt = (await list(page, '#folderSetupRunReceipt')).join(' | ');
+    await expect(headline(page)).toContainText('is ready', { timeout: 60_000 });
+    await expect(card(page).locator('.folder-visual')).toContainText('Confirmed workspace member');
+    await expect(card(page).locator('.folder-visual')).toContainText(fixtureModel);
+    const receipt = (await list(page, '#personalAssistantFolderReceipt')).join(' | ');
     expect(receipt).toContain('widget (created)');
     expect(receipt).toContain('linked where it is, read-only');
     expect(receipt).toContain('Code Project (planning first; approved work waits for you');
@@ -839,6 +875,18 @@ test.describe('after the server was restarted', () => {
     expect(done.next_request).toBe('Add a health check endpoint to the service.');
     expect(done.report_route).toBe(`/workspaces/widget/task/${before.task}`);
     await card(page).screenshot({ path: join(sandbox, 'separate-assessment-finished.png') });
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await page.setViewportSize({ width: 1440, height: 1100 });
+      await page.evaluate(() =>
+        (window as any).PersonalAssistantTranscript?.revealControl(
+          document.getElementById('personalAssistantFolderOfferHeadline'),
+          true
+        )
+      );
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/04-scripted-software-report.png`
+      });
+    }
 
     // Phone width: the result and its three actions wrap instead of scrolling
     // sideways, and each action can be reached from the keyboard.
@@ -944,7 +992,8 @@ test.describe('after the server was restarted', () => {
     // with that project instead of a setup card: nothing new is prepared.
     await attach(page, 'Documents');
     await page.locator('#personalAssistantReviewFolderSetup').click();
-    await chooseProject(page, 'widget');
+    // The only eligible candidate is the exact existing workspace; the host
+    // routes directly to its receipt instead of asking for a redundant choice.
     const existing = page.locator('section[aria-label="Existing project"]');
     await expect(existing).toBeVisible({ timeout: 30_000 });
     await expect(existing).toContainText('widget is already set up as the project');
@@ -1036,23 +1085,20 @@ test.describe('a repository attached to the conversation', () => {
     // takes, and the one that used to answer with a list of subfolders.
     const panel = page.locator('#personalAssistantPanel');
     await attach(page);
+    // Root attachment also restores the canonical review conversation. Send
+    // intentionally refuses while that read is pending, preserving the draft.
+    await expect(
+      card(page).getByRole('button', { name: 'Review setup', exact: true })
+    ).toBeEnabled();
     await page.locator('#personalAssistantSend').click();
 
-    // The reply proposes the folder itself, by name, as one workspace.
-    const proposal = page.locator('[data-folder-setup-suggestion]');
-    await expect(proposal).toBeVisible({ timeout: 90_000 });
-    await expect(proposal.locator('.personal-assistant-proposal__label')).toHaveText(
-      'Proposed workspace'
-    );
-    await expect(proposal.locator('.personal-assistant-proposal__subject')).toHaveText('Downloads');
-    await expect(proposal.locator('.personal-assistant-proposal__scope')).toHaveText(
-      'Whole folder'
-    );
-    const propose = proposal.getByRole('button');
-    await expect(propose).toHaveText('Review workspace setup');
-    await expect(proposal.locator('.personal-assistant-folder-context__note')).toHaveText(
-      'Review its effects before confirming. Nothing is set up here.'
-    );
+    // Recognized-root attachment owns one review beside the conversation.
+    // A model reply must not add a second live setup confirmation.
+    await expect(headline(page)).toHaveText('Downloads looks like a Python project.');
+    await expect(
+      card(page).getByRole('button', { name: 'Review setup', exact: true })
+    ).toBeVisible();
+    await expect(page.locator('[data-folder-setup-suggestion]')).toHaveCount(0);
     const said = await panel.innerText();
     expect(said).not.toContain('Choose setup scope');
     expect(said).not.toContain('compatible folders');
@@ -1079,12 +1125,19 @@ test.describe('a repository attached to the conversation', () => {
     });
     const entries = (observation.observed_entries || []).map((entry: any) => entry.name);
     for (const part of parts) expect(entries, `${part} left the observation`).toContain(part);
-    expect(told).toContain('Code project workspace');
+    const reviewContext = /<folder_review_context>([\s\S]*?)<\/folder_review_context>/.exec(
+      provider.calls.map(call => call.messages.map((m: any) => m.content).join('\n')).join('\n')
+    );
+    expect(reviewContext).toBeTruthy();
+    expect(JSON.parse(reviewContext![1])).toMatchObject({
+      subject: 'Downloads',
+      operation: 'create_project_workspace',
+      status: 'awaiting_confirmation'
+    });
     expect(told).not.toContain(neverRead);
 
-    // One click reaches the project's own card: there is no scope to choose.
-    await propose.click();
-    const reviewCard = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
+    // The existing project's card needs no scope chooser or duplicate review.
+    const reviewCard = card(page);
     await expect(reviewCard).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeHidden();
     await expect(headline(page)).toHaveText('Downloads looks like a Python project.');
@@ -1102,7 +1155,7 @@ test.describe('a repository attached to the conversation', () => {
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan).toHaveLength(5);
     expect(plan[0]).toContain('Creates a Code project workspace named Downloads');
-    expect(await buttons(page)).toContain('Hire and start');
+    expect(await buttons(page)).toContain('Hire & start');
     await expect(status).not.toContainText('not available');
 
     // Nothing private and no path reaches the card; nothing was created, the
@@ -1131,7 +1184,7 @@ test.describe('a repository attached to the conversation', () => {
     // Review setup beside the folder's chip: no reply is needed, and with one
     // project there is nothing to choose from.
     await page.locator('#personalAssistantReviewFolderSetup').click();
-    const reviewCard = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
+    const reviewCard = card(page);
     await expect(reviewCard).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeHidden();
     await expect(headline(page)).toHaveText('Downloads looks like a Python project.');

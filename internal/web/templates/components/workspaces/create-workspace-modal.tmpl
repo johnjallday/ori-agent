@@ -26,6 +26,7 @@
       <section id="workspaceBuildFolderReview" class="workspace-build-folder-review" aria-label="Workspace setup review" hidden>
         <div class="workspace-build-folder-review__body">
           <section id="workspaceBuildPlanReview" class="workspace-build-plan-review" aria-labelledby="workspaceBuildPlanReviewTitle" hidden>
+            <div class="workspace-build-plan-review__decision">
             <p class="workspace-wizard-eyebrow">From your folder</p>
             <h2 id="workspaceBuildPlanReviewTitle" tabindex="-1">Review your workspace</h2>
             <p id="workspaceBuildFolderStatus" role="status" aria-live="polite"></p>
@@ -59,11 +60,18 @@
               </div>
             </details>
             <p id="workspaceBuildFolderEffects"></p>
-            <ul id="workspaceBuildPlanReviewLines" class="workspace-build-plan__lines"></ul>
-            <details id="workspaceBuildPlanReviewWhy" class="workspace-build-plan__why" hidden>
-              <summary>Why this suggestion?</summary>
-              <p id="workspaceBuildPlanReviewEvidence" class="workspace-build-plan__evidence"></p>
+            <div id="workspaceBuildPlanReviewConsequences" class="folder-setup-consequences" hidden></div>
+            <div id="workspaceBuildPlanReviewProgress" hidden></div>
+            <details class="folder-setup-details">
+              <summary>Full setup details</summary>
+              <ul id="workspaceBuildPlanReviewLines" class="workspace-build-plan__lines"></ul>
+              <details id="workspaceBuildPlanReviewWhy" class="workspace-build-plan__why" hidden>
+                <summary>Why this suggestion?</summary>
+                <p id="workspaceBuildPlanReviewEvidence" class="workspace-build-plan__evidence"></p>
+              </details>
             </details>
+            </div>
+            <div id="workspaceBuildPlanReviewVisual" hidden></div>
           </section>
           <section id="workspaceBuildCreationReview" class="workspace-build-review" aria-label="Review File Janitor creation" hidden></section>
         </div>

@@ -79,6 +79,15 @@ func CloneFolderSetupVisual(value *FolderSetupVisual) *FolderSetupVisual {
 	return out
 }
 
+// FolderReceiptModel exposes only a bounded, path-free recorded model label.
+// Omission must not make an otherwise successful setup fail or rewrite its model.
+func FolderReceiptModel(value string) string {
+	if !visualText(value, 128) {
+		return ""
+	}
+	return value
+}
+
 func visualText(value string, maxRunes int) bool {
 	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= maxRunes &&
 		!looksLikeFilesystemPath(value) && strings.IndexFunc(value, unicode.IsControl) < 0

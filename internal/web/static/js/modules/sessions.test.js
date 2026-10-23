@@ -7296,7 +7296,7 @@ test('Hire and start sends the brief the pane shows, from either button', async 
   paneBrief = null;
   await manager.setUpWorkspaceBuild({});
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [
-    { version: 4, plan_digest: 'digest-1', brief: 'Find the risky parts.' },
+    { version: 4, plan_digest: 'digest-1', brief: ' Find the risky parts. ' },
     { version: 4, plan_digest: 'digest-1', brief: 'Mix the chorus first.' },
     { version: 4, plan_digest: 'digest-1' }
   ]);
@@ -7710,6 +7710,7 @@ test('folder review shows the actual effective team and constrains recognized pl
   const pane = manager.workspaceBuildPane;
   const hosts = [];
   const hire = {
+    confirmLabel: 'Hire & start',
     headline: [
       { text: 'Hire ' },
       { text: 'Song Assistant' },
@@ -7728,8 +7729,8 @@ test('folder review shows the actual effective team and constrains recognized pl
     nodes.get('workspaceBuildPlanReviewTitle').textContent,
     'Hire Song Assistant for Ori Music Demo'
   );
-  assert.equal(nodes.get('workspaceBuildPlanReviewSetup').textContent, 'Hire and start');
-  assert.match(nodes.get('workspaceBuildFolderEffects').textContent, /^Only Hire and start runs/);
+  assert.equal(nodes.get('workspaceBuildPlanReviewSetup').textContent, 'Hire & start');
+  assert.match(nodes.get('workspaceBuildFolderEffects').textContent, /^Only Hire & start runs/);
   manager.workspaceBuildPane = pane;
   delete manager.workspaceBuild.session.plan.hire;
   manager.workspaceBuild.session.plan.ready = false;
@@ -7784,7 +7785,7 @@ test('the folder review primary says Hire and create when its draft team creates
   };
   manager.workspaceBuild.session.folder.recognition = { verdict: 'project' };
   manager.syncWorkspaceBuildFolderReview();
-  assert.equal(action(), 'Hire and start');
+  assert.equal(action(), 'Hire & start');
 });
 
 test('changing purpose cannot refill earlier explicitly cleared name or description', () => {

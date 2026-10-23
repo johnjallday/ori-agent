@@ -8,7 +8,64 @@
   const operations = { create: 'Proposed · new', reuse: 'Proposed · reuse' };
   const kinds = { workspace: 'Workspace', group: 'Workspace group', home: 'Home' };
 
+  function resultView(offer) {
+    const outcome = offer.outcome;
+    const rows = list(outcome?.receipt);
+    const kind = { project: 'workspace', group: 'group', home: 'home' }[outcome?.kind];
+    const resource = rows.find(row => row.kind === (kind === 'home' ? 'home' : 'workspace'));
+    const source = text(offer.subject?.name) || text(offer.folder) || 'Selected folder';
+    const entity =
+      kind && text(resource?.name)
+        ? {
+            kind,
+            name: text(resource.name),
+            status: { create: 'Created', reuse: 'Reused' }[resource.operation] || 'Ready'
+          }
+        : null;
+    const member = rows.find(
+      row => row.kind === 'agent' && row.assigned === true && text(row.name)
+    );
+    const agent = member
+      ? {
+          name: text(member.name),
+          role: '',
+          model: text(member.model),
+          status: 'Confirmed workspace member'
+        }
+      : null;
+    const parent = outcome?.parent;
+    const placement =
+      parent?.status === 'standalone' || (!parent && resource?.placement === 'standalone')
+        ? 'Separate workspace · no parent Home'
+        : text(parent?.name)
+          ? `In ${parent.kind === 'group' ? 'group' : 'Home'} · ${parent.name}`
+          : kind === 'home'
+            ? 'Home library'
+            : kind === 'group'
+              ? 'Workspace group'
+              : 'Parent not reported';
+    return {
+      source,
+      entity,
+      agent,
+      parent: placement,
+      entries: [],
+      sourceNote: rows.some(row => row.kind === 'folder')
+        ? 'Linked where it is · kept in place'
+        : 'Source folder · kept in place',
+      summary: `${source}. ${entity ? `${entity.status} ${kinds[kind]} ${entity.name}.` : 'See the saved receipt.'} ${placement}.${agent ? ` Confirmed member: ${agent.name}.` : ' Agent membership not reported.'}`,
+      footer: !entity
+        ? 'See the saved receipt for the confirmed result.'
+        : kind === 'group'
+          ? 'Member workspaces are listed in the receipt. No automatic task.'
+          : kind === 'home'
+            ? 'A library listing does not mean every project has a workspace.'
+            : 'Workspace ready. First-look status is separate.'
+    };
+  }
+
   function visualView({ observation, offer, plan = offer?.plan } = {}) {
+    if (offer?.status === 'resolved') return resultView(offer);
     const visual = offer?.setup?.visual || plan?.visual;
     const proposed = visual?.entity;
     const entity =
@@ -69,7 +126,7 @@
       })),
       sourceNote: done('folder')
         ? 'Folder link complete · kept in place'
-        : observed && !setup
+        : observed && !setup && !plan
           ? 'Observed names only · contents not read'
           : 'Source folder · kept in place',
       summary: entity

@@ -374,6 +374,7 @@ async function resume(id, options = {}) {
   const target = String(id || '').trim();
   if (!target || state.loading) return false;
   state.loading = true;
+  document.dispatchEvent(new CustomEvent('personal-assistant:conversation-loading'));
   window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   const generation = ++state.generation;
   let hydrationBatch = false;
@@ -485,6 +486,7 @@ async function resume(id, options = {}) {
     return false;
   } finally {
     state.loading = false;
+    document.dispatchEvent(new CustomEvent('personal-assistant:conversation-loading'));
     if (hydrationBatch && generation === state.generation)
       window.PersonalAssistantTranscript?.endHydration?.();
     window.PersonalAssistantFolderContext?.refreshDiscussion?.();

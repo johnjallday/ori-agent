@@ -106,9 +106,9 @@ const reviewOffer = (mode = 'create') => ({
   }
 });
 
-async function mountReview(page: Page, offer = reviewOffer()) {
+async function mountReview(page: Page, offer = reviewOffer(), route = '/?panel=today') {
   await mockHiredAssistant(page);
-  await page.goto('/?panel=today');
+  await page.goto(route);
   await page.waitForFunction(() =>
     Boolean((window as any).PersonalAssistantFolder?.showConversationReview)
   );
@@ -215,6 +215,253 @@ test('fixture late confirmation response cannot reopen a parked review or replac
       reviewOffer()
     )
   ).toBe('Exact unsent goal');
+});
+
+test('fixture review cannot mutate during conversation hydration and keeps the exact draft', async ({
+  page
+}) => {
+  const offer = reviewOffer();
+  const requests: any[] = [];
+  await page.route('**/folder-digest/offers/visual-review-fixture/setup', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ json: { offer } });
+  });
+  const card = await mountReview(page, offer);
+  const brief = card.getByLabel('What should it do with it?');
+  await brief.fill(' Exact draft during reload ');
+  const hydrate = async (loading: boolean) =>
+    page.evaluate(loading => {
+      (window as any).PersonalAssistantConversation.isLoading = () => loading;
+      document.dispatchEvent(new CustomEvent('personal-assistant:conversation-loading'));
+    }, loading);
+  await hydrate(true);
+  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  await expect(confirm).toBeDisabled();
+  await confirm.dispatchEvent('click');
+  expect(requests).toHaveLength(0);
+  await hydrate(false);
+  await expect(confirm).toBeEnabled();
+  await expect(brief).toHaveValue(' Exact draft during reload ');
+  await confirm.click();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0].brief).toBe(' Exact draft during reload ');
+});
+
+test('fixture a late recovery conversation read cannot reopen the folder picker', async ({
+  page
+}) => {
+  const offer: any = {
+    ...reviewOffer(),
+    status: 'awaiting_outcome',
+    needs_pick: true,
+    setup: { status: 'stopped', stop_reason: 'needs_pick', lines: [] }
+  };
+  const card = await mountReview(page, offer);
+  await page.evaluate(id => {
+    const app = window as any;
+    app.__pickerOpens = 0;
+    app.PersonalAssistantFolderContext.open = () => {
+      app.__pickerOpens++;
+    };
+    app.PersonalAssistantConversation.currentId = () => 'another-conversation';
+    app.PersonalAssistantConversation.resume = () =>
+      new Promise(resolve => {
+        app.__finishRecoveryRead = () => {
+          app.PersonalAssistantConversation.currentId = () => id;
+          resolve(true);
+        };
+      });
+  }, offer.conversation_id);
+  await card.getByRole('button', { name: 'Pick it again', exact: true }).click();
+  await page.waitForFunction(() => Boolean((window as any).__finishRecoveryRead));
+  await page.locator('#personalAssistantClose').click();
+  await page.evaluate(() => (window as any).__finishRecoveryRead());
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  expect(await page.evaluate(() => (window as any).__pickerOpens)).toBe(0);
+});
+
+test('fixture Home shortcuts read only when opened and ignore a late open after closure', async ({
+  page
+}) => {
+  const rows = [
+    {
+      id: 'song-1',
+      name: 'Song one',
+      can_open: true,
+      connection: 'catalog_only',
+      last_saved_at: new Date().toISOString()
+    }
+  ];
+  let reads = 0;
+  const writes: any[] = [];
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route('**/assistant-program/library/projects?*', route => {
+    reads++;
+    return route.fulfill({ json: { rows, total: 1 } });
+  });
+  await page.route('**/assistant-program/library/projects/song-1/open', async route => {
+    writes.push(route.request().postDataJSON());
+    await held;
+    await route.fulfill({ json: { route: '/workspaces/song-one' } });
+  });
+  const card = await mountReview(page);
+  await page.locator('#personalAssistantClose').click();
+  const home = {
+    ...reviewOffer(),
+    status: 'resolved',
+    outcome: {
+      kind: 'home',
+      workspace_id: 'fixture-home',
+      route: '/workspaces/music-home',
+      receipt: [
+        {
+          kind: 'home',
+          name: 'Music Home',
+          operation: 'create',
+          route: '/workspaces/music-home/assistant#projectLibraryPanel'
+        },
+        { kind: 'library', name: 'Listed one music project' }
+      ]
+    }
+  };
+  await page.evaluate(
+    offer =>
+      (window as any).PersonalAssistantFolder.showConversationReview(
+        document.getElementById('visual-review-fixture-slot'),
+        offer
+      ),
+    home
+  );
+  expect(reads).toBe(0);
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(card.locator('#personalAssistantFolderSongs li')).toHaveCount(1);
+  await expect(card.getByRole('link', { name: 'Browse all 1 song', exact: true })).toHaveAttribute(
+    'href',
+    '/workspaces/music-home/assistant#projectLibraryPanel'
+  );
+  expect(reads).toBe(1);
+  const open = card.locator('[data-folder-run-open]');
+  await open.click();
+  await expect.poll(() => writes.length).toBe(1);
+  const before = page.url();
+  await page.locator('#personalAssistantClose').click();
+  const response = page.waitForResponse('**/assistant-program/library/projects/song-1/open');
+  release();
+  await (await response).finished();
+  await page.waitForTimeout(100);
+  await expect(page).toHaveURL(before);
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(open).toBeEnabled();
+  expect(reads).toBe(1);
+  expect(writes).toHaveLength(1);
+  expect(Object.keys(writes[0])).toEqual(['request_id']);
+  await expect(card.locator('.folder-visual')).not.toContainText('Ari');
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.evaluate(() =>
+      (window as any).PersonalAssistantTranscript?.revealControl(
+        document.getElementById('personalAssistantFolderOfferHeadline'),
+        true
+      )
+    );
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/04-fixture-home-result-neutral.png`
+    });
+  }
+});
+
+test('fixture non-Home drawer keeps the same facts and one review owner', async ({ page }) => {
+  const home = await mountReview(page);
+  const summary = await home.locator('.folder-visual figcaption').textContent();
+  const drawer = await mountReview(page, reviewOffer(), '/agents?panel=today');
+  await expect(drawer.locator('.folder-visual figcaption')).toHaveText(summary!);
+  await expect(page.locator('#personalAssistantFolderBrief')).toHaveCount(1);
+  await drawer.getByRole('button', { name: 'Hire & start', exact: true }).focus();
+  await expect(drawer.getByRole('button', { name: 'Hire & start', exact: true })).toBeFocused();
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.evaluate(() =>
+      (window as any).PersonalAssistantTranscript?.revealControl(
+        document.getElementById('personalAssistantFolderOfferHeadline'),
+        true
+      )
+    );
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/04-fixture-non-home-review.png`
+    });
+  }
+});
+
+test('fixture New Workspace uses identical facts without another confirmation or brief truncation', async ({
+  page
+}) => {
+  const offer = reviewOffer();
+  const home = await mountReview(page, offer);
+  const summary = await home.locator('.folder-visual figcaption').textContent();
+  await page.locator('#personalAssistantClose').click();
+  const forbidden: string[] = [];
+  const session = {
+    id: 'visual-build-fixture',
+    version: 1,
+    status: 'open',
+    transcript: [],
+    applied: ['name'],
+    draft: { name: 'Session' },
+    folder: { observation, recognition: { verdict: 'project', candidate_id: 'candidate-0' } },
+    plan: { ...offer.plan, ready: true, home: offer.plan.destination },
+    folder_expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
+  };
+  await page.route('**/api/workspaces/build-sessions/availability', route =>
+    route.fulfill({ json: { available: true, folders: true } })
+  );
+  await page.route('**/api/workspaces/build-sessions', route =>
+    route.fulfill({ json: { session } })
+  );
+  await page.route('**/api/workspaces/build-sessions/visual-build-fixture/**', route => {
+    if (/\/(setup|turn|create)$/.test(new URL(route.request().url()).pathname)) {
+      forbidden.push(route.request().url());
+      return route.abort('blockedbyclient');
+    }
+    return route.fulfill({ json: { session } });
+  });
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  const review = page.locator('#workspaceBuildPlanReview');
+  await expect(review).toBeVisible();
+  await expect(review.locator('.folder-visual figcaption')).toHaveText(summary!);
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Hire & start');
+  await expect(
+    page.locator('#workspaceBuildPane button:visible').filter({ hasText: /^Hire & start$/ })
+  ).toHaveCount(0);
+  const brief = page.locator('#workspaceBuildPlanReviewBrief');
+  const exact = `  ${'😀'.repeat(297)} `;
+  await brief.fill(exact);
+  await expect(brief).toHaveValue(exact);
+  expect(await brief.evaluate((node: HTMLInputElement) => node.checkValidity())).toBe(true);
+  await review.getByText('Full setup details', { exact: true }).click();
+  await expect(page.locator('#workspaceBuildPlanReviewLines')).toContainText('Linked where it is');
+  await expect(brief).toHaveValue(exact);
+  expect(forbidden).toEqual([]);
+  await brief.fill('  Review the groove before suggesting changes.  ');
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.locator('#workspaceBuildPlanReviewTitle').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/04-fixture-build-review.png`
+    });
+  }
+  await page.locator('#workspaceBuildPlanReviewBack').click();
+  await expect(review).toBeHidden();
+  await expect(
+    page.locator('#addFolderModal').getByRole('button', { name: 'Hire & start', exact: true })
+  ).toHaveCount(1);
+  await page.locator('#workspaceBuildReturnToReview').click();
+  await expect(review).toBeVisible();
+  await expect(brief).toHaveValue('  Review the groove before suggesting changes.  ');
+  expect(forbidden).toEqual([]);
 });
 
 test('fixture lost response can retry; a late acceptance never reopens the closed drawer', async ({

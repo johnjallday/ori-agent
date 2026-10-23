@@ -155,14 +155,18 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 	if err != nil || ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
 		return nil, errors.New("created workspace is unavailable for its receipt")
 	}
-	detail := ""
+	detail, operation := "", "create"
 	if !created {
-		detail = "already set up"
+		detail, operation = "already set up", "reuse"
 	}
 	rows := []personalassistant.FolderReceiptRow{{
-		Kind: "workspace", Name: ws.Name, Detail: detail,
+		Kind: "workspace", Name: ws.Name, Detail: detail, Operation: operation,
 		Route: "/workspaces/" + url.PathEscape(ws.FolderSlug),
 	}}
+	rows[0].Placement = "grouped"
+	if strings.TrimSpace(ws.ParentID) == "" {
+		rows[0].Placement = "standalone"
+	}
 	primary, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string)
 	if strings.TrimSpace(primary) != "" {
 		if ref, err := ws.GetDirectoryReference(primary); err == nil && ref != nil {
@@ -184,8 +188,9 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		})
 		for _, instance := range ws.AgentInstances {
 			if strings.TrimSpace(instance.Name) != "" {
+				_, model, _ := h.SavedAgentModel(instance.Name)
 				rows = append(rows, personalassistant.FolderReceiptRow{
-					Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance),
+					Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model),
 				})
 			}
 		}

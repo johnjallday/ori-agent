@@ -216,12 +216,11 @@ test('the card says what the library reads, and setup ends on songs with their f
   const card = await openCard(page);
   await expect(card).toContainText(READS_LINE);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal.locator('#folderSetupRunTitle')).toHaveText('Pick a song to start with', {
+  await expect(card.locator('#personalAssistantFolderSongs li')).toHaveCount(6, {
     timeout: 300_000
   });
   const songs = await page
-    .locator('#folderSetupRunSongs li')
+    .locator('#personalAssistantFolderSongs li')
     .evaluateAll(items =>
       items.map(item => [
         item.querySelector('strong')?.textContent || '',
@@ -236,9 +235,7 @@ test('the card says what the library reads, and setup ends on songs with their f
       )
     ])
   );
-  libraryURL = String(
-    await runModal.getByRole('link', { name: /^Browse all/ }).getAttribute('href')
-  );
+  libraryURL = String(await card.getByRole('link', { name: /^Browse all/ }).getAttribute('href'));
   await expect(card.locator('#personalAssistantFolderReceipt')).toContainText(
     'tempo, length and track count'
   );

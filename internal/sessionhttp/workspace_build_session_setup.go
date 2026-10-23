@@ -77,10 +77,13 @@ func buildSetupStopText(reason string) string {
 // buildSetupRunView is a setup run as the pane draws it: the plan's lines
 // with their states, and why it stopped.
 type buildSetupRunView struct {
-	Status          string                             `json:"status"`
-	StopReason      string                             `json:"stop_reason,omitempty"`
-	Lines           []personalassistant.FolderPlanLine `json:"lines"`
-	EntryCandidates []string                           `json:"entry_candidates,omitempty"`
+	Visual          *personalassistant.FolderSetupVisual      `json:"visual,omitempty"`
+	Hire            *personalassistant.FolderHire             `json:"hire,omitempty"`
+	Destination     *personalassistant.FolderSetupDestination `json:"destination,omitempty"`
+	Status          string                                    `json:"status"`
+	StopReason      string                                    `json:"stop_reason,omitempty"`
+	Lines           []personalassistant.FolderPlanLine        `json:"lines"`
+	EntryCandidates []string                                  `json:"entry_candidates,omitempty"`
 }
 
 // buildReviewGate is the build's lease on its own reviews: one setup request
@@ -172,11 +175,21 @@ func (h *Handler) readBuildSetupRun(ctx context.Context, userID string, projecti
 	if err != nil || offer == nil || offer.Setup == nil {
 		return nil
 	}
-	return &buildSetupRunView{
+	view := &buildSetupRunView{
+		Visual: personalassistant.CloneFolderSetupVisual(offer.Setup.Visual),
 		Status: offer.Setup.Status, StopReason: offer.Setup.StopReason,
 		Lines:           append([]personalassistant.FolderPlanLine(nil), offer.Setup.Lines...),
 		EntryCandidates: append([]string(nil), offer.Setup.EntryCandidates...),
 	}
+	if offer.Setup.Hire != nil {
+		copy := *offer.Setup.Hire
+		view.Hire = &copy
+	}
+	if offer.Setup.Destination != nil {
+		copy := *offer.Setup.Destination
+		view.Destination = &copy
+	}
+	return view
 }
 
 func respondBuildSetupRefusal(w http.ResponseWriter, status int, code, message string) {

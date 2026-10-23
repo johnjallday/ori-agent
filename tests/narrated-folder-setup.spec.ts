@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 
 /**
@@ -7,7 +8,7 @@ import { startJanitorBuildModel } from './helpers/janitor-build-model';
  * (tasks/prd-folder-hire-brief.md), and the Map places it by itself, with Move.
  *
  * No folder turn is sent: attaching a recognized folder already gives the build
- * its host plan, the in-pane review names the workspace, and Hire and start
+ * its host plan, the in-pane review names the workspace, and Hire & start
  * runs Home's real setup journey (the hired agent's first look then runs on the
  * sandbox's model). Run it against the
  * narrated demo sandbox, which installs the plugins and seeds the folders:
@@ -177,7 +178,7 @@ test('the build path recognizes the song, hires with a brief, and the Map places
   await expect(brief).toHaveValue(/\S/);
   await brief.fill('Mix the chorus first.');
   const setUp = page.locator('#workspaceBuildPlanReviewSetup');
-  await expect(setUp).toHaveText('Hire and start');
+  await expect(setUp).toHaveText('Hire & start');
   await expect(setUp).toBeEnabled({ timeout: 15_000 });
   const positions = await layoutPositions(page);
   await setUp.click();
@@ -232,20 +233,22 @@ test('Home’s Explore says the same lines, joins the existing Home, and Move ke
   // The card is a hire: its one question starts from the shape's default.
   await expect(page.getByLabel('What should it do with it?').first()).toHaveValue(/\S/);
   await page
-    .locator('button:visible', { hasText: /^Hire and start$/ })
+    .locator('button:visible', { hasText: /^(Hire|Assign) & start$/ })
     .first()
     .click();
 
-  // The run ends on its pop-up, which says where the building sits, with
-  // Move; nothing asks where to place it, before or after the drawer closes.
+  // The same card names the canonical Map placement; no placement prompt.
   const before = await layoutPositions(page);
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal).toHaveAttribute('data-phase', 'done', { timeout: 180_000 });
-  const onMap = runModal.locator('#folderSetupRunMap');
+  const result = page.locator('#personalAssistantFolderOffer');
+  await expect(result.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready', {
+    timeout: 180_000
+  });
+  await revealFolderSetupDetails(result);
+  const onMap = result.locator('#personalAssistantFolderMap');
   await expect(onMap).toContainText(`building sits inside ${HOME}.`);
   const move = await onMap.getByRole('link', { name: 'Move' }).getAttribute('href');
   expect(move).toMatch(/^\/\?move=/);
-  await runModal.locator('.btn-close, [data-bs-dismiss=modal]').first().click();
+  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
   await page.click('#personalAssistantClose');
   await expectNoPlacementAsk(page);
 
