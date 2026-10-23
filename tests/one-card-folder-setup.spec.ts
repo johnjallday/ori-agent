@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
+import { verifySavedFirstLook } from './helpers/folder-saved-report';
 
 // One card, one click: a recognized project folder shows its whole plan as a
 // hire, Hire & start runs it on the server, and the same card ends on a receipt.
@@ -29,6 +30,12 @@ import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 const sandbox = process.env.ORI_ONE_CARD_SANDBOX || '';
 const phase = process.env.ORI_ONE_CARD_PHASE || 'no-model';
 const providerPhase = phase === 'provider';
+// Slow local inference may take several tool rounds. Extend only the explicit
+// live-report wait, never the required finished-report assertion.
+const reportTimeout = Number(process.env.ORI_ONE_CARD_REPORT_TIMEOUT_MS || 180_000);
+if (!Number.isSafeInteger(reportTimeout) || reportTimeout < 1000 || reportTimeout > 900_000) {
+  throw new Error('ORI_ONE_CARD_REPORT_TIMEOUT_MS must be 1000–900000');
+}
 if (sandbox && !['no-model', 'provider'].includes(phase)) throw new Error('Unknown one-card phase');
 test.skip(!sandbox, 'requires ORI_ONE_CARD_SANDBOX (the demo sandbox directory)');
 test.describe.configure({ mode: 'serial' });
@@ -286,8 +293,9 @@ test('a model change preserves completed work and requires reviewed guided conti
 test('a hire with the reviewed model finishes on the same card and produces the first report', async ({
   page,
   request
-}) => {
+}, testInfo) => {
   test.skip(!providerPhase, 'fresh provider phase only');
+  test.setTimeout(reportTimeout + 60_000);
   const source = join(sandbox, 'Downloads', 'Third');
   const original = sourceSnapshot(source);
   await scan(request, 'downloads');
@@ -301,6 +309,11 @@ test('a hire with the reviewed model finishes on the same card and produces the 
     }
   });
   const card = await openCard(page);
+  await card
+    .locator('#personalAssistantFolderBrief')
+    .fill(
+      'Read the primary REAPER file once, using the directory ID returned by workspace_directories, not its name. Summarize only its actual contents in a concise final answer; reuse those findings rather than calling the same tools again.'
+    );
   await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
   const receipt = card.locator('#personalAssistantFolderReceipt li');
   await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
@@ -339,22 +352,30 @@ test('a hire with the reviewed model finishes on the same card and produces the 
   // Actual provider-backed acceptance needs a finished report, not merely a
   // configured model or a ready workspace with a failed first look.
   await expect(card.getByRole('link', { name: 'Open the full report', exact: true })).toBeVisible({
-    timeout: 180_000
+    timeout: reportTimeout
   });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const details = card.locator('#personalAssistantFolderDetails');
+  if ((await details.getAttribute('open')) !== null)
+    await details.locator('summary').first().click();
+  await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('live-ready-report.png') });
 
-  // Opening the workspace never starts it a second time, and shows the banner.
+  // Closing/reopening preserves the result. The shared read-only tail checks
+  // workspace/report navigation without repeating expensive live inference.
   const before = startCalls.length;
   const ids = await workspaceIDs(request);
   await page.locator('#personalAssistantClose').click();
   await page.locator('#personalAssistantLauncher').click();
   expect(await workspaceIDs(request)).toEqual(ids);
   expect(sourceSnapshot(source)).toEqual(original);
-  await page.goto(href!);
-  await page.waitForLoadState('load');
-  await expect(page.locator('.modal.show')).toHaveCount(0);
-  const banner = page.locator('#workspaceFirstTaskBanner');
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText(/first (task|look)/);
+  const savedOfferID = await page.evaluate(
+    () => (window as any).PersonalAssistantFolder.current()?.id
+  );
+  const reportHref = await card
+    .getByRole('link', { name: 'Open the full report', exact: true })
+    .getAttribute('href');
+  expect(reportHref).toBe(await verifySavedFirstLook(page, request, sandbox, savedOfferID, href!));
   expect(startCalls.length).toBe(before);
 });
 

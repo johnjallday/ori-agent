@@ -130,5 +130,35 @@ export function folderHireReportCases() {
       ).toBe(false);
     }
     expect((await request.get(other!.report_route || '/')).ok()).toBeTruthy();
+    // A 200 ticket page alone does not prove that its report is readable.
+    const tasks = async () => {
+      const response = await request.get(
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(other!.ref.workspace_id)}`
+      );
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).tasks;
+    };
+    const before = await tasks();
+    await page.goto(other!.report_route!);
+    const report = new URL(other!.report_route!, page.url());
+    expect(report.pathname).toMatch(/^\/workspaces\/[a-z0-9-]+\/task\/[A-Za-z0-9_-]+$/);
+    const taskId = report.pathname.split('/task/')[1];
+    const task = before.find((item: { id: string }) => item.id === taskId);
+    expect(task?.status).toBe('completed');
+    expect(task?.result).toBeTruthy();
+    const output = page.locator('#workspace-task-output');
+    await expect(output).toBeVisible();
+    const plain = (text: string) =>
+      text
+        .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+        .replace(/[`*#]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    for (const paragraph of task.result.split(/\n\s*\n/).filter(Boolean)) {
+      await expect.poll(async () => plain(await output.innerText())).toContain(plain(paragraph));
+    }
+    const executions = (items: { id: string; execution_count?: number }[]) =>
+      items.map(item => [item.id, item.execution_count || 0]).sort();
+    expect(executions(await tasks())).toEqual(executions(before));
   });
 }

@@ -237,13 +237,31 @@ Feature evidence and the post-implementation guide stay ignored/local at
 first report. Both phases are required. Supply `ORI_ONE_CARD_SANDBOX` and an
 explicit `ORI_ONE_CARD_PROVIDER` / `ORI_ONE_CARD_MODEL` through `scripts/e2e.sh`.
 Suppress ambient cloud keys and CLI credentials in the demo launch. No implicit
-Codex selection is made.
+Codex selection is made. Slow local inference can explicitly set
+`ORI_ONE_CARD_REPORT_TIMEOUT_MS=900000` (maximum 15 minutes; default 3 minutes).
+This only extends the report wait; a finished report is still required. The
+provider phase enters an explicit read-only brief through the normal review field;
+it does not supply a report, a tool response, or altered execution permissions.
+A timeout does not cancel the server task. Inspect its state before repeating anything, and
+use a new provider-phase store rather than replaying setup into a used store.
 
 Confirm the sandbox workspace root. If the initial offer has no plan, follow its
 existing guided setup to install/enable the reviewed integration and Home provider;
 record the actual versions. Changing a model after approval does not authorize a
 silent retry: **Review changed setup** opens the existing guided continuation.
 The provider phase instead reviews its intended model before confirming the hire.
+
+Follow **Open the full report** / **Read the full report** directly to the stored
+task output, not only a ticket's status. Legacy ticket-only data offers **Open task**.
+Reloading that view must preserve workspace/task IDs, execution counts and source
+bytes; it must not run the task or
+its suggestion. A successful HTTP response containing only ticket status is not
+proof that a report is readable. After slow inference or a browser interruption,
+`tests/one-card-saved-report.spec.ts` can recheck this read-only tail with explicit
+`ORI_ONE_CARD_SANDBOX` and `ORI_ONE_CARD_REPORT_OFFER_ID`. It shares the provider
+suite's assertions, never provisions or retries work, and supplements rather than
+replaces fresh review/staffing and live-execution evidence. A finished task is not
+re-announced in the workspace's first-task banner on a new visit.
 
 A listed model is not proof of usable execution. For local models, verify the
 **loaded** context capacity, not only the advertised maximum. Ori's
