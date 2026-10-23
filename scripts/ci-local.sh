@@ -21,7 +21,10 @@
 #               run at a time per machine: a lock in $TMPDIR queues other
 #               worktrees' gates (ORI_CI_LOCAL_LOCK=0 turns the queue off), and
 #               half the CPUs' worth of packages run at once
-#               (ORI_UNIT_TEST_PARALLEL=N overrides)
+#               (ORI_UNIT_TEST_PARALLEL=N overrides). The heaviest packages
+#               start first, and packages whose inputs did not change come
+#               back from Go's test cache (ORI_UNIT_TEST_CACHE=0 reruns every
+#               package, as CI does; use it when chasing a flake)
 #   devtools    make test-devtools (fake-tool wrappers and Ori-owned adapters)
 #   test-js     make test-js (npm run test:modules), as CI's Frontend Lint
 #   lint-js     npm run lint, as CI's Frontend Lint
@@ -409,9 +412,15 @@ ci_local_run_gate() {
       # Keep coverage/count/timeout flags and reporting in CI's one runner.
       # A caller's hosted-runner scope or shard must not narrow the local gate.
       local parallel="${ORI_UNIT_TEST_PARALLEL:-$(ci_local_unit_parallel)}"
+      local cache="${ORI_UNIT_TEST_CACHE:-1}"
       echo "ci-local: unit tests run $parallel packages at a time (ORI_UNIT_TEST_PARALLEL overrides)"
+      if [[ "$cache" == 1 ]]; then
+        echo "ci-local: unchanged packages come back from Go's test cache (ORI_UNIT_TEST_CACHE=0 reruns every package, as CI does)"
+      else
+        echo "ci-local: every package reruns (ORI_UNIT_TEST_CACHE=$cache)"
+      fi
       ci_local_with_unit_lock env RUNNER_OS= ORI_UNIT_SHARD= ORI_UNIT_SHARD_COUNT= \
-        ORI_UNIT_TEST_PARALLEL="$parallel" ./scripts/run-unit-tests.sh
+        ORI_UNIT_TEST_PARALLEL="$parallel" ORI_UNIT_TEST_CACHE="$cache" ./scripts/run-unit-tests.sh
       ;;
     test-unit)
       make test-unit

@@ -45,8 +45,11 @@ const (
 	// HomeActionBuildWorkspace opens "Build with your assistant" in the
 	// browser. It is deliberately not a mutation: the server never executes it.
 	HomeActionBuildWorkspace = "build_workspace"
-	// Opens an editable form only; never executed through ConfirmedAction.
-	HomeActionPrepareWorkspace = "prepare_workspace"
+	// HomeActionHireAgent is the assistant's offer to hire an agent for the
+	// work a request described, drawn as the shared Hire card. It is never
+	// executed through ConfirmedAction: the card's Hire and start is the
+	// user's own POST /api/agents/hire.
+	HomeActionHireAgent = "hire_agent"
 	// HomeActionOpenSetupQuest opens a guided setup in the browser. Its
 	// arguments name the quest by key (quest_id, source, plugin_id) and the
 	// browser builds the link; it is not a mutation and the server never
@@ -265,6 +268,10 @@ type HomeAssistantAskHandler struct {
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.
 	Drafts PersonalAssistantDraftSaver
+	// HireProposals keeps the hires the assistant proposes in a conversation,
+	// so a reload shows the same card and a decline is remembered; nil offers
+	// no hire.
+	HireProposals personalassistant.HireProposalStore
 	// Operations records what the assistant asked Ori to do in the app and what
 	// the watching tab observed. Nil registers no operation tool and loads no
 	// operating skill.
@@ -550,6 +557,16 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	if folderTurn != nil {
 		h.prepareContinuity(ctx, prompt, conversation)
+		// A folder Ori recognizes as something it can set up is answered by the
+		// folder's own card (#689: the hire card, or the review it offers while
+		// its plugin is missing), so the request's hire offer stays out of the
+		// way; any other folder leaves it available, as a link does.
+		if h.folderOwnsTheOffer(ctx, folderTurn) {
+			ctx = context.WithValue(ctx, hireProposalWithheldKey{}, true)
+		} else if proposal := h.hireProposalTurn(ctx, conversation); proposal != nil {
+			ctx = context.WithValue(ctx, hireProposalKey{}, proposal)
+			defer func() { proposal.finalize(ctx, &response) }()
+		}
 		return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
 	}
 
@@ -592,11 +609,11 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 	}
 
-	// A proposal is part of the normal model turn, not a second generation
+	// A hire proposal is part of the normal model turn, not a second generation
 	// hidden behind magic wording. Folder setup retains its own review owner.
-	if proposal := h.workspaceProposalTurn(conversation); proposal != nil {
-		ctx = context.WithValue(ctx, workspaceProposalKey{}, proposal)
-		defer func() { proposal.finalize(&response) }()
+	if proposal := h.hireProposalTurn(ctx, conversation); proposal != nil {
+		ctx = context.WithValue(ctx, hireProposalKey{}, proposal)
+		defer func() { proposal.finalize(ctx, &response) }()
 	}
 	if isAssistantWorkspaceReviewRequest(prompt) && conversation != nil {
 		intent = homeAssistantConversationIntent.Key
@@ -664,11 +681,16 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 		answer = withHostLeads(ctx, answer)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "answered"})
-		return HomeAssistantAskResponse{
+		reply := HomeAssistantAskResponse{
 			Response: answer, Intent: intent, Identity: identity,
 			Conversation: h.storeTurn(ctx, conversation, prompt, answer),
 			DraftContext: draftContext,
 		}
+		// Without tools the model cannot offer a hire; the host's chip can.
+		if chip := h.hireChipForRequest(prompt); chip != nil {
+			reply.Actions = append(reply.Actions, *chip)
+		}
+		return reply
 	}
 
 	window := NormalizeHomeDateWindow(req.DateWindow, DefaultHomeDateWindowForPrompt(prompt))
@@ -726,9 +748,9 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 		err = ctx.Err()
 	}
 	switch {
-	case errors.Is(err, errWorkspaceProposalInvalid):
-		reason = "invalid_workspace_proposal"
-		msg = "The model returned a workspace proposal that couldn't be safely used. No review was prepared and nothing was created. Your draft is kept; open the workspace form manually or try again."
+	case errors.Is(err, errHireProposalInvalid):
+		reason = "invalid_hire_proposal"
+		msg = "The model returned a hire proposal that couldn't be safely used. Nothing was hired or created. Your draft is kept; try again, or hire from the Agents page."
 	case errors.Is(err, context.DeadlineExceeded):
 		reason = "model_timeout"
 		msg = "The model took too long to answer. Your draft is kept and nothing was created; open the workspace form manually or try again."
@@ -849,12 +871,12 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if research != nil {
 		registry = &assistantResearchRegistry{base: registry, research: research}
 	}
-	proposal := workspaceProposalFromContext(ctx)
+	proposal := hireProposalFromContext(ctx)
 	if proposal != nil {
 		if err := proposal.revalidate(ctx); err != nil {
 			return "", err
 		}
-		registry = &workspaceProposalRegistry{base: registry, turn: proposal}
+		registry = &hireProposalRegistry{base: registry, turn: proposal}
 	}
 	operations := operationTurnFromContext(ctx)
 	if operations != nil {
@@ -890,10 +912,14 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	// The turn's rules travel as the request's system prompt, which every
 	// provider sends; a system-role message is not part of every provider's
 	// contract. Notes added later in the turn are appended to systemText, and
-	// each request rebuilds its system prompt from it.
-	proposalPrompt := workspaceProposalManualInstructions
-	if proposal != nil && provider.Capabilities().SupportsTools {
-		proposalPrompt = workspaceProposalInstructions
+	// each request rebuilds its system prompt from it. The hire offer's rules
+	// are among them: the tool's where it is offered, the folder card's where
+	// a recognized folder owns the offer, the chip's where there are no tools.
+	proposalPrompt := hireProposalManualInstructions
+	if hireProposalWithheld(ctx) {
+		proposalPrompt = hireProposalFolderInstructions
+	} else if proposal != nil && provider.Capabilities().SupportsTools {
+		proposalPrompt = hireProposalInstructions
 	}
 	systemText := turn.system + plainTextReplies + researchSystemPrompt(research, provider.Capabilities().SupportsTools) + proposalPrompt
 	conversation := make([]llm.Message, 0, len(turn.history)+1)
@@ -907,7 +933,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		recallPrompt = externalRecallPrompt
 	}
 	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence+
-		reviewedIntegrationTurnFromContext(ctx).referencePrompt()+folderPathTurnFromContext(ctx).referencePrompt()+recallPrompt))
+		reviewedIntegrationTurnFromContext(ctx).referencePrompt()+folderPathTurnFromContext(ctx).referencePrompt()+recallPrompt+proposal.prompt()))
 	if len(tools) == 0 && scope != nil {
 		systemText += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}
@@ -936,13 +962,15 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		// another completion that could claim creation. Reject mixed batches
 		// before executing ANY call; this tool grants no other operations.
 		for _, call := range resp.ToolCalls {
-			if call.Name == workspaceProposalTool {
+			if call.Name == hireProposalTool {
 				if proposal == nil || len(tools) == 0 || len(resp.ToolCalls) != 1 {
-					return "", errWorkspaceProposalInvalid
+					return "", errHireProposalInvalid
 				}
 				if research != nil && research.revalidate(ctx) != nil {
 					return "", assistantdiscovery.ErrReviewRefused
 				}
+				// The one line of prose beside the call is kept above the card.
+				proposal.lead = hireProposalLead(resp.Content)
 				return registry.Execute(ctx, call.Name, call.Arguments)
 			}
 		}

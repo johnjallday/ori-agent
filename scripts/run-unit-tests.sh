@@ -3,7 +3,7 @@
 # this wrapper owns a separate, newly allocated evidence directory.
 set -euo pipefail
 if [[ $# -ne 0 ]]; then
-  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux; ORI_UNIT_TEST_PARALLEL caps packages run at once)\n' >&2
+  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux; ORI_UNIT_TEST_PARALLEL caps packages run at once; ORI_UNIT_TEST_CACHE=1 lets unchanged packages come back from Go'"'"'s test cache)\n' >&2
   exit 2
 fi
 if [[ -n "${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]; then
@@ -15,6 +15,13 @@ fi
 # Unset keeps Go's default (one package per CPU), which CI uses; ci-local sets it.
 if [[ -n "${ORI_UNIT_TEST_PARALLEL:-}" && ! "${ORI_UNIT_TEST_PARALLEL}" =~ ^[1-9][0-9]*$ ]]; then
   printf 'ORI_UNIT_TEST_PARALLEL must be a positive number of packages\n' >&2
+  exit 2
+fi
+# Unset or 0 reruns every package (-count=1), which CI needs so flakes surface;
+# ci-local sets 1 so packages whose inputs did not change are served from Go's
+# test cache instead of running again.
+if [[ -n "${ORI_UNIT_TEST_CACHE:-}" && ! "${ORI_UNIT_TEST_CACHE}" =~ ^[01]$ ]]; then
+  printf 'ORI_UNIT_TEST_CACHE must be 0 or 1\n' >&2
   exit 2
 fi
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
@@ -132,10 +139,26 @@ if [[ "$package_count" -eq 0 ]]; then
   finish 2
   exit 2
 fi
+# The selection stays as listed; the run order puts the heaviest package first.
+# go test starts its list in order under -p, and the package that decides the
+# wall clock used to queue behind a hundred quick ones.
+if python3 "$script_dir/unit-shards.py" order < "$artifacts/packages.txt" > "$artifacts/run-order.txt" 2>> "$artifacts/stderr.txt"; then
+  packages=()
+  while IFS= read -r package; do
+    [[ -n "$package" ]] && packages+=("$package")
+  done < "$artifacts/run-order.txt"
+else
+  status=$?
+  finish "$status"
+  exit "$status"
+fi
 # Coverage is merged from the Ubuntu shards only (unit-shards.py checks these
 # exact flags there). The platform leg's profile was never consumed, and atomic
 # counters cost it ~40% of its race-mode wall clock, so it runs without them.
-flags=(-json -short -race -timeout 30m -count=1)
+flags=(-json -short -race -timeout 30m)
+if [[ "${ORI_UNIT_TEST_CACHE:-0}" != 1 ]]; then
+  flags+=(-count=1)
+fi
 if [[ "$scope" != platform ]]; then
   flags+=(-covermode=atomic)
 fi

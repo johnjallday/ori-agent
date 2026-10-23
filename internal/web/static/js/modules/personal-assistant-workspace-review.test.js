@@ -76,9 +76,70 @@ for (const changed of [
         'folderOfferId',
         'buildFirstMessage',
         'teamLock',
-        'stageBlueprintRoles'
+        'stageBlueprintRoles',
+        'staffPrimaryRole'
       ])
         assert.equal(seed[forbidden], undefined);
     }
   });
 }
+
+// The hire card's Adjust: the same form, prefilled with the role's blueprint,
+// the brief as the goal and one new agent in the primary seat. Nothing else
+// travels, and nothing is created until the form's own Create.
+test('Adjust from the hire card prefills the blueprint, the goal and the primary seat', () => {
+  const calls = [];
+  const window = {
+    location: { pathname: '/' },
+    PersonalAssistantConversation: { currentId: () => 'canonical', notify: () => {} },
+    PersonalAssistantPanel: {
+      _state: { personalAssistant: { state: 'active', state_version: 5 } },
+      close: () => calls.push('close')
+    },
+    PersonalAssistantFolderContext: { request: () => null },
+    sessionManager: { showAddWorkspaceModal: seed => calls.push(seed) }
+  };
+  const open = vm.runInNewContext(`(${opener})`, {
+    window,
+    buildHomeRouteContext: () => ({ workspace_id: '', selection_workspace_id: '' }),
+    normalizeHomeRouteContext: value => value
+  });
+  const opened = open(
+    {
+      conversation_id: 'canonical',
+      state_version: 5,
+      entry_point: 'assistant_hire_adjust',
+      name: 'CRM comparison',
+      description: 'Compare the three CRMs and recommend one by Friday.',
+      blueprint: 'research-project',
+      staff_primary_role: { name: ' Ruth ' }
+    },
+    { page_path: '/', workspace_id: '', selection_workspace_id: '' }
+  );
+  assert.equal(opened, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[1])), {
+    entryPoint: 'assistant_hire_adjust',
+    name: 'CRM comparison',
+    description: 'Compare the three CRMs and recommend one by Friday.',
+    stayAfterCreate: true,
+    blueprint: 'research-project',
+    staffPrimaryRole: { name: 'Ruth' }
+  });
+  // A Blank role's hire sends no blueprint; an unknown entry point is the
+  // ordinary review.
+  const blank = open(
+    {
+      conversation_id: 'canonical',
+      state_version: 5,
+      name: 'Plan',
+      description: 'Plan it.',
+      blueprint: '',
+      entry_point: 'forged'
+    },
+    { page_path: '/', workspace_id: '', selection_workspace_id: '' }
+  );
+  assert.equal(blank, true);
+  assert.equal(calls[3].entryPoint, 'assistant_workspace_review');
+  assert.equal(calls[3].blueprint, undefined);
+  assert.equal(calls[3].staffPrimaryRole, undefined);
+});

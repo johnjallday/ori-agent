@@ -80,7 +80,7 @@ const UNANSWERED_BECAUSE = {
   model_timeout: 'the model timed out',
   request_cancelled: 'the request was cancelled',
   model_not_configured: 'no system model is set',
-  invalid_workspace_proposal: 'its proposal could not be used',
+  invalid_hire_proposal: 'its hire proposal could not be used',
   context_changed: 'the conversation changed'
 };
 
@@ -404,6 +404,12 @@ async function resume(id, options = {}) {
     window.PersonalAssistantFolderContext?.resetEvents?.();
     const conversation = result.body.conversation;
     const messages = result.body.messages || [];
+    // A reply that offered a hire shows its one lead line; its card is drawn
+    // under it afterwards from the saved proposal, in the state it is in now.
+    const hire = window.PersonalAssistantHireOffer;
+    const offered = hire?.offeredMessageIds
+      ? hire.offeredMessageIds(result.body.hire_proposals)
+      : new Set();
     window.PersonalAssistantTranscript?.beginHydration?.();
     hydrationBatch = true;
     for (const message of messages) {
@@ -416,7 +422,10 @@ async function resume(id, options = {}) {
         );
         continue;
       }
-      const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
+      const row = window.OriAskRouting?.appendMessage?.(
+        message.role,
+        offered.has(message.id) ? hire.lead(message.content) : message.content
+      );
       renderTurnWorkspace(row, message.workspace_context, { historical: true });
       if (message.role === 'user' && !message.imported)
         renderFolderFocus(row, message.folder_focus);
@@ -436,6 +445,14 @@ async function resume(id, options = {}) {
             attachArrangementHistory(row, conversation.id, reference);
         }
       }
+    }
+    if (offered.size && typeof hire?.hydrate === 'function') {
+      hire.hydrate(
+        conversation.id,
+        result.body.hire_proposals,
+        result.body.hire_catalog || null,
+        window.OriAskRouting?.hireCardOptions?.(conversation.id) || {}
+      );
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
     // its latest part even when the server returned all of it.

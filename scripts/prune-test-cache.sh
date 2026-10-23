@@ -13,7 +13,11 @@ Options:
   --dry-run                 Report what would be pruned without deleting it.
   --temp-dir DIR            Scan DIR for stale Ori artifacts instead of TMPDIR.
   --older-than-hours HOURS  Stale-artifact minimum age (default: 24).
-  --max-go-cache-kib KIB    Go build-cache limit (default: 20971520 / 20 GiB).
+  --max-go-cache-kib KIB    Go build-cache limit (default: 62914560 / 60 GiB).
+                            Crossing it runs `go clean -cache`, which discards
+                            every cached unit-test result and race build; a
+                            full local gate adds about 2.7 GiB, so the limit
+                            must leave room for many gates.
   -h, --help                Show this help text.
 
 Environment:
@@ -47,7 +51,7 @@ script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 cleanup_script="$script_dir/clean-test-artifacts.sh"
 requested_temp_dir="${TMPDIR:-/tmp}"
 older_than_hours="${ORI_STALE_ARTIFACT_HOURS:-24}"
-max_go_cache_kib="${ORI_GO_CACHE_MAX_KIB:-20971520}"
+max_go_cache_kib="${ORI_GO_CACHE_MAX_KIB:-62914560}"
 go_bin="${ORI_GO_BIN:-go}"
 dry_run=false
 

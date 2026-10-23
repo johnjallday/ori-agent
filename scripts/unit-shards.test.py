@@ -2,6 +2,7 @@
 """Offline contract: sharding cannot silently narrow the unit/coverage gate."""
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -123,6 +124,63 @@ class UnitShardsTest(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "select", "--shard", "5", "--count", "4"],
             input="\n".join(self.packages), text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_order_runs_the_heaviest_package_first(self):
+        unknown = shards.MODULE + "internal/unknown"
+        selected = self.packages[::-1] + [unknown]
+        ordered = shards.order(selected, self.weights)
+        # Weights fall from p0 to p7; an unweighted package gets the default
+        # and sorts by name among its equals. Nothing is added or dropped.
+        self.assertEqual(ordered, self.packages + [unknown])
+        self.assertEqual(sorted(ordered), sorted(selected))
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "order"],
+            input="\n".join(selected), text=True, capture_output=True, check=True,
+        )
+        self.assertEqual(result.stdout.splitlines(), shards.order(selected, shards.load_weights()))
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "order"],
+            input="../evil", text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_weights_come_from_package_results_above_the_default(self):
+        quick, slow, slower, cached = self.packages[:4]
+
+        def event(package, action="pass", elapsed=None, test=None):
+            data = {"Action": action, "Package": package}
+            if elapsed is not None:
+                data["Elapsed"] = elapsed
+            if test is not None:
+                data["Test"] = test
+            return json.dumps(data)
+
+        stream = "\n".join([
+            event(quick, "start"),
+            event(slow, elapsed=12.4, test="TestOne"),
+            event(quick, elapsed=0.5),
+            event(slow, elapsed=12.4),
+            event(slower, "fail", elapsed=30.0),
+            event(cached, elapsed=0),
+            "",
+        ])
+        self.assertEqual(shards.weights_from_events(stream), {slow: 13, slower: 30})
+        for text in ("", event(quick, "start"), event("../evil", elapsed=20)):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                shards.weights_from_events(text)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "weights"],
+            input=stream, text=True, capture_output=True, check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), {slow: 13, slower: 30})
+        self.assertTrue(result.stdout.endswith("}\n"))
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "weights"],
+            input="not json", text=True, capture_output=True, check=False,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")

@@ -130,7 +130,10 @@ type Handler struct {
 	editCarrier EditCarrier
 	// hireRecords keeps hires from the Agents page (agents_hire.go); hireMu
 	// runs one hire at a time so a repeated request id finds the first.
-	hireRecords     personalassistant.HireRecordStore
+	hireRecords personalassistant.HireRecordStore
+	// hireProposals keeps the assistant's conversation offers; a hire whose
+	// request id is a proposal's id marks that proposal hired.
+	hireProposals   personalassistant.HireProposalStore
 	hireLookStarter HireLookStarter
 	runnableModel   RunnableModelChooser
 	hireWorkspaces  HireWorkspaces

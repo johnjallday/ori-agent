@@ -5,8 +5,12 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/ori-unit-wrapper-test.XXXXXX")"
 trap 'rm -rf -- "$root"' EXIT
 mkdir -p "$root/repo/scripts" "$root/bin" "$root/artifacts" "$root/tmp"
 cp "$script_dir/run-unit-tests.sh" "$script_dir/run-test-command.sh" "$script_dir/prune-test-cache.sh" "$script_dir/list-unit-packages.sh" "$script_dir/unit-shards.py" "$script_dir/unit-shard-weights.json" "$root/repo/scripts/"
-# Do not inherit the enclosing CI shard or the local gate's package cap.
-unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT ORI_UNIT_TEST_PARALLEL
+# Do not inherit the enclosing CI shard or the local gate's package cap and
+# cache setting.
+unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT ORI_UNIT_TEST_PARALLEL ORI_UNIT_TEST_CACHE
+# The fixture weights make internal/two the heavier package, so the run order
+# (heaviest first) differs from the alphabetical selection.
+printf '{"github.com/johnjallday/ori-agent/internal/two": 50}\n' > "$root/repo/scripts/unit-shard-weights.json"
 cat > "$root/reporter" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
@@ -91,6 +95,15 @@ grep -q -- '-coverprofile=.*/ori-unit\..*/coverage.txt' "$TEST_ARGUMENTS"
 # Unset, Go keeps its own package parallelism (CI's runs).
 if grep -qx -- '-p' "$TEST_ARGUMENTS"; then printf 'Unrequested -p\n' >&2; exit 1; fi
 grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"
+# Heaviest first: internal/two reaches go test ahead of internal/one although
+# the selection lists them alphabetically, and the selection itself is unchanged.
+two_line="$(grep -n 'internal/two$' "$TEST_ARGUMENTS" | cut -d: -f1)"
+one_line="$(grep -n 'internal/one$' "$TEST_ARGUMENTS" | cut -d: -f1)"
+[[ "$two_line" -lt "$one_line" ]] || { printf 'Packages did not run heaviest first\n' >&2; exit 1; }
+for directory in "$root/artifacts"/ori-unit.*; do
+  [[ "$(head -1 "$directory/packages.txt")" == 'github.com/johnjallday/ori-agent/internal/one' ]]
+  [[ "$(head -1 "$directory/run-order.txt")" == 'github.com/johnjallday/ori-agent/internal/two' ]]
+done
 RUNNER_OS=macOS check_case platform 0 0 0
 grep -qx 'github.com/johnjallday/ori-agent/internal/platform' "$TEST_ARGUMENTS"
 grep -qx 'github.com/johnjallday/ori-agent/cmd/server' "$TEST_ARGUMENTS"
@@ -115,13 +128,14 @@ for directory in "$root/artifacts"/ori-unit.*; do
 done
 [[ "$count" -eq 11 ]]
 
-# Each shard executes only its assigned packages, with exactly the original flags.
+# Each shard executes only its assigned packages, with exactly the original
+# flags. The planner places the heavier fixture package (internal/two) first.
 ORI_UNIT_SHARD=1 ORI_UNIT_SHARD_COUNT=2 check_case shard-one 0 0 0
-grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"
-if grep -qx 'github.com/johnjallday/ori-agent/internal/two' "$TEST_ARGUMENTS"; then exit 1; fi
-ORI_UNIT_SHARD=2 ORI_UNIT_SHARD_COUNT=2 check_case shard-two 0 0 0
 grep -qx 'github.com/johnjallday/ori-agent/internal/two' "$TEST_ARGUMENTS"
 if grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"; then exit 1; fi
+ORI_UNIT_SHARD=2 ORI_UNIT_SHARD_COUNT=2 check_case shard-two 0 0 0
+grep -qx 'github.com/johnjallday/ori-agent/internal/one' "$TEST_ARGUMENTS"
+if grep -qx 'github.com/johnjallday/ori-agent/internal/two' "$TEST_ARGUMENTS"; then exit 1; fi
 for flag in -json -short -race -timeout 30m -count=1 -covermode=atomic; do
   grep -qx -- "$flag" "$TEST_ARGUMENTS"
 done
@@ -157,6 +171,25 @@ for parallel in 0 -2 two 1.5; do
   [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid ORI_UNIT_TEST_PARALLEL ran tests\n' >&2; exit 1; }
 done
 
+# Reusing Go's test cache drops exactly -count=1, from the recorded flags too;
+# 0 is the fresh run CI makes, and anything else is refused before any test.
+ORI_UNIT_TEST_CACHE=1 check_case cache 0 0 0
+if grep -qx -- '-count=1' "$TEST_ARGUMENTS"; then printf 'ORI_UNIT_TEST_CACHE=1 still forced a fresh run\n' >&2; exit 1; fi
+for flag in -json -short -race -timeout 30m -covermode=atomic; do
+  grep -qx -- "$flag" "$TEST_ARGUMENTS"
+done
+grep -qx 'flags=-json -short -race -timeout 30m -covermode=atomic' "$root/artifacts"/ori-unit.*/metadata.txt
+ORI_UNIT_TEST_CACHE=0 check_case fresh 0 0 0
+grep -qx -- '-count=1' "$TEST_ARGUMENTS"
+for cache in 2 yes true; do
+  rm -f "$TEST_ARGUMENTS"
+  if ORI_UNIT_TEST_CACHE="$cache" "$runner" > "$root/invalid-cache.log" 2>&1; then
+    printf 'Invalid ORI_UNIT_TEST_CACHE accepted: %s\n' "$cache" >&2
+    exit 1
+  fi
+  [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid ORI_UNIT_TEST_CACHE ran tests\n' >&2; exit 1; }
+done
+
 WAIT_FOR_SIGNAL=1 "$runner" > "$root/cancel.log" 2>&1 &
 parent=$!
 for ((i=0; i<100; i++)); do
@@ -175,4 +208,4 @@ grep -q 'Test command exit status: 143' "$root/cancel.log"
 for file in "$root/artifacts"/ori-unit.*/events.json; do
   if grep -q 'Cache pruning\|Test sandbox' "$file"; then exit 1; fi
 done
-printf 'unit wrapper: scope, flags, owned artifacts, failures and cancellation passed\n'
+printf 'unit wrapper: scope, run order, flags, cache switch, owned artifacts, failures and cancellation passed\n'

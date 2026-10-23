@@ -7149,7 +7149,13 @@ const sessionManager = {
   stageGuidedBlueprintRoles() {
     const context = this.workspaceCreatorContext;
     const api = window.CreateWorkspaceTeamDraft;
-    if (!context?.stageBlueprintRoles || context.blueprintRolesStaged || !api?.declaredRoles)
+    const primaryOnly = !context?.stageBlueprintRoles && context?.staffPrimaryRole?.name;
+    if (
+      !context ||
+      (!context.stageBlueprintRoles && !primaryOnly) ||
+      context.blueprintRolesStaged ||
+      !api?.declaredRoles
+    )
       return;
     const draft = this.ensureWorkspaceTeamDraft();
     if (
@@ -7160,18 +7166,25 @@ const sessionManager = {
     ) {
       return;
     }
-    for (const role of api.declaredRoles(draft)) {
+    const declared = api.declaredRoles(draft);
+    const primary =
+      declared.find(role => role.primary) || declared.find(role => role.scope !== 'home');
+    for (const role of declared) {
       if (role.scope === 'home' || role.heldElsewhere || draft.roleFills?.has(role.roleId))
         continue;
-      const saved = api.findSavedAgent(draft, role.label);
+      // Adjust from the assistant's hire card staffs only the primary seat,
+      // under the card's name; the other roles stay open to fill later.
+      if (primaryOnly && role !== primary) continue;
+      const name = primaryOnly ? context.staffPrimaryRole.name : role.label;
+      const saved = api.findSavedAgent(draft, name);
       api.setRoleFill(
         draft,
         role.roleId,
         saved && api.isAttachableSavedAgent?.(saved)
-          ? { mode: api.FILL_ASSIGN, name: role.label }
+          ? { mode: api.FILL_ASSIGN, name }
           : {
               mode: api.FILL_CREATE,
-              name: role.label,
+              name,
               type: role.proposed?.type || '',
               systemPrompt: role.proposed?.system_prompt || ''
             }
