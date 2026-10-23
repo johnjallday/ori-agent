@@ -8,8 +8,8 @@ import { mockHiredAssistant } from './helpers/hired-assistant';
 //   source scripts/wt.sh; wt demo 8931
 //   ./scripts/e2e.sh --port 8931 tests/ori-guide.a11y.spec.js
 //
-// axe is scoped to the guide's own root so pre-existing chrome (navbar,
-// sidebar) cannot mask a regression introduced here — the same approach the
+// axe is scoped to the guide's own root so pre-existing chrome (the navbar)
+// cannot mask a regression introduced here — the same approach the
 // roster suite uses.
 //
 // Home, standalone Agents, and other authenticated shells share one navbar

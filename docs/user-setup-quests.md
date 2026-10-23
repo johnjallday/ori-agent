@@ -2,7 +2,7 @@
 
 A **setup quest** is a saved guide attached to a project template you own. It helps someone build a group, connect a project, create its workspace, and review staffing without turning the template into executable code.
 
-Open **Templates**, select a user-owned template, and choose the **Setup quest** tab. Ori shows whether the template is ready and what is missing when it is not.
+Open **Templates** (Settings gear → **Tools & integrations** → **Templates**), select a user-owned template, and choose the **Setup quest** tab. Ori shows whether the template is ready and what is missing when it is not.
 
 ## What a quest can contain
 

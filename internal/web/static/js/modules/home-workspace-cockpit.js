@@ -1448,7 +1448,9 @@ export function renderAttentionSectionHTML(items) {
       )
       .join('') +
     (items.length > 6 ? `<li class="cockpit-today-more">+${items.length - 6} more</li>` : '') +
-    '</ul>'
+    '</ul>' +
+    // Action Center left the top bar; Home is its way in (nav-collapse FR8).
+    '<a class="cockpit-today-see-all" href="/action-center">See all in Action Center</a>'
   );
 }
 

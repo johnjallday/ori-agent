@@ -1,6 +1,7 @@
 package web
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -175,8 +176,8 @@ func TestWorkspaceDetailHasOneRuntimeCapabilityEntryPoint(t *testing.T) {
 }
 
 // TestRenderTemplatesPage confirms the /templates page renders, carries the
-// master/detail scaffold and lifecycle controls, and highlights its sidebar
-// link when CurrentPage is "templates".
+// master/detail scaffold and lifecycle controls, and marks the Settings gear as
+// its way in when CurrentPage is "templates".
 func TestRenderTemplatesPage(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -222,9 +223,9 @@ func TestRenderTemplatesPage(t *testing.T) {
 		}
 	}
 
-	// The Templates sidebar link should be marked active for this page.
-	if !strings.Contains(html, `href="/templates" class="sidebar-nav-link active"`) {
-		t.Errorf("templates sidebar link not highlighted as active")
+	// Templates is reached through Settings, so the gear is the current destination.
+	if !strings.Contains(openingTag(t, html, `id="navSettingsLink"`), `aria-current="page"`) {
+		t.Errorf("Settings gear not marked current on the Templates page")
 	}
 }
 
@@ -520,22 +521,204 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 	}
 }
 
-func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
+// navbarMarkup returns the rendered top bar, from its opening tag to </nav>.
+func navbarMarkup(t *testing.T, html string) string {
+	t.Helper()
+	start := strings.Index(html, `<nav class="navbar`)
+	if start < 0 {
+		t.Fatal("rendered page has no navbar")
+	}
+	end := strings.Index(html[start:], `</nav>`)
+	if end < 0 {
+		t.Fatal("the navbar is never closed")
+	}
+	return html[start : start+end]
+}
+
+// hiddenAttr matches a bare hidden attribute, not aria-hidden.
+var hiddenAttr = regexp.MustCompile(`\shidden[\s>]`)
+
+// openingTag returns the tag that carries marker, from its "<" to its ">".
+func openingTag(t *testing.T, html, marker string) string {
+	t.Helper()
+	at := strings.Index(html, marker)
+	if at < 0 {
+		t.Fatalf("markup has no %s", marker)
+	}
+	start := strings.LastIndex(html[:at], "<")
+	end := strings.Index(html[at:], ">")
+	return html[start : at+end+1]
+}
+
+// The top bar is Home, Agents and a Settings gear on every page. Vaults joins
+// only on demand, Action Center is reached from Home, and the gear is the
+// current destination on Settings and every page its hub links to.
+func TestNavbarCollapsesToHomeAgentsAndSettingsGear(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
+	for _, tc := range []struct {
+		template, page string
+		gearActive     bool
+	}{
+		{"index", "index", false},
+		{"agents-roster", "agents", false},
+		{"action-center", "action-center", false},
+		{"workspace-detail", "workspaces", false},
+		{"vault", "vault", false},
+		{"settings", "settings", true},
+		{"skills", "skills", true},
+		{"plugins", "plugins", true},
+		{"profile", "profile", true},
+	} {
+		data := GetDefaultData()
+		data.CurrentPage = tc.page
+		html, err := r.RenderTemplate(tc.template, data)
+		if err != nil {
+			t.Fatalf("RenderTemplate(%s) failed: %v", tc.template, err)
+		}
+		nav := navbarMarkup(t, html)
 
-	html, err := r.RenderTemplate("agents-detail", TemplateData{Title: "Agent Detail - Ori Agent"})
+		links := nav[strings.Index(nav, `<div class="ori-navbar-links">`):strings.Index(nav, `<div class="ori-navbar-utilities">`)]
+		for _, want := range []string{`href="/"`, `id="navAgentsLink"`, `id="vaultLauncherButton"`} {
+			if strings.Count(links, want) != 1 {
+				t.Errorf("%s: link group should carry %s once", tc.template, want)
+			}
+		}
+		if got := strings.Count(links, `<a`); got != 3 {
+			t.Errorf("%s: link group has %d links, want Home, Agents and the Vaults launcher", tc.template, got)
+		}
+		for _, gone := range []string{`href="/action-center"`, `id="systemModelIndicator"`, `id="sidebarToggle"`, `navbar-sidebar-toggle`} {
+			if strings.Contains(nav, gone) {
+				t.Errorf("%s: top bar still carries %s", tc.template, gone)
+			}
+		}
+
+		launcher := openingTag(t, links, `id="vaultLauncherButton"`)
+		divider := openingTag(t, links, `id="vaultLauncherDivider"`)
+		onVaultPage := tc.page == "vault"
+		if hiddenAttr.MatchString(launcher) == onVaultPage || hiddenAttr.MatchString(divider) == onVaultPage {
+			t.Errorf("%s: Vaults launcher hidden=%v, want hidden everywhere but the vault page", tc.template, !onVaultPage)
+		}
+
+		if strings.Count(nav, `id="navSettingsLink"`) != 1 {
+			t.Fatalf("%s: top bar should carry exactly one Settings gear", tc.template)
+		}
+		gear := openingTag(t, nav, `id="navSettingsLink"`)
+		for _, want := range []string{`href="/settings"`, `aria-label="Settings"`, `title="Settings"`} {
+			if !strings.Contains(gear, want) {
+				t.Errorf("%s: Settings gear is missing %s", tc.template, want)
+			}
+		}
+		if strings.Contains(gear, `aria-current="page"`) != tc.gearActive {
+			t.Errorf("%s: Settings gear current=%v, want %v", tc.template, !tc.gearActive, tc.gearActive)
+		}
+		if tc.gearActive && strings.Contains(links, `aria-current`) {
+			t.Errorf("%s: a link is marked current on a Settings hub page", tc.template)
+		}
+		help := strings.Index(nav, `id="oriGuideLauncher"`)
+		if at := strings.Index(nav, `id="navSettingsLink"`); help < 0 || at < help {
+			t.Errorf("%s: the Settings gear should follow Help in the utilities row", tc.template)
+		}
+	}
+}
+
+// Settings is the hub for the configuration pages: a Tools & integrations group
+// after Integrations links each one as a full page, the Plugins item carries the
+// pending-changes badge, and the vault is reachable before its first record.
+func TestSettingsLinksEveryHubPage(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	data := GetDefaultData()
+	data.CurrentPage = "settings"
+	data.Version = "v9.9.9-test"
+	html, err := r.RenderTemplate("settings", data)
 	if err != nil {
-		t.Fatalf("RenderTemplate(agents-detail) failed: %v", err)
+		t.Fatalf("RenderTemplate(settings) failed: %v", err)
 	}
 
-	if !strings.Contains(html, `data-sidebar-default="hidden"`) {
-		t.Fatalf("rendered agents-detail page should default the sidebar to hidden")
+	integrations := strings.Index(html, `data-category="integrations"`)
+	tools := strings.Index(html, `data-category="tools"`)
+	storage := strings.Index(html, `data-category="data-storage"`)
+	if integrations < 0 || tools < integrations || storage < tools {
+		t.Fatalf("Tools & integrations should sit between Integrations and Data & Storage: %d %d %d", integrations, tools, storage)
 	}
-	if strings.Contains(html, `data-sidebar-default="visible"`) {
-		t.Fatalf("rendered agents-detail page should not default the sidebar to visible")
+	group := html[tools:storage]
+	if !strings.Contains(group, `>Tools &amp; integrations</h3>`) {
+		t.Error("the hub group is not titled Tools & integrations")
+	}
+	for _, page := range []struct{ href, label string }{
+		{"/skills", "Skills"}, {"/plugins", "Plugins"}, {"/mcp", "MCP Servers"},
+		{"/templates", "Templates"}, {"/workflows", "Workflows"}, {"/models", "Models"},
+		{"/usage", "Usage &amp; Costs"}, {"/review", "Review"}, {"/profile", "Profile"},
+	} {
+		link := openingTag(t, group, `href="`+page.href+`"`)
+		for _, want := range []string{`class="settings-nav-item"`, `data-external-link="true"`, `title="Opens the ` + page.label + ` page"`} {
+			if !strings.Contains(link, want) {
+				t.Errorf("%s hub link is missing %s", page.href, want)
+			}
+		}
+		item := group[strings.Index(group, `href="`+page.href+`"`):]
+		item = item[:strings.Index(item, "</a>")]
+		if !strings.Contains(item, `>`+page.label+`</span>`) || !strings.Contains(item, `settings-nav-item-open`) {
+			t.Errorf("%s hub link needs its label and the trailing open-page arrow", page.href)
+		}
+	}
+	if got := strings.Count(group, `class="settings-nav-item"`); got != 9 {
+		t.Errorf("Tools & integrations has %d items, want 9", got)
+	}
+	if strings.Contains(group, `data-section=`) {
+		t.Error("a hub item points at an in-page section; hub items open full pages")
+	}
+
+	plugins := group[strings.Index(group, `href="/plugins"`):]
+	if !strings.Contains(plugins[:strings.Index(plugins, "</a>")], `data-plugins-badge hidden`) {
+		t.Error("the Plugins hub item lost the pending-changes badge")
+	}
+	if !strings.Contains(html, `src="/js/modules/plugin-workspace-list.js"`) {
+		t.Error("Settings does not load plugin-workspace-list.js, so the badge never fills")
+	}
+
+	vaultDirectory := html[strings.Index(html, `<section id="vault-directory"`):]
+	vaultDirectory = vaultDirectory[:strings.Index(vaultDirectory, "</section>")]
+	if !strings.Contains(openingTag(t, vaultDirectory, `id="openVaultsLink"`), `href="/vaults"`) {
+		t.Error("Vault Directory has no Open vaults link to /vaults")
+	}
+
+	systemInfo := html[strings.Index(html, `<section id="system-info"`):]
+	if !strings.Contains(systemInfo[:strings.Index(systemInfo, "</section>")], "v9.9.9-test") {
+		t.Error("System Information no longer shows the version the sidebar used to show")
+	}
+}
+
+// No page renders the retired sidebar, its hamburger, its resize handle or its
+// scripts; the content column is the whole width below the top bar.
+func TestNoPageRendersTheSidebar(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	for name := range r.templates {
+		data := GetDefaultData()
+		data.CurrentPage = name
+		html, err := r.RenderTemplate(name, data)
+		if err != nil {
+			t.Fatalf("RenderTemplate(%s) failed: %v", name, err)
+		}
+		for _, gone := range []string{
+			`id="sidebar"`, `id="sidebarToggle"`, `id="sidebarResizeHandle"`, `id="agentsList"`,
+			`data-sidebar-default`, `/js/modules/sidebar.js`, `/js/modules/resizer.js`,
+		} {
+			if strings.Contains(html, gone) {
+				t.Errorf("%s still renders %s", name, gone)
+			}
+		}
+		if !strings.Contains(html, `/js/modules/navbar-offset.js`) {
+			t.Errorf("%s does not load navbar-offset.js, so --navbar-offset never follows the bar", name)
+		}
 	}
 }
 

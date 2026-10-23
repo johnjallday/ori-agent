@@ -75,7 +75,7 @@ for (const theme of ['light', 'dark']) {
     const updates = page.getByRole('button', { name: 'Show Updates', exact: true });
     await updates.focus();
     await page.keyboard.press('Enter');
-    const attention = page.locator('#cockpitTodayAttention a');
+    const attention = page.locator('#cockpitTodayAttention a.cockpit-today-link');
     await expect(attention).toContainText('2 tasks needing attention');
     await attention.focus();
     await expect(attention).toHaveCSS('outline-style', 'solid');

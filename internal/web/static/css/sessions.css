@@ -17,7 +17,7 @@
   display: flex;
   flex-direction: column;
   position: fixed;
-  left: var(--sidebar-width, 300px);
+  left: 0;
   top: 76px;
   bottom: 0;
   z-index: 1015;
@@ -32,17 +32,6 @@
 .session-sidebar.collapsed {
   transform: translateX(-100%) !important;
   pointer-events: none;
-  visibility: hidden;
-}
-
-/* When main sidebar is hidden, move session sidebar to left edge */
-.sidebar.d-none ~ .session-sidebar {
-  left: 0;
-}
-
-/* Ensure collapsed state persists when main sidebar is hidden */
-.sidebar.d-none ~ .session-sidebar.collapsed {
-  transform: translateX(-100%) !important;
   visibility: hidden;
 }
 
@@ -1886,34 +1875,9 @@ body.workspace-page .workspace-setup-card {
 @media (min-width: 992px) {
   /* When session sidebar is visible (not collapsed), adjust main content */
   .session-sidebar:not(.collapsed):not(.d-none) ~ .main-content {
-    margin-left: calc(var(--sidebar-width, 300px) + var(--session-sidebar-width, 280px)) !important;
-    max-width: calc(
-      100vw - var(--sidebar-width, 300px) - var(--session-sidebar-width, 280px) - 2rem
-    ) !important;
-    width: calc(
-      100vw - var(--sidebar-width, 300px) - var(--session-sidebar-width, 280px) - 2rem
-    ) !important;
-  }
-
-  /* When main sidebar is hidden but session sidebar is visible */
-  .sidebar.d-none ~ .session-sidebar:not(.collapsed):not(.d-none) ~ .main-content {
     margin-left: var(--session-sidebar-width, 280px) !important;
     max-width: calc(100vw - var(--session-sidebar-width, 280px) - 2rem) !important;
     width: calc(100vw - var(--session-sidebar-width, 280px) - 2rem) !important;
-  }
-
-  /* When session sidebar is collapsed, main content uses only main sidebar width */
-  .session-sidebar.collapsed ~ .main-content {
-    margin-left: var(--sidebar-width, 300px) !important;
-    max-width: calc(100vw - var(--sidebar-width, 300px) - 2rem) !important;
-    width: calc(100vw - var(--sidebar-width, 300px) - 2rem) !important;
-  }
-
-  /* When both sidebars are hidden/collapsed, main content takes full width */
-  .sidebar.d-none ~ .session-sidebar.collapsed ~ .main-content {
-    margin-left: 0 !important;
-    max-width: calc(100vw - 2rem) !important;
-    width: calc(100vw - 2rem) !important;
   }
 }
 

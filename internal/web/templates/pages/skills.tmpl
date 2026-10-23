@@ -8,8 +8,6 @@
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper" id="skillsPage" data-current-agent="{{index .Extra "DefaultAgentName"}}">
-    {{template "sidebar.tmpl" .}}
-
     <!-- Main Content -->
     <div class="main-content">
       <div class="container-fluid py-4">
@@ -258,9 +256,7 @@
   <script defer src="/js/modules/themeManager.js"></script>
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/modules/toast.js"></script>
-  <script defer src="/js/modules/resizer.js"></script>
   <script defer src="/js/modules/agents.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/skills-import-panel.js"></script>
   <script defer src="/js/skills.js"></script>
   {{template "theme-init.tmpl" .}}
