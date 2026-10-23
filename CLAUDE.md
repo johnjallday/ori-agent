@@ -64,6 +64,8 @@ make run-menubar   # Run menu bar app (macOS)
 
 **Menu Bar App**: The macOS menu bar app provides a GUI to start/stop the server, with auto-start on login support and visual status indicators.
 
+**Branch worktrees and `~/Test`**: `scripts/branch-server.sh start` runs `go run ./cmd/server` against a throwaway workspace directory (`ORI_BRANCH_WORKSPACE_ROOT`, else `WT_TEST_WORKSPACE_DIR`, else `~/Test`) that it **empties on every start**. The server's data dir goes inside it (`<root>/.ori-data`), the root is pre-confirmed, and onboarding is marked done (`ORI_BRANCH_ONBOARDING=1` keeps the wizard). Source `scripts/branch-server.zsh` from `~/.zshrc` and a plain `go run ./cmd/server` is routed there automatically in any checkout other than `ori-agent-dev` or one on `dev`/`main`. Other `go` commands, `make run-dev`, and Claude Code shells (`CLAUDECODE` set) are left alone, so agents keep using the isolated smoke recipe below. Never point a demo or smoke sandbox at that directory.
+
 ### Testing
 
 ```bash
