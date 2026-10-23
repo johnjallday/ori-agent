@@ -1943,14 +1943,33 @@ test('a running, waiting, failed and finished look each read as the server says'
     {
       state: 'finished',
       result_excerpt: 'Three drafts.',
+      report_route: '/workspaces/thesis/task/t-1',
       ticket_route: '/workspaces/thesis?ticket=t-1'
     },
     ctx
   );
   assert.equal(done.excerpt, 'Three drafts.');
   assert.equal(done.actions[0].label, 'Open the full report');
-  assert.equal(done.actions[0].href, '/workspaces/thesis?ticket=t-1');
-  // Only a ticket in a workspace is ever linked.
+  assert.equal(done.actions[0].href, '/workspaces/thesis/task/t-1');
+  // A ticket alone is not presented as the full report.
+  const legacy = folderFirstLookView(
+    { state: 'finished', ticket_route: '/workspaces/thesis?ticket=t-1' },
+    ctx
+  );
+  assert.equal(legacy.actions[0].label, 'Open task');
+  assert.equal(legacy.actions[0].href, '/workspaces/thesis?ticket=t-1');
+  for (const report_route of [
+    '//evil.example',
+    'javascript:alert(1)',
+    '/workspaces/thesis/task/t?run=1',
+    '/workspaces/thesis/task/../x'
+  ]) {
+    assert.deepEqual(
+      folderFirstLookView({ state: 'finished', report_route }, ctx).actions.map(a => a.id),
+      ['open']
+    );
+  }
+  // Only a canonical local report or legacy ticket is ever linked.
   const odd = folderFirstLookView({ state: 'finished', ticket_route: '//evil.example' }, ctx);
   assert.deepEqual(
     odd.actions.map(a => a.id),

@@ -1725,8 +1725,8 @@ export function hireLookView(offer) {
 
 // The states a folder's first look can be in, as the server reports them.
 const FIRST_LOOK_STATES = ['seeded', 'running', 'waiting', 'finished', 'failed'];
-// The full report is the task's ticket in its workspace, and nothing else.
-const FIRST_LOOK_REPORT = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?ticket=[A-Za-z0-9_-]+$/;
+// Legacy offers may have only a ticket link, which is not the report body.
+const FIRST_LOOK_TICKET = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?ticket=[A-Za-z0-9_-]+$/;
 const FIRST_LOOK_NOT_STARTED = 'The first look could not start. Try again.';
 
 // What Start first look costs, said beside the button before it is pressed.
@@ -1989,10 +1989,13 @@ export function folderFirstLookView(look, options = {}) {
         actions: open('primary')
       };
     case 'finished': {
-      const report = String(look.ticket_route || '').trim();
-      const link = FIRST_LOOK_REPORT.test(report)
+      const report = String(look.report_route || '').trim();
+      const ticket = String(look.ticket_route || '').trim();
+      const link = ASSESSMENT_REPORT_ROUTE.test(report)
         ? [{ id: 'report', label: 'Open the full report', style: 'primary', href: report }]
-        : [];
+        : FIRST_LOOK_TICKET.test(ticket)
+          ? [{ id: 'report', label: 'Open task', style: 'primary', href: ticket }]
+          : [];
       return {
         ...base,
         excerpt: String(look.result_excerpt || '').trim(),

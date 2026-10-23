@@ -51,6 +51,10 @@ workspace rows, not the group's agent rows.
 - Projects link to the actual workspace/task/report routes. Setup-ready and
   first-look-ready are independent; a failed look can coexist with a ready
   workspace. Reading a report or opening a suggestion never starts that work.
+  **Open the full report** uses the existing server-authored `report_route`,
+  not `ticket_route`: the ticket panel shows work/status, not the report body.
+  A legacy ticket-only record retains **Open task**, without promising a full
+  report. No new route, ticket field, result copy or execution action is added.
 - Plain groups list their actual member workspaces and manager without inventing
   a first task. Partial member failure keeps completed resources visible.
 - Home/library receipts list catalog entries without claiming every entry has a
