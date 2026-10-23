@@ -3,7 +3,7 @@
 <html lang="en" data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light" data-sidebar-default="visible">
+<body class="bg-light">
   <style>
     body {
       margin: 0;
@@ -89,8 +89,6 @@
   <a class="skip-link" href="#claude-detail-main">Skip to Main Content</a>
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
-
     <main class="main-content" id="claude-detail-main" role="main" aria-labelledby="claudeDetailTitle">
       <div class="claude-detail-container">
         <a href="/agents" class="claude-detail-back">← Back to Agents</a>
@@ -117,8 +115,6 @@
   <script defer src="/js/modules/themeManager.js"></script>
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/modules/toast.js"></script>
-  <script defer src="/js/modules/resizer.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script type="module" src="/js/modules/provider-limits.js"></script>
   <script defer src="/js/modules/claude-sync.js"></script>
   <script defer src="/js/agents-claude-detail.js"></script>

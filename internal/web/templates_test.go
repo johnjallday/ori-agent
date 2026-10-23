@@ -176,8 +176,8 @@ func TestWorkspaceDetailHasOneRuntimeCapabilityEntryPoint(t *testing.T) {
 }
 
 // TestRenderTemplatesPage confirms the /templates page renders, carries the
-// master/detail scaffold and lifecycle controls, and highlights its sidebar
-// link when CurrentPage is "templates".
+// master/detail scaffold and lifecycle controls, and marks the Settings gear as
+// its way in when CurrentPage is "templates".
 func TestRenderTemplatesPage(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -223,9 +223,9 @@ func TestRenderTemplatesPage(t *testing.T) {
 		}
 	}
 
-	// The Templates sidebar link should be marked active for this page.
-	if !strings.Contains(html, `href="/templates" class="sidebar-nav-link active"`) {
-		t.Errorf("templates sidebar link not highlighted as active")
+	// Templates is reached through Settings, so the gear is the current destination.
+	if !strings.Contains(openingTag(t, html, `id="navSettingsLink"`), `aria-current="page"`) {
+		t.Errorf("Settings gear not marked current on the Templates page")
 	}
 }
 
@@ -624,22 +624,31 @@ func TestNavbarCollapsesToHomeAgentsAndSettingsGear(t *testing.T) {
 	}
 }
 
-func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
+// No page renders the retired sidebar, its hamburger, its resize handle or its
+// scripts; the content column is the whole width below the top bar.
+func TestNoPageRendersTheSidebar(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
-
-	html, err := r.RenderTemplate("agents-detail", TemplateData{Title: "Agent Detail - Ori Agent"})
-	if err != nil {
-		t.Fatalf("RenderTemplate(agents-detail) failed: %v", err)
-	}
-
-	if !strings.Contains(html, `data-sidebar-default="hidden"`) {
-		t.Fatalf("rendered agents-detail page should default the sidebar to hidden")
-	}
-	if strings.Contains(html, `data-sidebar-default="visible"`) {
-		t.Fatalf("rendered agents-detail page should not default the sidebar to visible")
+	for name := range r.templates {
+		data := GetDefaultData()
+		data.CurrentPage = name
+		html, err := r.RenderTemplate(name, data)
+		if err != nil {
+			t.Fatalf("RenderTemplate(%s) failed: %v", name, err)
+		}
+		for _, gone := range []string{
+			`id="sidebar"`, `id="sidebarToggle"`, `id="sidebarResizeHandle"`, `id="agentsList"`,
+			`data-sidebar-default`, `/js/modules/sidebar.js`, `/js/modules/resizer.js`,
+		} {
+			if strings.Contains(html, gone) {
+				t.Errorf("%s still renders %s", name, gone)
+			}
+		}
+		if !strings.Contains(html, `/js/modules/navbar-offset.js`) {
+			t.Errorf("%s does not load navbar-offset.js, so --navbar-offset never follows the bar", name)
+		}
 	}
 }
 

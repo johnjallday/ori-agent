@@ -245,11 +245,6 @@
   color: #09213b;
 }
 
-.ori-keyboard-nav-hint[data-zone="sidebar"]:not([data-state="exact"]) {
-  background: linear-gradient(180deg, rgba(230, 250, 239, 0.98), rgba(180, 237, 205, 0.98));
-  color: #0b2f1f;
-}
-
 .ori-keyboard-nav-hint[data-zone="panel"]:not([data-state="exact"]) {
   background: linear-gradient(180deg, rgba(224, 246, 246, 0.98), rgba(170, 225, 222, 0.98));
   color: #082a2d;

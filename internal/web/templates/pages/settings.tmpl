@@ -8,8 +8,6 @@
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
-
     <!-- Main Content - Settings Layout -->
     <div class="main-content" style="padding: 0;">
       <div class="settings-layout">
@@ -2076,9 +2074,10 @@
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/app.js?v=1694538177"></script>
   <script defer src="/js/modules/agents.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
   <script defer src="/js/modules/toast.js"></script>
+  <!-- The Plugins item's badge: pending changes from the Workspace Directory's plugin list. -->
+  <script defer src="/js/modules/plugin-workspace-list.js"></script>
   {{template "theme-init.tmpl" .}}
   <script>
     // External Agents Settings

@@ -6,8 +6,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
 :root {
-  /* Sidebar */
-  --sidebar-width: 300px;
+  /* Top bar height; navbar-offset.js replaces it with the measured value. */
   --navbar-offset: 76px;
 
   /* Full-screen modal layer, above ALL application chrome.

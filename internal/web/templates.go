@@ -27,10 +27,6 @@ type TemplateData struct {
 	ShowBackButton         bool
 	BackButtonURL          string
 	BackButtonTitle        string
-	ShowSidebarToggle      bool
-	SidebarToggleId        string
-	SidebarToggleHideOnLg  bool
-	SidebarToggleTarget    string
 	BrandNoDecoration      bool
 	BrandURL               string
 	BrandColor             string
@@ -94,7 +90,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/layout/head.tmpl",
 		"templates/layout/scripts-dx-utils.tmpl",
 		"templates/layout/theme-init.tmpl",
-		"templates/components/sidebar.tmpl",
 		"templates/components/workspace-hub.tmpl",
 		"templates/components/ask-ori-activity.tmpl",
 		"templates/components/personal-assistant-today.tmpl",
@@ -246,8 +241,6 @@ func GetDefaultData() TemplateData {
 		Extra:        make(map[string]any),
 
 		// Navbar defaults - enable common features
-		ShowSidebarToggle:      true,
-		SidebarToggleTarget:    "#sidebar",
 		ShowNavLinks:           true,
 		ShowCurrentAgent:       true,
 		ShowUpdateNotification: true,

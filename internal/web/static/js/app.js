@@ -3069,12 +3069,11 @@ function setupChatPanel() {
   };
 }
 
-// ---- Sidebar Functionality ----
-// Sidebar functionality has been moved to modular files:
+// ---- Shared modules ----
+// Agent and settings management live in modular files:
 // - js/modules/agents.js - Agent management
 // - js/modules/skills.js - Skills management
 // - js/modules/settings.js - Settings management
-// - js/modules/sidebar.js - Main sidebar controller
 
 // Export functions for use by session manager
 window.appendMessageToUI = appendMessageToUI;

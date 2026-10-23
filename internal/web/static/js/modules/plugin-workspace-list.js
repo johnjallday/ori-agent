@@ -144,7 +144,7 @@
     refreshBadge
   };
 
-  // Every page with the sidebar shows the badge.
+  // A page that carries the badge (Settings' Plugins item) fills it on load.
   if (typeof document !== 'undefined' && document.querySelector) {
     const start = () => {
       if (document.querySelector('[data-plugins-badge]')) void refreshBadge();
