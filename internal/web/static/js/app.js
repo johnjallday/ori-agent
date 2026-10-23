@@ -3230,8 +3230,6 @@ async function initializeApp() {
     // Silent fail - onboarding is optional
   }
 
-  // Sidebar functionality is now handled by modular files
-
   appLog.info('App initialized successfully');
   EventBus.emit('app:initialized');
 }

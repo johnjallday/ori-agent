@@ -13,7 +13,8 @@ and the optional Sample Library, see [Ori's REAPER integration](reaper-integrati
 
 ## Installing a plugin
 
-**From the UI** — open **Plugins** in the sidebar:
+**From the UI** — click the Settings gear in the top bar, then **Plugins** under
+**Tools & integrations**:
 
 - **Browse official Claude plugins** — click **Browse official plugins** to open
   Anthropic's official, managed directory in a modal (it loads on first open — no

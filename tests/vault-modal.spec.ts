@@ -92,9 +92,16 @@ test.describe('Vault Modal', () => {
     });
 
     await page.goto('/');
-    await page.locator('#vaultLauncherButton').click();
+    // The launcher is on demand: the page-load read of the vault list finds a
+    // record and reveals it (nav-collapse FR6). Opening the modal then reads
+    // the list once more, for the vault tabs.
+    const launcher = page.locator('#vaultLauncherButton');
+    await expect(launcher).toBeVisible();
+    await expect(page.locator('#vaultNavCount')).toHaveText('1');
+    const callsBeforeOpen = vaultListCalls;
+    await launcher.click();
 
-    await expect.poll(() => vaultListCalls).toBe(1);
+    await expect.poll(() => vaultListCalls - callsBeforeOpen).toBe(1);
     await expect(page.locator('#vaultModal')).toHaveClass(/show/);
     await expect(
       page.locator('#vaultModalFolderVaultTabs [data-action="select-folder-vault-tab"]')

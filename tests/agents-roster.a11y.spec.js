@@ -5,7 +5,7 @@ import { mockWorkspaceActionRoster } from './helpers/agent-workspace-actions';
 
 // Accessibility regression for the Agents Gallery/Inspector, in both themes.
 // Mirrors tests/workspace-detail.a11y.spec.js: axe-core is loaded from a CDN and
-// scoped to the roster layout so pre-existing chrome (navbar/sidebar) doesn't
+// scoped to the roster layout so pre-existing chrome (the navbar) doesn't
 // mask regressions in this component.
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
 

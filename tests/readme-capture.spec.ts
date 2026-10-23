@@ -514,11 +514,19 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { has_workspace: false });
       return;
     }
-    // The sidebar's Plugins badge asks on every page load. The real API's
-    // answer for a Workspace Directory with no Plugins.json keeps the badge
-    // hidden, same as a profile with no plugin list.
+    // The Plugins badge (Settings' Tools & integrations item) and the Plugins
+    // page banner ask for this. The real API's answer for a Workspace
+    // Directory with no Plugins.json keeps both hidden, same as a profile with
+    // no plugin list.
     if (url.pathname === '/api/plugins/workspace-list') {
       await json(route, { pending: [], found: false });
+      return;
+    }
+    // The top bar's Vaults launcher asks on every page load whether any vault
+    // holds a record. A profile with no vault keeps it hidden, as the README
+    // scenes' fictional profile has none.
+    if (url.pathname === '/api/vault/vaults') {
+      await json(route, { count: 0, vaults: [] });
       return;
     }
     if (
