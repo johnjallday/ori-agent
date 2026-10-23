@@ -27,11 +27,12 @@ type BuildFolderHome struct {
 // the folder a workspace build attached: the host's lines and their digest,
 // what they need, the Home and the placement. Reading it creates nothing.
 type BuildFolderPlan struct {
-	Lines     []FolderPlanLine  `json:"lines"`
-	Digest    string            `json:"digest,omitempty"`
-	Needs     []BuildFolderNeed `json:"needs,omitempty"`
-	Home      *BuildFolderHome  `json:"home,omitempty"`
-	Placement string            `json:"placement,omitempty"`
+	Visual    *FolderSetupVisual `json:"visual,omitempty"`
+	Lines     []FolderPlanLine   `json:"lines"`
+	Digest    string             `json:"digest,omitempty"`
+	Needs     []BuildFolderNeed  `json:"needs,omitempty"`
+	Home      *BuildFolderHome   `json:"home,omitempty"`
+	Placement string             `json:"placement,omitempty"`
 	// Evidence is the digest's own reason for the suggestion, the "Why this
 	// suggestion?" line: what it saw, never a path.
 	Evidence string `json:"evidence,omitempty"`
@@ -99,7 +100,8 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	plan := &BuildFolderPlan{
 		Lines: append([]FolderPlanLine(nil), view.Plan.Lines...), Digest: view.Plan.Digest,
 		Placement: view.Plan.Intent.Placement, Evidence: view.Reason, Ready: true,
-		Needs: folderPlanNeeds(offer.Subject, view.Plan.Intent),
+		Needs:  folderPlanNeeds(offer.Subject, view.Plan.Intent),
+		Visual: CloneFolderSetupVisual(view.Plan.Visual),
 	}
 	if hire := view.Plan.Hire; hire != nil {
 		copied := *hire

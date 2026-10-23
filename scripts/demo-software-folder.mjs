@@ -11,9 +11,9 @@
 //   resume     after the server was restarted on the same sandbox: the paused
 //              setup is still there; a model is chosen, Continue finishes it,
 //              and the receipt is what was saved
-//   assess-interrupt  the receipt offers Start assessment and says what it
-//              needs; pressed twice it starts once, and the phase ends with the
-//              run still going so the server can be stopped under it
+//   assess-interrupt  observes the look authorized by setup, without starting
+//              it again. If still running, the server can be stopped under it;
+//              a look already finished is reported, never rerun to force a demo
 //   assess     after the server was restarted: a run the server lost did not
 //              finish and says so; Try again (or Start assessment, when it was
 //              never started) runs the same task with the real model; its
@@ -38,7 +38,7 @@
 // Choosing the model (resume) and both assessment phases need a signed-in model
 // provider: start those servers with CODEX_HOME set to a signed-in Codex home
 // (demo-server.sh is otherwise fully isolated and has no provider). The two
-// assessment phases make real model calls.
+// resume can start a real model call; assess retries only an unfinished look.
 //
 // The script reads the seeded folders only to hash them: every folder it did
 // not replace itself must be byte-for-byte the same at the end.
@@ -184,18 +184,31 @@ async function comeBack() {
   await card.waitFor({ state: 'visible', timeout: 30000 });
   await page.locator('#personalAssistantFolderOfferHeadline').waitFor({ state: 'visible' });
   await card.scrollIntoViewIfNeeded();
+  await fullDetails();
+}
+async function fullDetails() {
+  const details = card.locator('#personalAssistantFolderDetails');
+  if ((await details.getAttribute('open')) === null)
+    await details.locator('summary').first().click();
 }
 const text = id => page.locator(id).innerText();
 const list = id => page.locator(`${id} li`).allInnerTexts();
 const buttons = () =>
   card.locator('#personalAssistantFolderOfferActions').locator('button, a').allInnerTexts();
 const press = name => card.getByRole('button', { name, exact: true }).click();
+const isSetupAction = name => /^(Set up|Hire & start|Assign & start)$/.test(name);
+async function confirmSetup() {
+  const label = (await buttons())[0];
+  expect(isSetupAction(label), `no reviewed setup action: ${label}`);
+  await press(label);
+}
 const focused = () => page.evaluate(() => document.activeElement?.dataset?.folderAction || '');
 function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 // review presses Review setup (or Review again) and waits for what was read.
 async function review(label = 'Review setup') {
+  await fullDetails();
   await press(label);
   await page.locator('#personalAssistantFolderEvidence li').first().waitFor({ timeout: 30000 });
   await page.waitForFunction(
@@ -306,8 +319,8 @@ async function reviewPhase() {
   );
   const available = offer?.software?.setup_available === true;
   expect(
-    reviewed.buttons.includes('Set up') === available,
-    `Set up shown=${reviewed.buttons.includes('Set up')} but setup_available=${available}`
+    reviewed.buttons.some(isSetupAction) === available,
+    `Setup shown=${reviewed.buttons.some(isSetupAction)} but setup_available=${available}`
   );
   await shot('10-reviewed-setup');
 
@@ -465,17 +478,14 @@ async function reviewPhase() {
   }
 }
 
-// The run pop-up: what it says, its steps, its receipt, and its buttons.
-const runModal = page.locator('#folderSetupRunModal');
-async function runModalState() {
+// One surface for saved progress and the canonical receipt; no run modal.
+async function setupCardState() {
   return {
-    eyebrow: await text('#folderSetupRunEyebrow'),
-    title: await text('#folderSetupRunTitle'),
-    status: await text('#folderSetupRunStatus'),
-    count: await text('#folderSetupRunCount'),
-    steps: await page.locator('#folderSetupRunSteps li').allInnerTexts(),
-    receipt: await page.locator('#folderSetupRunReceipt li').allInnerTexts(),
-    buttons: await page.locator('#folderSetupRunActions').locator('button, a').allInnerTexts()
+    title: await text('#personalAssistantFolderOfferHeadline'),
+    status: await text('#personalAssistantFolderOfferQuestion'),
+    steps: await card.locator('[aria-label="Saved setup progress"] li').allInnerTexts(),
+    receipt: await list('#personalAssistantFolderReceipt'),
+    buttons: await buttons()
   };
 }
 async function developmentAssistants() {
@@ -494,17 +504,21 @@ async function setupPhase(before) {
   const reviewed = await list('#personalAssistantFolderPlan');
   expect(reviewed.length === 5, `no plan to confirm: ${reviewed}`);
   expect(/has no model yet/.test(reviewed[2]), `the plan hides the missing model: ${reviewed[2]}`);
-  expect((await buttons())[0] === 'Set up', `first action: ${await buttons()}`);
-  await press('Set up');
-  await runModal.waitFor({ state: 'visible', timeout: 30000 });
+  await confirmSetup();
   await page.waitForFunction(
-    () => /needs you/.test(document.getElementById('folderSetupRunTitle')?.textContent || ''),
+    () =>
+      /has no model yet/.test(
+        document.getElementById('personalAssistantFolderOfferQuestion')?.textContent || ''
+      ),
     null,
     { timeout: 30000 }
   );
-  const paused = await runModalState();
+  const paused = await setupCardState();
   console.log('paused setup:', JSON.stringify(paused, null, 1));
-  expect(/^0 of 5 steps finished/.test(paused.count), `steps finished: ${paused.count}`);
+  expect(
+    paused.steps.length > 0 && paused.steps.every(line => /Waiting|Did not finish/.test(line)),
+    `unexpected progress: ${paused.steps}`
+  );
   expect(/has no model yet/.test(paused.status), `no reason given: ${paused.status}`);
   expect(
     paused.buttons.join(',') === 'Set up a model,Continue',
@@ -554,29 +568,57 @@ async function resumePhase(untouched) {
   });
   expect(configured.ok(), `no model provider in this sandbox (${configured.status()})`);
   await press('Continue');
-  await runModal.waitFor({ state: 'visible', timeout: 30000 });
   await page.waitForFunction(
-    () => /is ready/.test(document.getElementById('folderSetupRunTitle')?.textContent || ''),
+    () =>
+      /is ready/.test(
+        document.getElementById('personalAssistantFolderOfferHeadline')?.textContent || ''
+      ) ||
+      [...document.querySelectorAll('#personalAssistantFolderOfferActions button')].some(
+        button => button.textContent === 'Pick it again'
+      ),
     null,
     { timeout: 60000 }
   );
-  const done = await runModalState();
+  if (await card.getByRole('button', { name: 'Pick it again', exact: true }).isVisible()) {
+    await press('Pick it again');
+    const scanned = page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' && /\/folder-digest\/scan$/.test(response.url())
+    );
+    await page
+      .locator('#personalAssistantFolderChooser')
+      .getByRole('button', { name: 'Documents', exact: true })
+      .click();
+    await scanned;
+    expect((await currentOffer())?.id === before.offer, 're-picking replaced the saved setup');
+    const reviewLabel = (await buttons()).find(label =>
+      /^(Review setup|Review again)$/.test(label)
+    );
+    if (reviewLabel) await review(reviewLabel);
+    if ((await buttons()).includes('Continue')) await press('Continue');
+    else await confirmSetup();
+  }
+  await page.waitForFunction(
+    () =>
+      /is ready/.test(
+        document.getElementById('personalAssistantFolderOfferHeadline')?.textContent || ''
+      ),
+    null,
+    { timeout: 60000 }
+  );
+  const done = await setupCardState();
   console.log('finished setup:', JSON.stringify(done, null, 1));
   // A finished setup ends on its receipt, read back from what was saved; the
   // run's own step list is gone with the run.
-  expect(done.eyebrow === 'ALL SET', `the pop-up did not end on done: ${done.eyebrow}`);
-  expect(
-    /Nothing in the project was run or changed/.test(done.status),
-    `the receipt's summary: ${done.status}`
-  );
+  expect(/is ready/.test(done.title), `setup did not resolve: ${done.title}`);
   const receipt = done.receipt.join(' | ').replace(/\n/g, ' ');
   for (const wanted of [
     new RegExp(`${projectName} \\(created\\)`),
     /linked where it is, read-only/,
     /Code Project \(planning first; approved work waits for you/,
     /Development Assistant \(development assistant, added\)/,
-    // The assessment waits: it is startable on a click, or it says why not.
-    /Assess this project and suggest a first task \((Cannot start here yet|Needs a model before it can start|Starts when you press [^)]*)\)/
+    // Task state is separate from setup; do not guess whether the look finished.
+    /Assess this project and suggest a first task/
   ])
     expect(wanted.test(receipt), `receipt lacks ${wanted}: ${receipt}`);
   expect(!/Ready to start/.test(receipt), `the receipt promises a start: ${receipt}`);
@@ -587,14 +629,19 @@ async function resumePhase(untouched) {
   expect((await developmentAssistants()) === 1, 'the setup did not make exactly one assistant');
   await shot('22-setup-receipt');
 
-  // 12. The card afterwards: the same receipt, and an assessment that waits.
-  await page.locator('#folderSetupRunModal .btn-close').click();
-  await runModal.waitFor({ state: 'hidden' });
+  // 12. The same card, with the separately recorded authorized first look.
+  expect(
+    (await page.locator('#folderSetupRunModal').count()) === 0,
+    'a duplicate run modal remains'
+  );
   await card.scrollIntoViewIfNeeded();
   const resolved = await currentOffer();
   console.log('first assessment:', JSON.stringify(resolved?.first_task));
   expect(resolved?.status === 'resolved', `the offer is ${resolved?.status}`);
-  expect(resolved?.first_task?.state === 'seeded', 'the assessment was started by setup');
+  expect(
+    Boolean(resolved?.outcome?.first_look && resolved?.first_task?.task_id),
+    'no canonical first look was recorded'
+  );
   await shot('23-card-receipt');
 
   writeFileSync(
@@ -686,44 +733,21 @@ async function assessInterruptPhase(untouched) {
   expect(before.resolved && before.task, 'run the resume phase first');
   const tasksBefore = await taskIDs(before.workspace);
 
-  // 15. Home shows the receipt with the assessment waiting for its click.
-  //     Looking at it spends nothing: no request but reads leaves the page.
+  // The hire's consent already authorized this task. Reopening is read-only.
   const writes = watchWrites();
   await comeBack();
-  const ready = await assessmentCard();
-  console.log('assessment ready:', JSON.stringify(ready, null, 1));
-  expect(ready.buttons[0] === 'Start assessment', `first action: ${ready.buttons}`);
-  expect(/no tools/.test(ready.note), `the cost is not said: ${ready.note}`);
-  expect(
-    ready.receipt.some(line => /Starts when you press Start assessment/.test(line)),
-    `the receipt's task row: ${ready.receipt}`
-  );
-  expect(
-    ready.readiness.some(line => /^Project folder · Ready/.test(line)),
-    `folder readiness: ${ready.readiness}`
-  );
-  expect(
-    ready.readiness.some(line => /^Assistant's model · Set, not checked/.test(line)),
-    `a model that was never called is not "ready": ${ready.readiness}`
-  );
-  expect(
-    ready.readiness.some(line => /^GitHub · Not set \(optional\)/.test(line)),
-    `GitHub readiness: ${ready.readiness}`
-  );
-  await page.waitForTimeout(4000);
-  expect(writes.length === 0, `looking at the card sent: ${writes}`);
-  expect((await firstTask(before.resolved)).state === 'seeded', 'the page load started it');
-  await shot('30-assessment-ready');
-  await phoneShot('30-assessment-ready', card);
-
-  // 16. Start assessment, pressed twice. One start is sent, and the card says
-  //     the model is reading and offers nothing more to press. The phase ends
-  //     here, with the run still going: stop the server now to interrupt it.
-  const start = card.getByRole('button', { name: 'Start assessment', exact: true });
-  await start.click();
-  await start.click({ timeout: 1000 }).catch(() => {});
   const look = await waitForLook(before.resolved, ['running', 'finished', 'failed'], 30000);
-  expect(look.state === 'running', `the assessment is ${look.state}: ${look.message || ''}`);
+  expect(look.task_id === before.task, 'the look was replaced');
+  expect(writes.length === 0, `reopening the receipt sent: ${writes}`);
+  await shot('30-assessment-observed');
+  await phoneShot('30-assessment-observed', card);
+  if (look.state !== 'running') {
+    console.log(
+      `NOT RUN (in-flight interruption): the first look is already ${look.state}; it will not be rerun just for this demo.`
+    );
+    await settled(before, untouched);
+    return;
+  }
   await page.waitForFunction(
     () =>
       ![...document.querySelectorAll('#personalAssistantFolderOfferActions button')].some(button =>
@@ -741,7 +765,7 @@ async function assessInterruptPhase(untouched) {
   );
   expect(look.task_id === before.task, 'the run is another task');
   const sent = writes.filter(write => /folder-first-task\/start$|tasks\/execute$/.test(write));
-  expect(sent.length === 1, `the start was not sent exactly once: ${sent}`);
+  expect(sent.length === 0, `reopening started the look again: ${sent}`);
   expect(
     JSON.stringify(await taskIDs(before.workspace)) === JSON.stringify(tasksBefore),
     'starting the assessment made another task'
@@ -750,7 +774,7 @@ async function assessInterruptPhase(untouched) {
   await shot('31-assessment-running');
   await settled(before, untouched);
   console.log(
-    'OK (assess-interrupt): one start for two presses, one task, still running. Stop the server now.'
+    'Observed the existing first look running, one task, no repeated start. Stop the server now; confirm interruption from its saved state after restart.'
   );
 }
 
@@ -765,7 +789,9 @@ async function assessPhase(untouched) {
   //     nothing, and nothing polls it into running again.
   const writes = watchWrites();
   await comeBack();
-  const waiting = await firstTask(before.resolved);
+  let waiting = await firstTask(before.resolved);
+  if (waiting?.state === 'running')
+    waiting = await waitForLook(before.resolved, ['finished', 'failed'], 180000);
   const left = await assessmentCard();
   console.log('assessment after a restart:', JSON.stringify({ ...left, look: waiting }, null, 1));
   // The model the assistant is saved with, as the server reads it.
@@ -798,7 +824,7 @@ async function assessPhase(untouched) {
 }
 
 // runAssessment presses the one button the card offers and follows the run to
-// its end. It is the only place this script spends model tokens.
+// its end. Initial setup may already have authorized a look; never start it twice.
 async function runAssessment(before, { writes, waiting, left, retry, tasksBefore }) {
   if (retry) {
     expect(waiting.can_retry === true, `it cannot be tried again: ${waiting.reason}`);
@@ -1153,30 +1179,17 @@ async function addFolderPhase() {
 
   // 27. Send. The real model answers; the proposal beside its reply is Ori's.
   await page.locator('#personalAssistantSend').click();
-  const proposal = page.locator('[data-folder-setup-suggestion]');
-  await proposal.waitFor({ state: 'visible', timeout: 240000 });
-  const part = name => proposal.locator(`.personal-assistant-proposal__${name}`).innerText();
-  const proposed = {
-    reply: (
-      await page
-        .locator('#homeAssistantConversation [data-message-role="assistant"]')
-        .last()
-        .innerText()
-    ).slice(0, 1200),
-    label: await part('label'),
-    subject: await part('subject'),
-    scope: await part('scope'),
-    action: await proposal.getByRole('button').innerText(),
-    topics: await page.locator('[data-folder-discussion] button').allInnerTexts()
-  };
-  console.log('the reply and its proposal:', JSON.stringify(proposed, null, 1));
-  expect(proposed.label === 'Proposed workspace', `not proposed as one: ${proposed.label}`);
-  expect(proposed.subject === 'Downloads', `the proposal names ${proposed.subject}`);
-  expect(proposed.scope === 'Whole folder', `the proposal's scope: ${proposed.scope}`);
-  expect(proposed.action === 'Review workspace setup', `the proposal's action: ${proposed.action}`);
+  await card.waitFor({ state: 'visible', timeout: 240000 });
   expect(
-    proposed.topics.join(',') === 'Discuss this folder',
-    `its subfolders are offered as topics: ${proposed.topics}`
+    (await page.locator('[data-folder-setup-suggestion]').count()) === 0,
+    'a duplicate setup proposal remains'
+  );
+  const reply = await panel.locator('[data-message-role="assistant"]').last().innerText();
+  const topics = await page.locator('[data-folder-discussion] button').allInnerTexts();
+  console.log('reply alongside the canonical review:', reply.slice(0, 1200));
+  expect(
+    topics.join(',') === 'Discuss this folder',
+    `its subfolders are offered as topics: ${topics}`
   );
   const said = await panel.innerText();
   expect(
@@ -1186,9 +1199,8 @@ async function addFolderPhase() {
   expect(!said.includes('never-read-this'), 'a private file reached the conversation');
   await shot('27-add-folder-reply-proposes-the-project');
 
-  // 28. One click reaches the project's own card. There is no scope to choose.
-  await proposal.getByRole('button').click();
-  const inline = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
+  // 28. The canonical review is already on the same card; no second setup control.
+  const inline = card;
   await inline.waitFor({ state: 'visible', timeout: 30000 });
   await page.locator('#personalAssistantFolderOfferHeadline').waitFor({ state: 'visible' });
   const status = page.locator('#personalAssistantFolderReviewStatus');
@@ -1207,8 +1219,7 @@ async function addFolderPhase() {
   expect(recognized.buttons[0] === 'Review setup', `first action: ${recognized.buttons}`);
   expect(!recognized.chooser, 'a scope chooser was shown for one project');
   expect(
-    /waiting for your confirmation/.test(recognized.status) &&
-      !/not available/.test(recognized.status),
+    !/not available/.test(recognized.status),
     `the line under the conversation disagrees with the card: ${recognized.status}`
   );
   await inline.scrollIntoViewIfNeeded();
@@ -1225,7 +1236,10 @@ async function addFolderPhase() {
   };
   console.log('reviewed in the conversation:', JSON.stringify(reviewed, null, 1));
   expect(reviewed.plan.length === 5, `the plan has ${reviewed.plan.length} lines`);
-  expect(reviewed.buttons.includes('Set up'), `no Set up after a review: ${reviewed.buttons}`);
+  expect(
+    reviewed.buttons.some(isSetupAction),
+    `no setup action after a review: ${reviewed.buttons}`
+  );
   expect(!/not available/.test(reviewed.status), `after the review: ${reviewed.status}`);
   expect(
     (await workspaceCount()) === before.workspaces,
@@ -1234,8 +1248,8 @@ async function addFolderPhase() {
   await inline.scrollIntoViewIfNeeded();
   await shot('29-add-folder-reviewed-plan');
 
-  // 30. Set up, confirmed on the card, makes the one workspace.
-  await press('Set up');
+  // 30. The reviewed hire, confirmed on the card, makes the one workspace.
+  await confirmSetup();
   const deadline = Date.now() + 120000;
   while ((await workspaceCount()) === before.workspaces) {
     expect(Date.now() < deadline, 'Set up in the conversation made no workspace');

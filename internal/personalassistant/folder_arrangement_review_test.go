@@ -187,6 +187,7 @@ func TestReviewArrangementGroup_OutcomeIsReadFromTheStoredOfferOnly(t *testing.T
 		offer.Status = FolderOfferResolved
 		offer.Outcome = &FolderOutcome{Kind: FolderChoiceGroup, WorkspaceID: "group-1", Route: "/workspaces/client-work", Receipt: []FolderReceiptRow{
 			{Kind: "workspace", Name: "Client work", Detail: "group", Route: "/workspaces/client-work"},
+			{Kind: "agent", Name: "Client work Manager", Assigned: true},
 			{Kind: "workspace", Name: "Song 01", Detail: "linked to Song 01", Route: "/workspaces/song-01"},
 			{Kind: "workspace", Name: "Song 02", Detail: "linked to Song 02", Route: "/workspaces/song-02"},
 		}}
@@ -210,6 +211,16 @@ func TestReviewArrangementGroup_OutcomeIsReadFromTheStoredOfferOnly(t *testing.T
 	}
 	if _, err := service.ConversationOfferStatus(t.Context(), other, view.ID); !errors.Is(err, ErrFolderOfferNotFound) {
 		t.Fatalf("a foreign conversation read the status: %v", err)
+	}
+	if _, err := f.store.Mutate(t.Context(), target.UserID, func(doc *FolderDigestDocument) error {
+		// A group and its manager alone do not prove any child was made.
+		doc.Offer(view.ID).Outcome.Receipt = doc.Offer(view.ID).Outcome.Receipt[:2]
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ArrangementOutcome(t.Context(), target, view.ID); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("agent row counted as a child workspace: %v", err)
 	}
 }
 

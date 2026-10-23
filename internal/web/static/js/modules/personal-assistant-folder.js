@@ -10,6 +10,7 @@
 
 // Sets window.OriFolderPlanLines, which the plan line exports below come from.
 import './folder-plan-lines.js';
+import './folder-setup-visual.js';
 // Sets window.OriFolderRecognitionLines: the Recognized and Needs lines, in the
 // build pane's words.
 import './folder-recognition-lines.js';
@@ -26,12 +27,7 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
-import {
-  hiredLine,
-  mapPlacementView,
-  renderMapPlacement,
-  reportedLine
-} from './first-look-report.js';
+import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import {
   declinedLine,
@@ -235,18 +231,19 @@ export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFold
 
 const SETUP_STOP_COPY = {
   plan_changed:
-    'What Set up would do now differs from the plan you approved, so I stopped before going further.',
+    'What Set up would do now differs from the plan you approved, so I stopped before going further. Review the changed setup before continuing.',
   needs_pick: subject =>
     `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
   needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
-  needs_model: 'The workspace and folder are set up. The agent needs a model before it can start.',
+  needs_model:
+    'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
   install_failed:
-    'The integration could not be installed or enabled, so nothing after it ran. If you install it from Plugins, Try again continues from there.',
+    'The integration could not be installed or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
   interrupted: 'Setup was interrupted before it finished.',
   consent_stale:
-    'The workspace and folder are set up. Your shared assistant was approved for an older version of this blueprint, so I did not add it. Continue setup to choose the agent yourself.',
+    'Your shared agent was approved for an older version of this blueprint. Completed work is kept; Continue setup to review staffing yourself.',
   assistant_missing:
-    'The workspace and folder are set up. The shared assistant this Home used is gone, so I did not add one on my own. Continue setup to choose the agent yourself.',
+    'The shared agent this Home used is no longer available. Completed work is kept; Continue setup to choose the agent yourself.',
   failed: 'A step did not finish.'
 };
 
@@ -296,6 +293,10 @@ function structureStoppedActions(reason) {
       return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
     case 'member_failed':
       return [{ ...retry, label: 'Continue' }];
+    case 'plan_changed':
+      return [
+        { id: 'review-saved', label: 'Review saved workspaces', style: 'primary', href: '/' }
+      ];
     default:
       return [retry];
   }
@@ -329,6 +330,7 @@ function stoppedActions(reason, setup) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
   switch (reason) {
     case 'plan_changed':
+      return [{ ...CONTINUE_SETUP, label: 'Review changed setup', style: 'primary' }];
     case 'consent_stale':
     case 'assistant_missing':
       return [{ ...CONTINUE_SETUP, style: 'primary' }];
@@ -373,10 +375,18 @@ export function setupRunView(
 ) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
+  if (status === 'done')
+    return {
+      status,
+      lines,
+      statusLine: 'Setup finished; checking the saved result.',
+      question: 'Checking the saved result…',
+      actions: []
+    };
   if (status !== 'stopped') {
     const working = lines.find(line => line.state === 'working');
     return {
-      status: status === 'done' ? 'running' : status,
+      status,
       lines,
       statusLine: working ? `Working on: ${working.name}` : 'Starting…',
       question: `Setting up ${subject}…`,
@@ -404,51 +414,42 @@ export function setupRunView(
   };
 }
 
-// setupModalView is the run pop-up: the same run the card shows, framed so the
-// user can see the assistant is working — a phase (running, stopped, done), a
-// step count, a percentage, and the lines. Pure data; the DOM is drawn below.
-// It is not visible for an offer with no one-card run.
-//
-// A Home run that finished ends on the songs saved most recently (`songs`, the
-// library's rows sorted by last_saved, and `total`, the library's song count):
-// each with an Open, the receipt folded under "What I set up". With no such
-// song the done screen is exactly the receipt and the Home link.
-export function setupModalView(offer, { songs = [], total = 0, now = new Date() } = {}) {
+// setupResultView reduces saved runs/receipts, including bounded Home project
+// shortcuts. It owns no modal, lifecycle, polling or confirmation.
+export function setupResultView(offer, { songs = [], total = 0, now = new Date() } = {}) {
   if (!offer) return { visible: false };
   const receipt = folderReceiptView(offer);
-  // A settled offer no longer carries its run, only its receipt; the pop-up that
-  // watched the run still ends on it. Without either there is nothing to show.
+  // A settled offer may carry only its receipt. Without either a saved run
+  // or a receipt there is nothing to show.
   if (!offer.setup && !receipt.visible) return { visible: false };
   const folder = String(offer.folder || '').trim() || 'this project';
   const subject = String(offer.subject?.name || '').trim() || folder;
   const software = Boolean(offer.software);
   const run = setupRunView(offer.setup, subject, {
     portfolio: Boolean(offer.portfolio),
-    software
+    software,
+    structure: Boolean(offerStructure(offer))
   });
   const steps = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
-    // The run is over, so every line it reached is done, except a step that
-    // was allowed to fail without stopping it (the Home's profile): that one
-    // keeps saying it did not finish, and is not counted.
-    const settled = run.lines.map(line => ({
-      ...line,
-      state: line.state === 'failed' ? 'failed' : line.state ? 'done' : ''
-    }));
-    const unfinished = settled.filter(line => line.state === 'failed').length;
+    // A resolved receipt does not repaint skipped/failed lines as successful.
+    const settled = run.lines;
+    const completed = settled.filter(line => line.state === 'done').length;
     // A hire ends on its agent at work: the look it started, or why it waits.
     const hired = receipt.hireLook?.visible ? offer.first_task : null;
     const agent = String(hired?.agent || '').trim();
     const done = {
       visible: true,
       phase: 'done',
-      eyebrow: hired ? 'Hired' : 'All set',
+      eyebrow: 'Setup ready',
       title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
       status: hired
-        ? hired.state === 'running' || hired.state === 'finished'
-          ? `${agent || 'Your agent'} is reading ${subject}, read-only. I'll tell you here when it has something.`
-          : `Here is what I set up. ${String(hired.message || '').trim() || 'Its first look has not started.'}`
+        ? hired.state === 'finished'
+          ? `${agent || 'Your agent'} finished the first look. Open the report to see what it found.`
+          : hired.state === 'running'
+            ? `${agent || 'Your agent'} is reading ${subject}, read-only. I'll tell you here when it has something.`
+            : `Here is what I set up. ${String(hired.message || '').trim() || 'Its first look has not started.'}`
         : receipt.home
           ? 'Here is what I set up. Open a project from the library when you want to work on it.'
           : software
@@ -456,8 +457,7 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
             : receipt.group
               ? 'Here is what I set up. Each workspace is linked to its own folder. Nothing was moved, copied or read, and no task was created.'
               : 'Here is what I set up. The first task starts when you open the workspace.',
-      count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
-      percent: 100,
+      count: steps ? `${completed} of ${steps} steps finished` : '',
       lines: settled,
       profile: receipt.profile || null,
       receiptRows: receipt.rows,
@@ -495,7 +495,6 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
     // The count line already says how many steps finished.
     status: stopped ? run.question.replace(/^\d+ of \d+ steps finished\. /, '') : run.statusLine,
     count: steps ? `${finished} of ${steps} steps finished` : '',
-    percent: steps ? Math.round((finished / steps) * 100) : 0,
     lines: run.lines,
     receiptRows: [],
     route: '',
@@ -573,7 +572,7 @@ function capabilityConfirmView(offer, base, subject) {
   else if (continuing && hasPlan)
     // Adjust… was pressed earlier: the one-click plan stays, beside the journey.
     actions = [
-      { id: 'setup', label: hire ? 'Hire and start' : 'Set up', style: 'primary', oneCard: true },
+      { id: 'setup', label: hire ? hire.confirmLabel : 'Set up', style: 'primary', oneCard: true },
       { id: 'resume', label: 'Continue setup', style: 'outline', journey: true }
     ];
   else if (continuing)
@@ -581,7 +580,7 @@ function capabilityConfirmView(offer, base, subject) {
   else if (base.decided) actions = [];
   else if (hire) {
     actions = [
-      { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+      { id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true },
       { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
     ];
     hire.adjust = { id: 'adjust', label: 'Adjust', style: 'link', journey: true };
@@ -1249,7 +1248,7 @@ export function softwareOfferView(offer, view, { subject, folder }) {
         : `What I read in ${subject}:`,
       hire,
       actions: [
-        { id: 'setup', label: 'Hire and start', style: 'primary', oneCard: true },
+        { id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true },
         ...(view.decided ? [] : [{ id: 'no', label: 'Not now', style: 'outline', decision: 'no' }]),
         reviewAction('Review again', 'link'),
         ...openExisting,
@@ -1570,26 +1569,25 @@ const WORKSPACE_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/?$/;
 // groupReceiptView is the receipt of a folder set up as a group: the group
 // first, then every workspace it made, each with the page to open.
 function groupReceiptView(offer) {
-  const rows = (Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : []).filter(
-    row => row?.kind === 'workspace' && String(row.name || '').trim()
-  );
+  const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
+  const workspaces = rows.filter(row => row?.kind === 'workspace' && String(row.name || '').trim());
   const route = resolvedRouteFor(offer);
-  if (rows.length < 2 || !WORKSPACE_ROUTE.test(route)) return { visible: false };
+  if (workspaces.length < 2 || !WORKSPACE_ROUTE.test(route)) return { visible: false };
   return {
     visible: true,
     group: true,
     rows: rows.map(row => {
       const link = String(row.route || '').trim();
       return {
-        kind: 'workspace',
-        name: String(row.name),
+        kind: String(row.kind || ''),
+        name: String(row.name || ''),
         detail: String(row.detail || ''),
         route: WORKSPACE_ROUTE.test(link) ? link : ''
       };
     }),
     route,
     homeRoute: '',
-    openLabel: `Open ${String(rows[0].name).trim()}`
+    openLabel: `Open ${String(workspaces[0].name).trim()}`
   };
 }
 
@@ -1645,7 +1643,7 @@ export function folderReceiptView(offer, options = {}) {
   // Move (FR23).
   const parent = offer.outcome.parent;
   const map = mapPlacementView({
-    agent: offer.setup?.hire?.agent_name || offer.first_task?.agent,
+    agent: rows.find(row => row.kind === 'agent' && row.assigned === true)?.name,
     home: parent && parent.status !== 'standalone' ? parent.name : '',
     workspaceId: offer.outcome.workspace_id
   });
@@ -1727,8 +1725,8 @@ export function hireLookView(offer) {
 
 // The states a folder's first look can be in, as the server reports them.
 const FIRST_LOOK_STATES = ['seeded', 'running', 'waiting', 'finished', 'failed'];
-// The full report is the task's ticket in its workspace, and nothing else.
-const FIRST_LOOK_REPORT = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?ticket=[A-Za-z0-9_-]+$/;
+// Legacy offers may have only a ticket link, which is not the report body.
+const FIRST_LOOK_TICKET = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?ticket=[A-Za-z0-9_-]+$/;
 const FIRST_LOOK_NOT_STARTED = 'The first look could not start. Try again.';
 
 // What Start first look costs, said beside the button before it is pressed.
@@ -1991,10 +1989,13 @@ export function folderFirstLookView(look, options = {}) {
         actions: open('primary')
       };
     case 'finished': {
-      const report = String(look.ticket_route || '').trim();
-      const link = FIRST_LOOK_REPORT.test(report)
+      const report = String(look.report_route || '').trim();
+      const ticket = String(look.ticket_route || '').trim();
+      const link = ASSESSMENT_REPORT_ROUTE.test(report)
         ? [{ id: 'report', label: 'Open the full report', style: 'primary', href: report }]
-        : [];
+        : FIRST_LOOK_TICKET.test(ticket)
+          ? [{ id: 'report', label: 'Open task', style: 'primary', href: ticket }]
+          : [];
       return {
         ...base,
         excerpt: String(look.result_excerpt || '').trim(),
@@ -2308,7 +2309,7 @@ function elements() {
 
 function setText(el, text, hideWhenEmpty = true) {
   if (!el) return;
-  el.textContent = text || '';
+  if (el.textContent !== (text || '')) el.textContent = text || '';
   if (hideWhenEmpty) el.hidden = !text;
 }
 
@@ -2320,19 +2321,10 @@ function showStatus(message) {
 function showError(message) {
   const els = elements();
   setText(els?.error, message);
-  runModal.error = String(message || '');
-  renderRunModal();
 }
 
-// The run pop-up: opened by pressing Set up (or Try again), it follows the same
-// offer the card does. Closing it never stops the run; the card keeps showing
-// progress. `wanted` is true only while the user has it open, so a page that
-// loads onto a run in progress does not pop a dialog over what they were doing.
-const runModal = { wanted: false, bound: false, error: '' };
-
-// The last screen of a Home run: the songs saved most recently, read once when
-// the open pop-up first reaches done, for the offer it watched. Nothing here
-// is stored; a pop-up closed before done, or a page loaded later, never asks.
+// The Home result's bounded song shortcuts, read once for its active card.
+// This is an observational library read, not another setup or polling owner.
 const runSongs = {
   offerID: '',
   homeID: '',
@@ -2341,8 +2333,10 @@ const runSongs = {
   total: 0,
   opening: '', // the song being opened; every Open waits for it
   message: '', // what the status line says while opening or choosing a file
+  error: '',
   choices: null, // { id, files } when a song folder holds several project files
   requests: new Map(), // song → request ID, reused when the same song is retried
+  navigationGeneration: 0, // closure invalidates navigation, not the saved library operation
   drawn: '' // the list the DOM was last drawn from
 };
 
@@ -2355,6 +2349,7 @@ async function loadRecentSongs(offerID, homeID) {
     total: 0,
     opening: '',
     message: '',
+    error: '',
     choices: null,
     requests: new Map()
   });
@@ -2373,68 +2368,73 @@ async function loadRecentSongs(offerID, homeID) {
     // The list is a shortcut; without it the done screen is the one it always was.
     if (runSongs.offerID === offerID) runSongs.status = 'failed';
   }
-  renderRunModal();
+  renderHomeSongs();
 }
 
-function runModalElements() {
-  const root = document.getElementById('folderSetupRunModal');
-  if (!root) return null;
-  return {
-    root,
-    eyebrow: document.getElementById('folderSetupRunEyebrow'),
-    title: document.getElementById('folderSetupRunTitle'),
-    bar: document.getElementById('folderSetupRunBar'),
-    fill: document.getElementById('folderSetupRunFill'),
-    count: document.getElementById('folderSetupRunCount'),
-    status: document.getElementById('folderSetupRunStatus'),
-    profile: document.getElementById('folderSetupRunProfile'),
-    steps: document.getElementById('folderSetupRunSteps'),
-    songs: document.getElementById('folderSetupRunSongs'),
-    more: document.getElementById('folderSetupRunMore'),
-    receipt: document.getElementById('folderSetupRunReceipt'),
-    map: document.getElementById('folderSetupRunMap'),
-    error: document.getElementById('folderSetupRunError'),
-    actions: document.getElementById('folderSetupRunActions')
-  };
-}
-
-// openRecentSong is the pop-up's Open: the library's one-click open, then the
+// openRecentSong is the Home result's Open: the library's one-click open, then the
 // song's workspace. A folder with several project files comes back as file
 // chips under the song; any other failure is the server's own message, and
 // the buttons come back so another song can be tried.
 async function openRecentSong(song, selectedFile = '') {
-  if (runSongs.opening || !runSongs.homeID || state.busy) return;
+  if (
+    runSongs.opening ||
+    !runSongs.homeID ||
+    state.busy ||
+    runSongs.offerID !== state.offer?.id ||
+    document.getElementById('personalAssistantPanel')?.hidden
+  )
+    return;
+  const reviewGeneration = state.reviewGeneration;
+  const offerID = runSongs.offerID;
+  const generation = runSongs.navigationGeneration;
+  const ownsRequest = () =>
+    runSongs.offerID === offerID && runSongs.navigationGeneration === generation;
+  const active = () =>
+    ownsRequest() &&
+    reviewGeneration === state.reviewGeneration &&
+    state.offer?.id === offerID &&
+    !document.getElementById('personalAssistantPanel')?.hidden;
+  let navigating = false;
   const requestID = runSongs.requests.get(song.id) || `open-${requestId()}`;
   runSongs.requests.set(song.id, requestID);
   runSongs.opening = song.id;
   runSongs.message = `Opening ${song.name}…`;
-  runModal.error = '';
-  renderRunModal();
+  runSongs.error = '';
+  renderHomeSongs();
   try {
     const result = await openLibrarySong(runSongs.homeID, song.id, { requestID, selectedFile });
+    if (!active()) return;
     runSongs.requests.delete(song.id);
     const route = libraryOpenRoute(result);
     if (route) {
+      navigating = true;
       window.location.assign(route); // Stay "Opening…" while the page changes.
       return;
     }
     runSongs.choices = null;
     runSongs.message = '';
-    runModal.error = `${song.name} is ready. Browse all songs to open it.`;
+    runSongs.error = `${song.name} is ready. Open the Home library to open it.`;
   } catch (error) {
+    if (!active()) return;
     const files = libraryOpenChoices(error);
     if (files.length) {
       runSongs.choices = { id: song.id, files };
       runSongs.message = `${song.name} has more than one project file. Choose the one to open.`;
     } else {
       runSongs.message = '';
-      runModal.error = error?.message || `${song.name} could not be opened. Nothing was changed.`;
+      runSongs.error = `${song.name} could not be opened. Review it in the Home library.`;
+    }
+  } finally {
+    if (!navigating && ownsRequest()) {
+      runSongs.opening = '';
+      if (!active()) runSongs.message = '';
+      renderHomeSongs();
     }
   }
-  runSongs.opening = '';
-  renderRunModal();
-  if (runSongs.choices?.id === song.id) {
-    document.querySelector(`#folderSetupRunSongs [data-folder-run-choice] button`)?.focus();
+  if (active() && runSongs.choices?.id === song.id) {
+    document
+      .querySelector(`#personalAssistantFolderSongs [data-folder-run-choice] button`)
+      ?.focus();
   }
 }
 
@@ -2486,13 +2486,9 @@ function fileChoices(song, files) {
 // (Opening…, disabled, file chips) in step on every render, so a re-render
 // never takes focus away from the button the user is on.
 function renderRunSongs(els, view) {
-  if (!els.songs || !els.more || !els.receipt) return;
+  if (!els.songs) return;
   const songs = view.songs || [];
   els.songs.hidden = !songs.length;
-  // The songs lead; what was set up folds under "What I set up".
-  if (songs.length && els.receipt.parentElement !== els.more) els.more.append(els.receipt);
-  if (!songs.length && els.receipt.parentElement === els.more) els.more.before(els.receipt);
-  els.more.hidden = !songs.length || !view.receiptRows.length;
   const drawn = JSON.stringify(songs);
   if (drawn !== runSongs.drawn) {
     runSongs.drawn = drawn;
@@ -2531,88 +2527,42 @@ function announceFinishedRun() {
   window.sessionManager?.notifyWorkspacesChanged?.({ workspaceId });
 }
 
-function openRunModal() {
-  const els = runModalElements();
-  const Modal = globalThis.bootstrap?.Modal;
-  if (!els || !Modal) return;
-  runModal.wanted = true;
-  runModal.error = '';
-  if (!runModal.bound) {
-    els.root.addEventListener('hidden.bs.modal', () => {
-      runModal.wanted = false;
-    });
-    runModal.bound = true;
-  }
-  renderRunModal();
-  Modal.getOrCreateInstance(els.root).show();
+function revealRunSurface() {
+  const card = elements()?.offer;
+  // A reply arriving after closure must not reopen the drawer.
+  if (!card || card.hidden || document.getElementById('personalAssistantPanel')?.hidden) return;
+  window.PersonalAssistantTranscript?.revealControl?.(card, true);
 }
 
-function closeRunModal() {
-  runModal.wanted = false;
-  const root = document.getElementById('folderSetupRunModal');
-  if (root) globalThis.bootstrap?.Modal?.getInstance(root)?.hide();
-}
-
-function renderRunModal() {
-  if (!runModal.wanted) return;
-  const els = runModalElements();
-  if (!els) return;
+function renderHomeSongs() {
+  const songs = document.getElementById('personalAssistantFolderSongs');
+  const note = document.getElementById('personalAssistantFolderSongsNote');
+  if (!songs) return;
+  if (document.getElementById('personalAssistantPanel')?.hidden || elements()?.offer?.hidden)
+    return;
+  const receipt = folderReceiptView(state.offer);
   const offerID = String(state.offer?.id || '');
+  if (!receipt.home || !receipt.homeID || !offerID) {
+    songs.hidden = true;
+    setText(note, '');
+    return;
+  }
+  if (runSongs.offerID !== offerID) void loadRecentSongs(offerID, receipt.homeID);
   const listed = runSongs.offerID === offerID && runSongs.status === 'ready';
-  const view = setupModalView(
+  const view = setupResultView(
     state.offer,
     listed ? { songs: runSongs.rows, total: runSongs.total } : {}
   );
-  if (!view.visible) {
-    closeRunModal();
-    return;
-  }
-  const done = view.phase === 'done';
-  // The first time the open pop-up reaches done on a Home, ask the library once.
-  const receipt = done ? folderReceiptView(state.offer) : null;
-  if (receipt?.home && receipt.homeID && offerID && runSongs.offerID !== offerID) {
-    void loadRecentSongs(offerID, receipt.homeID);
-  }
-  els.root.dataset.phase = view.phase;
-  setText(els.eyebrow, view.eyebrow, false);
-  setText(els.title, view.title, false);
-  setText(els.count, view.count);
-  setText(els.status, (view.songs?.length && runSongs.message) || view.status, false);
-  renderProfileLine(els.profile, done ? view.profile : null);
-  els.bar.setAttribute('aria-valuenow', String(view.percent));
-  els.fill.style.width = `${view.percent}%`;
-  renderSetupLines(els.steps, view.lines);
-  els.steps.hidden = done || !view.lines.length;
-  renderReceiptRows(els.receipt, view.receiptRows);
-  els.receipt.hidden = !done || !view.receiptRows.length;
-  renderMapRow(els.map, done ? view.map : null);
-  renderRunSongs(els, view);
-  els.error.textContent = runModal.error;
-  els.error.hidden = !runModal.error;
-  els.actions.replaceChildren();
-  if (done && view.route) {
-    const open = document.createElement('a');
-    // Beside the songs' Open buttons, browsing the library is the quieter way on.
-    open.className = view.songs?.length ? 'btn btn-outline-secondary' : 'btn btn-primary';
-    open.href = view.route;
-    open.textContent = view.openLabel;
-    els.actions.append(open);
-  }
-  view.actions.forEach(action => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = action.style === 'primary' ? 'btn btn-primary' : 'btn btn-outline-secondary';
-    button.dataset.folderRunAction = action.id;
-    button.textContent = action.label;
-    button.disabled = state.busy;
-    button.addEventListener('click', () => {
-      // Retrying keeps the pop-up; anything that opens another dialog or page
-      // closes it first.
-      if (!action.oneCard) closeRunModal();
-      runAction(action);
-    });
-    els.actions.append(button);
-  });
+  renderRunSongs({ songs }, view);
+  // Reuse the canonical Home link instead of adding a duplicate library CTA.
+  const browse = [...(elements()?.actions?.querySelectorAll('a') || [])].find(
+    link => link.getAttribute('href') === view.route
+  );
+  if (browse) browse.textContent = view.openLabel;
+  setText(
+    note,
+    runSongs.error || runSongs.message || (view.songs?.length ? 'Projects saved most recently' : '')
+  );
 }
 
 function requestId() {
@@ -2855,6 +2805,9 @@ function renderOffer(place) {
     message: state.firstLookMessage
   });
   const firstLook = receipt.firstLook || { visible: false };
+  // A canonical conversation reload can replace this card. Do not let a fast
+  // press mutate its offer while that older read is still being hydrated.
+  const actionBusy = state.busy || conversationReviewLoading();
   // The one offer card is a reply in the conversation while the flow runs
   // there, and a card in Needs you when it was found waiting on load (right
   // under Today's summary line while Today is folded, as Home says). It is
@@ -2876,7 +2829,24 @@ function renderOffer(place) {
   els.offer.dataset.status = view.status;
   if (els.headline) {
     els.headline.replaceChildren();
-    view.headline.forEach(part => {
+    const headline = receipt.visible
+      ? segments([
+          {
+            text:
+              receipt.homeName ||
+              receipt.rows?.find(row => row.kind === 'workspace')?.name ||
+              state.offer.subject?.name ||
+              'Workspace'
+          },
+          ' is ready'
+        ])
+      : view.setup
+        ? segments([
+            { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
+            view.setup.status === 'stopped' ? ' needs you' : ' · setting up'
+          ])
+        : view.headline;
+    headline.forEach(part => {
       if (part.strong) {
         const strong = document.createElement('strong');
         strong.textContent = part.text;
@@ -2887,7 +2857,34 @@ function renderOffer(place) {
     });
   }
   renderHire(els, view.hire, state.offer);
-  setText(els.question, view.question, false);
+  const diagram = document.getElementById('personalAssistantFolderVisual');
+  if (diagram) {
+    diagram.hidden = !(state.offer?.plan || state.offer?.setup || receipt.visible);
+    if (!diagram.hidden)
+      globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
+    els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
+  }
+  globalThis.OriFolderSetupVisual.renderConsequences(
+    document.getElementById('personalAssistantFolderConsequences'),
+    !state.offer?.setup && !receipt.visible ? state.offer?.plan : null
+  );
+  globalThis.OriFolderSetupVisual.renderProgress(
+    document.getElementById('personalAssistantFolderProgress'),
+    state.offer?.setup
+  );
+  renderProfileLine(document.getElementById('personalAssistantFolderProfile'), receipt.profile);
+  const details = document.getElementById('personalAssistantFolderDetails');
+  if (details && details.dataset.offer !== state.offer?.id) {
+    details.dataset.offer = state.offer?.id || '';
+    details.open = !state.offer?.plan;
+  }
+  setText(
+    els.question,
+    state.offer?.software && view.plan
+      ? 'Review the setup before anything is created.'
+      : view.question,
+    false
+  );
   if (els.structure) {
     // The proposed group and its member workspaces, drawn by the same renderer
     // as the proposal under a reply.
@@ -2957,14 +2954,14 @@ function renderOffer(place) {
       els.planHeading.hidden = !heading;
       setText(els.planHeadingText, heading, false);
       els.planHeading.querySelector('[data-folder-action]')?.remove();
-      const adjust = heading ? view.hire.adjust : null;
+      const adjust = heading && !diagram ? view.hire.adjust : null;
       if (adjust) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'btn btn-sm btn-link pa-folder__plan-adjust';
         button.dataset.folderAction = adjust.id;
         button.textContent = adjust.label;
-        button.disabled = state.busy;
+        button.disabled = actionBusy;
         button.addEventListener('click', () => runAction(adjust));
         els.planHeading.append(button);
       }
@@ -2987,7 +2984,7 @@ function renderOffer(place) {
       open: receipt.openLabel || '',
       home: receipt.homeRoute || '',
       actions: showView ? view.actions : null,
-      busy: state.busy
+      busy: actionBusy
     });
     const rebuild = els.actions.dataset.signature !== signature;
     els.actions.dataset.signature = signature;
@@ -3005,7 +3002,7 @@ function renderOffer(place) {
           control.href = action.href;
         } else {
           control.type = 'button';
-          control.disabled = action.busy === true;
+          control.disabled = actionBusy || action.busy === true;
           control.addEventListener(
             'click',
             () => void (action.stop ? stopFirstLook() : startFirstLook())
@@ -3028,7 +3025,11 @@ function renderOffer(place) {
       els.actions.append(home);
     }
     if (rebuild && showView) {
-      view.actions.forEach(action => {
+      const actions = [
+        ...view.actions,
+        ...(diagram && view.hire?.adjust ? [view.hire.adjust] : [])
+      ];
+      actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className =
@@ -3039,7 +3040,7 @@ function renderOffer(place) {
               : 'btn btn-sm btn-link';
         button.dataset.folderAction = action.id;
         button.textContent = action.label;
-        button.disabled = state.busy;
+        button.disabled = actionBusy;
         button.addEventListener('click', () => runAction(action));
         els.actions.appendChild(button);
       });
@@ -3109,7 +3110,7 @@ function render() {
   renderOffer(state.reviewSlot ? 'thread' : place);
   renderScene();
   if (state.reviewSlot && els.scene) els.scene.hidden = true;
-  renderRunModal();
+  renderHomeSongs();
   announceFinishedRun();
   syncSetupPolling();
 }
@@ -3197,7 +3198,34 @@ async function forgetDecline(body) {
 
 // runAction carries out one of the offer's actions, wherever its button was
 // pressed: the panel's card or the mission card (act below).
+function conversationReviewLoading() {
+  if (!state.offer?.conversation_id) return false;
+  const context = globalThis.window?.PersonalAssistantFolderContext?.current?.();
+  return Boolean(
+    globalThis.window?.PersonalAssistantConversation?.isLoading?.() ||
+    (context?.conversationId === state.offer.conversation_id && context.pending)
+  );
+}
+
+async function repickConversationReview(offer) {
+  const conversation = window.PersonalAssistantConversation;
+  if (offer.conversation_id !== conversation?.currentId?.()) {
+    if (!(await conversation?.resume?.(offer.conversation_id))) return;
+  }
+  // The Home attention card may name a different saved conversation. Reopen
+  // that owner before selecting a folder, and never redirect a newer target.
+  if (
+    conversation?.currentId?.() !== offer.conversation_id ||
+    state.offer?.id !== offer.id ||
+    state.offer?.status === 'resolved' ||
+    document.getElementById('personalAssistantPanel')?.hidden
+  )
+    return;
+  await window.PersonalAssistantFolderContext?.open?.();
+}
+
 function runAction(action) {
+  if (conversationReviewLoading()) return;
   if (action.forget) {
     void forgetDecline(action.forget);
     return;
@@ -3235,7 +3263,7 @@ function runAction(action) {
     return;
   }
   if (action.repick && state.offer?.conversation_id) {
-    void window.PersonalAssistantFolderContext?.open?.();
+    void repickConversationReview(state.offer);
     return;
   }
   if (action.open) {
@@ -3309,6 +3337,7 @@ function runAction(action) {
 
 const SETUP_POLL_MS = 1500;
 let setupPollTimer = null;
+const acceptedSetups = new Set();
 
 // Bound setup replies/polls cannot take over a different conversation's card.
 // Existing standalone journeys retain their independent lifetime.
@@ -3327,7 +3356,7 @@ function reviewResponseGuard(offer) {
 async function startOneCardSetup(action) {
   const offer = state.offer;
   const current = reviewResponseGuard(offer);
-  if (!offer?.id || state.busy) return;
+  if (!offer?.id || state.busy || conversationReviewLoading()) return;
   if (offer.needs_pick) {
     showOfferFailure({
       needs_pick: true,
@@ -3339,6 +3368,12 @@ async function startOneCardSetup(action) {
   const digest = String(offer.plan?.digest || offer.setup?.plan_digest || '');
   if (!digest) {
     showError('This setup has no plan to confirm. Choose Adjust… to set it up step by step.');
+    return;
+  }
+  const briefProblem = globalThis.OriFolderSetupVisual.briefError(briefFor(offer));
+  if (briefProblem) {
+    showError(briefProblem);
+    elements()?.brief?.focus();
     return;
   }
   state.busy = true;
@@ -3354,11 +3389,16 @@ async function startOneCardSetup(action) {
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
-      // The assistant says, in its own words and once, that the hire is made.
-      const hire = offer.plan?.hire;
-      if (hire) sayInConversation(hiredLine(hire.agent_name || hire.role_label));
-      // Show the run in a pop-up so it is plain that the assistant is working.
-      openRunModal();
+      // Acceptance is not a hire or proof of membership. Retry/poll/reload must
+      // not repeat the announcement or manufacture a completed assignment.
+      const key = `${offer.conversation_id || ''}:${offer.id}`;
+      if (!acceptedSetups.has(key)) {
+        acceptedSetups.add(key);
+        sayInConversation(
+          globalThis.OriFolderSetupVisual.setupAcceptedLine(offer.subject?.name || offer.folder)
+        );
+      }
+      revealRunSurface();
       return;
     }
     if (payload?.plan_changed && payload.offer) {
@@ -4489,9 +4529,16 @@ function init() {
     void onSetupProjectReady(String(event.detail?.run_id || ''));
   });
   document.addEventListener('personal-assistant:sent', keepLatestLast);
+  document.addEventListener('personal-assistant:conversation-loading', render);
   // The first look is followed only while the drawer is open. Opening it reads
   // the look once, which also resumes the poll when it is still running.
+  document.addEventListener('personal-assistant:closed', () => {
+    runSongs.navigationGeneration++;
+    runSongs.opening = '';
+    runSongs.message = '';
+  });
   document.addEventListener('personal-assistant:opened', () => {
+    renderHomeSongs();
     const look = currentFirstLook();
     if (look?.state === 'running') void refreshFirstLook(look.offer_id);
   });
@@ -4505,6 +4552,7 @@ function init() {
   });
   els.brief?.addEventListener('input', () => {
     state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };
+    els.brief.setCustomValidity(globalThis.OriFolderSetupVisual.briefError(els.brief.value));
   });
   window.PersonalAssistantFolder = {
     open: openChooser,
@@ -4553,7 +4601,6 @@ function init() {
       state.inThread = false;
       state.userAsked = false;
       state.pinned = '';
-      closeRunModal();
       render();
     },
     act,

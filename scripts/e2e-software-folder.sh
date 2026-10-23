@@ -6,26 +6,29 @@
 # Usage:
 #   ./scripts/e2e-software-folder.sh [--port PORT] [--fixture-port PORT] [--tail N] [-- playwright args]
 #
-# The suite (tests/software-project-folder-setup.spec.ts) has three phases. Two
+# The suite (tests/software-project-folder-setup.spec.ts) has four phases. Two
 # share one sandbox: "first" on a fresh server, and "restarted" after that
 # server was stopped and started again, which is how a paused setup surviving a
 # restart is checked for real. The third, "conversation", attaches a repository
 # through the composer's Add folder on a server and sandbox of its own, so it
-# depends on nothing the other two leave behind. By hand that is start a server
-# in the background, wait, run, stop, three times. This does it in one command:
+# depends on nothing the other two leave behind. The fourth provisions unread
+# reports with the same scripted provider in another fresh sandbox. This runs
+# their server lifetimes and browser checks in one command:
 #
 #   1. a new sandbox under $TMPDIR (HOME and ORI_DATA_DIR both redirected by
 #      scripts/demo-server.sh, which also builds the working tree),
 #   2. phase "first", then the server is stopped by its PID,
 #   3. the server is started again on the same sandbox, then phase "restarted",
 #   4. a second new sandbox and server, then phase "conversation",
-#   5. the server is stopped and one PASS/FAIL line is printed per phase.
+#   5. a separate reports sandbox runs two actual first looks with the scripted
+#      provider, then checks Home/drawer report handoff, Start this and Not now,
+#   6. the server is stopped and one PASS/FAIL line is printed per phase.
 #
 # No model is called. The server's own `lmstudio` provider is pointed at
 # --fixture-port, where the suite itself answers the model API (its FIXTURE
 # PROVIDER); CODEX_HOME is dropped so no signed-in provider is registered.
 #
-# Both ports must be free: nothing already listening is ever stopped. Both
+# Both ports must be free: nothing already listening is ever stopped. All
 # sandboxes are left under $TMPDIR (their paths are printed) so a failure can
 # be read.
 
@@ -91,7 +94,8 @@ tmp_root="${TMPDIR:-/tmp}"
 tmp_root="${tmp_root%/}"
 sandbox="$tmp_root/ori-software-e2e-$(date +%Y%m%d-%H%M%S)-$$"
 conversation_sandbox="$sandbox-conversation"
-for dir in "$sandbox" "$conversation_sandbox"; do
+reports_sandbox="$sandbox-reports"
+for dir in "$sandbox" "$conversation_sandbox" "$reports_sandbox"; do
 	if [[ -e "$dir" ]]; then
 		echo "$dir already exists" >&2
 		exit 2
@@ -105,8 +109,10 @@ for dir in "$sandbox" "$conversation_sandbox"; do
 done
 echo "SANDBOX=$sandbox"
 echo "CONVERSATION_SANDBOX=$conversation_sandbox"
+echo "REPORTS_SANDBOX=$reports_sandbox"
 
-unset CODEX_HOME
+unset CODEX_HOME OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
+export ORI_DEMO_NO_CODEX=1
 export LM_STUDIO_BASE_URL="http://127.0.0.1:$fixture_port/v1"
 
 stop_server() {
@@ -123,7 +129,7 @@ run_phase() {
 		--env "ORI_SOFTWARE_SANDBOX=$home" \
 		--env "ORI_SOFTWARE_FIXTURE_PORT=$fixture_port" \
 		--env "ORI_SOFTWARE_PHASE=$phase" \
-		tests/software-project-folder-setup.spec.ts -- --workers=1 ${pw_args[@]+"${pw_args[@]}"} \
+		tests/software-project-folder-setup.spec.ts -- --workers=1 --output "$home/results-$phase" ${pw_args[@]+"${pw_args[@]}"} \
 		>"$log" 2>&1 || status=$?
 	stop_server
 	if [[ "$tail_lines" != "0" ]]; then tail -n "$tail_lines" "$log"; else cat "$log"; fi
@@ -145,5 +151,6 @@ else
 fi
 # The third phase has a server and a sandbox of its own, so it runs either way.
 run_phase conversation "$conversation_sandbox" || true
+run_phase reports "$reports_sandbox" || true
 
 exit "$failed"

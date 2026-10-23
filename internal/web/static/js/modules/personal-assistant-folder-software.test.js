@@ -8,7 +8,7 @@ import {
   conversationFolderOfferView,
   folderFirstLookView,
   folderOfferView,
-  setupModalView,
+  setupResultView as setupModalView,
   softwareOfferView,
   softwarePrerequisiteRows
 } from './personal-assistant-folder.js';

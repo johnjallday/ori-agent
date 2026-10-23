@@ -1,0 +1,325 @@
+/* One fact-backed diagram, shared by the folder preview and setup surfaces.
+   Deliberately scoped: no global card, modal, or typography overrides. */
+.folder-visual {
+  --fv-ink: var(--ori-ink, var(--text-primary));
+  --fv-muted: var(--pa-ink-dim, var(--text-secondary));
+  --fv-paper: var(--ori-paper, var(--bg-secondary));
+  --fv-line: var(--ori-border, var(--border-color));
+  --fv-accent: var(--pa-accent-text, var(--text-primary));
+  color: var(--fv-ink);
+  margin: 1rem 0;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+  border: 1px solid var(--fv-line);
+  border-radius: 1rem;
+  background: var(--fv-paper);
+  container-type: inline-size;
+}
+
+.folder-visual__relationship {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.5rem minmax(0, 1.2fr);
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.folder-visual section,
+.folder-visual__agent > div {
+  min-width: 0;
+}
+
+.folder-visual h4 {
+  margin: 0.35rem 0;
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.folder-visual p,
+.folder-visual strong,
+.folder-visual li {
+  overflow-wrap: anywhere;
+}
+
+.folder-visual__label {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--fv-muted);
+}
+
+.folder-visual__note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--fv-muted);
+}
+
+.folder-visual__source {
+  padding: 0.5rem;
+}
+
+.folder-visual__folder-art {
+  position: relative;
+  display: block;
+  width: 5rem;
+  height: 3.5rem;
+  margin: 0.9rem 0 1rem;
+  border: 2px solid var(--fv-accent);
+  border-radius: 0.35rem 0.6rem 0.6rem 0.6rem;
+  background: color-mix(in srgb, var(--fv-accent) 15%, var(--fv-paper));
+  box-shadow: 0 0.3rem 0 color-mix(in srgb, var(--fv-accent) 8%, transparent);
+}
+
+.folder-visual__folder-art::before {
+  content: "";
+  position: absolute;
+  width: 2rem;
+  height: 0.55rem;
+  top: -0.55rem;
+  left: -2px;
+  border: 2px solid var(--fv-accent);
+  border-bottom: 0;
+  border-radius: 0.35rem 0.35rem 0 0;
+  background: var(--fv-paper);
+}
+
+.folder-visual__entries {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.folder-visual__entries li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--fv-line);
+}
+
+.folder-visual__entries small {
+  color: var(--fv-muted);
+}
+
+.folder-visual__connection {
+  color: var(--fv-accent);
+  text-align: center;
+  font-size: 1.4rem;
+}
+
+.folder-visual__destination {
+  padding: 0.9rem;
+  border: 1px solid var(--fv-line);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--fv-accent) 4%, var(--fv-paper));
+}
+
+.folder-visual__workspace {
+  padding: 0.85rem;
+  margin-top: 0.7rem;
+  border: 1px dashed var(--fv-accent);
+  border-radius: 0.7rem;
+}
+
+.folder-visual__badge {
+  display: inline-block;
+  margin: 0 0 0.35rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--fv-line);
+  border-radius: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.folder-visual__building {
+  display: block;
+  color: var(--fv-accent);
+}
+
+.folder-visual__building svg {
+  max-width: 100%;
+  height: 4rem;
+}
+
+.folder-visual__agent {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--fv-line);
+}
+
+.folder-visual__initials {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2.5rem;
+  height: 2.5rem;
+  border: 1px dashed var(--fv-accent);
+  border-radius: 50%;
+  font-weight: 700;
+}
+
+@container (max-width: 400px) {
+  .folder-visual__relationship {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .folder-visual__connection {
+    transform: rotate(90deg);
+  }
+}
+
+.folder-setup-decision,
+.folder-setup-diagram {
+  min-width: 0;
+}
+
+.folder-setup-consequences {
+  border-block: 1px solid var(--ori-border, var(--border-color));
+  padding-block: 0.8rem;
+  margin-block: 1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.folder-setup-consequences h4 {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.folder-setup-consequences ul {
+  padding-left: 1.2rem;
+  margin-bottom: 0;
+}
+
+.folder-setup-consequences li + li {
+  margin-top: 0.5rem;
+}
+
+.folder-setup-milestones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.8rem 0;
+}
+
+.folder-setup-milestones li {
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.folder-setup-milestones [data-state="working"],
+.folder-setup-milestones [data-state="failed"] {
+  border-color: var(--pa-accent-text, var(--text-primary));
+  font-weight: 700;
+}
+
+.folder-setup-details {
+  margin-top: 0.8rem;
+}
+
+.folder-setup-details > summary {
+  min-height: 44px;
+  padding-block: 0.7rem;
+  cursor: pointer;
+}
+
+.folder-setup-details summary:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--text-primary));
+  outline-offset: 3px;
+}
+
+@media (min-width: 1000px) {
+  #personalAssistantPanel:has(.pa-folder__offer--visual:not([hidden])) {
+    width: min(1120px, calc(100vw - 48px));
+  }
+
+  .pa-folder__offer--visual .folder-setup-surface {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "diagram decision";
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  .pa-folder__offer--visual .folder-setup-decision {
+    grid-area: decision;
+  }
+
+  .pa-folder__offer--visual .folder-setup-diagram {
+    grid-area: diagram;
+    position: sticky;
+    top: 0.5rem;
+  }
+}
+
+/* At short/zoomed viewports, keep the navbar and pinned composer usable
+   without letting their chrome squeeze the setup viewport to a few pixels. */
+@media (max-height: 520px) {
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__avatar,
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
+    .personal-assistant-panel__avatar
+    .agent-avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__input {
+    min-height: 44px;
+    height: 44px;
+  }
+}
+
+@media (min-width: 600px) and (max-height: 520px) {
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__form {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
+    .personal-assistant-panel__attachments {
+    grid-column: auto;
+    max-width: 180px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
+    .personal-assistant-panel__attachments
+    > * {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__input {
+    grid-column: 2;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__send {
+    grid-column: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-visual *,
+  .folder-visual *::before,
+  .folder-visual *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

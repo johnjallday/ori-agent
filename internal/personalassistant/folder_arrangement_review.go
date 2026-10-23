@@ -290,12 +290,19 @@ func (s *FolderObservationService) ArrangementOutcome(ctx context.Context, targe
 		out.SetupStatus, out.StopReason = offer.Setup.Status, offer.Setup.StopReason
 	}
 	if outcome := offer.Outcome; offer.Status == FolderOfferResolved && outcome != nil && outcome.Kind == FolderChoiceGroup {
+		workspaces := 0
+		for _, row := range outcome.Receipt {
+			if row.Kind == "workspace" {
+				workspaces++
+			}
+		}
 		encoded, err := json.Marshal(outcome.Receipt)
-		if err != nil || outcome.WorkspaceID == "" || len(outcome.Receipt) < 2 {
+		if err != nil || outcome.WorkspaceID == "" || workspaces < 2 {
 			return FolderArrangementOutcome{}, ErrFolderWorkspaceRefused
 		}
 		sum := sha256.Sum256(encoded)
-		out.WorkspaceID, out.Route, out.Workspaces, out.ReceiptDigest = outcome.WorkspaceID, outcome.Route, len(outcome.Receipt)-1, hex.EncodeToString(sum[:])
+		// The group itself is a workspace row; observed agents are not children.
+		out.WorkspaceID, out.Route, out.Workspaces, out.ReceiptDigest = outcome.WorkspaceID, outcome.Route, workspaces-1, hex.EncodeToString(sum[:])
 	}
 	return out, nil
 }

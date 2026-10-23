@@ -37,6 +37,11 @@ user: "create it" / clicks Create ─► POST /api/workspaces { …draft, build_
   pane ("Not yet — …") instead of submitting. The host never honours `create_now` on the
   first turn: the user always sees a filled form before anything is created.
 
+The folder-led build shares the inert [visual folder setup renderer](visual-folder-setup.md)
+with Home and the drawer. It does not share their state owner or confirmation controls;
+the build session and wizard remain authoritative. Full plan details are disclosed,
+while consequences and saved milestones stay visible.
+
 ## Server
 
 | Piece                                          | File                                                                               |

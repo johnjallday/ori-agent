@@ -168,8 +168,12 @@ async function attachFolder(page: Page, name: string) {
 }
 
 const card = (page: Page) => page.locator('#personalAssistantFolderOffer');
-const planLines = async (page: Page) =>
-  (await card(page).innerText()).split('\n').map(line => line.trim());
+const planLines = async (page: Page) => {
+  const details = card(page).locator('#personalAssistantFolderDetails');
+  if (!(await details.evaluate(node => (node as HTMLDetailsElement).open)))
+    await details.getByText('Full setup details', { exact: true }).click();
+  return (await card(page).innerText()).split('\n').map(line => line.trim());
+};
 
 test.describe('a folder of projects attached in the assistant', () => {
   test.skip(phase !== 'composer', 'runs in the composer phase');
@@ -222,9 +226,21 @@ test.describe('a folder of projects attached in the assistant', () => {
     await card(page).getByRole('button', { name: 'Set up', exact: true }).click();
     // The receipt is the end of the run; a workspace exists a moment before its
     // folder is linked, so nothing is read until the run says it is done.
-    const done = page.locator('.modal.show').first();
+    const done = card(page);
     await expect(done).toContainText('Workspace · Downloads (group)', { timeout: 90_000 });
-    await expect(done).toContainText('no task was created');
+    await expect(done).toContainText('No automatic task');
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await page.setViewportSize({ width: 1440, height: 1100 });
+      await page.evaluate(() =>
+        (window as any).PersonalAssistantTranscript?.revealControl(
+          document.getElementById('personalAssistantFolderOfferHeadline'),
+          true
+        )
+      );
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/04-real-group-result.png`
+      });
+    }
     await expect(done.getByRole('link', { name: 'Open Downloads' })).toBeVisible();
     const made = await groupOf(request, 'Downloads', 6);
     expectLinked(made.children, root);
@@ -344,7 +360,7 @@ test.describe("a folder of projects explored from Home's folder link", () => {
     );
 
     await card(page).getByRole('button', { name: 'Set up', exact: true }).click();
-    const done = page.locator('.modal.show').first();
+    const done = card(page);
     await expect(done).toContainText('Workspace · Studio (group)', { timeout: 90_000 });
     await expect(done.getByRole('link', { name: 'Open Studio' })).toBeVisible();
     const made = await groupOf(request, 'Studio', 6);
@@ -405,7 +421,7 @@ test.describe('a folder of projects the user once said No thanks to', () => {
     await setUp.click();
     await expect(card(page)).toContainText('Set up Downloads as a group?', { timeout: 30_000 });
     await card(page).getByRole('button', { name: 'Set up', exact: true }).click();
-    const done = page.locator('.modal.show').first();
+    const done = card(page);
     await expect(done).toContainText('Workspace · Downloads (group)', { timeout: 90_000 });
     const made = await groupOf(request, 'Downloads', 6);
     expectLinked(made.children, root);

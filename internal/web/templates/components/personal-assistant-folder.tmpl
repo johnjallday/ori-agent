@@ -43,6 +43,8 @@
   </div>
   <section id="personalAssistantFolderOffer" class="pa-thread__reply pa-specialist-offer pa-folder__offer"
            aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
+    <div class="folder-setup-surface">
+    <div class="folder-setup-decision" aria-label="Current setup decision">
     <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
     <!-- A recognized project's plan as a hire: the agent the setup hires for the
          folder, and the one question whose answer becomes the workspace goal.
@@ -54,9 +56,9 @@
       </p>
       <div id="personalAssistantFolderBriefField" class="pa-folder__brief" hidden>
         <label for="personalAssistantFolderBrief" class="pa-folder__brief-label">What should it do with it?</label>
-        <textarea id="personalAssistantFolderBrief" class="form-control form-control-sm" rows="3" maxlength="300"
+        <textarea id="personalAssistantFolderBrief" class="form-control form-control-sm" rows="3"
                   aria-describedby="personalAssistantFolderBriefHint"></textarea>
-        <p id="personalAssistantFolderBriefHint" class="pa-folder__note">This becomes the workspace goal. You can change it later.</p>
+        <p id="personalAssistantFolderBriefHint" class="pa-folder__note">This becomes the workspace goal. Up to 300 characters; you can change it later.</p>
       </div>
     </div>
     <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
@@ -73,6 +75,17 @@
     <p id="personalAssistantFolderOfferCapability" class="pa-folder__note" hidden></p>
     <!-- What the card does not lead with since a No thanks, with Show. -->
     <p id="personalAssistantFolderOfferHidden" class="pa-folder__note pa-folder__hidden" hidden></p>
+    <div id="personalAssistantFolderConsequences" class="folder-setup-consequences" hidden></div>
+    <div id="personalAssistantFolderProgress" hidden></div>
+    <p id="personalAssistantFolderProfile" class="pa-folder__note" hidden></p>
+    <p id="personalAssistantFolderFirstLookResult" class="pa-folder__first-look" hidden></p>
+    <div id="personalAssistantFolderOfferActions" class="pa-specialist-offer__actions"></div>
+    <p id="personalAssistantFolderOfferNote" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
+    <p id="personalAssistantFolderOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
+    <p id="personalAssistantFolderSongsNote" class="pa-folder__note" role="status" hidden></p>
+    <ul id="personalAssistantFolderSongs" class="folder-run folder-run__songs" aria-label="Projects saved most recently" hidden></ul>
+    <details id="personalAssistantFolderDetails" class="folder-setup-details">
+    <summary>Full setup details</summary>
     <details class="pa-folder__why"><summary>Why this suggestion?</summary>
       <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
     </details>
@@ -93,12 +106,11 @@
     <ul id="personalAssistantFolderReceipt" class="pa-folder__receipt" hidden></ul>
     <!-- On the Map: where the automatic layout put the building, with Move. -->
     <div id="personalAssistantFolderMap" hidden></div>
-    <!-- What the agent found on its first look, one line; the full report is the
-         task's ticket. Text only, written by the server. -->
-    <p id="personalAssistantFolderFirstLookResult" class="pa-folder__first-look" hidden></p>
-    <div id="personalAssistantFolderOfferActions" class="pa-specialist-offer__actions"></div>
-    <p id="personalAssistantFolderOfferNote" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
-    <p id="personalAssistantFolderOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
+    </details>
+    </div>
+    <!-- Decision controls precede the diagram in DOM order, including on phones. -->
+    <div id="personalAssistantFolderVisual" class="folder-setup-diagram" hidden></div>
+    </div>
   </section>
 </section>
 {{end}}

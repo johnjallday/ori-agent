@@ -8,8 +8,41 @@ import {
   folderReceiptView,
   hireLookView,
   hireView,
-  setupModalView
+  setupResultView as setupModalView,
+  setupRunView
 } from './personal-assistant-folder.js';
+
+test('stop families keep distinct reviewed recovery actions and never guess a plugin update', () => {
+  const cases = [
+    ['needs_pick', {}, ['repick', 'resume']],
+    ['needs_choice', {}, ['choose-0', 'resume']],
+    ['needs_model', {}, ['model', 'retry', 'resume']],
+    ['plan_changed', {}, ['resume']],
+    ['consent_stale', {}, ['resume']],
+    ['assistant_missing', {}, ['resume']],
+    ['install_failed', {}, ['retry', 'resume']],
+    ['unknown_failure', {}, ['retry', 'resume']],
+    ['member_failed', { structure: true }, ['retry']],
+    ['plan_changed', { structure: true }, ['review-saved']],
+    ['plan_changed', { software: true }, ['review']],
+    ['interrupted', { software: true }, ['retry']]
+  ];
+  for (const [reason, variant, ids] of cases) {
+    const view = setupRunView(
+      { status: 'stopped', stop_reason: reason, entry_candidates: ['Actual.rpp'] },
+      'Project',
+      variant
+    );
+    assert.deepEqual(
+      view.actions.map(action => action.id),
+      ids,
+      reason
+    );
+    if (reason.includes('_')) assert.doesNotMatch(view.question, new RegExp(reason));
+    assert.ok(!view.actions.some(action => action.label === 'Retry update'));
+    if (reason === 'needs_choice') assert.equal(view.actions[0].entry, 'Actual.rpp');
+  }
+});
 
 const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
 const template = readFileSync(
@@ -64,7 +97,7 @@ test('a plan that names a hire is a hire card: Hire and start, Not now, and Adju
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label]),
     [
-      ['setup', 'Hire and start'],
+      ['setup', 'Hire & start'],
       ['no', 'Not now']
     ]
   );
@@ -90,6 +123,8 @@ test('the agent row names the role and the model, or that there is no model yet'
 test('an existing agent is assigned, and a plugin not installed yet names the capability', () => {
   const assigned = hireView(hireOffer({ mode: 'bind', agent_name: 'Studio Lead' }).plan, 'My Song');
   assert.equal(text(assigned.headline), 'Assign Studio Lead to My Song');
+  assert.equal(assigned.confirmLabel, 'Assign & start');
+  assert.equal(folderOfferView(hireOffer({ mode: 'bind' })).actions[0].label, 'Assign & start');
   const pending = hireView(
     hireOffer({ mode: 'pending', agent_name: '', role_label: 'REAPER song', model: '' }).plan,
     'My Song'
@@ -145,7 +180,7 @@ test('after Adjust… the hire keeps its plan beside Continue setup', () => {
   const view = folderOfferView(hireOffer({}, { status: 'awaiting_outcome', decision: 'yes' }));
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire and start', 'Continue setup']
+    ['Hire & start', 'Continue setup']
   );
   assert.equal(view.hire.adjust, null);
 });
@@ -194,7 +229,7 @@ test('a reviewed software project is hired the same way, keeping what was read',
   assert.equal(view.question, 'What I read in widget:');
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire and start', 'Not now', 'Review again']
+    ['Hire & start', 'Not now', 'Review again']
   );
   assert.equal(view.hire.adjust.softwareAdjust, true);
   assert.ok(view.evidence.length > 0);
@@ -228,9 +263,12 @@ test('the brief field is a real labelled control, bounded like a workspace goal'
   );
   assert.match(
     template,
-    /<textarea id="personalAssistantFolderBrief"[^>]*maxlength="300"[\s\S]*?aria-describedby="personalAssistantFolderBriefHint"/
+    /<textarea id="personalAssistantFolderBrief"[\s\S]*?aria-describedby="personalAssistantFolderBriefHint"/
   );
-  assert.match(template, /This becomes the workspace goal\. You can change it later\./);
+  assert.doesNotMatch(template, /<textarea id="personalAssistantFolderBrief"[^>]*maxlength=/);
+  assert.match(template, /Up to 300 characters/);
+  assert.equal(globalThis.OriFolderSetupVisual.briefError('🎼'.repeat(300)), '');
+  assert.match(globalThis.OriFolderSetupVisual.briefError('🎼'.repeat(301)), /300 characters/);
 });
 
 // A set-up folder whose hire started its agent's first look, as the server
@@ -357,7 +395,7 @@ test('a running hired look can be stopped from the receipt, and Start first look
 
 test('the run pop-up ends a hire on its agent at work, or on why the look waits', () => {
   const running = setupModalView(hiredOffer());
-  assert.equal(running.eyebrow, 'Hired');
+  assert.equal(running.eyebrow, 'Setup ready');
   assert.equal(
     running.status,
     "Development Assistant is reading elite_school, read-only. I'll tell you here when it has something."
@@ -372,5 +410,8 @@ test('the run pop-up ends a hire on its agent at work, or on why the look waits'
     blocked.status,
     'Here is what I set up. Choose a model that can read without tools.'
   );
-  assert.equal(setupModalView(hiredOffer({}, null)).eyebrow, 'All set');
+  assert.equal(setupModalView(hiredOffer({}, null)).eyebrow, 'Setup ready');
+  const finished = setupModalView(hiredOffer({ state: 'finished' }));
+  assert.match(finished.status, /finished the first look/);
+  assert.doesNotMatch(finished.status, /is reading/);
 });

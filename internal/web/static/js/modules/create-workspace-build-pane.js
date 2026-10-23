@@ -72,24 +72,14 @@
     folderCollectionHint: 'Explore a folder on Home sets them up together',
     // A recognized folder's plan: the host's own lines, never the model's.
     planTitle: 'The setup plan',
-    // The sketch above the lines: the Home and the workspace Set it up leaves
-    // behind, drawn from the plan's own facts, then the lines as a checklist.
+    // The shared diagram uses typed host facts; complete plan lines remain
+    // available in the disclosure.
     planGet: 'You’ll get',
     planSteps: 'Ori will',
     planStepCount: count => `${count} ${count === 1 ? 'step' : 'steps'}`,
     planAlready: count => `${count} already done`,
-    planHome: 'Home',
-    planHomeNew: 'new',
-    planHomeExisting: 'existing',
-    planWorkspace: 'Workspace',
-    planWorkspaceUnnamed: 'Named after the folder',
-    planPartFolder: 'Folder linked',
-    planPartTeam: 'Team',
-    planPartTask: 'First task',
     planWhy: 'Why this suggestion?',
     setUp: 'Set it up',
-    // A plan that names a hire is pressed as one, as on Home's card.
-    hireStart: 'Hire and start',
     setupRetry: 'Retry',
     setupRunning: 'Setting it up… Ori is running the plan, line by line.',
     setupEntry: name => `Use ${name}`,
@@ -644,10 +634,6 @@
     els.plan.hidden = !lines.length && !note;
     if (lines.length) {
       shared.renderSetupLines(els.planLines, lines, document, { kindIcons: true });
-      // The line the run is on stays in view while the checklist scrolls.
-      els.planLines.querySelector?.('li[data-state="working"]')?.scrollIntoView?.({
-        block: 'nearest'
-      });
     } else els.planLines.textContent = '';
     els.planLines.hidden = !lines.length;
     const already = lines.filter(line => line.state === 'already').length;
@@ -666,13 +652,6 @@
     els.planWhy.hidden = !evidence;
     renderInstall(lines.length > 0);
     renderSetupControls(lines.length > 0);
-  }
-
-  // planWorkspaceName is the name Set it up gives the workspace, as the draft
-  // summary says it: the draft's name, else the recognized project's own name,
-  // else the attached folder's. '' when none is known.
-  function planWorkspaceName() {
-    return text(state.session?.draft?.name) || planProjectName();
   }
 
   // planProjectName is the recognized project's own name, else the attached
@@ -727,7 +706,6 @@
     const brief = createElement('textarea', 'form-control form-control-sm');
     brief.id = id;
     brief.rows = 3;
-    brief.setAttribute('maxlength', '300');
     brief.setAttribute('aria-describedby', `${id}Hint`);
     const hint = createElement('p', 'pa-folder__note');
     hint.id = `${id}Hint`;
@@ -763,7 +741,7 @@
     block.brief.disabled = Boolean(state.busy);
   }
 
-  // renderHire draws who Hire and start hires as the plan's title, with the
+  // renderHire draws the reviewed agent as the plan's title, with the
   // agent's badge and the one question above the sketch.
   function renderHire(view) {
     const { els } = state;
@@ -795,76 +773,31 @@
     return view;
   }
 
-  // sketchView is what the sketch above the lines draws, from the plan's own
-  // facts and the kinds of its lines: the Home the workspace goes into (when
-  // the plan names one), the workspace, and the parts the lines promise it.
-  // null when there is no ready plan to draw.
-  function sketchView(plan, lines) {
-    if (!plan || !Array.isArray(lines) || !lines.length) return null;
-    const kinds = new Set(lines.map(line => line.kind));
-    const home = plan.home && typeof plan.home === 'object' ? plan.home : null;
-    const parts = [];
-    if (kinds.has('folder')) parts.push({ kind: 'folder', label: COPY.planPartFolder });
-    if (kinds.has('agents') || kinds.has('assistant')) {
-      parts.push({ kind: 'agents', label: COPY.planPartTeam });
+  // Thin adapter: the build owns all requests/drafts/lifetime, while the same
+  // inert renderer used by the drawer consumes its host projection.
+  function renderVisualPlan(diagram, consequences, progress) {
+    const session = state.session || {};
+    const shared = globalThis.OriFolderSetupVisual;
+    const plan = session.plan?.ready ? { ...session.plan, destination: session.plan.home } : null;
+    const setup = session.setup_run;
+    const visible = Boolean(plan || setup);
+    if (diagram) {
+      diagram.hidden = !visible;
+      if (visible)
+        shared?.renderDiagram(diagram, {
+          observation: session.folder?.observation,
+          offer: { subject: { name: planProjectName() }, plan, setup }
+        });
     }
-    if (kinds.has('task')) parts.push({ kind: 'task', label: COPY.planPartTask });
-    return {
-      home:
-        home && text(home.name)
-          ? {
-              name: text(home.name),
-              status: home.status === 'existing' ? COPY.planHomeExisting : COPY.planHomeNew
-            }
-          : null,
-      workspace: planWorkspaceName() || COPY.planWorkspaceUnnamed,
-      parts
-    };
+    shared?.renderConsequences(consequences, setup ? null : plan);
+    shared?.renderProgress(progress, setup);
   }
 
-  // renderSketch draws the sketch: a Home box (when the plan names one) with
-  // the workspace box inside it, and the workspace's parts as chips. Every
-  // fact in it is also in the lines, so it is decoration for sighted readers.
-  function renderSketch(plan, lines) {
+  function renderSketch(plan) {
     const { els } = state;
     if (!els.sketch) return;
-    const view = sketchView(plan, lines);
-    els.sketchBody.textContent = '';
-    els.sketch.hidden = !view;
-    if (!view) return;
-    const shared = globalThis.OriFolderPlanLines;
-    const iconFor = kind => (shared?.setupLineKindIcon ? shared.setupLineKindIcon(kind) : 'bi-dot');
-    const box = (className, kind, label) => {
-      const node = createElement('div', className);
-      const caption = createElement('span', 'workspace-build-sketch__label');
-      const icon = createElement('i', `bi ${iconFor(kind)}`);
-      caption.appendChild(icon);
-      caption.append(label);
-      node.appendChild(caption);
-      return node;
-    };
-    const workspace = box('workspace-build-sketch__workspace', 'workspace', COPY.planWorkspace);
-    workspace.appendChild(createElement('strong', 'workspace-build-sketch__name', view.workspace));
-    if (view.parts.length) {
-      const parts = createElement('ul', 'workspace-build-sketch__parts');
-      view.parts.forEach(part => {
-        const item = createElement('li');
-        item.appendChild(createElement('i', `bi ${iconFor(part.kind)}`));
-        item.append(part.label);
-        parts.appendChild(item);
-      });
-      workspace.appendChild(parts);
-    }
-    if (view.home) {
-      const home = box('workspace-build-sketch__home', 'home', COPY.planHome);
-      const name = createElement('strong', 'workspace-build-sketch__name', view.home.name);
-      name.appendChild(createElement('span', 'workspace-build-sketch__badge', view.home.status));
-      home.appendChild(name);
-      home.appendChild(workspace);
-      els.sketchBody.appendChild(home);
-    } else {
-      els.sketchBody.appendChild(workspace);
-    }
+    els.sketch.hidden = !plan && !state.session?.setup_run;
+    renderVisualPlan(els.sketchBody, els.consequences, els.progress);
   }
 
   // folderPickMinutes is how long the server still holds the attached folder's
@@ -892,7 +825,7 @@
     els.planStatus.textContent = preparing ? COPY.setupRunning : '';
     els.planStatus.hidden = !preparing;
     els.setupButton.hidden = !(hasLines && open && !session.setup && session.plan?.ready === true);
-    els.setupButton.textContent = planHireView() ? COPY.hireStart : COPY.setUp;
+    els.setupButton.textContent = planHireView()?.confirmLabel || COPY.setUp;
     // An unnamed draft is named after its folder, as the plan says.
     els.setupButton.disabled = busy || expired;
     const candidates =
@@ -939,9 +872,7 @@
     const title = createElement('h3', 'workspace-build-plan__title', COPY.planTitle);
     title.id = 'workspaceBuildPlanTitle';
     plan.setAttribute('aria-labelledby', title.id);
-    // The sketch says nothing the lines do not, so assistive tech skips it.
     const sketch = createElement('div', 'workspace-build-plan__sketch');
-    sketch.setAttribute('aria-hidden', 'true');
     sketch.hidden = true;
     sketch.appendChild(createElement('p', 'workspace-build-plan__kicker', COPY.planGet));
     const sketchBody = createElement('div', 'workspace-build-sketch');
@@ -993,13 +924,24 @@
     // The body scrolls as one page beside the conversation; the title, the
     // run's status and Set it up stay put (workspace-construct.css).
     const body = createElement('div', 'workspace-build-plan__body');
-    body.appendChild(hireBlock.hire);
-    body.appendChild(sketch);
-    body.appendChild(linesKicker);
-    body.appendChild(planLines);
-    body.appendChild(planNote);
-    body.appendChild(installEls.install);
-    body.appendChild(planWhy);
+    const consequences = createElement('div', 'folder-setup-consequences');
+    const progress = createElement('div');
+    const details = createElement('details', 'folder-setup-details');
+    details.append(
+      createElement('summary', '', 'Full setup details'),
+      linesKicker,
+      planLines,
+      planWhy
+    );
+    body.append(
+      hireBlock.hire,
+      consequences,
+      progress,
+      sketch,
+      planNote,
+      installEls.install,
+      details
+    );
     plan.appendChild(title);
     plan.appendChild(body);
     plan.appendChild(planStatus);
@@ -1012,6 +954,8 @@
       hireBlock,
       sketch,
       sketchBody,
+      consequences,
+      progress,
       linesKicker,
       planLines,
       planNote,
@@ -2247,6 +2191,7 @@
     renderFolderQuestion,
     setupBrief,
     renderReviewHire,
+    renderVisualPlan,
     openFolderChooser,
     closeFolderChooser,
     folderChooserOpen: () => Boolean(state.root && state.chooserOpen),
@@ -2263,7 +2208,6 @@
     noteGroupPrerequisite,
     setProviderInstall,
     groupPrerequisiteView,
-    sketchView,
     isMounted: () => Boolean(state.root),
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),

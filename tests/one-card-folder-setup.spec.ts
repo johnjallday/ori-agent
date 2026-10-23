@@ -1,22 +1,42 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
+import { verifySavedFirstLook } from './helpers/folder-saved-report';
 
 // One card, one click: a recognized project folder shows its whole plan as a
-// hire, Hire and start runs it on the server, and the card ends on a receipt
-// that opens the workspace and starts the agent's first task.
+// hire, Hire & start runs it on the server, and the same card ends on a receipt.
+// The authorized first look is separate; opening the workspace does not start it.
 //
 // Run it against the isolated demo sandbox (the folders are written into the
 // server's HOME, which is the sandbox):
 //
-//   ./scripts/e2e.sh --env ORI_ONE_CARD_SANDBOX=<sandbox dir> tests/one-card-folder-setup.spec.ts
+//   ./scripts/e2e.sh --env ORI_ONE_CARD_SANDBOX=<sandbox dir> --env ORI_ONE_CARD_PHASE=no-model tests/one-card-folder-setup.spec.ts
 //
-// It needs the network the first time (the reviewed REAPER integration and its
-// Home provider are downloaded and installed by the run itself). The steps that
-// create agents also need a model provider; without one they are skipped and the
-// "needs a model" stop is the thing that is checked instead. No REAPER app is
+// Run again with ORI_ONE_CARD_PHASE=provider on a DIFFERENT fresh sandbox.
+// Both phases are required for delivery. Configure an explicit provider/model
+// for both: the no-model phase verifies that changing it requires fresh consent;
+// the provider phase reviews the intended model before the hire. A changed
+// model must not silently resume the old plan's approval.
+//
+// It needs the reviewed REAPER integration and its Home provider to be available.
+// On a fresh sandbox, follow the offered guided setup to install/enable the
+// reviewed packages if the initial scan reports plan_unavailable. The steps that
+// create agents also need explicit ORI_ONE_CARD_PROVIDER and ORI_ONE_CARD_MODEL;
+// without them only the no-model path is exercised. Never select a signed-in
+// CLI implicitly. An explicitly selected but refused model fails the run. No REAPER app is
 // launched and no live control is granted.
 const sandbox = process.env.ORI_ONE_CARD_SANDBOX || '';
+const phase = process.env.ORI_ONE_CARD_PHASE || 'no-model';
+const providerPhase = phase === 'provider';
+// Slow local inference may take several tool rounds. Extend only the explicit
+// live-report wait, never the required finished-report assertion.
+const reportTimeout = Number(process.env.ORI_ONE_CARD_REPORT_TIMEOUT_MS || 180_000);
+if (!Number.isSafeInteger(reportTimeout) || reportTimeout < 1000 || reportTimeout > 900_000) {
+  throw new Error('ORI_ONE_CARD_REPORT_TIMEOUT_MS must be 1000–900000');
+}
+if (sandbox && !['no-model', 'provider'].includes(phase)) throw new Error('Unknown one-card phase');
 test.skip(!sandbox, 'requires ORI_ONE_CARD_SANDBOX (the demo sandbox directory)');
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(240_000);
@@ -33,6 +53,32 @@ function seedProject(chip: 'Desktop' | 'Documents' | 'Downloads', name: string) 
   const folder = chip === 'Desktop' ? join(sandbox, chip) : join(sandbox, chip, name);
   mkdirSync(folder, { recursive: true, mode: 0o750 });
   writeFileSync(join(folder, `${name}.rpp`), '<REAPER_PROJECT 0.1 "7.0"\n>\n', { mode: 0o600 });
+  return folder;
+}
+
+function sourceSnapshot(folder: string): Record<string, string> {
+  const entries: Record<string, string> = {};
+  const visit = (relative = '') => {
+    for (const entry of readdirSync(join(folder, relative), { withFileTypes: true })) {
+      const name = join(relative, entry.name);
+      expect(entry.isSymbolicLink(), 'no new source symlinks').toBe(false);
+      if (entry.isDirectory()) {
+        entries[`${name}/`] = 'directory';
+        visit(name);
+      } else
+        entries[name] = createHash('sha256')
+          .update(readFileSync(join(folder, name)))
+          .digest('hex');
+    }
+  };
+  visit();
+  return entries;
+}
+
+async function workspaceIDs(request: APIRequestContext) {
+  const listed = await ok(await request.get('/api/workspaces'));
+  const rows = Array.isArray(listed) ? listed : listed.workspaces || listed.folders || [];
+  return rows.map((row: { id: string }) => row.id).sort();
 }
 
 async function scan(request: APIRequestContext, chip: string) {
@@ -52,23 +98,28 @@ async function openCard(page: Page) {
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   await card.scrollIntoViewIfNeeded();
+  await revealFolderSetupDetails(card);
   return card;
 }
 
-async function modelAvailable(request: APIRequestContext) {
-  const response = await request.post('/api/settings/system-model', {
-    data: { provider: 'codex', model: 'gpt-5.6-luna' }
-  });
-  return response.ok();
+async function selectExplicitModel(request: APIRequestContext) {
+  const provider = process.env.ORI_ONE_CARD_PROVIDER || '';
+  const model = process.env.ORI_ONE_CARD_MODEL || '';
+  if (!provider && !model) return false;
+  expect(provider, 'explicit provider required').not.toBe('');
+  expect(model, 'explicit model required').not.toBe('');
+  await ok(await request.post('/api/settings/system-model', { data: { provider, model } }));
+  return true;
 }
-
-let modelReady = false;
 
 test('a hired assistant with a recognized project folder shows the whole plan', async ({
   page,
   request
 }) => {
   await request.post('/api/onboarding/skip');
+  await ok(await request.post('/api/settings/workspace-root', { data: { workspace_root: '' } }));
+  if (providerPhase)
+    expect(await selectExplicitModel(request), 'provider phase requires explicit model').toBe(true);
   const relationship = (await ok(await request.get('/api/personal-assistant'))).personal_assistant;
   if (relationship.state === 'needs_hire') {
     await ok(
@@ -104,7 +155,7 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
   expect(text).toMatch(/File-only mode/);
   expect(text).toMatch(/where it is/);
   expect(text).toMatch(/agents/);
-  expect(text).toMatch(/first read-only task/);
+  expect(text).toMatch(/first read-only look, started right away/);
   expect(text).not.toMatch(/\/Users\/|\/var\/|\/private\//);
   // The plan is a hire: who is hired for the folder, one labelled question that
   // starts from a default brief, and the lines under their heading.
@@ -112,8 +163,12 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
     /^(Hire|Assign) .+ (for|to) Desktop$/
   );
   await expect(card.getByLabel('What should it do with it?')).toHaveValue(/\S/);
-  await expect(card.locator('#personalAssistantFolderPlanHeading')).toContainText(/^Also, /);
-  await expect(card.getByRole('button', { name: 'Hire and start', exact: true })).toBeVisible();
+  await expect(card.locator('#personalAssistantFolderPlanHeadingText')).toHaveText(
+    'Also, in the background'
+  );
+  await expect(
+    card.getByRole('button', { name: /^(Hire|Assign) & start$/, exact: true })
+  ).toBeVisible();
   await expect(card.getByRole('button', { name: 'Not now', exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Adjust', exact: true })).toBeVisible();
 
@@ -155,7 +210,9 @@ test('Adjust… opens today’s step-by-step journey instead of running the plan
   await page.reload();
   const resumed = await openCard(page);
   await expect(resumed).toContainText('Project setup has not finished');
-  await expect(resumed.getByRole('button', { name: 'Hire and start', exact: true })).toBeVisible();
+  await expect(
+    resumed.getByRole('button', { name: /^(Hire|Assign) & start$/, exact: true })
+  ).toBeVisible();
   await expect(resumed.getByRole('button', { name: 'Continue setup' })).toBeVisible();
   await expect(resumed.locator('#personalAssistantFolderPlan li').first()).toBeVisible();
 });
@@ -164,49 +221,84 @@ test('Set up without a model stops with one plain sentence and a way forward', a
   page,
   request
 }) => {
+  test.skip(providerPhase, 'no-model phase only');
   // Make sure no model is configured for this step.
   await request.post('/api/settings/system-model', { data: { provider: '', model: '' } });
   const offer = await scan(request, 'downloads');
   expect(offer.plan?.digest).toBeTruthy();
 
   const card = await openCard(page);
-  await card.getByRole('button', { name: 'Hire and start', exact: true }).click();
-  // Set up opens a pop-up that watches the run: no click per step, and it says
-  // the assistant is working.
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal).toBeVisible();
-  await expect(runModal.locator('#folderSetupRunEyebrow')).toContainText(/working|paused/i);
-  await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', /\d+/);
-  const stopped = runModal.locator('#folderSetupRunStatus');
+  await card.getByRole('button', { name: /^(Hire|Assign) & start$/, exact: true }).click();
+  const stopped = card.locator('#personalAssistantFolderOfferQuestion');
   await expect(stopped).toContainText('needs a model', { timeout: 120_000 });
-  await expect(runModal.locator('#folderSetupRunCount')).toContainText(/\d+ of \d+ steps finished/);
-  await expect(runModal).not.toContainText(/needs_model|plan_changed|install_failed/);
-  for (const name of ['Set up a model', 'Try again', 'Continue setup']) {
-    await expect(runModal.getByRole('button', { name })).toBeVisible();
-  }
-  // Closing it does not stop anything: the card says the same on its own.
-  await runModal.getByRole('button', { name: /^Close/ }).click();
-  await expect(runModal).toBeHidden();
+  await expect(card.locator('[aria-label="Saved setup progress"]')).toBeVisible();
+  await expect(card.locator('[role="progressbar"]')).toHaveCount(0);
+  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
+  // Closing/reopening reads the saved pause, without another setup POST.
+  const writes: string[] = [];
+  page.on(
+    'request',
+    r => r.method() === 'POST' && /\/setup$/.test(r.url()) && writes.push(r.url())
+  );
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  expect(writes).toEqual([]);
   const sentence = card.locator('#personalAssistantFolderOfferQuestion');
   await expect(sentence).toContainText('needs a model');
   await expect(sentence).toContainText(/\d+ of \d+ steps finished/);
   await expect(card).not.toContainText(/needs_model|plan_changed|install_failed/);
-  for (const name of ['Set up a model', 'Try again', 'Continue setup']) {
+  await expect(card.getByRole('button', { name: 'Set up a model' })).toBeVisible();
+  for (const name of ['Try again', 'Continue setup']) {
     await expect(card.getByRole('button', { name })).toBeVisible();
   }
-  // What finished stays finished; nothing was created without a model.
+  // Completed setup work is kept; staffing and the first look wait for a model.
   await expect(
     card.locator('#personalAssistantFolderPlan li[data-state="done"]').first()
   ).toBeVisible();
   await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
-  modelReady = await modelAvailable(request);
 });
 
-test('Try again after a model is set finishes the run on the same card, and the hire starts the first look', async ({
+test('a model change preserves completed work and requires reviewed guided continuation', async ({
   page,
   request
 }) => {
-  test.skip(!modelReady, 'no model provider is available on this machine');
+  test.skip(providerPhase, 'no-model phase only');
+  test.skip(
+    !process.env.ORI_ONE_CARD_PROVIDER && !process.env.ORI_ONE_CARD_MODEL,
+    'explicit model needed to exercise changed consent'
+  );
+  const before = await workspaceIDs(request);
+  const source = join(sandbox, 'Downloads', 'Third');
+  const original = sourceSnapshot(source);
+  expect(await selectExplicitModel(request)).toBe(true);
+  const card = await openCard(page);
+  await card.getByRole('button', { name: 'Try again', exact: true }).click();
+  const review = card.getByRole('button', { name: 'Review changed setup', exact: true });
+  await expect(review).toBeVisible({ timeout: 30000 });
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'differs from the plan you approved'
+  );
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+  expect(await workspaceIDs(request)).toEqual(before);
+  await review.click();
+  const journey = page.locator('#specialistSetupJourneyModal');
+  await expect(journey).toBeVisible();
+  await expect(
+    journey.getByRole('button', { name: 'Manage Team and Extras', exact: true })
+  ).toBeVisible();
+  expect(await workspaceIDs(request)).toEqual(before);
+  expect(sourceSnapshot(source)).toEqual(original);
+});
+
+test('a hire with the reviewed model finishes on the same card and produces the first report', async ({
+  page,
+  request
+}, testInfo) => {
+  test.skip(!providerPhase, 'fresh provider phase only');
+  test.setTimeout(reportTimeout + 60_000);
+  const source = join(sandbox, 'Downloads', 'Third');
+  const original = sourceSnapshot(source);
+  await scan(request, 'downloads');
   const startCalls: string[] = [];
   page.on('response', async response => {
     if (
@@ -217,7 +309,12 @@ test('Try again after a model is set finishes the run on the same card, and the 
     }
   });
   const card = await openCard(page);
-  await card.getByRole('button', { name: 'Try again' }).click();
+  await card
+    .locator('#personalAssistantFolderBrief')
+    .fill(
+      'Read the primary REAPER file once, using the directory ID returned by workspace_directories, not its name. Summarize only its actual contents in a concise final answer; reuse those findings rather than calling the same tools again.'
+    );
+  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
   const receipt = card.locator('#personalAssistantFolderReceipt li');
   await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
   const rows = (await receipt.allInnerTexts()).join('\n');
@@ -227,13 +324,8 @@ test('Try again after a model is set finishes the run on the same card, and the 
   expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
   expect(rows).toMatch(/First task/);
 
-  // The pop-up that watched the run ends on the hired agent at work.
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal).toBeVisible();
-  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('Hired', {
-    timeout: 30_000
-  });
-  await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', '100');
+  await expect(card.locator('.folder-visual')).toContainText('Confirmed workspace member');
+  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
   // The hire's consent started the look on the server; the page never asked to.
   const receiptCard = page.locator('#personalAssistantFolderOffer');
   await expect(receiptCard.locator('#personalAssistantFolderPlan')).toContainText(
@@ -241,7 +333,11 @@ test('Try again after a model is set finishes the run on the same card, and the 
   );
   await expect(receiptCard.getByRole('button', { name: 'Start first look' })).toHaveCount(0);
   expect(startCalls).toEqual([]);
-  const open = receiptCard.getByRole('link', { name: /^Open / });
+  const open = receiptCard
+    .locator('a[href^="/workspaces/"]')
+    .filter({ hasText: /^Open / })
+    .filter({ hasNotText: /report|assessment|Home/ })
+    .first();
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
@@ -253,23 +349,43 @@ test('Try again after a model is set finishes the run on the same card, and the 
     }
   );
 
-  // Opening the workspace never starts it a second time, and shows the banner.
+  // Actual provider-backed acceptance needs a finished report, not merely a
+  // configured model or a ready workspace with a failed first look.
+  await expect(card.getByRole('link', { name: 'Open the full report', exact: true })).toBeVisible({
+    timeout: reportTimeout
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const details = card.locator('#personalAssistantFolderDetails');
+  if ((await details.getAttribute('open')) !== null)
+    await details.locator('summary').first().click();
+  await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('live-ready-report.png') });
+
+  // Closing/reopening preserves the result. The shared read-only tail checks
+  // workspace/report navigation without repeating expensive live inference.
   const before = startCalls.length;
-  await page.goto(href!);
-  await page.waitForLoadState('load');
-  await expect(page.locator('.modal.show')).toHaveCount(0);
-  const banner = page.locator('#workspaceFirstTaskBanner');
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText(/first (task|look)/);
+  const ids = await workspaceIDs(request);
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  expect(await workspaceIDs(request)).toEqual(ids);
+  expect(sourceSnapshot(source)).toEqual(original);
+  const savedOfferID = await page.evaluate(
+    () => (window as any).PersonalAssistantFolder.current()?.id
+  );
+  const reportHref = await card
+    .getByRole('link', { name: 'Open the full report', exact: true })
+    .getAttribute('href');
+  expect(reportHref).toBe(await verifySavedFirstLook(page, request, sandbox, savedOfferID, href!));
   expect(startCalls.length).toBe(before);
 });
 
-test('keyboard only: Hire and start runs from the focused button and the card announces its progress', async ({
+test('keyboard only: Assign & start runs from the focused button and the card announces its progress', async ({
   page,
   request
 }) => {
-  test.skip(!modelReady, 'no model provider is available on this machine');
-  seedProject('Documents', 'Fourth');
+  test.skip(!providerPhase, 'fresh provider phase only');
+  const source = seedProject('Documents', 'Fourth');
+  const original = sourceSnapshot(source);
   await scan(request, 'documents');
   const card = await openCard(page);
   // A later song in the same Home is assigned the Home's one shared assistant.
@@ -281,7 +397,7 @@ test('keyboard only: Hire and start runs from the focused button and the card an
     'aria-live',
     'polite'
   );
-  const setUp = card.getByRole('button', { name: 'Hire and start', exact: true });
+  const setUp = card.getByRole('button', { name: 'Assign & start', exact: true });
   await setUp.focus();
   await expect(setUp).toBeFocused();
   await page.keyboard.press('Enter');
@@ -296,8 +412,9 @@ test('keyboard only: Hire and start runs from the focused button and the card an
   expect(names.filter((name: string) => name.startsWith('REAPER Assistant'))).toEqual([
     'REAPER Assistant'
   ]);
-  // The pop-up's Open link is reachable and activatable without a mouse.
-  const open = page.locator('#folderSetupRunModal').getByRole('link', { name: /^Open / });
+  // The actual workspace link remains keyboard reachable in the same card.
+  const open = card.getByRole('link', { name: 'Open Fourth', exact: true });
   await open.focus();
   await expect(open).toBeFocused();
+  expect(sourceSnapshot(source)).toEqual(original);
 });

@@ -142,6 +142,9 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 	}
 	plan.Destination = facts.Destination
 	plan.Prerequisites = append([]personalassistant.FolderPrerequisite(nil), facts.Prerequisites...)
+	plan.Visual = &personalassistant.FolderSetupVisual{Entity: &personalassistant.FolderSetupEntity{
+		Kind: "workspace", Name: software.WorkspaceName, Operation: software.Outcome,
+	}}
 	return plan.Stamped()
 }
 

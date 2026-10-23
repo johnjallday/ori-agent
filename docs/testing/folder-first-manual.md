@@ -229,14 +229,55 @@ Feature evidence and the post-implementation guide stay ignored/local at
 `tasks/evidence/assistant-conversation-first/final/` and
 `tasks/test-guide-assistant-conversation-first.md`.
 
+## Reviewed REAPER setup acceptance
+
+`tests/one-card-folder-setup.spec.ts` uses two **fresh disposable stores**:
+`ORI_ONE_CARD_PHASE=no-model` checks the saved pause and changed-consent review;
+`ORI_ONE_CARD_PHASE=provider` checks actual new/bound staffing and a finished
+first report. Both phases are required. Supply `ORI_ONE_CARD_SANDBOX` and an
+explicit `ORI_ONE_CARD_PROVIDER` / `ORI_ONE_CARD_MODEL` through `scripts/e2e.sh`.
+Suppress ambient cloud keys and CLI credentials in the demo launch. No implicit
+Codex selection is made. Slow local inference can explicitly set
+`ORI_ONE_CARD_REPORT_TIMEOUT_MS=900000` (maximum 15 minutes; default 3 minutes).
+This only extends the report wait; a finished report is still required. The
+provider phase enters an explicit read-only brief through the normal review field;
+it does not supply a report, a tool response, or altered execution permissions.
+A timeout does not cancel the server task. Inspect its state before repeating anything, and
+use a new provider-phase store rather than replaying setup into a used store.
+
+Confirm the sandbox workspace root. If the initial offer has no plan, follow its
+existing guided setup to install/enable the reviewed integration and Home provider;
+record the actual versions. Changing a model after approval does not authorize a
+silent retry: **Review changed setup** opens the existing guided continuation.
+The provider phase instead reviews its intended model before confirming the hire.
+
+Follow **Open the full report** / **Read the full report** directly to the stored
+task output, not only a ticket's status. Legacy ticket-only data offers **Open task**.
+Reloading that view must preserve workspace/task IDs, execution counts and source
+bytes; it must not run the task or
+its suggestion. A successful HTTP response containing only ticket status is not
+proof that a report is readable. After slow inference or a browser interruption,
+`tests/one-card-saved-report.spec.ts` can recheck this read-only tail with explicit
+`ORI_ONE_CARD_SANDBOX` and `ORI_ONE_CARD_REPORT_OFFER_ID`. It shares the provider
+suite's assertions, never provisions or retries work, and supplements rather than
+replaces fresh review/staffing and live-execution evidence. A finished task is not
+re-announced in the workspace's first-task banner on a new visit.
+
+A listed model is not proof of usable execution. For local models, verify the
+**loaded** context capacity, not only the advertised maximum. Ori's
+`LM_STUDIO_CONTEXT_WINDOW` sets its prompt budget; it does not resize LM Studio.
+Do not reconfigure a shared model server without authorization. A ready workspace
+with a waiting/failed look does not satisfy the finished-report check. Native
+picker selection/cancel and native browser zoom remain separate evidence.
+
 ## Software project folder
 
 A folder that holds a software project is reviewed, set up as a Code Project
 workspace bound to that exact directory, and given one read-only first
-assessment that the user starts. Nothing is installed and nothing is written
-into the project.
+assessment authorized by the reviewed hire. Nothing is installed and nothing
+is written into the project.
 
-Automated, in a real browser, with no model and no network:
+Automated, in a real browser, with a scripted loopback provider (no live model):
 
 ```bash
 ./scripts/e2e-software-folder.sh
@@ -248,7 +289,10 @@ the same sandbox, and runs the second phase, so a paused setup surviving a
 restart is checked for real. A third phase, on a server and sandbox of its
 own, attaches a checkout through the assistant composer's **Add folder** and
 sends it: the reply proposes that one folder as a workspace, and one click
-reaches its card. The suite writes its own inert project folders
+reaches its card. A fourth, independent `reports` phase creates two unread stored
+reports through actual setup/task execution, then checks Home/drawer handoff,
+**Start this** and **Not now** using the same cases as `folder-hire-brief.spec.ts`.
+The suite writes its own inert project folders
 (Git metadata is plain text; no git command runs) and hashes them before and
 after. Its one stand-in is labelled in the spec as the FIXTURE PROVIDER: a
 local HTTP server that answers the model API, which the server's own `lmstudio`
@@ -257,9 +301,15 @@ the evidence, the isolation and every screen are the product's own; only the
 model's words are canned, and the spec reads back exactly what was sent to it.
 Run directly through `scripts/e2e.sh`, the spec skips unless
 `ORI_SOFTWARE_SANDBOX`, `ORI_SOFTWARE_FIXTURE_PORT` and `ORI_SOFTWARE_PHASE`
-(`first`, `restarted` or `conversation`) are set.
+(`first`, `restarted`, `conversation` or `reports`) are set.
 
-With a real model, the whole journey in one command:
+The shared [visual setup contract](../architecture/visual-folder-setup.md) keeps
+review, saved milestones, recovery and the canonical result on one card. Use
+**Full setup details** for the complete plan/receipt. Create/bind plans use
+**Hire & start** / **Assign & start**; unknown staffing retains a generic setup
+action. Setup completion is separate from the first look and its report.
+
+With an explicitly intended real model, the whole journey in one command:
 
 ```bash
 ./scripts/demo-software-folder.sh               # a small unrelated project
@@ -275,12 +325,15 @@ and Set up finish in the conversation. The reply is printed in the sandbox's
 
 It starts an isolated demo server on a new sandbox, seeds the folders, and runs
 the walkthrough's phases in order, restarting the server where the journey
-needs it: `setup` (pauses with no model), restart, `resume`, `assess-interrupt`
-(starts the real assessment and leaves it running), restart, `assess` (the lost
-run reads "Did not finish"; Try again runs the same task; the report, the
-workspace banner and the Plans hand-off are followed), `repeat`. Like `wt
-demo`, the server is given your Codex home (`$CODEX_HOME`, else `~/.codex`), so
-the two assessment phases make real model calls. The report it got is printed
+needs it: `setup` (pauses with no model), restart, `resume` (re-pick/review if
+folder authority was lost), `assess-interrupt` (observes the first look already
+authorized by setup), restart, `assess` (Try again uses the same failed task;
+a finished look is only read), `repeat`. A look that finished before interruption
+is reported as **NOT RUN** for that interruption case, never rerun to manufacture
+it. The report, workspace banner and Plans hand-off are followed. Like `wt demo`,
+the server is given your Codex home (`$CODEX_HOME`, else `~/.codex`): confirming
+the hire and explicitly retrying its look can make real model calls. Do not use
+this live path as an implicit signed-in-provider fallback. The report is printed
 in the sandbox's `assess.log`, and screenshots go to its `shots` folder.
 
 To drive one phase by hand, start `scripts/demo-server.sh <port> <sandbox>`
@@ -295,8 +348,10 @@ Check by eye:
 1. Before Set up, the card names the workspace, the folder (linked where it
    is, read-only), the one assistant and its model, the planning-first mode and
    the first assessment, and says what was read and that no command was run.
-2. Start assessment says what it spends and that the model gets no tools. A
-   model that was never called reads "Set, not checked", never "Ready".
+2. The reviewed hire discloses its first look; accepting it may start that look
+   on the server. Reopening the card/workspace must not start it again. A model
+   configuration is not a verified connection. Observe pending/running/finished/
+   failed look state independently of the ready workspace.
 3. While it runs there is nothing to press twice. A run that does not finish
    says why in one sentence, offers Try again only when nothing has to be
    repaired first, and never shows a raw provider error or a path.

@@ -789,7 +789,7 @@ test('firstMissionOfferView: a hire keeps its question and Adjust on the mission
   assert.equal(offer.hire.brief.label, 'What should it do with it?');
   assert.deepEqual(
     offer.actions.map(action => action.label),
-    ['Hire and start', 'Not now', 'Adjust']
+    ['Hire & start', 'Not now', 'Adjust']
   );
 });
 

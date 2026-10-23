@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
 // A whole music portfolio from one card: 200 song folders show one plan, Set up
 // runs it on the server (provider, integration, Home and its agents, the
@@ -68,6 +69,7 @@ async function openCard(page: Page) {
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   await card.scrollIntoViewIfNeeded();
+  await revealFolderSetupDetails(card);
   return card;
 }
 
@@ -180,14 +182,15 @@ test('Set up without a model stops before any agent and keeps what finished', as
   await request.post('/api/settings/system-model', { data: { provider: '', model: '' } });
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal).toBeVisible();
-  await expect(runModal.locator('#folderSetupRunStatus')).toContainText('needs a model', {
-    timeout: 240_000
-  });
-  await expect(runModal).not.toContainText(/needs_model|plan_changed|install_failed/);
-  await expect(runModal.getByRole('button', { name: 'Try again' })).toBeVisible();
-  await runModal.getByRole('button', { name: /^Close/ }).click();
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'needs a model',
+    {
+      timeout: 240_000
+    }
+  );
+  await expect(card).not.toContainText(/needs_model|plan_changed|install_failed/);
+  await expect(card.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
   await expect(
     card.locator('#personalAssistantFolderPlan li[data-state="done"]').first()
   ).toBeVisible();
@@ -214,8 +217,7 @@ test('keyboard only: Try again lists the 200 songs and opens on the library', as
   await expect(retry).toBeFocused();
   await page.keyboard.press('Enter');
 
-  const runModal = page.locator('#folderSetupRunModal');
-  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('All set', {
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready', {
     timeout: 240_000
   });
   const receipt = (await card.locator('#personalAssistantFolderReceipt li').allInnerTexts()).join(
@@ -227,10 +229,9 @@ test('keyboard only: Try again lists the 200 songs and opens on the library', as
   expect(await songWorkspaces(request)).toEqual([]);
   expect(await agentNames(request)).not.toContain(ASSISTANT);
 
-  // The pop-up ends on the songs saved most recently (recent-songs-after-setup
-  // covers that list); the whole library is the link beside them.
-  await expect(runModal.locator('#folderSetupRunTitle')).toHaveText('Pick a song to start with');
-  const open = runModal.getByRole('link', { name: `Browse all ${SONGS} songs` });
+  // Bounded recent songs and the canonical library link stay in the same card.
+  await expect(card.locator('#personalAssistantFolderSongs li')).toHaveCount(6);
+  const open = card.getByRole('link', { name: `Browse all ${SONGS} songs` });
   await open.focus();
   await expect(open).toBeFocused();
   await page.keyboard.press('Enter');

@@ -24,7 +24,7 @@ import {
   portfolioLibraryURL,
   portfolioProviderAction,
   profileReceiptLine,
-  setupModalView,
+  setupResultView as setupModalView,
   finishedRunWorkspace,
   arrangedStructure,
   conversationFolderOfferView
@@ -80,7 +80,7 @@ test('a project receipt has an On the Map row with Move', () => {
   };
   assert.deepEqual(folderReceiptView(offer).map, {
     label: 'On the Map',
-    text: "REAPER Assistant's building sits inside Music Production Home.",
+    text: 'Its building sits inside Music Production Home.',
     move: { label: 'Move', href: '/?move=ws-song' }
   });
   const standalone = folderReceiptView({
@@ -126,7 +126,7 @@ test('the run pop-up says the assistant is working and counts finished steps', (
   assert.equal(view.eyebrow, 'Your assistant is working');
   assert.equal(view.title, 'Setting up Session');
   assert.equal(view.count, '2 of 4 steps finished');
-  assert.equal(view.percent, 50);
+  assert.equal(view.percent, undefined);
   assert.equal(view.status, 'Working on: Step 3');
   assert.deepEqual(view.actions, []);
 });
@@ -143,7 +143,7 @@ test('a stopped run keeps its progress and offers the way forward in the pop-up'
   });
   assert.equal(view.phase, 'stopped');
   assert.equal(view.title, 'Session needs you');
-  assert.equal(view.percent, 50);
+  assert.equal(view.percent, undefined);
   assert.match(view.status, /needs a model/);
   assert.doesNotMatch(JSON.stringify(view), /needs_model/);
   assert.deepEqual(
@@ -164,7 +164,7 @@ test('a finished run shows the receipt and the Open link in the pop-up', () => {
     }
   });
   assert.equal(view.phase, 'done');
-  assert.equal(view.percent, 100);
+  assert.equal(view.percent, undefined);
   assert.equal(view.route, '/workspaces/session');
   assert.equal(view.openLabel, 'Open Session');
   assert.equal(view.receiptRows.length, 1);
@@ -385,7 +385,7 @@ test('a finished Home run ends on the six songs saved most recently', () => {
   const view = setupModalView(homeRunOffer(), { songs: rows, total: 12, now: today });
   assert.equal(view.visible, true);
   assert.equal(view.phase, 'done');
-  assert.equal(view.eyebrow, 'All set');
+  assert.equal(view.eyebrow, 'Setup ready');
   assert.equal(view.title, 'Pick a song to start with');
   assert.equal(
     view.status,
@@ -1943,14 +1943,33 @@ test('a running, waiting, failed and finished look each read as the server says'
     {
       state: 'finished',
       result_excerpt: 'Three drafts.',
+      report_route: '/workspaces/thesis/task/t-1',
       ticket_route: '/workspaces/thesis?ticket=t-1'
     },
     ctx
   );
   assert.equal(done.excerpt, 'Three drafts.');
   assert.equal(done.actions[0].label, 'Open the full report');
-  assert.equal(done.actions[0].href, '/workspaces/thesis?ticket=t-1');
-  // Only a ticket in a workspace is ever linked.
+  assert.equal(done.actions[0].href, '/workspaces/thesis/task/t-1');
+  // A ticket alone is not presented as the full report.
+  const legacy = folderFirstLookView(
+    { state: 'finished', ticket_route: '/workspaces/thesis?ticket=t-1' },
+    ctx
+  );
+  assert.equal(legacy.actions[0].label, 'Open task');
+  assert.equal(legacy.actions[0].href, '/workspaces/thesis?ticket=t-1');
+  for (const report_route of [
+    '//evil.example',
+    'javascript:alert(1)',
+    '/workspaces/thesis/task/t?run=1',
+    '/workspaces/thesis/task/../x'
+  ]) {
+    assert.deepEqual(
+      folderFirstLookView({ state: 'finished', report_route }, ctx).actions.map(a => a.id),
+      ['open']
+    );
+  }
+  // Only a canonical local report or legacy ticket is ever linked.
   const odd = folderFirstLookView({ state: 'finished', ticket_route: '//evil.example' }, ctx);
   assert.deepEqual(
     odd.actions.map(a => a.id),

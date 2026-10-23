@@ -130,15 +130,11 @@ try {
     const chip = (args[0] || 'desktop').toLowerCase();
     const card = await openCard(page);
     await card.getByRole('button', { name: 'Set up', exact: true }).click();
-    const modal = page.locator('#folderSetupRunModal');
-    await modal.waitFor({ state: 'visible' });
-    await page
-      .locator('#folderSetupRunTitle', { hasText: 'Pick a song to start with' })
-      .waitFor({ timeout: 300_000 });
+    await card.locator('#personalAssistantFolderSongs li').first().waitFor({ timeout: 300_000 });
     await page.waitForTimeout(500);
-    await modal.locator('.modal-content').screenshot({ path: shot(`setup-${chip}`) });
+    await card.screenshot({ path: shot(`setup-${chip}`) });
     const rows = await page
-      .locator('#folderSetupRunSongs li')
+      .locator('#personalAssistantFolderSongs li')
       .evaluateAll(items =>
         items.map(
           item =>
@@ -146,7 +142,7 @@ try {
         )
       );
     rows.forEach(row => console.log(`  ${row}`));
-    const browse = await modal.getByRole('link', { name: /^Browse all/ }).getAttribute('href');
+    const browse = await card.getByRole('link', { name: /^Browse all/ }).getAttribute('href');
     console.log(`library ${browse}; saved ${shot(`setup-${chip}`)}`);
   } else if (step === 'library') {
     await openLibrary(args[0]);

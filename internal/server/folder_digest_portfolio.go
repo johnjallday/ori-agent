@@ -521,12 +521,12 @@ func (r portfolioReceipts) Receipt(_ context.Context, homeID string, facts folde
 	if err != nil || home == nil || !workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) {
 		return nil, errSetupUnavailable
 	}
-	detail := "your Home"
+	detail, operation := "your Home", "reuse"
 	if facts.HomeCreated {
-		detail = "created"
+		detail, operation = "created", "create"
 	}
 	rows := []personalassistant.FolderReceiptRow{{
-		Kind: "home", Name: home.Name, Detail: detail,
+		Kind: "home", Name: home.Name, Detail: detail, Operation: operation,
 		Route: "/workspaces/" + url.PathEscape(home.FolderSlug) + "/assistant#projectLibraryPanel",
 	}}
 	added := map[string]bool{}
@@ -535,7 +535,8 @@ func (r portfolioReceipts) Receipt(_ context.Context, homeID string, facts folde
 	}
 	for _, instance := range home.GetAgentInstances() {
 		if facts.HomeCreated || added[strings.ToLower(instance.Name)] {
-			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: instance.Name, Detail: receiptAgentDetail(instance)})
+			_, model, _ := b.sessionHandler.SavedAgentModel(instance.Name)
+			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: instance.Name, Detail: receiptAgentDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model)})
 		}
 	}
 	noun := strings.TrimSpace(r.noun)

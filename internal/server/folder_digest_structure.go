@@ -217,7 +217,17 @@ func structureGroupReceipt(b *ServerBuilder, userID string, offer personalassist
 		return refused, personalassistant.ErrFolderWorkspaceRefused
 	}
 	groupRoute := "/workspaces/" + group.FolderSlug
-	rows := []personalassistant.FolderReceiptRow{{Kind: "workspace", Name: group.Name, Detail: "group", Route: groupRoute}}
+	rows := []personalassistant.FolderReceiptRow{{Kind: "workspace", Name: group.Name, Detail: "group", Route: groupRoute, Operation: "create"}}
+	for _, agent := range group.GetAgentInstances() {
+		if strings.TrimSpace(agent.Name) != "" {
+			_, model, _ := b.sessionHandler.SavedAgentModel(agent.Name)
+			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "agent", Name: agent.Name, Detail: receiptAgentDetail(agent), Assigned: true, Model: personalassistant.FolderReceiptModel(model)})
+			// One observed member supports the diagram; the group route owns the
+			// full roster. Preserve room for all (at most 24) member workspaces.
+			break
+		}
+	}
+	members := 0
 	creator := folderWorkspaceCreator{linker: folderWorkspaceLinker{files: b.workspaceFileStore}}
 	for _, member := range offer.Structure.Included() {
 		path, err := b.personalAssistantFolderDigest.StructureMemberRoot(root, member)
@@ -235,10 +245,11 @@ func structureGroupReceipt(b *ServerBuilder, userID string, offer personalassist
 			return refused, personalassistant.ErrFolderWorkspaceRefused
 		}
 		rows = append(rows, personalassistant.FolderReceiptRow{
-			Kind: "workspace", Name: ws.Name, Detail: "linked to " + member.Folder, Route: "/workspaces/" + ws.FolderSlug,
+			Kind: "workspace", Name: ws.Name, Detail: "linked to " + member.Folder, Route: "/workspaces/" + ws.FolderSlug, Operation: "create",
 		})
+		members++
 	}
-	if len(rows) < 2 {
+	if members == 0 {
 		return refused, personalassistant.ErrFolderWorkspaceRefused
 	}
 	return personalassistant.FolderCreateResult{WorkspaceID: group.ID, Route: groupRoute, Created: true, Receipt: rows}, nil

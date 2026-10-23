@@ -124,7 +124,7 @@ run_phase() {
 	./scripts/e2e.sh --port "$port" --wait 300 --tail 0 \
 		--env "ORI_COLLECTION_SANDBOX=$home" \
 		--env "ORI_COLLECTION_PHASE=$phase" \
-		tests/folder-collection-proposal.spec.ts -- --workers=1 ${pw_args[@]+"${pw_args[@]}"} \
+		tests/folder-collection-proposal.spec.ts -- --workers=1 --output "$home/results-$phase" ${pw_args[@]+"${pw_args[@]}"} \
 		>"$log" 2>&1 || status=$?
 	stop_server
 	if [[ "$tail_lines" != "0" ]]; then tail -n "$tail_lines" "$log"; else cat "$log"; fi

@@ -1,5 +1,7 @@
 // Metadata-only presentation. No provider, filesystem, setup or authority calls.
 // Every label is text; an observed name/marker is never HTML, a route or consent.
+import './folder-setup-visual.js';
+
 const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
 const plural = (value, noun, many = `${noun}s`) => `${value} ${value === 1 ? noun : many}`;
 
@@ -191,6 +193,19 @@ export function renderFolderSummary(container, observation, options = {}) {
     node('span', view.status, 'personal-assistant-folder-context__status')
   );
   container.append(meta, node('p', view.disclosure));
+  if (options.local)
+    container.append(
+      node(
+        'p',
+        'Local selection lasts up to 30 minutes. After a restart, pick again for setup.',
+        'personal-assistant-folder-context__note'
+      )
+    );
+  if (options.local && view.rootMarker) {
+    const diagram = node('div', '', 'folder-visual-preview');
+    globalThis.OriFolderSetupVisual.renderDiagram(diagram, { observation });
+    container.append(diagram);
+  }
   const details = node('details', '', 'personal-assistant-folder-context__details');
   details.append(node('summary', 'Scan details'));
   if (view.rootMarker)

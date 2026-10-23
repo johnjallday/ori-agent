@@ -176,6 +176,7 @@ function fixtureDocument() {
       ownerDocument: document,
       children: [],
       textContent: '',
+      setAttribute() {},
       append(...nodes) {
         this.children.push(...nodes);
       },

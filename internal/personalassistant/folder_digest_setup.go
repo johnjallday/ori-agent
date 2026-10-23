@@ -41,6 +41,7 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 	view := &FolderSetupView{
 		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryCandidates: append([]string(nil), run.EntryCandidates...),
 		Lines: append([]FolderPlanLine(nil), run.Lines...), Brief: run.Brief,
+		Visual: CloneFolderSetupVisual(run.Visual),
 	}
 	if run.Hire != nil {
 		hire := *run.Hire
@@ -300,6 +301,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		plan = FolderSetupPlan{
 			Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest,
 			Intent: offer.Setup.Intent, Destination: offer.Setup.Intent.Destination, Hire: offer.Setup.Hire,
+			Visual: CloneFolderSetupVisual(offer.Setup.Visual),
 		}
 		// A resume carries on with the brief the run was started with.
 		brief = offer.Setup.Brief
@@ -352,6 +354,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
 			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
+			Visual: CloneFolderSetupVisual(plan.Visual),
 		}
 		if plan.Hire != nil {
 			hire := *plan.Hire

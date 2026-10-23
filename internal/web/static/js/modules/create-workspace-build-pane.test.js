@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./create-workspace-build-pane.js', import.meta.url), 'utf8');
+const visualSource = readFileSync(new URL('./folder-setup-visual.js', import.meta.url), 'utf8');
 const planLinesSource = readFileSync(new URL('./folder-plan-lines.js', import.meta.url), 'utf8');
 const recognitionLinesSource = readFileSync(
   new URL('./folder-recognition-lines.js', import.meta.url),
@@ -120,8 +121,9 @@ class FakeElement {
       } else this.appendChild(node);
     }
   }
-  replaceChildren() {
+  replaceChildren(...nodes) {
     this.textContent = '';
+    this.append(...nodes);
   }
   contains(node) {
     for (let current = node; current; current = current.parentNode) {
@@ -206,6 +208,7 @@ function loadPane(extras = {}) {
   // Loaded before the pane, as in base.tmpl.
   const context = vm.createContext({ window, document, CustomEvent, ...extras });
   vm.runInContext(planLinesSource, context, { filename: 'folder-plan-lines.js' });
+  vm.runInContext(visualSource, context, { filename: 'folder-setup-visual.js' });
   vm.runInContext(recognitionLinesSource, context, { filename: 'folder-recognition-lines.js' });
   vm.runInContext(source, context, { filename: 'pane.js' });
   const events = [];
@@ -976,7 +979,9 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
     ['bi bi-box-seam', 'bi bi-house-door']
   );
   assert.equal(items[1].children[0].getAttribute('aria-hidden'), 'true');
-  const why = root.querySelectorAll('details')[0];
+  const why = root
+    .querySelectorAll('details')
+    .find(node => node.classList.contains('workspace-build-plan__why'));
   assert.equal(why.hidden, false);
   assert.equal(why.textContent, 'Why this suggestion?Has a REAPER session, edited yesterday');
 
@@ -1021,7 +1026,7 @@ test('a recognized folder’s plan is the host’s lines, with the reason behind
 
 // The sketch above the lines: the Home and the workspace Set it up leaves
 // behind, from the plan's facts and the kinds of its lines, never the model.
-test('a ready plan is sketched as its Home and workspace, with the parts the lines promise', () => {
+test('legacy build plans keep full lines and parent facts without guessing a visual destination', () => {
   const { pane, root } = loadPane();
   pane.mount({ assistant, folders: true });
   const sketch = () =>
@@ -1070,7 +1075,7 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
     }
   });
   assert.equal(sketch().hidden, false);
-  assert.equal(sketch().getAttribute('aria-hidden'), 'true', 'it says nothing the lines do not');
+  assert.notEqual(sketch().getAttribute('aria-hidden'), 'true');
   assert.equal(byClass('p', 'workspace-build-plan__kicker')[0].textContent, 'You’ll get');
   assert.equal(
     byClass('p', 'workspace-build-plan__kicker')[1].textContent,
@@ -1091,23 +1096,9 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
     ]
   );
   assert.equal(items[0].textContent, '✓REAPER integration is installed — Already in place');
-  const home = byClass('div', 'workspace-build-sketch__home')[0];
-  assert.equal(home.children[0].textContent, 'Home');
-  assert.equal(home.children[0].children[0].className, 'bi bi-house-door');
-  assert.equal(home.children[1].textContent, 'Music Production Homenew');
-  assert.equal(home.children[1].children[0].className, 'workspace-build-sketch__badge');
-  const workspace = home.children[2];
-  assert.equal(workspace.className, 'workspace-build-sketch__workspace');
-  assert.equal(workspace.children[0].textContent, 'Workspace');
-  assert.equal(workspace.children[1].textContent, 'Album-2');
-  assert.deepEqual(
-    workspace.children[2].children.map(part => part.textContent),
-    ['Folder linked', 'Team', 'First task']
-  );
-  assert.deepEqual(
-    workspace.children[2].children.map(part => part.children[0].className),
-    ['bi bi-folder-symlink', 'bi bi-people', 'bi bi-clipboard-check']
-  );
+  assert.match(sketch().textContent, /Proposed new Home · Music Production Home/);
+  assert.match(sketch().textContent, /No destination proposed/);
+  assert.doesNotMatch(sketch().textContent, /Confirmed member/);
 
   // The draft's own name wins; an existing Home says so; without a Home the
   // workspace stands alone, and parts the lines do not promise are not drawn.
@@ -1122,20 +1113,8 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
       lines: lines.filter(line => line.kind !== 'task')
     }
   });
-  assert.equal(
-    byClass('div', 'workspace-build-sketch__home')[0].children[1].textContent,
-    'Music Production Homeexisting'
-  );
-  assert.equal(
-    byClass('div', 'workspace-build-sketch__workspace')[0].children[1].textContent,
-    'Ori Music Demo'
-  );
-  assert.deepEqual(
-    byClass('div', 'workspace-build-sketch__workspace')[0].children[2].children.map(
-      part => part.textContent
-    ),
-    ['Folder linked', 'Team']
-  );
+  assert.match(sketch().textContent, /Existing Home · Music Production Home/);
+  assert.doesNotMatch(sketch().textContent, /Ori Music Demo/);
   pane.applySession({
     transcript: [],
     draft: {},
@@ -1143,9 +1122,7 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
     plan: { ready: true, digest: 'd', lines: lines.filter(line => line.kind === 'workspace') }
   });
   assert.equal(byClass('div', 'workspace-build-sketch__home').length, 0);
-  const alone = byClass('div', 'workspace-build-sketch__workspace')[0];
-  assert.equal(alone.children[1].textContent, observation.folder, 'named after the folder');
-  assert.equal(alone.children.length, 2, 'no parts, no chips');
+  assert.match(sketch().textContent, /No destination proposed/);
   assert.equal(byClass('p', 'workspace-build-plan__kicker')[1].textContent, 'Ori will · 1 step');
 
   // The sketch stays while Set it up runs: the lines carry the progress.
@@ -1165,12 +1142,57 @@ test('a ready plan is sketched as its Home and workspace, with the parts the lin
   });
   assert.equal(sketch().hidden, false);
 
-  // sketchView itself: no plan, no lines, or an unnamed Home draw nothing of it.
-  assert.equal(pane.sketchView(null, lines), null);
-  assert.equal(pane.sketchView({ ready: true }, []), null);
-  assert.equal(pane.sketchView({ ready: true, home: { name: ' ' } }, lines).home, null);
+  // An unnamed Home is not turned into a named destination by old sketch logic.
+  pane.applySession({
+    transcript: [],
+    plan: { ready: true, digest: 'd', home: { name: ' ' }, lines }
+  });
+  assert.doesNotMatch(sketch().textContent, /Existing Home|Proposed new Home/);
   pane.destroy();
   assert.equal(sketch(), undefined);
+});
+
+test('build and review adapters share recorded visual facts and saved run milestones', () => {
+  const { pane, root, document } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const folder = { observation, recognition: { verdict: 'project' } };
+  const plan = {
+    ready: true,
+    digest: 'd',
+    visual: {
+      entity: { kind: 'workspace', name: 'Reviewed name', operation: 'create' },
+      placement: 'standalone'
+    },
+    lines: [
+      { kind: 'workspace', name: 'Creates a workspace' },
+      { kind: 'folder', name: 'Links without moving' },
+      { kind: 'task', name: 'First look is separate' }
+    ]
+  };
+  pane.applySession({ transcript: [], folder, draft: { name: 'Unsaved client name' }, plan });
+  const diagram = root.querySelectorAll('figure')[0];
+  assert.match(diagram.textContent, /Reviewed name/);
+  assert.doesNotMatch(diagram.textContent, /Unsaved client name|Confirmed member/);
+  const review = document.createElement('div');
+  pane.renderVisualPlan(review);
+  assert.equal(review.textContent, diagram.textContent);
+  pane.applySession({
+    transcript: [],
+    folder,
+    status: 'preparing',
+    setup: { plan_digest: 'd' },
+    setup_run: {
+      visual: plan.visual,
+      status: 'running',
+      lines: plan.lines.map(line => ({ ...line, state: 'working' }))
+    }
+  });
+  assert.match(root.querySelectorAll('figure')[0].textContent, /Reviewed name/);
+  const milestones = root
+    .querySelectorAll('ul')
+    .find(node => node.classList.contains('folder-setup-milestones'));
+  assert.match(milestones.textContent, /Workspace · In progress/);
+  assert.doesNotMatch(milestones.textContent, /First look/);
 });
 
 test('a plan that names a hire shows it above the sketch and Hire and start sends the brief', () => {
@@ -1213,7 +1235,7 @@ test('a plan that names a hire shows it above the sketch and Hire and start send
       body.children.findIndex(node => node.classList.contains('workspace-build-plan__sketch'))
   );
   assert.equal(brief.value, 'Keep the session tidy.');
-  assert.equal(control('setup').textContent, 'Hire and start');
+  assert.equal(control('setup').textContent, 'Hire & start');
   // The draft's goal stands in for the plan's own until the user types.
   pane.applySession({ ...session, draft: { mission: 'Finish three demos.' } });
   assert.equal(brief.value, 'Finish three demos.');
