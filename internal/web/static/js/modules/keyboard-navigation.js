@@ -42,12 +42,6 @@
       matches: element => element.closest('.navbar')
     },
     {
-      id: 'sidebar',
-      prefix: 'S',
-      label: 'sidebar',
-      matches: element => element.closest('#sidebar')
-    },
-    {
       id: 'content',
       prefix: 'C',
       label: 'content',

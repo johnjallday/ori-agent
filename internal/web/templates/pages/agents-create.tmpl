@@ -4,7 +4,7 @@
 {{template "head.tmpl" .}}
 <link rel="stylesheet" href="/css/agent-hire.css">
 
-<body class="bg-light" data-sidebar-default="hidden">
+<body class="bg-light">
   <style>
     body {
       margin: 0;
@@ -532,8 +532,6 @@
   <a class="skip-link" href="#create-agent-main">Skip to Main Content</a>
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
-
     <main class="main-content" id="create-agent-main" role="main" aria-labelledby="create-agent-title">
       <div class="create-container">
         <div class="page-header">
@@ -760,8 +758,6 @@
   <script defer src="/js/modules/themeManager.js"></script>
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/modules/toast.js"></script>
-  <script defer src="/js/modules/resizer.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/agents-create.js"></script>
   <script defer src="/js/modules/folder-plan-lines.js"></script>
   <script defer src="/js/modules/agent-hire-card.js"></script>

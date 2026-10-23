@@ -105,7 +105,7 @@ test.describe('Smoke Tests', () => {
     }
   });
 
-  test('home exposes the shared sidebar navigation', async ({ page }) => {
+  test('home reaches the configuration pages through the Settings gear', async ({ page }) => {
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({
         status: 200,
@@ -116,18 +116,19 @@ test.describe('Smoke Tests', () => {
     await page.goto('/');
 
     await expect(page.locator('.navbar').first()).toBeVisible();
-    const sidebar = page.locator('#sidebar');
-    const sidebarToggle = page.locator('#sidebarToggle');
+    await expect(page.locator('#sidebar')).toHaveCount(0);
+    await expect(page.locator('#sidebarToggle')).toHaveCount(0);
 
-    await expect(sidebar).toHaveCount(1);
-    await expect(sidebarToggle).toBeVisible();
-    await expect(sidebarToggle).toHaveAttribute('aria-expanded', 'false');
+    const gear = page.locator('#navSettingsLink');
+    await expect(gear).toBeVisible();
+    await expect(gear).toHaveAttribute('aria-label', 'Settings');
+    await gear.click();
 
-    await sidebarToggle.click();
-
-    await expect(sidebar).toBeVisible();
-    await expect(sidebarToggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(sidebar.getByRole('link', { name: 'Workflows' })).toBeVisible();
+    await expect(page).toHaveURL(/\/settings$/);
+    const hub = page.locator('.settings-nav-group[data-category="tools"]');
+    await hub.getByRole('link', { name: 'Workflows' }).click();
+    await expect(page).toHaveURL(/\/workflows$/);
+    await expect(page.locator('#navSettingsLink')).toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -538,8 +539,8 @@ test.describe('Home First Run', () => {
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.getByText('No workspaces yet.', { exact: true })).toHaveCount(0);
     await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
-    await expect(page.locator('#sidebar')).toHaveCount(1);
-    await expect(page.locator('#sidebarToggle')).toBeVisible();
+    await expect(page.locator('#sidebar')).toHaveCount(0);
+    await expect(page.locator('#navSettingsLink')).toBeVisible();
 
     await page.goto('/workspaces');
     await expect(page.locator('#addFolderModal')).toBeHidden();

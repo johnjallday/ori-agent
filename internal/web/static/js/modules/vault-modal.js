@@ -1140,7 +1140,10 @@
       return;
     }
 
-    if (!state.hasHydrated || !status?.available) {
+    // Any status read from the API is real; only init's null hides the pill.
+    // (Requiring hasHydrated here hid it for good: hydrateModal sets that flag
+    // after the refresh that renders the status.)
+    if (!status?.available) {
       elements.launcherCount.textContent = '0';
       elements.launcherCount.classList.add('is-hidden');
       return;
@@ -1153,6 +1156,60 @@
   function vaultRecordCount(vaultItem) {
     const count = Number(vaultItem?.record_count || 0);
     return Number.isFinite(count) ? count : 0;
+  }
+
+  function vaultsHoldRecords(vaults) {
+    return (Array.isArray(vaults) ? vaults : []).some(function (item) {
+      return vaultRecordCount(item) > 0;
+    });
+  }
+
+  // The top-bar launcher is on demand: navbar.tmpl renders it hidden (except
+  // on the vault page) and it appears once any vault holds a record. It is
+  // only ever revealed, so it never vanishes under an open modal (nav-collapse
+  // FR6).
+  function revealLauncherIfVaultsHoldRecords(vaults) {
+    if (!vaultsHoldRecords(vaults)) {
+      return;
+    }
+    const launcher = document.getElementById('vaultLauncherButton');
+    if (launcher) {
+      launcher.hidden = false;
+    }
+    const divider = document.getElementById('vaultLauncherDivider');
+    if (divider) {
+      divider.hidden = false;
+    }
+  }
+
+  // The count the modal will show once open: its remembered vault, else the first.
+  function launcherVaultRecordCount(vaults) {
+    const list = Array.isArray(vaults) ? vaults : [];
+    const storedID = readStoredVaultID();
+    const vault =
+      list.find(function (item) {
+        return item.id === storedID;
+      }) || list[0];
+    return vaultRecordCount(vault);
+  }
+
+  async function loadLauncherVisibility() {
+    const launcher = document.getElementById('vaultLauncherButton');
+    if (!launcher || !launcher.hidden) {
+      return;
+    }
+    try {
+      const data = await apiRequest('/api/vault/vaults');
+      revealLauncherIfVaultsHoldRecords(data?.vaults);
+      if (!launcher.hidden && !state.hasHydrated) {
+        updateLauncherCount({
+          available: true,
+          record_count: launcherVaultRecordCount(data.vaults)
+        });
+      }
+    } catch (error) {
+      // No vault store yet: the launcher stays hidden and Settings links to /vaults.
+    }
   }
 
   function vaultDisplayLabel(vaultItem) {
@@ -1889,6 +1946,7 @@
   async function loadVaults(/* preserveSelection */) {
     const data = await apiRequest('/api/vault/vaults');
     state.vaults = Array.isArray(data.vaults) ? data.vaults : [];
+    revealLauncherIfVaultsHoldRecords(state.vaults);
 
     const preferredVaultID = String(state.selectedVaultID || readStoredVaultID() || '').trim();
 
@@ -4786,6 +4844,7 @@
   }
 
   async function init() {
+    loadLauncherVisibility();
     elements = getElements();
     if (!elements) {
       return;

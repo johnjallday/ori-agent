@@ -183,6 +183,7 @@ test-devtools: ## Test workflow wrappers and Ori project adapters offline
 	@zsh scripts/wt-demo-codex.test.sh
 	@bash scripts/devops-release-candidate.test.sh
 	@bash scripts/feature-explore-snapshot.test.sh
+	@bash scripts/branch-server.test.sh
 	@zsh scripts/check-backlog-docs.sh
 
 test-release: ## Test RC lifecycle and installer probes offline (temporary Git remotes only)

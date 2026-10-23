@@ -2954,6 +2954,21 @@ body.home-command-page {
   font-size: 11px;
 }
 
+.cockpit-today-see-all {
+  display: inline-block;
+  margin-top: 5px;
+  color: var(--hc-signal);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.cockpit-today-see-all:hover,
+.cockpit-today-see-all:focus-visible {
+  color: var(--hc-ink);
+}
+
 /* --------------------------------------------------------------------------
  * Quick Capture dialog (home-workspace-map-ui-refresh group 4)
  *

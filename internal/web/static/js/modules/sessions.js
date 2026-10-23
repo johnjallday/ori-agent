@@ -2750,10 +2750,6 @@ const sessionManager = {
     if (typeof window.refreshAgentDisplay === 'function') {
       window.refreshAgentDisplay();
     }
-
-    if (typeof loadAgentsForSidebar === 'function') {
-      loadAgentsForSidebar();
-    }
   },
 
   // Update the combined chat info bar (session + agent)

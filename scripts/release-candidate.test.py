@@ -7,6 +7,7 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -50,7 +51,8 @@ class GitFixture(unittest.TestCase):
         self.source = rc.git("rev-parse", "HEAD")
         self.releases = {"v1.2.3": {"isDraft": False, "isPrerelease": False}}
         self.runs = {}
-        self.prs = [{"url": "https://example.invalid/merge-back"}]
+        self.prs = [{"number": 1, "url": "https://example.invalid/merge-back",
+                     "headRefName": "release/v1.2.4", "headRefOid": "0" * 40}]
         self.promote_runs = []
         self.variables = []
         self.env = patch.dict(os.environ, {"GITHUB_OUTPUT": str(self.root / "output"),
@@ -94,9 +96,9 @@ class GitFixture(unittest.TestCase):
         raise AssertionError(args)
 
     @staticmethod
-    def workflow_run(sha, branch, conclusion="success", status="completed", number=1):
+    def workflow_run(sha, branch, conclusion="success", status="completed", number=1, event="push"):
         return {"id": number, "head_sha": sha, "head_branch": branch, "status": status,
-                "conclusion": conclusion, "event": "push", "html_url": "https://example.invalid/run"}
+                "conclusion": conclusion, "event": event, "html_url": "https://example.invalid/run"}
 
     def commit(self, subject, file="product"):
         with Path(file).open("a") as target:
@@ -111,21 +113,44 @@ class GitFixture(unittest.TestCase):
     def outputs(self):
         return dict(line.split("=", 1) for line in (self.root / "output").read_text().splitlines())
 
+    def clear_outputs(self):
+        """Outputs accumulate across calls; clear them to assert what one call did not write."""
+        (self.root / "output").write_text("")
+
     def prepare(self):
         rc.prepare(rc.Repository(), "v1.2.4", self.source)
         self.tag = "v1.2.4-rc.1"
         self.releases[self.tag] = {"isDraft": False, "isPrerelease": True}
         self.candidate_sha = rc.Repository().tags[self.tag]
+        for pr in self.prs:
+            if pr.get("headRefName") == "release/v1.2.4":
+                pr["headRefOid"] = self.candidate_sha
         return self.candidate_sha
 
+    def ship(self):
+        """Prepare, promote and publish v1.2.4 without merging it back. Returns the stable commit."""
+        sha = self.prepare()
+        rc.promote(rc.Repository(), self.tag, sha)
+        self.releases["v1.2.4"] = {"isDraft": False, "isPrerelease": False}
+        return sha
+
+    def squash_merge_back(self, sha):
+        """What the Squash button does to a merge-back: the content lands on dev, the ancestry does not."""
+        rc.git("merge", "-q", "--squash", sha)
+        rc.git("commit", "-qm", "chore: prepare v1.2.4 release candidate (#99)")
+        rc.git("push", "-q", "origin", "dev")
+        return rc.git("rev-parse", "HEAD")
+
     @contextlib.contextmanager
-    def gh_writes(self):
-        """Run git for real; record gh mutations instead of executing them."""
+    def gh_writes(self, refuse=()):
+        """Run git for real; record gh mutations instead of executing them, refusing the listed ones."""
         calls, real = [], rc.run
 
         def side_effect(*args, **kwargs):
             if args[0] == "gh":
                 calls.append(args)
+                if args in refuse:
+                    raise rc.Refusal(f"{' '.join(args)} failed:\nGraphQL: refused by the test")
                 return ""
             return real(*args, **kwargs)
 
@@ -562,6 +587,129 @@ class LifecycleTests(GitFixture):
                     self.react("Release", self.tag, sha)
             self.assertEqual(calls, [])
 
+    def test_react_lands_the_stable_merge_back_after_its_own_ci_run(self):
+        sha = self.ship()
+        self.prs = [{"number": 9, "url": "https://example.invalid/merge-back",
+                     "headRefName": "release/v1.2.4", "headRefOid": sha}]
+        before = self.refs()
+        with self.gh_writes() as calls:
+            self.react("CI", "release/v1.2.4", sha, event="pull_request", conclusion="failure")
+            self.react("CI", "release/v1.2.4", sha)  # the branch's own push run: already stable
+            self.react("CI", "feature/unrelated", sha, event="pull_request")
+            self.react("CI", "release/v1.2.4", "f" * 40, event="pull_request")  # not the branch head
+            self.assertEqual(calls, [])
+            self.react("CI", "release/v1.2.4", sha, event="pull_request")
+            self.assertEqual(calls, [("gh", "pr", "merge", "9", "--merge")])
+        self.assertEqual(before, self.refs())
+        # A check outside the CI run still pending: GitHub refuses the merge, so auto-merge finishes it.
+        direct = ("gh", "pr", "merge", "9", "--merge")
+        with self.gh_writes(refuse=[direct]) as calls:
+            self.react("CI", "release/v1.2.4", sha, event="pull_request")
+            self.assertEqual(calls, [direct, direct + ("--auto",)])
+        rc.git("merge", "-q", "--no-ff", "-m", "Merge pull request #9 from owner/release/v1.2.4", sha)
+        rc.git("push", "-q", "origin", "dev")
+        with self.gh_writes() as calls:
+            self.react("CI", "release/v1.2.4", sha, event="pull_request")  # landed: nothing left to do
+            self.assertEqual(calls, [])
+        rc.evaluate(rc.Repository())
+        self.assertEqual(self.outputs()["ready"], "false")  # the merge-back is not a landed PR
+
+    def test_a_squashed_merge_back_is_repaired_with_a_zero_diff_merge_commit_pr(self):
+        sha = self.ship()
+        self.prs = []
+        squashed = self.squash_merge_back(sha)
+        before = self.refs()
+        rc.evaluate(rc.Repository())
+        self.assertEqual((self.outputs()["ready"], self.outputs()["repair"]), ("false", "v1.2.4"))
+        self.assertEqual(before, self.refs())
+        with self.gh_writes() as calls:
+            rc.repair(rc.Repository(), "v1.2.4")
+        repo = rc.Repository()
+        fix = repo.branches["release-merge-back/v1.2.4"]
+        self.assertEqual(rc.git("show", "-s", "--format=%P", fix).split(), [squashed, sha])
+        self.assertEqual(rc.git("diff", "--name-only", squashed, fix), "")
+        self.assertEqual(repo.branches["dev"], squashed)
+        self.assertEqual(calls[0][:7], ("gh", "pr", "create", "--base", "dev", "--head", "release-merge-back/v1.2.4"))
+        self.assertIn("NOT squash/rebase", calls[0][-1])
+        self.assertEqual(calls[1][-2:], ("--merge", "--auto"))
+        self.assertEqual(len(calls), 2)
+        # Opening it again changes nothing, and the gate holds quietly while the PR's CI runs.
+        self.prs = [{"number": 3, "url": "https://example.invalid/repair",
+                     "headRefName": "release-merge-back/v1.2.4", "headRefOid": fix}]
+        before = self.refs()
+        with self.gh_writes() as calls:
+            rc.repair(rc.Repository(), "v1.2.4")
+            self.assertEqual(calls, [])
+            self.clear_outputs()
+            rc.evaluate(rc.Repository())
+            self.assertEqual(self.outputs(), {"ready": "false"})
+            self.assertIn("react lands it with a merge commit", self.status()["next"])
+            # Once that run is green react lands it; a green PR still open the next day is a person's.
+            self.runs["ci.yml", fix] = [self.workflow_run(fix, "release-merge-back/v1.2.4", event="pull_request")]
+            with self.assertRaisesRegex(rc.Stuck, "has not landed"):
+                rc.evaluate(rc.Repository())
+            self.react("CI", "release-merge-back/v1.2.4", fix, event="pull_request")
+            self.assertEqual(calls, [("gh", "pr", "merge", "3", "--merge")])
+        self.assertEqual(before, self.refs())
+        rc.git("merge", "-q", "--no-ff", "-m", "Merge pull request #3 from owner/release-merge-back/v1.2.4", fix)
+        rc.git("push", "-q", "origin", "dev")
+        self.prs = []
+        # Only the squash commit is a landed PR; neither the repair merge nor its PR merge counts.
+        for minimum, ready in (("1", "true"), ("2", "false")):
+            with patch.dict(os.environ, {"RELEASE_MIN_PRS": minimum}):
+                self.clear_outputs()
+                rc.evaluate(rc.Repository())
+                self.assertEqual(self.outputs()["ready"], ready)
+                if ready == "true":
+                    self.assertEqual(self.outputs()["version"], "v1.2.5")
+
+    def test_the_gate_goes_red_only_when_a_person_must_act(self):
+        old = self.prepare()
+        rc.git("checkout", "-qb", "release/v1.2.4", old)
+        fixed = self.commit("fix: release blocker", "fix")
+        rc.git("push", "-q", "origin", "release/v1.2.4")
+        rc.prepare(rc.Repository(), "v1.2.4", fixed)
+        self.releases["v1.2.4-rc.2"] = {"isDraft": False, "isPrerelease": True}
+        rc.promote(rc.Repository(), "v1.2.4-rc.2", fixed)
+        self.releases["v1.2.4"] = {"isDraft": False, "isPrerelease": False}
+        rc.git("checkout", "-q", "dev")
+        self.prs = []
+        before = self.refs()
+        # The stabilization fix never reached dev: nothing zero-diff can repair that.
+        self.clear_outputs()
+        with self.assertRaisesRegex(rc.Stuck, "missing part of it"):
+            rc.evaluate(rc.Repository())
+        self.assertEqual(self.outputs(), {"ready": "false"})
+        with self.assertRaisesRegex(rc.Refusal, "by hand"):
+            rc.repair(rc.Repository(), "v1.2.4")
+        self.assertEqual(before, self.refs())
+        # A merge-back PR whose CI failed is ci-triage's; one still running is nobody's yet.
+        self.prs = [{"number": 9, "url": "https://example.invalid/merge-back",
+                     "headRefName": "release/v1.2.4", "headRefOid": fixed}]
+        rc.evaluate(rc.Repository())
+        self.runs["ci.yml", fixed] = [self.workflow_run(fixed, "release/v1.2.4", "failure", event="pull_request")]
+        with self.assertRaisesRegex(rc.Stuck, "red CI"):
+            rc.evaluate(rc.Repository())
+        self.runs.pop(("ci.yml", fixed))
+        # Squashed, the content is on dev and the gate repairs it instead of asking.
+        self.prs = []
+        self.squash_merge_back(fixed)
+        rc.evaluate(rc.Repository())
+        self.assertEqual(self.outputs()["repair"], "v1.2.4")
+
+    def test_red_dev_ci_fails_the_gate_but_pending_ci_holds_quietly(self):
+        self.runs["ci.yml", self.source] = [self.workflow_run(self.source, "dev", None, "in_progress")]
+        with self.assertRaises(rc.NotReady) as held:
+            rc.evaluate(rc.Repository())
+        self.assertNotIsInstance(held.exception, rc.Stuck)
+        self.runs["ci.yml", self.source] = [self.workflow_run(self.source, "dev", "failure")]
+        with self.assertRaisesRegex(rc.Stuck, "run ci-triage"):
+            rc.evaluate(rc.Repository())
+        # Below the minimum the count holds first, quietly: there is nothing to cut yet.
+        with patch.dict(os.environ, {"RELEASE_MIN_PRS": "11"}):
+            rc.evaluate(rc.Repository())
+            self.assertEqual(self.outputs()["ready"], "false")
+
     def test_status_counts_the_gate_before_a_cut_without_touching_refs(self):
         before = self.refs()
         report = self.status()
@@ -630,7 +778,13 @@ class LifecycleTests(GitFixture):
         self.assertEqual(report["latest_stable"], "v1.2.4")
         self.assertFalse(report["dev"]["merged_back"])
         self.assertEqual(report["merge_back_pr"], "https://example.invalid/merge-back")
-        self.assertIn("merge commit", report["next"])
+        self.assertIn("react lands it with a merge commit", report["next"])
+        self.prs = []
+        report = self.status()
+        self.assertIsNone(report["merge_back_pr"])
+        self.assertIn("merge commit (no PR is open); the daily gate repairs", report["next"])
+        self.prs = [{"number": 1, "url": "https://example.invalid/merge-back",
+                     "headRefName": "release/v1.2.4", "headRefOid": sha}]
         self.variables = [{"name": "AUTO_RELEASE_HOLD", "value": "1"}]
         report = self.status()
         self.assertTrue(report["hold"])
@@ -659,6 +813,17 @@ class LifecycleTests(GitFixture):
 
 
 class EntryPointTests(unittest.TestCase):
+    def test_evaluate_goes_red_only_for_a_hold_a_person_must_clear(self):
+        for error, code, verdict in ((rc.NotReady("CI is not green"), 0, "HOLD"),
+                                     (rc.Stuck("merge it by hand"), 1, "HOLD"),
+                                     (rc.Refusal("inconsistent refs"), 1, "REFUSED")):
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": "", "GITHUB_OUTPUT": ""}), \
+                    patch.object(rc, "Repository"), patch.object(rc, "evaluate", side_effect=error), \
+                    patch.object(sys, "argv", ["release-candidate.py", "evaluate"]), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(rc.main(), code, error)
+            self.assertIn(f"{verdict} — {error}", out.getvalue())
+
     def test_confirmation_and_dispatch_are_exact_without_local_git_mutation(self):
         with tempfile.TemporaryDirectory(prefix="ori-rc-cli-") as temp:
             root = Path(temp)
@@ -714,7 +879,20 @@ class EntryPointTests(unittest.TestCase):
         self.assertNotIn("workflow_run:", promote)
         # The lifecycle lock is per job: a skipped react job must not cancel a queued evaluation.
         self.assertNotIn("\nconcurrency:\n  group: release-lifecycle", auto)
-        self.assertEqual(auto.count("group: release-lifecycle"), 3)
+        self.assertEqual(auto.count("group: release-lifecycle"), 4)
+        # A squashed merge-back is repaired by a job holding the PAT: its PR needs a CI run and arms auto-merge.
+        repair_job = auto.split("\n  repair:", 1)[1].split("\n  react:", 1)[0]
+        self.assertIn("GH_TOKEN: ${{ secrets.RELEASE_PAT }}", repair_job)
+        self.assertIn('repair --version "$VERSION"', repair_job)
+        self.assertIn("needs.evaluate.outputs.repair != ''", repair_job)
+        self.assertIn("group: release-lifecycle", repair_job)
+        self.assertIn("repair: ${{ steps.gate.outputs.repair }}", auto)
+        # The merge-back PR's own CI run is the one pull_request run that authorizes a step, and only from this repo.
+        react_job = auto.split("\n  react:", 1)[1]
+        self.assertIn("github.event.workflow_run.event == 'pull_request'", react_job)
+        self.assertIn("head_repository.full_name == github.repository", react_job)
+        for prefix in ("release/", "release-merge-back/"):
+            self.assertIn(f"startsWith(github.event.workflow_run.head_branch, '{prefix}')", react_job)
         # The CI wait must not hold that lock, or it queues react and promotion behind it.
         wait_job = auto.split("  await-ci:", 1)[1].split("\n  evaluate:", 1)[0]
         self.assertNotIn("concurrency:", wait_job)

@@ -147,27 +147,6 @@
   border: 1px solid rgba(239, 68, 68, 0.45);
 }
 
-/* Active page indicator for sidebar navigation */
-.sidebar .modern-card .modern-btn-primary {
-  position: relative;
-}
-
-.sidebar .modern-card .modern-btn-primary::after {
-  content: "";
-  position: absolute;
-  left: -12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 60%;
-  background: var(--primary-color);
-  border-radius: 0 2px 2px 0;
-}
-
-[data-bs-theme="dark"] .sidebar .modern-card .modern-btn-primary::after {
-  background: #2a8762;
-}
-
 /* Bootstrap outline buttons enhancement */
 .btn-outline-primary {
   color: white !important;
@@ -1105,55 +1084,6 @@ textarea.form-control:focus {
   flex-direction: column;
   align-items: flex-end;
   gap: 0.25rem;
-}
-
-.sidebar-compact .plugin-item .d-flex > div:last-child {
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.sidebar-compact .plugin-item .plugin-remove-btn {
-  margin-right: 0 !important;
-  margin-bottom: 0.25rem;
-  padding: 0.25rem;
-  min-width: 24px;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sidebar-compact .plugin-item .plugin-remove-btn svg {
-  width: 12px;
-  height: 12px;
-}
-
-.sidebar-compact .plugin-item .form-switch {
-  margin: 0;
-  transform: scale(0.9);
-}
-
-.sidebar-very-compact .plugin-item {
-  padding: 0.5rem;
-}
-
-.sidebar-very-compact .plugin-item .d-flex {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.5rem;
-}
-
-.sidebar-very-compact .plugin-item .d-flex > div:last-child {
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.sidebar-very-compact .plugin-item .plugin-remove-btn {
-  margin-right: 0.5rem !important;
-  margin-bottom: 0;
 }
 
 .plugin-item .plugin-remove-btn {

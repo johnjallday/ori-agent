@@ -27,10 +27,6 @@ type TemplateData struct {
 	ShowBackButton         bool
 	BackButtonURL          string
 	BackButtonTitle        string
-	ShowSidebarToggle      bool
-	SidebarToggleId        string
-	SidebarToggleHideOnLg  bool
-	SidebarToggleTarget    string
 	BrandNoDecoration      bool
 	BrandURL               string
 	BrandColor             string
@@ -45,6 +41,28 @@ type TemplateData struct {
 	UpdateButtonText       string
 	ShowRefreshButton      bool
 	DarkModeIconFill       string
+}
+
+// settingsHubPages are the CurrentPage values the navbar's Settings gear owns:
+// Settings itself and the configuration pages its Tools & integrations group
+// links to.
+var settingsHubPages = map[string]bool{
+	"settings":  true,
+	"workflows": true,
+	"skills":    true,
+	"templates": true,
+	"usage":     true,
+	"review":    true,
+	"models":    true,
+	"mcp":       true,
+	"plugins":   true,
+	"profile":   true,
+}
+
+// InSettingsHub reports whether the page belongs to Settings, so the navbar
+// marks the gear as the current destination.
+func (d TemplateData) InSettingsHub() bool {
+	return settingsHubPages[d.CurrentPage]
 }
 
 // TemplateRenderer handles template rendering
@@ -72,7 +90,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/layout/head.tmpl",
 		"templates/layout/scripts-dx-utils.tmpl",
 		"templates/layout/theme-init.tmpl",
-		"templates/components/sidebar.tmpl",
 		"templates/components/workspace-hub.tmpl",
 		"templates/components/ask-ori-activity.tmpl",
 		"templates/components/personal-assistant-today.tmpl",
@@ -224,8 +241,6 @@ func GetDefaultData() TemplateData {
 		Extra:        make(map[string]any),
 
 		// Navbar defaults - enable common features
-		ShowSidebarToggle:      true,
-		SidebarToggleTarget:    "#sidebar",
 		ShowNavLinks:           true,
 		ShowCurrentAgent:       true,
 		ShowUpdateNotification: true,

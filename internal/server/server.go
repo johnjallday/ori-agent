@@ -442,8 +442,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	data.Extra["WorkspaceCount"] = workspaceCount
 	data.Extra["IsFirstRun"] = workspaceCount == 0
-	// Keep the command bridge as the home surface while retaining the shared
-	// application navigation, including its sidebar and navbar toggle.
+	// Keep the command bridge as the home surface under the shared top bar.
 	data.Extra["HomeCommandBridge"] = true
 
 	s.renderAndWritePage(w, "index", data)
@@ -451,7 +450,6 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
-	data.ShowSidebarToggle = true // Enable sidebar toggle
 	// The roster/stage redesign is the Agents page. The classic dashboard has been
 	// retired now that the roster covers its surface (per-agent detail lives on the
 	// standalone /agents/{name} page).
@@ -464,7 +462,6 @@ func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveActionCenter(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("action-center")
 	data.Title = "Action Center - Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "action-center", data)
 }
 
@@ -472,7 +469,6 @@ func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.Title = "Agent Details - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	name, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/agents/"))
 	if err == nil {
 		data.Extra["IsHiredAssistant"] = s.currentPersonalHQForPage("", name)
@@ -512,7 +508,6 @@ func (s *Server) serveClaudeAgentDetail(w http.ResponseWriter, _ *http.Request) 
 	data := s.prepareBasePageData("agents")
 	data.Title = "Claude Code - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "agents-claude-detail", data)
 }
 
@@ -522,7 +517,6 @@ func (s *Server) serveCodexAgentDetail(w http.ResponseWriter, _ *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.Title = "Codex - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "agents-codex-detail", data)
 }
 
@@ -539,7 +533,6 @@ func (s *Server) serveAgentsCreate(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.Title = "Create Agent - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "agents-create", data)
 }
 
@@ -559,7 +552,6 @@ func (s *Server) serveProfile(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("profile")
 	data.Title = "Profile - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "profile", data)
 }
 
@@ -567,7 +559,6 @@ func (s *Server) serveVault(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("vault")
 	data.Title = "Private Vaults - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "vault", data)
 }
 
@@ -585,7 +576,6 @@ func (s *Server) serveSkills(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("skills")
 	data.Title = "Skills - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "skills", data)
 }
 
@@ -593,13 +583,11 @@ func (s *Server) serveTemplates(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("templates")
 	data.Title = "Templates - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "templates", data)
 }
 
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("models")
-	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "models", data)
 }
 
@@ -798,7 +786,6 @@ func (s *Server) serveWorkspaceNotesPage(w http.ResponseWriter, workspaceID, wor
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Notes - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = false
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["NoteID"] = noteID
@@ -827,7 +814,6 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Note - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = false
 	data.Extra["WorkspaceID"] = ""
 	data.Extra["WorkspaceSlug"] = ""
 	data.Extra["NoteID"] = noteID
@@ -842,7 +828,6 @@ func (s *Server) serveWorkspaceAssistant(w http.ResponseWriter, workspaceID, wor
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Assistant - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-assistant", data)
@@ -855,7 +840,6 @@ func (s *Server) serveWorkspaceCatalog(w http.ResponseWriter, workspaceID, works
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Catalog - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-catalog", data)
@@ -867,7 +851,6 @@ func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID, workspa
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Plans - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-plans", data)
@@ -881,7 +864,6 @@ func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, workspac
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Plan - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["PlanID"] = planID
@@ -896,7 +878,6 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID, worksp
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["IsPersonalHQ"] = s.currentPersonalHQForPage(workspaceID, "")
@@ -911,7 +892,6 @@ func (s *Server) serveWorkspaceAgentDetail(w http.ResponseWriter, workspaceID, w
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Agent - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["AgentName"] = agentName
@@ -923,7 +903,6 @@ func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID, w
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Diagnostics - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-diagnostics", data)
@@ -933,7 +912,6 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, workspaceID, worksp
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Canvas - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-canvas", data)
@@ -943,7 +921,6 @@ func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, workspac
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Task - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["TaskID"] = taskID
@@ -954,7 +931,6 @@ func (s *Server) serveWorkspaceRun(w http.ResponseWriter, workspaceID, workspace
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Run - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["RunID"] = runID

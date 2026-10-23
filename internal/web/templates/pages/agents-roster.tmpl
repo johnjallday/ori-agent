@@ -10,14 +10,12 @@
      the cool grey canvas before the theme script runs. It is not the whole fix:
      the theme script re-adds .bg-light/.bg-dark at runtime, so the cozy canvas
      in agents-roster.css has to out-specify it as well. -->
-<body class="agents-roster-page" data-sidebar-default="hidden">
+<body class="agents-roster-page">
   <a class="skip-link" href="#roster-main">Skip to Main Content</a>
 
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
-
     <main class="main-content" id="roster-main" role="main" aria-labelledby="roster-title">
       <!-- .roster-layout stays the scoped root for the accessibility spec's axe
            run, so it must continue to wrap the collection, the Inspector, the
@@ -430,7 +428,6 @@
   <!-- Drives the Create Agent modal (window.showAddAgentModal). After the
        shared utilities: it takes its logger from them at load. -->
   <script defer src="/js/modules/agents.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
   <!-- Shared tag-entry widget (exposes window.OriTagInput). Loaded as a module so
        the roster's Overview + bulk tag flows reuse it instead of duplicating. -->

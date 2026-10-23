@@ -3,7 +3,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light" data-sidebar-default="hidden">
+<body class="bg-light">
   <style>
     #agentWorkspacesSection.agent-workspaces {
       scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px);
@@ -456,8 +456,6 @@
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
-
     <!-- Main Content -->
     <div class="main-content">
       <div class="detail-container" style="max-width: 1400px; margin: 0 auto; padding: 20px;">
@@ -967,8 +965,6 @@
   <script defer src="/js/modules/themeManager.js"></script>
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/modules/toast.js"></script>
-  <script defer src="/js/modules/resizer.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/agent-origin.js"></script>
   <script defer src="/js/modules/agent-workspace-editor.js"></script>
   <script defer src="/js/agents-detail.js"></script>

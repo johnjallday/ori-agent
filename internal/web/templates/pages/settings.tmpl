@@ -8,8 +8,6 @@
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
-
     <!-- Main Content - Settings Layout -->
     <div class="main-content" style="padding: 0;">
       <div class="settings-layout">
@@ -153,6 +151,98 @@
             </a>
           </div>
 
+          <!-- Tools & integrations: the configuration pages, one full-page link
+               each. The top bar's Settings gear is the only way here, so this
+               group is how they are reached (nav-collapse FR16). The trailing
+               arrow and data-external-link mark that the link leaves Settings;
+               settings-navigation.js leaves those clicks to the browser. -->
+          <div class="settings-nav-group" data-category="tools">
+            <h3 class="settings-nav-group-title">Tools &amp; integrations</h3>
+            <a href="/skills" class="settings-nav-item" data-external-link="true" title="Opens the Skills page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Skills</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/plugins" class="settings-nav-item" data-external-link="true" title="Opens the Plugins page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M10,2V4H8A2,2 0 0,0 6,6V8H4V10H6V14H4V16H6V18A2,2 0 0,0 8,20H10V22H12V20H16V22H18V20A2,2 0 0,0 20,18V6A2,2 0 0,0 18,4H16V2H14V4H12V2H10M8,6H18V18H8V6Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Plugins</span>
+              <!-- Pending changes from the Workspace Directory's plugin list (plugin-workspace-list.js). -->
+              <span class="badge rounded-pill bg-warning text-dark settings-nav-item-badge" data-plugins-badge hidden></span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/mcp" class="settings-nav-item" data-external-link="true" title="Opens the MCP Servers page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M13,9H18.5L13,3.5V9M6,2H14L20,8V20A2,2 0 0,1 18,22H6C4.89,22 4,21.1 4,20V4C4,2.89 4.89,2 6,2M15,18V16H6V18H15M18,14V12H6V14H18Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">MCP Servers</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/templates" class="settings-nav-item" data-external-link="true" title="Opens the Templates page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M15,7H20.5L15,1.5V7M8,0H16L22,6V18A2,2 0 0,1 20,20H8C6.89,20 6,19.1 6,18V2A2,2 0 0,1 8,0M4,4V22H20V24H4A2,2 0 0,1 2,22V4H4Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Templates</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/workflows" class="settings-nav-item" data-external-link="true" title="Opens the Workflows page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M4,2H20A2,2 0 0,1 22,4V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V4A2,2 0 0,1 4,2M4,4V8H9V4H4M11,4V8H20V4H11M4,10V14H9V10H4M11,10V14H20V10H11M4,16V20H9V16H4M11,16V20H20V16H11Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Workflows</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/models" class="settings-nav-item" data-external-link="true" title="Opens the Models page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M17.9,17.39C17.64,16.59 16.89,16 16,16H15V13A1,1 0 0,0 14,12H8V10H10A1,1 0 0,0 11,9V7H13A2,2 0 0,0 15,5V4.59C17.93,5.77 20,8.64 20,12C20,14.08 19.2,15.97 17.9,17.39M11,19.93C7.05,19.44 4,16.08 4,12C4,11.38 4.08,10.78 4.21,10.21L9,15V16A2,2 0 0,0 11,18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Models</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/usage" class="settings-nav-item" data-external-link="true" title="Opens the Usage &amp; Costs page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Usage &amp; Costs</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/review" class="settings-nav-item" data-external-link="true" title="Opens the Review page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H17V15H15M11,11V19H13V11H11Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Review</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+            <a href="/profile" class="settings-nav-item" data-external-link="true" title="Opens the Profile page">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Profile</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
+            </a>
+          </div>
+
           <!-- Data & Storage Category -->
           <div class="settings-nav-group" data-category="data-storage">
             <h3 class="settings-nav-group-title">Data & Storage</h3>
@@ -196,13 +286,14 @@
               </span>
               <span class="settings-nav-item-text">Session Management</span>
             </a>
-            <a href="/vaults" class="settings-nav-item" data-external-link="true">
+            <a href="/vaults" class="settings-nav-item" data-external-link="true" title="Opens the Vaults page">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12,1A5,5 0 0,1 17,6V8H18A2,2 0 0,1 20,10V21A2,2 0 0,1 18,23H6A2,2 0 0,1 4,21V10A2,2 0 0,1 6,8H7V6A5,5 0 0,1 12,1M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3M12,12A2,2 0 0,0 10,14A2,2 0 0,0 11,15.73V18H13V15.73A2,2 0 0,0 14,14A2,2 0 0,0 12,12Z"/>
                 </svg>
               </span>
               <span class="settings-nav-item-text">Private Vaults</span>
+              <span class="settings-nav-item-open" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg></span>
             </a>
             <a href="#device-capabilities" class="settings-nav-item" data-section="device-capabilities">
               <span class="settings-nav-item-icon">
@@ -1348,6 +1439,11 @@
               <button id="resetVaultRootBtn" class="modern-btn modern-btn-secondary">
                 Clear Custom Directory
               </button>
+              <!-- The top bar shows Vaults only once a vault holds a record, so
+                   this is the way to the first one (nav-collapse FR18). -->
+              <a id="openVaultsLink" href="/vaults" class="modern-btn modern-btn-secondary">
+                Open vaults
+              </a>
             </div>
           </section>
 
@@ -2076,9 +2172,10 @@
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/app.js?v=1694538177"></script>
   <script defer src="/js/modules/agents.js"></script>
-  <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
   <script defer src="/js/modules/toast.js"></script>
+  <!-- The Plugins item's badge: pending changes from the Workspace Directory's plugin list. -->
+  <script defer src="/js/modules/plugin-workspace-list.js"></script>
   {{template "theme-init.tmpl" .}}
   <script>
     // External Agents Settings
