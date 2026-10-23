@@ -248,7 +248,7 @@
   // Requirements are display facts, not another plan or action dispatcher.
   function requirementsView({ offer, plan = offer?.plan, readiness } = {}) {
     const saved = Boolean(offer?.setup);
-    const visual = offer?.setup?.visual || plan?.visual || offer?.readiness || readiness;
+    const visual = saved ? offer.setup.visual : plan?.visual || offer?.readiness || readiness;
     const statuses = {
       install: 'Not installed · Install',
       update: 'Update needed',
@@ -257,6 +257,12 @@
       not_checked: 'Not checked',
       unavailable: 'Check unavailable',
       unverified: 'Not verified'
+    };
+    const progressStatuses = {
+      waiting: 'Waiting',
+      working: 'In progress',
+      done: 'Complete',
+      failed: 'Stopped here'
     };
     const rows = [];
     for (const plugin of list(visual?.plugins)) {
@@ -268,22 +274,26 @@
       const operation = statuses[plugin.operation] ? plugin.operation : 'not_checked';
       const installed = text(plugin.installed_version);
       const version = text(plugin.version);
+      const progress = saved
+        ? list(offer.setup.lines).find(line => line.kind === plugin.kind)?.state
+        : '';
       rows.push({
         kind: plugin.kind,
         name:
           text(plugin.name) ||
           (plugin.kind === 'provider' ? 'Home provider' : 'Project integration'),
         operation,
-        status: statuses[operation],
+        progress: ['waiting', 'working', 'done', 'failed'].includes(progress) ? progress : '',
+        status: saved ? progressStatuses[progress] || 'Progress not reported' : statuses[operation],
         purpose: text(plugin.purpose),
         source: text(plugin.source),
         version:
           installed && version && installed !== version
-            ? `${installed} → ${version}`
+            ? `${saved ? 'Reviewed: ' : ''}${installed} → ${version}`
             : installed
-              ? `Installed version ${installed}`
+              ? `${saved ? 'Installed at review' : 'Installed version'} ${installed}`
               : version
-                ? `Target version ${version}`
+                ? `${saved ? 'Reviewed target' : 'Target version'} ${version}`
                 : 'Version not reported'
       });
     }
@@ -297,7 +307,8 @@
           kind: line.kind,
           name: line.kind === 'provider' ? 'Home provider' : 'Project integration',
           operation: 'not_checked',
-          status: 'Not checked',
+          status: saved ? progressStatuses[line.state] || 'Progress not reported' : 'Not checked',
+          progress: saved && progressStatuses[line.state] ? line.state : '',
           purpose: '',
           source: '',
           version: 'Version not reported'
@@ -325,6 +336,14 @@
             ? `${count} known · other requirements not fully checked`
             : 'Download requirements not fully checked'
     };
+  }
+
+  function stoppedRequirement(setup) {
+    const failed = list(setup?.lines).find(
+      line => ['integration', 'provider'].includes(line.kind) && line.state === 'failed'
+    );
+    if (!failed) return '';
+    return text(list(setup.visual?.plugins).find(row => row.kind === failed.kind)?.name);
   }
 
   function requirementsActionLabel(plan, fallback = 'Set up') {
@@ -364,6 +383,7 @@
     for (const requirement of view.rows) {
       const row = node('li', '', 'folder-requirements__row');
       row.dataset.operation = requirement.operation;
+      row.dataset.progress = requirement.progress || '';
       row.append(
         node('strong', requirement.name),
         node('p', requirement.status, 'folder-requirements__status')
@@ -539,6 +559,7 @@
     renderDiagram,
     requirementsView,
     modelRequirementView,
+    stoppedRequirement,
     requirementsActionLabel,
     renderRequirements,
     reviewConsequences,

@@ -238,6 +238,57 @@ test('hydration reveals newest exchange once; close/reopen preserves intentional
   assert.equal(f.pane.scrollTop, 40);
 });
 
+test('a fresh drawer reveals saved setup recovery once, never overriding later reading', () => {
+  const f = fixture([20]);
+  f.transcript.children[0].dataset.messageRole = ''; // the empty-thread placeholder is not a reply
+  f.prefix(880);
+  const attention = { getBoundingClientRect: () => ({ top: 130 - f.pane.scrollTop, height: 650 }) };
+  f.pane.querySelector = () => attention;
+  f.pane.scrollTop = 600;
+  f.owner.opened();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 72);
+  f.scroll(300);
+  f.owner.changed();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 300);
+  f.scroll(600);
+  f.owner.changed();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 600);
+  assert.equal(f.doc.activeElement, null);
+});
+
+test('hydration reveals the current folder review, but a later reply still wins', () => {
+  const f = fixture([100, 650]);
+  const row = f.transcript.children[1];
+  row.dataset.messageRole = 'folder_context';
+  const review = {
+    ownerRow: row,
+    getBoundingClientRect() {
+      const bounds = row.getBoundingClientRect();
+      return { top: bounds.top + 80, bottom: bounds.bottom, height: 570 };
+    }
+  };
+  row.contains = node => node === review;
+  f.transcript.querySelector = () => review;
+  f.transcript.contains = node => f.transcript.children.includes(node) || node === review;
+  const focus = {};
+  f.doc.activeElement = focus;
+  f.owner.beginHydration();
+  f.owner.endHydration();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 172);
+  assert.equal(f.doc.activeElement, focus);
+  const later = f.row(100);
+  f.owner.beginHydration();
+  f.transcript.append(later);
+  f.owner.endHydration();
+  f.flush();
+  assert.ok(later.getBoundingClientRect().bottom <= f.pane.getBoundingClientRect().bottom);
+  assert.equal(f.doc.activeElement, focus);
+});
+
 test('explicit local choice navigation reveals its control beginning without changing focus', () => {
   const f = fixture([80, 80, 280]);
   f.owner.revealControl(f.transcript.children[1], true);

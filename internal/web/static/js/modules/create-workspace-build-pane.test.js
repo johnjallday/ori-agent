@@ -227,6 +227,8 @@ function loadPane(extras = {}) {
     'workspace-build-prepare',
     'workspace-build-defer',
     'workspace-build-setup',
+    'workspace-build-configure-model',
+    'workspace-build-recheck',
     'workspace-build-prepare-group',
     'workspace-build-install-provider',
     'workspace-build-install-provider-confirm',
@@ -1282,6 +1284,64 @@ test('a plan that names a hire shows it above the sketch and Hire and start send
   assert.equal(control('setup').textContent, 'Set it up');
   control('setup').click();
   same(events.at(-1), { type: 'workspace-build-setup', detail: {} });
+});
+
+test('build requirements share presentation but model and recheck controls retain their own owner', () => {
+  const { pane, root, document, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  const session = {
+    id: 'build-readiness',
+    status: 'open',
+    transcript: [],
+    draft: {},
+    folder: { observation },
+    plan: {
+      ready: true,
+      digest: 'd',
+      lines: [{ kind: 'workspace', name: 'Creates a workspace' }],
+      visual: {
+        requirements_checked: true,
+        plugins: [{ kind: 'integration', name: 'Fixture integration', operation: 'install' }],
+        model: { state: 'missing', settings: 'system' }
+      }
+    }
+  };
+  pane.applySession(session);
+  assert.equal(control('setup').hidden, true);
+  assert.equal(control('configure-model').hidden, false);
+  control('configure-model').click();
+  control('recheck').click();
+  assert.deepEqual(
+    events.map(event => event.type),
+    ['workspace-build-configure-model', 'workspace-build-recheck']
+  );
+  const requirements = document.createElement('div');
+  pane.renderVisualPlan(null, null, null, requirements);
+  assert.match(requirements.textContent, /Fixture integration/);
+  assert.match(requirements.textContent, /Configuration needed/);
+  session.plan.visual.model = { state: 'configured', provider: 'fixture', name: 'model' };
+  pane.applySession(session);
+  assert.equal(control('setup').hidden, false);
+  assert.equal(control('setup').textContent, 'Install 1 plugin & set up');
+  pane.setReadinessStale(true);
+  assert.equal(control('setup').disabled, true);
+  assert.equal(control('recheck').disabled, false);
+  pane.applySession({
+    ...session,
+    setup: { plan_digest: 'd' },
+    setup_run: {
+      visual: session.plan.visual,
+      lines: [{ kind: 'integration', state: 'failed' }],
+      status: 'stopped'
+    }
+  });
+  pane.renderVisualPlan(null, null, null, requirements);
+  assert.match(requirements.textContent, /Stopped here/);
+  assert.equal(control('recheck').hidden, true);
+  assert.equal(control('configure-model').hidden, true);
+  pane.destroy();
 });
 
 test('Set it up is offered on a ready, named plan and follows the run it starts', () => {

@@ -464,6 +464,100 @@ test('fixture New Workspace uses identical facts without another confirmation or
   expect(forbidden).toEqual([]);
 });
 
+test('fixture New Workspace rechecks only its own requirements and preserves both hosts', async ({
+  page
+}) => {
+  const home = await mountReview(page);
+  const homeDraft = '  Assistant 界 draft  ';
+  await page.locator('#personalAssistantInput').fill(homeDraft);
+  await home.getByLabel('What should it do with it?').fill('  Assistant 🎼 brief  ');
+  await page.locator('#personalAssistantClose').click();
+  const offer = reviewOffer();
+  const session: any = {
+    id: 'readiness-build-fixture',
+    version: 1,
+    status: 'open',
+    transcript: [],
+    applied: ['name'],
+    draft: { name: 'Session' },
+    folder: { observation, recognition: { verdict: 'project', candidate_id: 'candidate-0' } },
+    plan: {
+      ...offer.plan,
+      ready: true,
+      home: offer.plan.destination,
+      hire: { ...offer.plan.hire, model: '' },
+      visual: { ...offer.plan.visual, model: { state: 'missing', settings: 'system' } }
+    },
+    folder_expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
+  };
+  const writes: string[] = [];
+  let rechecks = 0;
+  await page.route('**/api/workspaces/build-sessions/availability', route =>
+    route.fulfill({ json: { available: true, folders: true } })
+  );
+  await page.route('**/api/workspaces/build-sessions', route =>
+    route.fulfill({ json: { session } })
+  );
+  await page.route('**/api/workspaces/build-sessions/readiness-build-fixture**', route => {
+    const request = route.request();
+    if (request.method() !== 'GET') {
+      writes.push(new URL(request.url()).pathname);
+      if (request.method() === 'PATCH')
+        session.draft = { ...session.draft, ...request.postDataJSON()?.draft };
+    }
+    if (new URL(request.url()).searchParams.get('recheck') === '1') rechecks++;
+    return route.fulfill({ json: { session } });
+  });
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  const review = page.locator('#workspaceBuildPlanReview');
+  const requirements = page.locator('#workspaceBuildPlanReviewRequirements');
+  await expect(review).toBeVisible();
+  await expect(requirements).toContainText('Configuration needed');
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeHidden();
+  const brief = page.locator('#workspaceBuildPlanReviewBrief');
+  await brief.fill('  Creator 🎼 exact\nbrief  ');
+  await page.locator('#workspaceBuildPlanName').fill('Creator 界 name');
+  await page.evaluate(async () => (window as any).sessionManager.flushWorkspaceBuildDraft());
+  const name = await page.locator('#workspaceBuildPlanName').inputValue();
+  const before = [...writes];
+  const popup = page.waitForEvent('popup');
+  await page.locator('#workspaceBuildPlanReviewModel').click();
+  const settings = await popup;
+  await expect(settings).toHaveURL(/\/settings#system-model$/);
+  await settings.close(); // cancelling configuration does not promote readiness
+  await page.locator('#workspaceBuildPlanReviewRecheck').click();
+  await expect.poll(() => rechecks).toBe(1);
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeHidden();
+  session.plan.visual.model = {
+    state: 'configured',
+    provider: 'fixture',
+    name: 'controlled-model'
+  };
+  session.plan.hire.model = 'controlled-model';
+  await page.locator('#workspaceBuildPlanReviewRecheck').click();
+  await expect(requirements).toContainText('controlled-model');
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeEnabled();
+  await expect(page.locator('#workspaceBuildPlanName')).toHaveValue(name);
+  await expect(brief).toHaveValue('  Creator 🎼 exact\nbrief  ');
+  expect(writes).toEqual(before);
+  expect(writes.some(path => /\/(setup|turns|create)$/.test(path))).toBe(false);
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/group4-build-requirements.png`
+    });
+  await page
+    .locator('#addFolderModal')
+    .getByRole('button', { name: 'Cancel', exact: true })
+    .click();
+  await page.evaluate(() =>
+    (window as any).PersonalAssistantPanel.open(
+      document.getElementById('personalAssistantLauncher')
+    )
+  );
+  await expect(page.locator('#personalAssistantInput')).toHaveValue(homeDraft);
+  await expect(home.getByLabel('What should it do with it?')).toHaveValue('  Assistant 🎼 brief  ');
+});
+
 test('fixture lost response can retry; a late acceptance never reopens the closed drawer', async ({
   page
 }) => {
@@ -523,6 +617,17 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
 }) => {
   const requests: any[] = [];
   const offer = reviewOffer();
+  offer.plan.visual.plugins.push({
+    kind: 'provider',
+    name: 'Music Project Management',
+    operation: 'update',
+    installed_version: 'provider-old',
+    version: 'provider-reviewed'
+  });
+  offer.plan.lines.splice(1, 0, {
+    kind: 'provider',
+    name: 'Update Music Project Management to its reviewed release.'
+  });
   const run = (stopped: boolean) => ({
     ...offer,
     plan: undefined,
@@ -536,7 +641,7 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
       hire: offer.plan.hire,
       lines: offer.plan.lines.map((line, index) => ({
         ...line,
-        state: index === 0 ? (stopped ? 'failed' : 'done') : 'waiting'
+        state: index === 0 ? 'done' : index === 1 ? (stopped ? 'failed' : 'done') : 'waiting'
       }))
     }
   });
@@ -550,8 +655,15 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
   const card = await mountReview(page, offer);
   await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
   await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
-    'Integration · Did not finish'
+    'Home plugin · Did not finish'
   );
+  await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+    'Integration · Complete'
+  );
+  await expect(card).toContainText('Stopped at Music Project Management.');
+  await expect(card).toContainText('Reviewed: provider-old → provider-reviewed');
+  await expect(card).toContainText('Completed work is kept.');
+  await expect(card).not.toContainText('network');
   await expect(card.locator('.folder-visual')).toBeVisible();
   await expect(page.locator('#folderSetupRunModal')).toBeHidden();
   await expect(card).not.toContainText('Assigned to workspace');
@@ -564,7 +676,7 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
       )
     );
     await page.screenshot({
-      path: `${process.env.ORI_VISUAL_EVIDENCE}/03-fixture-update-blocked.png`
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/group4-fixture-provider-stopped.png`
     });
   }
   await card.getByRole('button', { name: 'Try again', exact: true }).click();
@@ -583,7 +695,14 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
   await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
     'Integration · Complete'
   );
+  await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+    'Home plugin · Complete'
+  );
   expect(requests).toHaveLength(2); // Reopening is observational, not another setup.
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/group4-fixture-resumed.png`
+    });
 });
 
 test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {

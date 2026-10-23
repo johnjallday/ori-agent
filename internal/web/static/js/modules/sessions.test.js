@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import './folder-setup-visual.js';
 import {
   loadInitialWorkspaceTree,
   loadOnboardingStatus,
@@ -6958,6 +6959,7 @@ function planReviewElements() {
 function plannedBuild() {
   return {
     session: {
+      status: 'open',
       draft: {},
       folder: {
         observation: {
@@ -7300,6 +7302,116 @@ test('Hire and start sends the brief the pane shows, from either button', async 
     { version: 4, plan_digest: 'digest-1', brief: 'Mix the chorus first.' },
     { version: 4, plan_digest: 'digest-1' }
   ]);
+});
+
+function readinessBuild() {
+  const manager = loadSessionManager(undefined, {
+    OriFolderSetupVisual: globalThis.OriFolderSetupVisual,
+    open: () => null
+  });
+  const build = plannedBuild();
+  Object.assign(build.session, {
+    id: 'readiness-build',
+    version: 4,
+    draft: { name: '  Exact 界 name  ', mission: '  Exact 🎼 brief\\n  ' }
+  });
+  build.session.plan.visual = { model: { state: 'missing', settings: 'system' } };
+  manager.workspaceBuild = build;
+  manager.workspaceCreatorContext = { buildRevision: 1 };
+  manager.syncWorkspaceBuildPresentation = () => {};
+  const applied = [];
+  manager.workspaceBuildPane = () => ({
+    setBusy() {},
+    setReadinessStale() {},
+    showLine() {},
+    applySession: value => applied.push(value)
+  });
+  manager.flushWorkspaceBuildDraft = () => assert.fail('a readiness check must not write a draft');
+  manager.applyWorkspaceBuildSession = () =>
+    assert.fail('a readiness check must not apply wizard fields');
+  return { manager, build, applied };
+}
+
+test('build model recheck updates only readiness and preserves its separate exact draft', async () => {
+  const { manager, build, applied } = readinessBuild();
+  const draft = JSON.stringify(build.session.draft);
+  const reads = [];
+  manager.workspaceBuildTransport = {
+    read: async (id, options) => {
+      reads.push({ id, options });
+      return {
+        ok: true,
+        body: {
+          session: {
+            ...build.session,
+            draft: { name: 'must not replace local edits' },
+            plan: {
+              ...build.session.plan,
+              visual: { model: { state: 'configured', provider: 'fixture', name: 'fixture-model' } }
+            }
+          }
+        }
+      };
+    }
+  };
+  assert.equal(manager.workspaceBuildSetupPressable(), false);
+  manager.configureWorkspaceBuildModel();
+  assert.match(build.readinessMessage, /tab was blocked/);
+  await manager.recheckWorkspaceBuild();
+  assert.deepEqual(JSON.parse(JSON.stringify(reads)), [
+    { id: 'readiness-build', options: { recheck: true } }
+  ]);
+  assert.equal(JSON.stringify(build.session.draft), draft);
+  assert.equal(applied.length, 1);
+  assert.equal(manager.workspaceBuildSetupPressable(), true);
+  build.session.setup = { plan_digest: 'accepted' };
+  await manager.recheckWorkspaceBuild();
+  assert.equal(reads.length, 1, 'accepted work cannot recheck into a new plan');
+});
+
+test('late and failed build readiness reads cannot overwrite newer drafts or enable stale setup', async () => {
+  const { manager, build, applied } = readinessBuild();
+  let finish;
+  manager.workspaceBuildTransport = {
+    read: () =>
+      new Promise(resolve => {
+        finish = resolve;
+      })
+  };
+  const pending = manager.recheckWorkspaceBuild();
+  manager.workspaceCreatorContext.buildRevision++;
+  finish({ ok: true, body: { session: { ...build.session, plan: { ready: true } } } });
+  await pending;
+  assert.equal(applied.length, 0);
+  assert.equal(build.readinessStale, true);
+  assert.equal(manager.workspaceBuildSetupPressable(), false);
+  manager.workspaceBuildTransport.read = async () => {
+    throw new Error('fixture unavailable');
+  };
+  await manager.recheckWorkspaceBuild();
+  assert.match(build.readinessMessage, /could not be checked/);
+  assert.equal(manager.workspaceBuildSetupPressable(), false);
+  assert.equal(applied.length, 0);
+});
+
+test('a canonical replacement folder retires old readiness failure without gating a model-free plan', () => {
+  const { manager, build, applied } = readinessBuild();
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.isWorkspaceCreator = () => false;
+  build.readinessStale = true;
+  build.readinessMessage = 'Old check failed';
+  manager.adoptWorkspaceBuildSession({ ...build.session, version: 3 });
+  assert.equal(build.readinessStale, true, 'an obsolete response cannot clear the guard');
+  manager.adoptWorkspaceBuildSession({
+    ...build.session,
+    version: 5,
+    folder: { ...build.session.folder, observation: { id: 'replacement-folder' } },
+    plan: { ...build.session.plan, visual: undefined }
+  });
+  assert.equal(build.readinessStale, false);
+  assert.equal(build.readinessMessage, '');
+  assert.equal(manager.workspaceBuildSetupPressable(), true);
+  assert.equal(applied.length, 1);
 });
 
 test('a recognized folder opens its host review directly and edits the shared draft', () => {

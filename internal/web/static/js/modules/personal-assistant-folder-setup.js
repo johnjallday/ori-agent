@@ -486,8 +486,13 @@ function syncReviewLink() {
   // Move the one existing control beside a local preview; never clone its
   // authority or create a second review owner. Saved context keeps the chip.
   const previewActions = document.getElementById('personalAssistantFolderPreviewActions');
+  const exploring = document
+    .getElementById('personalAssistantPanel')
+    ?.classList?.contains('personal-assistant-panel--exploring');
   const parent =
-    current.preview && !structure && previewActions ? previewActions : reviewLinkMarker?.parentNode;
+    current.preview && !structure && !exploring && previewActions
+      ? previewActions
+      : reviewLinkMarker?.parentNode;
   if (parent && elements.open.parentNode !== parent) {
     if (parent === previewActions) parent.append(elements.open);
     else parent.insertBefore(elements.open, reviewLinkMarker);
@@ -1170,6 +1175,7 @@ if (typeof window !== 'undefined')
     reviewStructure,
     reviewCandidate,
     recheckReview,
+    refreshReviewLink: syncReviewLink,
     adjustStructure,
     // Just discuss: the reply's proposal leaves this conversation's view. It
     // writes nothing; the folder can be proposed again by attaching it.

@@ -9,9 +9,12 @@ import (
 
 type readinessSetup struct {
 	*fakeFolderSetup
-	reads  int
-	visual *FolderSetupVisual
+	reads         int
+	visual        *FolderSetupVisual
+	invalidations int
 }
+
+func (s *readinessSetup) InvalidateSetupReadiness(string) { s.invalidations++ }
 
 func (s *readinessSetup) ReadSetupReadiness(context.Context, FolderSetupRequest) *FolderSetupVisual {
 	s.reads++
@@ -44,6 +47,24 @@ func TestFolderReadinessIsExplicitReviewOnlyAndNeverAPlan(t *testing.T) {
 	preview.Readiness.Plugins[0].Name = "changed"
 	if setup.visual.Plugins[0].Name != "Known plugin" {
 		t.Fatal("outward readiness aliases its reader")
+	}
+}
+
+func TestFolderBuildReadinessCannotBecomeAnExecutablePlan(t *testing.T) {
+	fx := newBuildSetupFixture(t)
+	setup := &readinessSetup{fakeFolderSetup: fx.setup, visual: &FolderSetupVisual{
+		Plugins: []FolderSetupPlugin{{Kind: FolderPlanIntegration, Name: "Known plugin", Operation: "unavailable"}},
+		Model:   &FolderSetupModel{State: "not_checked"},
+	}}
+	setup.planErr = errors.New("no complete plan")
+	fx.folderDigestFixture.service.deps.Setup = setup
+	plan, err := fx.service.BuildPlan(WithFolderSetupRecheck(t.Context()), fx.draft, fx.observation.ID, fx.candidate, "Exact name")
+	if err != nil || plan.Ready || plan.Digest != "" || plan.Readiness == nil || len(plan.Readiness.Plugins) != 1 || setup.runs != 0 || setup.invalidations != 1 {
+		t.Fatalf("build partial readiness became a plan or lost facts: %+v %v", plan, err)
+	}
+	plan.Readiness.Plugins[0].Name = "changed"
+	if setup.visual.Plugins[0].Name != "Known plugin" {
+		t.Fatal("build display aliases its reader")
 	}
 }
 

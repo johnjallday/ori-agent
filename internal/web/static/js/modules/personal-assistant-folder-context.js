@@ -972,7 +972,8 @@ function init() {
     current: () => controller.state,
     setFocus: (ids, binding) =>
       !window.PersonalAssistantConversation?.isLoading?.() && controller.setFocus(ids, binding),
-    notify: message => controller.notify(message)
+    notify: message => controller.notify(message),
+    layoutChanged: () => window.PersonalAssistantFolderSetup?.refreshReviewLink?.()
   });
   document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
   document.addEventListener('personal-assistant:status', renderDiscussion);

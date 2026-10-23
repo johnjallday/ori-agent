@@ -11748,7 +11748,11 @@ const sessionManager = {
       detachFolder: (id, body) => call('POST', sessionURL(id, 'folder/detach'), body),
       link: (id, body) => call('POST', sessionURL(id, 'link'), body),
       detachLink: (id, body) => call('POST', sessionURL(id, 'link/detach'), body),
-      read: id => call('GET', `${base}/${encodeURIComponent(String(id || ''))}`),
+      read: (id, { recheck = false } = {}) =>
+        call(
+          'GET',
+          `${base}/${encodeURIComponent(String(id || ''))}${recheck ? '?recheck=1' : ''}`
+        ),
       setup: (id, body) => call('POST', sessionURL(id, 'setup'), body),
       homeProvider: (id, body) => call('POST', sessionURL(id, 'home-provider'), body),
       janitorReview: (id, body) => call('POST', sessionURL(id, 'janitor-review'), body),
@@ -12024,6 +12028,16 @@ const sessionManager = {
     modal.addEventListener('workspace-build-setup', event => {
       void this.setUpWorkspaceBuild(event?.detail || {});
     });
+    modal.addEventListener('workspace-build-configure-model', () =>
+      this.configureWorkspaceBuildModel()
+    );
+    modal.addEventListener('workspace-build-recheck', () => void this.recheckWorkspaceBuild());
+    document
+      .getElementById('workspaceBuildPlanReviewModel')
+      ?.addEventListener('click', () => this.configureWorkspaceBuildModel());
+    document
+      .getElementById('workspaceBuildPlanReviewRecheck')
+      ?.addEventListener('click', () => void this.recheckWorkspaceBuild());
     modal.addEventListener('workspace-build-prepare-group', () => {
       void this.prepareWorkspaceBuildGroup();
     });
@@ -12918,6 +12932,104 @@ const sessionManager = {
     if (build.planReviewOpen) document.getElementById('workspaceBuildPlanName')?.focus?.();
   },
 
+  workspaceBuildModelView() {
+    const session = this.workspaceBuild?.session;
+    if (!session || session.setup || session.status !== 'open') return null;
+    return (
+      window.OriFolderSetupVisual?.modelRequirementView?.(
+        session.plan?.visual?.model || session.plan?.readiness?.model
+      ) || null
+    );
+  },
+
+  configureWorkspaceBuildModel() {
+    const build = this.workspaceBuild;
+    const model = this.workspaceBuildModelView();
+    if (
+      !build ||
+      build.closing ||
+      build.busy ||
+      build.setupBusy ||
+      build.readinessBusy ||
+      this.workspaceBuildFolderSelectionExpired(build) ||
+      model?.state !== 'missing' ||
+      !model.settings
+    )
+      return;
+    const tab = window.open(model.settings, '_blank');
+    if (tab) tab.opener = null;
+    else {
+      build.readinessMessage =
+        'The settings tab was blocked. Allow a new tab and try again. Your draft is unchanged.';
+      this.workspaceBuildPane()?.showLine(build.readinessMessage);
+      this.syncWorkspaceBuildPresentation();
+    }
+  },
+
+  async recheckWorkspaceBuild() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (
+      !build?.session ||
+      !pane ||
+      !this.workspaceBuildModelView() ||
+      build.closing ||
+      build.busy ||
+      build.setupBusy ||
+      build.readinessBusy ||
+      this.workspaceBuildFolderSelectionExpired(build)
+    )
+      return;
+    const { id, version } = build.session;
+    const revision = this.workspaceBuildRevision();
+    build.readinessBusy = true;
+    build.readinessMessage = 'Checking the current setup requirements…';
+    pane.setBusy?.(true, { focus: false });
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.workspaceBuildApi().read(id, { recheck: true });
+      if (this.workspaceBuild !== build || build.closing || build.session?.id !== id) return;
+      if (build.session.version !== version || this.workspaceBuildRevision() !== revision) {
+        build.readinessStale = true;
+        build.readinessMessage =
+          'Your draft changed while checking. Check again to review its current requirements.';
+        return;
+      }
+      const fresh = result?.body?.session;
+      if (
+        !result?.ok ||
+        fresh?.id !== id ||
+        fresh.version !== version ||
+        fresh.setup ||
+        fresh.status !== 'open'
+      ) {
+        build.readinessStale = true;
+        build.readinessMessage =
+          'This build could not be rechecked. Your draft is kept; reopen its review before continuing.';
+        return;
+      }
+      // Only readiness changes. Do not apply wizard fields, flush a draft,
+      // submit a model turn, or adopt another tab's accepted setup.
+      build.session = { ...build.session, plan: fresh.plan || null };
+      build.readinessStale = false;
+      pane.applySession(build.session);
+      build.readinessMessage = 'Readiness refreshed. Nothing was installed or started.';
+    } catch (_) {
+      if (this.workspaceBuild === build && build.session?.id === id) {
+        build.readinessStale = true;
+        build.readinessMessage = 'Requirements could not be checked. Your draft is unchanged.';
+      }
+    } finally {
+      if (this.workspaceBuild === build && !build.closing && build.session?.id === id) {
+        build.readinessBusy = false;
+        pane.setReadinessStale?.(build.readinessStale);
+        pane.setBusy?.(false, { focus: false });
+        this.syncWorkspaceBuildPresentation();
+        pane.showLine(build.readinessMessage);
+      }
+    }
+  },
+
   // workspaceBuildSetupPressable is when Set it up may be pressed, as the
   // pane's own button decides it: a ready plan, a named draft, a held folder
   // pick, and nothing in flight or already running.
@@ -12928,7 +13040,14 @@ const sessionManager = {
       return false;
     }
     // An unnamed draft is named after its folder, as the plan says.
-    if (build.busy || build.setupBusy) return false;
+    if (
+      build.busy ||
+      build.setupBusy ||
+      build.readinessBusy ||
+      build.readinessStale ||
+      this.workspaceBuildModelView()?.state === 'missing'
+    )
+      return false;
     const expires = Date.parse(String(session.folder_expires_at || ''));
     return !(Number.isFinite(expires) && expires <= Date.now());
   },
@@ -13012,7 +13131,8 @@ const sessionManager = {
     this.workspaceBuildPane()?.renderVisualPlan?.(
       document.getElementById('workspaceBuildPlanReviewVisual'),
       document.getElementById('workspaceBuildPlanReviewConsequences'),
-      document.getElementById('workspaceBuildPlanReviewProgress')
+      document.getElementById('workspaceBuildPlanReviewProgress'),
+      document.getElementById('workspaceBuildPlanReviewRequirements')
     );
     const shared = window.OriFolderPlanLines;
     const list = document.getElementById('workspaceBuildPlanReviewLines');
@@ -13244,11 +13364,33 @@ const sessionManager = {
           : checkingPermissions
             ? 'Checking the current folder permissions…'
             : '';
-    setText('workspaceBuildFolderProblem', problem || activity);
+    const model = this.workspaceBuildModelView();
+    const missingModel = model?.state === 'missing';
+    setText(
+      'workspaceBuildFolderProblem',
+      problem ||
+        activity ||
+        build.readinessMessage ||
+        (missingModel
+          ? 'Configure the project model, then check again. Nothing is installed on return.'
+          : '')
+    );
+    const modelButton = document.getElementById('workspaceBuildPlanReviewModel');
+    if (modelButton) {
+      modelButton.hidden = Boolean(expired || frozen || !missingModel || !model.settings);
+      modelButton.disabled = busy || build.readinessBusy;
+    }
+    const recheck = document.getElementById('workspaceBuildPlanReviewRecheck');
+    if (recheck) {
+      recheck.hidden = Boolean(expired || frozen || !model);
+      recheck.disabled = busy || build.readinessBusy;
+    }
     const action = document.getElementById('workspaceBuildPlanReviewSetup');
     if (action) {
       action.hidden =
-        build.janitorReview?.state === 'deferred' || (Boolean(build.draftError) && !frozen);
+        missingModel ||
+        build.janitorReview?.state === 'deferred' ||
+        (Boolean(build.draftError) && !frozen);
       action.textContent = this.isCreatingFolder
         ? 'Creating workspace…'
         : recognized
@@ -13275,8 +13417,15 @@ const sessionManager = {
               : this.workspaceReviewCreatesAgents()
                 ? 'Hire and create'
                 : 'Create workspace';
+      if (recognized && planReady)
+        action.textContent =
+          window.OriFolderSetupVisual?.requirementsActionLabel?.(
+            session.plan,
+            action.textContent
+          ) || action.textContent;
       action.disabled =
         busy ||
+        build.readinessBusy ||
         (!frozen &&
           (Boolean(build.draftError) ||
             expired ||
@@ -14613,8 +14762,13 @@ const sessionManager = {
       return;
     if (build.janitorReview) this.noteWorkspaceBuildIntent();
     build.session = session;
+    // A canonical folder response supplies its own current plan. A failed
+    // check of the old folder must not gate its model-free replacement.
+    build.readinessStale = false;
+    build.readinessMessage = '';
     this.rememberWorkspaceBuildSession(session);
     this.workspaceBuildPane()?.applySession(session);
+    this.workspaceBuildPane()?.setReadinessStale?.(false);
     this.syncWorkspaceBuildPresentation();
     if (this.isWorkspaceCreator?.()) this.refreshWorkspaceReview();
     // A run Set it up started is followed until it settles, wherever the
@@ -14791,7 +14945,8 @@ const sessionManager = {
   async setUpWorkspaceBuild(detail = {}) {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
-    if (!build?.session || !pane || build.busy || build.setupBusy) return;
+    if (!build?.session || !pane || build.busy || build.setupBusy || build.readinessBusy) return;
+    if (!build.session.setup && !this.workspaceBuildSetupPressable()) return;
     const digest = String(
       build.session.setup?.plan_digest || build.session.plan?.digest || ''
     ).trim();

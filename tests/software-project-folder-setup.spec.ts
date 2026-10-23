@@ -456,7 +456,6 @@ async function comeBack(page: Page) {
   }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
-  await card(page).scrollIntoViewIfNeeded();
 }
 
 const headline = (page: Page) => page.locator('#personalAssistantFolderOfferHeadline');
@@ -777,6 +776,15 @@ test.describe('after the server was restarted', () => {
     // restart (the conversation-bound review holds the folder in memory); the
     // paused setup itself is saved, and shows again once the folder is picked.
     await expect(question(page)).toContainText('the server was restarted');
+    await expect(question(page)).toBeInViewport();
+    await expect(
+      card(page).getByRole('button', { name: 'Pick it again', exact: true })
+    ).toBeInViewport({ ratio: 1 });
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/04-scripted-software-repick.png`
+      });
+    }
     // Picking the same folder again and reviewing the same project recovers
     // the confirmed, paused setup; it never starts a second one.
     await press(page, 'Pick it again');

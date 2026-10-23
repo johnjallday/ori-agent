@@ -78,6 +78,9 @@ for (const route of ['/?panel=today', '/settings']) {
       .click();
     const back = page.locator('#personalAssistantExplorerBack');
     await expect(back).toBeVisible({ timeout: 60_000 });
+    // Tree + Chat keeps the single review control in the visible composer;
+    // Back moves that same control beside the compact preview.
+    await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeVisible();
     await back.click();
     const preview = page.locator('#personalAssistantFolderPreview');
     await expect(preview).toBeVisible();

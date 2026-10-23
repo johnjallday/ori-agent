@@ -20,6 +20,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
   let callback = null;
   let generation = 0;
   let pending = null;
+  let attentionSeen = null;
   let userIntent = false;
   const scale = () => pane.getBoundingClientRect().height / pane.offsetHeight || 1;
   const offset = row =>
@@ -66,7 +67,20 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
   const settle = () => {
     callback = null;
     if (!isOpen() || hydrating) return; // preserve intent until open/batch completion
-    if (target && connected(target) && following) {
+    // On a fresh drawer, a saved setup may live in Needs you before any
+    // conversation is resumed. Reveal its recovery once, not its long tail.
+    // Later polling and a reader returning to the bottom must not re-arm it.
+    const attention =
+      !target && !Array.from(transcript.children).some(row => row.dataset.messageRole)
+        ? pane.querySelector?.('#personalAssistantFolderOffer:not([hidden])')
+        : null;
+    const shownAttention = attention && attention.getBoundingClientRect().height > 0;
+    const firstAttention = shownAttention && attention !== attentionSeen;
+    if (shownAttention) attentionSeen = attention;
+    if (firstAttention && following) {
+      move(pane.scrollTop + offset(attention) - 8);
+      following = false;
+    } else if (target && connected(target) && following) {
       const height = target.getBoundingClientRect().height / scale();
       move(
         replyViewportTop({
@@ -167,6 +181,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     userIntent = false;
     anchors = [];
     target = unread = null;
+    attentionSeen = null;
     pending?.remove();
     pending = null;
     dirty = false;
@@ -237,9 +252,14 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     endHydration() {
       hydrating = false;
       following = true;
-      target =
-        Array.from(transcript.children).findLast(row => row.dataset.messageRole === 'assistant') ||
-        null;
+      // A current folder review is a reply too, although its persisted row
+      // is folder_context. Start at its recovery controls, not the diagram's
+      // tail. A later conversational reply still takes precedence.
+      const review = transcript.querySelector?.('#personalAssistantFolderOffer:not([hidden])');
+      const latest = Array.from(transcript.children).findLast(
+        row => row.dataset.messageRole === 'assistant' || (review && row.contains?.(review))
+      );
+      target = review && latest?.contains?.(review) ? review : latest || null;
       changed();
     },
     isSettled: () => callback === null && !dirty,

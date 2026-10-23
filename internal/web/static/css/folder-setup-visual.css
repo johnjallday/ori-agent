@@ -274,8 +274,13 @@
   background: var(--ori-paper, var(--bg-secondary));
 }
 
-.folder-requirements__row[data-operation="ready"] {
+.folder-requirements__row[data-operation="ready"],
+.folder-requirements__row[data-progress="done"] {
   border-left-width: 1px;
+}
+
+.folder-requirements__row[data-progress="failed"] {
+  border-left-width: 4px;
 }
 
 .folder-requirements__status {

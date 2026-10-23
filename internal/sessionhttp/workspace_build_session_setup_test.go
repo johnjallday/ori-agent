@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,46 @@ func resolvedSongOffer(sessionID string) personalassistant.FolderOffer {
 			Parent:  &personalassistant.FolderSetupDestination{Status: "existing", WorkspaceID: "home-1", Name: "Music Production Home"},
 			Receipt: []personalassistant.FolderReceiptRow{{Kind: "workspace", Name: "Ori Music Demo"}},
 		},
+	}
+}
+
+func TestWorkspaceBuildSetup_RecheckIsReadOnlyAndOnlyMarksUnacceptedBuilds(t *testing.T) {
+	for _, state := range []string{"unaccepted", "running", "stopped"} {
+		t.Run(state, func(t *testing.T) {
+			accepted := state != "unaccepted"
+			f := newBuildFixture(t, true, plannedTeammateReply)
+			folders := &fakeBuildFolders{observation: reaperObservation(), recognition: reaperRecognition(), plan: songPlan()}
+			build := f.plannedBuild(t, folders)
+			if accepted {
+				if status, body := f.setUp(t, build, map[string]any{"plan_digest": songDigest}); status != http.StatusOK {
+					t.Fatalf("accept: %d %v", status, body)
+				}
+			}
+			if state == "stopped" {
+				stopped := resolvedSongOffer(build.ID)
+				stopped.Status, stopped.Outcome = personalassistant.FolderOfferAwaitingOutcome, nil
+				stopped.Setup.Status, stopped.Setup.StopReason = personalassistant.FolderSetupStopped, personalassistant.FolderStopNeedsModel
+				f.handler.WorkspaceBuildSetupSettled(t.Context(), "local", stopped)
+			}
+			before := f.read(t, build.ID)
+			started, reviewed, calls := len(folders.started), len(folders.reviewed), f.provider.calls
+			for _, query := range []string{"", "?recheck=0", "?recheck=1"} {
+				req := httptest.NewRequest(http.MethodGet, "/api/workspaces/build-sessions/"+build.ID+query, nil).WithContext(t.Context())
+				var seen context.Context
+				f.handler.workspaceBuild.Assistant = func(ctx context.Context, _ string) (*personalassistant.Projection, error) {
+					seen = ctx
+					return f.assistant, nil
+				}
+				rec := httptest.NewRecorder()
+				f.handler.HandleWorkspaces(rec, req)
+				if rec.Code != http.StatusOK || seen == nil || (seen != req.Context()) != (!accepted && query == "?recheck=1") {
+					t.Fatalf("wrong refresh scope for %q: %d, derived context %t", query, rec.Code, seen != req.Context())
+				}
+				if after := f.read(t, build.ID); !reflect.DeepEqual(before, after) || len(folders.started) != started || len(folders.reviewed) != reviewed || f.provider.calls != calls {
+					t.Fatal("read changed a build, accepted consent, or executed work")
+				}
+			}
+		})
 	}
 }
 
@@ -218,7 +260,10 @@ func TestWorkspaceBuildSetup_AStoppedRunReopensTheBuildAndRetryContinuesIt(t *te
 	for _, tc := range []struct {
 		reason, line string
 	}{
-		{personalassistant.FolderStopInstallFailed, "A plugin could not be installed or enabled, so nothing after it ran. Retry continues from there."},
+		{personalassistant.FolderStopInstallFailed, "A required plugin could not be installed, updated or enabled. Completed work is kept; Retry continues from the saved run."},
+		{personalassistant.FolderStopNeedsModel, "The project agent needs a model before setup can continue. Completed work is kept."},
+		{personalassistant.FolderStopConsentStale, "The Home's shared assistant needs approval for the current blueprint. Completed work is kept."},
+		{personalassistant.FolderStopAssistantMissing, "The Home's shared assistant is unavailable. Completed work is kept."},
 		{personalassistant.FolderStopNeedsPick, "Ori no longer holds the attached folder. Add the folder again, then Retry."},
 		{personalassistant.FolderStopNeedsChoice, "The folder has more than one project file. Choose the one to set up."},
 		{personalassistant.FolderStopPlanChanged, "What Set it up would do has changed, so it stopped before going further. Review the plan, then Retry."},

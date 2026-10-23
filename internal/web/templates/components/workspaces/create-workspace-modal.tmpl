@@ -30,6 +30,7 @@
             <p class="workspace-wizard-eyebrow">From your folder</p>
             <h2 id="workspaceBuildPlanReviewTitle" tabindex="-1">Review your workspace</h2>
             <p id="workspaceBuildFolderStatus" role="status" aria-live="polite"></p>
+            <div id="workspaceBuildPlanReviewRequirements" hidden></div>
             <!-- A plan that names a hire: the agent and the one question, drawn
                  by the build pane (renderReviewHire) and sharing its brief. -->
             <div id="workspaceBuildPlanReviewHire" hidden></div>
@@ -79,6 +80,8 @@
           <p id="workspaceBuildFolderProblem" role="status" aria-live="polite"></p>
           <div class="workspace-build-plan-review__actions">
             <button type="button" id="workspaceBuildFolderSave" class="modern-btn modern-btn-primary" hidden>Save my draft</button>
+            <button type="button" id="workspaceBuildPlanReviewModel" class="modern-btn modern-btn-primary" hidden>Configure project model</button>
+            <button type="button" id="workspaceBuildPlanReviewRecheck" class="modern-btn modern-btn-secondary" hidden>Check again</button>
             <button type="button" id="workspaceBuildPlanReviewSetup" class="modern-btn modern-btn-primary">Create workspace</button>
             <button type="button" id="workspaceBuildPlanReviewBack" class="modern-btn modern-btn-secondary">Refine with assistant</button>
             <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>

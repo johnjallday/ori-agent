@@ -233,13 +233,12 @@ export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFold
 const SETUP_STOP_COPY = {
   plan_changed:
     'What Set up would do now differs from the plan you approved, so I stopped before going further. Review the changed setup before continuing.',
-  needs_pick: subject =>
-    `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
+  needs_pick: subject => `Ori no longer has ${subject} open. Pick the folder again to carry on.`,
   needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
   needs_model:
     'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
   install_failed:
-    'The integration could not be installed or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
+    'A required plugin could not be installed, updated or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
   interrupted: 'Setup was interrupted before it finished.',
   consent_stale:
     'Your shared agent was approved for an older version of this blueprint. Completed work is kept; Continue setup to review staffing yourself.',
@@ -356,7 +355,15 @@ function stoppedActions(reason, setup) {
       ];
     case 'needs_model':
       return [
-        { id: 'model', label: 'Set up a model', style: 'primary', href: MODEL_SETTINGS_URL },
+        {
+          id: 'model',
+          label: 'Set up a model',
+          style: 'primary',
+          newTab: true,
+          href:
+            globalThis.OriFolderSetupVisual.modelRequirementView(setup.visual?.model)?.settings ||
+            MODEL_SETTINGS_URL
+        },
         { ...retry, style: 'outline' },
         CONTINUE_SETUP
       ];
@@ -402,6 +409,8 @@ export function setupRunView(
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (structure) sentence = STRUCTURE_STOP_COPY[reason] || STRUCTURE_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
+  const stopped = globalThis.OriFolderSetupVisual.stoppedRequirement(setup);
+  if (stopped) sentence = `Stopped at ${stopped}. ${sentence}`;
   return {
     status,
     lines,
@@ -2140,6 +2149,7 @@ export function folderOutcomeNote(offer) {
   const subject = String(offer?.subject?.name || '').trim() || 'that folder';
   switch (status) {
     case 'awaiting_outcome':
+      if (offer?.setup) return setupRunView(offer.setup, subject)?.statusLine || '';
       if (offer?.capability)
         return `Continue reviewed setup for ${subject}; no folder was changed.`;
       return offer?.choice === 'tidy'
