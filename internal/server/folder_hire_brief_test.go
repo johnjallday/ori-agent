@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,7 +12,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
+
+type folderSuggestionTaskRunner func(context.Context, string, workspace.Task) (string, error)
+
+func (run folderSuggestionTaskRunner) ExecuteTask(ctx context.Context, agent string, task workspace.Task) (string, error) {
+	return run(ctx, agent, task)
+}
 
 // firstLookRecord waits for what the hire did about its agent's first look,
 // which is written just after the offer resolves.
@@ -133,6 +142,27 @@ func TestFolderHire_StartThisMakesTheSuggestionTheHiredAgentsTask(t *testing.T) 
 		t.Fatal(err)
 	}
 
+	// Keep the real HTTP, admission, task and durable-run paths, but replace
+	// their external worker. A capturing LLM provider alone does not stop the
+	// real worker from launching npx/MCP and writing HOME during test cleanup.
+	type execution struct {
+		agent string
+		task  workspace.Task
+	}
+	called := make(chan execution, 1)
+	var calls atomic.Int32
+	const result = "Reviewed the health check suggestion without changing files."
+	executor := workspacerun.NewOriAgentExecutor(folderSuggestionTaskRunner(func(_ context.Context, agent string, task workspace.Task) (string, error) {
+		calls.Add(1)
+		select {
+		case called <- execution{agent: agent, task: task}:
+		default:
+		}
+		return result, nil
+	}))
+	executor.SetWorkspaceFolderResolver(f.builder.workspaceFileStore)
+	f.builder.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, executor)
+
 	route := "/api/personal-assistant/first-look/" + look.ID + "/start-suggestion"
 	status, body := f.call(t, http.MethodPost, route, map[string]any{})
 	if status != http.StatusOK {
@@ -160,6 +190,31 @@ func TestFolderHire_StartThisMakesTheSuggestionTheHiredAgentsTask(t *testing.T) 
 	}
 	if status, gone := f.call(t, http.MethodPost, "/api/personal-assistant/first-look/not-a-look/dismiss", map[string]any{}); status != http.StatusNotFound {
 		t.Fatalf("a look that is not the user's: %d %v", status, gone)
+	}
+
+	// Join admitted work, not a quiet-filesystem guess, before checking the
+	// result or allowing the fixture to remove its stores.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := f.builder.resetWork.WaitIdle(ctx); err != nil {
+		t.Fatalf("suggestion execution did not finish: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("suggestion executor calls = %d, want 1", got)
+	}
+	ran := <-called
+	if ran.agent != "Development Assistant" || ran.task.ID != taskID || ran.task.WorkspaceID != ws.ID ||
+		ran.task.Context[workspace.TaskContextAutonomyGate] != workspace.TaskAutonomyGateWorkspace {
+		t.Fatalf("executed suggestion = %+v", ran)
+	}
+	current, err = f.builder.workspaceStore.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := current.GetTask(taskID)
+	if err != nil || done.Status != workspace.TaskStatusCompleted || done.ExecutionCount != 1 || done.Result != result ||
+		len(current.Tasks) != len(ws.Tasks)+1 {
+		t.Fatalf("completed suggestion = %+v, tasks = %d, err = %v", done, len(current.Tasks), err)
 	}
 }
 
