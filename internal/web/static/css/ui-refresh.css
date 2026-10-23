@@ -4622,8 +4622,14 @@ body.agents-page .empty-state h3 {
 }
 
 @media (max-width: 991px) {
+  /* Stacked under the nav, the content column fills the screen. Its desktop
+     auto margins and 980px cap let it size to its widest card instead, which
+     pushed /settings 300px past a phone's width. */
   body.settings-page .settings-content {
     padding: calc(1.25rem * var(--ui-density));
+    margin: 0;
+    max-width: 100%;
+    min-width: 0;
   }
 
   body.settings-page .ui-density-options {

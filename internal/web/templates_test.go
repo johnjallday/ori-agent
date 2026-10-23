@@ -624,6 +624,76 @@ func TestNavbarCollapsesToHomeAgentsAndSettingsGear(t *testing.T) {
 	}
 }
 
+// Settings is the hub for the configuration pages: a Tools & integrations group
+// after Integrations links each one as a full page, the Plugins item carries the
+// pending-changes badge, and the vault is reachable before its first record.
+func TestSettingsLinksEveryHubPage(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	data := GetDefaultData()
+	data.CurrentPage = "settings"
+	data.Version = "v9.9.9-test"
+	html, err := r.RenderTemplate("settings", data)
+	if err != nil {
+		t.Fatalf("RenderTemplate(settings) failed: %v", err)
+	}
+
+	integrations := strings.Index(html, `data-category="integrations"`)
+	tools := strings.Index(html, `data-category="tools"`)
+	storage := strings.Index(html, `data-category="data-storage"`)
+	if integrations < 0 || tools < integrations || storage < tools {
+		t.Fatalf("Tools & integrations should sit between Integrations and Data & Storage: %d %d %d", integrations, tools, storage)
+	}
+	group := html[tools:storage]
+	if !strings.Contains(group, `>Tools &amp; integrations</h3>`) {
+		t.Error("the hub group is not titled Tools & integrations")
+	}
+	for _, page := range []struct{ href, label string }{
+		{"/skills", "Skills"}, {"/plugins", "Plugins"}, {"/mcp", "MCP Servers"},
+		{"/templates", "Templates"}, {"/workflows", "Workflows"}, {"/models", "Models"},
+		{"/usage", "Usage &amp; Costs"}, {"/review", "Review"}, {"/profile", "Profile"},
+	} {
+		link := openingTag(t, group, `href="`+page.href+`"`)
+		for _, want := range []string{`class="settings-nav-item"`, `data-external-link="true"`, `title="Opens the ` + page.label + ` page"`} {
+			if !strings.Contains(link, want) {
+				t.Errorf("%s hub link is missing %s", page.href, want)
+			}
+		}
+		item := group[strings.Index(group, `href="`+page.href+`"`):]
+		item = item[:strings.Index(item, "</a>")]
+		if !strings.Contains(item, `>`+page.label+`</span>`) || !strings.Contains(item, `settings-nav-item-open`) {
+			t.Errorf("%s hub link needs its label and the trailing open-page arrow", page.href)
+		}
+	}
+	if got := strings.Count(group, `class="settings-nav-item"`); got != 9 {
+		t.Errorf("Tools & integrations has %d items, want 9", got)
+	}
+	if strings.Contains(group, `data-section=`) {
+		t.Error("a hub item points at an in-page section; hub items open full pages")
+	}
+
+	plugins := group[strings.Index(group, `href="/plugins"`):]
+	if !strings.Contains(plugins[:strings.Index(plugins, "</a>")], `data-plugins-badge hidden`) {
+		t.Error("the Plugins hub item lost the pending-changes badge")
+	}
+	if !strings.Contains(html, `src="/js/modules/plugin-workspace-list.js"`) {
+		t.Error("Settings does not load plugin-workspace-list.js, so the badge never fills")
+	}
+
+	vaultDirectory := html[strings.Index(html, `<section id="vault-directory"`):]
+	vaultDirectory = vaultDirectory[:strings.Index(vaultDirectory, "</section>")]
+	if !strings.Contains(openingTag(t, vaultDirectory, `id="openVaultsLink"`), `href="/vaults"`) {
+		t.Error("Vault Directory has no Open vaults link to /vaults")
+	}
+
+	systemInfo := html[strings.Index(html, `<section id="system-info"`):]
+	if !strings.Contains(systemInfo[:strings.Index(systemInfo, "</section>")], "v9.9.9-test") {
+		t.Error("System Information no longer shows the version the sidebar used to show")
+	}
+}
+
 // No page renders the retired sidebar, its hamburger, its resize handle or its
 // scripts; the content column is the whole width below the top bar.
 func TestNoPageRendersTheSidebar(t *testing.T) {
