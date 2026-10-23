@@ -263,6 +263,58 @@
   }
 }
 
+/* At short/zoomed viewports, keep the navbar and pinned composer usable
+   without letting their chrome squeeze the setup viewport to a few pixels. */
+@media (max-height: 520px) {
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__avatar,
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
+    .personal-assistant-panel__avatar
+    .agent-avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__input {
+    min-height: 44px;
+    height: 44px;
+  }
+}
+
+@media (min-width: 600px) and (max-height: 520px) {
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__form {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
+    .personal-assistant-panel__attachments {
+    grid-column: auto;
+    max-width: 180px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
+    .personal-assistant-panel__attachments
+    > * {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__input {
+    grid-column: 2;
+  }
+
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-panel__send {
+    grid-column: 3;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .folder-visual *,
   .folder-visual *::before,

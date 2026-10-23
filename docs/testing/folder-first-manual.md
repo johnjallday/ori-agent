@@ -229,14 +229,37 @@ Feature evidence and the post-implementation guide stay ignored/local at
 `tasks/evidence/assistant-conversation-first/final/` and
 `tasks/test-guide-assistant-conversation-first.md`.
 
+## Reviewed REAPER setup acceptance
+
+`tests/one-card-folder-setup.spec.ts` uses two **fresh disposable stores**:
+`ORI_ONE_CARD_PHASE=no-model` checks the saved pause and changed-consent review;
+`ORI_ONE_CARD_PHASE=provider` checks actual new/bound staffing and a finished
+first report. Both phases are required. Supply `ORI_ONE_CARD_SANDBOX` and an
+explicit `ORI_ONE_CARD_PROVIDER` / `ORI_ONE_CARD_MODEL` through `scripts/e2e.sh`.
+Suppress ambient cloud keys and CLI credentials in the demo launch. No implicit
+Codex selection is made.
+
+Confirm the sandbox workspace root. If the initial offer has no plan, follow its
+existing guided setup to install/enable the reviewed integration and Home provider;
+record the actual versions. Changing a model after approval does not authorize a
+silent retry: **Review changed setup** opens the existing guided continuation.
+The provider phase instead reviews its intended model before confirming the hire.
+
+A listed model is not proof of usable execution. For local models, verify the
+**loaded** context capacity, not only the advertised maximum. Ori's
+`LM_STUDIO_CONTEXT_WINDOW` sets its prompt budget; it does not resize LM Studio.
+Do not reconfigure a shared model server without authorization. A ready workspace
+with a waiting/failed look does not satisfy the finished-report check. Native
+picker selection/cancel and native browser zoom remain separate evidence.
+
 ## Software project folder
 
 A folder that holds a software project is reviewed, set up as a Code Project
 workspace bound to that exact directory, and given one read-only first
-assessment that the user starts. Nothing is installed and nothing is written
-into the project.
+assessment authorized by the reviewed hire. Nothing is installed and nothing
+is written into the project.
 
-Automated, in a real browser, with no model and no network:
+Automated, in a real browser, with a scripted loopback provider (no live model):
 
 ```bash
 ./scripts/e2e-software-folder.sh
@@ -248,7 +271,10 @@ the same sandbox, and runs the second phase, so a paused setup surviving a
 restart is checked for real. A third phase, on a server and sandbox of its
 own, attaches a checkout through the assistant composer's **Add folder** and
 sends it: the reply proposes that one folder as a workspace, and one click
-reaches its card. The suite writes its own inert project folders
+reaches its card. A fourth, independent `reports` phase creates two unread stored
+reports through actual setup/task execution, then checks Home/drawer handoff,
+**Start this** and **Not now** using the same cases as `folder-hire-brief.spec.ts`.
+The suite writes its own inert project folders
 (Git metadata is plain text; no git command runs) and hashes them before and
 after. Its one stand-in is labelled in the spec as the FIXTURE PROVIDER: a
 local HTTP server that answers the model API, which the server's own `lmstudio`
@@ -257,7 +283,7 @@ the evidence, the isolation and every screen are the product's own; only the
 model's words are canned, and the spec reads back exactly what was sent to it.
 Run directly through `scripts/e2e.sh`, the spec skips unless
 `ORI_SOFTWARE_SANDBOX`, `ORI_SOFTWARE_FIXTURE_PORT` and `ORI_SOFTWARE_PHASE`
-(`first`, `restarted` or `conversation`) are set.
+(`first`, `restarted`, `conversation` or `reports`) are set.
 
 The shared [visual setup contract](../architecture/visual-folder-setup.md) keeps
 review, saved milestones, recovery and the canonical result on one card. Use

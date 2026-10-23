@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { dirname, join, relative } from 'node:path';
+import { folderHireReportCases } from './helpers/folder-hire-report-cases';
 
 // A software project folder, from the first look to its first assessment, in a
 // real browser against the real server and store.
@@ -34,7 +35,7 @@ const sandbox = process.env.ORI_SOFTWARE_SANDBOX || '';
 const fixturePort = Number(process.env.ORI_SOFTWARE_FIXTURE_PORT || '0');
 const phase = process.env.ORI_SOFTWARE_PHASE || '';
 test.skip(
-  !sandbox || !fixturePort || !['first', 'restarted', 'conversation'].includes(phase),
+  !sandbox || !fixturePort || !['first', 'restarted', 'conversation', 'reports'].includes(phase),
   'requires the sandbox, fixture port and phase that scripts/e2e-software-folder.sh provides'
 );
 test.describe.configure({ mode: 'serial' });
@@ -534,6 +535,51 @@ async function settled(request: APIRequestContext, before: Carried) {
   expect(await developmentAssistants(request)).toBe(1);
   expect(hashes(), 'a project folder changed').toEqual(before.hashes);
 }
+
+// Independent report handoff phase: real setup/tasks/storage, scripted model.
+test.describe('stored report handoff', () => {
+  test.skip(phase !== 'reports', 'runs in the isolated reports phase');
+  test('provision two unread reports without changing their source projects', async ({
+    page,
+    request
+  }) => {
+    test.setTimeout(60_000);
+    await hireAssistant(request);
+    seed();
+    const before = hashes();
+    const workspaces = await workspaceCount(request);
+    await ok(
+      await request.post('/api/settings/system-model', {
+        data: { provider: 'lmstudio', model: fixtureModel }
+      })
+    );
+    for (const project of ['api', 'site']) {
+      await show(page, 'Desktop', project);
+      await review(page);
+      const response = page.waitForResponse(
+        reply => reply.request().method() === 'POST' && /\/setup$/.test(reply.url())
+      );
+      await card(page)
+        .getByRole('button', { name: /^(Hire|Assign) & start$/ })
+        .click();
+      const accepted = await ok(await response);
+      const look = await lookIs(request, accepted.offer.id, ['finished']);
+      expect(await taskIDs(request, look.workspace_id)).toEqual([look.task_id]);
+      await expect(
+        card(page).getByRole('link', { name: `Open ${project}`, exact: true })
+      ).toBeVisible();
+      await closeAssistantDrawer(page);
+    }
+    expect(hashes()).toEqual(before);
+    expect(await workspaceCount(request)).toBe(workspaces + 2);
+    // The HQ's daily brief can also call this fixture; assessment calls use
+    // the host's deterministic temperature, unlike that separate brief.
+    expect(provider.calls.filter(call => call.temperature === 0)).toHaveLength(2);
+    expect(provider.calls.every(call => call.model === fixtureModel)).toBe(true);
+    expect(await developmentAssistants(request)).toBe(1);
+  });
+  folderHireReportCases();
+});
 
 // --- first phase: a fresh server ---------------------------------------------
 

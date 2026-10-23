@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 
 // Deterministic presentation fixtures against the real application. These prove
@@ -663,3 +663,185 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
   expect(forbidden).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+async function keyboardReach(page: Page, target: Locator) {
+  // macOS Safari's default Tab visits text inputs; Option-Tab includes buttons
+  // and links without changing the user's system keyboard-access preference.
+  const key = page.context().browser()?.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab';
+  for (let n = 0; n < 80; n++) {
+    if (await target.evaluate(node => node === document.activeElement)) break;
+    await page.keyboard.press(key);
+  }
+  await expect(target, 'reachable by keyboard').toBeFocused();
+  expect(
+    await target.evaluate(node => {
+      const scroll = node.closest('.personal-assistant-panel__scroll')!;
+      const viewport = scroll.getBoundingClientRect();
+      const bounds = node.getBoundingClientRect();
+      return bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1;
+    }),
+    'focused control is fully visible, not clipped by the pinned composer'
+  ).toBe(true);
+}
+
+// Explicit presentation fixtures, including a canonical-shaped saved receipt.
+// No live integration/model or native-picker claim is made by this matrix.
+for (const theme of ['light', 'dark']) {
+  for (const motion of ['reduce', 'no-preference'] as const) {
+    for (const width of [320, 390, 768, 1024, 1440, 640]) {
+      test(`fixture full journey layout ${theme} ${motion} ${width}`, async ({
+        page,
+        browserName
+      }, testInfo) => {
+        test.skip(
+          width === 640 && browserName !== 'chromium',
+          'CDP 200%-equivalent reflow is Chromium-only'
+        );
+        await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+        await page.emulateMedia({ reducedMotion: motion });
+        const size = { width, height: width === 640 ? 450 : 1000 };
+        await page.setViewportSize(size);
+        if (width === 640) {
+          const client = await page.context().newCDPSession(page);
+          await client.send('Emulation.setDeviceMetricsOverride', {
+            ...size,
+            deviceScaleFactor: 2,
+            mobile: false,
+            screenWidth: 1280,
+            screenHeight: 900
+          });
+        }
+        const errors: string[] = [];
+        page.on('pageerror', error => errors.push(error.message));
+        const offer = reviewOffer();
+        const stopped = {
+          ...offer,
+          plan: undefined,
+          status: 'awaiting_outcome',
+          setup: {
+            status: 'stopped',
+            stop_reason: 'install_failed',
+            plan_digest: offer.plan.digest,
+            visual: offer.plan.visual,
+            destination: offer.plan.destination,
+            hire: offer.plan.hire,
+            lines: offer.plan.lines.map((line, n) => ({ ...line, state: n ? 'waiting' : 'failed' }))
+          }
+        };
+        const resolved = {
+          ...offer,
+          plan: undefined,
+          status: 'resolved',
+          outcome: {
+            kind: 'project',
+            route: '/workspaces/fixture-session',
+            receipt: [
+              { kind: 'workspace', name: 'Session', operation: 'create', placement: 'standalone' },
+              { kind: 'agent', name: 'Ari', assigned: true, model: 'Fixture model' }
+            ]
+          }
+        };
+        const writes: any[] = [];
+        await page.route('**/folder-digest/offers/visual-review-fixture/setup', route => {
+          writes.push(route.request().postDataJSON());
+          return route.fulfill({ json: { offer: writes.length === 1 ? stopped : resolved } });
+        });
+        const card = await mountReview(page);
+        if (width === 640) {
+          // Presentation-only stress: a configured assistant adds another chip.
+          // Do not shrink these controls until their labels overlap each other.
+          const separated = await page.evaluate(() => {
+            document.getElementById('personalAssistantWatchRow')!.hidden = false;
+            const controls = Array.from(
+              document.querySelector('#personalAssistantChips')!.children
+            ).filter(node => !node.hasAttribute('hidden'));
+            const chips = controls.map(node => node.getBoundingClientRect());
+            return (
+              chips.every((box, n) => !n || box.left >= chips[n - 1].right) &&
+              controls.every(node => node.scrollWidth <= node.clientWidth + 1)
+            );
+          });
+          expect(separated, 'compact composer controls do not overlap').toBe(true);
+        }
+        const brief = card.getByLabel('What should it do with it?');
+        await brief.focus();
+        const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+        await keyboardReach(page, confirm);
+        await expect(confirm).toBeFocused();
+        const layout = await card.evaluate(node => {
+          const decision = node.querySelector('.folder-setup-decision')!;
+          const diagram = node.querySelector('.folder-setup-diagram')!;
+          return {
+            overflow: Math.max(
+              node.scrollWidth - node.clientWidth,
+              document.documentElement.scrollWidth - innerWidth
+            ),
+            decisionFirst: Boolean(
+              decision.compareDocumentPosition(diagram) & Node.DOCUMENT_POSITION_FOLLOWING
+            ),
+            diagramBelow:
+              diagram.getBoundingClientRect().top >= decision.getBoundingClientRect().bottom
+          };
+        });
+        expect(layout.overflow).toBeLessThanOrEqual(1);
+        expect(layout.decisionFirst).toBe(true);
+        if (width <= 768) expect(layout.diagramBelow).toBe(true);
+        const target = await confirm.boundingBox();
+        expect(target!.height).toBeGreaterThanOrEqual(24);
+        expect(target!.x).toBeGreaterThanOrEqual(0);
+        expect(target!.x + target!.width).toBeLessThanOrEqual(width);
+        expect(
+          await confirm.evaluate(
+            node =>
+              getComputedStyle(node).boxShadow !== 'none' ||
+              getComputedStyle(node).outlineStyle !== 'none'
+          )
+        ).toBe(true);
+        await keyboardReach(page, card.locator('#personalAssistantFolderDetails > summary'));
+        await page.keyboard.press('Enter');
+        await expect(card.locator('#personalAssistantFolderPlan')).toBeVisible();
+        expect(writes).toHaveLength(0);
+        await keyboardReach(page, confirm);
+        await page.keyboard.press('Enter');
+        await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
+          'Integration · Did not finish'
+        );
+        await expect(card).not.toContainText('Confirmed workspace member');
+        const retry = card.getByRole('button', { name: 'Try again', exact: true });
+        await keyboardReach(page, retry);
+        await page.keyboard.press('Enter');
+        await expect(card.locator('.folder-visual')).toContainText('Confirmed workspace member');
+        await expect(card.locator('.folder-visual')).toContainText('Separate workspace');
+        const open = card.getByRole('link', { name: 'Open Session', exact: true });
+        await expect(open).toHaveAttribute('href', '/workspaces/fixture-session');
+        await keyboardReach(page, open);
+        await expect(open).toBeFocused();
+        await expect(card.getByRole('figure', { name: 'Folder setup relationship' })).toHaveCount(
+          1
+        );
+        await expect(card.locator('figcaption')).toContainText('Confirmed member: Ari');
+        await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
+        await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
+        await expect(card.locator('#personalAssistantFolderOfferNote')).toHaveAttribute(
+          'aria-live',
+          'polite'
+        );
+        expect(writes.map(body => body.plan_digest)).toEqual([
+          offer.plan.digest,
+          offer.plan.digest
+        ]);
+        expect(errors).toEqual([]);
+        await page.screenshot({ path: testInfo.outputPath('fixture-ready.png') });
+        await page.keyboard.press('Escape');
+        await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+        const launcher = page.locator('#personalAssistantLauncher');
+        await launcher.focus();
+        await page.keyboard.press('Enter');
+        await expect(open).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(launcher).toBeFocused();
+        expect(writes).toHaveLength(2);
+      });
+    }
+  }
+}
