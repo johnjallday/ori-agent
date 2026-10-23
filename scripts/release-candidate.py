@@ -2,7 +2,8 @@
 """RC lifecycle. GitHub Actions owns authorization; all refs come from origin.
 
 No checkout, local branch switch, force-update, or working-tree commit is used.
-The only new commit is the candidate's VERSION bump, made with a private index.
+The only new commits are the candidate's VERSION bump, made with a private index,
+and the zero-diff merge commit that repairs a squashed merge-back on its own branch.
 """
 
 import argparse
@@ -23,6 +24,8 @@ RC = re.compile(r"(v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-rc\
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 HOLD = {"1", "true", "yes", "on"}
 PENDING = {"requested", "queued", "waiting", "pending", "in_progress"}
+# The repair branch for a squashed merge-back: a zero-diff merge commit that restores release ancestry on dev.
+MERGE_BACK = "release-merge-back"
 
 
 class Refusal(Exception):
@@ -31,6 +34,10 @@ class Refusal(Exception):
 
 class NotReady(Refusal):
     """An ordinary scheduled hold, but a refusal for an explicit mutation."""
+
+
+class Stuck(NotReady):
+    """A hold only a person can clear. The scheduled gate goes red so somebody sees it."""
 
 
 def run(*args, input=None, env=None):
@@ -163,16 +170,16 @@ class Repository:
             raise Refusal(f"Multiple active candidates: {', '.join(active)}")
         return active
 
-    def workflow_state(self, workflow, sha, branch):
-        """The latest push run of a workflow for this exact commit and branch/tag, or None."""
+    def workflow_state(self, workflow, sha, branch, event="push"):
+        """The latest run of a workflow for this exact commit and branch/tag (a push run unless told otherwise), or None."""
         # Match the event, exact SHA AND branch/tag. An unrelated green check or
         # an older successful attempt must not authorize this candidate.
         pages = gh("api", "--paginate", "--slurp",
                    f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs"
-                   f"?head_sha={sha}&event=push&per_page=100")
+                   f"?head_sha={sha}&event={event}&per_page=100")
         runs = [item for page in pages for item in page["workflow_runs"]
                 if item["head_sha"] == sha and item["head_branch"] == branch
-                and item["event"] == "push"]
+                and item["event"] == event]
         if not runs:
             return None
         latest = max(runs, key=lambda item: item["id"])
@@ -228,9 +235,10 @@ def landed_pr(subject):
     """A squash merge ends in (#N); a merge commit names the PR and its branch."""
     if re.search(r"\(#[0-9]+\)$", subject):
         return True
-    # The release merge-back has to be a merge commit, and it ships nothing new.
+    # The release merge-back has to be a merge commit, and it ships nothing new;
+    # neither does the repair of a squashed one.
     merged = re.match(r"Merge pull request #[0-9]+ from [^/\s]+/(\S+)", subject)
-    return bool(merged) and not merged[1].startswith("release/")
+    return bool(merged) and not merged[1].startswith(("release/", MERGE_BACK + "/"))
 
 
 def landed(since, sha):
@@ -307,7 +315,7 @@ def evaluate(repo, candidate=""):
             raise Refusal(f"Stable release {latest} has not finished publishing")
         sha = repo.branches["dev"]
         if not repo.ancestor(repo.branches["main"], sha) or not repo.ancestor(repo.tags[latest], sha):
-            summary("HOLD — merge the last release branch back into dev with a merge commit (not squash).")
+            hold_for_merge_back(repo, latest)
             return
         subjects, prs = landed(repo.tags[latest], sha)
         minimum = int(os.environ.get("RELEASE_MIN_PRS", "10"))
@@ -316,12 +324,43 @@ def evaluate(repo, candidate=""):
         if not subjects or (len(prs) < minimum and os.environ.get("FORCE_RELEASE") != "true"):
             summary(f"HOLD — {len(prs)}/{minimum} unreleased PRs; dev remains open.")
             return
+        state = repo.workflow_state("ci.yml", sha, "dev")
+        if failed(state):
+            # Red dev CI is the one thing a person or ci-triage must act on, so the run goes red too.
+            raise Stuck(f"dev CI failed for dev@{sha[:7]} ({state['url']}); run ci-triage")
         repo.successful_workflow("ci.yml", sha, "dev")
         version = repo.next_version()
         # PR titles are displayed as inert prose, never shell input.
         summary("Included PRs:\n" + "\n".join(f"- {subject}" for subject in prs))
     output(ready=True, version=version, sha=sha)
     summary(f"Prepare candidate for **{version}** from `{sha}` (no stable publication).")
+
+
+def hold_for_merge_back(repo, version):
+    """The stable commit is not on dev's line. Quiet while the lifecycle lands it, red when a person must.
+
+    A merge-back PR that is still running its CI lands itself (react merges it
+    with a merge commit). A squashed merge-back whose content is already on dev
+    is repaired by this run's repair job. Anything else needs a person: a
+    merge-back PR that finished CI and did not land, or release content that
+    never reached dev.
+    """
+    for pr in merge_back_prs(version):
+        state = repo.workflow_state("ci.yml", pr["headRefOid"], pr["headRefName"], event="pull_request")
+        if failed(state):
+            raise Stuck(f"merge-back PR {pr['url']} has red CI ({state['url']}); run ci-triage, "
+                        "then merge it with a merge commit (not squash)")
+        if conclusion(state) == "success":
+            raise Stuck(f"merge-back PR {pr['url']} is green but has not landed; "
+                        "merge it with a merge commit (not squash)")
+        summary(f"HOLD — {version} is being merged back: {pr['url']} lands with a merge commit once its CI is green.")
+        return
+    if repairable(repo, version):
+        output(repair=version)
+        summary(f"HOLD — {version} was merged back without a merge commit. dev already has its content, so the "
+                "repair job opens a zero-diff merge-commit PR that lands itself; the next run cuts.")
+        return
+    raise Stuck(f"merge release/{version} back into dev with a merge commit (not squash); dev is missing part of it")
 
 
 def version_commit(sha, version):
@@ -509,14 +548,142 @@ def sync_pr(repo, version):
               "Resolve conflicts without dropping newer dev work. New feature PRs can continue throughout.\n\n"
               "After CI passes and this PR is merge-committed, the release branch can be deleted. Keep all release tags.")
     # dev's required status checks make auto-merge wait for this PR's CI, and the
-    # merge commit keeps release ancestry for the next cut. A conflict leaves the
-    # PR open for a person instead of failing the stable publication.
+    # merge commit keeps release ancestry for the next cut. GitHub refuses to arm
+    # auto-merge while the head's own push run already satisfies those checks,
+    # which is this PR's normal state; react then lands it after its CI run. A
+    # conflict leaves the PR open for a person instead of failing the publication.
+    summary(f"Merge-back PR: {url}\n" + land_merge_commit(url, "auto") + " dev remains open.")
+
+
+def land_merge_commit(pr, *modes):
+    """Land a PR with a merge commit, trying each mode in turn; the line returned says what happened.
+
+    "auto" arms auto-merge, which GitHub accepts only while dev's required checks
+    still block the PR; "now" merges, which it accepts only once they pass. Each
+    caller lists the modes its PR can honestly use.
+    """
+    errors = []
+    for mode in modes:
+        args = ("--merge", "--auto") if mode == "auto" else ("--merge",)
+        try:
+            run("gh", "pr", "merge", pr, *args)
+        except Refusal as error:
+            errors.append(str(error))
+            continue
+        if mode == "auto":
+            return "Auto-merge (merge commit) is enabled; it lands once dev's checks pass."
+        return "Merged into dev with a merge commit."
+    return ("Not landed yet (" + "; ".join(errors) + "). react lands it after its CI run; "
+            "otherwise merge it with a merge commit (not squash) by hand.")
+
+
+def merge_back_prs(version):
+    """Open PRs into dev that would put the stable commit on dev's line: the release branch's, or a repair."""
+    heads = (f"release/{version}", f"{MERGE_BACK}/{version}")
+    return [pr for pr in gh("pr", "list", "--state", "open", "--base", "dev", "--limit", "100",
+                            "--json", "number,url,headRefName,headRefOid")
+            if pr.get("headRefName") in heads]
+
+
+def merged_tree(ours, theirs):
+    """The tree that merging theirs into ours would produce, or None when it would conflict."""
     try:
-        run("gh", "pr", "merge", url, "--merge", "--auto")
-    except Refusal as error:
-        summary(f"Merge-back PR: {url}\nAuto-merge could not be enabled ({error}); merge it with a merge commit by hand.")
+        return git("merge-tree", "--write-tree", ours, theirs).splitlines()[0]
+    except Refusal:
+        return None
+
+
+def repairable(repo, version):
+    """A squashed merge-back: the stable commit is not an ancestor of dev, yet dev has all of its content."""
+    tag, dev = repo.tags[version], repo.branches["dev"]
+    return tag == repo.branches["main"] and merged_tree(dev, tag) == git("rev-parse", f"{dev}^{{tree}}")
+
+
+def merge_back_commit(dev, tag, version):
+    """A merge commit joining dev and the stable commit, with dev's own tree: ancestry, no content."""
+    # Same dates as dev's head, so a retry after a lost push recreates the same commit.
+    date = git("show", "-s", "--format=%cI", dev)
+    env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
+    return git("commit-tree", f"{dev}^{{tree}}", "-p", dev, "-p", tag, env=env,
+               input=f"chore(release): restore {version} release ancestry on dev\n\n"
+                     f"The {version} merge-back was squashed. dev already has its content; "
+                     "this merge commit only makes the stable commit an ancestor again.\n")
+
+
+def repair(repo, version):
+    """Restore a squashed merge-back's ancestry with a zero-diff merge-commit PR to dev that lands itself.
+
+    GH_TOKEN must be RELEASE_PAT: the PR needs a CI run, and dev's required
+    checks make auto-merge wait for it. dev itself is never pushed.
+    """
+    check_hold()
+    if not STABLE.fullmatch(version) or version not in repo.tags:
+        raise Refusal("Expected a published stable version")
+    if version != repo.latest_stable():
+        raise Refusal("Only the latest stable release is merged back")
+    tag, dev = repo.tags[version], repo.branches["dev"]
+    if repo.ancestor(tag, dev) and repo.ancestor(repo.branches["main"], dev):
+        summary(f"{version} is already merged back into dev.")
         return
-    summary(f"Merge-back PR: {url}\nAuto-merge (merge commit) is enabled; it lands once dev's checks pass. dev remains open.")
+    if not repairable(repo, version):
+        raise Refusal(f"dev is missing part of {version}; merge release/{version} into dev by hand with a merge commit")
+    branch = f"{MERGE_BACK}/{version}"
+    existing = [pr for pr in merge_back_prs(version) if pr["headRefName"] == branch]
+    if existing:
+        summary(f"Repair PR already open: {existing[0]['url']}")
+        return
+    commit = merge_back_commit(dev, tag, version)
+    # The repair branch is this lifecycle's own; a leftover from a closed PR is replaced, nothing else is.
+    git("push", "origin", f"--force-with-lease=refs/heads/{branch}:{repo.branches.get(branch, '')}",
+        f"{commit}:refs/heads/{branch}")
+    url = run("gh", "pr", "create", "--base", "dev", "--head", branch,
+              "--title", f"chore(release): restore {version} release ancestry on dev",
+              "--body", f"The {version} merge-back landed as a squash, so the stable commit is not an ancestor of "
+              "dev and the candidate gate holds. dev already has every file from the release: this merge commit "
+              "changes nothing, it only restores the ancestry.\n\n"
+              "**Use Create a merge commit, NOT squash/rebase** if merging by hand. Auto-merge is set to do that "
+              "once dev's checks pass, and react lands it after its CI run.")
+    # A fresh commit has pending checks, so auto-merge arms; "now" only matters where dev has no required checks.
+    summary(f"Repair PR: {url}\n" + land_merge_commit(url, "auto", "now"))
+
+
+def land_merge_back(repo, branch, sha):
+    """Land a merge-back PR into dev with a merge commit once its own CI run is green.
+
+    The PR's head is either the shipped release branch, whose head is the stable
+    commit, or the repair branch, a zero-diff merge commit whose second parent
+    is the stable commit. Anything else is left alone.
+    """
+    prefix = "release/" if branch.startswith("release/") else MERGE_BACK + "/"
+    version = branch.removeprefix(prefix)
+    if not STABLE.fullmatch(version):
+        raise Refusal(f"Unrecognized merge-back branch: {branch}")
+    if version not in repo.tags or repo.branches.get(branch) != sha:
+        summary(f"Nothing to do: {branch}@{sha[:7]} is not a shipped release's merge-back.")
+        return
+    tag = repo.tags[version]
+    if prefix == "release/":
+        if sha != tag:
+            summary(f"Nothing to do: {branch} has moved past the stable commit {tag[:7]}.")
+            return
+        release = repo.release(version)
+        if release["isDraft"] or release["isPrerelease"]:
+            raise Refusal(f"Stable publication of {version} is incomplete; retry its Release workflow")
+    else:
+        parents = git("show", "-s", "--format=%P", sha).split()
+        if len(parents) != 2 or parents[1] != tag or git("diff", "--name-only", parents[0], sha):
+            summary(f"Nothing to do: {branch}@{sha[:7]} is not a zero-diff merge of {version}.")
+            return
+    if repo.ancestor(tag, repo.branches["dev"]):
+        summary(f"{version} is already merged back into dev.")
+        return
+    prs = [pr for pr in merge_back_prs(version) if pr["headRefName"] == branch and pr["headRefOid"] == sha]
+    if not prs:
+        summary(f"Nothing to do: no open PR into dev from {branch} at {sha[:7]}.")
+        return
+    # Its CI run just passed, so the required checks are satisfied and the merge goes through now;
+    # a check outside that run still pending leaves auto-merge to finish it.
+    summary(f"Merge-back PR {prs[0]['url']}: " + land_merge_commit(str(prs[0]["number"]), "now", "auto"))
 
 
 def pending_promotion(tag):
@@ -582,11 +749,18 @@ def react(repo, workflow, event, branch, sha, conclusion):
     Failures are left alone; the release watcher routine investigates those.
     """
     check_hold()
-    if conclusion != "success" or event != "push":
+    if conclusion != "success" or event not in ("push", "pull_request"):
         summary(f"Nothing to do: {workflow} ({event}) on {branch} ended {conclusion}.")
         return
     if not SHA.fullmatch(sha):
         raise Refusal("Invalid full commit SHA")
+    if event == "pull_request":
+        # The one PR run that authorizes a step: a shipped release's merge-back into dev lands after its own CI.
+        if workflow == "CI" and branch.startswith(("release/", MERGE_BACK + "/")):
+            land_merge_back(repo, branch, sha)
+        else:
+            summary(f"Nothing to do: {workflow} ({event}) on {branch}.")
+        return
     if workflow == "CI" and branch == "dev":
         merge_sync_prs(repo, sha)
     elif workflow == "CI" and branch.startswith("release/"):
@@ -633,8 +807,11 @@ def describe(report):
     dev, release = report["dev"], report["release"]
     if release is None:
         if not dev["merged_back"]:
-            where = report["merge_back_pr"] or "no PR is open"
-            return prefix + f"Merge {report['latest_stable']} back into dev with a merge commit ({where})."
+            if report["merge_back_pr"]:
+                return prefix + (f"Merge-back of {report['latest_stable']} is open: {report['merge_back_pr']}; "
+                                 "react lands it with a merge commit once its CI is green.")
+            return prefix + (f"Merge {report['latest_stable']} back into dev with a merge commit (no PR is open); "
+                             "the daily gate repairs a squashed merge-back itself.")
         count = f"{dev['unreleased_prs']}/{dev['minimum_prs']} PRs toward {report['next_version']}"
         if failed(dev["ci"]):
             # Red dev CI blocks the cut whatever the count; it is the one thing a person or ci-triage must act on.
@@ -686,7 +863,7 @@ def status(repo):
         "release": None,
     }
     if not report["dev"]["merged_back"]:
-        open_prs = gh("pr", "list", "--state", "open", "--base", "dev", "--head", f"release/{latest}", "--json", "url")
+        open_prs = merge_back_prs(latest)
         report["merge_back_pr"] = open_prs[0]["url"] if open_prs else None
     try:
         active = repo.active()
@@ -752,6 +929,8 @@ def main():
     verify_parser.add_argument("--tag", required=True)
     sync_parser = commands.add_parser("sync-pr")
     sync_parser.add_argument("--version", required=True)
+    repair_parser = commands.add_parser("repair")
+    repair_parser.add_argument("--version", required=True)
     report_parser = commands.add_parser("attach-test-report")
     report_parser.add_argument("--rc", required=True)
     report_parser.add_argument("--previous", required=True)
@@ -784,12 +963,18 @@ def main():
             verify_build(repo, args.tag)
         elif args.command == "sync-pr":
             sync_pr(repo, args.version)
+        elif args.command == "repair":
+            repair(repo, args.version)
         elif args.command == "attach-test-report":
             attach_test_report(repo, args.rc, args.previous, args.repository)
         elif args.command == "react":
             react(repo, args.workflow, args.event, args.branch, args.sha, args.conclusion)
         elif args.command == "status":
             status(repo)
+    except Stuck as error:
+        # A hold only a person can clear: the run goes red so it is noticed, unlike an ordinary hold.
+        summary(f"HOLD — {error}")
+        return 1
     except NotReady as error:
         if args.command in ("evaluate", "react"):
             summary(f"HOLD — {error}")

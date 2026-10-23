@@ -7,9 +7,13 @@ name: Auto Release
 # Finished CI and Release runs land here too (workflow_run fires for main's copy
 # of this file only). The react job re-cuts a candidate whose branch turned
 # green, lands the release watcher's dev→release sync PR once dev CI is green
-# for that exact commit, and requests promotion once an RC has every automated
-# check green. Publishing stable still needs a person to approve the `release`
-# environment review on the dispatched Promote Release run.
+# for that exact commit, lands a shipped release's merge-back PR into dev with a
+# merge commit once that PR's own CI run is green, and requests promotion once
+# an RC has every automated check green. A merge-back that was squashed anyway
+# is repaired by the scheduled run: the repair job opens a zero-diff merge-commit
+# PR that lands itself. Holds only a person can clear turn the scheduled run red.
+# Publishing stable still needs a person to approve the `release` environment
+# review on the dispatched Promote Release run.
 on:
   schedule:
     - cron: '30 18 * * *'
@@ -76,6 +80,7 @@ jobs:
       ready: ${{ steps.gate.outputs.ready }}
       version: ${{ steps.gate.outputs.version }}
       sha: ${{ steps.gate.outputs.sha }}
+      repair: ${{ steps.gate.outputs.repair }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -116,18 +121,55 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python3 scripts/release-candidate.py prepare --version "$VERSION" --sha "$SHA"
 
+  # The last stable's merge-back was squashed: dev has its content but not its
+  # ancestry, and the gate cannot count the next batch. This opens a zero-diff
+  # merge-commit PR from release-merge-back/<version> and arms auto-merge. It
+  # needs the PAT: a PR from GITHUB_TOKEN gets no CI run and would never land.
+  repair:
+    name: Restore ${{ needs.evaluate.outputs.repair }} release ancestry on dev
+    needs: evaluate
+    if: needs.evaluate.outputs.repair != ''
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+      - name: Open a zero-diff merge-commit PR that lands itself
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          VERSION: ${{ needs.evaluate.outputs.repair }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 scripts/release-candidate.py repair --version "$VERSION"
+
   react:
     name: React to ${{ github.event.workflow_run.name }} on ${{ github.event.workflow_run.head_branch }}
-    # Successful push runs only. Failures belong to the release watcher routine,
-    # and a pull_request run never authorizes a lifecycle step.
+    # Successful runs only; failures belong to the release watcher routine. Push
+    # runs on dev, a release branch or an RC tag drive the lifecycle. The one
+    # pull_request run that authorizes a step is a shipped release's merge-back
+    # into dev, from its release branch or from the repair branch of a squashed
+    # one: react lands that PR with a merge commit once its CI run is green.
     if: >-
       github.event_name == 'workflow_run'
       && github.ref == 'refs/heads/main'
       && github.event.workflow_run.conclusion == 'success'
-      && github.event.workflow_run.event == 'push'
-      && (github.event.workflow_run.head_branch == 'dev'
-          || startsWith(github.event.workflow_run.head_branch, 'release/')
-          || contains(github.event.workflow_run.head_branch, '-rc.'))
+      && ((github.event.workflow_run.event == 'push'
+           && (github.event.workflow_run.head_branch == 'dev'
+               || startsWith(github.event.workflow_run.head_branch, 'release/')
+               || contains(github.event.workflow_run.head_branch, '-rc.')))
+          || (github.event.workflow_run.event == 'pull_request'
+              && github.event.workflow_run.head_repository.full_name == github.repository
+              && (startsWith(github.event.workflow_run.head_branch, 'release/')
+                  || startsWith(github.event.workflow_run.head_branch, 'release-merge-back/'))))
     runs-on: ubuntu-24.04
     concurrency:
       group: release-lifecycle
