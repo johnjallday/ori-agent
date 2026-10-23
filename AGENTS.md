@@ -185,9 +185,13 @@ Red CI on `dev` or on the active release branch is the release watcher
 routine's job: it opens a `release-fix/*` PR to `dev` (auto-merge on green) and
 then a `release-sync/*` PR into the release branch. `auto-release.yml` reacts to
 finished runs: it merges that sync PR once dev CI is green for the exact commit,
-re-cuts the RC when the release branch turns green, and dispatches Promote
-Release once every automated check is green. The one human step is approving
-the `release` environment review on that run. `./scripts/release.sh status` is
+re-cuts the RC when the release branch turns green, lands the stable merge-back
+PR into `dev` with a merge commit once that PR's own CI run is green, and
+dispatches Promote Release once every automated check is green. A merge-back
+that was squashed anyway is repaired by the scheduled run through a zero-diff
+`release-merge-back/*` PR; holds only a person can clear turn that run red. The
+one human step is approving the `release` environment review on the promotion
+run. `./scripts/release.sh status` is
 the shared read-only view of where the lifecycle stands; `docs/CI_TRIAGE.md` is
 the runbook the watcher and the local `ci-triage` agent follow for red CI.
 

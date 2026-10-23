@@ -54,8 +54,11 @@ part of this first RC workflow.
    casual edits. Operators with permission to change workflows/tags remain
    trusted; a repository script is not a substitute for GitHub permissions.
 7. Release merge-back PRs must use **Create a merge commit**. Keep that merge
-   method enabled; do not squash or rebase those PRs. Feature PRs still squash
-   into `dev` as usual.
+   method enabled: the lifecycle lands those PRs itself with it, and anyone
+   merging one by hand must pick it (the merge button remembers the last
+   method used, which is Squash after a feature PR). Feature PRs still squash
+   into `dev` as usual. A merge-back that was squashed anyway is repaired by
+   the next Auto Release run (see Merge back and continue).
 8. Clear the hold only when ready to enable candidate creation. No live GitHub
    setting, release, tag, or branch is changed merely by running local tests.
 
@@ -181,8 +184,9 @@ Promote Release dispatch. The one human action is approving the `release`
 environment review on that run (GitHub emails the request). Red CI on `dev` or
 on the release branch is the release watcher routine's job, following
 [CI_TRIAGE.md](CI_TRIAGE.md): it opens a `release-fix/*` PR to `dev` with
-auto-merge, then the sync PR. Stable's merge-back PR auto-merges with a merge
-commit. `AUTO_RELEASE_HOLD=1` stops every automatic step.
+auto-merge, then the sync PR. Stable's merge-back PR is landed with a merge
+commit by react once its own CI run is green. `AUTO_RELEASE_HOLD=1` stops every
+automatic step.
 `./scripts/release.sh status` says which of these steps is next, whether a
 promotion is awaiting approval, and why a candidate is not promotable yet. To
 promote by hand instead:
@@ -219,17 +223,28 @@ Raw stable tags without a promotion receipt are rejected by the build workflow.
 
 ## Merge back and continue
 
-After stable publication, Release opens an idempotent `release/vX.Y.Z → dev` PR.
-Merge it with a **merge commit**, preserving new dev work and all stabilization
-fixes. Conflicts require review and a new CI run; do not resolve them by replacing
-all of dev with the release tree. Do not edit the shipped release branch to
-resolve conflicts: use a separate integration branch incorporating both parents,
-then PR that branch to dev with a merge commit.
+After stable publication, Release opens an idempotent `release/vX.Y.Z → dev` PR
+and arms auto-merge with a merge commit. GitHub usually refuses to arm it: the
+branch head's own push run already satisfies dev's required checks, so the PR
+already counts as mergeable. That is why react lands the PR with a merge commit
+as soon as the PR's CI run is green. Nobody needs to touch it. If you do merge
+it by hand, use **Create a merge commit**, preserving new dev work and all
+stabilization fixes. Conflicts require review and a new CI run; do not resolve
+them by replacing all of dev with the release tree. Do not edit the shipped
+release branch to resolve conflicts: use a separate integration branch
+incorporating both parents, then PR that branch to dev with a merge commit.
 
 The next candidate waits until the previous stable revision is an ancestor of
-`dev`. Feature PRs continue throughout. The cadence and DevOps dashboard compare
-the stable tag's ancestry rather than publication time, so work merged while you
-were testing is correctly included in the next batch.
+`dev`. A merge-back that was squashed leaves the release's content on dev but
+not its ancestry; the next Auto Release run notices that merging the stable
+commit would change no files and opens `release-merge-back/vX.Y.Z`, a zero-diff
+merge-commit PR with auto-merge armed. react lands it after its CI run, and the
+run after that cuts the batch. Holds only a person can clear turn the scheduled
+run red instead of leaving it quietly green: dev is missing release content, a
+merge-back PR finished its CI run without landing, or dev CI is red at the
+minimum PR count. Feature PRs continue throughout. The cadence and DevOps
+dashboard compare the stable tag's ancestry rather than publication time, so
+work merged while you were testing is correctly included in the next batch.
 
 After merge-back, delete the temporary release branch if desired. Keep RC and
 stable tags for provenance. Automatic release pruning is intentionally not part
@@ -245,6 +260,10 @@ of this workflow.
 - **Stable published but merge-back PR creation failed:** the release remains
   published. Retry only the failed `sync-dev` job. Creating another stable tag
   is neither necessary nor safe.
+- **Merge-back was squashed:** nothing to do. The next Auto Release run opens
+  `release-merge-back/vX.Y.Z` and lands it; `./scripts/release.sh status` shows
+  it under `merge_back_pr`. The run goes red only when dev is missing release
+  content, which is a merge commit for a person to make.
 - **Release branch diverged / multiple candidates / API unavailable:** stop and
   inspect. The gate will not guess, merge unrelated work, or overwrite refs.
 - **Rollback:** retain published tags and downloads. Use a separately approved
