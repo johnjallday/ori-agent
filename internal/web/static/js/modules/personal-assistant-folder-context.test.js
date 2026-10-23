@@ -362,6 +362,32 @@ test('explicit review sends opaque candidate and scope, never contents or a mode
   });
 });
 
+test('explicit readiness recheck retains scope and suppresses late responses without execution', async () => {
+  let finish;
+  const f = fixture(async url =>
+    url.endsWith('/select')
+      ? { observation: observation('a') }
+      : new Promise(resolve => {
+          finish = resolve;
+        })
+  );
+  await f.controller.select('chip', 'documents');
+  const pending = f.controller.review('root', false, undefined, { recheck: true });
+  assert.deepEqual(f.calls[1].body, {
+    draft_id: 'opaque-draft',
+    revision: '',
+    selection_id: 'a',
+    candidate_id: 'root',
+    recheck: true
+  });
+  assert.equal(await f.controller.review('root', false, undefined, { recheck: true }), null);
+  f.setId('another-conversation');
+  finish({ conversation: { id: 'stale' } });
+  assert.equal(await pending, null);
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.calls.every(call => !/decide|install|setup\/run/.test(call.url)));
+});
+
 test('review carries a named workspace as a reference while the page stays the location', async t => {
   globalThis.window = { location: { pathname: '/workspaces/album-1' } };
   globalThis.document = { body: { dataset: { workspaceId: 'ws-1', workspaceSlug: 'album-1' } } };

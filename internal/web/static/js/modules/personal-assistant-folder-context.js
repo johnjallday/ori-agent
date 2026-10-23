@@ -318,6 +318,7 @@ export function createFolderContextController({
               ...(placement.operation
                 ? { operation: placement.operation, destination_id: placement.destination_id || '' }
                 : {}),
+              ...(placement.recheck === true ? { recheck: true } : {}),
               // What the user changed in Adjust on a proposed group.
               ...(placement.structure ? { structure: placement.structure } : {})
             })

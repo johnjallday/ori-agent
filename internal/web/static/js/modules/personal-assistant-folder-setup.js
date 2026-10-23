@@ -731,6 +731,27 @@ async function review(candidateId, close = false, offerId, placement) {
     }
     return;
   }
+  const refreshed = result.folder_reviews?.[current?.offerId];
+  if (placement?.recheck && currentReview(current, refreshed)) {
+    // The host refreshed the exact canonical review without appending a turn.
+    // Do not reload the conversation or move the user's draft/scroll owner.
+    reviews = { ...reviews, [refreshed.id]: refreshed };
+    window.PersonalAssistantFolder?.updateConversationReview?.(refreshed);
+    applyReviewContext(null);
+    window.PersonalAssistantFolderContext?.notify?.(
+      'Review refreshed. Nothing was installed or started.'
+    );
+    if (shouldFocus) {
+      const model = document.querySelector(
+        '#personalAssistantFolderRequirements .folder-requirements__model'
+      );
+      if (model) {
+        model.tabIndex = -1;
+        focusLocal(model, true);
+      }
+    }
+    return;
+  }
   const focusBeforeHydration = document.activeElement;
   window.PersonalAssistantConversation?.applyReply?.(result);
   // Reload only canonical data. This never scans, calls a model, or confirms.
@@ -862,6 +883,24 @@ export function reviewCandidate(candidateId) {
   if (!setupCandidates(current.observation).some(candidate => candidate.id === candidateId))
     return false;
   reviewFrom(elements.open, candidateId);
+  return true;
+}
+
+// Recheck follows the exact canonical candidate and its saved placement. The
+// context controller owns revision/generation checks and rejects stale replies.
+export function recheckReview(offer, trigger) {
+  if (
+    !elements ||
+    !currentReview(current, offer) ||
+    offer.status !== 'pending' ||
+    offer.setup ||
+    !current.observation ||
+    !offer.candidate_id ||
+    current.pending ||
+    current.authority
+  )
+    return false;
+  reviewFrom(trigger, offer.candidate_id, { recheck: true });
   return true;
 }
 
@@ -1130,6 +1169,7 @@ if (typeof window !== 'undefined')
     structure: currentStructure,
     reviewStructure,
     reviewCandidate,
+    recheckReview,
     adjustStructure,
     // Just discuss: the reply's proposal leaves this conversation's view. It
     // writes nothing; the folder can be proposed again by attaching it.

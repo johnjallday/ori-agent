@@ -2,11 +2,33 @@ package server
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
+
+// InvalidateSetupReadiness is used only by explicit, unaccepted review. It
+// invalidates observations, not an accepted run, destination or consent.
+func (h *folderSetupHost) InvalidateSetupReadiness(userID string) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.epoch++
+	for key := range h.cache {
+		if strings.HasPrefix(key, userID+"|") {
+			delete(h.cache, key)
+		}
+	}
+	for key := range h.readiness {
+		if strings.HasPrefix(key, userID+"|") {
+			delete(h.readiness, key)
+		}
+	}
+}
 
 type cachedSetupReadiness struct {
 	at     time.Time
@@ -26,13 +48,28 @@ func (h *folderSetupHost) ReadSetupReadiness(ctx context.Context, req personalas
 	if err != nil {
 		return nil // no plugin requirement is imposed on built-in/unknown recipes
 	}
+	withModel := func(visual *personalassistant.FolderSetupVisual) *personalassistant.FolderSetupVisual {
+		visual = personalassistant.CloneFolderSetupVisual(visual)
+		if visual == nil {
+			return nil
+		}
+		integration := foldersetup.Plugin{}
+		for _, row := range visual.Plugins {
+			if row.Kind == personalassistant.FolderPlanIntegration {
+				integration.State = row.Operation
+			}
+		}
+		_, _, visual.Model = h.pluginHire(req.UserID, target, integration)
+		return personalassistant.CloneFolderSetupVisual(visual)
+	}
 	key := req.UserID + "|" + target.entry.Key
 	h.mu.Lock()
 	cached, known := h.readiness[key]
 	plan, planned := h.cache[key]
+	epoch := h.epoch
 	h.mu.Unlock()
 	if known && time.Since(cached.at) < planFactsTTL {
-		return personalassistant.CloneFolderSetupVisual(cached.visual)
+		return withModel(cached.visual)
 	}
 	visual := &personalassistant.FolderSetupVisual{RequirementsChecked: true}
 	if planned && time.Since(plan.at) < planFactsTTL {
@@ -56,7 +93,9 @@ func (h *folderSetupHost) ReadSetupReadiness(ctx context.Context, req personalas
 	if h.readiness == nil {
 		h.readiness = map[string]cachedSetupReadiness{}
 	}
-	h.readiness[key] = cachedSetupReadiness{at: time.Now(), visual: visual}
+	if epoch == h.epoch {
+		h.readiness[key] = cachedSetupReadiness{at: time.Now(), visual: visual}
+	}
 	h.mu.Unlock()
-	return personalassistant.CloneFolderSetupVisual(visual)
+	return withModel(visual)
 }

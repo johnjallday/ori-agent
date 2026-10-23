@@ -283,7 +283,7 @@ func TestFolderHire_APluginNotInstalledIsAPendingHire(t *testing.T) {
 		Shape: folderdigest.ShapeAudio, Blueprint: folderdigest.ShapeBlueprint{Label: "Song"},
 	}}
 	for _, state := range []string{personalassistant.FolderInstallInstall, personalassistant.FolderInstallEnable, personalassistant.FolderInstallUpdate} {
-		hire, brief := host.pluginHire("local", target, foldersetup.Plugin{State: state})
+		hire, brief, _ := host.pluginHire("local", target, foldersetup.Plugin{State: state})
 		if hire == nil || hire.Mode != personalassistant.FolderHirePending || hire.RoleLabel != "Song" || hire.AgentName != "" ||
 			brief != personalassistant.FolderDefaultBrief(folderdigest.ShapeAudio, "") {
 			t.Fatalf("%s: %+v %q", state, hire, brief)

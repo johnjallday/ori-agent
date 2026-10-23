@@ -129,6 +129,9 @@ func (h *folderSetupHost) ReadSetupDestination(ctx context.Context, req personal
 }
 
 func (h *folderSetupHost) ValidateSetupDestination(ctx context.Context, req personalassistant.FolderSetupRequest) error {
+	if err := h.validateSetupModel(req); err != nil {
+		return err
+	}
 	expected := req.Plan.Destination
 	if expected == nil {
 		return nil

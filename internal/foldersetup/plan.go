@@ -57,6 +57,7 @@ type PlanFacts struct {
 	// Hire is who the card names for the folder and BriefDefault the brief it
 	// starts from; the plan carries both beside its lines, outside the digest.
 	Hire         *personalassistant.FolderHire
+	Model        *personalassistant.FolderSetupModel
 	BriefDefault string
 }
 
@@ -251,6 +252,7 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 	plan.BriefDefault = facts.BriefDefault
 	plan.Visual = &personalassistant.FolderSetupVisual{
 		RequirementsChecked: true,
+		Model:               facts.Model,
 		Entity:              &personalassistant.FolderSetupEntity{Kind: "workspace", Name: facts.WorkspaceName, Operation: personalassistant.FolderSoftwareCreate},
 		Plugins:             []personalassistant.FolderSetupPlugin{PluginVisual(personalassistant.FolderPlanIntegration, facts.Integration)},
 	}

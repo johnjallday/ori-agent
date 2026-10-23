@@ -926,7 +926,12 @@ export function folderOfferView(offer, options = {}) {
       ...view,
       plan: null,
       actions: guided
-        ? [guided]
+        ? [
+            guided,
+            ...(offer.candidate_id && offer.conversation_id && !offer.setup
+              ? [{ id: 'recheck', label: 'Check again', style: 'outline', recheck: true }]
+              : [])
+          ]
         : plainReview
           ? [
               {
@@ -938,7 +943,7 @@ export function folderOfferView(offer, options = {}) {
             ]
           : [],
       question: guided
-        ? 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and review this folder again. Opening it does not confirm installation or folder setup. Your draft stays here.'
+        ? 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and check again. Opening it does not confirm installation or folder setup. Your draft stays here.'
         : `${destination ? `${destination} ` : ''}${
             offer.destination_status === 'changed'
               ? 'The reviewed destination has changed.'
@@ -1017,6 +1022,22 @@ export function folderOfferView(offer, options = {}) {
           }
         : action
     );
+  if (view.plan && !view.setup && status === 'pending') {
+    const model = globalThis.OriFolderSetupVisual.modelRequirementView(offer.plan?.visual?.model);
+    if (model?.state === 'missing') {
+      view.actions = view.actions.filter(action => !action.oneCard);
+      if (model.settings)
+        view.actions.unshift({
+          id: 'model',
+          label: 'Configure project model',
+          style: 'primary',
+          href: model.settings,
+          newTab: true
+        });
+    }
+    if (model && offer.conversation_id && offer.candidate_id)
+      view.actions.push({ id: 'recheck', label: 'Check again', style: 'outline', recheck: true });
+  }
   return view;
 }
 
@@ -3336,13 +3357,20 @@ function runAction(action) {
     announceOffer();
     return;
   }
+  if (action.recheck) {
+    if (!window.PersonalAssistantFolderSetup?.recheckReview?.(state.offer, document.activeElement))
+      showError(
+        'This review is no longer current. Reopen its conversation or select the folder again. Your draft is unchanged.'
+      );
+    return;
+  }
   if (action.href) {
     if (action.newTab) {
       const tab = window.open(action.href, '_blank');
       if (tab) tab.opener = null;
       else
         showError(
-          'The setup tab was blocked. Allow a new tab and choose Open Guided Setup again. Your folder and draft are unchanged.'
+          'The setup tab was blocked. Allow a new tab and try this action again. Your folder and draft are unchanged.'
         );
     } else window.location.assign(action.href);
     return;

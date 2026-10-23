@@ -99,6 +99,10 @@ type FolderOfferHire struct {
 	AgentName string
 	RoleLabel string
 	Model     string
+	Provider  string
+	// ModelSource identifies the applicable configuration, not connectivity.
+	ModelSource  string // existing, system, template
+	ModelChecked bool
 	// Goal is the blueprint's own workspace goal; it may be empty.
 	Goal string
 }
@@ -150,19 +154,24 @@ func (h *Handler) FolderOfferHire(templateID, ownerUserID, composition string) (
 	}
 	// The model the agent would run on: a saved agent's own, a roster agent's
 	// resolved one, else the model new agents get.
-	if _, model, found := h.SavedAgentModel(hire.AgentName); found {
-		hire.Model = model
+	if provider, model, found := h.SavedAgentModel(hire.AgentName); found {
+		hire.Provider, hire.Model = provider, model
+		hire.ModelSource, hire.ModelChecked = "existing", true
 	} else {
 		for _, agent := range roster.Agents {
 			if strings.EqualFold(strings.TrimSpace(agent.Name), hire.AgentName) {
-				hire.Model = strings.TrimSpace(agent.Model)
+				hire.Provider, hire.Model = strings.TrimSpace(agent.Provider), strings.TrimSpace(agent.Model)
+				hire.ModelSource = agent.ModelSource
+				hire.ModelChecked = hire.Model != "" && hire.Provider != ""
+				break
 			}
 		}
 		if hire.Model == "" && h.systemModelReader != nil {
-			_, hire.Model = h.systemModelReader.GetSystemModel()
+			hire.Provider, hire.Model = h.systemModelReader.GetSystemModel()
+			hire.ModelSource, hire.ModelChecked = "system", true
 		}
 	}
-	hire.Model = strings.TrimSpace(hire.Model)
+	hire.Provider, hire.Model = strings.TrimSpace(hire.Provider), strings.TrimSpace(hire.Model)
 	return hire, nil
 }
 

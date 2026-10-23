@@ -58,6 +58,7 @@ type folderSetupHost struct {
 	mu        sync.Mutex
 	cache     map[string]cachedPlanFacts
 	readiness map[string]cachedSetupReadiness
+	epoch     uint64 // invalidation fences in-flight cache writes
 	// apps is the last look for installed applications a plan line was worded
 	// from, and when it was made.
 	apps   []folderdigest.InstalledApp
@@ -253,6 +254,7 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 	key := req.UserID + "|" + target.entry.Key
 	h.mu.Lock()
 	cached, ok := h.cache[key]
+	epoch := h.epoch
 	h.mu.Unlock()
 	if !ok || time.Since(cached.at) > planFactsTTL {
 		facts := foldersetup.PlanFacts{AppName: target.entry.DisplayName, BlueprintLabel: target.row.Blueprint.Label}
@@ -268,16 +270,20 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 			}
 			facts.Provider = &provider
 		}
-		facts.Hire, facts.BriefDefault = h.pluginHire(req.UserID, target, integration)
 		cached = cachedPlanFacts{at: time.Now(), facts: facts}
 		h.mu.Lock()
 		if h.cache == nil {
 			h.cache = map[string]cachedPlanFacts{}
 		}
-		h.cache[key] = cached
+		if epoch == h.epoch {
+			h.cache[key] = cached
+		}
 		h.mu.Unlock()
 	}
 	facts := cached.facts
+	// Applicable agent/default configuration is local and read on every plan;
+	// the release-facts cache is not a model-configuration lease.
+	facts.Hire, facts.BriefDefault, facts.Model = h.pluginHire(req.UserID, target, facts.Integration)
 	facts.Destination = &personalassistant.FolderSetupDestination{Status: "standalone"}
 	if target.provider != nil {
 		// Software preview caching is never a destination/ownership lease.
@@ -347,6 +353,7 @@ func reviewedHomeSharingOff(b *ServerBuilder, userID, providerKey string) bool {
 // forget drops cached facts, so the next plan reflects what a run just changed.
 func (h *folderSetupHost) forget(userID string, entry reviewedintegration.Entry) {
 	h.mu.Lock()
+	h.epoch++
 	delete(h.cache, userID+"|"+entry.Key)
 	delete(h.readiness, userID+"|"+entry.Key)
 	h.mu.Unlock()
@@ -359,6 +366,7 @@ func (h *folderSetupHost) forgetAll() {
 		return
 	}
 	h.mu.Lock()
+	h.epoch++
 	h.cache = nil
 	h.readiness = nil
 	h.mu.Unlock()
@@ -395,7 +403,22 @@ func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.Folder
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
 	}
-	return foldersetup.BuildPlan(facts), nil
+	plan := foldersetup.BuildPlan(facts)
+	if facts.Model != nil && facts.Model.State == "configured" {
+		// The witness is host-authored material consent, not the outward visual.
+		model := &personalassistant.FolderSetupModelIntent{
+			Source: facts.Model.Settings, AgentName: facts.Model.AgentName,
+			Provider: facts.Model.Provider, Model: facts.Model.Name,
+		}
+		if model.Source == "" {
+			model.Source = "template"
+		}
+		if model.Validate() != nil {
+			return personalassistant.FolderSetupPlan{}, errSetupUnavailable
+		}
+		plan.Intent.Model = model
+	}
+	return plan.Stamped(), nil
 }
 
 // Run brings the plugins the plan promised into place, then drives the plugin's

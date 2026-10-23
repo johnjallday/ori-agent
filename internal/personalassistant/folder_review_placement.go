@@ -195,6 +195,7 @@ func (s *FolderObservationService) PreviewReview(ctx context.Context, target fol
 	// The unbound preview also offers supporting-folder choices, which must
 	// not acquire plugin checks. Only an explicitly selected create checks them.
 	if offer.ConversationReview.Operation == FolderOperationCreate {
+		s.recheckSetupFacts(ctx, target, offer)
 		s.digest.attachSetupReadiness(ctx, target.UserID, offer, &view)
 	}
 	return view, nil

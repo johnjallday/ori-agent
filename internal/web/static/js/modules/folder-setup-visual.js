@@ -220,6 +220,31 @@
     container.replaceChildren(figure);
   }
 
+  // Configuration is not connectivity. Routes are compiled from the host's
+  // applicable configuration owner; no URL or credential is accepted here.
+  function modelRequirementView(model, { saved = false } = {}) {
+    if (!model) return null;
+    const configured = model.state === 'configured' && text(model.provider) && text(model.name);
+    const missing = model.state === 'missing';
+    const settings =
+      model.settings === 'system'
+        ? '/settings#system-model'
+        : model.settings === 'agent' && text(model.agent_name)
+          ? `/agents/${encodeURIComponent(text(model.agent_name))}`
+          : '';
+    return {
+      state: configured ? 'configured' : missing ? 'missing' : 'not_checked',
+      status: configured ? 'Configured' : missing ? 'Configuration needed' : 'Not checked',
+      detail: configured
+        ? `${text(model.provider)} · ${text(model.name)} — configuration only; connection not verified.`
+        : missing
+          ? 'This project agent needs a model configuration before setup.'
+          : 'The project blueprint and agent must be available before their model requirement can be checked.',
+      saved,
+      settings: saved ? '' : settings
+    };
+  }
+
   // Requirements are display facts, not another plan or action dispatcher.
   function requirementsView({ offer, plan = offer?.plan, readiness } = {}) {
     const saved = Boolean(offer?.setup);
@@ -286,6 +311,7 @@
     const count = `${downloads} ${downloads === 1 ? 'plugin download' : 'plugin downloads'}`;
     return {
       rows,
+      model: modelRequirementView(visual?.model, { saved }),
       complete,
       downloads,
       saved,
@@ -317,12 +343,12 @@
   function renderRequirements(container, input) {
     if (!container) return;
     const view = requirementsView(input);
-    container.hidden = !view.rows.length;
+    container.hidden = !view.rows.length && !view.model;
     const signature = JSON.stringify(view);
     if (container.dataset.signature === signature) return;
     container.dataset.signature = signature;
     container.replaceChildren();
-    if (!view.rows.length) return;
+    if (!view.rows.length && !view.model) return;
     const doc = container.ownerDocument;
     const node = (tag, label, className = '') => {
       const el = doc.createElement(tag);
@@ -332,10 +358,8 @@
     };
     const section = node('section', '', 'folder-requirements');
     section.setAttribute('aria-label', 'Setup requirements');
-    section.append(
-      node('h4', 'What you need'),
-      node('p', view.summary, 'folder-requirements__summary')
-    );
+    section.append(node('h4', 'What you need'));
+    if (view.rows.length) section.append(node('p', view.summary, 'folder-requirements__summary'));
     const requirements = node('ul', '', 'folder-requirements__list');
     for (const requirement of view.rows) {
       const row = node('li', '', 'folder-requirements__row');
@@ -362,6 +386,16 @@
         'folder-visual__note'
       )
     );
+    if (view.model) {
+      const model = node('section', '', 'folder-requirements__model');
+      model.setAttribute('aria-label', 'Project agent model');
+      model.append(
+        node('strong', view.model.saved ? 'Model configuration at review' : 'Project agent model'),
+        node('p', view.model.status, 'folder-requirements__status'),
+        node('p', view.model.detail, 'folder-visual__note')
+      );
+      section.append(model);
+    }
     container.append(section);
   }
 
@@ -504,6 +538,7 @@
     visualView,
     renderDiagram,
     requirementsView,
+    modelRequirementView,
     requirementsActionLabel,
     renderRequirements,
     reviewConsequences,

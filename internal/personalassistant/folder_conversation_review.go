@@ -163,6 +163,7 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 	if err != nil {
 		return FolderOfferView{}, err
 	}
+	s.recheckSetupFacts(ctx, target, offer)
 	offer.ID = d.deps.NewID()
 	var result FolderOffer
 	_, err = d.store.Mutate(ctx, source.UserID, func(doc *FolderDigestDocument) error {

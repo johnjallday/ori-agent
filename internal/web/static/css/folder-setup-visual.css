@@ -284,6 +284,12 @@
   margin: 0.2rem 0;
 }
 
+.folder-requirements__model {
+  border-top: 1px solid var(--ori-line);
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
 .folder-requirements__source summary {
   font-size: 0.75rem;
   min-height: 32px;
