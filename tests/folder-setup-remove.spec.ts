@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { openAttachMenu } from './helpers/assistant-menus';
 
 // A confirmed folder setup that stopped stays in Needs you until the user
 // removes it. These fixtures drive the real card with route mocks for the
@@ -135,13 +136,15 @@ test('fixture Remove asks once, Keep and Esc back out, and a removed setup stays
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   expect(state.abandons).toHaveLength(0);
 
-  // Confirm: one request with a fresh id, the card leaves, focus lands on Add folder.
+  // Confirm: one request with a fresh id, the card leaves, and focus goes where
+  // the user starts over: Add folder is in the composer's closed "+" menu, so
+  // the composer itself.
   await card.getByRole('button', { name: 'Remove', exact: true }).click();
   await card.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(card).toBeHidden();
   expect(state.abandons).toHaveLength(1);
   expect(String(state.abandons[0].request_id)).toMatch(/\S{8,}/);
-  await expect(page.locator('#personalAssistantFolderChip')).toBeFocused();
+  await expect(page.locator('#personalAssistantInput')).toBeFocused();
   await expect(page.locator('#homeAssistantConversation')).toContainText(
     'Album-4 setup removed. Show the folder again to start over.'
   );
@@ -150,6 +153,7 @@ test('fixture Remove asks once, Keep and Esc back out, and a removed setup stays
 
   // After a reload the server no longer returns it: the chooser, not a card.
   await page.reload();
+  await openAttachMenu(page);
   await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
   await expect(page.locator('#personalAssistantFolderOffer')).toBeHidden();
   if (process.env.ORI_VISUAL_EVIDENCE)

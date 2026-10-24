@@ -337,16 +337,26 @@ test('a failed hydration says what happens next and does not block sending (FR21
 test('backup-console navigation owns focus and Today consumes only its own query', () => {
   assert.deepEqual(assistantPanelOpenIntent('?panel=backup-recovery&tab=overview', false), {
     requestedOpen: false,
-    restoreAllowed: false
+    restoreAllowed: false,
+    revealToday: false
   });
+  // The way to what needs the user opens Today's strip as well.
   assert.deepEqual(assistantPanelOpenIntent('?panel=today', true), {
     requestedOpen: true,
-    restoreAllowed: true
+    restoreAllowed: true,
+    revealToday: true
+  });
+  // The way to the folder flow opens the drawer but leaves Today folded.
+  assert.deepEqual(assistantPanelOpenIntent('?panel=today&folder=show', true), {
+    requestedOpen: true,
+    restoreAllowed: true,
+    revealToday: false
   });
   for (const query of ['', '?panel=calendar', '?panel=file-janitor'])
     assert.deepEqual(assistantPanelOpenIntent(query, false), {
       requestedOpen: false,
-      restoreAllowed: true
+      restoreAllowed: true,
+      revealToday: false
     });
 });
 

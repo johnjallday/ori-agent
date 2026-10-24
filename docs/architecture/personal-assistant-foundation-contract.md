@@ -991,7 +991,11 @@ a brief row or a progress row, with a Show/Hide control. When a Today source
 cannot be read the line adds "· sources unavailable", so a folded strip is never
 an all-clear; with nothing to show there is no strip. The strip is folded every
 time the drawer opens, on desktop and on phones, so the conversation is what
-shows; Show and Hide hold until the drawer closes. Folding only hides them, so
+shows; Show and Hide hold until the drawer closes. A link to what needs the
+user, `/?panel=today` (the "N need you" line on other pages, the HQ card route,
+a locked mission), opens the drawer with the strip open; `&folder=show` opens
+the folder flow and leaves it folded. Opening a drawer that is already open
+changes nothing. Folding only hides them, so
 anything typed into a card is still there. It opens by itself once, only for
 an item this tab produced: a report of a hire made from this tab's
 conversation, a first look this tab started, or a folder card that left this

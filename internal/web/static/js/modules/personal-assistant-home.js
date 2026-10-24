@@ -1307,8 +1307,11 @@ function init() {
   // The strip folds every time the drawer opens, so the conversation is what
   // shows; Show and Hide hold until it closes. A reveal while it was closed
   // opens it again on this opening.
-  document.addEventListener('personal-assistant:opened', () => {
-    setStripExpanded(state.revealOnOpen);
+  document.addEventListener('personal-assistant:opened', event => {
+    if (event.detail?.reopened === true) return;
+    // A link to what needs the user (`/?panel=today`) asks for the strip.
+    const requested = window.PersonalAssistantPanel?.todayRequested?.() === true;
+    setStripExpanded(state.revealOnOpen || requested);
     if (state.revealOnOpen && state.align.item) {
       state.align.until = Date.now() + REVEAL_ALIGN_MS;
       realignReveal();
@@ -1333,6 +1336,8 @@ function init() {
     // Shows Needs you when the user asked for something under it.
     expand: () => reveal('request')
   };
+  // The drawer may have opened from `/?panel=today` before this module ran.
+  if (window.PersonalAssistantPanel?.todayRequested?.() === true) setStripExpanded(true);
   void keepTodaysBriefPrepared();
 }
 

@@ -289,10 +289,18 @@ test('the strip is one control in the Today frame, wired to the sections it fold
 
 test('the strip folds on every opening, and only this tab opens it by itself (FR13, FR14)', () => {
   const home = readFileSync(new URL('./personal-assistant-home.js', import.meta.url), 'utf8');
-  // Opening the drawer folds it, unless a reveal waited for that opening.
+  // Opening the drawer folds it, unless a reveal waited for that opening or the
+  // opening came from a link to what needs the user (`/?panel=today`). Opening
+  // a drawer that is already open changes nothing.
   assert.match(
     home,
-    /addEventListener\('personal-assistant:opened', \(\) => \{\s*setStripExpanded\(state\.revealOnOpen\);/
+    /addEventListener\('personal-assistant:opened', event => \{\s*if \(event\.detail\?\.reopened === true\) return;/
+  );
+  assert.match(home, /setStripExpanded\(state\.revealOnOpen \|\| requested\);/);
+  // Today may load after the drawer opened from the link: it asks then too.
+  assert.match(
+    home,
+    /if \(window\.PersonalAssistantPanel\?\.todayRequested\?\.\(\) === true\) setStripExpanded\(true\);/
   );
   // Show and Hide only flip it; nothing else closes it while the drawer is open.
   assert.match(home, /setStripExpanded\(!state\.stripExpanded\)/);

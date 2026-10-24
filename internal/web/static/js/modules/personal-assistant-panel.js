@@ -290,10 +290,16 @@ export const NEEDS_YOU_URL = '/?panel=today';
 // A console deep link owns its panel/focus. Restoring this drawer must neither
 // consume the other owner's query nor hide the requested backup console.
 export function assistantPanelOpenIntent(search, hasToday) {
-  const panel = new URLSearchParams(search).get('panel');
+  const params = new URLSearchParams(search);
+  const panel = params.get('panel');
+  const requestedOpen = Boolean(hasToday) && panel === 'today';
   return {
-    requestedOpen: Boolean(hasToday) && panel === 'today',
-    restoreAllowed: panel !== 'backup-recovery'
+    requestedOpen,
+    restoreAllowed: panel !== 'backup-recovery',
+    // `/?panel=today` is the way to what needs the user (the "N need you"
+    // line, the HQ card, a locked mission), so it opens Today's strip too.
+    // `&folder=show` is the way to the folder flow in the conversation.
+    revealToday: requestedOpen && !params.has('folder')
   };
 }
 
@@ -609,6 +615,8 @@ const state = {
   // The header's conversation menu and the composer's attach menu.
   conversationMenu: null,
   attachMenu: null,
+  // This opening came from `/?panel=today` (see todayRequested).
+  todayRequested: false,
   // The last "N need you" line read for this page, shown only with the hired
   // assistant selected.
   needsLine: { visible: false, text: '' },
@@ -1252,6 +1260,7 @@ function closeMoreMenu() {
 function close(options = {}) {
   if (!state.open || !state.els) return;
   state.open = false;
+  state.todayRequested = false;
   state.draft = state.els.input.value;
   saveTabValue(PANEL_OPEN_KEY, '');
   saveTabValue(PANEL_DRAFT_KEY, state.draft);
@@ -1295,6 +1304,8 @@ function open(trigger, options = {}) {
   renderIdentity();
   moveSharedWorkActivity();
   syncPanelViewport();
+  // A caller may open a drawer that is already open; that is not an opening.
+  const reopened = state.open;
   state.open = true;
   saveTabValue(PANEL_OPEN_KEY, '1');
   state.lastTrigger = trigger || document.activeElement;
@@ -1312,7 +1323,7 @@ function open(trigger, options = {}) {
   void refreshWorkspaceContext();
   void readTodayForThisPage();
   try {
-    document.dispatchEvent(new CustomEvent('personal-assistant:opened'));
+    document.dispatchEvent(new CustomEvent('personal-assistant:opened', { detail: { reopened } }));
   } catch (_) {
     // Listeners only tidy their own surface; none is required to open.
   }
@@ -1865,12 +1876,15 @@ function init() {
   // hired.
   const intent = assistantPanelOpenIntent(window.location.search, Boolean(state.els.todayBanner));
   void refresh().then(() => {
-    if (
-      !intent.restoreAllowed ||
-      !(intent.requestedOpen || tabValue(PANEL_OPEN_KEY) === '1') ||
-      !open(launcher)
-    )
+    if (!intent.restoreAllowed || !(intent.requestedOpen || tabValue(PANEL_OPEN_KEY) === '1'))
       return;
+    // The link asked for Today's strip, unlike an ordinary opening, which folds
+    // it. Home's Today may load after this, so it reads the request from here.
+    state.todayRequested = intent.revealToday;
+    if (!open(launcher)) {
+      state.todayRequested = false;
+      return;
+    }
     const url = new URL(window.location.href);
     if (intent.requestedOpen && url.searchParams.get('panel') === 'today') {
       url.searchParams.delete('panel');
@@ -1890,6 +1904,9 @@ const api = {
     return open(trigger, { workActivity: true, focus: options.focus === true });
   },
   isOpen: () => state.open,
+  // Whether this opening came from a link to what needs the user
+  // (`/?panel=today`), so Home's Today opens its strip.
+  todayRequested: () => state.open && state.todayRequested === true,
   hasLauncher: () => identity().launcherVisible,
   close,
   prefill,
