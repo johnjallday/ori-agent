@@ -18,6 +18,15 @@ import {
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
+  clampDrawerWidth,
+  DRAWER_EXPANDED_KEY,
+  DRAWER_WIDTH_KEY,
+  drawerLayoutView,
+  drawerWidthBounds,
+  drawerWidthForKey,
+  expandedDrawerWidth,
+  readDrawerPrefs,
+  writeDrawerPrefs,
   ENTRY_HYDRATION_FAILED,
   entryAgentSendRecipient,
   entrySessionStripView,
@@ -718,4 +727,158 @@ test('with a folder attached the placeholder says what an empty Send asks for', 
     placeholder: 'Finish personal assistant setup before sending work'
   };
   assert.equal(composerPlaceholder(blocked, 'Explore this folder'), blocked.placeholder);
+});
+
+function memoryStorage(seed = {}) {
+  const values = new Map(Object.entries(seed));
+  return {
+    values,
+    getItem: key => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value))
+  };
+}
+
+const throwingStorage = {
+  getItem() {
+    throw new Error('SecurityError');
+  },
+  setItem() {
+    throw new Error('QuotaExceededError');
+  }
+};
+
+test('the sheet width range leaves the page its left margin (FR3)', () => {
+  // min(180px, 20%) of the page and the 20px right gap stay outside the sheet.
+  assert.deepEqual(drawerWidthBounds(1280), { min: 560, max: 960 });
+  assert.deepEqual(drawerWidthBounds(1440), { min: 560, max: 960 });
+  assert.deepEqual(drawerWidthBounds(1920), { min: 560, max: 960 });
+  assert.deepEqual(drawerWidthBounds(900), { min: 560, max: 700 });
+  assert.deepEqual(drawerWidthBounds(800), { min: 560, max: 620 });
+  // A zoomed viewport narrower than the range: the bottom follows the top down.
+  assert.deepEqual(drawerWidthBounds(390), { min: 292, max: 292 });
+});
+
+test('a remembered width is clamped for the viewport, never dropped (FR3)', () => {
+  assert.equal(clampDrawerWidth(960, 1440), 960);
+  assert.equal(clampDrawerWidth(960, 900), 700);
+  assert.equal(clampDrawerWidth(400, 1440), 560);
+  assert.equal(clampDrawerWidth(700.6, 1440), 701);
+  assert.equal(clampDrawerWidth(Number.NaN, 1440), 640);
+  assert.equal(clampDrawerWidth(undefined, 1920), 640);
+});
+
+test('Expand takes the widest sheet the page allows (FR5)', () => {
+  assert.equal(expandedDrawerWidth(1280), 1080);
+  assert.equal(1280 - 20 - expandedDrawerWidth(1280), 180);
+  assert.equal(expandedDrawerWidth(1440), 1180);
+  assert.equal(expandedDrawerWidth(1920), 1180);
+  assert.ok(1440 - 20 - expandedDrawerWidth(1440) >= 180);
+});
+
+test('the saved width and Expand choice survive bad and missing storage (FR4)', () => {
+  assert.deepEqual(
+    readDrawerPrefs(memoryStorage({ [DRAWER_WIDTH_KEY]: '900', [DRAWER_EXPANDED_KEY]: '1' })),
+    { width: 900, expanded: true }
+  );
+  // Above every cap is still a valid saved width; it is clamped where applied.
+  assert.equal(readDrawerPrefs(memoryStorage({ [DRAWER_WIDTH_KEY]: '1400' })).width, 1400);
+  for (const bad of ['abc', '-5', '12.5', '0', '', ' ', '9e3', 'null'])
+    assert.equal(readDrawerPrefs(memoryStorage({ [DRAWER_WIDTH_KEY]: bad })).width, 640, bad);
+  assert.equal(readDrawerPrefs(memoryStorage({ [DRAWER_EXPANDED_KEY]: 'true' })).expanded, false);
+  assert.deepEqual(readDrawerPrefs(null), { width: 640, expanded: false });
+  assert.deepEqual(readDrawerPrefs(throwingStorage), { width: 640, expanded: false });
+
+  const store = memoryStorage();
+  assert.equal(writeDrawerPrefs(store, { width: 700.4, expanded: false }), true);
+  assert.equal(store.values.get(DRAWER_WIDTH_KEY), '700');
+  assert.equal(store.values.get(DRAWER_EXPANDED_KEY), '0');
+  // A drag end writes only the width; Expand writes only its choice.
+  writeDrawerPrefs(store, { expanded: true });
+  assert.equal(store.values.get(DRAWER_WIDTH_KEY), '700');
+  assert.equal(store.values.get(DRAWER_EXPANDED_KEY), '1');
+  assert.equal(writeDrawerPrefs(throwingStorage, { width: 700 }), false);
+  assert.equal(writeDrawerPrefs(null, { width: 700 }), false);
+});
+
+test('the handle keys step by 16, 64 with Shift, and jump with Home and End (FR2)', () => {
+  const at = { width: 640, min: 560, max: 960 };
+  // Left moves the left edge outwards: wider.
+  assert.equal(drawerWidthForKey('ArrowLeft', at), 656);
+  assert.equal(drawerWidthForKey('ArrowRight', at), 624);
+  assert.equal(drawerWidthForKey('ArrowLeft', { ...at, shift: true }), 704);
+  assert.equal(drawerWidthForKey('ArrowRight', { ...at, shift: true }), 576);
+  assert.equal(drawerWidthForKey('Home', at), 560);
+  assert.equal(drawerWidthForKey('End', at), 960);
+  assert.equal(drawerWidthForKey('ArrowLeft', { ...at, width: 950 }), 960);
+  assert.equal(drawerWidthForKey('ArrowRight', { ...at, width: 570, shift: true }), 560);
+  assert.equal(drawerWidthForKey('ArrowUp', at), null);
+  assert.equal(drawerWidthForKey('Enter', at), null);
+});
+
+test('the sheet layout: width, handle and Expand per state (FR5, FR6, FR9)', () => {
+  const prefs = { width: 900, expanded: false };
+  const plain = drawerLayoutView({ viewportWidth: 1440, prefs });
+  assert.equal(plain.sheet, true);
+  assert.equal(plain.width, 900);
+  assert.deepEqual(plain.bounds, { min: 560, max: 960 });
+  assert.equal(plain.handleVisible, true);
+  assert.equal(plain.handleInert, false);
+  assert.equal(plain.expandVisible, true);
+  assert.equal(plain.expanded, false);
+  assert.equal(plain.expandLabel, 'Expand');
+
+  const expanded = drawerLayoutView({ viewportWidth: 1280, prefs: { ...prefs, expanded: true } });
+  assert.equal(expanded.width, 1080);
+  assert.equal(expanded.handleWidth, 900);
+  assert.equal(expanded.handleInert, true);
+  assert.equal(expanded.expanded, true);
+  assert.equal(expanded.expandLabel, 'Shrink');
+
+  // Tree + Chat borrows the expanded width; the saved choice is untouched.
+  const exploring = drawerLayoutView({ viewportWidth: 1440, prefs, exploring: true });
+  assert.equal(exploring.width, 1180);
+  assert.equal(exploring.handleInert, true);
+  assert.equal(exploring.expandVisible, false);
+  assert.equal(exploring.expanded, false);
+  assert.deepEqual(prefs, { width: 900, expanded: false });
+
+  // A 900px saved width on a 900px viewport is fitted, not discarded.
+  assert.equal(drawerLayoutView({ viewportWidth: 900, prefs }).width, 700);
+
+  // The phone sheet, or a zoom that reaches phone width: no handle, no Expand.
+  for (const viewportWidth of [760, 390]) {
+    const phone = drawerLayoutView({ viewportWidth, prefs });
+    assert.equal(phone.sheet, false);
+    assert.equal(phone.handleVisible, false);
+    assert.equal(phone.expandVisible, false);
+  }
+});
+
+test('the drawer carries the resize handle and the Expand toggle (FR2, FR5)', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const handle = markup.match(/<div id="personalAssistantResize"[^>]*>/)?.[0] || '';
+  for (const attribute of [
+    'role="separator"',
+    'aria-orientation="vertical"',
+    'aria-label="Resize assistant"',
+    'aria-valuemin="560"',
+    'aria-valuemax="960"',
+    'aria-valuenow="640"',
+    'tabindex="0"'
+  ])
+    assert.ok(handle.includes(attribute), attribute);
+  assert.match(handle, /\bhidden\b/);
+  const expand = markup.match(/<button[^>]*id="personalAssistantExpand"[^>]*>/)?.[0] || '';
+  assert.match(expand, /aria-pressed="false"/);
+  assert.match(expand, /aria-label="Expand"/);
+  assert.match(expand, /\bhidden\b/);
+  // Expand sits in the header before More and Close.
+  const header =
+    markup.match(/<header class="personal-assistant-panel__header">[\s\S]*?<\/header>/)?.[0] || '';
+  assert.ok(header.indexOf('personalAssistantExpand') > 0);
+  assert.ok(header.indexOf('personalAssistantExpand') < header.indexOf('personalAssistantMore'));
+  assert.ok(header.indexOf('personalAssistantMore') < header.indexOf('personalAssistantClose'));
 });

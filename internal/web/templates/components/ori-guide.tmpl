@@ -96,6 +96,12 @@
   </button>
   <section id="personalAssistantPanel" class="personal-assistant-panel" role="dialog"
            aria-labelledby="personalAssistantPanelTitle" hidden>
+    <!-- The desktop sheet's left edge. Drag it, or use the arrow keys, to set
+         the width; the browser remembers it. Not shown on the phone sheet, and
+         inert while Expand is on. -->
+    <div id="personalAssistantResize" class="personal-assistant-panel__resize" role="separator"
+         aria-orientation="vertical" aria-label="Resize assistant" aria-controls="personalAssistantPanel"
+         aria-valuemin="560" aria-valuemax="960" aria-valuenow="640" tabindex="0" hidden></div>
     <header class="personal-assistant-panel__header">
       <!-- Who the drawer is talking to. Inside a workspace that is its entry
            agent or the hired assistant; then the name moves into a menu button
@@ -114,6 +120,11 @@
         <div id="personalAssistantRecipientMenu" class="personal-assistant-recipient-menu" role="menu"
              aria-label="Who to talk to" hidden></div>
       </div>
+      <!-- The widest sheet the page allows, and back. Desktop only. -->
+      <button type="button" id="personalAssistantExpand" class="personal-assistant-panel__icon"
+              aria-pressed="false" aria-label="Expand" title="Expand" hidden>
+        <i class="bi bi-arrows-angle-expand" aria-hidden="true"></i>
+      </button>
       <details id="personalAssistantMore" class="personal-assistant-panel__more">
         <summary class="personal-assistant-panel__icon" aria-label="More assistant options">
           <i class="bi bi-three-dots" aria-hidden="true"></i>

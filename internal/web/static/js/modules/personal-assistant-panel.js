@@ -324,6 +324,116 @@ export function assistantChipView({ available, folderBusy } = {}) {
   return { visible: available === true, disabled: folderBusy === true };
 }
 
+// The desktop sheet's width belongs to the user (FR2–FR5). It is kept in this
+// browser, not on the server, and every number here is in CSS pixels of the
+// zoom-corrected viewport that syncPanelViewport measures.
+export const DRAWER_WIDTH_KEY = 'ori.assistant.drawer.width';
+export const DRAWER_EXPANDED_KEY = 'ori.assistant.drawer.expanded';
+export const DRAWER_DEFAULT_WIDTH = 640;
+const DRAWER_MIN_WIDTH = 560;
+const DRAWER_MAX_WIDTH = 960;
+const DRAWER_EXPANDED_MAX_WIDTH = 1180;
+// At or below this viewport width the drawer is the phone bottom sheet.
+export const DRAWER_SHEET_BREAKPOINT = 760;
+
+/** How far right of the page edge the sheet may reach: the page keeps this. */
+function drawerRoom(viewportWidth) {
+  const width = Number(viewportWidth) || 0;
+  return Math.floor(width - Math.min(180, 0.2 * width) - 20);
+}
+
+/**
+ * The widths the handle can reach on this viewport. The page keeps at least
+ * min(180px, 20% of the viewport) on the left, so on a narrow desktop the top
+ * of the range can fall below 560; the bottom then follows it down.
+ */
+export function drawerWidthBounds(viewportWidth) {
+  const max = Math.max(0, Math.min(DRAWER_MAX_WIDTH, drawerRoom(viewportWidth)));
+  return { min: Math.min(DRAWER_MIN_WIDTH, max), max };
+}
+
+/** A remembered width fitted to this viewport. It is clamped, never dropped. */
+export function clampDrawerWidth(width, viewportWidth) {
+  const { min, max } = drawerWidthBounds(viewportWidth);
+  const value = Number.isFinite(width) ? Math.round(width) : DRAWER_DEFAULT_WIDTH;
+  return Math.min(max, Math.max(min, value));
+}
+
+/** Expand, and Tree + Chat: the widest sheet the page allows. */
+export function expandedDrawerWidth(viewportWidth) {
+  return Math.max(0, Math.min(DRAWER_EXPANDED_MAX_WIDTH, drawerRoom(viewportWidth)));
+}
+
+/**
+ * The saved width and Expand choice. Storage may be missing, may throw, or may
+ * hold something else under the key; each of those reads as the default.
+ */
+export function readDrawerPrefs(storage) {
+  const prefs = { width: DRAWER_DEFAULT_WIDTH, expanded: false };
+  try {
+    const width = String(storage?.getItem?.(DRAWER_WIDTH_KEY) ?? '').trim();
+    if (/^\d{1,5}$/.test(width) && Number(width) > 0) prefs.width = Number(width);
+    prefs.expanded = storage?.getItem?.(DRAWER_EXPANDED_KEY) === '1';
+  } catch (_) {
+    /* Storage may be disabled. */
+  }
+  return prefs;
+}
+
+/** Saves the width as a whole number and Expand as "1" or "0". */
+export function writeDrawerPrefs(storage, prefs = {}) {
+  try {
+    if (Number.isFinite(prefs.width) && prefs.width > 0)
+      storage.setItem(DRAWER_WIDTH_KEY, String(Math.round(prefs.width)));
+    if (typeof prefs.expanded === 'boolean')
+      storage.setItem(DRAWER_EXPANDED_KEY, prefs.expanded ? '1' : '0');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * The handle's next width for a key, or null when the key is not one it uses.
+ * The handle sits on the sheet's left edge, so Left moves it outwards and
+ * widens the sheet.
+ */
+export function drawerWidthForKey(key, { width, min, max, shift = false }) {
+  const step = shift ? 64 : 16;
+  const next = {
+    ArrowLeft: width + step,
+    ArrowRight: width - step,
+    Home: min,
+    End: max
+  }[key];
+  return next === undefined ? null : Math.min(max, Math.max(min, next));
+}
+
+/**
+ * What the sheet looks like now. `exploring` is Tree + Chat, which takes the
+ * expanded width while it is open without changing the saved choice (FR6);
+ * Expand steps aside meanwhile, since there is nothing for it to change.
+ * Off the desktop sheet there is no handle and no Expand (FR9).
+ */
+export function drawerLayoutView({ viewportWidth, prefs, exploring = false }) {
+  const sheet = Number(viewportWidth) > DRAWER_SHEET_BREAKPOINT;
+  const expanded = prefs?.expanded === true;
+  const wide = expanded || exploring === true;
+  const handleWidth = clampDrawerWidth(prefs?.width, viewportWidth);
+  return {
+    sheet,
+    bounds: drawerWidthBounds(viewportWidth),
+    width: wide ? expandedDrawerWidth(viewportWidth) : handleWidth,
+    // The handle's own value: the remembered width, fitted to this viewport.
+    handleWidth,
+    handleVisible: sheet,
+    handleInert: wide,
+    expandVisible: sheet && exploring !== true,
+    expanded,
+    expandLabel: expanded ? 'Shrink' : 'Expand'
+  };
+}
+
 const state = {
   view: personalAssistantPanelView(null),
   personalAssistant: null,
@@ -344,11 +454,113 @@ const state = {
   // The last "N need you" line read for this page, shown only with the hired
   // assistant selected.
   needsLine: { visible: false, text: '' },
+  // The desktop sheet: the saved width and Expand choice, the layout last
+  // applied, and the drag in progress, if any.
+  drawer: { width: DRAWER_DEFAULT_WIDTH, expanded: false },
+  drawerLayout: null,
+  drag: null,
+  viewport: { width: 0, scale: 1 },
   els: null
 };
 
 function setStatus(message) {
   if (state.els?.status) state.els.status.textContent = String(message || '');
+}
+
+function browserStorage() {
+  try {
+    return window.localStorage;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Applies the sheet width, the handle's range and the Expand toggle's state. */
+function applyDrawerLayout() {
+  const { panel, resize, expand } = state.els || {};
+  if (!panel) return;
+  const view = drawerLayoutView({
+    viewportWidth: state.viewport.width,
+    prefs: state.drawer,
+    exploring: panel.classList.contains('personal-assistant-panel--exploring')
+  });
+  state.drawerLayout = view;
+  const width = `${view.width}px`;
+  if (panel.style.getPropertyValue('--pa-drawer-width') !== width)
+    panel.style.setProperty('--pa-drawer-width', width);
+  if (resize) {
+    resize.hidden = !view.handleVisible;
+    resize.inert = view.handleInert;
+    resize.setAttribute('aria-valuemin', String(view.bounds.min));
+    resize.setAttribute('aria-valuemax', String(view.bounds.max));
+    resize.setAttribute('aria-valuenow', String(view.handleWidth));
+  }
+  if (expand) {
+    expand.hidden = !view.expandVisible;
+    expand.setAttribute('aria-pressed', String(view.expanded));
+    expand.setAttribute('aria-label', view.expandLabel);
+    expand.title = view.expandLabel;
+    const icon = expand.querySelector('i');
+    if (icon)
+      icon.className = view.expanded ? 'bi bi-arrows-angle-contract' : 'bi bi-arrows-angle-expand';
+  }
+}
+
+function startDrawerResize(event) {
+  const view = state.drawerLayout;
+  if (event.button !== 0 || !view?.sheet || view.handleInert) return;
+  event.preventDefault();
+  state.drag = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    width: view.handleWidth,
+    scale: state.viewport.scale
+  };
+  state.els.resize.setPointerCapture?.(event.pointerId);
+  document.documentElement.classList.add('personal-assistant-resizing');
+}
+
+function moveDrawerResize(event) {
+  const drag = state.drag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  // The handle is the left edge: moving it left widens the sheet.
+  state.drawer.width = clampDrawerWidth(
+    drag.width + (drag.x - event.clientX) / drag.scale,
+    state.viewport.width
+  );
+  applyDrawerLayout();
+}
+
+function endDrawerResize(event) {
+  const drag = state.drag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  state.drag = null;
+  if (state.els.resize.hasPointerCapture?.(event.pointerId))
+    state.els.resize.releasePointerCapture(event.pointerId);
+  document.documentElement.classList.remove('personal-assistant-resizing');
+  writeDrawerPrefs(browserStorage(), { width: state.drawer.width });
+}
+
+function keyDrawerResize(event) {
+  const view = state.drawerLayout;
+  if (!view?.sheet || view.handleInert) return;
+  const next = drawerWidthForKey(event.key, {
+    width: view.handleWidth,
+    ...view.bounds,
+    shift: event.shiftKey
+  });
+  if (next === null) return;
+  event.preventDefault();
+  state.drawer.width = next;
+  applyDrawerLayout();
+  writeDrawerPrefs(browserStorage(), { width: next });
+}
+
+function toggleDrawerExpanded() {
+  if (!state.drawerLayout?.expandVisible) return;
+  state.drawer.expanded = !state.drawer.expanded;
+  writeDrawerPrefs(browserStorage(), { expanded: state.drawer.expanded });
+  applyDrawerLayout();
 }
 
 function syncPanelViewport() {
@@ -357,8 +569,10 @@ function syncPanelViewport() {
   const scale = panel?.offsetWidth
     ? Math.max(1, Math.round((panel.getBoundingClientRect().width / panel.offsetWidth) * 100) / 100)
     : 1;
+  state.viewport = { width: window.innerWidth / scale, scale };
   state.els.root.style.setProperty('--pa-viewport-width', `${window.innerWidth / scale}px`);
   state.els.root.style.setProperty('--pa-viewport-height', `${window.innerHeight / scale}px`);
+  applyDrawerLayout();
   panel?.classList.toggle(
     'personal-assistant-panel--explorer-narrow',
     window.innerWidth / scale <= 760
@@ -1266,6 +1480,8 @@ function init() {
     checkIn: document.getElementById('personalAssistantCheckIn'),
     more: document.getElementById('personalAssistantMore'),
     close: document.getElementById('personalAssistantClose'),
+    resize: document.getElementById('personalAssistantResize'),
+    expand: document.getElementById('personalAssistantExpand'),
     form: document.getElementById('personalAssistantForm'),
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
@@ -1292,6 +1508,15 @@ function init() {
   };
   launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
   state.els.close?.addEventListener('click', close);
+  state.drawer = readDrawerPrefs(browserStorage());
+  const resize = state.els.resize;
+  resize?.addEventListener('pointerdown', startDrawerResize);
+  resize?.addEventListener('pointermove', moveDrawerResize);
+  resize?.addEventListener('pointerup', endDrawerResize);
+  resize?.addEventListener('pointercancel', endDrawerResize);
+  resize?.addEventListener('lostpointercapture', endDrawerResize);
+  resize?.addEventListener('keydown', keyDrawerResize);
+  state.els.expand?.addEventListener('click', toggleDrawerExpanded);
   state.els.form?.addEventListener('submit', submit);
   // A legacy work handoff is an explicit recovery offer, not a Help search.
   try {

@@ -683,11 +683,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.locator('#personalAssistantHQHeadline')).toContainText('Atlas is hired');
     await expect(page.getByRole('link', { name: 'Build Personal HQ' })).toHaveCount(0);
     // The composer is there but closed until HQ exists, so focus went to the
-    // first control in the drawer instead.
+    // first control in the drawer instead: on the desktop sheet, Expand.
     await expect(page.locator('#personalAssistantInput')).toBeVisible();
     await expect(page.locator('#personalAssistantInput')).toBeDisabled();
     await expect(page.locator('#personalAssistantSend')).toBeDisabled();
-    await expect(page.locator('#personalAssistantMore > summary')).toBeFocused();
+    await expect(page.locator('#personalAssistantExpand')).toBeFocused();
     // The HQ confirmation is what needs the user, and the heading's number is
     // what is listed: that card, plus whatever "Also needs you" holds.
     await expect(page.locator('#personalAssistantNeedsYou')).toBeVisible();

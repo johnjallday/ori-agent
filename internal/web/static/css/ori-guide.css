@@ -629,6 +629,7 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 .personal-assistant-panel {
+  position: relative;
   display: flex;
   width: min(640px, calc(var(--pa-viewport-width, 100vw) - 48px));
   height: min(
@@ -1013,7 +1014,11 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   white-space: nowrap;
 }
 
-/* The header's two icon buttons: More and Close. */
+/* The header's icon buttons: Expand (desktop sheet only), More and Close. */
+.personal-assistant-panel__icon[hidden] {
+  display: none;
+}
+
 .personal-assistant-panel__icon {
   display: grid;
   width: 44px;
@@ -2837,6 +2842,99 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-panel--exploring.personal-assistant-panel--explorer-narrow[data-explorer-tab="chat"]
   .personal-assistant-explorer__pane {
   display: none;
+}
+
+/* ---- desktop sheet -------------------------------------------------------------- */
+
+/* Above the phone breakpoint the drawer is a sheet on the right whose width the
+   user sets with the handle. The panel module writes --pa-drawer-width from the
+   saved width, Expand or Tree + Chat; the cap here keeps min(180px, 20%) of the
+   page visible on the left while a resize is still being measured. A zoom that
+   brings the corrected viewport to phone width marks the panel explorer-narrow,
+   and it keeps the floating card. These rules come after the exploring and
+   inline-toolbar rules so they win over their size and position. */
+@media (min-width: 761px) {
+  .personal-assistant-panel:not(.personal-assistant-panel--explorer-narrow) {
+    width: min(
+      var(--pa-drawer-width, 640px),
+      calc(
+        var(--pa-viewport-width, 100vw) - min(180px, var(--pa-viewport-width, 100vw) * 0.2) - 20px
+      )
+    );
+  }
+}
+
+/* Full height: clear the navbar, stop 12px above the floor. Viewports 520px
+   tall or shorter keep the taller floating card (see max-height: 520px). */
+@media (min-width: 761px) and (min-height: 521px) {
+  .personal-assistant-panel:not(.personal-assistant-panel--explorer-narrow) {
+    position: fixed;
+    top: calc(var(--ori-navbar-bottom, 60px) + 12px);
+    right: 20px;
+    bottom: 12px;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+}
+
+/* The handle: an 8px strip along the sheet's left edge with a 44px grip
+   centred on it, faint until it is hovered, focused or dragged. */
+.personal-assistant-panel__resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 12;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.personal-assistant-panel__resize[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__resize::before {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ori-ink) 45%, var(--ori-paper-deep));
+  content: "";
+  opacity: 0.3;
+  transform: translateY(-50%);
+  transition: opacity 0.15s ease;
+}
+
+.personal-assistant-panel__resize:hover::before,
+.personal-assistant-panel__resize:focus-visible::before,
+.personal-assistant-resizing .personal-assistant-panel__resize::before {
+  opacity: 1;
+}
+
+/* Inside the panel's rounded clip, so the ring is not cut off. */
+.personal-assistant-panel__resize:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: -3px;
+}
+
+/* Expand is on: the width is not the handle's to change. */
+.personal-assistant-panel__resize[inert] {
+  cursor: default;
+}
+
+.personal-assistant-panel__resize[inert]::before {
+  opacity: 0;
+}
+
+/* While dragging, the pointer may cross the page: no text selection there. */
+html.personal-assistant-resizing {
+  cursor: ew-resize;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @media (max-width: 760px) {
