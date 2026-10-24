@@ -342,6 +342,82 @@ test('requirement identity, purpose and source are literal inert text with stabl
   assert.equal(container.hidden, true);
 });
 
+// An inbox folder's plan: File Janitor is built in and its first batch calls
+// no model, so nothing is downloaded and nothing waits on a model.
+const inboxPlan = {
+  visual: {
+    entity: { kind: 'workspace', name: 'Downloads', operation: 'create' },
+    placement: 'standalone',
+    requirements_checked: true,
+    builtin: 'File Janitor',
+    model: { state: 'not_needed' }
+  },
+  hire: { mode: 'create', agent_name: 'File Curator', role_label: 'specialist', model: '' },
+  lines: [
+    { kind: 'agents', name: 'Hire File Curator' },
+    { kind: 'workspace', name: 'A File Janitor workspace named Downloads' },
+    {
+      kind: 'folder',
+      name: 'Linked where it is',
+      detail: 'Ori lists the files directly inside it.'
+    },
+    {
+      kind: 'task',
+      name: 'A first look: a metadata-only scan that proposes the first filing batch'
+    }
+  ]
+};
+
+test('a built-in recipe says why nothing is downloaded and that no model is needed', () => {
+  const view = requirementsView({ plan: inboxPlan });
+  assert.equal(view.summary, 'Nothing to download: File Janitor is built into Ori');
+  assert.equal(view.rows.length, 0);
+  assert.equal(view.model.state, 'not_needed');
+  assert.equal(view.model.status, 'Not needed for the first batch');
+  assert.equal(view.model.settings, '', 'no configuration route for a model nothing needs');
+  const container = documentFixture().createElement('div');
+  renderRequirements(container, { plan: inboxPlan });
+  assert.equal(container.hidden, false);
+  const texts = nodes(container).map(node => node.textContent);
+  assert.ok(texts.includes('Nothing to download: File Janitor is built into Ori'));
+  assert.ok(texts.includes('Model'));
+  assert.ok(!texts.some(text => /Ori plugins are separate/.test(text)));
+  // A built-in name never stands beside a plugin to download or unchecked rows.
+  assert.equal(
+    requirementsView({
+      plan: { visual: { ...inboxPlan.visual, requirements_checked: false } }
+    }).summary,
+    'Download requirements not fully checked'
+  );
+});
+
+test('an inbox hire is a File Janitor workspace with no parent and no model to wait on', () => {
+  const view = visualView({ offer: { subject: { name: 'Downloads' }, plan: inboxPlan } });
+  assert.equal(view.entity.label, 'File Janitor workspace');
+  assert.equal(view.entity.status, 'Proposed · new');
+  assert.equal(view.parent, 'Separate workspace · no parent Home');
+  assert.equal(view.agent.status, 'Proposed new agent');
+  assert.equal(view.agent.name, 'File Curator');
+  const container = documentFixture().createElement('div');
+  renderDiagram(
+    container,
+    { offer: { subject: { name: 'Downloads' }, plan: inboxPlan } },
+    { artwork: null }
+  );
+  const texts = nodes(container).map(node => node.textContent);
+  assert.ok(texts.includes('File Janitor workspace'));
+  assert.ok(texts.includes('specialist · No model needed for the first batch'));
+  // Before you start never claims model tokens for a scan that calls no model.
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences(inboxPlan);
+  assert.ok(!effects.some(effect => /model tokens/.test(effect)));
+  assert.ok(effects.some(effect => /Linked where it is/.test(effect)));
+  // A plain workspace keeps its plain kind.
+  assert.equal(
+    visualView({ offer: { subject: { name: 'Source' }, plan } }).entity.label,
+    'Workspace'
+  );
+});
+
 test('all external strings are text nodes with a semantic diagram alternative and no controls', () => {
   const doc = documentFixture();
   const container = doc.createElement('div');

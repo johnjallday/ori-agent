@@ -272,7 +272,15 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 	}
 	// Only the root option can describe a collection. Review still requires
 	// the user to choose it explicitly, with the same canonical Home checks.
-	verdict := folderdigest.Exclude(held.result, now, func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) })
+	tombstoned := func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) }
+	verdict := folderdigest.Exclude(held.result, now, tombstoned)
+	// The root of an inbox folder is reviewed as the host's File Janitor setup.
+	// A build keeps its own reviewed janitor consent, and a supporting link is
+	// not a setup.
+	if candidate.IsRoot && !collection && placement.Operation != FolderOperationSupport && !IsBuildReview(target) &&
+		folderdigest.IsInbox(held.result, now, tombstoned) {
+		offer.Subject.Shape = string(folderdigest.ShapeInbox)
+	}
 	if candidate.IsRoot && verdict.Portfolio != nil && d.deps.HomeExists != nil {
 		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
 		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" {
@@ -414,6 +422,8 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 		option.Presentation = unavailableReviewPresentation(option.Presentation, reason, folderAvailabilitySubject(offer, reason))
 	}
 	row, software := softwareCapability(offer.Subject)
+	inbox, isInbox := folderdigest.InboxCapability()
+	isInbox = isInbox && isInboxOffer(offer)
 	switch {
 	case offer.Structure.ProposesWorkspaces():
 		// A structure never waits on a plugin, only on a host that can set
@@ -431,6 +441,12 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 		option.WorkspaceType = row.Builtin.Workspace
 		if s.digest.deps.InspectSoftware == nil || s.digest.deps.Setup == nil {
 			unavailable(FolderAvailabilityPlanUnavailable)
+		}
+	case isInbox:
+		// An inbox folder's File Janitor setup is reviewed on its hire card.
+		option.WorkspaceType = inbox.Builtin.Workspace
+		if view.Plan == nil {
+			unavailable(view.Availability)
 		}
 	case view.Capability != nil:
 		option.WorkspaceType = view.Capability.Workspace
@@ -468,7 +484,7 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 	if err != nil || recognition == nil || recognition.Verdict != BuildFolderProject || recognition.CandidateID == "" {
 		return FolderHireCandidate{}
 	}
-	if recognition.IntegrationKey == "" && recognition.Shape != string(folderdigest.ShapeCode) {
+	if recognition.IntegrationKey == "" && recognition.Shape != string(folderdigest.ShapeCode) && recognition.Shape != string(folderdigest.ShapeInbox) {
 		return FolderHireCandidate{}
 	}
 	held, _, err := s.resolve(ctx, target, observationID)

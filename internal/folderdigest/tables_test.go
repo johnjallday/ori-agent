@@ -68,7 +68,13 @@ func TestCapabilityTableIntegrity(t *testing.T) {
 			if _, err := projecttemplates.FindLibraryTemplate(library, row.Blueprint.BlueprintID); err != nil {
 				t.Errorf("%q: built-in setup has no built-in blueprint: %v", row.Shape, err)
 			}
-			if len(row.Markers) == 0 {
+			// The inbox row is the one built-in chosen by verdict (IsInbox): it
+			// must have neither a marker nor a tool, so no file name selects it.
+			if b.Recipe == folderdigest.BuiltinInboxFolder {
+				if len(row.Markers) != 0 || len(row.Tools) != 0 || row.Shape != folderdigest.ShapeInbox {
+					t.Errorf("%q: the inbox setup is keyed by verdict, never by a marker or tool", row.Shape)
+				}
+			} else if len(row.Markers) == 0 {
 				t.Errorf("%q: built-in setup has no marker to recognize", row.Shape)
 			}
 		}

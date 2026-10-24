@@ -107,13 +107,27 @@ func TestFolderRecognition_EverythingElseSaysWhatItIs(t *testing.T) {
 	f, service, target := observationFixture(t)
 	ctx := context.Background()
 
-	// Desktop holds two loose files: nothing Ori knows the kind of.
+	// Desktop holds two loose files: no project of a kind Ori knows, so it is
+	// an inbox folder, set up as a File Janitor workspace by the host's own row.
 	desktop, err := service.Observe(ctx, target, "chip", "desktop")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := service.Recognize(ctx, target, desktop.ID); err != nil || *got != (BuildFolderRecognition{Verdict: BuildFolderUnrecognized}) {
+	inbox := BuildFolderRecognition{
+		Verdict: BuildFolderProject, Shape: "inbox", ProjectCount: 1, CandidateID: "candidate-0",
+		Label: "inbox folder", BlueprintID: "file-janitor", BlueprintLabel: "File Janitor",
+	}
+	if got, err := service.Recognize(ctx, target, desktop.ID); err != nil || *got != inbox {
 		t.Fatalf("loose files = %+v %v", got, err)
+	}
+
+	// A folder with a marker of a kind Ori knows but no blueprint for is that
+	// kind, never an inbox.
+	vault := filepath.Join(f.home, "Notes", "Vault")
+	writeFolderFiles(t, vault, ".obsidian/app.json", "Inbox.md")
+	notes := observeSelected(t, f, service, target, vault)
+	if got, err := service.Recognize(ctx, target, notes.ID); err != nil || got.Verdict != BuildFolderProject || got.Shape != "notes" || got.Label != "Obsidian vault" {
+		t.Fatalf("notes vault = %+v %v", got, err)
 	}
 
 	// Several songs side by side are a collection, which a build never makes

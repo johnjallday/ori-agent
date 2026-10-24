@@ -20,7 +20,16 @@ type FolderSetupVisual struct {
 	// RequirementsChecked is true only for a complete, checked plugin set.
 	// Legacy/partial rows cannot imply zero downloads.
 	RequirementsChecked bool `json:"requirements_checked,omitempty"`
+	// Builtin names the capability a host recipe uses that ships with Ori, so
+	// the requirements say why nothing is downloaded ("File Janitor"). Only a
+	// checked set with no plugin rows carries it.
+	Builtin string `json:"builtin,omitempty"`
 }
+
+// FolderSetupModelNotNeeded is a plan whose setup and first look call no model
+// at all (an inbox folder's first batch is a metadata-only scan). It is never
+// a gate and never "missing": nothing waits for a model to be chosen.
+const FolderSetupModelNotNeeded = "not_needed"
 
 // FolderSetupReadinessReader is an optional observational display seam for
 // explicit review. It supplies no executable plan or authorization.
@@ -32,7 +41,7 @@ type FolderSetupReadinessReader interface {
 // check or a provider credential. An unreadable blueprint is not_checked.
 // Settings names a compiled configuration owner, never a supplied URL.
 type FolderSetupModel struct {
-	State     string `json:"state"` // configured, missing, not_checked
+	State     string `json:"state"` // configured, missing, not_checked, not_needed
 	Provider  string `json:"provider,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Settings  string `json:"settings,omitempty"` // system, agent
@@ -111,6 +120,9 @@ func CloneFolderSetupVisual(value *FolderSetupVisual) *FolderSetupVisual {
 		model := *value.Model
 		switch model.State {
 		case "configured", "missing", "not_checked":
+		case FolderSetupModelNotNeeded:
+			// Nothing about a model is claimed: no provider, name or owner.
+			model = FolderSetupModel{State: FolderSetupModelNotNeeded}
 		default:
 			model.State = "not_checked"
 		}
@@ -130,6 +142,11 @@ func CloneFolderSetupVisual(value *FolderSetupVisual) *FolderSetupVisual {
 			}
 		}
 		out.Model = &model
+	}
+	// A built-in is said only where it is the whole answer: a checked set with
+	// no plugin to download.
+	if out.RequirementsChecked && len(out.Plugins) == 0 && visualText(value.Builtin, 80) {
+		out.Builtin = value.Builtin
 	}
 	if out.Entity == nil && len(out.Plugins) == 0 && out.Placement == "" && !out.RequirementsChecked && out.Model == nil {
 		return nil

@@ -29,17 +29,25 @@ type FolderFirstLookStarter interface {
 // FolderFirstLookRecord is what a hire did about the first look once the
 // workspace was verified: started it, or why it did not. It is kept on the
 // outcome so the card can tell the look the hire started from one the user
-// starts later, and so a replayed settle never starts it twice.
+// starts later, and so a replayed settle never starts it twice. An inbox
+// hire's first look is its first batch instead: no task is started.
 type FolderFirstLookRecord struct {
-	Started bool      `json:"started"`
-	Reason  string    `json:"reason,omitempty"`
-	TaskID  string    `json:"task_id,omitempty"`
-	At      time.Time `json:"at"`
+	Started bool              `json:"started"`
+	Reason  string            `json:"reason,omitempty"`
+	TaskID  string            `json:"task_id,omitempty"`
+	Batch   *FolderFirstBatch `json:"batch,omitempty"`
+	At      time.Time         `json:"at"`
 }
 
 func (r *FolderFirstLookRecord) validate() error {
 	if r == nil {
 		return nil
+	}
+	if err := r.Batch.validate(); err != nil {
+		return err
+	}
+	if r.Batch != nil && (r.Started || r.TaskID != "") {
+		return fmt.Errorf("%w: first look record", errFolderDigestInvalid)
 	}
 	for _, text := range []string{r.Reason, r.TaskID} {
 		if len(text) > 200 || strings.ContainsAny(text, "/\\\x00\r\n") {
@@ -65,6 +73,11 @@ func (s *FolderDigestService) startHiredLook(ctx context.Context, userID, offerI
 	offer := doc.Offer(offerID)
 	if offer == nil || offer.Status != FolderOfferResolved || offer.Outcome == nil || strings.TrimSpace(offer.Outcome.WorkspaceID) == "" ||
 		offer.Outcome.FirstLook != nil || offer.Setup == nil || offer.Setup.Hire == nil {
+		return
+	}
+	// An inbox hire's first look is the batch its setup prepared; no model
+	// task is ever started for it.
+	if offer.Setup.Intent.Inbox != nil || isInboxOffer(*offer) {
 		return
 	}
 	workspaceID := offer.Outcome.WorkspaceID

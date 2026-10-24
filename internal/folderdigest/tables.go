@@ -180,6 +180,19 @@ var capabilityRows = []CapabilityRow{
 		},
 	},
 	{
+		// The fallback below every recognized project and collection (IsInbox).
+		// It has no markers and no tools on purpose: no file name makes a folder
+		// an inbox, and nothing is installed for it.
+		Shape:     ShapeInbox,
+		Blueprint: ShapeBlueprint{Shape: ShapeInbox, BlueprintID: "file-janitor", Label: "File Janitor"},
+		Builtin: &BuiltinCapability{
+			Recipe: BuiltinInboxFolder, Version: 1,
+			DisplayName: "inbox folder", Workspace: "File Janitor workspace",
+			Question:    "Want File Curator to keep this folder tidy?",
+			AcceptLabel: "Review setup", DeclineLabel: "No thanks",
+		},
+	},
+	{
 		Tools: []Tool{
 			{Match: ToolByExtension, Value: ".fig", AppNames: []string{"Figma"}, ToolID: "figma", ToolName: "Figma", HypothesisText: "Figma may be one of the tools you use for visual planning."},
 			{Match: ToolByExtension, Value: ".psd", ToolID: "photoshop", ToolName: "Photoshop", HypothesisText: "Photoshop may be one of the tools you use."},

@@ -59,6 +59,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		},
 		InspectSoftware: inspectSoftwareProject,
 		SoftwareProject: setupHost.softwareProject,
+		InboxProject:    setupHost.inboxProject,
 		StructureGroup: func(_ context.Context, userID string, offer personalassistant.FolderOffer, root, groupID string) (personalassistant.FolderCreateResult, error) {
 			return structureGroupReceipt(b, userID, offer, root, groupID)
 		},

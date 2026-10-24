@@ -14,6 +14,7 @@ func TestFolderConversationDestination_PinnedReadAndExplicitRefresh(t *testing.T
 	f.service.deps.Setup = setup
 	f.service.deps.Creator = &fakeFolderCreator{}
 	service.ConfigureConversationReviews(func(context.Context, FolderOffer) error { return nil }, func(foldercontext.Target) (func(), bool) { return func() {}, true })
+	markNotInbox(t, f, "Desktop")
 	observed, err := service.Observe(context.Background(), source, "chip", "desktop")
 	if err != nil {
 		t.Fatal(err)

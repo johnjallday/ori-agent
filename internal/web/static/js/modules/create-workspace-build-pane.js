@@ -175,7 +175,14 @@
       return 'Folder metadata attached. Choose the purpose that fits.';
     const shared = globalThis.OriFolderRecognitionLines;
     if (!shared) return '';
-    return shared.recognitionLine(recognition, { collectionHint: COPY.folderCollectionHint });
+    const line = shared.recognitionLine(recognition, { collectionHint: COPY.folderCollectionHint });
+    // An inbox folder is no project of its own: the line names the blueprint
+    // Ori suggests for it, so the build starts from File Janitor without a model
+    // having to say so. The build keeps its own reviewed File Janitor consent.
+    const suggested = String(recognition?.blueprint_label || '').trim();
+    return line && recognition?.shape === 'inbox' && suggested
+      ? `${line} · ${suggested} suggested`
+      : line;
   }
 
   // A reason code ("desktop_off") is for code, never for the user; a note

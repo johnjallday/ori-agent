@@ -203,6 +203,9 @@ type FolderCreateResult struct {
 	// (a retried click) and was reused.
 	Created bool
 	Receipt []FolderReceiptRow
+	// FirstBatch is an inbox setup's first metadata-only batch, as File Janitor
+	// recorded it. Nil for every other setup.
+	FirstBatch *FolderFirstBatch
 }
 
 // FolderWorkspaceCreator is the host seam that creates the workspace for a
@@ -331,6 +334,11 @@ type FolderDigestDeps struct {
 	// how a run's "done" is checked before the offer says so. Nil leaves a
 	// finished run unverified, and an unverified run never resolves an offer.
 	SoftwareProject func(ctx context.Context, userID string, offer FolderOffer, folderPath, identity string) (FolderCreateResult, error)
+	// InboxProject re-reads, from canonical state, the File Janitor workspace a
+	// finished inbox setup made for this exact directory: its folder grant and
+	// its first batch. Nil leaves a finished run unverified, and an unverified
+	// run never resolves an offer.
+	InboxProject func(ctx context.Context, userID string, offer FolderOffer, folderPath, identity string) (FolderCreateResult, error)
 	// StructureGroup re-reads, from canonical state, the group a finished
 	// structure setup made (or joined) and the workspaces it created for the
 	// offer's members, each still linked to its own folder under root. It is how
@@ -1418,8 +1426,10 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				}
 				// A software project is set up through its reviewed plan (Review
 				// setup, then Set up), never by a bare yes or the generic creator:
-				// the plan is what ties the workspace to this exact folder.
-				if isSoftwareOffer(*offer) {
+				// the plan is what ties the workspace to this exact folder. An
+				// inbox folder likewise: its File Janitor grant is consented to on
+				// the plan's own lines.
+				if isSoftwareOffer(*offer) || isInboxOffer(*offer) {
 					return FolderOfferView{}, ErrFolderReviewRequired
 				}
 			}
@@ -2534,6 +2544,11 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintForOffer(offer)
 		v.CreateAvailable = s.deps.Creator != nil
 	}
+	// An inbox folder is set up only through its reviewed File Janitor plan: a
+	// plain create would link the folder without the grant's own consent.
+	if isInboxOffer(offer) {
+		v.CreateAvailable = false
+	}
 	if offer.Portfolio != nil && !offer.CapabilitySuppressed {
 		if row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape)); ok && row.Offer != nil {
 			v.CreateAvailable = false
@@ -2636,7 +2651,7 @@ func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer 
 // project: not while paused (FR52), and not when the fact text would be
 // refused by the memory validator (FR39).
 func folderOfferRemembers(offer FolderOffer, paused bool) bool {
-	if paused || offer.Portfolio != nil || (offer.ConversationReview != nil && offer.ConversationReview.Operation == FolderOperationSupport) {
+	if paused || offer.Portfolio != nil || (offer.ConversationReview != nil && offer.ConversationReview.Operation == FolderOperationSupport) || isInboxOffer(offer) {
 		return false
 	}
 	switch folderdigest.Kind(offer.Verdict) {

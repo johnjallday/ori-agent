@@ -60,6 +60,11 @@ type ReviewedTemplateCreationRequest struct {
 	Name       string
 	Plan       ReviewedTemplateCreationPlan
 	Descriptor AssistantSetupCreationDescriptor
+	// Mission, when set, is the goal the user gave the hire. It is created as
+	// the workspace goal through the same goal-at-create path as the Create
+	// Workspace modal, in place of the blueprint's own. Empty keeps the
+	// blueprint's goal.
+	Mission string
 }
 
 type ReviewedTemplateCreationResult struct {
@@ -218,11 +223,15 @@ func (h *Handler) CreateReviewedFileJanitor(ctx context.Context, request Reviewe
 	if err != nil {
 		return ReviewedTemplateCreationResult{}, err
 	}
-	body, err := json.Marshal(createWorkspaceRequest{
+	create := createWorkspaceRequest{
 		Name: request.Name, TemplateID: fresh.BlueprintID, TeamIntent: intent,
 		teamIntentPresent: true, roleStaffingPresent: true,
 		RoleStaffing: []roleStaffingInput{{RoleID: role.RoleID, Mode: mode, Name: role.Name}},
-	})
+	}
+	if mission := strings.TrimSpace(request.Mission); mission != "" {
+		create.Mission = &mission
+	}
+	body, err := json.Marshal(create)
 	if err != nil {
 		return ReviewedTemplateCreationResult{}, err
 	}

@@ -148,6 +148,8 @@ type FolderSetupIntent struct {
 	Recipe        string                `json:"recipe,omitempty"`
 	RecipeVersion int                   `json:"recipe_version,omitempty"`
 	Software      *FolderSoftwareIntent `json:"software,omitempty"`
+	// Inbox is the folderdigest.BuiltinInboxFolder recipe's promise.
+	Inbox *FolderInboxIntent `json:"inbox,omitempty"`
 	// Structure is the FolderRecipeStructure recipe's promise.
 	Structure *FolderStructureIntent `json:"structure,omitempty"`
 }
@@ -595,21 +597,30 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	// formed; anything else is refused rather than run on a guess.
 	switch intent.Recipe {
 	case "":
-		if intent.RecipeVersion != 0 || intent.Software != nil || intent.Structure != nil {
+		if intent.RecipeVersion != 0 || intent.Software != nil || intent.Structure != nil || intent.Inbox != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 	case folderdigest.BuiltinSoftwareProject:
-		if intent.RecipeVersion < 1 || intent.Software == nil || intent.Structure != nil {
+		if intent.RecipeVersion < 1 || intent.Software == nil || intent.Structure != nil || intent.Inbox != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 		if err := intent.Software.Validate(); err != nil {
 			return err
 		}
 	case FolderRecipeStructure:
-		if intent.RecipeVersion < 1 || intent.Structure == nil || intent.Software != nil {
+		if intent.RecipeVersion < 1 || intent.Structure == nil || intent.Software != nil || intent.Inbox != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 		if err := intent.Structure.Validate(); err != nil {
+			return err
+		}
+	case folderdigest.BuiltinInboxFolder:
+		// The first batch never waits on a model: an inbox plan has no model
+		// witness to hold a run to.
+		if intent.RecipeVersion < 1 || intent.Inbox == nil || intent.Software != nil || intent.Structure != nil || intent.Model != nil {
+			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
+		}
+		if err := intent.Inbox.Validate(); err != nil {
 			return err
 		}
 	default:

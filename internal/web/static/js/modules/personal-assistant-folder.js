@@ -170,6 +170,7 @@ function plural(n, noun) {
 // and Later, which belong to the offer it came from.
 function projectConfirmView(offer, base, subject, remember, { back = false } = {}) {
   if (offer.capability && !back) return capabilityConfirmView(offer, base, subject);
+  if (isInboxFolderOffer(offer) && !back) return inboxConfirmView(offer, base, subject);
   const marker = String(offer.subject?.marker || '').trim();
   // The plan names its blueprint only when that blueprint will be used; a
   // missing one is explained by the note instead.
@@ -271,6 +272,26 @@ const SOFTWARE_STOP_COPY = {
   failed:
     'A step did not finish. What finished is kept and nothing in the project folder was changed; Try again carries on from there.'
 };
+
+// An inbox folder's File Janitor setup is the host's own as well. A changed
+// review or a folder File Janitor will not take is reviewed afresh from a new
+// pick; anything else carries on from what is saved.
+const INBOX_STOP_COPY = {
+  plan_changed:
+    'What is saved no longer matches what you reviewed, or File Janitor will not take this folder, so I stopped before going further. Anything that finished is kept and no file was moved. Pick the folder again to review it afresh.',
+  needs_pick: subject =>
+    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  interrupted:
+    'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
+  failed:
+    'A step did not finish. What finished is kept and no file was moved; Try again carries on from there.'
+};
+
+function inboxStoppedActions(reason) {
+  if (reason === 'plan_changed' || reason === 'needs_pick')
+    return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
+  return [{ id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true }];
+}
 
 // A group setup is the host's own too. It creates workspaces one at a time, so
 // a stop always leaves what finished in place and is carried on from the card.
@@ -380,7 +401,7 @@ function stoppedActions(reason, setup) {
 export function setupRunView(
   setup,
   subject,
-  { portfolio = false, software = false, structure = false } = {}
+  { portfolio = false, software = false, structure = false, inbox = false } = {}
 ) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
@@ -409,6 +430,7 @@ export function setupRunView(
     (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (structure) sentence = STRUCTURE_STOP_COPY[reason] || STRUCTURE_STOP_COPY.failed;
+  if (inbox) sentence = INBOX_STOP_COPY[reason] || INBOX_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   const stopped = globalThis.OriFolderSetupVisual.stoppedRequirement(setup);
   if (stopped) sentence = `Stopped at ${stopped}. ${sentence}`;
@@ -421,7 +443,77 @@ export function setupRunView(
       ? structureStoppedActions(reason)
       : software
         ? softwareStoppedActions(reason)
-        : stoppedActions(reason, setup || {})
+        : inbox
+          ? inboxStoppedActions(reason)
+          : stoppedActions(reason, setup || {})
+  };
+}
+
+// confirmationSummary is the line under a plan's confirm button: what the click
+// covers. Only a plan that installs a plugin says that it covers more than that.
+export function confirmationSummary(plan) {
+  const installs = (Array.isArray(plan?.lines) ? plan.lines : []).some(line =>
+    ['integration', 'provider'].includes(line?.kind)
+  );
+  return installs
+    ? 'Confirmation covers the whole setup above, not just plugin installation.'
+    : 'Confirmation covers the whole setup above.';
+}
+
+// isInboxFolderOffer is an offer about an inbox folder (Downloads, Desktop,
+// Documents and the like), which the host's own File Janitor setup answers.
+export function isInboxFolderOffer(offer) {
+  return (
+    offer?.subject?.shape === 'inbox' &&
+    offer?.subject?.is_root === true &&
+    !offer?.capability &&
+    !offer?.software &&
+    !offer?.portfolio
+  );
+}
+
+// inboxConfirmView is an inbox folder's hire card: Hire File Curator (or
+// Assign it, when a saved File Curator exists), the one question, the plan's
+// lines and Hire & start or Not now. It installs nothing and has no
+// step-by-step journey, so there is no Adjust.
+function inboxConfirmView(offer, base, subject) {
+  const run = offer.setup ? setupRunView(offer.setup, subject, { inbox: true }) : null;
+  const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
+  const hasPlan = planLines.length > 0;
+  const continuing = base.status === 'awaiting_outcome';
+  const hire =
+    hasPlan && (continuing || !base.decided)
+      ? hireView(offer.plan, subject, { needs: offer.needs })
+      : null;
+  let actions = [];
+  if (run) actions = run.actions;
+  else if (hire && !base.decided)
+    actions = [
+      { id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true },
+      { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
+    ];
+  else if (hire && continuing)
+    actions = [{ id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true }];
+  const lines = globalThis.OriFolderRecognitionLines;
+  return {
+    ...base,
+    headline: hire
+      ? hire.headline
+      : segments([{ text: subject }, ' is a folder File Curator can tidy.']),
+    question: run
+      ? run.question
+      : hasPlan
+        ? `${subject} holds loose files rather than one project, so File Curator can keep it tidy.`
+        : `Setting up ${subject} is unavailable right now.`,
+    recognitionLine: run || !lines ? '' : lines.recognitionLine(offer.recognition),
+    needsLine: '',
+    capabilityDetail: '',
+    reason: run ? '' : base.reason,
+    actions,
+    resume: continuing,
+    plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    hire,
+    setup: run
   };
 }
 
@@ -1052,7 +1144,14 @@ export function folderOfferView(offer, options = {}) {
           newTab: true
         });
     }
-    if (model && status === 'pending' && offer.conversation_id && offer.candidate_id)
+    // A plan whose model is not needed has nothing to check again.
+    if (
+      model &&
+      model.state !== 'not_needed' &&
+      status === 'pending' &&
+      offer.conversation_id &&
+      offer.candidate_id
+    )
       view.actions.push({ id: 'recheck', label: 'Check again', style: 'outline', recheck: true });
   }
   return view;
@@ -1698,6 +1797,23 @@ export function folderReceiptView(offer, options = {}) {
     )
   )
     return { visible: false };
+  // An inbox hire's first look is its first batch: the card leads to the review
+  // of that batch (or File Janitor, when there was nothing to file). No model
+  // task exists for it, so Start first look never appears.
+  const batch = firstBatchView(offer);
+  if (batch)
+    return {
+      visible: true,
+      rows: rows.map(row => ({
+        kind: String(row.kind || ''),
+        name: String(row.name || ''),
+        detail: String(row.detail || '')
+      })),
+      route: batch.route,
+      homeRoute: '',
+      openLabel: batch.label,
+      batch
+    };
   const openLabel = `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`;
   // The stored receipt is from the moment of setup. Where the first look stands
   // now is read live, so its row and the card's buttons follow it.
@@ -1742,6 +1858,31 @@ export function folderReceiptView(offer, options = {}) {
     ...(map ? { map } : {}),
     ...(hireLook.visible ? { hireLook } : {}),
     ...(firstLook.visible ? { firstLook } : {})
+  };
+}
+
+// The File Janitor review a first batch opens: its workspace's panel, on the
+// batch when the scan made one. Nothing else is followed.
+const FILE_JANITOR_ROUTE =
+  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&batch_id=[A-Za-z0-9_-]+)?$/;
+
+// firstBatchView is an inbox hire's first batch, as its outcome recorded it:
+// where Review batch (or Open File Janitor) leads, and the counts. Null for
+// any other outcome, or a route that is not a File Janitor review.
+export function firstBatchView(offer) {
+  const batch = offer?.outcome?.first_look?.batch;
+  if (!batch || typeof batch !== 'object') return null;
+  const route = String(batch.route || '').trim();
+  if (!FILE_JANITOR_ROUTE.test(route)) return null;
+  const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
+  const outcome = ['batch', 'no_eligible', 'failed'].includes(batch.outcome) ? batch.outcome : '';
+  if (!outcome) return null;
+  return {
+    outcome,
+    route,
+    label: outcome === 'batch' ? 'Review batch' : 'Open File Janitor',
+    eligible: count(batch.eligible),
+    needsReview: count(batch.needs_review)
   };
 }
 
@@ -2295,6 +2436,7 @@ const RECEIPT_LABELS = {
   blueprint: ['Blueprint', '✦'],
   agent: ['Agent', '●'],
   task: ['First task', '✓'],
+  batch: ['First batch', '▦'],
   home: ['Home', '⌂'],
   library: ['Library', '☰'],
   assistant: ['Shared assistant', '●'],
@@ -2843,7 +2985,8 @@ export function conversationFolderOfferView(offer, options = {}) {
   // read, has said why no setup is offered; that is not "unavailable here".
   // A software project's card always says what it offers and why: a review, a
   // workspace to open, or the reason neither is possible.
-  const softwareExplained = Boolean(offer.software);
+  // An inbox folder's card says the same of its own File Janitor setup.
+  const softwareExplained = Boolean(offer.software) || isInboxFolderOffer(offer);
   if (!offer.needs_pick && !offer.capability && !offer.create_available && !softwareExplained)
     view.question =
       'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
@@ -2978,9 +3121,7 @@ function renderOffer(place) {
   );
   setText(
     document.getElementById('personalAssistantFolderActionSummary'),
-    view.plan && !view.setup && !receipt.visible
-      ? 'Confirmation covers the whole setup above, not just plugin installation.'
-      : ''
+    view.plan && !view.setup && !receipt.visible ? confirmationSummary(view.plan) : ''
   );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {

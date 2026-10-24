@@ -49,6 +49,11 @@ func (h *folderSetupHost) ReadSetupDestination(ctx context.Context, req personal
 	if h == nil || h.builder == nil {
 		return nil, errSetupUnavailable
 	}
+	// An inbox folder's File Janitor workspace is a separate workspace: no page
+	// it was attached from places it in a group or a Home.
+	if _, inbox := inboxRow(req.Offer); inbox {
+		return nil, nil
+	}
 	requestedID := ""
 	if review := req.Offer.ConversationReview; review != nil {
 		requestedID = review.DestinationID

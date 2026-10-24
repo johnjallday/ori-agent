@@ -32,6 +32,10 @@ const (
 	ShapeManuscript Shape = "manuscript"
 	ShapeCorpus     Shape = "corpus"
 	ShapeNotes      Shape = "notes"
+	// ShapeInbox is no marker's shape: it is what an attached root is when it is
+	// neither a project Ori recognizes nor a collection (IsInbox), the landing
+	// zone a File Janitor keeps tidy.
+	ShapeInbox Shape = "inbox"
 )
 
 // Marker is one row of the host-owned project marker table (FR14). A

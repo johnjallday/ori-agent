@@ -4,8 +4,11 @@ import { readFileSync } from 'node:fs';
 
 import {
   FIRST_LOOK_FOOTNOTE,
+  confirmationSummary,
+  conversationFolderOfferView,
   folderOfferView,
   folderReceiptView,
+  isInboxFolderOffer,
   hireLookView,
   hireView,
   setupResultView as setupModalView,
@@ -414,4 +417,182 @@ test('the run pop-up ends a hire on its agent at work, or on why the look waits'
   const finished = setupModalView(hiredOffer({ state: 'finished' }));
   assert.match(finished.status, /finished the first look/);
   assert.doesNotMatch(finished.status, /is reading/);
+});
+
+// An inbox hire, resolved: its first look is its first batch.
+function inboxHire(batch) {
+  return {
+    id: 'offer-inbox',
+    status: 'resolved',
+    subject: { name: 'Downloads', shape: 'inbox', is_root: true },
+    outcome: {
+      kind: 'project',
+      workspace_id: 'ws-downloads',
+      route: '/workspaces/downloads',
+      first_look: { started: false, batch, at: '2026-10-24T09:00:00Z' },
+      receipt: [
+        { kind: 'agent', name: 'File Curator', detail: 'file curator, added', assigned: true },
+        { kind: 'workspace', name: 'Downloads', detail: 'created', route: '/workspaces/downloads' },
+        { kind: 'folder', name: 'Downloads', detail: 'linked where it is' },
+        {
+          kind: 'batch',
+          name: 'First batch',
+          detail: '23 proposed · 4 need review',
+          route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+        }
+      ]
+    }
+  };
+}
+
+test('an inbox hire ends on its first batch: Review batch, never Start first look', () => {
+  const receipt = folderReceiptView(
+    inboxHire({
+      outcome: 'batch',
+      batch_id: 'batch-1',
+      eligible: 23,
+      needs_review: 4,
+      route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+    })
+  );
+  assert.equal(receipt.visible, true);
+  assert.equal(receipt.openLabel, 'Review batch');
+  assert.equal(receipt.route, '/workspaces/downloads?panel=file-janitor&batch_id=batch-1');
+  assert.equal('firstLook' in receipt, false);
+  assert.equal('hireLook' in receipt, false);
+  assert.deepEqual(
+    receipt.rows.map(row => [row.kind, row.detail]),
+    [
+      ['agent', 'file curator, added'],
+      ['workspace', 'created'],
+      ['folder', 'linked where it is'],
+      ['batch', '23 proposed · 4 need review']
+    ]
+  );
+  // Nothing to file opens File Janitor itself.
+  const empty = folderReceiptView(
+    inboxHire({ outcome: 'no_eligible', route: '/workspaces/downloads?panel=file-janitor' })
+  );
+  assert.equal(empty.openLabel, 'Open File Janitor');
+  assert.equal(empty.route, '/workspaces/downloads?panel=file-janitor');
+  // A route that is not a File Janitor review is never followed.
+  const elsewhere = folderReceiptView(
+    inboxHire({ outcome: 'batch', route: 'https://example.com/?panel=file-janitor' })
+  );
+  assert.equal(elsewhere.openLabel, 'Open Downloads');
+  assert.equal(elsewhere.route, '/workspaces/downloads');
+});
+
+// An inbox folder's review, as the server sends it: no capability, no software
+// block, the host's File Janitor plan with its hire.
+const inboxOffer = (hire = {}, overrides = {}) => ({
+  id: 'offer-inbox',
+  verdict: 'project',
+  status: 'pending',
+  folder: 'Downloads',
+  reason: '25 files of 6 kinds, edited today',
+  subject: { name: 'Downloads', kind: 'project', shape: 'inbox', is_root: true },
+  recognition: { verdict: 'project', label: 'inbox folder' },
+  create_available: false,
+  plan: {
+    digest: 'e'.repeat(64),
+    lines: [
+      { kind: 'agents', name: 'Hire File Curator' },
+      { kind: 'workspace', name: 'A File Janitor workspace named Downloads' },
+      { kind: 'folder', name: 'Linked where it is' },
+      {
+        kind: 'task',
+        name: 'A first look: a metadata-only scan that proposes the first filing batch'
+      }
+    ],
+    hire: { mode: 'create', agent_name: 'File Curator', role_label: 'specialist', ...hire },
+    brief_default:
+      'Prepare reviewable filing batches for the approved folder, explain uncertain classifications, and require approval before moving anything.',
+    visual: { requirements_checked: true, builtin: 'File Janitor', model: { state: 'not_needed' } }
+  },
+  ...overrides
+});
+
+test('an inbox folder is a hire card for File Curator: Hire & start or Not now, no Adjust', () => {
+  assert.equal(isInboxFolderOffer(inboxOffer()), true);
+  const view = folderOfferView(inboxOffer());
+  assert.equal(text(view.headline), 'Hire File Curator for Downloads');
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['setup', 'Hire & start'],
+      ['no', 'Not now']
+    ]
+  );
+  assert.equal(view.actions[0].oneCard, true);
+  assert.equal(view.hire.adjust, null, 'no step-by-step journey to adjust');
+  assert.equal(view.hire.brief.hint, 'This becomes the workspace goal. You can change it later.');
+  assert.match(view.hire.brief.value, /^Prepare reviewable filing batches/);
+  assert.equal(view.plan.lines.length, 4);
+  assert.ok(!view.actions.some(action => action.recheck), 'no model to check again');
+  // A saved File Curator is assigned, never hired twice.
+  const assigned = folderOfferView(inboxOffer({ mode: 'bind', model: 'gpt-5-mini' }));
+  assert.equal(text(assigned.headline), 'Assign File Curator to Downloads');
+  assert.equal(assigned.actions[0].label, 'Assign & start');
+  // Another kind of folder is never mistaken for one.
+  assert.equal(isInboxFolderOffer(hireOffer()), false);
+  assert.equal(isInboxFolderOffer(reviewedSoftware()), false);
+});
+
+test('the confirmation line names plugins only for a plan that installs one', () => {
+  assert.equal(
+    confirmationSummary(folderOfferView(inboxOffer()).plan),
+    'Confirmation covers the whole setup above.'
+  );
+  assert.equal(
+    confirmationSummary({ lines: [{ kind: 'integration', name: 'Installs REAPER' }] }),
+    'Confirmation covers the whole setup above, not just plugin installation.'
+  );
+});
+
+test('in a conversation the inbox hire keeps its own words and closes with Keep chatting', () => {
+  const view = conversationFolderOfferView(inboxOffer({}, { conversation_id: 'conversation-1' }));
+  assert.doesNotMatch(view.question, /unavailable here/);
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Hire & start', 'Keep chatting']
+  );
+});
+
+test('a stopped inbox run says what finished and offers its own recovery', () => {
+  const stopped = (reason, state = 'failed') =>
+    folderOfferView(
+      inboxOffer(
+        {},
+        {
+          status: 'awaiting_outcome',
+          decision: 'yes',
+          setup: {
+            status: 'stopped',
+            stop_reason: reason,
+            lines: [
+              { kind: 'agents', name: 'Hire File Curator', state: 'done' },
+              {
+                kind: 'workspace',
+                name: 'A File Janitor workspace named Downloads',
+                state: 'done'
+              },
+              { kind: 'folder', name: 'Linked where it is', state }
+            ]
+          }
+        }
+      )
+    );
+  const failed = stopped('failed');
+  assert.match(failed.question, /^2 of 3 steps finished\. A step did not finish\./);
+  assert.deepEqual(
+    failed.actions.map(action => [action.id, action.label]),
+    [['retry', 'Try again']]
+  );
+  const changed = stopped('plan_changed');
+  assert.match(changed.question, /File Janitor will not take this folder/);
+  assert.deepEqual(
+    changed.actions.map(action => [action.id, action.label]),
+    [['repick', 'Pick it again']]
+  );
 });

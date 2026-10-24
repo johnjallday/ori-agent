@@ -136,6 +136,17 @@ func TestReviewContext_AHiredPlanIsDescribedWithHireAndStart(t *testing.T) {
 			t.Fatalf("hire %v: %+v", test.plan.Hire != nil, got)
 		}
 	}
+	// An inbox folder's hire is the host's own File Janitor plan: no capability,
+	// no plain create, and no journey to adjust. It is never "unavailable".
+	inbox := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending,
+		Subject: personalassistant.FolderSubjectView{Name: "Downloads", Kind: personalassistant.FolderChoiceProject, Shape: "inbox", IsRoot: true}, Plan: &hired}
+	if got := projectReviewContext(inbox, true); got.Status != "awaiting_confirmation" || !reflect.DeepEqual(got.Controls, []string{"Hire and start", "Keep chatting"}) {
+		t.Fatalf("inbox hire: %+v", got)
+	}
+	inbox.Plan = nil
+	if got := projectReviewContext(inbox, true); got.Status != "setup_unavailable" {
+		t.Fatalf("an inbox with no plan is unavailable: %+v", got)
+	}
 }
 
 type reviewContextReader struct {

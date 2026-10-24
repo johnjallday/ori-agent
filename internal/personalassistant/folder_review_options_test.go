@@ -309,6 +309,7 @@ func TestFolderReviewOptions_ASingleFolderIsStillOneWorkspace(t *testing.T) {
 	f, service, target := observationFixture(t)
 	f.service.deps.Creator = &fakeFolderCreator{}
 	f.service.deps.Setup = &structureSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines()}}
+	markNotInbox(t, f, "Desktop")
 	observation, err := service.Observe(ctx, target, "chip", "desktop")
 	if err != nil {
 		t.Fatal(err)

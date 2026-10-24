@@ -20,15 +20,16 @@ var ErrFolderPlanChanged = errors.New("personal assistant: the setup plan change
 const folderSetupTimeout = 20 * time.Minute
 
 // eligibleForOneCard is true for what a one-card setup covers: a single
-// recognized project with a reviewed capability row, or a whole collection of
-// projects (a portfolio) — never one whose capability was suppressed.
+// recognized project with a reviewed capability row, an inbox folder, or a
+// whole collection of projects (a portfolio) — never one whose capability was
+// suppressed.
 func eligibleForOneCard(offer FolderOffer) bool {
 	// A proposed group is the host's own setup and needs no capability: a
 	// domain the user declined only changes what the group is made of.
 	if offer.Structure.ProposesWorkspaces() {
 		return true
 	}
-	return !offer.CapabilitySuppressed && (isProjectCapabilityOffer(offer) || isSoftwareOffer(offer))
+	return !offer.CapabilitySuppressed && (isProjectCapabilityOffer(offer) || isSoftwareOffer(offer) || isInboxOffer(offer))
 }
 
 // attachSetupRun shows the stored run. A run recorded as running with no live
@@ -473,6 +474,16 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 		}
 		if err != nil {
 			logger.Warn("One-card collection setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
+			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+		}
+		return
+	}
+	if offer.Setup.Intent.Recipe == folderdigest.BuiltinInboxFolder {
+		// Its proof is the File Janitor workspace, its grant and its first
+		// batch, re-read from canonical state. The batch is the first look:
+		// nothing else is started.
+		if err := s.resolveInbox(ctx, userID, offerID); err != nil {
+			logger.Warn("Inbox folder setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
 			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
 		}
 		return

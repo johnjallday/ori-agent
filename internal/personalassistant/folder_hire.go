@@ -67,6 +67,7 @@ var folderDefaultBriefs = map[folderdigest.Shape]string{
 	folderdigest.ShapeNotes:      "Learn how these notes are organized and suggest one way to make them more useful.",
 	folderdigest.ShapeCorpus:     "Catalogue what this collection contains and suggest the first thing worth doing with it.",
 	folderdigest.ShapeAudio:      "Understand this song's project and suggest the next production step.",
+	folderdigest.ShapeInbox:      "Keep this folder tidy: propose filing batches from file names and dates, explain anything uncertain, and ask before anything moves.",
 }
 
 // FolderDefaultBrief is the brief a hire card starts from: the blueprint's own

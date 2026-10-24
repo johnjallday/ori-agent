@@ -249,8 +249,17 @@ func (a assistantSetupSessionAdapter) ReviewMonitoring(ctx context.Context, owne
 }
 
 func (a assistantSetupSessionAdapter) PrepareFirstReview(ctx context.Context, request assistantsetup.PrepareReviewRequest) (assistantsetup.PrepareReviewResult, error) {
+	return a.prepareFirstReview(ctx, request, true)
+}
+
+// prepareFirstReview is PrepareFirstReview with the monitoring choice made by
+// the caller. With monitoring the reviewed approval is recorded and the
+// watcher and daily scan are activated before the scan; without it nothing is
+// approved or activated, and the workspace must already be set to manual scans.
+// Either way it runs (or replays) exactly one metadata-only scan.
+func (a assistantSetupSessionAdapter) prepareFirstReview(ctx context.Context, request assistantsetup.PrepareReviewRequest, monitoring bool) (assistantsetup.PrepareReviewResult, error) {
 	var result assistantsetup.PrepareReviewResult
-	if a.janitor == nil || a.automation == nil {
+	if a.janitor == nil || (monitoring && a.automation == nil) {
 		return result, assistantsetup.ErrUnavailable
 	}
 	fresh, err := a.ReviewMonitoring(ctx, request.OwnerUserID, request.WorkspaceID)
@@ -263,8 +272,14 @@ func (a assistantSetupSessionAdapter) PrepareFirstReview(ctx context.Context, re
 	if fresh.PrivacyMode != string(filejanitor.ContentModeMetadataOnly) || fresh.PrivacyMode != request.Review.PrivacyMode {
 		return result, assistantsetup.ErrPrivacyReview
 	}
+	// A nil *Automation must not reach PrepareMetadataReview as a non-nil
+	// interface: without monitoring it needs none.
+	var automation filejanitor.PreparationAutomation
+	if a.automation != nil {
+		automation = a.automation
+	}
 	prepared, err := a.janitor.PrepareMetadataReview(filejanitor.PreparationRequest{
-		WorkspaceID: request.WorkspaceID, RootID: request.Review.RootGenerationID, Monitoring: true,
+		WorkspaceID: request.WorkspaceID, RootID: request.Review.RootGenerationID, Monitoring: monitoring,
 		DailyScanLocalTime: request.Review.DailyScanLocalTime, Timezone: request.Review.Timezone,
 		WasApproved: request.Review.WasApproved, WasPaused: request.Review.WasPaused,
 		Operation: filejanitor.AssistedAutomationOperation{
@@ -279,7 +294,7 @@ func (a assistantSetupSessionAdapter) PrepareFirstReview(ctx context.Context, re
 			}
 			return nil
 		},
-	}, a.automation)
+	}, automation)
 	result.MonitoringRetryBound = prepared.MonitoringRetryBound
 	result.MonitoringApplied = prepared.MonitoringApplied
 	result.ScanAttempted = prepared.ScanAttempted
@@ -363,6 +378,20 @@ func (d progressionFileJanitorRecommendations) DeferFileJanitorRecommendation(co
 		return assistantsetup.ErrUnavailable
 	}
 	return d.engine.Skip(progression.ShowFolderQuestID)
+}
+
+// assistantSetupAdapter is the adapter over the reviewed File Janitor creator,
+// File Janitor and its automation, with no coordinator: the inbox-folder setup
+// prepares its first review through it under its own run's operation ids.
+func (b *ServerBuilder) assistantSetupAdapter() assistantSetupSessionAdapter {
+	adapter := assistantSetupSessionAdapter{
+		sessions: b.sessionHandler, folders: b.workspaceFileStore,
+		janitor: b.fileJanitorService, automation: b.fileJanitorAutomation, profiles: b.userStore,
+	}
+	if b.setupWizardService != nil {
+		adapter.wizard = b.setupWizardService
+	}
+	return adapter
 }
 
 func (b *ServerBuilder) wireAssistantSetup() {
