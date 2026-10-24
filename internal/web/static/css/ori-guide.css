@@ -1171,6 +1171,14 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   padding: 2px;
 }
 
+/* The region itself takes focus so the keyboard can scroll it; its ring sits
+   inside, clear of the panel's rounded clip. */
+.personal-assistant-panel__scroll:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: -2px;
+}
+
 .personal-assistant-panel__scroll > * {
   flex: none;
 }

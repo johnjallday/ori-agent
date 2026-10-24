@@ -238,7 +238,9 @@
         </div>
       </aside>
     <!-- The existing conversation scrolls here; no second transcript/composer. -->
-    <div id="personalAssistantScroll" class="personal-assistant-panel__scroll">
+    <!-- Focusable so the keyboard can scroll it even when nothing inside can
+         take focus (New and Continue… live in the header's menu). -->
+    <div id="personalAssistantScroll" class="personal-assistant-panel__scroll" tabindex="0" role="region" aria-label="Conversation">
       {{if eq .CurrentPage "index"}}
       {{template "personal-assistant-today.tmpl" .}}
       {{else}}
