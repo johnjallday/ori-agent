@@ -31,8 +31,10 @@ test('folder heading owns the root; visible rows stop at three without aggregate
 test('bounded/partial, omitted and historical facts never wait for a disclosure', () => {
   const view = folderPresentation(fixtures.partial, { historical: true });
   assert.match(view.status, /Saved observations · historical · Partial, bounded look/);
-  assert.match(view.omission, /4 folder summaries and 2 file-kind summaries omitted/);
-  assert.match(view.omission, /not available in Show more/);
+  assert.equal(
+    view.omission,
+    'Some folder and file-kind summaries were left out of this bounded look.'
+  );
   assert.equal(view.moreRows.length, 5);
   assert.match(view.disclosure, /Attached folder: contents not read/);
   assert.match(folderPresentation(fixtures.album).status, /Bounded look/);

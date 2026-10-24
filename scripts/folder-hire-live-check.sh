@@ -14,6 +14,10 @@
 # what the hire did about the look, the look's state, its suggested next task
 # and the start of its result, as KEY=value lines.
 #
+# For an inbox folder (File Curator, folder-inbox-hire) it needs no model: it
+# waits for the hire to resolve and prints the first batch's outcome and counts
+# (INBOX=1, BATCH_*), and fails if a model task was started for it.
+#
 # It only talks to http://localhost:<port>; point it at a sandboxed server
 # (scripts/demo-server.sh or `wt demo`), never at one over your real data.
 
@@ -56,6 +60,33 @@ fi
 echo "HIRE=$(read_offer | field plan.hire)"
 body="$(python3 -c 'import json,sys; print(json.dumps({"request_id":"live-hire-"+sys.argv[3],"plan_digest":sys.argv[1],"brief":sys.argv[2]}))' "$digest" "$brief" "$$")"
 curl -fsS -X POST "${base}/offers/${offer}/setup" -H 'Content-Type: application/json' -d "$body" >/dev/null
+
+# An inbox folder's first look is its first batch, prepared by a metadata-only
+# scan: no model task exists, so this waits for the offer to resolve and reads
+# the batch outcome instead of a look's state. It needs no model.
+if [[ "$(read_offer | field subject.shape)" == "inbox" ]]; then
+	deadline=$((SECONDS + timeout))
+	while ((SECONDS < deadline)); do
+		[[ "$(read_offer | field status)" == "resolved" ]] && break
+		if [[ "$(read_offer | field setup.status)" == "stopped" ]]; then
+			echo "SETUP_STOPPED=$(read_offer | field setup.stop_reason)"
+			exit 1
+		fi
+		sleep 2
+	done
+	echo "INBOX=1"
+	echo "STATUS=$(read_offer | field status)"
+	echo "WORKSPACE_ROUTE=$(read_offer | field outcome.route)"
+	echo "BATCH_OUTCOME=$(read_offer | field outcome.first_look.batch.outcome)"
+	echo "BATCH_ELIGIBLE=$(read_offer | field outcome.first_look.batch.eligible)"
+	echo "BATCH_NEEDS_REVIEW=$(read_offer | field outcome.first_look.batch.needs_review)"
+	echo "BATCH_ROUTE=$(read_offer | field outcome.first_look.batch.route)"
+	echo "TASK_STARTED=$(read_offer | field outcome.first_look.started)"
+	echo "TASK_ID=$(read_offer | field outcome.first_look.task_id)"
+	[[ "$(read_offer | field status)" == "resolved" && -n "$(read_offer | field outcome.first_look.batch.outcome)" &&
+		-z "$(read_offer | field outcome.first_look.task_id)" ]] || exit 1
+	exit 0
+fi
 
 deadline=$((SECONDS + timeout))
 state=""

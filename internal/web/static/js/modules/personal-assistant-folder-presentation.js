@@ -53,7 +53,7 @@ export function folderPresentation(
         ? 'No files or child folders recorded in this bounded snapshot.'
         : 'No child folders recorded in this bounded snapshot.',
     omission: omissions.length
-      ? `${omissions.join(' and ')} omitted from this snapshot; not available in Show more.`
+      ? 'Some folder and file-kind summaries were left out of this bounded look.'
       : '',
     details: [
       observationSummary(observation),
