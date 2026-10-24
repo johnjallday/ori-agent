@@ -179,6 +179,9 @@
       hire.mode === 'pending' ||
       (Array.isArray(needs) && needs.some(need => need && need.state && need.state !== 'ready'));
     const brief = String(plan.brief_default || '').trim();
+    const monitoringTime = /^\d{2}:\d{2}$/.test(String(plan.monitoring?.time || ''))
+      ? plan.monitoring.time
+      : '';
     return {
       mode: hire.mode,
       confirmLabel: hire.mode === 'bind' ? 'Assign & start' : 'Hire & start',
@@ -189,6 +192,16 @@
             label: 'What should it do with it?',
             value: brief,
             hint: 'This becomes the workspace goal. You can change it later.'
+          }
+        : null,
+      // An inbox folder's optional watching and daily catch-up, off unless the
+      // user ticks it. The plan names the time; the choice travels in the
+      // request, never in the plan.
+      monitoring: monitoringTime
+        ? {
+            label: `Also watch this folder and run a daily catch-up scan at ${monitoringTime}`,
+            hint: 'Ori notices new files after a short settle time and proposes them for review. Nothing is filed by itself.',
+            line: 'Watching turned on'
           }
         : null,
       linesHeading: waits ? 'Also, once installed' : 'Also, in the background',

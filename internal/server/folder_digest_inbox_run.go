@@ -169,7 +169,13 @@ func (h *folderSetupHost) inboxRun(ctx context.Context, req personalassistant.Fo
 	if err := progress.working(personalassistant.FolderPlanTask); err != nil {
 		return err
 	}
-	monitoring := false
+	// Ticked, the reviewed approval is recorded and watching and the daily scan
+	// are switched on with the first scan (the preparation step below); unticked,
+	// approval stays unset.
+	monitoring := req.Monitoring
+	if monitoring {
+		progress.line(personalassistant.FolderPlanMode).State = personalassistant.FolderLineWorking
+	}
 	if !monitoring && !status.Settings.ManualScansOnly() {
 		if !status.Settings.AutomationApprovedAt.IsZero() {
 			return changed(personalassistant.FolderPlanTask, errInboxChanged)
@@ -189,7 +195,13 @@ func (h *folderSetupHost) inboxRun(ctx context.Context, req personalassistant.Fo
 		logger.Warn("Inbox folder setup: the first scan did not complete", logger.Fields{"offer_id": req.Offer.ID, "error": err.Error()})
 		task := progress.line(personalassistant.FolderPlanTask)
 		task.State, task.Detail = personalassistant.FolderLineFailed, inboxScanIncomplete
+		if monitoring {
+			progress.line(personalassistant.FolderPlanMode).State = personalassistant.FolderLineFailed
+		}
 		return progress.send(personalassistant.FolderSetupDone, "")
+	}
+	if monitoring {
+		progress.done(personalassistant.FolderPlanMode)
 	}
 	if outcome, known := inboxBatchOutcome(prepared.ScanOutcome); known {
 		progress.line(personalassistant.FolderPlanTask).Detail = inboxBatchDetail(outcome, prepared.EligibleCount, -1)
@@ -399,9 +411,9 @@ func (h *folderSetupHost) inboxRetryFirstBatch(ctx context.Context, userID strin
 	if err != nil {
 		return personalassistant.FolderFirstBatch{}, err
 	}
-	// The monitoring choice the setup made stands: approved monitoring is
-	// kept as it is, and manual scans stay manual.
-	monitoring := !settings.AutomationApprovedAt.IsZero()
+	// The monitoring choice the setup made stands: a ticked watching is tried
+	// again, and manual scans stay manual.
+	monitoring := offer.Setup.Monitoring
 	scanOperation := ids.scanAttempt(attempt)
 	if _, err := h.inboxPrepareBatch(ctx, deps, userID, ids, scanOperation, monitoring); err != nil {
 		logger.Warn("Inbox first batch retry did not complete", logger.Fields{"offer_id": offer.ID, "attempt": attempt, "error": err.Error()})

@@ -6,6 +6,7 @@ import {
   FIRST_LOOK_FOOTNOTE,
   confirmationSummary,
   conversationFolderOfferView,
+  planWithWatching,
   folderOfferView,
   folderReceiptView,
   isInboxFolderOffer,
@@ -537,6 +538,73 @@ test('an inbox folder is a hire card for File Curator: Hire & start or Not now, 
   // Another kind of folder is never mistaken for one.
   assert.equal(isInboxFolderOffer(hireOffer()), false);
   assert.equal(isInboxFolderOffer(reviewedSoftware()), false);
+});
+
+test('a folder another workspace already tidies, or a refused root, is said and creates nothing', () => {
+  const tidied = folderOfferView({
+    ...inboxOffer(),
+    plan: undefined,
+    setup_unavailable_reason: 'folder_tidied',
+    tidied: { name: 'Old Downloads', route: '/workspaces/old-downloads?panel=file-janitor' }
+  });
+  assert.equal(text(tidied.headline), 'File Curator already tidies Downloads');
+  assert.deepEqual(
+    tidied.actions.map(action => [action.label, action.href]),
+    [['Open it', '/workspaces/old-downloads?panel=file-janitor']]
+  );
+  assert.equal(tidied.plan, null);
+  assert.match(tidied.question, /Old Downloads already keeps this folder tidy/);
+  // A route that is not a workspace page is never offered.
+  const odd = folderOfferView({
+    ...inboxOffer(),
+    plan: undefined,
+    setup_unavailable_reason: 'folder_tidied',
+    tidied: { name: 'x', route: 'https://example.com/' }
+  });
+  assert.deepEqual(odd.actions, []);
+  const refused = folderOfferView({
+    ...inboxOffer(),
+    plan: undefined,
+    setup_unavailable_reason: 'root_refused',
+    setup_unavailable_message: "Ori's own workspaces folder cannot be tidied."
+  });
+  assert.equal(text(refused.headline), 'Hire File Curator for Downloads (unavailable)');
+  assert.equal(refused.question, "Ori's own workspaces folder cannot be tidied.");
+  assert.deepEqual(refused.actions, []);
+});
+
+test('watching is offered only by a plan that names its time, off until ticked', () => {
+  const none = hireView(inboxOffer().plan, 'Downloads');
+  assert.equal(none.monitoring, null);
+  const plan = { ...inboxOffer().plan, monitoring: { time: '09:00' } };
+  const view = hireView(plan, 'Downloads');
+  assert.deepEqual(view.monitoring, {
+    label: 'Also watch this folder and run a daily catch-up scan at 09:00',
+    hint: 'Ori notices new files after a short settle time and proposes them for review. Nothing is filed by itself.',
+    line: 'Watching turned on'
+  });
+  assert.equal(hireView({ ...plan, monitoring: { time: 'later' } }, 'Downloads').monitoring, null);
+  // The tick is sent with the click and only when chosen.
+  assert.match(
+    source,
+    /if \(offer\.plan\?\.monitoring && monitoringChosen\(offer\)\) body\.monitoring = true;/
+  );
+  assert.match(template, /<input id="personalAssistantFolderMonitoring"[^>]*type="checkbox"/);
+  assert.doesNotMatch(template, /id="personalAssistantFolderMonitoring"[^>]*checked/);
+});
+
+test('ticking watching adds its fifth line to what the card lists, and the plan stays the same', () => {
+  const offer = { ...inboxOffer(), plan: { ...inboxOffer().plan, monitoring: { time: '09:00' } } };
+  assert.equal(planWithWatching(offer, false).lines.length, 4);
+  const ticked = planWithWatching(offer, true);
+  assert.equal(ticked.lines.length, 5);
+  assert.equal(ticked.lines[4].name, 'Watching turned on');
+  assert.equal(ticked.digest, offer.plan.digest, 'the tick is not in the digest');
+  assert.equal(offer.plan.lines.length, 4, 'the offer itself is not changed');
+  // A plan that offers no watching ignores a tick.
+  assert.equal(planWithWatching(inboxOffer(), true).lines.length, 4);
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences(ticked);
+  assert.ok(effects.some(effect => effect.startsWith('Watching turned on')));
 });
 
 test('the confirmation line names plugins only for a plan that installs one', () => {

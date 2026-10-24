@@ -710,8 +710,14 @@ type FolderOfferView struct {
 	Needs       []BuildFolderNeed       `json:"needs,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
-	Plan                   *FolderSetupPlan   `json:"plan,omitempty"`
-	SetupUnavailableReason string             `json:"setup_unavailable_reason,omitempty"`
+	Plan                   *FolderSetupPlan `json:"plan,omitempty"`
+	SetupUnavailableReason string           `json:"setup_unavailable_reason,omitempty"`
+	// SetupUnavailableMessage is the host's own words for a refusal it can
+	// explain (File Janitor's message for a root it will not take).
+	SetupUnavailableMessage string `json:"setup_unavailable_message,omitempty"`
+	// Tidied is the File Janitor workspace that already tidies an inbox folder
+	// (exact, ancestor or descendant): the card opens it instead.
+	Tidied                 *FolderTidiedView  `json:"tidied,omitempty"`
 	Readiness              *FolderSetupVisual `json:"readiness,omitempty"`               // display only; never confirms setup
 	PrerequisitesAvailable bool               `json:"prerequisites_available,omitempty"` // separate reviewed plugin-only controls
 	// Availability says, in the words a proposal uses (FolderAvailability*), why
@@ -807,6 +813,13 @@ type FolderSubjectView struct {
 	Shape  string `json:"shape,omitempty"`
 	Marker string `json:"marker,omitempty"`
 	IsRoot bool   `json:"is_root,omitempty"`
+}
+
+// FolderTidiedView names the workspace that already tidies a folder and the
+// page that opens it. It never carries a path.
+type FolderTidiedView struct {
+	Name  string `json:"name"`
+	Route string `json:"route"`
 }
 
 // FolderDecisionInput is the user's answer to an offer.

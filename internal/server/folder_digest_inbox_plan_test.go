@@ -1,11 +1,15 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestInboxPlan_LinesInTheCardsOrderWithNoModelAndNoDownload(t *testing.T) {
@@ -84,6 +88,42 @@ func TestInboxPlan_ATakenNameGetsTheNextFreeOne(t *testing.T) {
 	plan := f.plan(t)
 	if plan.Intent.Inbox.WorkspaceName != "Downloads 3" || plan.Lines[1].Name != "A File Janitor workspace named Downloads 3" {
 		t.Fatalf("name = %q, line %q", plan.Intent.Inbox.WorkspaceName, plan.Lines[1].Name)
+	}
+}
+
+// FR16: a folder another File Janitor already tidies, or a root File Janitor
+// refuses, is said at plan time with nothing created. A File Janitor for a
+// different folder does not block (the fake reports no owner for it).
+func TestInboxPlan_AFolderAlreadyTidiedOrRefusedIsSaidBeforeAnyWrite(t *testing.T) {
+	f := newInboxFixture(t, "create")
+	request := personalassistant.FolderSetupRequest{UserID: "local", Offer: f.offer, Path: f.path}
+	other := &workspace.Workspace{ID: "ws-old", Name: "Old Downloads", FolderSlug: "old-downloads"}
+	f.world.workspaces[other.ID] = other
+	f.janitor.owner = &filejanitor.RootOwner{WorkspaceID: other.ID, WorkspaceName: other.Name}
+	_, err := f.host.Plan(context.Background(), request)
+	var refusal interface {
+		SetupPreviewReason() string
+		SetupRefusal() (string, string, string)
+	}
+	if !errors.As(err, &refusal) || refusal.SetupPreviewReason() != "folder_tidied" {
+		t.Fatalf("tidied folder => %v", err)
+	}
+	if _, name, route := refusal.SetupRefusal(); name != "Old Downloads" || route != "/workspaces/old-downloads?panel=file-janitor" {
+		t.Fatalf("owner = %q %q", name, route)
+	}
+	f.janitor.owner = nil
+	f.janitor.reviewErr = &filejanitor.SetupError{Code: filejanitor.CodeInvalidPath, Message: "Ori's own workspaces folder cannot be tidied."}
+	_, err = f.host.Plan(context.Background(), request)
+	if !errors.As(err, &refusal) || refusal.SetupPreviewReason() != "root_refused" {
+		t.Fatalf("refused root => %v", err)
+	}
+	if message, _, _ := refusal.SetupRefusal(); message != "Ori's own workspaces folder cannot be tidied." {
+		t.Fatalf("message = %q", message)
+	}
+	// Nothing was created by either answer, and a folder with no owner plans.
+	f.janitor.reviewErr = nil
+	if _, err := f.host.Plan(context.Background(), request); err != nil || len(f.world.writes) != 0 {
+		t.Fatalf("a free folder => %v, writes %v", err, f.world.writes)
 	}
 }
 

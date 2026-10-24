@@ -61,6 +61,15 @@
                   aria-describedby="personalAssistantFolderBriefHint"></textarea>
         <p id="personalAssistantFolderBriefHint" class="pa-folder__note">This becomes the workspace goal. Up to 300 characters; you can change it later.</p>
       </div>
+      <!-- An inbox folder's optional watching: off unless ticked. -->
+      <div id="personalAssistantFolderMonitoringField" class="pa-folder__monitoring" hidden>
+        <div class="form-check">
+          <input id="personalAssistantFolderMonitoring" class="form-check-input" type="checkbox"
+                 aria-describedby="personalAssistantFolderMonitoringHint">
+          <label id="personalAssistantFolderMonitoringLabel" class="form-check-label" for="personalAssistantFolderMonitoring"></label>
+        </div>
+        <p id="personalAssistantFolderMonitoringHint" class="pa-folder__note"></p>
+      </div>
     </div>
     <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
     <!-- A folder of several projects: the proposed group and its member

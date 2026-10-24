@@ -15,7 +15,16 @@ import (
 // review to its verified outcome, with the first batch the host reads back.
 func resolvedInboxHire(t *testing.T, batch FolderFirstBatch) (*folderDigestFixture, string) {
 	t.Helper()
+	f, offerID, _ := resolvedInboxHireWatching(t, batch, false)
+	return f, offerID
+}
+
+// resolvedInboxHireWatching is resolvedInboxHire with the watching checkbox
+// ticked or not; it also returns the digest of the plan the user confirmed.
+func resolvedInboxHireWatching(t *testing.T, batch FolderFirstBatch, watching bool) (*folderDigestFixture, string, *fakeFolderSetup) {
+	t.Helper()
 	f, service, source, setup, _ := inboxServiceFixture(t)
+	setup.monitoring = &FolderMonitoringOffer{Time: "09:00"}
 	ctx := context.Background()
 	observed, err := service.Observe(ctx, source, "chip", "desktop")
 	if err != nil {
@@ -46,7 +55,7 @@ func resolvedInboxHire(t *testing.T, batch FolderFirstBatch) (*folderDigestFixtu
 	if err != nil || read.Plan == nil {
 		t.Fatalf("review plan = %+v %v", read, err)
 	}
-	if _, err := f.service.StartSetup(ctx, "local", view.ID, FolderSetupInput{RequestID: "hire-1", PlanDigest: read.Plan.Digest}); err != nil {
+	if _, err := f.service.StartSetup(ctx, "local", view.ID, FolderSetupInput{RequestID: "hire-1", PlanDigest: read.Plan.Digest, Monitoring: watching}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the inbox hire to resolve", func() bool {
@@ -54,7 +63,28 @@ func resolvedInboxHire(t *testing.T, batch FolderFirstBatch) (*folderDigestFixtu
 		offer := doc.Offer(view.ID)
 		return err == nil && offer != nil && offer.Status == FolderOfferResolved
 	})
-	return f, view.ID
+	return f, view.ID, setup
+}
+
+// The watching checkbox is the user's tick, outside the plan digest: unticked
+// the run is asked for no monitoring, ticked it is, and its fifth line shows.
+func TestFolderInbox_TheWatchingTickTravelsInTheRequestNotThePlan(t *testing.T) {
+	batch := FolderFirstBatch{Outcome: FolderFirstBatchEmpty, Route: "/workspaces/desktop?panel=file-janitor"}
+	for _, watching := range []bool{false, true} {
+		f, offerID, setup := resolvedInboxHireWatching(t, batch, watching)
+		offer, _ := storedFirstBatch(t, f, offerID)
+		ran := setup.ran[0]
+		if ran.Monitoring != watching || offer.Setup.Monitoring != watching {
+			t.Fatalf("watching %v: run asked %v, stored %v", watching, ran.Monitoring, offer.Setup.Monitoring)
+		}
+		hasLine := false
+		for _, line := range offer.Setup.Lines {
+			hasLine = hasLine || line.Name == "Watching turned on"
+		}
+		if hasLine != watching || len(ran.Plan.Lines) != len(offer.Setup.Lines) {
+			t.Fatalf("watching %v: fifth line %v, run lines %d stored %d", watching, hasLine, len(ran.Plan.Lines), len(offer.Setup.Lines))
+		}
+	}
 }
 
 func storedFirstBatch(t *testing.T, f *folderDigestFixture, offerID string) (FolderOffer, *FolderFirstBatch) {

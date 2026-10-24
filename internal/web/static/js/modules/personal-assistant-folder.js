@@ -472,6 +472,47 @@ export function isInboxFolderOffer(offer) {
   );
 }
 
+const WORKSPACE_PAGE = /^\/workspaces\/[a-z0-9][a-z0-9-]*(?:\?panel=file-janitor)?$/;
+
+// inboxRefusalView is the card of an inbox folder that cannot be hired for (FR16):
+// "File Curator already tidies <folder>" with Open it, or the hire's headline with
+// File Janitor's own reason and no primary. Null while the folder can be hired for.
+function inboxRefusalView(offer, base, subject) {
+  if (base.decided || offer.plan) return null;
+  const reason = String(offer.setup_unavailable_reason || '');
+  const message = String(offer.setup_unavailable_message || '').trim();
+  if (reason === 'folder_tidied') {
+    const route = String(offer.tidied?.route || '').trim();
+    return {
+      ...base,
+      headline: segments(['File Curator already tidies ', { text: subject }]),
+      question: offer.tidied?.name
+        ? `${offer.tidied.name} already keeps this folder tidy, so nothing new is created.`
+        : 'Another workspace already keeps this folder tidy, so nothing new is created.',
+      reason: '',
+      actions: WORKSPACE_PAGE.test(route)
+        ? [{ id: 'open-tidied', label: 'Open it', style: 'primary', href: route }]
+        : [],
+      plan: null,
+      hire: null,
+      setup: null
+    };
+  }
+  if (reason === 'root_refused') {
+    return {
+      ...base,
+      headline: segments(['Hire File Curator for ', { text: subject }, ' (unavailable)']),
+      question: message || 'File Janitor cannot use this folder. Nothing is created.',
+      reason: '',
+      actions: [],
+      plan: null,
+      hire: null,
+      setup: null
+    };
+  }
+  return null;
+}
+
 // inboxConfirmView is an inbox folder's hire card: Hire File Curator (or
 // Assign it, when a saved File Curator exists), the one question, the plan's
 // lines and Hire & start or Not now. It installs nothing and has no
@@ -494,6 +535,10 @@ function inboxConfirmView(offer, base, subject) {
     ];
   else if (hire && continuing)
     actions = [{ id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true }];
+  // Another workspace already tidies this folder, or File Janitor will not take
+  // it: the card says so, creates nothing, and offers the owner when there is one.
+  const refusal = inboxRefusalView(offer, base, subject);
+  if (refusal) return refusal;
   const lines = globalThis.OriFolderRecognitionLines;
   return {
     ...base,
@@ -2357,6 +2402,7 @@ const state = {
   // The brief typed on a hire card: which offer, and the text. Untouched, the
   // card shows the plan's default and sends nothing, so the server's applies.
   brief: { offerId: '', value: '', typed: false },
+  monitoring: { offerId: '', checked: false },
   digest: null,
   offer: null,
   busy: false,
@@ -2528,6 +2574,10 @@ function elements() {
     hireDetail: document.getElementById('personalAssistantFolderHireDetail'),
     briefField: document.getElementById('personalAssistantFolderBriefField'),
     brief: document.getElementById('personalAssistantFolderBrief'),
+    monitoringField: document.getElementById('personalAssistantFolderMonitoringField'),
+    monitoring: document.getElementById('personalAssistantFolderMonitoring'),
+    monitoringLabel: document.getElementById('personalAssistantFolderMonitoringLabel'),
+    monitoringHint: document.getElementById('personalAssistantFolderMonitoringHint'),
     planHeading: document.getElementById('personalAssistantFolderPlanHeading'),
     planHeadingText: document.getElementById('personalAssistantFolderPlanHeadingText'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
@@ -3028,6 +3078,39 @@ function renderHire(els, hire, offer) {
     els.brief.value = typed === null ? hire.brief.value : typed;
   }
   if (els.brief) els.brief.disabled = state.busy;
+  // Watching is offered only by a plan that names it, and is off until ticked.
+  if (els.monitoringField) els.monitoringField.hidden = !hire.monitoring;
+  if (hire.monitoring && els.monitoring) {
+    setText(els.monitoringLabel, hire.monitoring.label, false);
+    setText(els.monitoringHint, hire.monitoring.hint, false);
+    els.monitoring.checked = monitoringChosen(offer);
+    els.monitoring.disabled = state.busy;
+  }
+}
+
+// planWithWatching is the offer's plan as the card shows it: with the fifth line
+// "Watching turned on" once the user ticked watching, so every list of what
+// Hire and start will do says it. The digest is the plan's own; the tick is not in it.
+export function planWithWatching(offer, chosen = monitoringChosen(offer)) {
+  const plan = offer?.plan;
+  if (!plan?.monitoring || !chosen) return plan || null;
+  return {
+    ...plan,
+    lines: [
+      ...(Array.isArray(plan.lines) ? plan.lines : []),
+      {
+        kind: 'mode',
+        name: 'Watching turned on',
+        detail:
+          'Ori notices new files after a short settle time and proposes them for review. Nothing is filed by itself.'
+      }
+    ]
+  };
+}
+
+// monitoringChosen is whether the user ticked watching on this offer's card.
+function monitoringChosen(offer) {
+  return Boolean(offer?.id) && state.monitoring.offerId === offer.id && state.monitoring.checked;
 }
 
 function renderOffer(place) {
@@ -3132,7 +3215,7 @@ function renderOffer(place) {
   }
   globalThis.OriFolderSetupVisual.renderConsequences(
     document.getElementById('personalAssistantFolderConsequences'),
-    !state.offer?.setup && !receipt.visible ? state.offer?.plan : null
+    !state.offer?.setup && !receipt.visible ? planWithWatching(state.offer) : null
   );
   globalThis.OriFolderSetupVisual.renderProgress(
     document.getElementById('personalAssistantFolderProgress'),
@@ -3208,7 +3291,10 @@ function renderOffer(place) {
   if (els.plan) {
     // After a hire, its agent's first look follows the receipt as two lines.
     const look = !view.setup && !view.plan && receipt.visible ? receipt.hireLook : null;
-    const lines = view.setup?.lines || view.plan?.lines || (look?.visible ? look.lines : []);
+    let lines = view.setup?.lines || view.plan?.lines || (look?.visible ? look.lines : []);
+    // Ticking watching adds its fifth line before the click; a run carries its own.
+    if (!view.setup && view.plan?.lines && view.hire?.monitoring && monitoringChosen(state.offer))
+      lines = [...lines, { kind: 'mode', name: view.hire.monitoring.line, detail: '', state: '' }];
     renderSetupLines(els.plan, lines);
     els.plan.hidden = !lines.length;
     els.plan.dataset.mode = view.setup ? view.setup.status : look?.visible ? 'look' : 'plan';
@@ -3666,6 +3752,8 @@ async function startOneCardSetup(action) {
     // default, and a cleared field is sent empty for the same default.
     const brief = offer.plan?.brief_default ? briefFor(offer) : null;
     if (brief !== null) body.brief = brief;
+    // Watching is the user's own tick, sent with the click and not part of the plan.
+    if (offer.plan?.monitoring && monitoringChosen(offer)) body.monitoring = true;
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
@@ -4829,6 +4917,10 @@ function init() {
   });
   els.workspaceName?.addEventListener('input', () => {
     state.workspaceName = els.workspaceName.value;
+  });
+  els.monitoring?.addEventListener('change', () => {
+    state.monitoring = { offerId: String(state.offer?.id || ''), checked: els.monitoring.checked };
+    render();
   });
   els.brief?.addEventListener('input', () => {
     state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };

@@ -199,6 +199,14 @@ func (r *fakeInboxReviewer) prepareFirstReview(_ context.Context, request assist
 		if !monitoring && !r.world.settings[request.WorkspaceID].ManualScansOnly() {
 			return assistantsetup.PrepareReviewResult{}, errors.New("confirm manual scans first")
 		}
+		if monitoring {
+			// The reviewed approval is recorded and the watcher and daily scan
+			// switched on, as PrepareMetadataReview does.
+			settings := r.world.settings[request.WorkspaceID]
+			settings.AutomationApprovedAt, settings.Paused = time.Unix(300, 0), false
+			r.world.settings[request.WorkspaceID] = settings
+			r.world.writes = append(r.world.writes, "monitoring")
+		}
 		receipt = filejanitor.ScanOperationReceipt{
 			OperationID: request.ScanOperation, RootID: request.Review.RootGenerationID, PrivacyMode: filejanitor.ContentModeMetadataOnly,
 			Outcome: filejanitor.ScanOutcomeNoEligible, EligibleCount: r.eligible, IneligibleCount: 2,
@@ -223,6 +231,8 @@ type inboxFixture struct {
 	path     string
 	identity string
 	offer    personalassistant.FolderOffer
+	// monitoring is the tick on the card's watching checkbox.
+	monitoring bool
 }
 
 func newInboxFixture(t *testing.T, action string) *inboxFixture {
@@ -290,11 +300,11 @@ func (f *inboxFixture) plan(t *testing.T) personalassistant.FolderSetupPlan {
 func (f *inboxFixture) run(t *testing.T, plan personalassistant.FolderSetupPlan) (personalassistant.FolderSetupUpdate, error) {
 	t.Helper()
 	if f.offer.Setup == nil {
-		f.offer.Setup = &personalassistant.FolderSetupRun{PlanDigest: plan.Digest, Intent: plan.Intent}
+		f.offer.Setup = &personalassistant.FolderSetupRun{PlanDigest: plan.Digest, Intent: plan.Intent, Monitoring: f.monitoring}
 	}
 	var last personalassistant.FolderSetupUpdate
 	err := f.host.Run(context.Background(), personalassistant.FolderSetupRequest{
-		UserID: "local", Offer: f.offer, Path: f.path, Plan: plan, Brief: "Keep my downloads tidy.",
+		UserID: "local", Offer: f.offer, Path: f.path, Plan: plan, Brief: "Keep my downloads tidy.", Monitoring: f.monitoring,
 		Update: func(_ context.Context, update personalassistant.FolderSetupUpdate) error {
 			if update.RunID != "" {
 				f.offer.Setup.RunID = update.RunID
@@ -376,6 +386,36 @@ func TestInboxRun_CreatesTheWorkspaceGrantsTheFolderAndPreparesTheFirstBatch(t *
 	}
 	if got := strings.Join(kinds, "|"); got != "agent=file curator, added|workspace=created|folder=linked where it is; names, types, sizes and dates only; Filed is inside it|batch=23 proposed · 4 need review" {
 		t.Fatalf("receipt = %s", got)
+	}
+}
+
+// FR9, FR15 step 3: ticked, the reviewed approval is recorded and watching is
+// switched on with the first scan, and no manual-scan decision is made;
+// unticked (every other test) approval stays unset.
+func TestInboxRun_ATickedCheckboxTurnsWatchingOnAndNothingElseDoes(t *testing.T) {
+	f := newInboxFixture(t, "create")
+	f.monitoring = true
+	plan := f.plan(t)
+	if plan.Monitoring == nil || plan.Monitoring.Time != "09:00" {
+		t.Fatalf("the plan names the daily time: %+v", plan.Monitoring)
+	}
+	// The tick is not part of the digest the user confirmed.
+	if again := f.plan(t); again.Digest != plan.Digest {
+		t.Fatal("the checkbox changed the plan digest")
+	}
+	update, err := f.run(t, plan)
+	if err != nil || update.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("run = %+v, %v", update, err)
+	}
+	if got := strings.Join(f.world.writes, ","); got != "workspace,grant,monitoring,scan" {
+		t.Fatalf("writes = %q (no manual decision when watching is on)", got)
+	}
+	settings := f.world.settings[f.team.created[0].Descriptor.WorkspaceID]
+	if settings.AutomationApprovedAt.IsZero() || settings.Paused {
+		t.Fatalf("watching not turned on: %+v", settings)
+	}
+	if len(f.reviewer.prepared) != 1 || !f.reviewer.prepared[0] {
+		t.Fatalf("prepared with monitoring = %v", f.reviewer.prepared)
 	}
 }
 

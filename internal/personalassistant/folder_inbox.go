@@ -194,6 +194,31 @@ func (s *FolderDigestService) resolveInbox(ctx context.Context, userID, offerID 
 	return nil
 }
 
+type folderSubjectPathKey struct{}
+
+// withFolderSubjectPath carries the folder a review is about to a plan read,
+// for a review that is only being described and is not stored yet: the held
+// selection names it. The path never leaves the server.
+func withFolderSubjectPath(ctx context.Context, path string) context.Context {
+	return context.WithValue(ctx, folderSubjectPathKey{}, path)
+}
+
+// planRequest is setupRequest for a plan read. An inbox folder's plan checks the
+// folder against File Janitor's other workspaces and its root rules, so the
+// request carries the folder's path (never sent to the browser).
+func (s *FolderDigestService) planRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
+	req := s.setupRequest(ctx, userID, offer)
+	if !isInboxOffer(offer) {
+		return req
+	}
+	if path, _ := ctx.Value(folderSubjectPathKey{}).(string); strings.TrimSpace(path) != "" {
+		req.Path = path
+	} else if path, err := s.subjectPathOf(offer); err == nil {
+		req.Path = path
+	}
+	return req
+}
+
 // inboxHire is the user's resolved inbox hire with a first batch, found by its
 // offer among their own folder setups: never from a browser's word alone.
 func inboxHire(doc FolderDigestDocument, offerID string) (*FolderOffer, error) {

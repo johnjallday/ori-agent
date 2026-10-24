@@ -410,7 +410,11 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 	// Describe without a canonical review/root grant: that grant can only
 	// exist after the user's later Review click is successfully persisted.
 	view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
-	s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
+	planCtx := ctx
+	if candidate, found := observedReviewCandidate(held, candidateID); found {
+		planCtx = withFolderSubjectPath(ctx, candidate.Path)
+	}
+	s.digest.attachSetupPlan(planCtx, target.UserID, offer, &view)
 	option := FolderReviewOption{CandidateID: candidateID, WorkspaceType: "Blank workspace", Presentation: folderReviewPresentation(offer, view)}
 	// An option that cannot be set up right now is still listed, with its
 	// reason (PRD FR10). It is never a control that leads nowhere: its state
@@ -510,7 +514,10 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 	// A recognized integration can explain its prerequisites before it has a
 	// complete plan. Opening that canonical review is observational, not a
 	// confirmation. Software keeps its existing eligibility rules.
-	if option.Presentation != nil && option.Presentation.State == "unavailable" && recognition.IntegrationKey == "" {
+	// An inbox folder's card says why it cannot be hired for (already tidied,
+	// or a root File Janitor refuses), so it opens even then.
+	if option.Presentation != nil && option.Presentation.State == "unavailable" && recognition.IntegrationKey == "" &&
+		recognition.Shape != string(folderdigest.ShapeInbox) {
 		return FolderHireCandidate{}
 	}
 	return FolderHireCandidate{CandidateID: option.CandidateID}

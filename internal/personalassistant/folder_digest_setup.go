@@ -81,15 +81,24 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	if isSoftwareOffer(offer) && !softwarePlannable(offer, v) {
 		return
 	}
-	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
+	plan, err := s.deps.Setup.Plan(ctx, s.planRequest(ctx, userID, offer))
 	if err != nil || len(plan.Lines) == 0 {
 		v.SetupUnavailableReason = "setup_unavailable"
 		v.Availability = setupAvailability(err)
 		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
 			switch reason.SetupPreviewReason() {
 			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable",
-				"project_exists", "assistant_unavailable", "name_taken":
+				"project_exists", "assistant_unavailable", "name_taken", "folder_tidied", "root_refused":
 				v.SetupUnavailableReason = reason.SetupPreviewReason()
+			}
+		}
+		if refusal, ok := err.(interface {
+			SetupRefusal() (message, ownerName, ownerRoute string)
+		}); ok {
+			message, name, route := refusal.SetupRefusal()
+			v.SetupUnavailableMessage = truncateRunes(strings.TrimSpace(message), 300)
+			if name != "" && strings.HasPrefix(route, "/workspaces/") && !strings.HasPrefix(route, "//") {
+				v.Tidied = &FolderTidiedView{Name: truncateRunes(name, 120), Route: route}
 			}
 		}
 		return
@@ -126,6 +135,9 @@ func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, o
 	req := FolderSetupRequest{UserID: userID, Offer: offer}
 	if review := offer.ConversationReview; review != nil {
 		req.WorkspaceName = review.WorkspaceName
+	}
+	if isInboxOffer(offer) {
+		return req
 	}
 	if isSoftwareOffer(offer) {
 		// A request the service cannot fill in (the folder is no longer held, or
@@ -295,7 +307,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	// confirmed on.
 	var plan FolderSetupPlan
 	if offer.Setup == nil {
-		fresh, planErr := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, *offer))
+		fresh, planErr := s.deps.Setup.Plan(ctx, s.planRequest(withFolderSubjectPath(ctx, path), userID, *offer))
 		if planErr != nil {
 			return FolderOfferView{}, planErr
 		}
@@ -360,6 +372,19 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			entryName = item.EntryName
 		}
 		lines := append([]FolderPlanLine(nil), plan.Lines...)
+		// A ticked watching checkbox is the user's own choice, outside the
+		// digest: the run carries it as a fifth line, and a resume keeps it.
+		monitoring := plan.Intent.Inbox != nil && input.Monitoring && plan.Monitoring != nil
+		if item.Setup != nil {
+			monitoring = plan.Intent.Inbox != nil && item.Setup.Monitoring
+		}
+		if monitoring {
+			if !hasPlanLineKind(lines, FolderPlanMode) {
+				lines = append(lines, FolderPlanLine{Kind: FolderPlanMode, Name: "Watching turned on",
+					Detail: "Ori notices new files after a short settle time and proposes them for review. Nothing is filed by itself."})
+			}
+			plan.Lines = append([]FolderPlanLine(nil), lines...)
+		}
 		for i := range lines {
 			if lines[i].State == "" {
 				lines[i].State = FolderLineWaiting
@@ -372,7 +397,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
 			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent, Brief: brief,
-			Visual: CloneFolderSetupVisual(plan.Visual),
+			Visual: CloneFolderSetupVisual(plan.Visual), Monitoring: monitoring,
 		}
 		if plan.Hire != nil {
 			hire := *plan.Hire
@@ -399,6 +424,15 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	return s.viewFor(ctx, userID, started, binding.Paused), nil
 }
 
+func hasPlanLineKind(lines []FolderPlanLine, kind string) bool {
+	for _, line := range lines {
+		if line.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // runSetup drives one run on a context that outlives the request, then lets the
 // existing journey verification settle the offer. A run that cannot be proved
 // to have made a workspace for this exact folder never resolves the offer.
@@ -412,6 +446,7 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	}
 	if offer.Setup != nil {
 		request.Brief = offer.Setup.Brief
+		request.Monitoring = offer.Setup.Monitoring
 	}
 	if review := offer.ConversationReview; review != nil {
 		request.WorkspaceName = review.WorkspaceName

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -82,6 +83,41 @@ func (h *folderSetupHost) inboxDeps() (inboxCollaborators, bool) {
 	}, true
 }
 
+// inboxRefused is a plan that cannot be offered because of the folder itself:
+// another workspace already tidies it, or File Janitor refuses the root. The
+// card shows the message, and for an owner the page that opens it.
+type inboxRefused struct {
+	reason, message, ownerName, ownerRoute string
+}
+
+func (e inboxRefused) Error() string              { return e.message }
+func (e inboxRefused) Unwrap() error              { return errSetupUnavailable }
+func (e inboxRefused) SetupPreviewReason() string { return e.reason }
+func (e inboxRefused) SetupRefusal() (message, ownerName, ownerRoute string) {
+	return e.message, e.ownerName, e.ownerRoute
+}
+
+// inboxRefusal reads the two folder refusals of FR16 from File Janitor itself.
+// nil means the folder may be hired for.
+func (h *folderSetupHost) inboxRefusal(deps inboxCollaborators, path string) error {
+	if owner, found := deps.janitor.FolderOwner(path); found && owner != nil {
+		refused := inboxRefused{reason: "folder_tidied", message: "File Curator already tidies this folder."}
+		if ws, err := deps.workspace(owner.WorkspaceID); err == nil && ws != nil && todaySafeFolderSlug(ws.FolderSlug) {
+			refused.ownerName = strings.TrimSpace(ws.Name)
+			refused.ownerRoute = "/workspaces/" + ws.FolderSlug + "?panel=file-janitor"
+		}
+		return refused
+	}
+	if _, err := deps.janitor.ReviewSelectedSetup("", path, nil); err != nil {
+		return inboxRefused{reason: "root_refused", message: inboxRefusal(err)}
+	}
+	return nil
+}
+
+var inboxSafeSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
+
+func todaySafeFolderSlug(slug string) bool { return inboxSafeSlug.MatchString(slug) }
+
 // inboxNameTries bounds the search for a free workspace name ("Downloads 2").
 const inboxNameTries = 20
 
@@ -117,6 +153,13 @@ func (h *folderSetupHost) inboxPlan(ctx context.Context, req personalassistant.F
 	review := req.Offer.ConversationReview
 	if !ok || review == nil || strings.TrimSpace(review.CandidateIdentity) == "" || strings.TrimSpace(req.Offer.Subject.Name) == "" {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
+	}
+	// A folder another File Janitor already tidies, or a root File Janitor will
+	// not take, is said on the card itself, before any write (FR16).
+	if path := strings.TrimSpace(req.Path); path != "" {
+		if refusal := h.inboxRefusal(deps, path); refusal != nil {
+			return personalassistant.FolderSetupPlan{}, refusal
+		}
 	}
 	team, err := deps.team.ReviewFileJanitorCreation(ctx)
 	if err != nil || len(team.Roles) != 1 {
@@ -165,5 +208,11 @@ func (h *folderSetupHost) inboxPlan(ctx context.Context, req personalassistant.F
 		plan.Hire.Model = loadDefaultSettings().Model
 	}
 	plan.BriefDefault = personalassistant.FolderDefaultBrief(folderdigest.ShapeInbox, roster.Goal)
+	// Watching is optional and off; the plan only says the daily time it would
+	// use: the blueprint recipe's (File Janitor's default when it has none).
+	plan.Monitoring = &personalassistant.FolderMonitoringOffer{Time: filejanitor.DefaultDailyScanLocalTime}
+	if review, err := deps.janitor.ReviewSelectedSetup("", req.Path, nil); err == nil && strings.TrimSpace(review.Terms.DailyScanLocalTime) != "" {
+		plan.Monitoring.Time = review.Terms.DailyScanLocalTime
+	}
 	return plan, nil
 }
