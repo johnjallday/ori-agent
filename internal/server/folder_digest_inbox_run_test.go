@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/testutil/softwarefixture"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -517,6 +518,24 @@ func TestInboxRun_AFailureStopsAtItsStepAndKeepsWhatFinished(t *testing.T) {
 	}
 }
 
+// replaceInboxFolder puts an empty, different directory at path. The old one is
+// moved aside first and deleted after, because Linux hands a deleted
+// directory's inode number to its replacement, which would leave the two
+// indistinguishable.
+func replaceInboxFolder(t *testing.T, path string) {
+	t.Helper()
+	discard, err := softwarefixture.Vacate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := discard(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A first scan that does not complete does not undo the hire (FR20): the
 // setup finishes with the workspace, File Curator and the link, the first batch
 // is a failed one, and Retry runs the scan alone under an attempt of its own.
@@ -569,12 +588,7 @@ func TestInboxRun_AFirstScanThatDidNotCompleteIsRetriedAlone(t *testing.T) {
 		t.Fatalf("retry created %d / granted %d", len(f.team.created), len(f.janitor.grants))
 	}
 	// A folder replaced since is not scanned.
-	if err := os.Remove(f.path); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(f.path, 0o750); err != nil {
-		t.Fatal(err)
-	}
+	replaceInboxFolder(t, f.path)
 	if _, err := f.host.inboxRetryFirstBatch(context.Background(), "local", f.offer, 3); err == nil {
 		t.Fatal("a replaced folder was scanned")
 	}
@@ -603,12 +617,7 @@ func TestInboxRun_RefusesAStaleOrForeignRecipe(t *testing.T) {
 func TestInboxRun_AFolderReplacedSinceTheReviewNeedsAFreshPick(t *testing.T) {
 	f := newInboxFixture(t, "create")
 	plan := f.plan(t)
-	if err := os.Remove(f.path); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(f.path, 0o750); err != nil {
-		t.Fatal(err)
-	}
+	replaceInboxFolder(t, f.path)
 	update, err := f.run(t, plan)
 	if err != nil || update.StopReason != personalassistant.FolderStopNeedsPick || len(f.world.writes) != 0 {
 		t.Fatalf("update = %+v, err %v, writes %v", update, err, f.world.writes)
