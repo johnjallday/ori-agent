@@ -2143,3 +2143,25 @@ test('a card says what it does not lead with since a No thanks, with Show', () =
   );
   assert.equal(capabilityHiddenView({ id: 'offer-3', status: 'pending' }).visible, false);
 });
+
+test('a waiting card is placed in the Needs you cards, and opens the strip only from this tab', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  // One host: Needs you's cards container (els.needs), never a slot that Home
+  // moves under a folded line.
+  assert.match(source, /needs: document\.getElementById\('personalAssistantNeedsYouCards'\)/);
+  assert.match(source, /const home = state\.reviewSlot \|\| \(needs \? els\.needs : els\.root\);/);
+  assert.doesNotMatch(source, /needsHost/);
+  // The card claims itself while it is in this tab's conversation; moving to
+  // Needs you asks Home to open the strip with that claim, once.
+  assert.match(source, /if \(place === 'thread'\) claimNeedsItem\(offerKey\);/);
+  assert.match(
+    source,
+    /window\.PersonalAssistantToday\?\.reveal\?\.\('folder', \{ key: offerKey, item: els\.offer \}\)/
+  );
+  // A first look this tab started claims its report by the look's task.
+  assert.match(source, /claimNeedsItem\(`offer:\$\{look\.offer_id\}`\);/);
+  assert.match(
+    source,
+    /needsItemClaimed\(`offer:\$\{id\}`\)\) claimNeedsItem\(`folder:\$\{lookTask\}`\);/
+  );
+});

@@ -28,6 +28,12 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
+import {
+  claimNeedsItem,
+  linkNeedsYouWords,
+  needsItemClaimed,
+  revealReportCard
+} from './personal-assistant-needs-reveal.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import { setupQuestActionURL } from './setup-quest-links.js';
 import { createFolderPrerequisites, renderFolderPrerequisites } from './folder-prerequisites.js';
@@ -3163,14 +3169,18 @@ function renderOffer(place) {
   // press mutate its offer while that older read is still being hydrated.
   const actionBusy = state.busy || conversationReviewLoading() || prerequisites.active();
   // The one offer card is a reply in the conversation while the flow runs
-  // there, and a card in Needs you when it was found waiting on load (right
-  // under Today's summary line while Today is folded, as Home says). It is
-  // moved, never copied, so its controls and their handlers stay the same.
+  // there, and a card in Needs you when it was found waiting on load (counted
+  // on Today's strip while that is folded). It is moved, never copied, so its
+  // controls and their handlers stay the same.
   const needs = place === 'needs' && els.needs;
-  const home =
-    state.reviewSlot ||
-    (needs ? window.PersonalAssistantToday?.needsHost?.() || els.needs : els.root);
+  const home = state.reviewSlot || (needs ? els.needs : els.root);
   if (els.offer.parentElement !== home) home.append(els.offer);
+  // A card that leaves this tab's conversation for Needs you opens the strip
+  // once (personal-assistant-needs-reveal.js); one found waiting does not.
+  const offerKey = state.offer?.id ? `folder-offer:${state.offer.id}` : '';
+  if (place === 'thread') claimNeedsItem(offerKey);
+  else if (needs && offerKey && els.offer.dataset.placement !== 'needs')
+    window.PersonalAssistantToday?.reveal?.('folder', { key: offerKey, item: els.offer });
   els.offer.dataset.placement = place;
   els.offer.hidden = !view.visible || place === 'none';
   els.root.dataset.state = view.visible
@@ -3924,29 +3934,33 @@ async function refreshFirstLook(offerID) {
   if (after !== 'seeded') state.firstLookMessage = '';
   render();
   announceOffer();
+  // A look this tab started has finished: its report (known by the look's
+  // task) opens the strip once when Today draws it.
+  const finished = before === 'running' && after === 'finished';
+  const lookTask = String(currentFirstLook()?.task_id || '');
+  if (finished && lookTask && needsItemClaimed(`offer:${id}`)) claimNeedsItem(`folder:${lookTask}`);
   if (before !== after) firstLookMoved();
   // A hired agent's look that this page watched finish: the assistant points
-  // at its report.
-  if (
-    before === 'running' &&
-    after === 'finished' &&
-    state.offer?.id === id &&
-    state.offer?.outcome?.first_look
-  ) {
+  // at its report, and "Needs you" in that line opens it.
+  if (finished && state.offer?.id === id && state.offer?.outcome?.first_look) {
     const look = state.offer.first_task;
-    sayInConversation(reportedLine(look?.agent, state.offer.subject?.name || look?.folder_name));
+    const row = sayInConversation(
+      reportedLine(look?.agent, state.offer.subject?.name || look?.folder_name)
+    );
+    linkNeedsYouWords(row, () => revealReportCard(look?.task_id));
   }
 }
 
 // sayInConversation adds one line the host wrote to the assistant's
-// conversation on this page. No model turn is spent on it, and it is not part
-// of the stored history.
+// conversation on this page and returns its row. No model turn is spent on
+// it, and it is not part of the stored history.
 function sayInConversation(line) {
-  if (typeof window === 'undefined' || !line) return;
+  if (typeof window === 'undefined' || !line) return null;
   try {
-    window.OriAskRouting?.appendMessage?.('assistant', line);
+    return window.OriAskRouting?.appendMessage?.('assistant', line) || null;
   } catch (_) {
     // A page without the conversation shows the card alone.
+    return null;
   }
 }
 
@@ -3995,6 +4009,8 @@ async function startFirstLook() {
     started = false;
   }
   if (started) {
+    // This tab started it, so its report will open Today's strip once.
+    claimNeedsItem(`offer:${look.offer_id}`);
     // The run is handed to the executor. Say so now; the read below confirms it.
     applyFirstLook(look.offer_id, {
       ...look,

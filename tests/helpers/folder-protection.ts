@@ -19,7 +19,7 @@ export async function skipOnboarding(page: Page): Promise<void> {
 export async function openNeedsYou(page: Page): Promise<void> {
   await page.goto('/?panel=today');
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
-  const summary = page.locator('#personalAssistantSummaryToggle');
+  const summary = page.locator('#personalAssistantTodayStripToggle');
   await expect(summary).toBeVisible();
   if ((await summary.getAttribute('aria-expanded')) !== 'true') await summary.click();
   await expect(page.locator('#personalAssistantTodaySections')).toBeVisible();

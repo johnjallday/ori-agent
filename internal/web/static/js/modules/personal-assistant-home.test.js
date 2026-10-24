@@ -18,9 +18,7 @@ import {
   safeTodayRoute,
   specialistSetupView,
   studioSectionView,
-  summaryFoldAfter,
-  summaryStripText,
-  summaryStripView,
+  todayStripView,
   todayLabel,
   todaySectionItems,
   todayThreeSectionView,
@@ -231,98 +229,89 @@ test('the progress row is hidden only when there is no work, nothing done today 
   assert.equal(progressRowVisible({ working: 0, done: 0, meetings: true }), true);
 });
 
-test('ready attention defaults folded and preserves explicit expansion across chat and reopen', () => {
-  const rest = { started: false, expanded: false };
-  const folded = { started: true, expanded: false };
-  const shown = { started: true, expanded: true };
-
-  // Ready includes an empty or rehydrated drawer, without requiring a send.
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'ready' }), folded);
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'ready' }), shown);
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'sent' }), folded);
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'folder', by: 'user' }), folded);
-  // The assistant speaking first (its first-folder prompt) folds nothing.
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'folder', by: 'assistant' }), rest);
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'folder' }), rest);
-
-  // Show and Hide reverse each other, and do nothing before a conversation.
-  assert.deepEqual(summaryFoldAfter(folded, { type: 'toggle' }), shown);
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'toggle' }), folded);
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'toggle' }), rest);
-  // Something under Needs you has to be seen.
-  assert.deepEqual(summaryFoldAfter(folded, { type: 'expand' }), shown);
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'expand' }), shown);
-  // Sending or opening another flow must not close something explicitly shown.
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'sent' }), shown);
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'folder', by: 'user' }), shown);
-
-  // Reopening preserves the choice regardless of conversation hydration timing.
-  assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: false }), folded);
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: false }), shown);
-  assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: true }), folded);
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: true }), shown);
-
-  assert.deepEqual(summaryFoldAfter(folded, { type: 'something-else' }), folded);
-  assert.deepEqual(summaryFoldAfter(undefined, undefined), rest);
-});
-
-test('the summary strip says what it folded, and shows only when there is something', () => {
-  assert.equal(
-    summaryStripText({ needs: 2, brief: 'Brief ready', inProgress: 2, doneToday: 5 }),
-    'Needs you 2 · Brief ready · 2 in progress'
-  );
-  // A part with nothing to say is left out.
-  assert.equal(summaryStripText({ needs: 0, brief: 'Brief ready', inProgress: 0 }), 'Brief ready');
-  assert.equal(summaryStripText({ needs: 1, brief: '', inProgress: 0 }), 'Needs you 1');
-  // With nothing in progress, the row's other number is the one worth saying.
-  assert.equal(
-    summaryStripText({ brief: 'Brief failed', doneToday: 3 }),
-    'Brief failed · 3 done today'
-  );
-  assert.equal(summaryStripText({ needs: -1, inProgress: 'x' }), '');
-  assert.equal(summaryStripText(), '');
-  assert.equal(summaryStripText({ unavailable: true }), 'Today sources unavailable');
-  assert.equal(
-    summaryStripView({ started: true, expanded: false }, summaryStripText({ unavailable: true }))
-      .sectionsHidden,
-    true
-  );
-
-  const text = 'Needs you 2';
-  assert.deepEqual(summaryStripView({ started: true, expanded: false }, text), {
+test('the strip reads "Needs you · N" or "Today", and shows only when there is something (FR12, FR16)', () => {
+  assert.deepEqual(todayStripView({ count: 2, hasBrief: true, hasProgress: true }), {
     visible: true,
+    label: 'Needs you · 2',
     expanded: false,
     sectionsHidden: true,
     toggleLabel: 'Show'
   });
-  assert.deepEqual(summaryStripView({ started: true, expanded: true }, text), {
+  assert.deepEqual(todayStripView({ count: 1, expanded: true }), {
     visible: true,
+    label: 'Needs you · 1',
     expanded: true,
     sectionsHidden: false,
     toggleLabel: 'Hide'
   });
-  // Before a conversation nothing is folded, so there is no strip.
-  assert.equal(summaryStripView({ started: false, expanded: false }, text).visible, false);
-  assert.equal(summaryStripView({ started: false, expanded: false }, text).sectionsHidden, false);
-  // With nothing to summarise there is nothing to fold either.
-  assert.equal(summaryStripView({ started: true, expanded: false }, '').visible, false);
-  assert.equal(summaryStripView({ started: true, expanded: false }, '').sectionsHidden, false);
+  // Nothing needs the user: a brief row or a progress row is still worth a line.
+  assert.equal(todayStripView({ hasBrief: true }).label, 'Today');
+  assert.equal(todayStripView({ hasProgress: true }).label, 'Today');
+  assert.equal(todayStripView({ count: 0, hasBrief: true }).visible, true);
+  // Nothing at all: no strip, and nothing under it shows either.
+  for (const empty of [{}, { count: 0 }, { count: -1 }, { count: 'x' }, undefined]) {
+    const view = todayStripView(empty);
+    assert.equal(view.visible, false);
+    assert.equal(view.label, '');
+    assert.equal(view.sectionsHidden, true);
+  }
+  assert.equal(todayStripView({ expanded: true }).expanded, false);
+  // Unreadable sources keep a line, which says so: folded is never an all-clear.
+  assert.equal(todayStripView({ unavailable: true }).label, 'Today · sources unavailable');
+  assert.equal(
+    todayStripView({ count: 3, unavailable: true }).label,
+    'Needs you · 3 · sources unavailable'
+  );
+  assert.equal(todayStripView({ count: 2.7 }).label, 'Needs you · 2');
 });
 
-test('the summary strip is one control in the Today frame, wired to the sections it folds', () => {
+test('the strip is one control in the Today frame, wired to the sections it folds', () => {
   const template = readFileSync(
     new URL('../../../templates/components/personal-assistant-today.tmpl', import.meta.url),
     'utf8'
   );
   assert.match(
     template,
-    /id="personalAssistantSummaryToggle"[^>]*aria-expanded="false"[^>]*aria-controls="personalAssistantTodaySections"/
+    /id="personalAssistantTodayStripToggle"[^>]*aria-expanded="false"[^>]*aria-controls="personalAssistantTodaySections"/
   );
-  // The strip comes before what it stands for.
+  assert.match(template, /id="personalAssistantTodayStripText"/);
+  assert.doesNotMatch(template, /id="personalAssistantSummary/);
+  // The strip comes before what it stands for, after the banner.
   assert.ok(
-    template.indexOf('id="personalAssistantSummary"') <
+    template.indexOf('id="personalAssistantTodayBanner"') <
+      template.indexOf('id="personalAssistantTodayStrip"')
+  );
+  assert.ok(
+    template.indexOf('id="personalAssistantTodayStrip"') <
       template.indexOf('id="personalAssistantTodaySections"')
   );
+});
+
+test('the strip folds on every opening, and only this tab opens it by itself (FR13, FR14)', () => {
+  const home = readFileSync(new URL('./personal-assistant-home.js', import.meta.url), 'utf8');
+  // Opening the drawer folds it, unless a reveal waited for that opening.
+  assert.match(
+    home,
+    /addEventListener\('personal-assistant:opened', \(\) => \{\s*setStripExpanded\(state\.revealOnOpen\);/
+  );
+  // Show and Hide only flip it; nothing else closes it while the drawer is open.
+  assert.match(home, /setStripExpanded\(!state\.stripExpanded\)/);
+  assert.doesNotMatch(home, /personal-assistant:sent/);
+  // An arriving item opens it only through the per-tab claim record.
+  assert.match(home, /if \(key && !takeNeedsReveal\(key\)\) return false;/);
+  assert.match(home, /reveal\('report', \{ key: reportRevealKey\(card\), item: card \}\)/);
+  assert.match(home, /revealOwnReports\(list\);/);
+  // The old fold is gone: one fold mechanism, and no slot under the line.
+  for (const gone of [
+    'summaryStripView',
+    'todayFolded',
+    'foldedNeedsSlot',
+    'needsHost',
+    'NeedsFolded'
+  ])
+    assert.doesNotMatch(home, new RegExp(gone), gone);
+  // The count is what Needs you holds: cards, reports and the queue.
+  assert.match(home, /const count = cards \+ reported \+ queued;/);
 });
 
 test('Today view distinguishes active, paused, partial, no-model, empty, and fatal states', () => {
@@ -340,9 +329,10 @@ test('partial Today always names the limitation even without a source list or ge
     partialTodaySummary({ brief: { opening_summary: 'Prior records are still stored.' } }),
     /unavailable.*Prior records are still stored/
   );
+  // Folded behind the strip, the limitation is still on the line.
   assert.match(
-    summaryStripText({ brief: 'Brief ready', unavailable: true }),
-    /Brief ready.*sources unavailable/
+    todayStripView({ hasBrief: true, unavailable: true }).label,
+    /Today · sources unavailable/
   );
 });
 

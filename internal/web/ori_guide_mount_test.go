@@ -170,7 +170,7 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 		`id="personalAssistantPanelTitle"`, `id="personalAssistantCheckIn"`,
 		`id="personalAssistantMore"`, `id="personalAssistantClose"`,
 		`id="personalAssistantScroll"`, `id="personalAssistantToday"`,
-		`id="personalAssistantTodayBanner"`, `id="personalAssistantSummary"`,
+		`id="personalAssistantTodayBanner"`, `id="personalAssistantTodayStrip"`,
 		`id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
 		// The conversation: the shared activity, then the folder flow as a
@@ -270,7 +270,7 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	for _, absent := range []string{
 		`id="personalAssistantToday"`, `id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
-		`id="personalAssistantSummary"`, `id="homeDailyBrief"`,
+		`id="personalAssistantTodayStrip"`, `id="homeDailyBrief"`,
 	} {
 		if strings.Contains(html, absent) {
 			t.Errorf("non-Home assistant panel unexpectedly contains %s", absent)

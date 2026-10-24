@@ -1161,19 +1161,21 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   opacity: 0.55;
 }
 
-/* On a page that is not Home: how much needs the user, and the way there. */
+/* On a page that is not Home: how much needs the user, and the way there. It
+   reads as the same one-line fold as Home's strip (.personal-assistant-summary). */
 .personal-assistant-panel__needs {
   display: flex;
+  box-sizing: border-box;
+  min-height: 40px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 6px 12px;
   border: 1px solid var(--ori-line);
-  border-left: 3px solid var(--ori-accent);
   border-radius: 10px;
   background: var(--ori-paper);
   color: var(--ori-ink);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   text-decoration: none;
 }
@@ -1584,13 +1586,17 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-weight: 700;
 }
 
-/* What Needs you and the two rows fold into once a conversation starts. */
+/* The strip: one 40px line that Needs you and the two rows fold behind each
+   time the drawer opens ("Needs you · N" or "Today", then Show). */
 .personal-assistant-summary {
   display: flex;
+  box-sizing: border-box;
+  min-height: 40px;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 6px 6px 12px;
+  padding: 3px 4px 3px 12px;
   border: 1px solid var(--ori-line);
   border-radius: 10px;
   background: var(--ori-paper);
@@ -1625,6 +1631,20 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 
 .personal-assistant-summary__toggle:hover {
   background: var(--ori-surface);
+}
+
+/* "Needs you" in the assistant's line about a finished look: it opens the
+   strip at the report. Text-like, so the sentence still reads as one. */
+.personal-assistant-needs-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .personal-assistant-panel .personal-assistant-today__sections {

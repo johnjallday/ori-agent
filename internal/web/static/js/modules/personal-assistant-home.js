@@ -7,11 +7,11 @@ import { prepareTodaysBrief } from './home-daily-brief.js';
 import {
   dailyBriefRowStatus,
   dailyBriefStationLink,
-  dailyBriefStatus,
-  dailyBriefStripStatus
+  dailyBriefStatus
 } from './daily-brief-station.js';
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
 import { isFirstLookReportKind, mountFirstLookReports } from './first-look-report.js';
+import { reportRevealKey, takeNeedsReveal } from './personal-assistant-needs-reveal.js';
 
 // The drawer's shared link check lives with the drawer; it is re-exported here
 // for the callers and tests that have always read it from Home.
@@ -446,51 +446,25 @@ export function progressRowVisible({ working, done, meetings }) {
   return Number(working) > 0 || Number(done) > 0 || meetings === true;
 }
 
-// A ready drawer keeps unrelated attention behind one disclosure, including
-// before Send and after history hydration. Setup prerequisites stay expanded.
-// `started` means the strip is in use; explicit expansion survives sends,
-// refreshes and reopening. Folding hides existing nodes, never answers a card.
-export function summaryFoldAfter(fold, event = {}) {
-  const current = { started: fold?.started === true, expanded: fold?.expanded === true };
-  switch (event?.type) {
-    case 'ready':
-    case 'sent':
-      return { started: true, expanded: current.expanded };
-    case 'folder':
-      return event.by === 'user' ? { started: true, expanded: current.expanded } : current;
-    case 'toggle':
-      return current.started ? { started: true, expanded: !current.expanded } : current;
-    case 'expand':
-      return { started: true, expanded: true };
-    default:
-      return current;
-  }
-}
-
-// summaryStripText is the line itself: "Needs you 2 · Brief ready · 2 in
-// progress". A part with nothing to say is left out, and with no parts there
-// is nothing to fold.
-export function summaryStripText({ needs, brief, inProgress, doneToday, unavailable } = {}) {
-  const count = value => Math.max(0, Number(value) || 0);
-  const parts = [];
-  if (count(needs)) parts.push(`Needs you ${count(needs)}`);
-  if (brief) parts.push(String(brief));
-  if (unavailable) parts.push('Today sources unavailable');
-  if (count(inProgress)) parts.push(`${count(inProgress)} in progress`);
-  else if (count(doneToday)) parts.push(`${count(doneToday)} done today`);
-  return parts.join(' · ');
-}
-
-// summaryStripView: whether the strip shows, and whether what it stands for is
-// hidden behind it.
-export function summaryStripView(fold, text) {
-  const visible = fold?.started === true && Boolean(text);
-  const expanded = visible && fold.expanded === true;
+// todayStripView is the one line the drawer folds Today behind: "Needs you · N"
+// while something waits on the user, else "Today" while there is a brief row
+// or a progress row to open. With nothing to open there is no strip, and the
+// drawer is the conversation alone. A Today source that could not be read is
+// said on the line, so a folded strip never reads as an all-clear. Folding
+// hides the existing nodes; it never answers a card.
+export function todayStripView({ count, hasBrief, hasProgress, unavailable, expanded } = {}) {
+  const needs = Math.max(0, Math.floor(Number(count) || 0));
+  const visible = needs > 0 || hasBrief === true || hasProgress === true || unavailable === true;
+  const open = visible && expanded === true;
+  let label = '';
+  if (visible) label = needs > 0 ? `Needs you · ${needs}` : 'Today';
+  if (visible && unavailable === true) label += ' · sources unavailable';
   return {
     visible,
-    expanded,
-    sectionsHidden: visible && !expanded,
-    toggleLabel: expanded ? 'Hide' : 'Show'
+    label,
+    expanded: open,
+    sectionsHidden: !open,
+    toggleLabel: open ? 'Hide' : 'Show'
   };
 }
 
@@ -529,18 +503,26 @@ const state = {
   // The Daily Brief as Home last read it, for the drawer's brief row. hq is
   // null until Home has looked, then false (no Personal HQ) or { slug }.
   brief: { hq: null, revision: null, config: null, generation: '' },
-  // What Needs you and the brief row last showed, for the summary strip.
+  // How many things Needs you last counted, for the strip.
   needsCount: 0,
-  briefStrip: '',
   // Whether the progress row's lists (Working on, Done) are expanded.
   progressOpen: false,
   // Whether the assistant's state lets Needs you and the rows show at all.
   sectionsAvailable: false,
-  // The counts the progress row was last drawn from, for the summary strip.
-  progress: { inProgress: 0, doneToday: 0 },
-  // The summary strip: see summaryFoldAfter.
-  fold: { started: false, expanded: false }
+  // The strip: folded on every opening of the drawer, until Show or this
+  // tab's own new item opens it (see todayStripView, reveal). A reveal while
+  // the drawer is closed waits for the next opening.
+  stripExpanded: false,
+  revealOnOpen: false,
+  // The item a reveal brought into view. Today redraws (an opening re-reads
+  // it) can move or replace it for a moment afterwards, so until `until` each
+  // redraw aligns to it again, found by its key when it was redrawn.
+  align: { key: '', item: null, until: 0 }
 };
+
+// How long after a reveal (or the opening it waited for) Today redraws keep
+// the revealed item in view.
+const REVEAL_ALIGN_MS = 4000;
 
 function elements() {
   const root = document.getElementById('personalAssistantToday');
@@ -550,9 +532,9 @@ function elements() {
     launcherStatus: document.getElementById('personalAssistantLauncherStatus'),
     title: document.getElementById('personalAssistantTodayTitle'),
     banner: document.getElementById('personalAssistantTodayBanner'),
-    summary: document.getElementById('personalAssistantSummary'),
-    summaryText: document.getElementById('personalAssistantSummaryText'),
-    summaryToggle: document.getElementById('personalAssistantSummaryToggle'),
+    strip: document.getElementById('personalAssistantTodayStrip'),
+    stripText: document.getElementById('personalAssistantTodayStripText'),
+    stripToggle: document.getElementById('personalAssistantTodayStripToggle'),
     sections: document.getElementById('personalAssistantTodaySections'),
     workingSection: document.getElementById('personalAssistantWorkingOn'),
     workingContent: document.getElementById('personalAssistantWorkingOnContent'),
@@ -624,60 +606,22 @@ function renderFirstLookReports(els, items) {
   }
   placeFirstLookReports(els, list);
   mountFirstLookReports(list, items, { onDone: () => void loadToday() });
+  revealOwnReports(list);
 }
 
-// placeFirstLookReports keeps a report in view (FR20: opening the drawer shows
-// it). While Today rests behind its summary line the report cards sit right
-// under that line; shown, they are at the top of Needs you again.
+// placeFirstLookReports keeps the report cards at the top of Needs you, after
+// any unfinished build. Behind the strip they are counted in its number
+// instead of being shown; this tab's own new report opens the strip.
 function placeFirstLookReports(
   els,
   list = document.getElementById('personalAssistantNeedsYouReports')
 ) {
   const host = els?.needsCards;
-  if (!host) return;
-  // A folder card waiting on its answer is acted on in place too.
-  const folder = document.getElementById('personalAssistantFolderOffer');
-  const waiting = folder?.dataset.placement === 'needs' ? folder : null;
-  if (todayFolded(els)) {
-    const slot = foldedNeedsSlot(els);
-    if (list && slot.firstElementChild !== list) slot.prepend(list);
-    if (waiting && waiting.parentElement !== slot) slot.append(waiting);
-    return;
-  }
-  if (waiting && waiting.parentElement !== host) host.append(waiting);
-  if (!list) return;
+  if (!host || !list) return;
   const build = document.getElementById('personalAssistantNeedsYouBuild');
   if (build?.parentElement === host) {
     if (build.nextElementSibling !== list) build.after(list);
   } else if (host.firstElementChild !== list) host.prepend(list);
-}
-
-// todayFolded: Today rests behind its summary line (after a conversation
-// started), so Needs you is hidden.
-function todayFolded(els) {
-  return Boolean(els?.sections?.hidden && els.summary && !els.summary.hidden);
-}
-
-// foldedNeedsSlot is right under the summary line, where the cards the user
-// acts on wait while Today is folded: a hired agent's report and a folder card
-// waiting on its answer. Opening the drawer always shows them (FR20).
-function foldedNeedsSlot(els) {
-  let slot = document.getElementById('personalAssistantNeedsFolded');
-  if (!slot) {
-    slot = document.createElement('div');
-    slot.id = 'personalAssistantNeedsFolded';
-    slot.className = 'personal-assistant-today__reports';
-  }
-  if (slot.previousElementSibling !== els.summary) els.summary.after(slot);
-  return slot;
-}
-
-// needsHost is where a card in Needs you sits now: the folded slot while Today
-// rests behind its summary line, else Needs you itself. The folder card asks
-// it, so the two never move the card back and forth.
-function needsHost(els = elements()) {
-  if (!els?.needsCards) return null;
-  return todayFolded(els) ? foldedNeedsSlot(els) : els.needsCards;
 }
 
 function renderCompactRows(list, rows, skipCards = false) {
@@ -921,15 +865,11 @@ function syncNeedsYou(els = elements()) {
     if (card.id === 'personalAssistantNeedsYouBuild') return count + card.childElementCount;
     return count + 1;
   }, 0);
-  // One card per hired agent's report, wherever the list sits (it waits under
-  // the summary line while Today is folded).
+  // One card per hired agent's report. A waiting folder card sits in Needs you
+  // itself and is one of the cards above.
   const reports = document.getElementById('personalAssistantNeedsYouReports');
   const reported = reports && !reports.hidden ? reports.childElementCount : 0;
-  // A folder card waiting under the summary line while Today is folded.
-  const folded = Array.from(
-    document.getElementById('personalAssistantNeedsFolded')?.children || []
-  ).filter(card => card !== reports && !card.hidden).length;
-  const count = cards + reported + folded + queued;
+  const count = cards + reported + queued;
   const hidden = count === 0;
   if (els.needsSection.hidden !== hidden) els.needsSection.hidden = hidden;
   if (els.needsCount && els.needsCount.textContent !== String(count)) {
@@ -937,53 +877,107 @@ function syncNeedsYou(els = elements()) {
   }
   state.needsCount = count;
   syncGlance(els);
-  syncSummary(els);
+  syncStrip(els);
   return count;
 }
 
-// The summary strip and what it stands for. Folding only hides the sections:
-// their cards are not redrawn, so anything typed into one is still there.
-function syncSummary(els = elements()) {
+// The strip and what it stands for. Folding only hides the sections: their
+// cards are not redrawn, so anything typed into one is still there. A setup
+// prerequisite (no HQ yet, a repair) is not folded: it is the one thing the
+// drawer is for until it is done, so it shows with no strip.
+function syncStrip(els = elements()) {
   if (!els?.sections) return;
-  const text = state.sectionsAvailable
-    ? summaryStripText({
-        needs: state.needsCount,
-        brief: state.briefStrip,
-        inProgress: state.progress.inProgress,
-        doneToday: state.progress.doneToday,
-        unavailable:
-          Boolean(state.today?.unavailable_sources?.length) ||
-          ['partial', 'unavailable'].includes(state.today?.state)
-      })
-    : '';
-  // Do not collapse a prerequisite or a form the user is currently editing.
   const prerequisite = ['needs_hq', 'provisioning_hq', 'repair_needed'].includes(
     state.relationship?.state
   );
-  const editing = els.sections.contains(document.activeElement);
-  const fold = prerequisite
-    ? { started: false, expanded: false }
-    : editing
-      ? { ...state.fold, expanded: true }
-      : state.fold;
-  const strip = summaryStripView(fold, text);
-  const hidden = !state.sectionsAvailable || strip.sectionsHidden;
+  const strip = todayStripView({
+    count: state.sectionsAvailable ? state.needsCount : 0,
+    hasBrief: state.sectionsAvailable && els.briefRow?.hidden === false,
+    hasProgress: state.sectionsAvailable && els.progressRow?.hidden === false,
+    unavailable:
+      state.sectionsAvailable &&
+      (Boolean(state.today?.unavailable_sources?.length) ||
+        ['partial', 'unavailable'].includes(state.today?.state)),
+    expanded: state.stripExpanded
+  });
+  const visible = strip.visible && !prerequisite;
+  const hidden = !state.sectionsAvailable || (!prerequisite && strip.sectionsHidden);
   if (els.sections.hidden !== hidden) els.sections.hidden = hidden;
-  if (!els.summary) return;
-  if (els.summary.hidden !== !strip.visible) els.summary.hidden = !strip.visible;
-  if (els.summaryText && els.summaryText.textContent !== text) els.summaryText.textContent = text;
-  if (els.summaryToggle) {
-    if (els.summaryToggle.textContent !== strip.toggleLabel) {
-      els.summaryToggle.textContent = strip.toggleLabel;
-    }
-    els.summaryToggle.setAttribute('aria-expanded', strip.expanded ? 'true' : 'false');
+  if (!els.strip) return;
+  if (els.strip.hidden !== !visible) els.strip.hidden = !visible;
+  if (els.stripText && els.stripText.textContent !== strip.label)
+    els.stripText.textContent = strip.label;
+  if (els.stripToggle) {
+    if (els.stripToggle.textContent !== strip.toggleLabel)
+      els.stripToggle.textContent = strip.toggleLabel;
+    els.stripToggle.setAttribute('aria-expanded', strip.expanded ? 'true' : 'false');
   }
-  placeFirstLookReports(els);
 }
 
-function applyFold(event) {
-  state.fold = summaryFoldAfter(state.fold, event);
-  syncSummary();
+function setStripExpanded(expanded) {
+  state.stripExpanded = expanded === true;
+  syncStrip();
+}
+
+/**
+ * Opens the strip. A request of the user's (Show is the toggle; "Needs you"
+ * in the conversation, a setup walkthrough) always opens it. An arriving item
+ * passes `key` and opens it only when this tab produced it, the first time
+ * (personal-assistant-needs-reveal.js). `item`, if given, is brought into
+ * view. Returns whether the strip was opened. `reason` names the caller.
+ */
+function reveal(reason, { key = '', item = null } = {}) {
+  if (key && !takeNeedsReveal(key)) return false;
+  setStripExpanded(true);
+  if (item) state.align = { key, item, until: Date.now() + REVEAL_ALIGN_MS };
+  // Opening the drawer folds the strip; a reveal that came while it was
+  // closed is kept for that opening.
+  if (window.PersonalAssistantPanel?.isOpen?.() === false) state.revealOnOpen = true;
+  else if (item) bringIntoView(item);
+  return true;
+}
+
+// A report card this tab caused that has just been drawn opens the strip.
+function revealOwnReports(list) {
+  for (const card of list?.querySelectorAll?.('[data-look-id]') || []) {
+    reveal('report', { key: reportRevealKey(card), item: card });
+  }
+}
+
+// The revealed item as it is drawn now: the same node, or the report card
+// that replaced it.
+function alignedItem() {
+  const { key, item } = state.align;
+  if (item?.isConnected) return item;
+  if (!key) return null;
+  const cards = document.querySelectorAll('#personalAssistantNeedsYouReports [data-look-id]');
+  return Array.from(cards).find(card => reportRevealKey(card) === key) || null;
+}
+
+// After a Today redraw, keep a just-revealed item in view.
+function realignReveal() {
+  if (!state.stripExpanded || Date.now() > state.align.until) return;
+  const item = alignedItem();
+  if (item) bringIntoView(item);
+}
+
+// Scrolls the drawer to a revealed item, top first. The conversation may still
+// be loading or settling on the reply the user last read; scrolling before it
+// has would be undone, so wait for it (about two seconds at most).
+function bringIntoView(item, frames = 0) {
+  requestAnimationFrame(() => {
+    if (!item.isConnected || item.getClientRects().length === 0) return;
+    const transcript = window.PersonalAssistantTranscript;
+    const busy =
+      (transcript && transcript.isSettled?.() === false) ||
+      window.PersonalAssistantConversation?.isLoading?.() === true;
+    if (busy && frames < 120) {
+      bringIntoView(item, frames + 1);
+      return;
+    }
+    if (transcript?.revealControl) transcript.revealControl(item, true);
+    else item.scrollIntoView?.({ block: 'nearest' });
+  });
 }
 
 // The brief row and the progress row share one bordered group; it goes when
@@ -1005,7 +999,6 @@ function renderBriefRow(els = elements()) {
   // The row belongs to the assistant's Today, so it follows the sections.
   const shown = Boolean(link) && (today.active || today.paused || today.partial);
   els.briefRow.hidden = !shown;
-  state.briefStrip = '';
   if (shown) {
     els.briefRow.href = link;
     const status = dailyBriefStatus({
@@ -1015,10 +1008,9 @@ function renderBriefRow(els = elements()) {
       paused: today.paused || state.relationship?.state === 'paused'
     });
     if (els.briefRowStatus) els.briefRowStatus.textContent = ` · ${dailyBriefRowStatus(status)}`;
-    state.briefStrip = dailyBriefStripStatus(status);
   }
   syncGlance(els);
-  syncSummary(els);
+  syncStrip(els);
 }
 
 // The row that summarises work. Activating it expands Working on (with today's
@@ -1036,12 +1028,9 @@ function renderProgressRow(els, sections) {
   if (els.progressText) {
     els.progressText.textContent = progressRowText(sections.inProgress, sections.doneToday);
   }
-  state.progress = shown
-    ? { inProgress: sections.inProgress, doneToday: sections.doneToday }
-    : { inProgress: 0, doneToday: 0 };
   syncProgressLists(els);
   syncGlance(els);
-  syncSummary(els);
+  syncStrip(els);
 }
 
 function syncProgressLists(els = elements()) {
@@ -1063,11 +1052,12 @@ function renderToday(today) {
   if (!els) return;
   state.today = today;
   const view = personalAssistantTodayView(today);
-  // Ready Today summaries/errors belong to the folded attention path, not the
-  // active exchange. Model/hiring/HQ prerequisites retain their visible banner.
-  if (view.active || view.paused || view.partial || view.unavailable)
+  // A ready Today's summary and source errors fold behind the strip (whose
+  // line says when sources are unavailable). What stops the assistant working
+  // (paused, no model, repair, hiring, HQ) keeps its banner above the strip.
+  if ((view.active && !view.modelUnavailable) || view.partial || view.unavailable)
     els.sections?.prepend(els.banner);
-  else if (els.summary) els.root.insertBefore(els.banner, els.summary);
+  else if (els.strip) els.root.insertBefore(els.banner, els.strip);
   els.root.hidden = false;
   els.root.dataset.state = view.state;
   els.title.textContent = `Today from ${view.displayName}`;
@@ -1129,14 +1119,12 @@ function renderToday(today) {
   state.sectionsAvailable = Boolean(
     view.active || view.paused || view.partial || view.needsHQ || view.unavailable
   );
-  if (view.active || view.paused || view.partial || view.unavailable) {
-    state.fold = summaryFoldAfter(state.fold, { type: 'ready' });
-  }
   renderProgressRow(els, sections);
   renderBriefRow(els);
   syncNeedsYou(els);
   els.banner.hidden = !els.banner.textContent.trim();
   renderLauncherCue(els, today);
+  realignReveal();
 }
 
 function renderRelationship(personalAssistant, view) {
@@ -1161,7 +1149,6 @@ function renderRelationship(personalAssistant, view) {
   state.sectionsAvailable = Boolean(view.available || view.needsHQ);
   // Until Today is read there is no work to summarise and no brief to point at.
   if (els.progressRow) els.progressRow.hidden = true;
-  state.progress = { inProgress: 0, doneToday: 0 };
   syncProgressLists(els);
   renderBriefRow(els);
   syncNeedsYou(els);
@@ -1240,7 +1227,7 @@ async function loadToday() {
       ? 'Couldn’t refresh assistant requests. Showing last-loaded records. Retry to check for changes.'
       : 'Assistant requests are temporarily unavailable. Retry, or use the Workspace Map.';
     els.banner.hidden = false;
-    syncSummary(els);
+    syncStrip(els);
     shareTodayWithDrawer(state.today);
     renderLauncherCue(els, { state: 'unavailable' });
   }
@@ -1317,14 +1304,20 @@ function init() {
   document
     .getElementById('personalAssistantTodayRetry')
     ?.addEventListener('click', () => void loadToday());
-  // The summary strip: see summaryFoldAfter for what each of these does.
-  document.addEventListener('personal-assistant:sent', () => applyFold({ type: 'sent' }));
-  document.addEventListener('personal-assistant:folder-started', event => {
-    applyFold({ type: 'folder', by: String(event.detail?.by || '') });
+  // The strip folds every time the drawer opens, so the conversation is what
+  // shows; Show and Hide hold until it closes. A reveal while it was closed
+  // opens it again on this opening.
+  document.addEventListener('personal-assistant:opened', () => {
+    setStripExpanded(state.revealOnOpen);
+    if (state.revealOnOpen && state.align.item) {
+      state.align.until = Date.now() + REVEAL_ALIGN_MS;
+      realignReveal();
+    }
+    state.revealOnOpen = false;
   });
   document
-    .getElementById('personalAssistantSummaryToggle')
-    ?.addEventListener('click', () => applyFold({ type: 'toggle' }));
+    .getElementById('personalAssistantTodayStripToggle')
+    ?.addEventListener('click', () => setStripExpanded(!state.stripExpanded));
   document.addEventListener('personal-assistant:status', event => {
     renderRelationship(event.detail?.personalAssistant, event.detail?.view);
   });
@@ -1334,10 +1327,11 @@ function init() {
   }
   window.PersonalAssistantToday = {
     refresh: loadToday,
-    // Shows Needs you again when something under it has to be seen.
-    expand: () => applyFold({ type: 'expand' }),
-    // Where a card in Needs you sits now (under the summary line while folded).
-    needsHost: () => needsHost()
+    // Opens the strip, for an arriving item of this tab's (`key`) or at the
+    // user's request; see reveal.
+    reveal,
+    // Shows Needs you when the user asked for something under it.
+    expand: () => reveal('request')
   };
   void keepTodaysBriefPrepared();
 }

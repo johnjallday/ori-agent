@@ -196,14 +196,14 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     await capture(`${prefix}-ordinary-first`, ordinary.conversation.assistant_message_id);
     if (path === '/') {
       await expect(page.locator('#personalAssistantTodayFooter')).toBeHidden();
-      await expect(page.locator('#personalAssistantSummaryText')).toContainText(
-        'Today sources unavailable'
+      await expect(page.locator('#personalAssistantTodayStripText')).toContainText(
+        'sources unavailable'
       );
-      await page.locator('#personalAssistantSummaryToggle').click();
+      await page.locator('#personalAssistantTodayStripToggle').click();
       await expect(page.locator('#personalAssistantTodayFooter')).toBeVisible();
       await expect(page.locator('#personalAssistantTodayRetry')).toBeVisible();
       await page.screenshot({ path: join(evidence, 'home-today-error-expanded.png') });
-      await page.locator('#personalAssistantSummaryToggle').click();
+      await page.locator('#personalAssistantTodayStripToggle').click();
     }
     const repeated = await send('What should we discuss next?');
     await capture(`${prefix}-ordinary-repeated`, repeated.conversation.assistant_message_id);

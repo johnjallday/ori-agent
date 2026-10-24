@@ -262,7 +262,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       'polite'
     );
     await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
-    await page.locator('#personalAssistantSummaryToggle').press('Enter');
+    await page.locator('#personalAssistantTodayStripToggle').press('Enter');
     await expect(page.locator('#personalAssistantBriefRow')).toBeVisible();
     await expect(page.locator('#personalAssistantProgressRow')).toBeVisible();
     await page.locator('#personalAssistantInput').focus();
@@ -406,9 +406,9 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(chip).toHaveAttribute('id', 'personalAssistantFolderChip');
     expect(await contrastRatio(page, '#personalAssistantFolderChip')).toBeGreaterThanOrEqual(4.5);
 
-    // Ready attention is folded even before the first message.
-    const strip = page.locator('#personalAssistantSummary');
-    const toggle = page.locator('#personalAssistantSummaryToggle');
+    // Today is folded behind the strip on every opening, before any message.
+    const strip = page.locator('#personalAssistantTodayStrip');
+    const toggle = page.locator('#personalAssistantTodayStripToggle');
     await expect(strip).toBeVisible();
     await page.keyboard.press('Enter');
 
@@ -433,7 +433,10 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle).toHaveAttribute('aria-controls', 'personalAssistantTodaySections');
     await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
-    for (const selector of ['#personalAssistantSummaryText', '#personalAssistantSummaryToggle']) {
+    for (const selector of [
+      '#personalAssistantTodayStripText',
+      '#personalAssistantTodayStripToggle'
+    ]) {
       expect(await contrastRatio(page, selector), `contrast of ${selector}`).toBeGreaterThanOrEqual(
         4.5
       );
@@ -441,7 +444,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // Reached with the keyboard, it shows where focus is.
     await page.locator('#personalAssistantInput').focus();
     const stops = await tabBackThroughDrawer(page);
-    expect(stops.map(stop => stop.name)).toContain('personalAssistantSummaryToggle');
+    expect(stops.map(stop => stop.name)).toContain('personalAssistantTodayStripToggle');
     expect(stops.filter(stop => !stop.outlined).map(stop => stop.name)).toEqual([]);
     await toggle.focus();
     await page.keyboard.press('Enter');
