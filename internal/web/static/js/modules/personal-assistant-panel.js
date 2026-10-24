@@ -7,6 +7,8 @@ import {
   createRecipientMenu,
   entryAgentPlaceholder,
   entrySessionRows,
+  menuKeyIntent,
+  nextMenuIndex,
   recipientButtonLabel,
   recipientMenuRows,
   switchLockMessage
@@ -74,7 +76,7 @@ export function personalAssistantPanelView(personalAssistant) {
     visible:
       available || state === 'needs_hq' || state === 'provisioning_hq' || state === 'repair_needed',
     placeholder: available
-      ? `Ask ${name} a question or describe what you want help with`
+      ? 'Ask or describe what you want help with'
       : state === 'needs_hq' || state === 'provisioning_hq'
         ? `Build ${name}’s Personal HQ before sending work`
         : 'Finish personal assistant setup before sending work'
@@ -434,6 +436,159 @@ export function drawerLayoutView({ viewportWidth, prefs, exploring = false }) {
   };
 }
 
+/**
+ * The header's conversation menu (FR21). The hired assistant's has New,
+ * Continue… and the check-in row; the entry agent's has New only, for its
+ * workspace session. The button shows while there is a conversation to name.
+ */
+export function conversationMenuView({ personal = true, available = false, entry = null } = {}) {
+  if (personal !== false) {
+    const shown = available === true;
+    return {
+      visible: shown,
+      personalTitle: shown,
+      personalItems: shown,
+      entryTitle: false,
+      entryNew: false,
+      checkIn: shown
+    };
+  }
+  const shown = entry?.visible === true;
+  return {
+    visible: shown,
+    personalTitle: false,
+    personalItems: false,
+    entryTitle: shown,
+    entryNew: shown,
+    checkIn: false
+  };
+}
+
+// The text box starts two rows tall and grows with what is typed (FR23).
+export const COMPOSER_MIN_HEIGHT = 56;
+export const COMPOSER_MAX_HEIGHT = 160;
+
+/** The text box's height for its content, where the browser cannot size it. */
+export function composerHeight(scrollHeight) {
+  const height = Math.ceil(Number(scrollHeight) || 0);
+  return Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, height));
+}
+
+/** The items a menu's arrow keys move through: shown, and not disabled. */
+export function menuItemsIn(menu) {
+  return Array.from(menu?.querySelectorAll?.('[role="menuitem"]') || []).filter(
+    item => !item.hidden && !item.disabled && item.getClientRects().length > 0
+  );
+}
+
+/**
+ * A button that opens a menu of existing controls: the attach "+" and the
+ * header's conversation menu (FR24). It follows the recipient menu's keys:
+ * arrows move, Enter or Space chooses, Escape closes only the menu and
+ * returns focus to the button, Tab and a click outside close it. `items` are
+ * the controls it holds; they keep their own ids, handlers and hidden and
+ * disabled rules. Each is a menu item only while it is inside the menu (a
+ * module may move one out and back), and a module that returns focus to one
+ * while the menu is closed reaches the button instead.
+ */
+export function createActionMenu({ button, menu, doc, items = [] }) {
+  if (!button || !menu || !doc) return null;
+  let open = false;
+
+  function syncRoles() {
+    for (const item of items) {
+      if (menu.contains(item)) {
+        item.setAttribute('role', 'menuitem');
+        item.tabIndex = -1;
+      } else {
+        item.removeAttribute('role');
+        item.removeAttribute('tabindex');
+      }
+    }
+  }
+
+  for (const item of items) {
+    const focus = item.focus;
+    item.focus = function (options) {
+      if (!open && menu.contains(item)) button.focus(options);
+      else focus.call(item, options);
+    };
+  }
+
+  function show(at = 'first') {
+    syncRoles();
+    open = true;
+    menu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    const list = menuItemsIn(menu);
+    const usable = list.filter(item => item.getAttribute('aria-disabled') !== 'true');
+    (at === 'last' ? list.at(-1) : usable[0] || list[0])?.focus();
+  }
+
+  function close({ focus = false } = {}) {
+    if (!open) return;
+    const inside = menu.contains(doc.activeElement);
+    open = false;
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (focus || inside) button.focus();
+  }
+
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    if (open) close({ focus: true });
+    else show();
+  });
+  button.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      close({ focus: true });
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      show(event.key === 'ArrowUp' ? 'last' : 'first');
+    }
+  });
+  menu.addEventListener('keydown', event => {
+    const intent = menuKeyIntent(event.key);
+    if (!intent) return;
+    if (intent === 'close') {
+      // Escape closes this menu, never the drawer around it.
+      event.preventDefault();
+      event.stopPropagation();
+      close({ focus: true });
+      return;
+    }
+    if (intent === 'tab') {
+      close();
+      return;
+    }
+    const list = menuItemsIn(menu);
+    const index = list.indexOf(doc.activeElement);
+    if (intent === 'choose') {
+      event.preventDefault();
+      if (list[index]?.getAttribute('aria-disabled') !== 'true') list[index]?.click();
+      return;
+    }
+    event.preventDefault();
+    list[nextMenuIndex(index, list.length, intent)]?.focus();
+  });
+  // After an item's own handler has run: the menu closes, and focus that the
+  // handler left on the item goes back to the button.
+  menu.addEventListener('click', event => {
+    const item = event.target?.closest?.('[role="menuitem"]');
+    if (item && item.getAttribute('aria-disabled') !== 'true') close();
+  });
+  doc.addEventListener('click', event => {
+    if (open && !menu.contains(event.target) && !button.contains(event.target)) close();
+  });
+  if (typeof MutationObserver !== 'undefined')
+    new MutationObserver(syncRoles).observe(menu, { childList: true, subtree: true });
+  syncRoles();
+
+  return { isOpen: () => open, show, close };
+}
+
 const state = {
   view: personalAssistantPanelView(null),
   personalAssistant: null,
@@ -451,6 +606,9 @@ const state = {
   folderBusy: false,
   // The recipient picker's menu, once the drawer is mounted.
   recipientMenu: null,
+  // The header's conversation menu and the composer's attach menu.
+  conversationMenu: null,
+  attachMenu: null,
   // The last "N need you" line read for this page, shown only with the hired
   // assistant selected.
   needsLine: { visible: false, text: '' },
@@ -603,15 +761,50 @@ function recipients() {
 
 function renderEntrySessionBar() {
   const els = state.els;
-  if (!els?.entrySessionBar) return;
+  if (!els) return;
   const view = entrySessionStripView({
     recipient: recipients()?.current?.(),
     session: recipients()?.session?.(),
     hasMessages: window.OriAskRouting?.getState?.().hasConversation === true
   });
-  els.entrySessionBar.hidden = !view.visible;
   if (els.entrySessionTitle) els.entrySessionTitle.textContent = view.title;
   if (els.entrySessionNew) els.entrySessionNew.disabled = view.newDisabled;
+  renderConversationMenu(view);
+}
+
+/**
+ * Which conversation the header names, and what its menu holds, for the
+ * current recipient. personal-assistant-conversation.js keeps the hired
+ * assistant's title and New's disabled state; this decides what shows.
+ */
+function renderConversationMenu(entry) {
+  const els = state.els;
+  if (!els?.conversationMenu) return;
+  const who = identity();
+  const view = conversationMenuView({
+    personal: who.personal,
+    available: who.personal && state.view.available === true,
+    entry
+  });
+  els.conversationMenu.hidden = !view.visible;
+  const show = (el, shown) => {
+    if (el) el.hidden = !shown;
+  };
+  show(els.conversationTitle, view.personalTitle);
+  show(els.conversationNew, view.personalItems);
+  show(els.conversationContinue, view.personalItems);
+  show(els.entrySessionTitle, view.entryTitle);
+  show(els.entrySessionNew, view.entryNew);
+  show(els.checkIn, view.checkIn);
+  if (!view.visible) state.conversationMenu?.close();
+}
+
+/** Grows the text box with its content where CSS field-sizing cannot. */
+function syncComposerHeight() {
+  const input = state.els?.input;
+  if (!input || globalThis.CSS?.supports?.('field-sizing', 'content') === true) return;
+  input.style.height = 'auto';
+  input.style.height = `${composerHeight(input.scrollHeight)}px`;
 }
 
 // Which entry agent the thread was last loaded for, and a ticket so a slow
@@ -1108,6 +1301,7 @@ function open(trigger, options = {}) {
   state.els.panel.hidden = false;
   state.els.launcher.setAttribute('aria-expanded', 'true');
   state.els.input.value = state.draft;
+  syncComposerHeight();
   if (options.focus !== false) focusOnOpen();
   // Rename/pause/repair changes are server-owned. Refresh on every open rather
   // than trusting the hire-time name or local storage. The workspace's
@@ -1290,7 +1484,13 @@ function restoreDraft(text) {
 async function refreshWorkspaceContext() {
   if (!state.els?.workspaceContext || !state.open) return;
   const sequence = ++state.workspaceSequence;
-  state.els.workspaceContext.textContent = 'Checking workspace context…';
+  // One line at the start of the attach row: a long label is cut short there,
+  // and its tooltip holds the whole of it.
+  const say = text => {
+    state.els.workspaceContext.textContent = text;
+    state.els.workspaceContext.title = text;
+  };
+  say('Checking workspace context…');
   try {
     const response = await fetch('/api/home-assistant/context', {
       method: 'POST',
@@ -1300,11 +1500,10 @@ async function refreshWorkspaceContext() {
     if (!response.ok) throw new Error('Context unavailable');
     const data = await response.json();
     if (sequence !== state.workspaceSequence) return;
-    state.els.workspaceContext.textContent = 'Context · ' + workspaceContextLabel(data);
+    say('Context · ' + workspaceContextLabel(data));
   } catch (_) {
     if (sequence === state.workspaceSequence)
-      state.els.workspaceContext.textContent =
-        'Workspace context unavailable · refresh or choose an app-wide page';
+      say('Workspace context unavailable · refresh or choose an app-wide page');
   }
 }
 
@@ -1398,6 +1597,7 @@ function submit(event) {
   );
   state.draft = '';
   state.els.input.value = '';
+  syncComposerHeight();
   saveTabValue(PANEL_DRAFT_KEY, '');
   // Planning can intentionally remain pending while the user reviews a choice;
   // the existing work controller owns that lifecycle. Release only this
@@ -1471,9 +1671,15 @@ function init() {
     name: document.getElementById('personalAssistantPanelName'),
     recipientButton: document.getElementById('personalAssistantRecipientButton'),
     recipientMenu: document.getElementById('personalAssistantRecipientMenu'),
-    entrySessionBar: document.getElementById('personalAssistantEntrySessionBar'),
+    conversationMenu: document.getElementById('personalAssistantConversationMenu'),
+    conversationItems: document.getElementById('personalAssistantConversationItems'),
+    conversationTitle: document.getElementById('personalAssistantConversationTitle'),
+    conversationNew: document.getElementById('personalAssistantConversationNew'),
+    conversationContinue: document.getElementById('personalAssistantConversationContinue'),
     entrySessionTitle: document.getElementById('personalAssistantEntrySessionTitle'),
     entrySessionNew: document.getElementById('personalAssistantEntrySessionNew'),
+    attachMenu: document.getElementById('personalAssistantAttachMenu'),
+    attachItems: document.getElementById('personalAssistantAttachItems'),
     launcherAvatar: document.getElementById('personalAssistantLauncherAvatar'),
     panelAvatar: document.getElementById('personalAssistantPanelAvatar'),
     title: document.getElementById('personalAssistantPanelTitle'),
@@ -1536,6 +1742,7 @@ function init() {
   state.els.input?.addEventListener('input', () => {
     state.draft = state.els.input.value;
     saveTabValue(PANEL_DRAFT_KEY, state.draft);
+    syncComposerHeight();
   });
   document.addEventListener('ori:workspace-context', () => void refreshWorkspaceContext());
   window.addEventListener('popstate', () => void refreshWorkspaceContext());
@@ -1560,6 +1767,28 @@ function init() {
       row.kind === RECIPIENT_WORKSPACE_ENTRY
         ? assistantAvatarMarkup(row.name, row.appearance)
         : assistantAvatarMarkup(state.view.name, state.personalAssistant?.appearance)
+  });
+  state.conversationMenu = createActionMenu({
+    button: state.els.conversationMenu,
+    menu: state.els.conversationItems,
+    doc: document,
+    items: [
+      state.els.conversationNew,
+      state.els.conversationContinue,
+      state.els.entrySessionNew,
+      state.els.checkIn
+    ].filter(Boolean)
+  });
+  state.attachMenu = createActionMenu({
+    button: state.els.attachMenu,
+    menu: state.els.attachItems,
+    doc: document,
+    items: [
+      state.els.folderChip,
+      document.getElementById('personalAssistantLinkChip'),
+      document.getElementById('personalAssistantExploreAttachedFolder'),
+      document.getElementById('personalAssistantReviewFolderSetup')
+    ].filter(Boolean)
   });
   document.addEventListener('ori:workspace-context', () => void recipients()?.refresh?.());
   window.addEventListener('popstate', () => void recipients()?.refresh?.());

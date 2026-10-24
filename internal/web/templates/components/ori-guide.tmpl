@@ -113,12 +113,35 @@
               type="button" id="personalAssistantRecipientButton" class="personal-assistant-panel__recipient"
               aria-haspopup="menu" aria-expanded="false" aria-controls="personalAssistantRecipientMenu" hidden><i
                 class="bi bi-chevron-down" aria-hidden="true"></i></button></h2>
-          <!-- When the next check-in is, or "Commander · <workspace>" for the
-               entry agent. "Personal Assistant" until that is known. -->
-          <p id="personalAssistantCheckIn" class="personal-assistant-panel__checkin">Personal Assistant</p>
+          <!-- The conversation this tab is in, under the name. Its menu starts
+               a new one or continues an earlier one. Shown while there is a
+               conversation to name: the hired assistant's, or the entry
+               agent's workspace session. -->
+          <button type="button" id="personalAssistantConversationMenu" class="personal-assistant-panel__conversation"
+                  aria-haspopup="menu" aria-expanded="false" aria-controls="personalAssistantConversationItems">
+            <span class="visually-hidden">Conversation: </span>
+            <span id="personalAssistantConversationTitle" class="personal-assistant-panel__conversation-title">New conversation</span>
+            <span id="personalAssistantEntrySessionTitle" class="personal-assistant-panel__conversation-title" hidden>New conversation</span>
+            <i class="bi bi-chevron-down" aria-hidden="true"></i>
+          </button>
         </div>
         <div id="personalAssistantRecipientMenu" class="personal-assistant-recipient-menu" role="menu"
              aria-label="Who to talk to" hidden></div>
+        <!-- New and Continue… for the hired assistant, New for the entry agent
+             (whose session is also listed in the Sessions station). The last
+             row says when the hired assistant next checks in; it does nothing. -->
+        <div id="personalAssistantConversationItems" class="personal-assistant-recipient-menu personal-assistant-panel__menu"
+             role="menu" aria-label="Conversation" hidden>
+          <button type="button" id="personalAssistantConversationNew" class="personal-assistant-panel__menu-item"
+                  role="menuitem" tabindex="-1">New conversation</button>
+          <button type="button" id="personalAssistantConversationContinue" class="personal-assistant-panel__menu-item"
+                  role="menuitem" tabindex="-1" aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>
+          <button type="button" id="personalAssistantEntrySessionNew" class="personal-assistant-panel__menu-item"
+                  role="menuitem" tabindex="-1" hidden>New conversation</button>
+          <!-- When the next check-in is; "Personal Assistant" until known. -->
+          <p id="personalAssistantCheckIn" class="personal-assistant-panel__checkin personal-assistant-panel__menu-note"
+             role="menuitem" aria-disabled="true" tabindex="-1">Personal Assistant</p>
+        </div>
       </div>
       <!-- The widest sheet the page allows, and back. Desktop only. -->
       <button type="button" id="personalAssistantExpand" class="personal-assistant-panel__icon"
@@ -130,6 +153,15 @@
           <i class="bi bi-three-dots" aria-hidden="true"></i>
         </summary>
         <nav class="personal-assistant-panel__links" aria-label="Personal assistant details">
+          <!-- Watch Ori is this tab's own choice, shown only where the assistant
+               can operate the app. The hint under it says what it allows. -->
+          <div id="personalAssistantWatchRow" class="personal-assistant-panel__switch pa-operation__watch" hidden>
+            <label for="personalAssistantWatch">
+              <input type="checkbox" id="personalAssistantWatch" role="switch" aria-describedby="personalAssistantWatchHint">
+              <span>Watch Ori</span>
+            </label>
+            <p id="personalAssistantWatchHint" class="personal-assistant-panel__switch-hint"></p>
+          </div>
           <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
           <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
           <a id="personalAssistantTodayMemory" href="/" hidden>Workspace memory</a>
@@ -145,6 +177,27 @@
         <i class="bi bi-x-lg" aria-hidden="true"></i>
       </button>
     </header>
+
+    <!-- Under the header, only while one of them has something: the earlier
+         conversations Continue… lists, the conversation's note (reserved for
+         unsaved history, truncation and recovery, not routine idle copy) and
+         the saved draft it is working on. -->
+    <div id="personalAssistantConversationBar" class="personal-assistant-conversation" hidden>
+      <ul id="personalAssistantConversationList" class="personal-assistant-conversation__list"
+          aria-label="Earlier conversations" hidden></ul>
+      <p id="personalAssistantConversationNote" class="personal-assistant-conversation__note"
+         role="status" aria-live="polite"></p>
+      <!-- The saved draft this conversation is working on, read from Personal
+           HQ. Replies are not part of it until Update saved draft is chosen. -->
+      <div id="personalAssistantSavedDraft" class="personal-assistant-conversation__saved" hidden>
+        <p id="personalAssistantSavedDraftText" class="personal-assistant-conversation__note"></p>
+        <div class="personal-assistant-conversation__actions">
+          <a id="personalAssistantSavedDraftOpen" class="personal-assistant-conversation__button" href="#" hidden>Open in Personal HQ</a>
+          <button type="button" id="personalAssistantSavedDraftStart"
+                  class="personal-assistant-conversation__button" hidden>Start a new conversation about it</button>
+        </div>
+      </div>
+    </div>
 
     <div id="personalAssistantExplorerToolbar" class="personal-assistant-explorer__toolbar" hidden>
       <button type="button" id="personalAssistantExplorerBack" class="personal-assistant-conversation__button">← Back to chat</button>
@@ -203,50 +256,6 @@
       <div id="personalAssistantNeedsReports" class="personal-assistant-panel__reports" hidden></div>
       {{end}}
 
-      <!-- The conversation this tab is in. The status note is reserved for
-           unsaved history, truncation and recovery, not routine idle copy. -->
-      <div id="personalAssistantConversationBar" class="personal-assistant-conversation" hidden>
-        <div class="personal-assistant-conversation__head">
-          <p class="personal-assistant-conversation__current">
-            <span id="personalAssistantConversationTitle" class="personal-assistant-conversation__title">New conversation</span>
-          </p>
-          <div class="personal-assistant-conversation__actions">
-            <button type="button" id="personalAssistantConversationNew"
-                    class="personal-assistant-conversation__button" aria-label="New conversation">New</button>
-            <button type="button" id="personalAssistantConversationContinue"
-                    class="personal-assistant-conversation__button"
-                    aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>
-          </div>
-        </div>
-        <ul id="personalAssistantConversationList" class="personal-assistant-conversation__list"
-            aria-label="Earlier conversations" hidden></ul>
-        <p id="personalAssistantConversationNote" class="personal-assistant-conversation__note"
-           role="status" aria-live="polite"></p>
-        <!-- The saved draft this conversation is working on, read from Personal
-             HQ. Replies are not part of it until Update saved draft is chosen. -->
-        <div id="personalAssistantSavedDraft" class="personal-assistant-conversation__saved" hidden>
-          <p id="personalAssistantSavedDraftText" class="personal-assistant-conversation__note"></p>
-          <div class="personal-assistant-conversation__actions">
-            <a id="personalAssistantSavedDraftOpen" class="personal-assistant-conversation__button" href="#" hidden>Open in Personal HQ</a>
-            <button type="button" id="personalAssistantSavedDraftStart"
-                    class="personal-assistant-conversation__button" hidden>Start a new conversation about it</button>
-          </div>
-        </div>
-      </div>
-      <!-- With the workspace's entry agent selected, its conversation is a
-           workspace chat session (also listed in the Sessions station). New
-           starts another one with the next message; nothing is created here. -->
-      <div id="personalAssistantEntrySessionBar" class="personal-assistant-conversation" hidden>
-        <div class="personal-assistant-conversation__head">
-          <p class="personal-assistant-conversation__current">
-            <span id="personalAssistantEntrySessionTitle" class="personal-assistant-conversation__title">New conversation</span>
-          </p>
-          <div class="personal-assistant-conversation__actions">
-            <button type="button" id="personalAssistantEntrySessionNew"
-                    class="personal-assistant-conversation__button" aria-label="New conversation">New</button>
-          </div>
-        </div>
-      </div>
       <!-- Save to HQ backlog: the review of one reply before it is saved. It is
            its own form, so Enter here can never send the composer. Opening it
            writes nothing; only Save to backlog does. -->
@@ -388,11 +397,10 @@
     <button type="button" id="personalAssistantNewReply" class="personal-assistant-transcript__jump"
             aria-controls="homeAssistantConversation" hidden>New reply</button>
     <span id="personalAssistantReplyAnnouncement" class="visually-hidden" role="status" aria-live="polite"></span>
-    <p id="personalAssistantWorkspaceContext" class="personal-assistant-panel__context" role="status" aria-live="polite" aria-atomic="true">Checking workspace context…</p>
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
     <!-- Operate Ori: what happened to an operation the assistant requested.
          Shown only while there is one; the line says only what a page or the
-         server confirmed. The Watch choice itself is a chip in the composer. -->
+         server confirmed. The Watch choice itself is in the "…" menu. -->
     <section id="personalAssistantOperation" class="pa-operation" aria-label="Ori in your app" hidden>
       <p id="personalAssistantOperationStatus" class="pa-operation__status" role="status" aria-live="polite" hidden></p>
       <div id="personalAssistantOperationActions" class="pa-operation__actions" hidden></div>
@@ -405,40 +413,60 @@
     </section>
     <a id="personalAssistantModelSetup" class="personal-assistant-conversation__button" href="/settings#system-model" hidden>Configure a model for conversational replies</a>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">
-      <div id="personalAssistantChips" class="personal-assistant-panel__chips personal-assistant-panel__attachments" hidden>
-        <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantContextChooser">
-          <i class="bi bi-folder2-open" aria-hidden="true"></i>
-          <span>Add folder</span>
-        </button>
-        <span id="personalAssistantActiveFolder" class="personal-assistant-folder-context__chip" hidden>
-          <span id="personalAssistantActiveFolderName"></span>
-          <button type="button" id="personalAssistantRemoveFolder" aria-label="Remove folder context">×</button>
-        </span>
-        <button type="button" id="personalAssistantExploreAttachedFolder" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantFolderExplorer" hidden>Tree + Chat</button>
-        <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
-        <button type="button" id="personalAssistantLinkChip" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantLinkField" hidden>
-          <i class="bi bi-link-45deg" aria-hidden="true"></i>
-          <span>Add link</span>
-        </button>
-        <span id="personalAssistantActiveLink" class="personal-assistant-folder-context__chip personal-assistant-link-chip" hidden>
-          <i id="personalAssistantActiveLinkIcon" class="bi bi-link-45deg" aria-hidden="true"></i>
-          <span id="personalAssistantActiveLinkName"></span>
-          <span id="personalAssistantLinkSummary" class="visually-hidden" hidden></span>
-          <button type="button" id="personalAssistantRemoveLink" aria-label="Remove link">×</button>
-        </span>
-        <span id="personalAssistantLinkSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Tell me about this link”</span>
-        <!-- Watch Ori is this tab's own choice. Shown only where the assistant
-             can operate the app; it takes no row of its own. -->
-        <label id="personalAssistantWatchRow" class="personal-assistant-panel__chip pa-operation__watch" for="personalAssistantWatch" hidden>
-          <input type="checkbox" id="personalAssistantWatch" role="switch" aria-describedby="personalAssistantWatchHint">
-          <span>Watch Ori</span>
-          <span id="personalAssistantWatchHint" class="visually-hidden"></span>
-        </label>
+      <!-- One row above the text box: what the page gives as context, then
+           "+" for attaching a folder or a link, then what is attached. -->
+      <div class="personal-assistant-panel__attach-row">
+        <p id="personalAssistantWorkspaceContext" class="personal-assistant-panel__context" role="status" aria-live="polite" aria-atomic="true">Checking workspace context…</p>
+        <div id="personalAssistantChips" class="personal-assistant-panel__chips personal-assistant-panel__attachments" hidden>
+          <div class="personal-assistant-attach">
+            <button type="button" id="personalAssistantAttachMenu" class="personal-assistant-attach__button"
+                    aria-haspopup="menu" aria-expanded="false" aria-controls="personalAssistantAttachItems"
+                    aria-label="Attach" title="Attach">
+              <i class="bi bi-plus-lg" aria-hidden="true"></i>
+            </button>
+            <!-- Each item keeps its own id, handler, and hidden and disabled
+                 rules: Tree + Chat only with a folder attached, Review setup
+                 only when offered, Add link only when the server offers it. -->
+            <div id="personalAssistantAttachItems" class="personal-assistant-panel__menu personal-assistant-attach__menu"
+                 role="menu" aria-label="Attach" hidden>
+              <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip personal-assistant-panel__menu-item" role="menuitem" tabindex="-1" aria-expanded="false" aria-controls="personalAssistantContextChooser">
+                <i class="bi bi-folder2-open" aria-hidden="true"></i>
+                <span>Add folder</span>
+              </button>
+              <button type="button" id="personalAssistantLinkChip" class="personal-assistant-panel__chip personal-assistant-panel__menu-item" role="menuitem" tabindex="-1" aria-expanded="false" aria-controls="personalAssistantLinkField" hidden>
+                <i class="bi bi-link-45deg" aria-hidden="true"></i>
+                <span>Add link</span>
+              </button>
+              <button type="button" id="personalAssistantExploreAttachedFolder" class="personal-assistant-panel__chip personal-assistant-panel__menu-item" role="menuitem" tabindex="-1" aria-expanded="false" aria-controls="personalAssistantFolderExplorer" hidden>
+                <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                <span>Tree + Chat</span>
+              </button>
+              <!-- Beside a local folder preview, setup moves this one control
+                   out of the menu and back (personal-assistant-folder-setup.js);
+                   it is a menu item only while it is in here. -->
+              <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link personal-assistant-panel__menu-item" role="menuitem" tabindex="-1" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
+            </div>
+          </div>
+          <span id="personalAssistantActiveFolder" class="personal-assistant-folder-context__chip" hidden>
+            <span id="personalAssistantActiveFolderName"></span>
+            <button type="button" id="personalAssistantRemoveFolder" aria-label="Remove folder context">×</button>
+          </span>
+          <!-- With a link attached, an empty Send asks about it; the chip says
+               so in its tooltip and description. -->
+          <span id="personalAssistantActiveLink" class="personal-assistant-folder-context__chip personal-assistant-link-chip"
+                title="Empty Send: “Tell me about this link”" aria-describedby="personalAssistantLinkSendHint" hidden>
+            <i id="personalAssistantActiveLinkIcon" class="bi bi-link-45deg" aria-hidden="true"></i>
+            <span id="personalAssistantActiveLinkName"></span>
+            <span id="personalAssistantLinkSummary" class="visually-hidden" hidden></span>
+            <span id="personalAssistantLinkSendHint" class="visually-hidden" hidden>Empty Send: “Tell me about this link”</span>
+            <button type="button" id="personalAssistantRemoveLink" aria-label="Remove link">×</button>
+          </span>
+        </div>
       </div>
       <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
       <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="2"
                 maxlength="2000" autocomplete="off"
-                placeholder="Ask a question or describe what you want help with"></textarea>
+                placeholder="Ask or describe what you want help with"></textarea>
       <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
     </form>
   </section>

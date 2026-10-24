@@ -399,16 +399,12 @@
 }
 
 /* The requirements already are the open review. Avoid a duplicate entry in
-   the pinned chips and give the two package identities room on shorter pages. */
+   the attach menu and give the two package identities room on shorter pages.
+   The attach row is one line already; it does not scroll sideways, because
+   that would clip the attach menu that opens above it. */
 #personalAssistantPanel:has(.folder-requirements__row--actionable)
   #personalAssistantReviewFolderSetup {
   display: none;
-}
-
-#personalAssistantPanel:has(.folder-requirements__row--actionable)
-  .personal-assistant-panel__attachments {
-  flex-wrap: nowrap;
-  overflow-x: auto;
 }
 
 #personalAssistantPanel:has(.folder-requirements__row--actionable)
@@ -468,11 +464,17 @@
   }
 
   #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))
-    .personal-assistant-panel__attachments {
+    .personal-assistant-panel__attach-row {
     grid-column: auto;
     max-width: 180px;
     flex-wrap: nowrap;
-    overflow-x: auto;
+  }
+
+  /* The narrowed row is at the composer's left, so the attach menu opens
+     rightwards from it, over the text box, and stays in the sheet. */
+  #personalAssistantPanel:has(.pa-folder__offer:not([hidden])) .personal-assistant-attach__menu {
+    right: auto;
+    left: 0;
   }
 
   #personalAssistantPanel:has(.pa-folder__offer:not([hidden]))

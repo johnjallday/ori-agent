@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseAttach, openAttachMenu } from './helpers/assistant-menus';
 
 test('the assistant portrait explores only while a scan is in flight, then shows observed findings', async ({
   page,
@@ -108,6 +109,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   // The scene is the reply after a folder is chosen, not before.
   await expect(scene).toBeHidden();
   // Opening choices is not a scan, model turn, or setup decision.
+  await openAttachMenu(page);
   await expect(chip).toBeVisible();
   await expect(chip).toBeEnabled();
   expect(mutations).toEqual([]);
@@ -169,7 +171,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     return [
       top('personalAssistantTodayStrip'),
       top('personalAssistantContextChooser'),
-      top('personalAssistantFolderChip'),
+      top('personalAssistantAttachMenu'),
       top('personalAssistantInput')
     ];
   });
@@ -224,7 +226,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   expect(transition).toBe('none');
   // Asking again reopens the chooser in the same turn.
   failNext = true;
-  await chip.click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await expect(chooser).toBeVisible();
   await page
     .locator('#personalAssistantFolderChoices')

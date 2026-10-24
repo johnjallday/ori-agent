@@ -13,11 +13,10 @@
 .pa-operation[hidden] {
   display: none;
 }
-/* The Watch chip sits in the composer's existing chip row, at its end, so it
-   takes no row of its own. */
+/* The Watch switch is a row of the drawer's "…" menu (ori-guide.css
+   .personal-assistant-panel__switch), so it takes no row of the drawer. */
 .pa-operation__watch {
   min-height: 40px;
-  margin: 0 0 0 auto;
   cursor: pointer;
 }
 .pa-operation__watch[hidden] {

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Production browser, Route/Ask, Ollama adapter, canonical stores and hydration.
 // Only the loopback provider's text/generation barrier is deterministic. This
@@ -126,12 +127,13 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
 
   // Inside A, choose a separate project review explicitly. This choice is
   // non-executing; it does not approve creation or link a supporting folder.
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // The attach opened Tree + Chat, so Review setup is in the "+" menu.
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page
     .locator('#personalAssistantFolderSetupCandidate')
     .selectOption({ label: 'Album-5 history fixture' });
