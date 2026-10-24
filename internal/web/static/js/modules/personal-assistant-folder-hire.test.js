@@ -39,7 +39,7 @@ test('stop families keep distinct reviewed recovery actions and never guess a pl
     );
     assert.deepEqual(
       view.actions.map(action => action.id),
-      ids,
+      [...ids, 'remove'],
       reason
     );
     if (reason.includes('_')) assert.doesNotMatch(view.question, new RegExp(reason));
@@ -706,12 +706,18 @@ test('a stopped inbox run says what finished and offers its own recovery', () =>
   assert.match(failed.question, /^2 of 3 steps finished\. A step did not finish\./);
   assert.deepEqual(
     failed.actions.map(action => [action.id, action.label]),
-    [['retry', 'Try again']]
+    [
+      ['retry', 'Try again'],
+      ['remove', 'Remove']
+    ]
   );
   const changed = stopped('plan_changed');
   assert.match(changed.question, /File Janitor will not take this folder/);
   assert.deepEqual(
     changed.actions.map(action => [action.id, action.label]),
-    [['repick', 'Pick it again']]
+    [
+      ['repick', 'Pick it again'],
+      ['remove', 'Remove']
+    ]
   );
 });

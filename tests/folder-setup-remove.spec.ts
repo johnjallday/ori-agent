@@ -1,0 +1,193 @@
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+
+// A confirmed folder setup that stopped stays in Needs you until the user
+// removes it. These fixtures drive the real card with route mocks for the
+// digest read and the abandon call; the server side is covered by Go tests.
+const OFFER_ID = 'stopped-album';
+
+const stoppedOffer = () => ({
+  id: OFFER_ID,
+  status: 'awaiting_outcome',
+  verdict: 'project',
+  folder: 'Album-4',
+  subject: { name: 'Album-4', kind: 'project', is_root: true },
+  capability: { recognized: 'music project', workspace: 'Song workspace' },
+  decision: 'yes',
+  choice: 'project',
+  setup: {
+    plan_digest: 'fixture-digest',
+    status: 'stopped',
+    stop_reason: 'interrupted',
+    lines: [
+      { kind: 'workspace', name: 'Creates a Song workspace named Album-4', state: 'done' },
+      { kind: 'folder', name: 'Linked where it is', state: 'done' },
+      { kind: 'agents', name: 'Hires an assistant', state: 'done' },
+      { kind: 'task', name: 'Queues a first read-only task', state: 'failed' }
+    ]
+  }
+});
+
+const chips = [{ id: 'desktop', label: 'Desktop' }];
+
+// Today and Needs you render only for a hired assistant with an HQ, so the demo
+// sandbox hires one for real (once); the folder digest is the part that is mocked.
+async function hireAssistant(request: APIRequestContext) {
+  await request.post('/api/onboarding/skip');
+  const read = async () =>
+    (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
+  let relationship = await read();
+  if (relationship.state === 'needs_hire') {
+    const hire = await request.post('/api/personal-assistant/hire', {
+      data: {
+        request_id: 'remove-spec-hire',
+        if_version: relationship.state_version ?? 0,
+        display_name: 'Atlas',
+        mandate: 'Keep my projects moving.',
+        focus_areas: ['plan_my_day']
+      }
+    });
+    expect(hire.ok(), await hire.text()).toBeTruthy();
+    relationship = await read();
+  }
+  if (!relationship.hq_workspace_id) {
+    const hq = await request.post('/api/personal-assistant/hq', {
+      data: { request_id: 'remove-spec-hq', if_version: relationship.state_version, name: 'My HQ' }
+    });
+    expect(hq.ok(), await hq.text()).toBeTruthy();
+  }
+}
+
+async function mountStopped(page: Page) {
+  const state = { removed: false, abandons: [] as any[] };
+  await page.route('**/api/personal-assistant/folder-digest', route =>
+    route.fulfill({
+      json: {
+        folder_digest: {
+          chips,
+          picker_available: false,
+          ...(state.removed ? {} : { offer: stoppedOffer() })
+        }
+      }
+    })
+  );
+  return state;
+}
+
+test.beforeEach(async ({ request }) => {
+  await hireAssistant(request);
+});
+
+test('fixture Remove asks once, Keep and Esc back out, and a removed setup stays gone after a reload', async ({
+  page
+}) => {
+  const state = await mountStopped(page);
+  await page.route(`**/api/personal-assistant/folder-digest/offers/${OFFER_ID}/abandon`, route => {
+    state.abandons.push(route.request().postDataJSON());
+    state.removed = true;
+    return route.fulfill({ json: { offer: { ...stoppedOffer(), status: 'abandoned' } } });
+  });
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Album-4 needs you');
+  // Remove is last, after the way forward.
+  const actions = card.locator('#personalAssistantFolderOfferActions button');
+  await expect(actions.last()).toHaveText('Remove');
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+
+  // First click opens the confirm, which says what stays. Nothing is sent yet.
+  await actions.last().click();
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'Remove this setup from Needs you?'
+  );
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'Kept: the workspace, the folder link, the agent.'
+  );
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'Show the folder again to start over.'
+  );
+  const keep = card.getByRole('button', { name: 'Keep', exact: true });
+  await expect(keep).toBeFocused();
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/remove-confirm.png` });
+
+  // Keep restores the row and puts focus back on Remove.
+  await keep.click();
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Remove', exact: true })).toBeFocused();
+
+  // Esc leaves the confirm too, without closing the drawer.
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(keep).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  expect(state.abandons).toHaveLength(0);
+
+  // Confirm: one request with a fresh id, the card leaves, focus lands on Add folder.
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(card).toBeHidden();
+  expect(state.abandons).toHaveLength(1);
+  expect(String(state.abandons[0].request_id)).toMatch(/\S{8,}/);
+  await expect(page.locator('#personalAssistantFolderChip')).toBeFocused();
+  await expect(page.locator('#homeAssistantConversation')).toContainText(
+    'Album-4 setup removed. Show the folder again to start over.'
+  );
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/remove-done.png` });
+
+  // After a reload the server no longer returns it: the chooser, not a card.
+  await page.reload();
+  await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderOffer')).toBeHidden();
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/remove-reloaded.png` });
+  expect(state.abandons).toHaveLength(1);
+});
+
+test('fixture a refused Remove keeps the confirm and says why', async ({ page }) => {
+  await mountStopped(page);
+  let reason = 'setup_running';
+  await page.route(`**/api/personal-assistant/folder-digest/offers/${OFFER_ID}/abandon`, route =>
+    route.fulfill({
+      status: 409,
+      json: { error: 'server words', reason }
+    })
+  );
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  const error = card.locator('#personalAssistantFolderOfferError');
+  await expect(error).toHaveText('Setup is still running. Wait for it to stop.');
+  await expect(card.getByRole('button', { name: 'Keep', exact: true })).toBeVisible();
+  await expect(card).toBeVisible();
+
+  reason = 'offer_decided';
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(error).toHaveText('This setup already moved on. Reload to see it.');
+  await expect(card.getByRole('button', { name: 'Keep', exact: true })).toBeVisible();
+
+  // Keep clears the message and the card is whole again.
+  await card.getByRole('button', { name: 'Keep', exact: true }).click();
+  await expect(error).toBeHidden();
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+});
+
+test('fixture a running setup has no Remove', async ({ page }) => {
+  const running = stoppedOffer();
+  running.setup.status = 'running';
+  running.setup.stop_reason = '';
+  running.setup.lines[3].state = 'working';
+  await page.route('**/api/personal-assistant/folder-digest', route =>
+    route.fulfill({
+      json: { folder_digest: { chips, picker_available: false, offer: running } }
+    })
+  );
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+});

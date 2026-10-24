@@ -567,7 +567,10 @@ test('a review of a proposed group shows the group, its members and Adjust, neve
   assert.match(stopped.question, /^1 of 2 steps finished\. One workspace could not be created/);
   assert.deepEqual(
     stopped.actions.map(action => [action.label, action.oneCard, action.retry]),
-    [['Continue', true, true]]
+    [
+      ['Continue', true, true],
+      ['Remove', undefined, undefined]
+    ]
   );
   // A finished setup shows its receipt: the group, then every workspace, each
   // with its own page. A row whose route is not a workspace page is not linked.
