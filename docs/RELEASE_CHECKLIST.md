@@ -56,8 +56,10 @@ part of this first RC workflow.
 7. Release merge-back PRs must use **Create a merge commit**. Keep that merge
    method enabled: the lifecycle lands those PRs itself with it, and anyone
    merging one by hand must pick it (the merge button remembers the last
-   method used, which is Squash after a feature PR). Feature PRs still squash
-   into `dev` as usual. A merge-back that was squashed anyway is repaired by
+   method used, which is Squash after a feature PR). Merge it with
+   `./scripts/devops.sh merge <N>` instead of the button: it chooses the merge
+   commit for `release/*` and `release-merge-back/*` heads and refuses anything
+   with a failing check. Feature PRs still squash into `dev` as usual. A merge-back that was squashed anyway is repaired by
    the next Auto Release run (see Merge back and continue).
 8. Clear the hold only when ready to enable candidate creation. No live GitHub
    setting, release, tag, or branch is changed merely by running local tests.
@@ -228,8 +230,9 @@ and arms auto-merge with a merge commit. GitHub usually refuses to arm it: the
 branch head's own push run already satisfies dev's required checks, so the PR
 already counts as mergeable. That is why react lands the PR with a merge commit
 as soon as the PR's CI run is green. Nobody needs to touch it. If you do merge
-it by hand, use **Create a merge commit**, preserving new dev work and all
-stabilization fixes. Conflicts require review and a new CI run; do not resolve
+it by hand, use `./scripts/devops.sh merge <N>`; it chooses the merge commit for
+release heads and refuses otherwise. Without it, use **Create a merge
+commit**, preserving new dev work and all stabilization fixes. Conflicts require review and a new CI run; do not resolve
 them by replacing all of dev with the release tree. Do not edit the shipped
 release branch to resolve conflicts: use a separate integration branch
 incorporating both parents, then PR that branch to dev with a merge commit.

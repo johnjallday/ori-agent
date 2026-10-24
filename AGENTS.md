@@ -200,7 +200,11 @@ Each prerelease includes `rc-test-report-<tag>.md`. Follow
 a separately named sanitized completed report before sign-off. Path suggestions
 do not replace diff-informed cases. Merge the release branch back to `dev` with a
 **merge commit**, not squash/rebase, before the next candidate (the release-only
-exception to feature squash merges). Never move published tags, mix newer dev
+exception to feature squash merges). A person merges any PR into `dev` with
+`./scripts/devops.sh merge <N>`, which picks the method from the head branch:
+a merge commit for `release/*` and `release-merge-back/*`, a squash for the
+rest, never rebase, and nothing that has a red check or a conflict. Agents do
+not run it; they open PRs with `wt pr`. Never move published tags, mix newer dev
 features into an active RC, or bypass the RC gate via obsolete local skills.
 Rollout/GitHub settings are separate operator actions; workflow source alone does
 not enable them on `main`.

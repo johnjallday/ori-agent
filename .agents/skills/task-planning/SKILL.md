@@ -494,9 +494,12 @@ The default is one feature, one branch, and one PR targeting `dev`.
 - Commit once per completed parent group, not once per sub-task.
 - Once the PR readiness gate below passes, open the PR with `wt pr` without
   asking. CI then runs while a person reviews the open PR.
-- The merge is the human gate. Never enable auto-merge, run `gh pr merge`, or
-  push to `dev`; a person reviews the PR and squash-merges it. Changes requested
-  on the PR are further commits on the same branch.
+- The merge is the human gate. Never enable auto-merge, run `gh pr merge`, run
+  `devops.sh merge`, or push to `dev`. A person reviews the PR and merges it with
+  `./scripts/devops.sh merge <N>` (picker key `m`): it squash-merges a feature
+  head, refuses anything that is not fully green, and runs `wt done` for the
+  PR's worktree afterwards. The action refuses to run in an agent shell.
+  Changes requested on the PR are further commits on the same branch.
 
 For work too large for one reviewable PR, default to one long-lived
 `epic/<name>` branch with one final `epic → dev` PR. Merge `origin/dev` into the
@@ -581,10 +584,11 @@ Then open the PR with `wt pr` and end the assigned work with one readiness
 summary and the PR URL. `wt pr` runs `make ci-local` first and pushes nothing
 on failure; a failed gate is a blocker to fix, never a reason for
 `--skip-checks`. The merge and post-merge cleanup items stay unchecked: a
-person reviews the PR on GitHub and squash-merges it, and `wt done` runs only
-after that. Opening the PR authorizes nothing else: no auto-merge, companion
-publication, installation, release/pin changes, or cleanup. Follow the separate
-approval and lifecycle rules for those actions.
+person reviews the PR on GitHub and squash-merges it (`devops.sh merge` does so
+for a feature head), and `wt done` runs only after that. Opening the PR
+authorizes nothing else: no auto-merge, companion publication, installation,
+release/pin changes, or cleanup. Follow the separate approval and lifecycle
+rules for those actions.
 
 These are agent instructions, not a runtime supervisor. An optional harness guard
 must be explicitly armed for the authorized session/worktree/scope, preserve these
