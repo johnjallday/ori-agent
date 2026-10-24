@@ -56,8 +56,16 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 		return unrecognized, nil
 	}
 	verdict := folderdigest.Exclude(held.result, now, tombstoned)
-	if verdict.Kind != folderdigest.KindProject || verdict.Project == nil {
+	if verdict.Project == nil || (verdict.Kind != folderdigest.KindProject && verdict.Kind != folderdigest.KindMixed) {
 		return unrecognized, nil
+	}
+	// Projects beside loose files that are not a dump: the project leads (the
+	// dump rule has already sent a dump to its tidy above). Several projects and
+	// nothing loose stay as they were: a choice of project, not one hire.
+	if verdict.Kind == folderdigest.KindMixed {
+		if _, led := folderdigest.MixedHireLead(held.result, now, tombstoned); !led {
+			return unrecognized, nil
+		}
 	}
 	project := *verdict.Project
 	candidateID := ""

@@ -37,6 +37,9 @@ type FolderConversationReview struct {
 	// (a workspace build's draft). Empty names it after the folder, as Home's
 	// card does. The plan, its digest and the run all use it.
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	// Lead is the host's choice between this folder's two hires, when it holds a
+	// project beside loose files (folder-inbox-hire FR12). Nil otherwise.
+	Lead *FolderLead `json:"lead,omitempty"`
 }
 
 // ConfigureConversationReviews is wired once at host construction. The guard
@@ -277,9 +280,15 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 	// The root of an inbox folder is reviewed as the host's File Janitor setup.
 	// A build keeps its own reviewed janitor consent, and a supporting link is
 	// not a setup.
+	// A folder that holds a project beside loose files has two hires: the host
+	// chooses which leads from the digest, and the root's review is the tidy.
+	lead, mixed := folderdigest.MixedHireLead(held.result, now, tombstoned)
 	if candidate.IsRoot && !collection && placement.Operation != FolderOperationSupport && !IsBuildReview(target) &&
-		folderdigest.IsInbox(held.result, now, tombstoned) {
+		(mixed || folderdigest.IsInbox(held.result, now, tombstoned)) {
 		offer.Subject.Shape = string(folderdigest.ShapeInbox)
+	}
+	if mixed && !collection && placement.Operation != FolderOperationSupport && !IsBuildReview(target) {
+		offer.ConversationReview.Lead = reviewLead(held, candidate, lead)
 	}
 	if candidate.IsRoot && verdict.Portfolio != nil && d.deps.HomeExists != nil {
 		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
@@ -763,6 +772,9 @@ func validateConversationReview(review *FolderConversationReview) error {
 	}
 	if review.WorkspaceName != "" && (strings.TrimSpace(review.WorkspaceName) != review.WorkspaceName || validateFolderName(review.WorkspaceName) != nil) {
 		return errFolderDigestInvalid
+	}
+	if err := review.Lead.validate(); err != nil {
+		return err
 	}
 	if len(review.DestinationID) > 200 || strings.ContainsAny(review.DestinationID, "/\\\x00\r\n") {
 		return errFolderDigestInvalid

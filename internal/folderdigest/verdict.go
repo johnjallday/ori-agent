@@ -261,9 +261,9 @@ func IsCollection(r Result, now time.Time) bool {
 // IsInbox reports whether an attached root is an inbox folder: the fallback
 // below a collection and a recognized project. Nothing about the root's name
 // counts; only the verdict does. The root is one when, without the candidates
-// the user declined, it is a dump, an ambiguous or empty folder, a mixed one,
-// or a project only by the density of files of no kind Ori knows (at the root
-// or in one subfolder). A root the user declined is never one, and neither is
+// the user declined, it is a dump, an ambiguous or empty folder, a mixed one
+// that is also a dump, or a project only by the density of files of no kind Ori
+// knows (at the root or in one subfolder). A root the user declined is never one, and neither is
 // a root that holds one project of a known kind. The dump thresholds do not
 // gate it: attaching the folder is the ask.
 func IsInbox(r Result, now time.Time, declined func(Candidate) bool) bool {
@@ -275,8 +275,12 @@ func IsInbox(r Result, now time.Time, declined func(Candidate) bool) bool {
 	}
 	v := Exclude(r, now, declined)
 	switch v.Kind {
-	case KindDump, KindAmbiguous, KindEmpty, KindMixed:
+	case KindDump, KindAmbiguous, KindEmpty:
 		return true
+	case KindMixed:
+		// Projects beside loose files: the tidy hire leads only when the root is
+		// a dump. Otherwise the project does (MixedHireLead).
+		return v.RootDump
 	case KindProject:
 		return v.Project != nil && !knownProject(*v.Project)
 	}

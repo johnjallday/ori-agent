@@ -994,7 +994,29 @@ export function blockedFolderSetupAction(offer) {
 // string comes from the verdict and the server's counts and names.
 // options.confirm ('project' or 'tidy') shows the plan card for a mixed or
 // ambiguous offer instead of its question. The reason line remains present.
+// folderOfferView is the card for an offer. A folder that holds a project beside
+// loose files has two hires; the host chose which leads, so the leading card
+// carries its reason under "Why this suggestion?" and every undecided card
+// carries one link to the other hire (folder-inbox-hire FR12, FR13). Following
+// the link reviews the other hire in place; nothing is created.
 export function folderOfferView(offer, options = {}) {
+  const view = folderOfferViewWithoutLead(offer, options);
+  const lead = offer?.lead;
+  if (!view?.visible || !lead || view.decided || offer.status !== 'pending') return view;
+  const id = String(lead.alternative_id || '').trim();
+  const label = String(lead.alternative_label || '').trim();
+  if (!id || !label) return view;
+  return {
+    ...view,
+    leadReason: lead.leading === true ? String(lead.reason || '').trim() : '',
+    actions: [
+      ...(view.actions || []),
+      { id: 'lead-swap', label: `Or: ${label}`, style: 'link', swapCandidate: id }
+    ]
+  };
+}
+
+function folderOfferViewWithoutLead(offer, options = {}) {
   if (!offer || typeof offer !== 'object') return { visible: false };
   const verdict = String(offer.verdict || '').trim();
   const folder = String(offer.folder || '').trim() || 'that folder';
@@ -3271,6 +3293,16 @@ function renderOffer(place) {
   renderHidden(els.hidden, capabilityHiddenView(state.offer));
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
+  // The host's reason for which of a folder's two hires leads, in view on the card.
+  const leadWhy = document.getElementById('personalAssistantFolderLeadWhy');
+  if (leadWhy) {
+    leadWhy.hidden = !view.leadReason;
+    setText(
+      document.getElementById('personalAssistantFolderLeadReason'),
+      view.leadReason || '',
+      false
+    );
+  }
   if (els.receipt) {
     els.receipt.hidden = !receipt.visible;
     // A group's receipt is a list of workspaces to open: one to a row.
@@ -3584,6 +3616,12 @@ function runAction(action) {
   }
   if (action.closeReview) {
     void window.PersonalAssistantFolderSetup?.closeReview?.(state.offer);
+    return;
+  }
+  if (action.swapCandidate) {
+    // The other hire of a folder that holds a project beside loose files: its
+    // own review takes this one's place, and nothing is created.
+    window.PersonalAssistantFolderSetup?.reviewCandidate?.(action.swapCandidate);
     return;
   }
   if (action.rename) {

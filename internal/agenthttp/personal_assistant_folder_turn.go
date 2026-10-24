@@ -212,7 +212,7 @@ const folderInstructionsClosing = ` If the user wants only discussion, respect t
 
 // folderHireCardRule is what the model is told about a hire card: the card
 // answers the setup request, and the reply never says what the card says.
-const folderHireCardRule = ` When the canonical review context's controls start with Hire and start, Ori shows a hire card under your reply: it names the assistant it hires, asks what that assistant should do, and lists every step. That card answers a request to set the folder up. Add at most two sentences of your own, about the folder or the user's question; never name the hired assistant or its role, count or list the card's steps, or describe its controls.`
+const folderHireCardRule = ` When the canonical review context's controls start with Hire and start, Ori shows a hire card under your reply: it names the assistant it hires, asks what that assistant should do, and lists every step. That card answers a request to set the folder up. Add at most two sentences of your own, about the folder or the user's question; never name the hired assistant or its role, count or list the card's steps, or describe its controls. When the folder holds a project beside loose files, Ori chose which hire leads from its own rule and shows the reason and the other hire on the card: you may restate that reason in your own words, but never contradict it, never recommend the other hire instead, and never choose between the two yourself.`
 
 // A canonical event-only review is not an answered folder turn. Only local
 // event/user/answer triples for this snapshot, still in the provider's bounded

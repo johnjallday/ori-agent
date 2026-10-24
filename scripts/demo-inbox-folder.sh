@@ -5,7 +5,11 @@
 # sandboxed folder chips reach them.
 #
 # Usage:
-#   ./scripts/demo-inbox-folder.sh [--port PORT] [--sandbox DIR]
+#   ./scripts/demo-inbox-folder.sh [--port PORT] [--sandbox DIR] [--desktop-project-leads]
+#
+# --desktop-project-leads seeds Desktop with a Go module beside five loose files
+# instead of leaving it empty, so the project hire leads there (the mixed-folder
+# case where the loose files are not a dump).
 #
 # 1. A new sandbox under $TMPDIR (or --sandbox, which must be under $TMPDIR),
 #    the demo server (scripts/demo-server.sh: builds this worktree, redirects
@@ -27,8 +31,13 @@ set -euo pipefail
 
 port=8952
 sandbox=""
+desktop=empty
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--desktop-project-leads)
+		desktop=project-leads
+		shift
+		;;
 	--port)
 		port="${2:-}"
 		shift 2
@@ -38,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	-h | --help)
-		echo "usage: $0 [--port PORT] [--sandbox DIR]"
+		echo "usage: $0 [--port PORT] [--sandbox DIR] [--desktop-project-leads]"
 		echo "Serves this worktree on an isolated sandbox with no model and seeded inbox folders."
 		exit 0
 		;;
@@ -113,8 +122,15 @@ for name in main util handler store config; do
 done
 echo "DOCUMENTS=$sandbox/Documents"
 
-# Empty: its first scan finds nothing to file.
 mkdir -p "$sandbox/Desktop"
+if [[ "$desktop" == project-leads ]]; then
+	# A Go module beside only a few loose files: the project leads.
+	seed_loose "$sandbox/Desktop" 5 receipt pdf png zip csv txt
+	mkdir -p "$sandbox/Desktop/tool"
+	printf 'module example.com/tool\n\ngo 1.22\n' >"$sandbox/Desktop/tool/go.mod"
+	for name in main util store; do printf 'package main\n' >"$sandbox/Desktop/tool/$name.go"; done
+fi
+# By default Desktop is empty: its first scan finds nothing to file.
 echo "DESKTOP=$sandbox/Desktop"
 
 stop_server() {

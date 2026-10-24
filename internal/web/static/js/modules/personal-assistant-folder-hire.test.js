@@ -593,6 +593,57 @@ test('watching is offered only by a plan that names its time, off until ticked',
   assert.doesNotMatch(template, /id="personalAssistantFolderMonitoring"[^>]*checked/);
 });
 
+test('a folder with a project beside loose files shows why one hire leads and the other one link away', () => {
+  const reason =
+    '23 loose files of 6 kinds sit beside a Go module changed on Oct 20: the loose files are the bigger job.';
+  const tidy = folderOfferView({
+    ...inboxOffer(),
+    lead: {
+      leading: true,
+      reason,
+      alternative_id: 'candidate-1',
+      alternative_label: 'hire Development Assistant for widget instead'
+    }
+  });
+  assert.equal(tidy.leadReason, reason, 'the reason sits under "Why this suggestion?"');
+  assert.deepEqual(
+    tidy.actions.map(action => [action.id, action.label, action.swapCandidate || '']),
+    [
+      ['setup', 'Hire & start', ''],
+      ['no', 'Not now', ''],
+      ['lead-swap', 'Or: hire Development Assistant for widget instead', 'candidate-1']
+    ]
+  );
+  // The hire reached by the link does not lead: no reason, a link back.
+  const project = folderOfferView({
+    ...reviewedSoftware(),
+    lead: {
+      leading: false,
+      alternative_id: 'candidate-0',
+      alternative_label: 'hire File Curator to tidy the loose files instead'
+    }
+  });
+  assert.equal(project.leadReason, '');
+  assert.equal(project.actions.at(-1).swapCandidate, 'candidate-0');
+  assert.equal(
+    project.actions.at(-1).label,
+    'Or: hire File Curator to tidy the loose files instead'
+  );
+  // Without a lead, or once decided, there is no link.
+  assert.ok(!folderOfferView(inboxOffer()).actions.some(action => action.swapCandidate));
+  const decided = folderOfferView({
+    ...inboxOffer(),
+    status: 'awaiting_outcome',
+    lead: { leading: true, reason, alternative_id: 'candidate-1', alternative_label: 'x' }
+  });
+  assert.ok(!decided.actions.some(action => action.swapCandidate));
+  // The link only reviews the other hire; it posts nothing itself.
+  assert.match(
+    source,
+    /window\.PersonalAssistantFolderSetup\?\.reviewCandidate\?\.\(action\.swapCandidate\)/
+  );
+});
+
 test('ticking watching adds its fifth line to what the card lists, and the plan stays the same', () => {
   const offer = { ...inboxOffer(), plan: { ...inboxOffer().plan, monitoring: { time: '09:00' } } };
   assert.equal(planWithWatching(offer, false).lines.length, 4);

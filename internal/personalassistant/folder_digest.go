@@ -717,7 +717,10 @@ type FolderOfferView struct {
 	SetupUnavailableMessage string `json:"setup_unavailable_message,omitempty"`
 	// Tidied is the File Janitor workspace that already tidies an inbox folder
 	// (exact, ancestor or descendant): the card opens it instead.
-	Tidied                 *FolderTidiedView  `json:"tidied,omitempty"`
+	Tidied *FolderTidiedView `json:"tidied,omitempty"`
+	// Lead is the host's choice between a folder's two hires (a project beside
+	// loose files): the reason this one leads, and the other hire one click away.
+	Lead                   *FolderLead        `json:"lead,omitempty"`
 	Readiness              *FolderSetupVisual `json:"readiness,omitempty"`               // display only; never confirms setup
 	PrerequisitesAvailable bool               `json:"prerequisites_available,omitempty"` // separate reviewed plugin-only controls
 	// Availability says, in the words a proposal uses (FolderAvailability*), why
@@ -2548,6 +2551,7 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 		v.Operation = offer.ConversationReview.Operation
 		v.CandidateID = offer.ConversationReview.CandidateID
 		v.RequestedDestinationID = offer.ConversationReview.DestinationID
+		v.Lead = offer.ConversationReview.Lead.clone()
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
 	if offer.Verdict == string(folderdigest.KindProject) && offer.Subject.Kind == FolderChoiceProject &&
