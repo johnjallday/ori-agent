@@ -339,6 +339,10 @@ type FolderDigestDeps struct {
 	// its first batch. Nil leaves a finished run unverified, and an unverified
 	// run never resolves an offer.
 	InboxProject func(ctx context.Context, userID string, offer FolderOffer, folderPath, identity string) (FolderCreateResult, error)
+	// InboxRetry runs a resolved inbox hire's first scan again, alone, as the
+	// attempt'th retry, on the workspace and folder its setup made, and reads
+	// the attempt's batch back. Nil leaves the report without Retry.
+	InboxRetry func(ctx context.Context, userID string, offer FolderOffer, attempt int) (FolderFirstBatch, error)
 	// StructureGroup re-reads, from canonical state, the group a finished
 	// structure setup made (or joined) and the workspaces it created for the
 	// offer's members, each still linked to its own folder under root. It is how

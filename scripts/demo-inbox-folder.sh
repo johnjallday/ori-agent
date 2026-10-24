@@ -14,7 +14,7 @@
 # 2. Seeded folders, every one a disposable fixture of loose files:
 #      Downloads   a dump: 25 loose files of 6 kinds, no project marker
 #      Documents   a mixed folder: one Go module ("widget") beside 22 loose files
-#      Desktop     an empty folder: one loose file
+#      Desktop     an empty folder: nothing to file
 # 3. The personal assistant and its HQ, through the same host routes the
 #    Playwright suites use, so Home's Hire an agent and the composer's Add folder
 #    are both available at once.
@@ -113,8 +113,8 @@ for name in main util handler store config; do
 done
 echo "DOCUMENTS=$sandbox/Documents"
 
+# Empty: its first scan finds nothing to file.
 mkdir -p "$sandbox/Desktop"
-printf 'fixture\n' >"$sandbox/Desktop/todo.txt"
 echo "DESKTOP=$sandbox/Desktop"
 
 stop_server() {

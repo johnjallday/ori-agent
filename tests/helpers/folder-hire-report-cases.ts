@@ -162,3 +162,76 @@ export function folderHireReportCases() {
     expect(executions(await tasks())).toEqual(executions(before));
   });
 }
+
+// An inbox hire's first batch as Today reports it (folder-inbox-hire FR19,
+// FR20): kind folder_first_batch, keyed by its setup's offer.
+export type FirstBatchItem = {
+  kind: string;
+  state?: string;
+  title: string;
+  detail?: string;
+  attribution?: string;
+  workspace?: string;
+  actions?: string[];
+  report_route?: string;
+  ref: { entity_id: string; workspace_id: string; entity_type?: string };
+};
+
+// The three inbox cases: a batch to review, nothing to file, and a first scan
+// that did not complete. Each is told apart by the primary the card offers.
+export const INBOX_FIRST_BATCH_CASES = {
+  batch: { action: 'review_batch', primary: 'Review batch', link: true },
+  empty: { action: 'open_janitor', primary: 'Open File Janitor', link: true },
+  failed: { action: 'retry', primary: 'Retry', link: false }
+} as const;
+
+export async function inboxFirstBatchItems(request: APIRequestContext): Promise<FirstBatchItem[]> {
+  const response = await request.get('/api/personal-assistant/today');
+  expect(response.ok()).toBeTruthy();
+  return ((await response.json()).today?.needs_you?.items || []).filter(
+    (item: FirstBatchItem) => item.kind === 'folder_first_batch'
+  );
+}
+
+// expectFirstBatchCard asserts one inbox report on Home's Today and in the
+// drawer on another page: its sentence, its one primary (a link to the File
+// Janitor review, or Retry), Not now beside a link, and no Start this.
+export async function expectFirstBatchCard(
+  page: Page,
+  item: FirstBatchItem,
+  which: keyof typeof INBOX_FIRST_BATCH_CASES
+) {
+  const want = INBOX_FIRST_BATCH_CASES[which];
+  expect(item.actions || []).toContain(want.action);
+  expect(item.title).not.toMatch(/\/Users\/|\/private\/|\/var\//);
+  const open = async () => {
+    await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
+    await page.evaluate(() =>
+      (window as any).PersonalAssistantPanel.open(
+        document.getElementById('personalAssistantLauncher')
+      )
+    );
+  };
+  for (const [path, host] of [
+    ['/', '#personalAssistantNeedsYouReports'],
+    ['/agents', '#personalAssistantNeedsReports']
+  ]) {
+    await page.goto(path);
+    await open();
+    const card = page.locator(`${host} article[data-look-id="${item.ref.entity_id}"]`);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card).toContainText(item.title);
+    await expect(card).toContainText(item.attribution || 'File Curator');
+    await expect(card.getByRole('button', { name: 'Start this' })).toHaveCount(0);
+    if (want.link) {
+      await expect(card.getByRole('link', { name: want.primary })).toHaveAttribute(
+        'href',
+        item.report_route || ''
+      );
+      await expect(card.getByRole('button', { name: 'Not now' })).toBeVisible();
+    } else {
+      await expect(card.getByRole('button', { name: want.primary })).toBeVisible();
+      await expect(card.getByRole('button', { name: 'Not now' })).toHaveCount(0);
+    }
+  }
+}

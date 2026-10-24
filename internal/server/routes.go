@@ -1255,6 +1255,10 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/start-suggestion", s.Handlers.PersonalAssistant.StartHireLookSuggestion)
 		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/dismiss", s.Handlers.PersonalAssistant.DismissHireLook)
 		mux.HandleFunc("POST /api/personal-assistant/hires/{hireID}/retry", s.Handlers.PersonalAssistant.RetryHireLook)
+		// An inbox hire reports its first batch, keyed by its setup: Not now,
+		// and Retry for a first scan that did not complete.
+		mux.HandleFunc("POST /api/personal-assistant/first-batch/{offerID}/dismiss", s.Handlers.PersonalAssistant.DismissFirstBatch)
+		mux.HandleFunc("POST /api/personal-assistant/first-batch/{offerID}/retry", s.Handlers.PersonalAssistant.RetryFirstBatch)
 		mux.HandleFunc("GET /api/personal-assistant/protection-options", s.Handlers.PersonalAssistant.GetProtectionOptions)
 		// A workspace's read-only Protection fact, from the same stored reader.
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/protection", s.Handlers.PersonalAssistant.GetWorkspaceProtection)

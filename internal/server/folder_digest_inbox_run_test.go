@@ -444,7 +444,6 @@ func TestInboxRun_AFailureStopsAtItsStepAndKeepsWhatFinished(t *testing.T) {
 		{"plan changed", func(f *inboxFixture) { f.team.plan.PlanRevision = "plan-2" }, personalassistant.FolderPlanAgents, ""},
 		{"grant", func(f *inboxFixture) { f.janitor.grantErr = errors.New("permission denied") }, personalassistant.FolderPlanFolder, "workspace"},
 		{"decision", func(f *inboxFixture) { f.janitor.decisionErr = errors.New("busy") }, personalassistant.FolderPlanTask, "workspace,grant"},
-		{"scan", func(f *inboxFixture) { f.reviewer.prepareErr = errors.New("scan failed") }, personalassistant.FolderPlanTask, "workspace,grant,decision"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -475,6 +474,69 @@ func TestInboxRun_AFailureStopsAtItsStepAndKeepsWhatFinished(t *testing.T) {
 				t.Fatalf("writes after retry = %q", got)
 			}
 		})
+	}
+}
+
+// A first scan that does not complete does not undo the hire (FR20): the
+// setup finishes with the workspace, File Curator and the link, the first batch
+// is a failed one, and Retry runs the scan alone under an attempt of its own.
+func TestInboxRun_AFirstScanThatDidNotCompleteIsRetriedAlone(t *testing.T) {
+	f := newInboxFixture(t, "create")
+	plan := f.plan(t)
+	f.reviewer.prepareErr = errors.New("scan failed")
+	update, err := f.run(t, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := lineState(update, personalassistant.FolderPlanTask)
+	if update.Status != personalassistant.FolderSetupDone || task.State != personalassistant.FolderLineFailed || !strings.Contains(task.Detail, "did not complete") {
+		t.Fatalf("status %s, task line %+v", update.Status, task)
+	}
+	if got := strings.Join(f.world.writes, ","); got != "workspace,grant,decision" {
+		t.Fatalf("writes = %q", got)
+	}
+	f.offer.Setup.Status = personalassistant.FolderSetupDone
+	verified, err := f.host.inboxProject(context.Background(), "local", f.offer, f.path, f.identity)
+	if err != nil {
+		t.Fatalf("a setup whose scan failed must still verify: %v", err)
+	}
+	if verified.FirstBatch == nil || verified.FirstBatch.Outcome != personalassistant.FolderFirstBatchFailed ||
+		verified.FirstBatch.Route != "/workspaces/downloads?panel=file-janitor" {
+		t.Fatalf("first batch = %+v", verified.FirstBatch)
+	}
+	if last := verified.Receipt[len(verified.Receipt)-1]; last.Kind != "batch" || !strings.Contains(last.Detail, "did not complete") {
+		t.Fatalf("receipt batch row = %+v", last)
+	}
+
+	// Retry, still failing: nothing but the scan is attempted, under its own id.
+	retried, err := f.host.inboxRetryFirstBatch(context.Background(), "local", f.offer, 1)
+	if err != nil || retried.Outcome != personalassistant.FolderFirstBatchFailed {
+		t.Fatalf("failing retry = %+v, %v", retried, err)
+	}
+	// Retry once the scan can run.
+	f.reviewer.prepareErr = nil
+	retried, err = f.host.inboxRetryFirstBatch(context.Background(), "local", f.offer, 2)
+	if err != nil || retried.Outcome != personalassistant.FolderFirstBatchReady || retried.Eligible != 23 || retried.NeedsReview != 4 {
+		t.Fatalf("retry = %+v, %v", retried, err)
+	}
+	if got := strings.Join(f.world.writes, ","); got != "workspace,grant,decision,scan" {
+		t.Fatalf("writes after retry = %q (no second workspace, grant or decision)", got)
+	}
+	if _, found := f.world.receipts[inboxOperationIDs(f.offer.Setup.RunID).workspace+"|"+inboxOperationIDs(f.offer.Setup.RunID).scanAttempt(2)]; !found {
+		t.Fatal("the retry did not scan under its own attempt's operation")
+	}
+	if len(f.team.created) != 1 || len(f.janitor.grants) != 1 {
+		t.Fatalf("retry created %d / granted %d", len(f.team.created), len(f.janitor.grants))
+	}
+	// A folder replaced since is not scanned.
+	if err := os.Remove(f.path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(f.path, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.host.inboxRetryFirstBatch(context.Background(), "local", f.offer, 3); err == nil {
+		t.Fatal("a replaced folder was scanned")
 	}
 }
 

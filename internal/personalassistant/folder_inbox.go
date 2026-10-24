@@ -2,8 +2,18 @@ package personalassistant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
+)
+
+// Errors of an inbox hire report's Retry.
+var (
+	// ErrFirstBatchNotFailed is a Retry on a first batch whose scan completed.
+	ErrFirstBatchNotFailed = errors.New("personal assistant: the first scan did not fail")
+	// ErrFirstBatchRetryBusy is a Retry while another is still running.
+	ErrFirstBatchRetryBusy = errors.New("personal assistant: the first scan is already being retried")
 )
 
 // FolderInboxIntent is everything a reviewed inbox-folder setup promised, in a
@@ -89,7 +99,16 @@ type FolderFirstBatch struct {
 	NeedsReview int    `json:"needs_review"`
 	Ineligible  int    `json:"ineligible"`
 	Route       string `json:"route,omitempty"`
+	// Attempts counts the report's Retry presses; each runs under a scan
+	// operation of its own.
+	Attempts int `json:"attempts,omitempty"`
+	// DismissedAt is when the report's Not now was pressed: it leaves Needs
+	// you and Today, and the batch stays in File Janitor.
+	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
 }
+
+// folderFirstBatchMaxAttempts bounds the report's Retry presses.
+const folderFirstBatchMaxAttempts = 20
 
 func (b *FolderFirstBatch) validate() error {
 	if b == nil {
@@ -99,6 +118,9 @@ func (b *FolderFirstBatch) validate() error {
 	case FolderFirstBatchReady, FolderFirstBatchEmpty, FolderFirstBatchFailed:
 	default:
 		return fmt.Errorf("%w: first batch outcome", errFolderDigestInvalid)
+	}
+	if b.Attempts < 0 || b.Attempts > folderFirstBatchMaxAttempts {
+		return fmt.Errorf("%w: first batch attempts", errFolderDigestInvalid)
 	}
 	if b.Eligible < 0 || b.NeedsReview < 0 || b.Ineligible < 0 || b.NeedsReview > b.Eligible ||
 		len(b.BatchID) > 200 || strings.ContainsAny(b.BatchID, "/\\\x00\r\n") ||
@@ -170,4 +192,108 @@ func (s *FolderDigestService) resolveInbox(ctx context.Context, userID, offerID 
 	}
 	s.afterOutcome(ctx, userID, resolved)
 	return nil
+}
+
+// inboxHire is the user's resolved inbox hire with a first batch, found by its
+// offer among their own folder setups: never from a browser's word alone.
+func inboxHire(doc FolderDigestDocument, offerID string) (*FolderOffer, error) {
+	offer := doc.Offer(strings.TrimSpace(offerID))
+	if offer == nil || offer.Status != FolderOfferResolved || offer.Outcome == nil || offer.Outcome.FirstLook == nil ||
+		offer.Outcome.FirstLook.Batch == nil || strings.TrimSpace(offer.Outcome.WorkspaceID) == "" || !isInboxOffer(*offer) {
+		return nil, ErrFirstLookNotFound
+	}
+	return offer, nil
+}
+
+// DismissFirstBatch is Not now on an inbox hire's report: it leaves Needs you
+// and Today. The batch itself stays in File Janitor, where it is reviewed.
+func (s *FolderDigestService) DismissFirstBatch(ctx context.Context, userID, offerID string) error {
+	if s == nil || s.store == nil {
+		return ErrFolderOutcomeUnavailable
+	}
+	now := s.now()
+	_, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		offer, err := inboxHire(*d, offerID)
+		if err != nil {
+			return err
+		}
+		item := d.Offer(offer.ID)
+		if item.Outcome.FirstLook.Batch.DismissedAt != nil {
+			return errFolderReplay
+		}
+		at := now
+		item.Outcome.FirstLook.Batch.DismissedAt = &at
+		return nil
+	})
+	if errors.Is(err, errFolderReplay) {
+		return nil
+	}
+	return err
+}
+
+// RetryFirstBatch is Retry on an inbox hire whose first scan did not complete:
+// the setup's step 4 again, alone, under an attempt of its own. The workspace,
+// File Curator and the folder link were kept and are not touched. The attempt
+// is recorded before it runs, and its result replaces the report.
+func (s *FolderDigestService) RetryFirstBatch(ctx context.Context, userID, offerID string) (FolderFirstBatch, error) {
+	if s == nil || s.store == nil || s.deps.InboxRetry == nil {
+		return FolderFirstBatch{}, ErrFolderOutcomeUnavailable
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderFirstBatch{}, err
+	}
+	offer, err := inboxHire(doc, offerID)
+	if err != nil {
+		return FolderFirstBatch{}, err
+	}
+	if offer.Outcome.FirstLook.Batch.Outcome != FolderFirstBatchFailed {
+		return *offer.Outcome.FirstLook.Batch, ErrFirstBatchNotFailed
+	}
+	claim := "first-batch:" + offer.ID
+	if !s.claimRun(claim) {
+		return *offer.Outcome.FirstLook.Batch, ErrFirstBatchRetryBusy
+	}
+	defer s.releaseRun(claim)
+	attempt := offer.Outcome.FirstLook.Batch.Attempts + 1
+	if attempt > folderFirstBatchMaxAttempts {
+		return *offer.Outcome.FirstLook.Batch, ErrFolderOutcomeUnavailable
+	}
+	if _, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		current, err := inboxHire(*d, offer.ID)
+		if err != nil {
+			return err
+		}
+		batch := d.Offer(current.ID).Outcome.FirstLook.Batch
+		if batch.Outcome != FolderFirstBatchFailed || batch.Attempts != attempt-1 {
+			return ErrFirstBatchNotFailed
+		}
+		batch.Attempts = attempt
+		return nil
+	}); err != nil {
+		return FolderFirstBatch{}, err
+	}
+	result, err := s.deps.InboxRetry(ctx, userID, *offer, attempt)
+	if err != nil {
+		return FolderFirstBatch{}, err
+	}
+	result.Attempts, result.DismissedAt = attempt, nil
+	if err := result.validate(); err != nil {
+		return FolderFirstBatch{}, err
+	}
+	now := s.now()
+	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		current, err := inboxHire(*d, offer.ID)
+		if err != nil {
+			return err
+		}
+		look := d.Offer(current.ID).Outcome.FirstLook
+		replaced := result
+		look.Batch, look.At = &replaced, now
+		return nil
+	})
+	if err != nil {
+		return FolderFirstBatch{}, err
+	}
+	return result, nil
 }

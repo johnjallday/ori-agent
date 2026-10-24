@@ -30,6 +30,15 @@ type inboxOperations struct {
 	run, workspace, profile, create, folder, monitoring, scan string
 }
 
+// scanAttempt is the scan operation of one attempt at the first batch: the
+// run's own scan first, then one per Retry from the report.
+func (ids inboxOperations) scanAttempt(attempt int) string {
+	if attempt <= 0 {
+		return ids.scan
+	}
+	return fmt.Sprintf("%s-retry-%d", ids.scan, attempt)
+}
+
 func inboxOperationIDs(runID string) inboxOperations {
 	derive := func(part string) string { return uuid.NewSHA1(inboxNamespace, []byte(runID+":"+part)).String() }
 	return inboxOperations{
@@ -171,23 +180,42 @@ func (h *folderSetupHost) inboxRun(ctx context.Context, req personalassistant.Fo
 	}
 
 	// 4. The first look: one metadata-only scan, prepared through the assisted
-	// setup's own step under this run's operation ids.
-	facts, err := deps.review.ReviewMonitoring(ctx, req.UserID, ids.workspace)
+	// setup's own step under this run's operation ids. A scan that does not
+	// complete does not undo the hire: the workspace, File Curator and the link
+	// are kept, the first batch is reported as not complete, and its Retry runs
+	// this step again on its own.
+	prepared, err := h.inboxPrepareBatch(ctx, deps, req.UserID, ids, ids.scan, monitoring)
 	if err != nil {
-		return failed(personalassistant.FolderPlanTask, err)
-	}
-	prepared, err := deps.review.prepareFirstReview(ctx, assistantsetup.PrepareReviewRequest{
-		OwnerUserID: req.UserID, RunID: runID, WorkspaceID: ids.workspace,
-		MonitoringOperation: ids.monitoring, ScanOperation: ids.scan, Review: inboxMonitoringReview(runID, facts),
-	}, monitoring)
-	if err != nil {
-		return failed(personalassistant.FolderPlanTask, err)
+		logger.Warn("Inbox folder setup: the first scan did not complete", logger.Fields{"offer_id": req.Offer.ID, "error": err.Error()})
+		task := progress.line(personalassistant.FolderPlanTask)
+		task.State, task.Detail = personalassistant.FolderLineFailed, inboxScanIncomplete
+		return progress.send(personalassistant.FolderSetupDone, "")
 	}
 	if outcome, known := inboxBatchOutcome(prepared.ScanOutcome); known {
 		progress.line(personalassistant.FolderPlanTask).Detail = inboxBatchDetail(outcome, prepared.EligibleCount, -1)
 	}
 	progress.done(personalassistant.FolderPlanTask)
 	return progress.send(personalassistant.FolderSetupDone, "")
+}
+
+// inboxScanIncomplete is the first-look line of a run whose scan did not
+// complete.
+const inboxScanIncomplete = "The first scan did not complete. The workspace, File Curator and the folder link are kept; Retry it from Needs you."
+
+// inboxPrepareBatch is FR15 step 4: one metadata-only scan under scanOperation,
+// through the assisted setup's own preparation step, with the monitoring
+// choice the setup made. The setup's run and its report's Retry both use it,
+// each under its own scan operation, so a replay of either returns its
+// recorded result instead of scanning again.
+func (h *folderSetupHost) inboxPrepareBatch(ctx context.Context, deps inboxCollaborators, userID string, ids inboxOperations, scanOperation string, monitoring bool) (assistantsetup.PrepareReviewResult, error) {
+	facts, err := deps.review.ReviewMonitoring(ctx, userID, ids.workspace)
+	if err != nil {
+		return assistantsetup.PrepareReviewResult{}, err
+	}
+	return deps.review.prepareFirstReview(ctx, assistantsetup.PrepareReviewRequest{
+		OwnerUserID: userID, RunID: ids.run, WorkspaceID: ids.workspace,
+		MonitoringOperation: ids.monitoring, ScanOperation: scanOperation, Review: inboxMonitoringReview(ids.run, facts),
+	}, monitoring)
 }
 
 // inboxTeamPlan is the reviewed team plan the intent promised, in the terms the
@@ -246,6 +274,8 @@ func inboxBatchDetail(outcome string, eligible, needsReview int) string {
 	switch outcome {
 	case personalassistant.FolderFirstBatchEmpty:
 		return "Nothing to file right now."
+	case personalassistant.FolderFirstBatchFailed:
+		return "the first scan did not complete; Retry it from Needs you"
 	case personalassistant.FolderFirstBatchReady:
 		detail := fmt.Sprintf("%d proposed", eligible)
 		if needsReview >= 0 {
@@ -285,26 +315,54 @@ func (h *folderSetupHost) inboxProject(_ context.Context, userID string, offer p
 		return personalassistant.FolderCreateResult{}, errInboxChanged
 	}
 	ids := inboxOperationIDs(offer.Setup.RunID)
-	ws, err := h.inboxWorkspace(deps, ids, userID)
+	ws, settings, err := h.inboxGranted(deps, ids, userID, folderPath)
 	if err != nil {
 		return personalassistant.FolderCreateResult{}, err
+	}
+	batch, err := inboxBatchFrom(deps, ws, settings, ids.scan)
+	if err != nil {
+		return personalassistant.FolderCreateResult{}, err
+	}
+	return personalassistant.FolderCreateResult{
+		WorkspaceID: ws.ID, Route: "/workspaces/" + url.PathEscape(ws.FolderSlug), Created: true, FirstBatch: batch,
+		Receipt: h.inboxReceipt(deps, ws, settings, intent, batch),
+	}, nil
+}
+
+// inboxGranted reads the workspace a run created and the folder File Janitor
+// manages for it: this exact directory, metadata only, granted under the run's
+// own operation. Anything else is a setup that is no longer the reviewed one.
+func (h *folderSetupHost) inboxGranted(deps inboxCollaborators, ids inboxOperations, userID, folderPath string) (*workspace.Workspace, filejanitor.JanitorSettings, error) {
+	ws, err := h.inboxWorkspace(deps, ids, userID)
+	if err != nil {
+		return nil, filejanitor.JanitorSettings{}, err
 	}
 	status, err := deps.janitor.Status(ws.ID)
 	settings := status.Settings
 	if err != nil || !settings.IsSetUp() || !sameCanonicalDirectory(settings.RootPath, folderPath) ||
 		settings.ContentMode != filejanitor.ContentModeMetadataOnly || settings.LastFolderGrant == nil || settings.LastFolderGrant.OperationID != ids.folder {
-		return personalassistant.FolderCreateResult{}, errInboxChanged
+		return nil, filejanitor.JanitorSettings{}, errInboxChanged
 	}
-	scan, found, err := deps.janitor.ScanOperationReceipt(ws.ID, ids.scan)
-	if err != nil || !found || scan.RootID != settings.RootID || scan.PrivacyMode != filejanitor.ContentModeMetadataOnly {
-		return personalassistant.FolderCreateResult{}, errInboxChanged
+	return ws, settings, nil
+}
+
+// inboxBatchFrom reads one attempt at the first batch from File Janitor's own
+// record of its scan operation: the batch with its counts, nothing to file, or
+// (no record of the scan) a scan that did not complete. The route opens the
+// review surface, on the batch when there is one.
+func inboxBatchFrom(deps inboxCollaborators, ws *workspace.Workspace, settings filejanitor.JanitorSettings, scanOperation string) (*personalassistant.FolderFirstBatch, error) {
+	review := "/workspaces/" + url.PathEscape(ws.FolderSlug) + "?panel=file-janitor"
+	scan, found, err := deps.janitor.ScanOperationReceipt(ws.ID, scanOperation)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return &personalassistant.FolderFirstBatch{Outcome: personalassistant.FolderFirstBatchFailed, Route: review}, nil
 	}
 	outcome, known := inboxBatchOutcome(scan.Outcome)
-	if !known {
-		return personalassistant.FolderCreateResult{}, errInboxChanged
+	if !known || scan.RootID != settings.RootID || scan.PrivacyMode != filejanitor.ContentModeMetadataOnly {
+		return nil, errInboxChanged
 	}
-	route := "/workspaces/" + url.PathEscape(ws.FolderSlug)
-	review := route + "?panel=file-janitor"
 	batch := &personalassistant.FolderFirstBatch{Outcome: outcome, Eligible: scan.EligibleCount, Ineligible: scan.IneligibleCount, Route: review}
 	if outcome == personalassistant.FolderFirstBatchReady && strings.TrimSpace(scan.BatchID) != "" {
 		batch.BatchID = scan.BatchID
@@ -317,10 +375,42 @@ func (h *folderSetupHost) inboxProject(_ context.Context, userID string, offer p
 			}
 		}
 	}
-	return personalassistant.FolderCreateResult{
-		WorkspaceID: ws.ID, Route: route, Created: true, FirstBatch: batch,
-		Receipt: h.inboxReceipt(deps, ws, settings, intent, batch),
-	}, nil
+	return batch, nil
+}
+
+// inboxRetryFirstBatch is Retry on an inbox hire's report: FR15 step 4 alone,
+// again, under the attempt's own scan operation, on the workspace and folder
+// the setup made. The folder is the one File Janitor manages for that
+// workspace, still the directory the review was about; no held selection is
+// needed, so a Retry after a restart works. Nothing else is created or
+// changed. It returns the attempt's batch as File Janitor recorded it; a scan
+// that did not complete again is a failed batch, not an error.
+func (h *folderSetupHost) inboxRetryFirstBatch(ctx context.Context, userID string, offer personalassistant.FolderOffer, attempt int) (personalassistant.FolderFirstBatch, error) {
+	deps, available := h.inboxDeps()
+	if !available || offer.Setup == nil || offer.Setup.Intent.Inbox == nil || strings.TrimSpace(offer.Setup.RunID) == "" || attempt < 1 {
+		return personalassistant.FolderFirstBatch{}, errSetupUnavailable
+	}
+	ids := inboxOperationIDs(offer.Setup.RunID)
+	status, err := deps.janitor.Status(ids.workspace)
+	if err != nil || !softwareDirectoryIs(status.Settings.RootPath, offer.Setup.Intent.Inbox.SubjectIdentity) {
+		return personalassistant.FolderFirstBatch{}, errInboxChanged
+	}
+	ws, settings, err := h.inboxGranted(deps, ids, userID, status.Settings.RootPath)
+	if err != nil {
+		return personalassistant.FolderFirstBatch{}, err
+	}
+	// The monitoring choice the setup made stands: approved monitoring is
+	// kept as it is, and manual scans stay manual.
+	monitoring := !settings.AutomationApprovedAt.IsZero()
+	scanOperation := ids.scanAttempt(attempt)
+	if _, err := h.inboxPrepareBatch(ctx, deps, userID, ids, scanOperation, monitoring); err != nil {
+		logger.Warn("Inbox first batch retry did not complete", logger.Fields{"offer_id": offer.ID, "attempt": attempt, "error": err.Error()})
+	}
+	batch, err := inboxBatchFrom(deps, ws, settings, scanOperation)
+	if err != nil {
+		return personalassistant.FolderFirstBatch{}, err
+	}
+	return *batch, nil
 }
 
 // inboxReceipt lists what the setup made, in the order of the card's lines: the
