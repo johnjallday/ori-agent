@@ -3284,9 +3284,10 @@ function renderOffer(place) {
   );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
-    diagram.hidden = !(state.offer?.plan || state.offer?.setup || receipt.visible);
+    diagram.hidden = !folderDiagramVisible(state.offer, receipt.visible);
     if (!diagram.hidden)
       globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
+    else diagram.replaceChildren();
     els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
   }
   globalThis.OriFolderSetupVisual.renderConsequences(
@@ -3813,6 +3814,15 @@ function runAction(action) {
     return;
   }
   decide(action);
+}
+
+// folderDiagramVisible says whether an offer card draws the setup diagram: for a
+// receipt, or when the saved run or plan carries visual data. A run saved before
+// the diagram existed has none, and the renderer's placeholder ("Setup preview",
+// "Not reviewed", "No destination proposed") would read as state the card does
+// not know.
+export function folderDiagramVisible(offer, receiptVisible = false) {
+  return Boolean(receiptVisible || offer?.setup?.visual || offer?.plan?.visual);
 }
 
 // removeFailureSentence is what a refused or failed Remove tells the user. The

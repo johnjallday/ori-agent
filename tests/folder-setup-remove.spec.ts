@@ -73,6 +73,9 @@ async function mountStopped(page: Page) {
   return state;
 }
 
+// The sandbox hires once; parallel workers would race that setup.
+test.describe.configure({ mode: 'serial' });
+
 test.beforeEach(async ({ request }) => {
   await hireAssistant(request);
 });
@@ -90,6 +93,13 @@ test('fixture Remove asks once, Keep and Esc back out, and a removed setup stays
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   await expect(card).toContainText('Album-4 needs you');
+  // A run saved without visual data draws no diagram and no placeholder text.
+  await expect(card.locator('.folder-visual')).toHaveCount(0);
+  await expect(card).not.toContainText('Setup preview');
+  await expect(card).not.toContainText('Not reviewed');
+  await expect(card).not.toContainText('No destination proposed');
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/no-diagram-pre-visual.png` });
   // Remove is last, after the way forward.
   const actions = card.locator('#personalAssistantFolderOfferActions button');
   await expect(actions.last()).toHaveText('Remove');
@@ -190,4 +200,25 @@ test('fixture a running setup has no Remove', async ({ page }) => {
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   await expect(card.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+});
+
+test('fixture a stopped run that saved its visual data still draws the diagram', async ({
+  page
+}) => {
+  const withVisual = stoppedOffer() as any;
+  withVisual.setup.visual = {
+    entity: { kind: 'workspace', name: 'Album-4', operation: 'create' }
+  };
+  await page.route('**/api/personal-assistant/folder-digest', route =>
+    route.fulfill({
+      json: { folder_digest: { chips, picker_available: false, offer: withVisual } }
+    })
+  );
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toBeVisible();
+  await expect(card.locator('.folder-visual')).toBeVisible();
+  await expect(card.locator('.folder-visual')).toContainText('Album-4');
+  if (process.env.ORI_VISUAL_EVIDENCE)
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/diagram-with-visual.png` });
 });
