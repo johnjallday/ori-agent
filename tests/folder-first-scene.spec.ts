@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseAttach, openAttachMenu } from './helpers/assistant-menus';
 
 test('the assistant portrait explores only while a scan is in flight, then shows observed findings', async ({
   page,
@@ -108,6 +109,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   // The scene is the reply after a folder is chosen, not before.
   await expect(scene).toBeHidden();
   // Opening choices is not a scan, model turn, or setup decision.
+  await openAttachMenu(page);
   await expect(chip).toBeVisible();
   await expect(chip).toBeEnabled();
   expect(mutations).toEqual([]);
@@ -115,9 +117,9 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   await expect(page.locator('#personalAssistantNeedsYouQueue')).toBeHidden();
   await expect(page.locator('#personalAssistantTodayTitle')).toHaveText('Today from Atlas');
   await expect(page.locator('#personalAssistantCheckIn')).toContainText('Next check-in ·');
-  // The user started something, so the top of the drawer is one line.
-  const summary = page.locator('#personalAssistantSummary');
-  const summaryToggle = page.locator('#personalAssistantSummaryToggle');
+  // Every opening folds Today, so the top of the drawer is one line.
+  const summary = page.locator('#personalAssistantTodayStrip');
+  const summaryToggle = page.locator('#personalAssistantTodayStripToggle');
   await expect(summary).toBeVisible();
   await expect(summaryToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
@@ -167,9 +169,9 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   const order = await page.evaluate(() => {
     const top = (id: string) => document.getElementById(id)!.getBoundingClientRect().top;
     return [
-      top('personalAssistantSummary'),
+      top('personalAssistantTodayStrip'),
       top('personalAssistantContextChooser'),
-      top('personalAssistantFolderChip'),
+      top('personalAssistantAttachMenu'),
       top('personalAssistantInput')
     ];
   });
@@ -224,7 +226,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   expect(transition).toBe('none');
   // Asking again reopens the chooser in the same turn.
   failNext = true;
-  await chip.click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await expect(chooser).toBeVisible();
   await page
     .locator('#personalAssistantFolderChoices')

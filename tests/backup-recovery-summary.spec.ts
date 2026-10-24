@@ -223,7 +223,7 @@ test('stored product fixture: user reports and scoped Today/Brief return to the 
     .toBe(false);
   await page.reload();
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
-  const summary = page.locator('#personalAssistantSummaryToggle');
+  const summary = page.locator('#personalAssistantTodayStripToggle');
   await expect(summary).toBeVisible();
   if ((await summary.getAttribute('aria-expanded')) !== 'true') await summary.click();
   await expect(page.locator('#personalAssistantTodaySections')).toBeVisible();

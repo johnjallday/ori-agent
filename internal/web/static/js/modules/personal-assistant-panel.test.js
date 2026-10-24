@@ -18,6 +18,19 @@ import {
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
+  clampDrawerWidth,
+  composerHeight,
+  conversationMenuView,
+  createActionMenu,
+  menuItemsIn,
+  DRAWER_EXPANDED_KEY,
+  DRAWER_WIDTH_KEY,
+  drawerLayoutView,
+  drawerWidthBounds,
+  drawerWidthForKey,
+  expandedDrawerWidth,
+  readDrawerPrefs,
+  writeDrawerPrefs,
   ENTRY_HYDRATION_FAILED,
   entryAgentSendRecipient,
   entrySessionStripView,
@@ -155,10 +168,71 @@ test('the launcher role line can be updated per recipient', () => {
     'utf8'
   );
   assert.match(markup, /id="personalAssistantLauncherRole"/);
-  // The entry agent's session strip is its own, never the personal one's.
-  assert.match(markup, /id="personalAssistantEntrySessionBar"[^>]*hidden/);
-  assert.match(markup, /id="personalAssistantEntrySessionTitle"[^>]*>New conversation</);
-  assert.match(markup, /id="personalAssistantEntrySessionNew"/);
+  // The entry agent's session has its own title and New, never the personal
+  // one's; both start hidden in the header's conversation menu.
+  assert.match(markup, /id="personalAssistantEntrySessionTitle"[^>]*hidden>New conversation</);
+  assert.match(markup, /id="personalAssistantEntrySessionNew"[^>]*hidden>/);
+});
+
+test('the header names the conversation, and its menu holds New, Continue… and the check-in (FR21)', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const header =
+    markup.match(/<header class="personal-assistant-panel__header">[\s\S]*?<\/header>/)?.[0] || '';
+  const button =
+    header.match(/<button[^>]*id="personalAssistantConversationMenu"[^>]*>/)?.[0] || '';
+  assert.match(button, /aria-haspopup="menu"/);
+  assert.match(button, /aria-expanded="false"/);
+  assert.match(button, /aria-controls="personalAssistantConversationItems"/);
+  // The two titles are inside the button; the menu holds the moved controls.
+  assert.match(
+    header,
+    /id="personalAssistantConversationMenu"[\s\S]*?id="personalAssistantConversationTitle"[\s\S]*?id="personalAssistantEntrySessionTitle"[\s\S]*?<\/button>/
+  );
+  const menu =
+    header.match(/<div id="personalAssistantConversationItems"[\s\S]*?<\/div>/)?.[0] || '';
+  assert.match(menu, /role="menu"/);
+  for (const id of [
+    'personalAssistantConversationNew',
+    'personalAssistantConversationContinue',
+    'personalAssistantEntrySessionNew'
+  ])
+    assert.match(menu, new RegExp(`id="${id}"[^>]*role="menuitem"[^>]*tabindex="-1"`), id);
+  assert.match(
+    menu,
+    /id="personalAssistantConversationContinue"[^>]*aria-controls="personalAssistantConversationList"/
+  );
+  assert.match(menu, /id="personalAssistantCheckIn"[^>]*role="menuitem" aria-disabled="true"/);
+  // The list, note and saved draft are under the header, not in the scroll.
+  const bar = markup.indexOf('id="personalAssistantConversationBar"');
+  assert.ok(bar > markup.indexOf('</header>'));
+  assert.ok(bar < markup.indexOf('id="personalAssistantScroll"'));
+  assert.doesNotMatch(markup, /personalAssistantEntrySessionBar/);
+});
+
+test('the conversation menu holds what the recipient can use (FR21)', () => {
+  assert.deepEqual(conversationMenuView({ personal: true, available: true }), {
+    visible: true,
+    personalTitle: true,
+    personalItems: true,
+    entryTitle: false,
+    entryNew: false,
+    checkIn: true
+  });
+  // No conversation yet (no HQ, unavailable): nothing to name.
+  assert.equal(conversationMenuView({ personal: true, available: false }).visible, false);
+  assert.deepEqual(conversationMenuView({ personal: false, entry: { visible: true } }), {
+    visible: true,
+    personalTitle: false,
+    personalItems: false,
+    entryTitle: true,
+    entryNew: true,
+    checkIn: false
+  });
+  assert.equal(conversationMenuView({ personal: false, entry: { visible: false } }).visible, false);
+  assert.equal(conversationMenuView({ personal: false }).visible, false);
 });
 
 test('the session strip names the entry agent session or a new conversation (FR22)', () => {
@@ -263,16 +337,26 @@ test('a failed hydration says what happens next and does not block sending (FR21
 test('backup-console navigation owns focus and Today consumes only its own query', () => {
   assert.deepEqual(assistantPanelOpenIntent('?panel=backup-recovery&tab=overview', false), {
     requestedOpen: false,
-    restoreAllowed: false
+    restoreAllowed: false,
+    revealToday: false
   });
+  // The way to what needs the user opens Today's strip as well.
   assert.deepEqual(assistantPanelOpenIntent('?panel=today', true), {
     requestedOpen: true,
-    restoreAllowed: true
+    restoreAllowed: true,
+    revealToday: true
+  });
+  // The way to the folder flow opens the drawer but leaves Today folded.
+  assert.deepEqual(assistantPanelOpenIntent('?panel=today&folder=show', true), {
+    requestedOpen: true,
+    restoreAllowed: true,
+    revealToday: false
   });
   for (const query of ['', '?panel=calendar', '?panel=file-janitor'])
     assert.deepEqual(assistantPanelOpenIntent(query, false), {
       requestedOpen: false,
-      restoreAllowed: true
+      restoreAllowed: true,
+      revealToday: false
     });
 });
 
@@ -340,7 +424,8 @@ test('personal assistant panel covers unavailable, pre-hire, active, paused, and
   const active = personalAssistantPanelView({ state: 'active', display_name: 'Nova' });
   assert.equal(active.available, true);
   assert.equal(active.name, 'Nova');
-  assert.match(active.placeholder, /Ask Nova/);
+  // The header already names Nova; the box says what to do (FR23 design note).
+  assert.equal(active.placeholder, 'Ask or describe what you want help with');
 
   const paused = personalAssistantPanelView({ state: 'paused', display_name: 'Nova' });
   assert.equal(paused.available, true);
@@ -580,9 +665,18 @@ test('Add folder sits inside the composer, on every page', () => {
   // The attachment row remains outside the scrolling region.
   assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
   assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
-  // Add folder, Tree + Chat, and Add link.
-  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 3);
-  assert.match(drawer, /id="personalAssistantExploreAttachedFolder"[^>]+hidden>Tree \+ Chat/);
+  // Add folder, Add link and Tree + Chat are chips inside the "+" menu.
+  assert.equal(
+    (
+      drawer.match(/class="personal-assistant-panel__chip personal-assistant-panel__menu-item"/g) ||
+      []
+    ).length,
+    3
+  );
+  assert.match(
+    drawer,
+    /id="personalAssistantExploreAttachedFolder"[^>]+hidden>[\s\S]{0,120}Tree \+ Chat/
+  );
   const linkChip = drawer.indexOf('id="personalAssistantLinkChip"');
   assert.ok(linkChip > chips && linkChip < drawer.indexOf('id="personalAssistantInput"'));
   assert.match(drawer, /id="personalAssistantLinkChip"[^>]+hidden>[\s\S]{0,120}Add link/);
@@ -718,4 +812,391 @@ test('with a folder attached the placeholder says what an empty Send asks for', 
     placeholder: 'Finish personal assistant setup before sending work'
   };
   assert.equal(composerPlaceholder(blocked, 'Explore this folder'), blocked.placeholder);
+});
+
+function memoryStorage(seed = {}) {
+  const values = new Map(Object.entries(seed));
+  return {
+    values,
+    getItem: key => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value))
+  };
+}
+
+const throwingStorage = {
+  getItem() {
+    throw new Error('SecurityError');
+  },
+  setItem() {
+    throw new Error('QuotaExceededError');
+  }
+};
+
+test('the sheet width range leaves the page its left margin (FR3)', () => {
+  // min(180px, 20%) of the page and the 20px right gap stay outside the sheet.
+  assert.deepEqual(drawerWidthBounds(1280), { min: 560, max: 960 });
+  assert.deepEqual(drawerWidthBounds(1440), { min: 560, max: 960 });
+  assert.deepEqual(drawerWidthBounds(1920), { min: 560, max: 960 });
+  assert.deepEqual(drawerWidthBounds(900), { min: 560, max: 700 });
+  assert.deepEqual(drawerWidthBounds(800), { min: 560, max: 620 });
+  // A zoomed viewport narrower than the range: the bottom follows the top down.
+  assert.deepEqual(drawerWidthBounds(390), { min: 292, max: 292 });
+});
+
+test('a remembered width is clamped for the viewport, never dropped (FR3)', () => {
+  assert.equal(clampDrawerWidth(960, 1440), 960);
+  assert.equal(clampDrawerWidth(960, 900), 700);
+  assert.equal(clampDrawerWidth(400, 1440), 560);
+  assert.equal(clampDrawerWidth(700.6, 1440), 701);
+  assert.equal(clampDrawerWidth(Number.NaN, 1440), 640);
+  assert.equal(clampDrawerWidth(undefined, 1920), 640);
+});
+
+test('Expand takes the widest sheet the page allows (FR5)', () => {
+  assert.equal(expandedDrawerWidth(1280), 1080);
+  assert.equal(1280 - 20 - expandedDrawerWidth(1280), 180);
+  assert.equal(expandedDrawerWidth(1440), 1180);
+  assert.equal(expandedDrawerWidth(1920), 1180);
+  assert.ok(1440 - 20 - expandedDrawerWidth(1440) >= 180);
+});
+
+test('the saved width and Expand choice survive bad and missing storage (FR4)', () => {
+  assert.deepEqual(
+    readDrawerPrefs(memoryStorage({ [DRAWER_WIDTH_KEY]: '900', [DRAWER_EXPANDED_KEY]: '1' })),
+    { width: 900, expanded: true }
+  );
+  // Above every cap is still a valid saved width; it is clamped where applied.
+  assert.equal(readDrawerPrefs(memoryStorage({ [DRAWER_WIDTH_KEY]: '1400' })).width, 1400);
+  for (const bad of ['abc', '-5', '12.5', '0', '', ' ', '9e3', 'null'])
+    assert.equal(readDrawerPrefs(memoryStorage({ [DRAWER_WIDTH_KEY]: bad })).width, 640, bad);
+  assert.equal(readDrawerPrefs(memoryStorage({ [DRAWER_EXPANDED_KEY]: 'true' })).expanded, false);
+  assert.deepEqual(readDrawerPrefs(null), { width: 640, expanded: false });
+  assert.deepEqual(readDrawerPrefs(throwingStorage), { width: 640, expanded: false });
+
+  const store = memoryStorage();
+  assert.equal(writeDrawerPrefs(store, { width: 700.4, expanded: false }), true);
+  assert.equal(store.values.get(DRAWER_WIDTH_KEY), '700');
+  assert.equal(store.values.get(DRAWER_EXPANDED_KEY), '0');
+  // A drag end writes only the width; Expand writes only its choice.
+  writeDrawerPrefs(store, { expanded: true });
+  assert.equal(store.values.get(DRAWER_WIDTH_KEY), '700');
+  assert.equal(store.values.get(DRAWER_EXPANDED_KEY), '1');
+  assert.equal(writeDrawerPrefs(throwingStorage, { width: 700 }), false);
+  assert.equal(writeDrawerPrefs(null, { width: 700 }), false);
+});
+
+test('the handle keys step by 16, 64 with Shift, and jump with Home and End (FR2)', () => {
+  const at = { width: 640, min: 560, max: 960 };
+  // Left moves the left edge outwards: wider.
+  assert.equal(drawerWidthForKey('ArrowLeft', at), 656);
+  assert.equal(drawerWidthForKey('ArrowRight', at), 624);
+  assert.equal(drawerWidthForKey('ArrowLeft', { ...at, shift: true }), 704);
+  assert.equal(drawerWidthForKey('ArrowRight', { ...at, shift: true }), 576);
+  assert.equal(drawerWidthForKey('Home', at), 560);
+  assert.equal(drawerWidthForKey('End', at), 960);
+  assert.equal(drawerWidthForKey('ArrowLeft', { ...at, width: 950 }), 960);
+  assert.equal(drawerWidthForKey('ArrowRight', { ...at, width: 570, shift: true }), 560);
+  assert.equal(drawerWidthForKey('ArrowUp', at), null);
+  assert.equal(drawerWidthForKey('Enter', at), null);
+});
+
+test('the sheet layout: width, handle and Expand per state (FR5, FR6, FR9)', () => {
+  const prefs = { width: 900, expanded: false };
+  const plain = drawerLayoutView({ viewportWidth: 1440, prefs });
+  assert.equal(plain.sheet, true);
+  assert.equal(plain.width, 900);
+  assert.deepEqual(plain.bounds, { min: 560, max: 960 });
+  assert.equal(plain.handleVisible, true);
+  assert.equal(plain.handleInert, false);
+  assert.equal(plain.expandVisible, true);
+  assert.equal(plain.expanded, false);
+  assert.equal(plain.expandLabel, 'Expand');
+
+  const expanded = drawerLayoutView({ viewportWidth: 1280, prefs: { ...prefs, expanded: true } });
+  assert.equal(expanded.width, 1080);
+  assert.equal(expanded.handleWidth, 900);
+  assert.equal(expanded.handleInert, true);
+  assert.equal(expanded.expanded, true);
+  assert.equal(expanded.expandLabel, 'Shrink');
+
+  // Tree + Chat borrows the expanded width; the saved choice is untouched.
+  const exploring = drawerLayoutView({ viewportWidth: 1440, prefs, exploring: true });
+  assert.equal(exploring.width, 1180);
+  assert.equal(exploring.handleInert, true);
+  assert.equal(exploring.expandVisible, false);
+  assert.equal(exploring.expanded, false);
+  assert.deepEqual(prefs, { width: 900, expanded: false });
+
+  // A 900px saved width on a 900px viewport is fitted, not discarded.
+  assert.equal(drawerLayoutView({ viewportWidth: 900, prefs }).width, 700);
+
+  // The phone sheet, or a zoom that reaches phone width: no handle, no Expand.
+  for (const viewportWidth of [760, 390]) {
+    const phone = drawerLayoutView({ viewportWidth, prefs });
+    assert.equal(phone.sheet, false);
+    assert.equal(phone.handleVisible, false);
+    assert.equal(phone.expandVisible, false);
+  }
+});
+
+test('the drawer carries the resize handle and the Expand toggle (FR2, FR5)', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const handle = markup.match(/<div id="personalAssistantResize"[^>]*>/)?.[0] || '';
+  for (const attribute of [
+    'role="separator"',
+    'aria-orientation="vertical"',
+    'aria-label="Resize assistant"',
+    'aria-valuemin="560"',
+    'aria-valuemax="960"',
+    'aria-valuenow="640"',
+    'tabindex="0"'
+  ])
+    assert.ok(handle.includes(attribute), attribute);
+  assert.match(handle, /\bhidden\b/);
+  const expand = markup.match(/<button[^>]*id="personalAssistantExpand"[^>]*>/)?.[0] || '';
+  assert.match(expand, /aria-pressed="false"/);
+  assert.match(expand, /aria-label="Expand"/);
+  assert.match(expand, /\bhidden\b/);
+  // Expand sits in the header before More and Close.
+  const header =
+    markup.match(/<header class="personal-assistant-panel__header">[\s\S]*?<\/header>/)?.[0] || '';
+  assert.ok(header.indexOf('personalAssistantExpand') > 0);
+  assert.ok(header.indexOf('personalAssistantExpand') < header.indexOf('personalAssistantMore'));
+  assert.ok(header.indexOf('personalAssistantMore') < header.indexOf('personalAssistantClose'));
+});
+
+test('the text box starts at two rows and grows to 160px (FR23)', () => {
+  assert.equal(composerHeight(0), 56);
+  assert.equal(composerHeight(40), 56);
+  assert.equal(composerHeight(90.2), 91);
+  assert.equal(composerHeight(160), 160);
+  assert.equal(composerHeight(900), 160);
+  assert.equal(composerHeight('x'), 56);
+  const css = readFileSync(new URL('../../css/ori-guide.css', import.meta.url), 'utf8');
+  const rule = css.match(/\n\.personal-assistant-panel__input \{([^}]*)\}/)?.[1] || '';
+  assert.match(rule, /min-height: 56px;/);
+  assert.match(rule, /max-height: 160px;/);
+  assert.match(rule, /field-sizing: content;/);
+});
+
+test('one attach row: the context, "+" and what is attached (FR18, FR19, FR22)', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const form = markup.match(/<form id="personalAssistantForm"[\s\S]*?<\/form>/)?.[0] || '';
+  const row = form.indexOf('class="personal-assistant-panel__attach-row"');
+  const context = form.indexOf('id="personalAssistantWorkspaceContext"');
+  const plus = form.indexOf('id="personalAssistantAttachMenu"');
+  assert.ok(row >= 0 && row < context && context < plus);
+  // The context line is outside the chips, which only the hired assistant has.
+  assert.ok(context < form.indexOf('id="personalAssistantChips"'));
+  assert.match(form, /id="personalAssistantWorkspaceContext"[^>]*role="status" aria-live="polite"/);
+  const button = form.match(/<button[^>]*id="personalAssistantAttachMenu"[^>]*>/)?.[0] || '';
+  for (const attribute of [
+    'aria-haspopup="menu"',
+    'aria-expanded="false"',
+    'aria-controls="personalAssistantAttachItems"',
+    'aria-label="Attach"'
+  ])
+    assert.ok(button.includes(attribute), attribute);
+  const menu =
+    form.match(/<div id="personalAssistantAttachItems"[\s\S]*?\n {12}<\/div>/)?.[0] || '';
+  assert.match(menu, /role="menu"/);
+  for (const id of [
+    'personalAssistantFolderChip',
+    'personalAssistantLinkChip',
+    'personalAssistantExploreAttachedFolder',
+    'personalAssistantReviewFolderSetup'
+  ])
+    assert.match(menu, new RegExp(`id="${id}"[^>]*role="menuitem"[^>]*tabindex="-1"`), id);
+  // The active chips stay in the row, after "+", outside the menu.
+  for (const id of ['personalAssistantActiveFolder', 'personalAssistantActiveLink']) {
+    assert.ok(form.indexOf(`id="${id}"`) > plus, id);
+    assert.ok(!menu.includes(`id="${id}"`), id);
+  }
+  // The empty-Send hint is the link chip's description and tooltip.
+  assert.match(
+    form,
+    /id="personalAssistantActiveLink"[^>]*title="Empty Send: “Tell me about this link”" aria-describedby="personalAssistantLinkSendHint"/
+  );
+  assert.match(form, /placeholder="Ask or describe what you want help with"/);
+  // Watch Ori is a switch row in the "…" menu, with its hint as visible text.
+  const more = markup.match(/<details id="personalAssistantMore"[\s\S]*?<\/details>/)?.[0] || '';
+  assert.match(more, /id="personalAssistantWatchRow"[^>]*hidden/);
+  assert.match(
+    more,
+    /id="personalAssistantWatch" role="switch" aria-describedby="personalAssistantWatchHint"/
+  );
+  assert.match(
+    more,
+    /<p id="personalAssistantWatchHint" class="personal-assistant-panel__switch-hint">/
+  );
+  assert.ok(!form.includes('personalAssistantWatch'));
+});
+
+// A small stand-in for the DOM a menu needs: elements with attributes,
+// listeners, focus and rendering, inside one menu container.
+function fakeMenu(names) {
+  const doc = { activeElement: null, listeners: {} };
+  doc.addEventListener = (type, fn) => (doc.listeners[type] ||= []).push(fn);
+  const element = name => {
+    const listeners = {};
+    const el = {
+      name,
+      hidden: false,
+      disabled: false,
+      tabIndex: 0,
+      attributes: {},
+      setAttribute(key, value) {
+        this.attributes[key] = String(value);
+      },
+      getAttribute(key) {
+        return key in this.attributes ? this.attributes[key] : null;
+      },
+      removeAttribute(key) {
+        delete this.attributes[key];
+        if (key === 'tabindex') this.tabIndex = 0;
+      },
+      addEventListener(type, fn) {
+        (listeners[type] ||= []).push(fn);
+      },
+      fire(type, extra = {}) {
+        const event = {
+          type,
+          target: el,
+          key: '',
+          stopped: false,
+          prevented: false,
+          preventDefault() {
+            this.prevented = true;
+          },
+          stopPropagation() {
+            this.stopped = true;
+          },
+          ...extra
+        };
+        for (const fn of listeners[type] || []) fn(event);
+        return event;
+      },
+      focus() {
+        doc.activeElement = el;
+      },
+      contains: node => node === el,
+      closest: () => null
+    };
+    return el;
+  };
+  const button = element('button');
+  const menu = element('menu');
+  menu.hidden = true;
+  const items = names.map(element);
+  menu.children = [...items];
+  menu.contains = node => node === menu || menu.children.includes(node);
+  menu.querySelectorAll = () =>
+    menu.children.filter(item => item.getAttribute('role') === 'menuitem');
+  for (const item of items) {
+    item.getClientRects = () => (!item.hidden && !menu.hidden && menu.contains(item) ? [{}] : []);
+    item.closest = () => (item.getAttribute('role') === 'menuitem' ? item : null);
+    // A click runs the item's own handler, then bubbles to the menu.
+    item.click = () => {
+      item.fire('click');
+      menu.fire('click', { target: item });
+    };
+  }
+  return { doc, button, menu, items };
+}
+
+test('the attach and conversation menus follow the recipient menu keys (FR24)', () => {
+  const { doc, button, menu, items } = fakeMenu(['folder', 'link', 'tree', 'review']);
+  const [folder, link, tree, review] = items;
+  link.disabled = true;
+  tree.hidden = true;
+  const controller = createActionMenu({ button, menu, doc, items });
+  // Every item is a menu item reached by arrows, not by Tab.
+  assert.ok(items.every(item => item.getAttribute('role') === 'menuitem' && item.tabIndex === -1));
+
+  button.fire('click');
+  assert.equal(controller.isOpen(), true);
+  assert.equal(menu.hidden, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(doc.activeElement, folder);
+  // Disabled and hidden items are skipped, and the arrows wrap.
+  assert.deepEqual(menuItemsIn(menu), [folder, review]);
+  menu.fire('keydown', { key: 'ArrowDown' });
+  assert.equal(doc.activeElement, review);
+  menu.fire('keydown', { key: 'ArrowDown' });
+  assert.equal(doc.activeElement, folder);
+  menu.fire('keydown', { key: 'End' });
+  assert.equal(doc.activeElement, review);
+
+  // Escape closes only the menu and returns focus to "+".
+  const escape = menu.fire('keydown', { key: 'Escape' });
+  assert.equal(escape.stopped, true);
+  assert.equal(controller.isOpen(), false);
+  assert.equal(menu.hidden, true);
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(doc.activeElement, button);
+
+  // A module returning focus to an item of the closed menu reaches "+".
+  doc.activeElement = null;
+  folder.focus();
+  assert.equal(doc.activeElement, button);
+
+  // Choosing runs the item's own handler; focus it moved elsewhere stays there.
+  const chooser = { name: 'chooser' };
+  let chosen = 0;
+  folder.addEventListener('click', () => {
+    chosen += 1;
+    doc.activeElement = chooser;
+  });
+  button.fire('keydown', { key: 'ArrowDown' });
+  assert.equal(doc.activeElement, folder);
+  menu.fire('keydown', { key: 'Enter' });
+  assert.equal(chosen, 1);
+  assert.equal(controller.isOpen(), false);
+  assert.equal(doc.activeElement, chooser);
+
+  // A handler that keeps focus on its item hands it back to "+" as it closes.
+  review.addEventListener('click', () => review.focus());
+  button.fire('click');
+  review.click();
+  assert.equal(doc.activeElement, button);
+
+  // A click outside closes it.
+  button.fire('click');
+  for (const fn of doc.listeners.click) fn({ target: { name: 'page' } });
+  assert.equal(controller.isOpen(), false);
+
+  // A control a module moves out of the menu is no longer a menu item.
+  menu.children = menu.children.filter(item => item !== review);
+  button.fire('click');
+  assert.equal(review.getAttribute('role'), null);
+  assert.equal(review.tabIndex, 0);
+  assert.deepEqual(menuItemsIn(menu), [folder]);
+  // And it focuses as itself out there.
+  review.focus();
+  assert.equal(doc.activeElement, review);
+});
+
+test('a non-interactive menu row is reached but never chosen', () => {
+  const { doc, button, menu, items } = fakeMenu(['new', 'checkin']);
+  const [fresh, checkIn] = items;
+  checkIn.setAttribute('aria-disabled', 'true');
+  let chosen = 0;
+  checkIn.addEventListener('click', () => (chosen += 1));
+  const controller = createActionMenu({ button, menu, doc, items });
+  // ArrowUp on "+" opens at the last row.
+  button.fire('keydown', { key: 'ArrowUp' });
+  assert.equal(doc.activeElement, checkIn);
+  menu.fire('keydown', { key: 'Enter' });
+  assert.equal(chosen, 0);
+  assert.equal(controller.isOpen(), true);
+  // Opening puts focus on the first row that can be chosen.
+  menu.fire('keydown', { key: 'Escape' });
+  button.fire('click');
+  assert.equal(doc.activeElement, fresh);
 });

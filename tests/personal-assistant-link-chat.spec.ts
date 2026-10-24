@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { chooseAttach, openAttachMenu } from './helpers/assistant-menus';
 
 // Browser controller fixtures for the composer's Add link. Hire/HQ use real
 // host routes; link selection, Route, Ask and the build requests are explicit
@@ -168,11 +169,12 @@ async function open(page: Page) {
   await page.goto('/');
   await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
   await page.locator('#personalAssistantLauncher').click();
+  await openAttachMenu(page);
   await expect(page.locator('#personalAssistantLinkChip')).toBeVisible();
 }
 
 async function attach(page: Page, url: string) {
-  await page.locator('#personalAssistantLinkChip').click();
+  await chooseAttach(page, '#personalAssistantLinkChip');
   await expect(page.locator('#personalAssistantLinkField')).toBeVisible();
   await expect(page.locator('#personalAssistantLinkInput')).toBeFocused();
   await page.locator('#personalAssistantLinkInput').fill(url);
@@ -206,7 +208,7 @@ test('a link attached in the composer rides the turn and its reply offers the bu
     'title',
     'GitHub repository · Go · 10,354 open issues'
   );
-  await expect(page.locator('#personalAssistantLinkChip')).toBeHidden();
+  await expect(page.locator('#personalAssistantLinkChip')).toHaveJSProperty('hidden', true);
   // A short, zoomed screen keeps the reply box in view with a link attached.
   await page.setViewportSize({ width: 720, height: 450 });
   await expect
@@ -266,7 +268,7 @@ test('a refused address keeps what was typed, and Escape closes only the field',
   await page.locator('#personalAssistantLinkInput').press('Escape');
   await expect(page.locator('#personalAssistantLinkField')).toBeHidden();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-  await expect(page.locator('#personalAssistantLinkChip')).toBeFocused();
+  await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
 });
 
 test('a link the server let go sends nothing and gives the message back', async ({
@@ -296,7 +298,7 @@ test('removing the link detaches it, and a new conversation starts without one',
   await attach(page, 'https://github.com/golang/go');
   await page.locator('#personalAssistantRemoveLink').click();
   await expect(page.locator('#personalAssistantActiveLink')).toBeHidden();
-  await expect(page.locator('#personalAssistantLinkChip')).toBeFocused();
+  await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
   expect(fixture.requests.filter(item => item.stage === 'detach')).toEqual([
     { stage: 'detach', link_id: 'link-1' }
   ]);
@@ -305,6 +307,7 @@ test('removing the link detaches it, and a new conversation starts without one',
   await expect(page.locator('#personalAssistantActiveLink')).toBeVisible();
   await page.evaluate(() => (window as any).PersonalAssistantLink.reset());
   await expect(page.locator('#personalAssistantActiveLink')).toBeHidden();
+  await openAttachMenu(page);
   await expect(page.locator('#personalAssistantLinkChip')).toBeVisible();
   expect(fixture.requests.filter(item => item.stage === 'detach')).toHaveLength(2);
 });

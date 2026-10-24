@@ -785,8 +785,8 @@ function mount() {
       )
     };
     const view = operationView(viewState);
-    // The Watch chip lives in the composer's chip row, so it costs the drawer
-    // no height. Its hint is the chip's description and tooltip.
+    // The Watch switch lives in the drawer's "…" menu, so it costs the drawer
+    // no height. Its hint is the line under it and the switch's description.
     if (els.watchRow) {
       els.watchRow.hidden = !view.watchVisible;
       els.watchRow.title = view.watchHint;

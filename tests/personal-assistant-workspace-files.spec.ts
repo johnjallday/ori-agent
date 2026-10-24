@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Production browser, Route/Ask, Ollama adapter, brokered file readers, the
 // real folder store and the real filesystem under `wt demo`. The loopback
@@ -211,7 +212,7 @@ test('wt demo: linked files and attachments are read with coverage; an attached 
 
   // 4. A folder that is only attached stays metadata, even on a workspace whose
   // own files are readable: the answer comes from the workspace's linked file.
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

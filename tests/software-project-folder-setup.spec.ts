@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { dirname, join, relative } from 'node:path';
+import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import { folderHireReportCases } from './helpers/folder-hire-report-cases';
 
 // A software project folder, from the first look to its first assessment, in a
@@ -369,8 +370,12 @@ async function attach(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
   await openAssistant(page);
   // Each look at a folder is its own conversation, as a person would start it.
   const fresh = page.locator('#personalAssistantConversationNew');
-  if ((await fresh.isVisible()) && (await fresh.isEnabled())) await fresh.click();
-  await page.locator('#personalAssistantFolderChip').click();
+  if (
+    (await page.locator('#personalAssistantConversationMenu').isVisible()) &&
+    (await fresh.isEnabled())
+  )
+    await chooseConversation(page, '#personalAssistantConversationNew');
+  await chooseAttach(page, '#personalAssistantFolderChip');
   return pickChip(page, chip);
 }
 
@@ -433,7 +438,8 @@ async function show(
     if (project instanceof RegExp) expect(offer.subject.name).toMatch(project);
     else if (project) expect(offer.subject.name).toBe(project);
   } else {
-    await page.locator('#personalAssistantReviewFolderSetup').click();
+    // The attach opened Tree + Chat, so Review setup is in the "+" menu.
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     if (project) await chooseProject(page, project);
   }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
@@ -464,7 +470,7 @@ async function comeBack(page: Page) {
     // The Continue control toggles the list: open it only when it is closed.
     const list = page.locator('#personalAssistantConversationList');
     if (!(await list.isVisible()))
-      await page.locator('#personalAssistantConversationContinue').click();
+      await chooseConversation(page, '#personalAssistantConversationContinue');
     await expect(list).toBeVisible({ timeout: 30_000 });
     await list.locator('button[data-conversation-id]').first().click();
   }
@@ -675,7 +681,7 @@ test.describe('a fresh server', () => {
     // opens the setup chooser (a question) instead of a card; no card, no
     // review and no setup exist until one project is chosen.
     await attach(page, 'Desktop');
-    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible({
       timeout: 30_000
     });
@@ -737,7 +743,7 @@ test.describe('a fresh server', () => {
     // composer, then the card offers Review setup as before.
     await expect(page.locator('#personalAssistantFolderChoices')).toBeVisible();
     await pickChip(page, 'Downloads');
-    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     await chooseProject(page, 'scratchpad');
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
     await expect(headline(page)).toContainText('scratchpad looks like');
@@ -803,7 +809,7 @@ test.describe('after the server was restarted', () => {
     // the confirmed, paused setup; it never starts a second one.
     await press(page, 'Pick it again');
     await pickChip(page, 'Documents');
-    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     await chooseProject(page, 'widget');
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
     expect((await currentOffer(request))?.id).toBe(before.offer);
@@ -1059,7 +1065,7 @@ test.describe('after the server was restarted', () => {
     // In a conversation, reviewing a folder that is already a project answers
     // with that project instead of a setup card: nothing new is prepared.
     await attach(page, 'Documents');
-    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     // The only eligible candidate is the exact existing workspace; the host
     // routes directly to its receipt instead of asking for a redundant choice.
     const existing = page.locator('section[aria-label="Existing project"]');
@@ -1122,7 +1128,7 @@ test.describe('a repository attached to the conversation', () => {
     await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     const attached = page.waitForResponse(
       response =>
         response.request().method() === 'POST' &&

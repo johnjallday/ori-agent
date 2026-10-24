@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdir, writeFile, readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Real isolated Ori, real Ask/storage/history; only the loopback model is scripted.
 // Not a live-model quality test. Run scripts/e2e-pa-arrangement.sh.
@@ -188,7 +189,7 @@ test('Home Explore and PA Add folder → explicit sharing → goal-dependent sav
     await expect(panel).toBeVisible();
     expect(calls.length).toBe(0);
     expect(totalRequests).toBe(beforeAttachment);
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })

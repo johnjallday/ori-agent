@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Fresh isolated exact candidate; no existing Home, vendor model or live REAPER.
 test('declared new Home: explicit setup persists resulting parent and reload reuses outcome', async ({
@@ -64,12 +65,13 @@ test('declared new Home: explicit setup persists resulting parent and reload reu
   await page.goto('/');
   await page.locator('#personalAssistantLauncher').click();
   await page.locator('#personalAssistantInput').fill('Add this to my workspace');
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // The attach opened Tree + Chat, so Review setup is in the "+" menu.
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   const candidate = await page
     .locator('#personalAssistantFolderSetupCandidate option')
     .filter({ hasText: portfolio ? 'Documents (whole folder)' : 'New Home Album fixture' })

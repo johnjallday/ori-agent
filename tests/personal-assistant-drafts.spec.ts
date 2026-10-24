@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { chooseConversation } from './helpers/assistant-menus';
 
 // The hired assistant's conversation: draft, save to the HQ backlog, resume and
 // update, and Remember….
@@ -117,7 +118,7 @@ async function openAsk(page: Page): Promise<void> {
   const launcher = page.locator('#personalAssistantLauncher');
   await expect(launcher).toBeVisible({ timeout: 20000 });
   if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
-  await expect(page.locator('#personalAssistantConversationBar')).toBeVisible();
+  await expect(page.locator('#personalAssistantConversationMenu')).toBeVisible();
 }
 
 const messageRows = (page: Page) => page.locator('#homeAssistantConversation [data-message-id]');
@@ -125,7 +126,7 @@ const messageRow = (page: Page, id: string) =>
   page.locator(`#homeAssistantConversation [data-message-id="${id}"]`);
 
 async function continueConversation(page: Page, id: string, messages: number): Promise<void> {
-  await page.locator('#personalAssistantConversationContinue').click();
+  await chooseConversation(page, '#personalAssistantConversationContinue');
   await page.locator(`#personalAssistantConversationList [data-conversation-id="${id}"]`).click();
   await expect(messageRows(page)).toHaveCount(messages);
 }

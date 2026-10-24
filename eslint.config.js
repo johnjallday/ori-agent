@@ -168,6 +168,7 @@ export default defineConfig([
       'internal/web/static/js/modules/folder-prerequisites.js',
       'internal/web/static/js/modules/personal-assistant-hire.js',
       'internal/web/static/js/modules/personal-assistant-hire-offer.js',
+      'internal/web/static/js/modules/personal-assistant-needs-reveal.js',
       'internal/web/static/js/modules/meet-assistant-home-prompt.js',
       'internal/web/static/js/modules/ori-spotlight.js',
       'internal/web/static/js/modules/personal-assistant-panel.js',

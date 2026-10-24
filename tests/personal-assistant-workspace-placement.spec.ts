@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { attachItem, chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // Production browser, Route/Ask/Review/Decide, Ollama adapter and canonical
@@ -100,7 +101,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
     await talkToPersonalAssistant(page);
   };
   const attachDocuments = async () => {
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })
@@ -212,7 +213,8 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   // it names can be reached and used from the keyboard.
   await expect(status).toHaveAttribute('role', 'status');
   await expect(status).toHaveAttribute('aria-live', 'polite');
-  const recover = page.getByRole('button', { name: 'Review workspace setup', exact: true });
+  // After the resume no local preview is shown, so Review setup is in the "+" menu.
+  const recover = await attachItem(page, '#personalAssistantReviewFolderSetup');
   await recover.focus();
   await expect(recover).toBeFocused();
   await page.keyboard.press('Enter');
@@ -291,7 +293,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
 
   // 6. In a new conversation, the folder that already became a project is
   // pointed at, not set up a second time.
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   await attachDocuments();
   await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
   await chooseCandidate('Album-5 placement fixture');

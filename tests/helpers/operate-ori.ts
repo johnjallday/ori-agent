@@ -6,6 +6,7 @@
 // spec says so where it captures evidence.
 import { expect } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
+import { openMoreMenu } from './assistant-menus';
 
 export const FIXTURE_MODEL = { provider: 'ollama', model: 'ori-workspace-fixture' };
 
@@ -107,7 +108,12 @@ export function drawer(page: Page) {
         await page.locator('#personalAssistantLauncher').click();
       await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     },
+    // Watch Ori is a switch in the drawer's "…" menu.
+    async openMore() {
+      await openMoreMenu(page);
+    },
     async setWatch(on: boolean) {
+      await openMoreMenu(page);
       await expect(watch).toBeVisible();
       if ((await watch.isChecked()) !== on) await watch.click();
       await expect(watch).toBeChecked({ checked: on });

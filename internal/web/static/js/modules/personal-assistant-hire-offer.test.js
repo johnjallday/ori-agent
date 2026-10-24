@@ -12,6 +12,7 @@ for (const script of ['./folder-plan-lines.js', './agent-hire-card.js']) {
 }
 
 const hire = await import('./personal-assistant-hire-offer.js');
+const { readNeedsReveal } = await import('./personal-assistant-needs-reveal.js');
 
 const catalog = {
   entries: [
@@ -369,6 +370,12 @@ test('the headline follows the card: a role change renames the hire, an edited b
 test('Hire and start submits the card once, and a finished hire settles the card with its message and link', async () => {
   const calls = stubMount();
   const hired = [];
+  const tab = new Map();
+  const hadStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: { getItem: key => tab.get(key) ?? null, setItem: (key, value) => tab.set(key, value) }
+  });
   try {
     const row = replyRow();
     const card = hire.render(row, confirmation, {
@@ -400,8 +407,12 @@ test('Hire and start submits the card once, and a finished hire settles the card
     assert.ok(card.find('personal-assistant-hire__card'));
     assert.equal(hired.length, 1);
     assert.equal(hired[0][1].state, 'hired');
+    // This tab made the hire, so its report will open Today's strip once.
+    assert.deepEqual(readNeedsReveal().own, ['hire:h-1']);
   } finally {
     calls.restore();
+    if (hadStorage) Object.defineProperty(globalThis, 'sessionStorage', hadStorage);
+    else delete globalThis.sessionStorage;
   }
 });
 

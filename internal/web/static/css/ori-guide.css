@@ -629,6 +629,7 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 .personal-assistant-panel {
+  position: relative;
   display: flex;
   width: min(640px, calc(var(--pa-viewport-width, 100vw) - 48px));
   height: min(
@@ -759,6 +760,56 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 .personal-assistant-panel__recipient[aria-expanded="true"] .bi {
+  transform: rotate(180deg);
+}
+
+/* The conversation under the name: its title and a chevron, opening the
+   conversation menu. It sits above the recipient button's stretched hit area,
+   so each opens its own menu. */
+.personal-assistant-panel__conversation {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 0 -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pa-ink-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__conversation[hidden],
+.personal-assistant-panel__conversation-title[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__conversation:hover,
+.personal-assistant-panel__conversation[aria-expanded="true"] {
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+}
+
+.personal-assistant-panel__conversation-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-panel__conversation .bi {
+  flex: none;
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.personal-assistant-panel__conversation[aria-expanded="true"] .bi {
   transform: rotate(180deg);
 }
 
@@ -1013,7 +1064,11 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   white-space: nowrap;
 }
 
-/* The header's two icon buttons: More and Close. */
+/* The header's icon buttons: Expand (desktop sheet only), More and Close. */
+.personal-assistant-panel__icon[hidden] {
+  display: none;
+}
+
 .personal-assistant-panel__icon {
   display: grid;
   width: 44px;
@@ -1116,6 +1171,14 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   padding: 2px;
 }
 
+/* The region itself takes focus so the keyboard can scroll it; its ring sits
+   inside, clear of the panel's rounded clip. */
+.personal-assistant-panel__scroll:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: -2px;
+}
+
 .personal-assistant-panel__scroll > * {
   flex: none;
 }
@@ -1129,9 +1192,13 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   margin: 0;
 }
 
+/* Two rows to start, growing with what is typed up to 160px, then it scrolls
+   (FR23). Browsers without field-sizing get the same from the panel module. */
 .personal-assistant-panel__input {
   width: 100%;
-  min-height: 72px;
+  min-height: 56px;
+  max-height: 160px;
+  field-sizing: content;
   resize: none;
   border: 1px solid var(--ori-line);
   border-radius: 14px;
@@ -1156,19 +1223,21 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   opacity: 0.55;
 }
 
-/* On a page that is not Home: how much needs the user, and the way there. */
+/* On a page that is not Home: how much needs the user, and the way there. It
+   reads as the same one-line fold as Home's strip (.personal-assistant-summary). */
 .personal-assistant-panel__needs {
   display: flex;
+  box-sizing: border-box;
+  min-height: 40px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 6px 12px;
   border: 1px solid var(--ori-line);
-  border-left: 3px solid var(--ori-accent);
   border-radius: 10px;
   background: var(--ori-paper);
   color: var(--ori-ink);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   text-decoration: none;
 }
@@ -1389,6 +1458,193 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: var(--pa-accent-text);
 }
 
+/* The attach row (FR18–FR22): the page's context at the left in small muted
+   text, then "+" and what is attached. One line while it fits; when what is
+   attached leaves the context less than its own 10rem, the attachments wrap
+   to a second line instead of cutting the context to a letter. Nothing here
+   clips overflow, because the attach menu opens above the row. */
+.personal-assistant-panel__attach-row {
+  position: relative;
+  display: flex;
+  grid-column: 1 / -1;
+  min-width: 0;
+  min-height: 36px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.personal-assistant-panel__attach-row > .personal-assistant-panel__context {
+  min-width: 0;
+  flex: 1 1 10rem;
+  overflow: hidden;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-panel__attach-row > .personal-assistant-panel__attachments {
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.personal-assistant-panel__attach-row .personal-assistant-folder-context__chip {
+  min-width: 0;
+  max-width: 14rem;
+}
+
+.personal-assistant-attach {
+  flex: none;
+}
+
+.personal-assistant-attach__button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--ori-line);
+  border-radius: 50%;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.personal-assistant-attach__button:hover,
+.personal-assistant-attach__button[aria-expanded="true"] {
+  border-color: var(--ori-accent);
+  background: var(--ori-paper);
+}
+
+/* The attach and conversation menus: the recipient menu's box with plain
+   rows. Items keep their own ids and handlers; here they read as rows. The
+   attach menu is placed against the attach row's right edge, above it: "+"
+   sits towards that end (the context line takes the left), and the row spans
+   the composer, so the menu stays in the sheet whatever is attached. */
+.personal-assistant-attach__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 11;
+  display: grid;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+}
+
+.personal-assistant-attach__menu[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__menu {
+  width: min(260px, calc(var(--pa-viewport-width, 100vw) - 48px));
+}
+
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item[hidden],
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-note[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item:hover:not(:disabled),
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item:focus-visible {
+  background: var(--ori-paper);
+}
+
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item:focus-visible,
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-note:focus-visible {
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: -2px;
+}
+
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-item i {
+  width: 16px;
+  color: var(--pa-accent-text);
+}
+
+/* With a folder attached, Add folder is "Replace folder" (its aria-label,
+   set by personal-assistant-folder-context.js); in the menu that is also
+   what it says. */
+.personal-assistant-attach__menu #personalAssistantFolderChip[aria-label] > span {
+  display: none;
+}
+
+.personal-assistant-attach__menu #personalAssistantFolderChip[aria-label]::after {
+  content: attr(aria-label);
+}
+
+/* The conversation menu's last row: when the next check-in is. */
+.personal-assistant-panel__menu > .personal-assistant-panel__menu-note {
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--ori-line);
+  border-radius: 0 0 8px 8px;
+  white-space: normal;
+}
+
+/* Watch Ori in the "…" menu: a switch, with what it allows as visible text. */
+.personal-assistant-panel__switch {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 2px 10px 8px;
+  border-bottom: 1px solid var(--ori-line);
+}
+
+.personal-assistant-panel__switch[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__switch label {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.personal-assistant-panel__switch-hint {
+  margin: 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* Add link: hidden until the server offers it, and one inline field. */
 #personalAssistantLinkChip[hidden] {
   display: none;
@@ -1579,13 +1835,17 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-weight: 700;
 }
 
-/* What Needs you and the two rows fold into once a conversation starts. */
+/* The strip: one 40px line that Needs you and the two rows fold behind each
+   time the drawer opens ("Needs you · N" or "Today", then Show). */
 .personal-assistant-summary {
   display: flex;
+  box-sizing: border-box;
+  min-height: 40px;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 6px 6px 12px;
+  padding: 3px 4px 3px 12px;
   border: 1px solid var(--ori-line);
   border-radius: 10px;
   background: var(--ori-paper);
@@ -1620,6 +1880,20 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 
 .personal-assistant-summary__toggle:hover {
   background: var(--ori-surface);
+}
+
+/* "Needs you" in the assistant's line about a finished look: it opens the
+   strip at the report. Text-like, so the sentence still reads as one. */
+.personal-assistant-needs-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pa-accent-text, var(--ori-accent-strong));
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .personal-assistant-panel .personal-assistant-today__sections {
@@ -1902,6 +2176,22 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 
 .personal-assistant-conversation[hidden],
 .personal-assistant-conversation__list[hidden] {
+  display: none;
+}
+
+/* Under the header, the bar takes room only while the earlier-conversations
+   list, the note or the saved draft has something to show (FR21). */
+#personalAssistantConversationBar {
+  flex: none;
+}
+
+#personalAssistantConversationBar:not(
+  :has(
+    > #personalAssistantConversationList:not([hidden]),
+    > #personalAssistantConversationNote:not(:empty),
+    > #personalAssistantSavedDraft:not([hidden])
+  )
+) {
   display: none;
 }
 
@@ -2837,6 +3127,99 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-panel--exploring.personal-assistant-panel--explorer-narrow[data-explorer-tab="chat"]
   .personal-assistant-explorer__pane {
   display: none;
+}
+
+/* ---- desktop sheet -------------------------------------------------------------- */
+
+/* Above the phone breakpoint the drawer is a sheet on the right whose width the
+   user sets with the handle. The panel module writes --pa-drawer-width from the
+   saved width, Expand or Tree + Chat; the cap here keeps min(180px, 20%) of the
+   page visible on the left while a resize is still being measured. A zoom that
+   brings the corrected viewport to phone width marks the panel explorer-narrow,
+   and it keeps the floating card. These rules come after the exploring and
+   inline-toolbar rules so they win over their size and position. */
+@media (min-width: 761px) {
+  .personal-assistant-panel:not(.personal-assistant-panel--explorer-narrow) {
+    width: min(
+      var(--pa-drawer-width, 640px),
+      calc(
+        var(--pa-viewport-width, 100vw) - min(180px, var(--pa-viewport-width, 100vw) * 0.2) - 20px
+      )
+    );
+  }
+}
+
+/* Full height: clear the navbar, stop 12px above the floor. Viewports 520px
+   tall or shorter keep the taller floating card (see max-height: 520px). */
+@media (min-width: 761px) and (min-height: 521px) {
+  .personal-assistant-panel:not(.personal-assistant-panel--explorer-narrow) {
+    position: fixed;
+    top: calc(var(--ori-navbar-bottom, 60px) + 12px);
+    right: 20px;
+    bottom: 12px;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+}
+
+/* The handle: an 8px strip along the sheet's left edge with a 44px grip
+   centred on it, faint until it is hovered, focused or dragged. */
+.personal-assistant-panel__resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 12;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.personal-assistant-panel__resize[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__resize::before {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ori-ink) 45%, var(--ori-paper-deep));
+  content: "";
+  opacity: 0.3;
+  transform: translateY(-50%);
+  transition: opacity 0.15s ease;
+}
+
+.personal-assistant-panel__resize:hover::before,
+.personal-assistant-panel__resize:focus-visible::before,
+.personal-assistant-resizing .personal-assistant-panel__resize::before {
+  opacity: 1;
+}
+
+/* Inside the panel's rounded clip, so the ring is not cut off. */
+.personal-assistant-panel__resize:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: -3px;
+}
+
+/* Expand is on: the width is not the handle's to change. */
+.personal-assistant-panel__resize[inert] {
+  cursor: default;
+}
+
+.personal-assistant-panel__resize[inert]::before {
+  opacity: 0;
+}
+
+/* While dragging, the pointer may cross the page: no text selection there. */
+html.personal-assistant-resizing {
+  cursor: ew-resize;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @media (max-width: 760px) {

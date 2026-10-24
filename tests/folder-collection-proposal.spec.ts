@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // A folder that holds several projects, from the moment it is shown to the
 // group and workspaces it becomes, in a real browser against the real server
@@ -151,7 +152,7 @@ async function attachFolder(page: Page, name: string) {
   await expect(page.locator('#personalAssistantLauncher')).toBeVisible({ timeout: 30_000 });
   if (!(await page.locator('#personalAssistantPanel').isVisible()))
     await page.locator('#personalAssistantLauncher').click();
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   const attached = page.waitForResponse(
     response =>
       response.request().method() === 'POST' &&

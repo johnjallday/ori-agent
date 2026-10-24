@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { basename } from 'node:path';
+import { chooseConversation } from './helpers/assistant-menus';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // The recipient picker (tasks/prd-assistant-recipient-picker.md). On a
@@ -150,7 +151,7 @@ test('a workspace with a Commander opens as its entry agent and sends to it', as
     'placeholder',
     'Ask Mira about this workspace… (/task creates a task)'
   );
-  await expect(page.locator('#personalAssistantFolderChip')).toBeHidden();
+  await expect(page.locator('#personalAssistantChips')).toBeHidden();
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText('New conversation');
 
   await page.locator('#personalAssistantInput').fill('What can you do in this workspace?');
@@ -208,7 +209,7 @@ test('switching to the Personal Assistant keeps the draft byte for byte', async 
   await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Atlas');
   await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Atlas');
   expect(await input.inputValue()).toBe(draft);
-  await expect(page.locator('#personalAssistantEntrySessionBar')).toBeHidden();
+  await expect(page.locator('#personalAssistantEntrySessionTitle')).toBeHidden();
   await expect(page.locator('#homeAssistantConversation [data-message-author="Mira"]')).toHaveCount(
     0
   );
@@ -245,7 +246,7 @@ test('New forgets the session and the next message starts another', async ({ pag
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText(
     'What can you do in this workspace?'
   );
-  await page.locator('#personalAssistantEntrySessionNew').click();
+  await chooseConversation(page, '#personalAssistantEntrySessionNew');
   await expect(page.locator('#personalAssistantEntrySessionTitle')).toHaveText('New conversation');
   expect(await sessionsIn(request, seeded.commander.id)).toHaveLength(1);
   await page.locator('#personalAssistantInput').fill('Hello again.');

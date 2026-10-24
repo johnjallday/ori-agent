@@ -5,6 +5,7 @@ import {
   syntheticFolderFiles,
   folderContentSentinel
 } from './fixtures/assistant-folder-response.js';
+import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
 
 // Real Ori selection -> Route/Ask -> canonical persistence -> replay. Only the
 // loopback provider's short prose is scripted: NOT vendor-model quality evidence.
@@ -85,11 +86,11 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
     await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
-    if (path !== '/') await page.locator('#personalAssistantConversationNew').click();
+    if (path !== '/') await chooseConversation(page, '#personalAssistantConversationNew');
     const protectedDraft = '  Keep my exact 🎼 draft\n';
     await page.locator('#personalAssistantInput').fill(protectedDraft);
     const beforeAttachment = (await audit()).requests;
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     const selected = page.waitForResponse(response =>
       response.url().endsWith('/folder-context/select')
     );
@@ -106,7 +107,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       await expect(page.locator('#personalAssistantFolderStructure')).toContainText(
         `Set up ${chip} as a group?`
       );
-      await page.locator('#personalAssistantExploreAttachedFolder').click();
+      await chooseAttach(page, '#personalAssistantExploreAttachedFolder');
     }
     await expect(explorer).toBeVisible();
     await expect(page.locator('#personalAssistantPanel')).toHaveClass(/--exploring/);
@@ -200,12 +201,12 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await page.locator('#personalAssistantExplorerBack').click();
     await expect(explorer).toBeHidden();
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
-    await page.locator('#personalAssistantExploreAttachedFolder').click();
+    await chooseAttach(page, '#personalAssistantExploreAttachedFolder');
     await expect(folderCheck).toBeChecked();
     await expect(fileCheck).toBeChecked();
     await page.locator('#personalAssistantExplorerBack').click();
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.locator('#personalAssistantExploreAttachedFolder').click();
+    await chooseAttach(page, '#personalAssistantExploreAttachedFolder');
     await page.evaluate(() => {
       document.body.style.zoom = '2';
     });
@@ -245,7 +246,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       `[data-message-id="${reply.conversation.user_message_id}"] [data-folder-turn-focus]`
     );
     await expect(firstSentFocus).toContainText(fileNode.name);
-    await page.locator('#personalAssistantExploreAttachedFolder').click();
+    await chooseAttach(page, '#personalAssistantExploreAttachedFolder');
     await fileCheck.uncheck();
     await expect(firstSentFocus).toContainText(fileNode.name);
     await page.locator('#personalAssistantExplorerBack').click();

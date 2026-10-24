@@ -576,9 +576,11 @@ that a restart interrupted can.
 A look a hire started reports back instead (`first_look_report.go`): once it
 finishes, Today's Needs you carries one `folder_first_look` item, drawn as a
 card on Home's Today and in the assistant drawer on every page and counted in
-its Needs you number. While Home's Today is folded behind its summary line
-(after a conversation started), the report cards wait right under that line,
-so opening the drawer always shows them. The card says who looked and where, at most two
+its Needs you number. In the drawer on Home the cards sit in Needs you behind
+the Today strip, counted in "Needs you · N"; a report this tab caused (its hire
+or its first look) opens the strip once by itself, and the assistant's line
+"…It's under Needs you…" makes "Needs you" a button that opens the strip at the
+card (see The assistant drawer). The card says who looked and where, at most two
 sentences of what it found, **Suggests first** (the report's `Next:` line and
 its reason), an "On the Map" row with **Move**, and **Start this**, **Not now**
 and **Read the full report**. Start this creates the suggestion as a Ready task
@@ -739,12 +741,14 @@ assistant makes one explained offer.
   ("Explore a folder"), then the assistant's replies in order — the chooser
   ("Which folder should I explore?", the folder buttons, "A read-only peek.
   Nothing moves."), the exploring scene once a folder is chosen, and the offer
-  card. Starting the turn folds Needs you, the brief row and the progress row
-  into the summary strip (see Surfaces and routing). The offer card is one
-  element: it is a reply in the conversation while the flow runs there, and
-  when a page loads onto an offer that is still waiting (`pending` or
-  `awaiting_outcome`) the same element is placed under Needs you instead, and
-  stays there while it is acted on, so it is never lost and never shown twice.
+  card. Needs you, the brief row and the progress row are behind the Today
+  strip from the moment the drawer opens (see The assistant drawer). The offer
+  card is one element: it is a reply in the conversation while the flow runs
+  there, and when a page loads onto an offer that is still waiting (`pending`
+  or `awaiting_outcome`) the same element is placed in Needs you instead,
+  counted on the strip, and stays there while it is acted on, so it is never
+  lost and never shown twice. A card that leaves this tab's conversation for
+  Needs you opens the strip once; one found waiting on load does not.
   The scene's small visual field trip uses the assistant's already-rendered
   avatar. A folder graphic starts moving
   only when a real scan begins (and finishes the motion on a fast response);
@@ -903,23 +907,62 @@ user to create a workspace by hand.
 ### The assistant drawer
 
 `tasks/prd-assistant-drawer-redesign.md`. The Personal Assistant drawer is one
-view on every page. It has no tabs. From top to bottom:
+view on every page. It has no tabs.
 
-- **Header.** The assistant's name; under it the next check-in ("Next check-in
-  · Mon 5:00 PM", "Check-ins paused", "No check-in scheduled"), or the plain
-  role "Personal Assistant" until that is known; a **More** menu (an icon
-  button named "More assistant options") holding the distinct HQ, working
-  agreement, workspace memory, remembered-facts review, optional interview and
-  Agents destinations; and Close.
+**Geometry.** Above 760px wide it is a sheet on the right: it clears the navbar
+by 12px, stops 12px above the floor and 20px from the right edge, and is 640px
+wide until the user changes it. Its left edge is a resize handle
+(`role="separator"`, named "Resize assistant", `aria-valuenow` in pixels):
+drag it, or use Left/Right (16px), Shift+Left/Right (64px), Home and End. The
+width runs from 560 to 960px, capped so the page keeps min(180px, 20% of the
+viewport) on the left; the browser remembers it (`localStorage`
+`ori.assistant.drawer.width`, a remembered width is clamped per viewport, never
+dropped). **Expand** in the header takes min(1180px, viewport − that margin −
+20px) and makes the handle inert (`ori.assistant.drawer.expanded`); Tree + Chat
+borrows the same width while it is open, without changing the choice. Every
+number is in the zoom-corrected viewport the panel module measures. The
+launcher is hidden while the drawer is open, at every width, and gets focus
+back on close. Phones (760px or narrower, or a zoom that brings the corrected
+viewport there) keep the bottom sheet with no handle or Expand, and viewports
+520px tall or shorter keep the taller floating card. The drawer stays
+non-modal.
+
+From top to bottom:
+
+- **Header.** The assistant's name (a recipient menu when a workspace's entry
+  agent can also be addressed); under it a **conversation menu** button whose
+  text is the conversation's title ("New conversation" or the saved title).
+  Its menu holds **New**, **Continue…** and a row that cannot be chosen with
+  the next check-in ("Next check-in · Mon 5:00 PM", "Check-ins paused", "No
+  check-in scheduled", or "Personal Assistant" until known); with the entry
+  agent selected it holds New only. Then **Expand** (desktop), a **More** menu
+  (an icon button named "More assistant options") holding **Watch Ori** where
+  the assistant can operate the app (a switch with its hint as visible text)
+  and the distinct HQ, working agreement, workspace memory, remembered-facts
+  review, optional interview and Agents destinations; and Close.
+- **Under the header**, only while it has something: the earlier conversations
+  Continue… lists, the conversation's note, and its saved draft.
 - **A region that scrolls.** On Home it starts with the Today projection: the
-  status banner (paused, not hired, HQ not built, repair, no model), then
-  **Needs you** with its count in the heading, the **brief row** and the
-  **progress row**. Then the conversation.
-- **The chip**, "Explore a folder", directly above the composer.
-- **The composer**, always visible at the bottom. Opening the drawer puts focus
-  in it whenever the assistant can accept work, and on the first control in
-  the drawer when it cannot (the composer is then disabled).
-  `/?panel=today` still opens the drawer on Home.
+  status banner and any setup prerequisite, then the **Today strip**, behind
+  which are **Needs you** with its count in the heading, the **brief row** and
+  the **progress row**. Then the conversation.
+- **The attach row**: the page's "Context · …" line at the left in small muted
+  text, then a round **"+"** (named "Attach") whose menu holds **Add folder**,
+  **Add link** (when the server offers it), **Tree + Chat** (with a folder
+  attached) and **Review setup** (when offered), then the attached folder and
+  link chips with their × buttons. With a link attached, an empty Send asks
+  about it; the link chip says so in its tooltip and description.
+- **The composer**, always visible at the bottom: a text box two rows tall that
+  grows with its content to 160px, and Send. Opening the drawer puts focus in it
+  whenever the assistant can accept work, and on the first control in the
+  drawer when it cannot (the composer is then disabled). `/?panel=today` still
+  opens the drawer on Home.
+
+The menus follow the recipient menu's keys: arrows move, Enter or Space
+chooses, Escape closes only the menu and returns focus to its button, Tab and
+a click outside close it. The controls in them keep their ids and handlers.
+At 1440×900 with nothing attached the header and composer together take at
+most 200px and the conversation region at least 70% of the sheet.
 
 Today remains a Home-owned projection for the same bound Personal Assistant.
 Needs you is shown only when something is in it, leads with the next action
@@ -939,19 +982,39 @@ for one release but do not render as sections.
 
 The conversation is empty until something happens: the shared work activity's
 idle text is not shown in the drawer. The activity block is permanently owned
-by the assistant, not shared or reparented into Help. When the user starts something (Send, or
-"Explore a folder") Needs you and the two rows fold into one **summary strip**
-("Needs you 2 · Brief ready · 2 in progress") with a Show/Hide control.
-Folding only hides them, so anything typed into a card is still there. A
-message the assistant starts by itself does not fold them, and reopening the
-drawer with no conversation going shows them in full again.
+by the assistant, not shared or reparented into Help.
+
+**The Today strip.** Needs you and the two rows sit behind one 40px line,
+"Needs you · N" when something waits on the user (N counts the cards, hired
+agents' reports, a waiting folder card and the queue) or "Today" while there is
+a brief row or a progress row, with a Show/Hide control. When a Today source
+cannot be read the line adds "· sources unavailable", so a folded strip is never
+an all-clear; with nothing to show there is no strip. The strip is folded every
+time the drawer opens, on desktop and on phones, so the conversation is what
+shows; Show and Hide hold until the drawer closes. A link to what needs the
+user, `/?panel=today` (the "N need you" line on other pages, the HQ card route,
+a locked mission), opens the drawer with the strip open; `&folder=show` opens
+the folder flow and leaves it folded. Opening a drawer that is already open
+changes nothing. Folding only hides them, so
+anything typed into a card is still there. It opens by itself once, only for
+an item this tab produced: a report of a hire made from this tab's
+conversation, a first look this tab started, or a folder card that left this
+tab's conversation. A per-tab record (`sessionStorage`
+`ori.assistant.needs.reveal`, `personal-assistant-needs-reveal.js`) claims
+those when they are made, so items from other tabs, devices or earlier
+sessions stay folded. This amends the earlier rule that opening the drawer
+always shows waiting cards: they are counted on the strip instead. What stops
+the assistant working (paused, no model, repair, not hired) keeps its banner
+above the strip, and a setup prerequisite (HQ not built, a repair) shows
+expanded with no strip.
 
 Pages other than Home have no Today of their own. Their drawer reads
 `GET /api/personal-assistant/today` when it opens, for the header's check-in
 line and More links and for one line, "N need you", that links to
-`/?panel=today`. The line is hidden when nothing needs the user and reads "Open
-Home to see what needs you" when the number cannot be read. They show no brief
-row or progress row, and their chip goes to Home's folder flow.
+`/?panel=today`, styled like the Today strip. The line is hidden when nothing
+needs the user and reads "Open Home to see what needs you" when the number
+cannot be read. They show no brief row or progress row, and their Add folder
+goes to Home's folder flow.
 
 Home still keeps today's brief prepared: on load, with a Personal HQ and no
 brief for today, it asks the server for one (`POST /api/personal-hq/brief/open`)

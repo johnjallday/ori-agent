@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // The assistant hires from a plain request (assistant-hires-from-a-request):
 // the real built drawer, Route -> Ask -> the loopback Ollama stand-in and
@@ -203,7 +204,7 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
 
   // 5. A recognized folder attached to the turn keeps the folder's own card:
   // the request's hire tool is withheld and no hire card is drawn.
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 import { talkToPersonalAssistant } from './helpers/assistant-recipient';
 
 // One conversation, start to finish, on the production browser and host under
@@ -174,7 +175,7 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
   await page.goto(`/workspaces/${group.folder_slug}/canvas`);
   await openDrawer();
   await expect(label).toHaveText('Context · Group: Music portfolio integrated fixture');
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

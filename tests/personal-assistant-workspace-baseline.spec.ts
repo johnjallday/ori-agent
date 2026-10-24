@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
 
 // Exact installed-candidate baseline regression, not release verification or a live model.
 // Run via reaper-demo.sh test --suite awareness with explicit clean sources.
@@ -96,13 +97,14 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
   });
   await page.goto(`/workspaces/${home.folder_slug}/assistant`);
   await page.locator('#personalAssistantLauncher').click();
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
   await expect(page.locator('#personalAssistantFolderChip')).toBeEnabled();
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // The attach opened Tree + Chat, so Review setup is in the "+" menu.
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   const candidate = await page
     .locator('#personalAssistantFolderSetupCandidate option')
     .filter({ hasText: 'Album-5 fixture' })
@@ -197,7 +199,8 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
     'Keep chatting'
   ]);
   await card.screenshot({ path: join(evidence, 'compatible-destination-changed.png') });
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // After the resume no local preview is shown, so Review setup is in the "+" menu.
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption(candidate!);
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   await expect(card).toContainText(
@@ -314,13 +317,13 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
     const supportingBytes = 'Supporting-folder fixture: source must remain unchanged.';
     await writeFile(join(supportingRoot, 'references.md'), supportingBytes, { mode: 0o600 });
     const originalChild = await (await request.get(`/api/workspaces/${child.id}`)).json();
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })
       .click();
     await expect(page.locator('#personalAssistantFolderChip')).toBeEnabled();
-    await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     const supportingCandidate = await page
       .locator('#personalAssistantFolderSetupCandidate option')
       .filter({ hasText: 'Supporting references fixture' })
@@ -363,7 +366,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
       await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
       if (!(await page.locator('#personalAssistantPanel').isVisible()))
         await page.locator('#personalAssistantLauncher').click();
-      await page.locator('#personalAssistantConversationNew').click();
+      await chooseConversation(page, '#personalAssistantConversationNew');
       await page.locator('#personalAssistantInput').fill('Read the project file');
       const answered = page.waitForResponse(
         response => new URL(response.url()).pathname === '/api/home-assistant/ask'

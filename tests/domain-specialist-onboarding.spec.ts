@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openAttachMenu } from './helpers/assistant-menus';
 
 // This was the installed-app specialist-card suite. The detector remains
 // available for silent installed/not-installed copy and onboarding profiles,
@@ -41,7 +42,8 @@ test('Home never mounts the retired installed-app offer', async ({ page, request
   });
   await page.goto('/?panel=today');
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
-  // The folder flow is the one thing on offer, from the chip above the composer.
+  // The folder flow is the one thing on offer, from Add folder in the composer's "+" menu.
+  await openAttachMenu(page);
   await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
   await expect(page.locator('#personalAssistantSpecialistOffer')).toHaveCount(0);
   await expect(page.locator('#personalAssistantSpecialistManual')).toHaveCount(0);

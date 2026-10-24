@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { folderContentSentinel } from './fixtures/assistant-folder-response.js';
+import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
 
 // Real host/provider/store characterization. Geometry is observed BEFORE any
 // screenshot/action can scroll it. Group 2 adds the new visibility assertions;
@@ -190,20 +191,20 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     if (!(await page.locator('#personalAssistantPanel').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
     if (await page.locator('#personalAssistantConversationNew').isEnabled())
-      await page.locator('#personalAssistantConversationNew').click();
+      await chooseConversation(page, '#personalAssistantConversationNew');
     if (path === '/') await capture('home-today-error-compact');
     const ordinary = await send('Tell me about this workspace');
     await capture(`${prefix}-ordinary-first`, ordinary.conversation.assistant_message_id);
     if (path === '/') {
       await expect(page.locator('#personalAssistantTodayFooter')).toBeHidden();
-      await expect(page.locator('#personalAssistantSummaryText')).toContainText(
-        'Today sources unavailable'
+      await expect(page.locator('#personalAssistantTodayStripText')).toContainText(
+        'sources unavailable'
       );
-      await page.locator('#personalAssistantSummaryToggle').click();
+      await page.locator('#personalAssistantTodayStripToggle').click();
       await expect(page.locator('#personalAssistantTodayFooter')).toBeVisible();
       await expect(page.locator('#personalAssistantTodayRetry')).toBeVisible();
       await page.screenshot({ path: join(evidence, 'home-today-error-expanded.png') });
-      await page.locator('#personalAssistantSummaryToggle').click();
+      await page.locator('#personalAssistantTodayStripToggle').click();
     }
     const repeated = await send('What should we discuss next?');
     await capture(`${prefix}-ordinary-repeated`, repeated.conversation.assistant_message_id);
@@ -214,7 +215,7 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     ).toBeGreaterThan(300);
     await capture(`${prefix}-ordinary-long`, long.conversation.assistant_message_id);
 
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     const selection = page.waitForResponse(r => r.url().endsWith('/folder-context/select'));
     await page
       .locator('#personalAssistantFolderChoices')
@@ -364,7 +365,7 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     await capture(`${prefix}-reopen`, arrival.conversation.assistant_message_id);
     // Fresh explicit select recovers process-local authority for a Review;
     // reloading history itself did not scan or prepare an offer.
-    await page.locator('#personalAssistantFolderChip').click();
+    await chooseAttach(page, '#personalAssistantFolderChip');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })

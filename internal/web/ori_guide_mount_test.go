@@ -170,7 +170,7 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 		`id="personalAssistantPanelTitle"`, `id="personalAssistantCheckIn"`,
 		`id="personalAssistantMore"`, `id="personalAssistantClose"`,
 		`id="personalAssistantScroll"`, `id="personalAssistantToday"`,
-		`id="personalAssistantTodayBanner"`, `id="personalAssistantSummary"`,
+		`id="personalAssistantTodayBanner"`, `id="personalAssistantTodayStrip"`,
 		`id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
 		// The conversation: the shared activity, then the folder flow as a
@@ -270,7 +270,7 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	for _, absent := range []string{
 		`id="personalAssistantToday"`, `id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
-		`id="personalAssistantSummary"`, `id="homeDailyBrief"`,
+		`id="personalAssistantTodayStrip"`, `id="homeDailyBrief"`,
 	} {
 		if strings.Contains(html, absent) {
 			t.Errorf("non-Home assistant panel unexpectedly contains %s", absent)
@@ -300,9 +300,9 @@ func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
 	body := stripHTMLComments(readTemplate(t, "templates/components/ori-guide.tmpl"))
 	for _, want := range []string{
 		`id="oriGuideTitle">Help<`, `for="oriGuideInput">Search help<`,
-		// The line under the assistant's name says "Personal Assistant" until
+		// The conversation menu's check-in row says "Personal Assistant" until
 		// the next check-in is known, and the launcher always carries the role.
-		`class="personal-assistant-panel__checkin">Personal Assistant<`,
+		`role="menuitem" aria-disabled="true" tabindex="-1">Personal Assistant<`,
 		`class="personal-assistant-launcher__role">Personal Assistant<`,
 	} {
 		if !strings.Contains(body, want) {
@@ -319,7 +319,7 @@ func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
 func TestPAFComposersStateTheirSeparatePurposes(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
 	if !strings.Contains(body, "Search app topics") ||
-		!strings.Contains(body, "Ask a question or describe what you want help with") {
+		!strings.Contains(body, "Ask or describe what you want help with") {
 		t.Error("Help and hired-assistant composers must state separate purposes")
 	}
 }
