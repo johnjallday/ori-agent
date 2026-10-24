@@ -253,7 +253,9 @@ refusals, replacement/detach, closed reviews and old answers cannot revive it.
 Clicking still uses the existing explicit review endpoint and confirmation gates.
 The composer **Review setup** entry remains available for direct/no-model review.
 An existing review retains its status and **Show existing setup review** action;
-discussion choices never supply its candidate default or confirmation.
+discussion choices never supply its candidate default or confirmation. The single
+review control stays in the visible composer during Tree + Chat and moves beside
+the compact preview on Back; it is not a second review owner.
 
 Only explicit Review workspace setup mints a canonical digest offer. The handoff
 checks current conversation revision, selection owner/expiry/directory identity,
@@ -269,6 +271,36 @@ Completed outcomes are not undone. The existing creator, reviewed plan digest,
 receipt and provider-specific gates remain the sole execution path. Canonical
 outcome references are read back in the owning conversation; hydration executes
 nothing.
+
+### Setup requirements and configuration return
+
+A single recognized project now opens its canonical requirements review on
+attachment even when prerequisites prevent a complete plan. Multiple candidates,
+unsupported folders and another owner's pending review keep their existing
+choice/refusal behavior. Raw attachment eligibility and supporting/unbound
+previews still acquire no independent release facts; the automatically opened
+canonical creation review intentionally reads them. Partial `readiness` remains
+inert: no digest, setup confirmation or new source access.
+
+The assistant's package rows provide separate inline review/confirm controls.
+`POST …/folder-digest/offers/{id}/prerequisites` accepts only a package kind and
+bounded consent envelope, not a source, path or executable input. The current
+canonical owner, pending creation status, live selection and destination are
+revalidated. Integration actions use the existing host install quest's durable
+review token/revision/idempotency; Home-provider actions use its existing reviewed
+installer with an exact release/disclosure/generation witness. Neither creates a
+workspace/Home, hires an agent or invokes a model. Successful explicit repair
+refreshes this unaccepted review in place, not its draft or consent. New Workspace
+still owns its own lifecycle and does not acquire this assistant adapter.
+
+The applicable project model is independent of chat configuration. A known
+missing model opens its existing configuration owner in another tab, retaining
+exact drafts/briefs. Explicit `recheck: true` uses the review endpoint's same
+references and authority checks; an exact current review refreshes in place
+without appending history or invoking a model. Expiry, changed consent, different
+owners and accepted runs retain their existing refusal/recovery rules. See the
+[visual/readiness contract](visual-folder-setup.md) for the bounded projection,
+cache invalidation and separate material model-consent witness.
 
 ## Implemented contextual turns (group 3)
 

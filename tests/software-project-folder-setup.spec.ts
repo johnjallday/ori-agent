@@ -371,7 +371,7 @@ async function attach(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
   const fresh = page.locator('#personalAssistantConversationNew');
   if ((await fresh.isVisible()) && (await fresh.isEnabled())) await fresh.click();
   await page.locator('#personalAssistantFolderChip').click();
-  await pickChip(page, chip);
+  return pickChip(page, chip);
 }
 
 // pickChip picks a folder in the open attachment picker.
@@ -386,10 +386,13 @@ async function pickChip(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads')
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: chip, exact: true })
     .click();
-  expect((await attached).ok()).toBeTruthy();
+  const response = await attached;
+  expect(response.ok()).toBeTruthy();
+  const selection = await response.json();
   await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeEnabled({
     timeout: 30_000
   });
+  return selection;
 }
 
 // chooseProject answers the setup chooser (shown after Review setup on a folder
@@ -419,9 +422,20 @@ async function show(
   chip: 'Documents' | 'Desktop' | 'Downloads',
   project?: string | RegExp
 ) {
-  await attach(page, chip);
-  await page.locator('#personalAssistantReviewFolderSetup').click();
-  if (project) await chooseProject(page, project);
+  const selection = await attach(page, chip);
+  if (selection.hire_candidate) {
+    // A single eligible project already opens its canonical review. Do not
+    // race that pending request with another composer click or manufacture a
+    // multi-project chooser. Verify it is precisely the requested candidate.
+    await expect(card(page)).toBeVisible({ timeout: 30_000 });
+    const offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
+    expect(offer.candidate_id).toBe(selection.hire_candidate);
+    if (project instanceof RegExp) expect(offer.subject.name).toMatch(project);
+    else if (project) expect(offer.subject.name).toBe(project);
+  } else {
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    if (project) await chooseProject(page, project);
+  }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
   await card(page).scrollIntoViewIfNeeded();
@@ -456,7 +470,6 @@ async function comeBack(page: Page) {
   }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
-  await card(page).scrollIntoViewIfNeeded();
 }
 
 const headline = (page: Page) => page.locator('#personalAssistantFolderOfferHeadline');
@@ -777,6 +790,15 @@ test.describe('after the server was restarted', () => {
     // restart (the conversation-bound review holds the folder in memory); the
     // paused setup itself is saved, and shows again once the folder is picked.
     await expect(question(page)).toContainText('the server was restarted');
+    await expect(question(page)).toBeInViewport();
+    await expect(
+      card(page).getByRole('button', { name: 'Pick it again', exact: true })
+    ).toBeInViewport({ ratio: 1 });
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/04-scripted-software-repick.png`
+      });
+    }
     // Picking the same folder again and reviewing the same project recovers
     // the confirmed, paused setup; it never starts a second one.
     await press(page, 'Pick it again');

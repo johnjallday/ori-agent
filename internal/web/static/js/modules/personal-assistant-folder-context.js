@@ -318,6 +318,7 @@ export function createFolderContextController({
               ...(placement.operation
                 ? { operation: placement.operation, destination_id: placement.destination_id || '' }
                 : {}),
+              ...(placement.recheck === true ? { recheck: true } : {}),
               // What the user changed in Adjust on a proposed group.
               ...(placement.structure ? { structure: placement.structure } : {})
             })
@@ -971,7 +972,8 @@ function init() {
     current: () => controller.state,
     setFocus: (ids, binding) =>
       !window.PersonalAssistantConversation?.isLoading?.() && controller.setFocus(ids, binding),
-    notify: message => controller.notify(message)
+    notify: message => controller.notify(message),
+    layoutChanged: () => window.PersonalAssistantFolderSetup?.refreshReviewLink?.()
   });
   document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
   document.addEventListener('personal-assistant:status', renderDiscussion);

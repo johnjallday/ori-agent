@@ -40,7 +40,8 @@ user: "create it" / clicks Create ─► POST /api/workspaces { …draft, build_
 The folder-led build shares the inert [visual folder setup renderer](visual-folder-setup.md)
 with Home and the drawer. It does not share their state owner or confirmation controls;
 the build session and wizard remain authoritative. Full plan details are disclosed,
-while consequences and saved milestones stay visible.
+while requirements, consequences and saved milestones stay visible. The smaller
+proposed outcome follows the decision, rather than competing in a sticky column.
 
 ## Server
 
@@ -170,6 +171,25 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   becomes **Plan so far**. With a ready plan the model may set only the name, description, goal
   and one extra saved teammate; everything else is refused as `set by the plan`, and the prompt
   carries `<setup_plan>` instead of the catalog.
+- **Requirements and model return**: an unavailable plan may carry independent
+  `readiness` rows without a digest or `ready` authority. Applicable project-agent
+  configuration is separate from the build's conversational model; an unreadable
+  blueprint is not checked, not missing. Known missing configuration opens the
+  existing Settings/agent owner separately. An unavailable recognized integration
+  offers **Check requirements** even before model metadata exists. Attachment
+  retains its existing planning reads; independent partial release checks require
+  this explicit action. **Check again** reads
+  `GET …/{id}?recheck=1`; only an open session without a setup claim invalidates
+  cached prerequisites. It does not increment the build version, change its draft,
+  renew the folder hold, turn to a model or confirm setup. The client checks
+  session/version/local revision/observation identity and applies the returned
+  plan and authoritative folder expiry, retaining exact name/brief/form edits.
+  A lost hold becomes re-pick, never a renewed selection. Failed or late reads disable stale confirmation;
+  a canonical replacement-folder response clears that obsolete failure. Accepted
+  running/stopped builds retain recorded consent and existing recovery, not a
+  rechecked plan. The assistant's per-package inline-install adapter explicitly
+  refuses build-session reviews; sharing the renderer does not share those
+  actions or their lifecycle. See the [readiness/model contract](visual-folder-setup.md).
 - **A missing Home plugin**: a plan that waits on its Home's plugin (`provider_not_installed`,
   `provider_unverified`) sets `install_provider` on the response, and the pane offers
   **Install <plugin>** under the plan. `POST …/{id}/home-provider {version}` previews the release
@@ -187,7 +207,8 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   it is open it stands in for the conversation, with its own Hire and start.
 - **The hire**: a ready plan carries `hire` (who the setup hires: `create`, `bind` or `pending`,
   the agent's name, role and model) and `brief_default`, outside its digest, read from the same
-  host plan as Home's card. The pane's plan column is titled by the hire ("Hire <agent> for
+  host plan as Home's card. A separately validated material model witness, when
+  known, participates in consent; the display projection is not that witness. The pane's plan column is titled by the hire ("Hire <agent> for
   <project>"), with the agent's badge and role and the one question "What should it do with
   it?" above the "You'll get" sketch; the folder review, which a recognized folder opens
   directly, shows the same block (`renderReviewHire`, `#workspaceBuildPlanReviewHire`), titled the

@@ -29,6 +29,8 @@ import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
+import { setupQuestActionURL } from './setup-quest-links.js';
+import { createFolderPrerequisites, renderFolderPrerequisites } from './folder-prerequisites.js';
 import {
   declinedLine,
   proposalView,
@@ -232,13 +234,12 @@ export const { setupLinesView, renderSetupLines, hireView } = globalThis.OriFold
 const SETUP_STOP_COPY = {
   plan_changed:
     'What Set up would do now differs from the plan you approved, so I stopped before going further. Review the changed setup before continuing.',
-  needs_pick: subject =>
-    `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
+  needs_pick: subject => `Ori no longer has ${subject} open. Pick the folder again to carry on.`,
   needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
   needs_model:
     'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
   install_failed:
-    'The integration could not be installed or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
+    'A required plugin could not be installed, updated or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
   interrupted: 'Setup was interrupted before it finished.',
   consent_stale:
     'Your shared agent was approved for an older version of this blueprint. Completed work is kept; Continue setup to review staffing yourself.',
@@ -355,7 +356,15 @@ function stoppedActions(reason, setup) {
       ];
     case 'needs_model':
       return [
-        { id: 'model', label: 'Set up a model', style: 'primary', href: MODEL_SETTINGS_URL },
+        {
+          id: 'model',
+          label: 'Set up a model',
+          style: 'primary',
+          newTab: true,
+          href:
+            globalThis.OriFolderSetupVisual.modelRequirementView(setup.visual?.model)?.settings ||
+            MODEL_SETTINGS_URL
+        },
         { ...retry, style: 'outline' },
         CONTINUE_SETUP
       ];
@@ -401,6 +410,8 @@ export function setupRunView(
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (structure) sentence = STRUCTURE_STOP_COPY[reason] || STRUCTURE_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
+  const stopped = globalThis.OriFolderSetupVisual.stoppedRequirement(setup);
+  if (stopped) sentence = `Stopped at ${stopped}. ${sentence}`;
   return {
     status,
     lines,
@@ -819,10 +830,33 @@ function structureOfferView(offer, base, subject) {
   };
 }
 
+// A missing Home may have a compiled guided continuation. Use only the
+// host's matching capability and blocker; a marker/name is never a quest.
+export function blockedFolderSetupAction(offer) {
+  const capability = offer?.capability;
+  const key = offer?.destination_blocker?.integration_key;
+  if (
+    offer?.status !== 'pending' ||
+    offer.needs_pick ||
+    offer.destination_status !== 'unavailable' ||
+    !key ||
+    capability?.setup_source !== 'host' ||
+    capability.setup_quest_id !== `install_${key}`
+  )
+    return null;
+  const href = setupQuestActionURL({
+    type: 'open_setup_quest',
+    arguments: { source: 'host', quest_id: capability.setup_quest_id }
+  });
+  return href
+    ? { id: 'requirements', label: 'Open Guided Setup', style: 'primary', href, newTab: true }
+    : null;
+}
+
 // folderOfferView is the whole render decision for one offer (FR22). Every
-// string comes from the verdict and the server's counts and names; the
-// reason line is always present. options.confirm ('project' or 'tidy') shows
-// the plan card for a mixed or ambiguous offer instead of its question.
+// string comes from the verdict and the server's counts and names.
+// options.confirm ('project' or 'tidy') shows the plan card for a mixed or
+// ambiguous offer instead of its question. The reason line remains present.
 export function folderOfferView(offer, options = {}) {
   if (!offer || typeof offer !== 'object') return { visible: false };
   const verdict = String(offer.verdict || '').trim();
@@ -891,24 +925,42 @@ export function folderOfferView(offer, options = {}) {
       !view.needsPick &&
       offer.structure?.version === 1 &&
       offer.structure.group?.type === 'library';
+    const guided = blockedFolderSetupAction(offer);
+    if (view.needsPick)
+      return {
+        ...repickView(view, subject),
+        resume: status === 'awaiting_outcome',
+        actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
+      };
     return {
       ...view,
       plan: null,
-      actions: plainReview
+      actions: guided
         ? [
-            {
-              id: 'group',
-              label: 'Review plain group instead…',
-              style: 'link',
-              structureGroup: true
-            }
+            ...(offer.prerequisites_available ? [] : [guided]),
+            ...(offer.candidate_id && offer.conversation_id && !offer.setup
+              ? [{ id: 'recheck', label: 'Check again', style: 'outline', recheck: true }]
+              : [])
           ]
-        : [],
-      question: `${destination ? `${destination} ` : ''}${
-        offer.destination_status === 'changed'
-          ? 'The reviewed destination has changed.'
-          : 'The reviewed destination is unavailable.'
-      } Use Review workspace setup to refresh the review. Your draft is unchanged.`
+        : plainReview
+          ? [
+              {
+                id: 'group',
+                label: 'Review plain group instead…',
+                style: 'link',
+                structureGroup: true
+              }
+            ]
+          : [],
+      question: guided
+        ? offer.prerequisites_available
+          ? 'Install the required Ori plugins below. Each has its own review and confirmation. This does not create a workspace or start an agent; your folder and draft stay here.'
+          : 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and check again. Opening it does not confirm installation or folder setup. Your draft stays here.'
+        : `${destination ? `${destination} ` : ''}${
+            offer.destination_status === 'changed'
+              ? 'The reviewed destination has changed.'
+              : 'The reviewed destination is unavailable.'
+          } Use Review workspace setup to refresh the review. Your draft is unchanged.`
     };
   }
   if (view.visible && view.needsPick && status === 'awaiting_outcome') {
@@ -972,6 +1024,36 @@ export function folderOfferView(offer, options = {}) {
           ]
         : []
     };
+  }
+  if (view.plan && !view.setup)
+    view.actions = view.actions.map(action =>
+      action.oneCard
+        ? {
+            ...action,
+            label: globalThis.OriFolderSetupVisual.requirementsActionLabel(offer.plan, action.label)
+          }
+        : action
+    );
+  if (
+    view.plan &&
+    !view.setup &&
+    !offer.setup &&
+    (status === 'pending' || status === 'awaiting_outcome')
+  ) {
+    const model = globalThis.OriFolderSetupVisual.modelRequirementView(offer.plan?.visual?.model);
+    if (model?.state === 'missing') {
+      view.actions = view.actions.filter(action => !action.oneCard);
+      if (model.settings)
+        view.actions.unshift({
+          id: 'model',
+          label: 'Configure project model',
+          style: 'primary',
+          href: model.settings,
+          newTab: true
+        });
+    }
+    if (model && status === 'pending' && offer.conversation_id && offer.candidate_id)
+      view.actions.push({ id: 'recheck', label: 'Check again', style: 'outline', recheck: true });
   }
   return view;
 }
@@ -2075,6 +2157,7 @@ export function folderOutcomeNote(offer) {
   const subject = String(offer?.subject?.name || '').trim() || 'that folder';
   switch (status) {
     case 'awaiting_outcome':
+      if (offer?.setup) return setupRunView(offer.setup, subject)?.statusLine || '';
       if (offer?.capability)
         return `Continue reviewed setup for ${subject}; no folder was changed.`;
       return offer?.choice === 'tidy'
@@ -2163,6 +2246,29 @@ const state = {
   firstLookBusy: false,
   firstLookMessage: ''
 };
+
+const prerequisites = createFolderPrerequisites({
+  key: () => `${state.reviewGeneration}:${state.offer?.id || ''}`,
+  id: requestId,
+  request: async body => {
+    const response = await fetch(
+      `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(state.offer.id)}/prerequisites`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body)
+      }
+    );
+    return { ok: response.ok, status: response.status, data: await readJSON(response) };
+  },
+  changed: () => render(),
+  refreshed: message => {
+    showError(message || '');
+    // Explicit package repair refreshes only this still-unaccepted canonical
+    // review. It never confirms the newly available workspace/model plan.
+    window.PersonalAssistantFolderSetup?.recheckReview?.(state.offer, document.activeElement);
+  }
+});
 
 // announceOffer tells the mission card (progression-widget.js) what the
 // chooser shows, so the two render the same offer in the same state. It also
@@ -2807,7 +2913,7 @@ function renderOffer(place) {
   const firstLook = receipt.firstLook || { visible: false };
   // A canonical conversation reload can replace this card. Do not let a fast
   // press mutate its offer while that older read is still being hydrated.
-  const actionBusy = state.busy || conversationReviewLoading();
+  const actionBusy = state.busy || conversationReviewLoading() || prerequisites.active();
   // The one offer card is a reply in the conversation while the flow runs
   // there, and a card in Needs you when it was found waiting on load (right
   // under Today's summary line while Today is folded, as Home says). It is
@@ -2857,6 +2963,25 @@ function renderOffer(place) {
     });
   }
   renderHire(els, view.hire, state.offer);
+  globalThis.OriFolderSetupVisual.renderRequirements(
+    document.getElementById('personalAssistantFolderRequirements'),
+    receipt.visible ? {} : { offer: state.offer }
+  );
+  renderFolderPrerequisites(
+    document.getElementById('personalAssistantFolderRequirements'),
+    receipt.visible ? null : state.offer,
+    prerequisites,
+    {
+      blocked: state.busy || conversationReviewLoading(),
+      trust: window.PluginLifecycle?.renderTrustReport
+    }
+  );
+  setText(
+    document.getElementById('personalAssistantFolderActionSummary'),
+    view.plan && !view.setup && !receipt.visible
+      ? 'Confirmation covers the whole setup above, not just plugin installation.'
+      : ''
+  );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
     diagram.hidden = !(state.offer?.plan || state.offer?.setup || receipt.visible);
@@ -3282,8 +3407,22 @@ function runAction(action) {
     announceOffer();
     return;
   }
+  if (action.recheck) {
+    if (!window.PersonalAssistantFolderSetup?.recheckReview?.(state.offer, document.activeElement))
+      showError(
+        'This review is no longer current. Reopen its conversation or select the folder again. Your draft is unchanged.'
+      );
+    return;
+  }
   if (action.href) {
-    window.location.assign(action.href);
+    if (action.newTab) {
+      const tab = window.open(action.href, '_blank');
+      if (tab) tab.opener = null;
+      else
+        showError(
+          'The setup tab was blocked. Allow a new tab and try this action again. Your folder and draft are unchanged.'
+        );
+    } else window.location.assign(action.href);
     return;
   }
   if (action.candidate) {
@@ -3356,7 +3495,7 @@ function reviewResponseGuard(offer) {
 async function startOneCardSetup(action) {
   const offer = state.offer;
   const current = reviewResponseGuard(offer);
-  if (!offer?.id || state.busy || conversationReviewLoading()) return;
+  if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
   if (offer.needs_pick) {
     showOfferFailure({
       needs_pick: true,

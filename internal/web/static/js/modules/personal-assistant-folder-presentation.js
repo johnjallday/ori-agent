@@ -1,7 +1,5 @@
 // Metadata-only presentation. No provider, filesystem, setup or authority calls.
 // Every label is text; an observed name/marker is never HTML, a route or consent.
-import './folder-setup-visual.js';
-
 const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
 const plural = (value, noun, many = `${noun}s`) => `${value} ${value === 1 ? noun : many}`;
 
@@ -201,15 +199,20 @@ export function renderFolderSummary(container, observation, options = {}) {
         'personal-assistant-folder-context__note'
       )
     );
-  if (options.local && view.rootMarker) {
-    const diagram = node('div', '', 'folder-visual-preview');
-    globalThis.OriFolderSetupVisual.renderDiagram(diagram, { observation });
-    container.append(diagram);
-  }
+  if (view.rootMarker)
+    container.append(node('p', view.rootMarker, 'personal-assistant-folder-context__marker'));
+  if (options.local)
+    container.append(
+      node(
+        'p',
+        observation.projects?.length
+          ? 'Review setup to check requirements and next steps. No model is needed to review; nothing is installed or created.'
+          : 'No setup candidate was recorded in this snapshot. You can discuss it or choose another folder.',
+        'personal-assistant-folder-context__note'
+      )
+    );
   const details = node('details', '', 'personal-assistant-folder-context__details');
   details.append(node('summary', 'Scan details'));
-  if (view.rootMarker)
-    details.append(node('p', view.rootMarker, 'personal-assistant-folder-context__note'));
   if (view.visibleRows.length) details.append(rows(view.visibleRows));
   if (view.empty)
     container.append(node('p', view.empty, 'personal-assistant-folder-context__note'));

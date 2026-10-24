@@ -106,12 +106,15 @@ const (
 // not to a recomputed plan: the plan shrinks as steps finish, the promise does not.
 // It never leaves the server.
 type FolderSetupIntent struct {
-	Integration        string `json:"integration,omitempty"`
-	IntegrationPlugin  string `json:"integration_plugin,omitempty"`
-	IntegrationVersion string `json:"integration_version,omitempty"`
-	Provider           string `json:"provider,omitempty"`
-	ProviderPlugin     string `json:"provider_plugin,omitempty"`
-	ProviderVersion    string `json:"provider_version,omitempty"`
+	// Model is the separately witnessed configuration of a known plugin hire.
+	// Display metadata cannot set it; legacy/pending-blueprint plans omit it.
+	Model              *FolderSetupModelIntent `json:"model,omitempty"`
+	Integration        string                  `json:"integration,omitempty"`
+	IntegrationPlugin  string                  `json:"integration_plugin,omitempty"`
+	IntegrationVersion string                  `json:"integration_version,omitempty"`
+	Provider           string                  `json:"provider,omitempty"`
+	ProviderPlugin     string                  `json:"provider_plugin,omitempty"`
+	ProviderVersion    string                  `json:"provider_version,omitempty"`
 	// Placement is "grouped" (inside a Home) or "standalone"; CreatesHome says
 	// the plan promised to create that Home first. HomeTemplate is the exact
 	// template the Home is created from.
@@ -416,6 +419,10 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	if p.Intent.Model != nil {
+		model := *p.Intent.Model
+		stamped.Intent.Model = &model
+	}
 	stamped.Visual = CloneFolderSetupVisual(p.Visual)
 	if stamped.Visual != nil && (p.Intent.Placement == "grouped" || p.Intent.Placement == "standalone") {
 		stamped.Visual.Placement = p.Intent.Placement
@@ -434,6 +441,14 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	}
 	if stamped.Intent.Recipe != "" {
 		stamped.Digest = recipePlanDigest(stamped.Digest, stamped.Intent)
+	} else if stamped.Intent.Model != nil {
+		encoded, err := json.Marshal(stamped.Intent.Model)
+		if err != nil {
+			stamped.Digest = ""
+		} else {
+			sum := sha256.Sum256(append([]byte(stamped.Digest+"\x00model\x00"), encoded...))
+			stamped.Digest = hex.EncodeToString(sum[:])
+		}
 	}
 	return stamped
 }
@@ -566,6 +581,11 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		}
 	}
 	intent := run.Intent
+	if intent.Model != nil {
+		if err := intent.Model.Validate(); err != nil {
+			return err
+		}
+	}
 	if intent.Destination != nil {
 		if err := intent.Destination.Validate(); err != nil {
 			return err

@@ -7,6 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 )
 
 type folderPlacementOption struct {
@@ -17,6 +18,7 @@ type folderPlacementOption struct {
 
 func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWriter, r *http.Request, target foldercontext.Target, refs *HomeAssistantRouteContext, operation, destinationID, selectionID, candidateID, currentOfferID string) (context.Context, bool) {
 	ctx := r.Context()
+	requestedDestinationID := destinationID
 	if refs == nil && operation == "" && destinationID == "" {
 		// Legacy callers can refresh an exact canonical candidate, but lack the
 		// navigation authority to select a different operation/destination.
@@ -86,8 +88,9 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 		return personalassistant.WithFolderReviewPlacement(ctx, personalassistant.FolderReviewPlacement{Operation: personalassistant.FolderOperationCreate}), true
 	}
 	subject := turn.projection.Subject
+	var readiness *personalassistant.FolderSetupVisual
 	choice := func(message string, options []folderPlacementOption, actions ...HomeAction) (context.Context, bool) {
-		writeFolderPlacementChoice(w, candidateID, preview.Subject.Name, message, options, actions)
+		writeFolderPlacementChoice(w, candidateID, preview.Subject.Name, message, options, actions, readiness)
 		return ctx, false
 	}
 	createOption := folderPlacementOption{Operation: personalassistant.FolderOperationCreate, Label: "Review a separate project"}
@@ -120,10 +123,21 @@ func (h *HomeAssistantAskHandler) resolveFolderReviewPlacement(w http.ResponseWr
 		}
 		destinationID = subject.ID
 	}
+	// The page's implicit group is not a missing blueprint's Home. For one
+	// recognized integration, save an unaccepted requirements review of the
+	// default Home instead of stranding it behind a Guided Setup tab. Explicit
+	// placement choices and supporting-folder authority are never rewritten.
+	if operation == personalassistant.FolderOperationCreate && refs != nil && preview.DestinationStatus == "unavailable" && preview.DestinationBlocker != nil {
+		_, reviewed := reviewedintegration.Get(preview.DestinationBlocker.IntegrationKey)
+		if reviewed && requestedDestinationID == "" {
+			return personalassistant.WithFolderReviewPlacement(ctx, personalassistant.FolderReviewPlacement{Operation: operation}), true
+		}
+	}
 	placement := personalassistant.FolderReviewPlacement{Operation: operation, DestinationID: destinationID}
 	bound := personalassistant.WithFolderReviewPlacement(ctx, placement)
 	// Resolve the exact selected destination before allocating any offer.
 	selected, err := previewer.PreviewReview(bound, target, selectionID, candidateID)
+	readiness = selected.Readiness
 	if err != nil || selected.DestinationStatus == "unavailable" {
 		if err == nil {
 			// The destination is missing because its integration is not set

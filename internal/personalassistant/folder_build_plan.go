@@ -28,6 +28,7 @@ type BuildFolderHome struct {
 // what they need, the Home and the placement. Reading it creates nothing.
 type BuildFolderPlan struct {
 	Visual    *FolderSetupVisual `json:"visual,omitempty"`
+	Readiness *FolderSetupVisual `json:"readiness,omitempty"`
 	Lines     []FolderPlanLine   `json:"lines"`
 	Digest    string             `json:"digest,omitempty"`
 	Needs     []BuildFolderNeed  `json:"needs,omitempty"`
@@ -76,8 +77,15 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 	if offer.Structure != nil || offer.Portfolio != nil || !isProjectCapabilityOffer(offer) {
 		return unavailable(""), nil
 	}
+	s.recheckSetupFacts(ctx, target, offer)
 	view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
 	s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
+	// BuildPlan also runs in attachment responses. Preserve those existing
+	// planning reads; only an explicit check may acquire independent release
+	// facts after a prerequisite prevented the complete plan.
+	if ctx.Value(folderSetupRecheckKey{}) != nil {
+		s.digest.attachSetupReadiness(ctx, target.UserID, offer, &view)
+	}
 	row, capability := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
 	if view.Plan == nil || view.Plan.Digest == "" {
 		plan := unavailable(view.Availability)
@@ -95,6 +103,7 @@ func (s *FolderObservationService) BuildPlan(ctx context.Context, target folderc
 			}
 		}
 		plan.Evidence = view.Reason
+		plan.Readiness = CloneFolderSetupVisual(view.Readiness)
 		return plan, nil
 	}
 	plan := &BuildFolderPlan{

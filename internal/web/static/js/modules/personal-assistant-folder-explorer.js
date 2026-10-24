@@ -40,7 +40,7 @@ export function focusStatusLine(count) {
 
 // Uses the same panel, attachment, conversation and composer. This controller
 // owns only ephemeral layout/disclosures, never permissions or durable scope.
-export function initFolderExplorer({ current, setFocus, notify }) {
+export function initFolderExplorer({ current, setFocus, notify, layoutChanged }) {
   const get = id => document.getElementById(`personalAssistant${id}`);
   const panel = get('Panel'),
     pane = get('FolderExplorer'),
@@ -70,6 +70,7 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     treeTab.setAttribute('aria-pressed', String(tab === 'tree'));
     chatTab.setAttribute('aria-pressed', String(tab === 'chat'));
     window.PersonalAssistantPanel?.syncViewport?.();
+    layoutChanged?.();
   }
   function showChat() {
     tab = 'chat';

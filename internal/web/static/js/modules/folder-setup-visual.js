@@ -220,6 +220,211 @@
     container.replaceChildren(figure);
   }
 
+  // Configuration is not connectivity. Routes are compiled from the host's
+  // applicable configuration owner; no URL or credential is accepted here.
+  function modelRequirementView(model, { saved = false } = {}) {
+    if (!model) return null;
+    const configured = model.state === 'configured' && text(model.provider) && text(model.name);
+    const missing = model.state === 'missing';
+    const settings =
+      model.settings === 'system'
+        ? '/settings#system-model'
+        : model.settings === 'agent' && text(model.agent_name)
+          ? `/agents/${encodeURIComponent(text(model.agent_name))}`
+          : '';
+    return {
+      state: configured ? 'configured' : missing ? 'missing' : 'not_checked',
+      status: configured ? 'Configured' : missing ? 'Configuration needed' : 'Not checked',
+      detail: configured
+        ? `${text(model.provider)} · ${text(model.name)} — configuration only; connection not verified.`
+        : missing
+          ? 'This project agent needs a model configuration before setup.'
+          : 'The project blueprint and agent must be available before their model requirement can be checked.',
+      saved,
+      settings: saved ? '' : settings
+    };
+  }
+
+  // Requirements are display facts, not another plan or action dispatcher.
+  function requirementsView({ offer, plan = offer?.plan, readiness } = {}) {
+    const saved = Boolean(offer?.setup);
+    const visual = saved ? offer.setup.visual : plan?.visual || offer?.readiness || readiness;
+    const statuses = {
+      install: 'Not installed · Install',
+      update: 'Update needed',
+      enable: 'Disabled · Enable · No download',
+      ready: 'Ready · No download',
+      not_checked: 'Not checked',
+      unavailable: 'Check unavailable',
+      unverified: 'Not verified'
+    };
+    const progressStatuses = {
+      waiting: 'Waiting',
+      working: 'In progress',
+      done: 'Complete',
+      failed: 'Stopped here'
+    };
+    const rows = [];
+    for (const plugin of list(visual?.plugins)) {
+      if (
+        !['integration', 'provider'].includes(plugin.kind) ||
+        rows.some(row => row.kind === plugin.kind)
+      )
+        continue;
+      const operation = statuses[plugin.operation] ? plugin.operation : 'not_checked';
+      const installed = text(plugin.installed_version);
+      const version = text(plugin.version);
+      const progress = saved
+        ? list(offer.setup.lines).find(line => line.kind === plugin.kind)?.state
+        : '';
+      rows.push({
+        kind: plugin.kind,
+        name:
+          text(plugin.name) ||
+          (plugin.kind === 'provider' ? 'Home provider' : 'Project integration'),
+        operation,
+        progress: ['waiting', 'working', 'done', 'failed'].includes(progress) ? progress : '',
+        status: saved ? progressStatuses[progress] || 'Progress not reported' : statuses[operation],
+        purpose: text(plugin.purpose),
+        source: text(plugin.source),
+        version:
+          installed && version && installed !== version
+            ? `${saved ? 'Reviewed: ' : ''}${installed} → ${version}`
+            : installed
+              ? `${saved ? 'Installed at review' : 'Installed version'} ${installed}`
+              : version
+                ? `${saved ? 'Reviewed target' : 'Target version'} ${version}`
+                : 'Version not reported'
+      });
+    }
+    // Older saved plans may have lines but no structured display identity.
+    for (const line of list(offer?.setup?.lines || plan?.lines)) {
+      if (
+        ['integration', 'provider'].includes(line.kind) &&
+        !rows.some(row => row.kind === line.kind)
+      )
+        rows.push({
+          kind: line.kind,
+          name: line.kind === 'provider' ? 'Home provider' : 'Project integration',
+          operation: 'not_checked',
+          status: saved ? progressStatuses[line.state] || 'Progress not reported' : 'Not checked',
+          progress: saved && progressStatuses[line.state] ? line.state : '',
+          purpose: '',
+          source: '',
+          version: 'Version not reported'
+        });
+    }
+    const complete =
+      visual?.requirements_checked === true &&
+      list(visual.plugins).length === rows.length &&
+      rows.every(row => ['install', 'update', 'enable', 'ready'].includes(row.operation));
+    const downloads = rows.filter(row => ['install', 'update'].includes(row.operation)).length;
+    const count = `${downloads} ${downloads === 1 ? 'plugin download' : 'plugin downloads'}`;
+    return {
+      rows,
+      model: modelRequirementView(visual?.model, { saved }),
+      complete,
+      downloads,
+      saved,
+      summary: saved
+        ? 'Requirements recorded for this setup'
+        : complete
+          ? downloads
+            ? `${count} for this setup`
+            : 'Nothing to download'
+          : downloads
+            ? `${count} known · other requirements not fully checked`
+            : 'Download requirements not fully checked'
+    };
+  }
+
+  function stoppedRequirement(setup) {
+    const failed = list(setup?.lines).find(
+      line => ['integration', 'provider'].includes(line.kind) && line.state === 'failed'
+    );
+    if (!failed) return '';
+    return text(list(setup.visual?.plugins).find(row => row.kind === failed.kind)?.name);
+  }
+
+  function requirementsActionLabel(plan, fallback = 'Set up') {
+    const view = requirementsView({ plan });
+    if (!view.complete) return fallback;
+    const installs = view.rows.filter(row => row.operation === 'install').length;
+    const updates = view.rows.filter(row => row.operation === 'update').length;
+    const enables = view.rows.filter(row => row.operation === 'enable').length;
+    const count = installs + updates || enables;
+    if (!count) return fallback;
+    const verb =
+      installs && updates ? 'Install/update' : installs ? 'Install' : updates ? 'Update' : 'Enable';
+    return `${verb} ${count} ${count === 1 ? 'plugin' : 'plugins'} & set up`;
+  }
+
+  function renderRequirements(container, input) {
+    if (!container) return;
+    const view = requirementsView(input);
+    container.hidden = !view.rows.length && !view.model;
+    const signature = JSON.stringify(view);
+    if (container.dataset.signature === signature) return;
+    container.dataset.signature = signature;
+    container.replaceChildren();
+    if (!view.rows.length && !view.model) return;
+    const doc = container.ownerDocument;
+    const node = (tag, label, className = '') => {
+      const el = doc.createElement(tag);
+      el.textContent = label;
+      el.className = className;
+      return el;
+    };
+    const section = node('section', '', 'folder-requirements');
+    section.setAttribute('aria-label', 'Setup requirements');
+    section.append(node('h4', 'What you need'));
+    if (view.rows.length) section.append(node('p', view.summary, 'folder-requirements__summary'));
+    const requirements = node('ul', '', 'folder-requirements__list');
+    for (const requirement of view.rows) {
+      const row = node('li', '', 'folder-requirements__row');
+      row.dataset.operation = requirement.operation;
+      row.dataset.requirementKind = requirement.kind;
+      row.dataset.progress = requirement.progress || '';
+      row.append(
+        node('strong', requirement.name),
+        node('p', requirement.status, 'folder-requirements__status')
+      );
+      if (requirement.purpose)
+        row.append(
+          node('p', requirement.purpose, 'folder-visual__note folder-requirements__purpose')
+        );
+      row.append(
+        node('p', requirement.version, 'folder-visual__note folder-requirements__version')
+      );
+      const details = node('details', '', 'folder-requirements__source');
+      details.append(
+        node('summary', 'Source details'),
+        node('p', requirement.source || 'Source not reported', 'folder-visual__note')
+      );
+      row.append(details, node('div', '', 'folder-requirements__actions'));
+      requirements.append(row);
+    }
+    section.append(
+      requirements,
+      node(
+        'p',
+        'Ori plugins are separate from the desktop application, model runtime and model weights.',
+        'folder-visual__note'
+      )
+    );
+    if (view.model) {
+      const model = node('section', '', 'folder-requirements__model');
+      model.setAttribute('aria-label', 'Project agent model');
+      model.append(
+        node('strong', view.model.saved ? 'Model configuration at review' : 'Project agent model'),
+        node('p', view.model.status, 'folder-requirements__status'),
+        node('p', view.model.detail, 'folder-visual__note')
+      );
+      section.append(model);
+    }
+    container.append(section);
+  }
+
   // Material effects stay outside the disclosure. The full original plan is
   // still rendered by folder-plan-lines; this is not another consent document.
   function reviewConsequences(plan) {
@@ -358,6 +563,11 @@
   globalThis.OriFolderSetupVisual = Object.freeze({
     visualView,
     renderDiagram,
+    requirementsView,
+    modelRequirementView,
+    stoppedRequirement,
+    requirementsActionLabel,
+    renderRequirements,
     reviewConsequences,
     renderConsequences,
     briefError,

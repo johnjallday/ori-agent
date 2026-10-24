@@ -17,6 +17,7 @@ import {
 } from './personal-assistant-folder-setup.js';
 import {
   conversationFolderOfferView,
+  blockedFolderSetupAction,
   folderReceiptView,
   folderReviewResponseCurrent,
   offerStructure,
@@ -32,6 +33,48 @@ const offer = {
   create_available: true,
   remember: true
 };
+
+test('a missing Home exposes only the matching host guided route, never setup confirmation', () => {
+  const blocked = {
+    ...offer,
+    create_available: false,
+    destination_status: 'unavailable',
+    destination_blocker: { integration_key: 'ori_reaper' },
+    capability: { setup_source: 'host', setup_quest_id: 'install_ori_reaper' }
+  };
+  const action = blockedFolderSetupAction(blocked);
+  assert.equal(action.href, '/?setup=quest&source=host&quest=install_ori_reaper');
+  assert.equal(action.newTab, true);
+  const view = conversationFolderOfferView(blocked);
+  assert.deepEqual(
+    view.actions.map(row => row.id),
+    ['requirements', 'keep-chatting']
+  );
+  assert.match(view.question, /does not confirm installation/);
+  assert.equal(view.plan, null);
+  for (const change of [
+    { status: 'resolved' },
+    { status: 'awaiting_outcome' },
+    { needs_pick: true },
+    { destination_status: 'changed' },
+    { destination_blocker: null },
+    { capability: { setup_source: 'plugin', setup_quest_id: 'install_ori_reaper' } },
+    { capability: { setup_source: 'host', setup_quest_id: 'install_other' } },
+    {
+      destination_blocker: { integration_key: '../hostile' },
+      capability: { setup_source: 'host', setup_quest_id: 'install_../hostile' }
+    }
+  ])
+    assert.equal(blockedFolderSetupAction({ ...blocked, ...change }), null);
+  assert.equal(
+    conversationFolderOfferView({ ...blocked, needs_pick: true }).actions[0].id,
+    'repick'
+  );
+  assert.match(
+    conversationFolderOfferView({ ...blocked, destination_status: 'changed' }).question,
+    /has changed/
+  );
+});
 
 test('local choice binding uses exact conversation, observation and revision, never discussion topics', () => {
   const binding = { conversationId: 'one', observationId: 'picked', revision: 'turn' };

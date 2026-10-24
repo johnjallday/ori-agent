@@ -775,7 +775,7 @@
 
   // Thin adapter: the build owns all requests/drafts/lifetime, while the same
   // inert renderer used by the drawer consumes its host projection.
-  function renderVisualPlan(diagram, consequences, progress) {
+  function renderVisualPlan(diagram, consequences, progress, requirements) {
     const session = state.session || {};
     const shared = globalThis.OriFolderSetupVisual;
     const plan = session.plan?.ready ? { ...session.plan, destination: session.plan.home } : null;
@@ -789,6 +789,9 @@
           offer: { subject: { name: planProjectName() }, plan, setup }
         });
     }
+    shared?.renderRequirements(requirements, {
+      offer: { plan, setup, readiness: session.plan?.readiness }
+    });
     shared?.renderConsequences(consequences, setup ? null : plan);
     shared?.renderProgress(progress, setup);
   }
@@ -797,7 +800,7 @@
     const { els } = state;
     if (!els.sketch) return;
     els.sketch.hidden = !plan && !state.session?.setup_run;
-    renderVisualPlan(els.sketchBody, els.consequences, els.progress);
+    renderVisualPlan(els.sketchBody, els.consequences, els.progress, els.requirements);
   }
 
   // folderPickMinutes is how long the server still holds the attached folder's
@@ -825,9 +828,29 @@
     els.planStatus.textContent = preparing ? COPY.setupRunning : '';
     els.planStatus.hidden = !preparing;
     els.setupButton.hidden = !(hasLines && open && !session.setup && session.plan?.ready === true);
-    els.setupButton.textContent = planHireView()?.confirmLabel || COPY.setUp;
+    const model = globalThis.OriFolderSetupVisual?.modelRequirementView(
+      session.plan?.visual?.model || session.plan?.readiness?.model
+    );
+    const missingModel = !session.setup && model?.state === 'missing';
+    const fallback = planHireView()?.confirmLabel || COPY.setUp;
+    els.setupButton.textContent =
+      globalThis.OriFolderSetupVisual?.requirementsActionLabel(session.plan, fallback) || fallback;
+    els.setupButton.hidden ||= missingModel;
     // An unnamed draft is named after its folder, as the plan says.
-    els.setupButton.disabled = busy || expired;
+    els.setupButton.disabled = busy || expired || missingModel || Boolean(state.readinessStale);
+    els.modelButton.hidden = !(
+      open &&
+      !session.setup &&
+      !expired &&
+      missingModel &&
+      model?.settings
+    );
+    const checkable =
+      model || (session.plan?.unavailable && session.folder?.recognition?.integration_key);
+    els.recheckButton.hidden = !(open && !session.setup && !expired && checkable);
+    els.recheckButton.textContent = model ? 'Check again' : 'Check requirements';
+    els.modelButton.disabled = busy;
+    els.recheckButton.disabled = busy;
     const candidates =
       stopped && run?.stop_reason === 'needs_choice' && Array.isArray(run.entry_candidates)
         ? run.entry_candidates.map(text).filter(Boolean).slice(0, 4)
@@ -914,6 +937,19 @@
     folderAgain.type = 'button';
     folderAgain.dataset.buildControl = 'folder-again';
     folderAgain.hidden = true;
+    const modelButton = createElement(
+      'button',
+      'modern-btn modern-btn-primary',
+      'Configure project model'
+    );
+    modelButton.type = 'button';
+    modelButton.dataset.buildControl = 'configure-model';
+    modelButton.hidden = true;
+    const recheckButton = createElement('button', 'modern-btn modern-btn-secondary', 'Check again');
+    recheckButton.type = 'button';
+    recheckButton.dataset.buildControl = 'recheck';
+    recheckButton.hidden = true;
+    actions.append(modelButton, recheckButton);
     actions.appendChild(setupButton);
     actions.appendChild(retryButton);
     actions.appendChild(setupEntries);
@@ -924,6 +960,9 @@
     // The body scrolls as one page beside the conversation; the title, the
     // run's status and Set it up stay put (workspace-construct.css).
     const body = createElement('div', 'workspace-build-plan__body');
+    const requirements = createElement('div');
+    requirements.id = 'workspaceBuildRequirements';
+    requirements.hidden = true;
     const consequences = createElement('div', 'folder-setup-consequences');
     const progress = createElement('div');
     const details = createElement('details', 'folder-setup-details');
@@ -934,6 +973,7 @@
       planWhy
     );
     body.append(
+      requirements,
       hireBlock.hire,
       consequences,
       progress,
@@ -963,6 +1003,9 @@
       planEvidence,
       planStatus,
       setupButton,
+      modelButton,
+      recheckButton,
+      requirements,
       retryButton,
       setupEntries,
       folderAgain,
@@ -1430,6 +1473,9 @@
           if (!attachmentsLocked(state) && !control.disabled) emit('workspace-build-link-remove');
         } else if (kind === 'link-cancel') closeLinkField();
         else if (kind === 'link-attach') submitLink();
+        else if (kind === 'configure-model' && !control.disabled)
+          emit('workspace-build-configure-model');
+        else if (kind === 'recheck' && !control.disabled) emit('workspace-build-recheck');
         else if (kind === 'setup' && !control.disabled) {
           // Hire and start sends the brief; a Retry continues with the one sent.
           const brief = setupBrief();
@@ -1855,6 +1901,7 @@
   function applySession(session) {
     const before = attachedFolder()?.id || '';
     const linkBefore = attachedLink()?.id || '';
+    if (state.session?.id !== session?.id) state.readinessStale = false;
     state.session = session && typeof session === 'object' ? session : null;
     if (state.session?.assistant) state.assistant = state.session.assistant;
     // A note is about the attachment it was written under; a new one, or
@@ -1864,6 +1911,11 @@
     // The server's own prerequisite replaces what the form's review said.
     if (state.session?.group_prerequisite) state.groupHint = null;
     render();
+  }
+
+  function setReadinessStale(stale) {
+    state.readinessStale = Boolean(stale);
+    renderPlan();
   }
 
   function setSuggestion(value) {
@@ -1877,7 +1929,7 @@
     render();
     // Focus returns to the composer after a turn, never to a step heading the
     // wizard just advanced to (FR a11y: advancing never steals focus).
-    if (!state.busy) focusComposer();
+    if (!state.busy && options.focus !== false) focusComposer();
   }
 
   // focusComposer puts focus in the composer unless the user has moved it
@@ -2181,6 +2233,7 @@
     applySession,
     setSuggestion,
     setBusy,
+    setReadinessStale,
     focusComposer,
     showLine,
     removeLine,

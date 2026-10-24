@@ -2435,29 +2435,11 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 #workspaceBuildPlanReviewVisual {
   min-width: 0;
 }
-@media (min-width: 1100px) {
-  .workspace-create-modal#addFolderModal.workspace-create-modal--folder-review:has(
-      #workspaceBuildPlanReviewVisual:not([hidden])
-    )
-    .workspace-create-modal-dialog {
-    width: min(1100px, calc(100vw - 2rem));
-    max-width: min(1100px, calc(100vw - 2rem));
-  }
-  #workspaceBuildPlanReview:not([hidden]):has(#workspaceBuildPlanReviewVisual:not([hidden])) {
-    display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
-    grid-template-areas: "diagram decision";
-    gap: 24px;
-  }
-  #workspaceBuildPlanReview .workspace-build-plan-review__decision {
-    grid-area: decision;
-  }
-  #workspaceBuildPlanReviewVisual {
-    grid-area: diagram;
-    align-self: start;
-    position: sticky;
-    top: 0;
-  }
+/* Requirements and consent lead; the proposed outcome is a smaller tail,
+   never a sticky second column competing with the creator's own controls. */
+#workspaceBuildPlanReviewVisual {
+  max-width: 32rem;
+  margin-top: 1rem;
 }
 .workspace-build-folder-review__facts {
   display: grid;

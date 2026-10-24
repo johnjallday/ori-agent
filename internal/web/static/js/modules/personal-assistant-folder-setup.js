@@ -57,7 +57,8 @@ export function placementChoiceView(choice) {
   return {
     message: String(choice?.message || 'Choose the operation to review.'),
     options,
-    setups
+    setups,
+    ...(choice?.readiness ? { readiness: choice.readiness } : {})
   };
 }
 
@@ -92,6 +93,7 @@ let candidateObservation = '';
 let choiceOptions = [];
 let choiceOrigin = null;
 let choicesMarker = null;
+let reviewLinkMarker = null;
 let noticeMarker = null;
 let composerOrigin = null;
 let uiEpoch = 0;
@@ -131,8 +133,7 @@ function fallbackOrigin() {
   composerOrigin.className = 'personal-assistant-message__setup';
   composerOrigin.setAttribute('aria-label', 'Setup from attached folder');
   const note = document.createElement('p');
-  note.textContent =
-    'Setup from your attached folder — no assistant reply or model is required. Choose scope explicitly; discussion topics are separate.';
+  note.textContent = 'Review setup · no model is needed. Nothing is created until you confirm.';
   composerOrigin.append(note);
   // Idle shared routing targets remain hidden. This is a local UI handoff at
   // the composer's end of the same pane, not a fabricated transcript message.
@@ -480,7 +481,22 @@ export function reviewLinkHidden(observation, structure) {
 
 function syncReviewLink() {
   if (!elements || !current) return;
-  elements.open.hidden = reviewLinkHidden(current.observation, currentStructure());
+  const structure = currentStructure();
+  elements.open.hidden = reviewLinkHidden(current.observation, structure);
+  // Move the one existing control beside a local preview; never clone its
+  // authority or create a second review owner. Saved context keeps the chip.
+  const previewActions = document.getElementById('personalAssistantFolderPreviewActions');
+  const exploring = document
+    .getElementById('personalAssistantPanel')
+    ?.classList?.contains('personal-assistant-panel--exploring');
+  const parent =
+    current.preview && !structure && !exploring && previewActions
+      ? previewActions
+      : reviewLinkMarker?.parentNode;
+  if (parent && elements.open.parentNode !== parent) {
+    if (parent === previewActions) parent.append(elements.open);
+    else parent.insertBefore(elements.open, reviewLinkMarker);
+  }
 }
 
 function renderReviewStatus() {
@@ -645,6 +661,9 @@ async function review(candidateId, close = false, offerId, placement) {
     placementNode = document.createElement('section');
     placementNode.className = 'personal-assistant-message__setup';
     placementNode.setAttribute('aria-label', 'Choose folder placement');
+    const requirements = document.createElement('div');
+    globalThis.OriFolderSetupVisual.renderRequirements(requirements, { readiness: view.readiness });
+    placementNode.append(requirements);
     const message = document.createElement('p');
     message.textContent = view.message;
     placementNode.append(message);
@@ -671,14 +690,17 @@ async function review(candidateId, close = false, offerId, placement) {
       preview.append(button);
       placementNode.append(preview);
     }
-    // A guided setup the server attached opens in this tab, like the
-    // assistant's own setup button; it replaces a review that cannot proceed.
+    const actions = document.createElement('div');
+    actions.className = 'folder-setup-next';
+    // Keep the local folder/draft owner here while its host-guided setup opens.
     for (const setup of view.setups) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = setup.href;
-      open.textContent = setup.label;
-      placementNode.append(open);
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = `${setup.label} (new tab)`;
+      actions.append(open);
     }
     const cancel = document.createElement('button');
     cancel.type = 'button';
@@ -687,8 +709,11 @@ async function review(candidateId, close = false, offerId, placement) {
     cancel.addEventListener('click', () => {
       closeChoices();
     });
-    placementNode.append(cancel);
-    showPlacement(placementNode.querySelector('button, a'), shouldFocus);
+    actions.append(cancel);
+    placementNode.append(actions);
+    const start = requirements.querySelector('h4');
+    if (start) start.tabIndex = -1;
+    showPlacement(start || placementNode.querySelector('button, a'), shouldFocus);
     return;
   }
   if (result?.review_closed) {
@@ -708,6 +733,27 @@ async function review(candidateId, close = false, offerId, placement) {
     if (shouldFocus && elements.notice?.textContent) {
       elements.notice.tabIndex = -1;
       focusLocal(elements.notice, true);
+    }
+    return;
+  }
+  const refreshed = result.folder_reviews?.[current?.offerId];
+  if (placement?.recheck && currentReview(current, refreshed)) {
+    // The host refreshed the exact canonical review without appending a turn.
+    // Do not reload the conversation or move the user's draft/scroll owner.
+    reviews = { ...reviews, [refreshed.id]: refreshed };
+    window.PersonalAssistantFolder?.updateConversationReview?.(refreshed);
+    applyReviewContext(null);
+    window.PersonalAssistantFolderContext?.notify?.(
+      'Review refreshed. This check did not install plugins or start setup.'
+    );
+    if (shouldFocus) {
+      const model = document.querySelector(
+        '#personalAssistantFolderRequirements .folder-requirements__model'
+      );
+      if (model) {
+        model.tabIndex = -1;
+        focusLocal(model, true);
+      }
     }
     return;
   }
@@ -842,6 +888,24 @@ export function reviewCandidate(candidateId) {
   if (!setupCandidates(current.observation).some(candidate => candidate.id === candidateId))
     return false;
   reviewFrom(elements.open, candidateId);
+  return true;
+}
+
+// Recheck follows the exact canonical candidate and its saved placement. The
+// context controller owns revision/generation checks and rejects stale replies.
+export function recheckReview(offer, trigger) {
+  if (
+    !elements ||
+    !currentReview(current, offer) ||
+    offer.status !== 'pending' ||
+    offer.setup ||
+    !current.observation ||
+    !offer.candidate_id ||
+    current.pending ||
+    current.authority
+  )
+    return false;
+  reviewFrom(trigger, offer.candidate_id, { recheck: true });
   return true;
 }
 
@@ -1049,6 +1113,8 @@ function init() {
     noticeMarker = document.createComment('folder notice parking slot');
     elements.notice.after(noticeMarker);
   }
+  reviewLinkMarker = document.createComment('single review link parking slot');
+  elements.open.after(reviewLinkMarker);
   choicesMarker = document.createComment('single setup chooser parking slot');
   elements.choices.after(choicesMarker);
   // A folder Ori proposed a group for is reviewed as that group; choosing one
@@ -1108,6 +1174,8 @@ if (typeof window !== 'undefined')
     structure: currentStructure,
     reviewStructure,
     reviewCandidate,
+    recheckReview,
+    refreshReviewLink: syncReviewLink,
     adjustStructure,
     // Just discuss: the reply's proposal leaves this conversation's view. It
     // writes nothing; the folder can be proposed again by attaching it.

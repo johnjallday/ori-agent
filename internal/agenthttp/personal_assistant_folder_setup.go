@@ -128,6 +128,7 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		Context        *HomeAssistantRouteContext `json:"context,omitempty"`
 		Operation      string                     `json:"operation,omitempty"`
 		DestinationID  string                     `json:"destination_id,omitempty"`
+		Recheck        bool                       `json:"recheck,omitempty"`
 		// Structure is what the user changed in Adjust on a proposed group: its
 		// name and type, and which folders get a workspace under which name. It
 		// names folders only by the ids the proposal gave.
@@ -157,6 +158,9 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 	if err != nil {
 		writeFolderError(w, err)
 		return
+	}
+	if req.Recheck {
+		r = r.WithContext(personalassistant.WithFolderSetupRecheck(r.Context()))
 	}
 	placementContext, placementReady := h.resolveFolderReviewPlacement(w, r, target, req.Context, req.Operation, req.DestinationID, req.SelectionID, req.CandidateID, state.OfferID)
 	if !placementReady {
@@ -203,6 +207,16 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		if scopeOK {
 			writeFolderError(w, foldercontext.ErrInvalid)
 		}
+		return
+	}
+	if req.Recheck && !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID == req.SelectionID {
+		// Refresh this existing canonical review in place. A readiness check is
+		// not another folder turn, a new conversation or a setup confirmation.
+		orihttp.WriteJSON(w, map[string]any{
+			"conversation":   HomeAssistantConversationState{ID: id, Stored: true},
+			"folder_context": state,
+			"folder_reviews": map[string]personalassistant.FolderOfferView{offer.ID: offer},
+		})
 		return
 	}
 	rows, err := h.folderStore().AppendFolderTurn(r.Context(), id, scope.workspaceID, scope.agentName, req.Revision,

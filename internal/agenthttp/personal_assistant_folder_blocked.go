@@ -14,10 +14,13 @@ import (
 // writeFolderPlacementChoice is the placement answer the drawer renders: the
 // host's sentence, the operations it offers, and any guided setup it attaches.
 // Actions are presentation for this response only; none is stored.
-func writeFolderPlacementChoice(w http.ResponseWriter, candidateID, subject, message string, options []folderPlacementOption, actions []HomeAction) {
+func writeFolderPlacementChoice(w http.ResponseWriter, candidateID, subject, message string, options []folderPlacementOption, actions []HomeAction, readiness ...*personalassistant.FolderSetupVisual) {
 	choice := map[string]any{"candidate_id": candidateID, "subject": subject, "message": message, "options": options}
 	if len(actions) > 0 {
 		choice["actions"] = actions
+	}
+	if len(readiness) == 1 && readiness[0] != nil {
+		choice["readiness"] = personalassistant.CloneFolderSetupVisual(readiness[0])
 	}
 	orihttp.WriteJSON(w, map[string]any{"folder_placement_choice": choice})
 }

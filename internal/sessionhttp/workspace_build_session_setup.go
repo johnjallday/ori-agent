@@ -60,11 +60,11 @@ var buildSetupStopCopy = map[string]string{
 	personalassistant.FolderStopPlanChanged:      "What Set it up would do has changed, so it stopped before going further. Review the plan, then Retry.",
 	personalassistant.FolderStopNeedsPick:        "Ori no longer holds the attached folder. Add the folder again, then Retry.",
 	personalassistant.FolderStopNeedsChoice:      "The folder has more than one project file. Choose the one to set up.",
-	personalassistant.FolderStopNeedsModel:       "The workspace and folder are set up. Its agent needs a model before it can start.",
-	personalassistant.FolderStopInstallFailed:    "A plugin could not be installed or enabled, so nothing after it ran. Retry continues from there.",
+	personalassistant.FolderStopNeedsModel:       "The project agent needs a model before setup can continue. Completed work is kept.",
+	personalassistant.FolderStopInstallFailed:    "A required plugin could not be installed, updated or enabled. Completed work is kept; Retry continues from the saved run.",
 	personalassistant.FolderStopInterrupted:      "Set it up was interrupted before it finished. Retry continues from there.",
-	personalassistant.FolderStopConsentStale:     "The workspace and folder are set up. The Home's shared assistant was approved for an older version of this blueprint, so it was not added.",
-	personalassistant.FolderStopAssistantMissing: "The workspace and folder are set up. The Home's shared assistant is gone, so none was added.",
+	personalassistant.FolderStopConsentStale:     "The Home's shared assistant needs approval for the current blueprint. Completed work is kept.",
+	personalassistant.FolderStopAssistantMissing: "The Home's shared assistant is unavailable. Completed work is kept.",
 }
 
 func buildSetupStopText(reason string) string {
@@ -150,6 +150,9 @@ func (h *Handler) getWorkspaceBuildSession(w http.ResponseWriter, r *http.Reques
 	if session == nil {
 		_ = orihttp.RespondJSON(w, http.StatusNotFound, map[string]any{"error": buildErrorText("not_found"), "code": "not_found"})
 		return
+	}
+	if r.URL.Query().Get("recheck") == "1" && session.Status == personalassistant.WorkspaceBuildOpen && session.Setup == nil {
+		ctx = personalassistant.WithFolderSetupRecheck(ctx)
 	}
 	view := cloneBuildSession(*session)
 	view.CreateNow = false

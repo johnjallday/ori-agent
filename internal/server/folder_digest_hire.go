@@ -26,12 +26,13 @@ func hireRoleLabel(role, blueprintLabel string) string {
 // it is, the blueprint's roster and goal are read the way the Create Workspace
 // review reads them. A roster that cannot be read still gets a hire card,
 // named by the blueprint.
-func (h *folderSetupHost) pluginHire(userID string, target setupTarget, integration foldersetup.Plugin) (*personalassistant.FolderHire, string) {
+func (h *folderSetupHost) pluginHire(userID string, target setupTarget, integration foldersetup.Plugin) (*personalassistant.FolderHire, string, *personalassistant.FolderSetupModel) {
+	model := &personalassistant.FolderSetupModel{State: "not_checked"}
 	label := target.row.Blueprint.Label
 	shape := target.row.Shape
 	if integration.State != personalassistant.FolderInstallReady || h.builder == nil || h.builder.sessionHandler == nil {
 		return &personalassistant.FolderHire{Mode: personalassistant.FolderHirePending, RoleLabel: label},
-			personalassistant.FolderDefaultBrief(shape, "")
+			personalassistant.FolderDefaultBrief(shape, ""), model
 	}
 	composition := "standalone"
 	if target.provider != nil {
@@ -41,7 +42,7 @@ func (h *folderSetupHost) pluginHire(userID string, target setupTarget, integrat
 	read, err := h.builder.sessionHandler.FolderOfferHire(templateID, userID, composition)
 	if err != nil {
 		return &personalassistant.FolderHire{Mode: personalassistant.FolderHireCreate, RoleLabel: label},
-			personalassistant.FolderDefaultBrief(shape, "")
+			personalassistant.FolderDefaultBrief(shape, ""), model
 	}
 	hire := &personalassistant.FolderHire{
 		Mode: personalassistant.FolderHireCreate, AgentName: read.AgentName,
@@ -50,7 +51,19 @@ func (h *folderSetupHost) pluginHire(userID string, target setupTarget, integrat
 	if read.Mode == sessionhttp.FolderOfferHireBind {
 		hire.Mode = personalassistant.FolderHireBind
 	}
-	return hire, personalassistant.FolderDefaultBrief(shape, read.Goal)
+	if read.ModelChecked {
+		model.State, model.Provider, model.Name = "missing", read.Provider, read.Model
+		if read.Provider != "" && read.Model != "" {
+			model.State = "configured"
+		}
+		switch read.ModelSource {
+		case "existing":
+			model.Settings, model.AgentName = "agent", read.AgentName
+		case "system":
+			model.Settings = "system"
+		}
+	}
+	return hire, personalassistant.FolderDefaultBrief(shape, read.Goal), model
 }
 
 // softwareHire names who a software project's plan hires: the assistant the
