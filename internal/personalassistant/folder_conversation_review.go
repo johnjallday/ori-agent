@@ -37,6 +37,9 @@ type FolderConversationReview struct {
 	// (a workspace build's draft). Empty names it after the folder, as Home's
 	// card does. The plan, its digest and the run all use it.
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	// Lead is the host's choice between this folder's two hires, when it holds a
+	// project beside loose files (folder-inbox-hire FR12). Nil otherwise.
+	Lead *FolderLead `json:"lead,omitempty"`
 }
 
 // ConfigureConversationReviews is wired once at host construction. The guard
@@ -272,7 +275,21 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 	}
 	// Only the root option can describe a collection. Review still requires
 	// the user to choose it explicitly, with the same canonical Home checks.
-	verdict := folderdigest.Exclude(held.result, now, func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) })
+	tombstoned := func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) }
+	verdict := folderdigest.Exclude(held.result, now, tombstoned)
+	// The root of an inbox folder is reviewed as the host's File Janitor setup.
+	// A build keeps its own reviewed janitor consent, and a supporting link is
+	// not a setup.
+	// A folder that holds a project beside loose files has two hires: the host
+	// chooses which leads from the digest, and the root's review is the tidy.
+	lead, mixed := folderdigest.MixedHireLead(held.result, now, tombstoned)
+	if candidate.IsRoot && !collection && placement.Operation != FolderOperationSupport && !IsBuildReview(target) &&
+		(mixed || folderdigest.IsInbox(held.result, now, tombstoned)) {
+		offer.Subject.Shape = string(folderdigest.ShapeInbox)
+	}
+	if mixed && !collection && placement.Operation != FolderOperationSupport && !IsBuildReview(target) {
+		offer.ConversationReview.Lead = reviewLead(held, candidate, lead)
+	}
 	if candidate.IsRoot && verdict.Portfolio != nil && d.deps.HomeExists != nil {
 		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
 		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" {
@@ -402,7 +419,11 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 	// Describe without a canonical review/root grant: that grant can only
 	// exist after the user's later Review click is successfully persisted.
 	view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
-	s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
+	planCtx := ctx
+	if candidate, found := observedReviewCandidate(held, candidateID); found {
+		planCtx = withFolderSubjectPath(ctx, candidate.Path)
+	}
+	s.digest.attachSetupPlan(planCtx, target.UserID, offer, &view)
 	option := FolderReviewOption{CandidateID: candidateID, WorkspaceType: "Blank workspace", Presentation: folderReviewPresentation(offer, view)}
 	// An option that cannot be set up right now is still listed, with its
 	// reason (PRD FR10). It is never a control that leads nowhere: its state
@@ -414,6 +435,8 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 		option.Presentation = unavailableReviewPresentation(option.Presentation, reason, folderAvailabilitySubject(offer, reason))
 	}
 	row, software := softwareCapability(offer.Subject)
+	inbox, isInbox := folderdigest.InboxCapability()
+	isInbox = isInbox && isInboxOffer(offer)
 	switch {
 	case offer.Structure.ProposesWorkspaces():
 		// A structure never waits on a plugin, only on a host that can set
@@ -431,6 +454,12 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 		option.WorkspaceType = row.Builtin.Workspace
 		if s.digest.deps.InspectSoftware == nil || s.digest.deps.Setup == nil {
 			unavailable(FolderAvailabilityPlanUnavailable)
+		}
+	case isInbox:
+		// An inbox folder's File Janitor setup is reviewed on its hire card.
+		option.WorkspaceType = inbox.Builtin.Workspace
+		if view.Plan == nil {
+			unavailable(view.Availability)
 		}
 	case view.Capability != nil:
 		option.WorkspaceType = view.Capability.Workspace
@@ -468,7 +497,7 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 	if err != nil || recognition == nil || recognition.Verdict != BuildFolderProject || recognition.CandidateID == "" {
 		return FolderHireCandidate{}
 	}
-	if recognition.IntegrationKey == "" && recognition.Shape != string(folderdigest.ShapeCode) {
+	if recognition.IntegrationKey == "" && recognition.Shape != string(folderdigest.ShapeCode) && recognition.Shape != string(folderdigest.ShapeInbox) {
 		return FolderHireCandidate{}
 	}
 	held, _, err := s.resolve(ctx, target, observationID)
@@ -494,7 +523,10 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 	// A recognized integration can explain its prerequisites before it has a
 	// complete plan. Opening that canonical review is observational, not a
 	// confirmation. Software keeps its existing eligibility rules.
-	if option.Presentation != nil && option.Presentation.State == "unavailable" && recognition.IntegrationKey == "" {
+	// An inbox folder's card says why it cannot be hired for (already tidied,
+	// or a root File Janitor refuses), so it opens even then.
+	if option.Presentation != nil && option.Presentation.State == "unavailable" && recognition.IntegrationKey == "" &&
+		recognition.Shape != string(folderdigest.ShapeInbox) {
 		return FolderHireCandidate{}
 	}
 	return FolderHireCandidate{CandidateID: option.CandidateID}
@@ -740,6 +772,9 @@ func validateConversationReview(review *FolderConversationReview) error {
 	}
 	if review.WorkspaceName != "" && (strings.TrimSpace(review.WorkspaceName) != review.WorkspaceName || validateFolderName(review.WorkspaceName) != nil) {
 		return errFolderDigestInvalid
+	}
+	if err := review.Lead.validate(); err != nil {
+		return err
 	}
 	if len(review.DestinationID) > 200 || strings.ContainsAny(review.DestinationID, "/\\\x00\r\n") {
 		return errFolderDigestInvalid

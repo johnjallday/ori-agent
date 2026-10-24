@@ -7,6 +7,15 @@
   const list = value => (Array.isArray(value) ? value : []);
   const operations = { create: 'Proposed · new', reuse: 'Proposed · reuse' };
   const kinds = { workspace: 'Workspace', group: 'Workspace group', home: 'Home' };
+  // A model a plan never calls (an inbox folder's metadata-only first batch).
+  const MODEL_NOT_NEEDED = 'not_needed';
+
+  // kindLabel names what the proposal is: "File Janitor workspace" when a
+  // built-in capability shipped with Ori sets it up, else its plain kind.
+  function kindLabel(kind, visual) {
+    const builtin = text(visual?.builtin).trim();
+    return kind === 'workspace' && builtin ? `${builtin} workspace` : kinds[kind];
+  }
 
   function resultView(offer) {
     const outcome = offer.outcome;
@@ -70,7 +79,12 @@
     const proposed = visual?.entity;
     const entity =
       proposed && kinds[proposed.kind] && operations[proposed.operation]
-        ? { kind: proposed.kind, name: text(proposed.name), status: operations[proposed.operation] }
+        ? {
+            kind: proposed.kind,
+            name: text(proposed.name),
+            status: operations[proposed.operation],
+            label: kindLabel(proposed.kind, visual)
+          }
         : null;
     const setup = offer?.setup;
     const done = kind =>
@@ -93,6 +107,7 @@
             name: hire.mode === 'pending' ? '' : text(hire.agent_name),
             role: text(hire.role_label),
             model: text(hire.model),
+            modelNotNeeded: visual?.model?.state === MODEL_NOT_NEEDED,
             status:
               hire.mode === 'bind'
                 ? 'Proposed assignment'
@@ -130,7 +145,7 @@
           ? 'Observed names only · contents not read'
           : 'Source folder · kept in place',
       summary: entity
-        ? `${source} → ${entity.status.toLowerCase()} ${kinds[entity.kind].toLowerCase()} ${entity.name}. ${parent}.${agent ? ` ${agent.status}: ${agent.name || agent.role || 'agent not yet known'}.` : ''}${setup ? ' Status comes from the saved run.' : ' Nothing here proves creation or assignment.'}`
+        ? `${source} → ${entity.status.toLowerCase()} ${entity.label.toLowerCase()} ${entity.name}. ${parent}.${agent ? ` ${agent.status}: ${agent.name || agent.role || 'agent not yet known'}.` : ''}${setup ? ' Status comes from the saved run.' : ' Nothing here proves creation or assignment.'}`
         : `${source}. Destination and agent are not yet reviewed.${setup ? ' Setup status comes from the saved run.' : ' No setup has started.'}`,
       footer: setup
         ? 'Setup is separate from the first look. Completed work is kept.'
@@ -186,7 +201,11 @@
     workspace.append(
       node('p', view.entity?.status || 'Not reviewed', 'folder-visual__badge'),
       node('h4', view.entity?.name || 'Setup preview'),
-      node('p', kinds[view.entity?.kind] || 'No destination proposed', 'folder-visual__note')
+      node(
+        'p',
+        view.entity?.label || kinds[view.entity?.kind] || 'No destination proposed',
+        'folder-visual__note'
+      )
     );
     if (view.agent) {
       const agent = node('div', '', 'folder-visual__agent');
@@ -205,7 +224,14 @@
         node('strong', view.agent.name || view.agent.role || 'Agent not yet known'),
         node(
           'p',
-          [view.agent.role, view.agent.model ? `Model: ${view.agent.model}` : 'Model not yet known']
+          [
+            view.agent.role,
+            view.agent.model
+              ? `Model: ${view.agent.model}`
+              : view.agent.modelNotNeeded
+                ? 'No model needed for the first batch'
+                : 'Model not yet known'
+          ]
             .filter(Boolean)
             .join(' · '),
           'folder-visual__note'
@@ -224,6 +250,17 @@
   // applicable configuration owner; no URL or credential is accepted here.
   function modelRequirementView(model, { saved = false } = {}) {
     if (!model) return null;
+    // Nothing waits on a model: the setup and its first look call none.
+    if (model.state === MODEL_NOT_NEEDED)
+      return {
+        state: MODEL_NOT_NEEDED,
+        label: 'Model',
+        status: 'Not needed for the first batch',
+        detail:
+          'The first look is a metadata-only scan. No model is called and nothing waits for one.',
+        saved,
+        settings: ''
+      };
     const configured = model.state === 'configured' && text(model.provider) && text(model.name);
     const missing = model.state === 'missing';
     const settings =
@@ -320,18 +357,24 @@
       rows.every(row => ['install', 'update', 'enable', 'ready'].includes(row.operation));
     const downloads = rows.filter(row => ['install', 'update'].includes(row.operation)).length;
     const count = `${downloads} ${downloads === 1 ? 'plugin download' : 'plugin downloads'}`;
+    // A checked set with no plugin at all, set up by a capability built into
+    // Ori, says why nothing is downloaded.
+    const builtin = complete && !rows.length ? text(visual?.builtin).trim() : '';
     return {
       rows,
       model: modelRequirementView(visual?.model, { saved }),
       complete,
       downloads,
       saved,
+      builtin,
       summary: saved
         ? 'Requirements recorded for this setup'
         : complete
           ? downloads
             ? `${count} for this setup`
-            : 'Nothing to download'
+            : builtin
+              ? `Nothing to download: ${builtin} is built into Ori`
+              : 'Nothing to download'
           : downloads
             ? `${count} known · other requirements not fully checked`
             : 'Download requirements not fully checked'
@@ -362,12 +405,13 @@
   function renderRequirements(container, input) {
     if (!container) return;
     const view = requirementsView(input);
-    container.hidden = !view.rows.length && !view.model;
+    const empty = !view.rows.length && !view.model && !view.builtin;
+    container.hidden = empty;
     const signature = JSON.stringify(view);
     if (container.dataset.signature === signature) return;
     container.dataset.signature = signature;
     container.replaceChildren();
-    if (!view.rows.length && !view.model) return;
+    if (empty) return;
     const doc = container.ownerDocument;
     const node = (tag, label, className = '') => {
       const el = doc.createElement(tag);
@@ -378,7 +422,8 @@
     const section = node('section', '', 'folder-requirements');
     section.setAttribute('aria-label', 'Setup requirements');
     section.append(node('h4', 'What you need'));
-    if (view.rows.length) section.append(node('p', view.summary, 'folder-requirements__summary'));
+    if (view.rows.length || view.builtin)
+      section.append(node('p', view.summary, 'folder-requirements__summary'));
     const requirements = node('ul', '', 'folder-requirements__list');
     for (const requirement of view.rows) {
       const row = node('li', '', 'folder-requirements__row');
@@ -404,19 +449,26 @@
       row.append(details, node('div', '', 'folder-requirements__actions'));
       requirements.append(row);
     }
-    section.append(
-      requirements,
-      node(
-        'p',
-        'Ori plugins are separate from the desktop application, model runtime and model weights.',
-        'folder-visual__note'
-      )
-    );
+    // A built-in needs no plugin, so there is no plugin to tell apart.
+    if (view.rows.length || !view.builtin)
+      section.append(
+        requirements,
+        node(
+          'p',
+          'Ori plugins are separate from the desktop application, model runtime and model weights.',
+          'folder-visual__note'
+        )
+      );
     if (view.model) {
       const model = node('section', '', 'folder-requirements__model');
       model.setAttribute('aria-label', 'Project agent model');
+      model.dataset.state = view.model.state;
       model.append(
-        node('strong', view.model.saved ? 'Model configuration at review' : 'Project agent model'),
+        node(
+          'strong',
+          view.model.label ||
+            (view.model.saved ? 'Model configuration at review' : 'Project agent model')
+        ),
         node('p', view.model.status, 'folder-requirements__status'),
         node('p', view.model.detail, 'folder-visual__note')
       );
@@ -461,7 +513,13 @@
         effects.push(text(line.detail));
       }
     }
-    if (plan.hire && list(plan.lines).some(line => line.kind === 'task'))
+    // A first look that calls no model (an inbox folder's first batch) spends
+    // no tokens and reads no file contents.
+    if (
+      plan.hire &&
+      plan.visual?.model?.state !== MODEL_NOT_NEEDED &&
+      list(plan.lines).some(line => line.kind === 'task')
+    )
       effects.push(
         'The first look shares permitted folder content with the configured model and uses model tokens. It does not change your source files.'
       );

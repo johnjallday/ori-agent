@@ -548,6 +548,8 @@ type folderSetupRequest struct {
 	PlanDigest string `json:"plan_digest"`
 	EntryName  string `json:"entry_name"`
 	Brief      string `json:"brief"`
+	// Monitoring is an inbox folder's watching checkbox; absent is off.
+	Monitoring bool `json:"monitoring"`
 }
 
 // SetupFolderDigest is the click on Set up (Hire and start). The body carries
@@ -569,7 +571,7 @@ func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req folderSetupRequest
-	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name", "brief") {
+	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name", "brief", "monitoring") {
 		return
 	}
 	userID, ok := h.currentUserID(w, r)
@@ -577,7 +579,7 @@ func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offer, err := h.folderDigest.StartSetup(r.Context(), userID, offerID, personalassistant.FolderSetupInput{
-		RequestID: req.RequestID, PlanDigest: req.PlanDigest, EntryName: req.EntryName, Brief: req.Brief,
+		RequestID: req.RequestID, PlanDigest: req.PlanDigest, EntryName: req.EntryName, Brief: req.Brief, Monitoring: req.Monitoring,
 	})
 	if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{

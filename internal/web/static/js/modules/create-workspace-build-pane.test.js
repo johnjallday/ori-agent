@@ -885,6 +885,18 @@ test('the recognition line says what Ori recognized, from server facts only', ()
     pane.folderRecognitionText({ verdict: 'project', label: 'software project', project_count: 1 }),
     'Recognized: software project'
   );
+  // An inbox folder names the blueprint Ori suggests for it (folder-inbox-hire FR3).
+  assert.equal(
+    pane.folderRecognitionText({
+      verdict: 'project',
+      shape: 'inbox',
+      label: 'inbox folder',
+      project_count: 1,
+      blueprint_id: 'file-janitor',
+      blueprint_label: 'File Janitor'
+    }),
+    'Recognized: inbox folder · File Janitor suggested'
+  );
   assert.equal(
     pane.folderRecognitionText({ verdict: 'none' }),
     'Folder metadata attached. Choose the purpose that fits.'

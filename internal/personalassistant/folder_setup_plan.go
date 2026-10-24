@@ -148,6 +148,8 @@ type FolderSetupIntent struct {
 	Recipe        string                `json:"recipe,omitempty"`
 	RecipeVersion int                   `json:"recipe_version,omitempty"`
 	Software      *FolderSoftwareIntent `json:"software,omitempty"`
+	// Inbox is the folderdigest.BuiltinInboxFolder recipe's promise.
+	Inbox *FolderInboxIntent `json:"inbox,omitempty"`
 	// Structure is the FolderRecipeStructure recipe's promise.
 	Structure *FolderStructureIntent `json:"structure,omitempty"`
 }
@@ -361,8 +363,18 @@ type FolderSetupPlan struct {
 	// what the run creates, and the brief is the user's own words.
 	Hire         *FolderHire `json:"hire,omitempty"`
 	BriefDefault string      `json:"brief_default,omitempty"`
+	// Monitoring is an inbox folder's optional watching and daily catch-up, off
+	// unless the user ticks it. Like the brief it is not in the digest: the
+	// tick travels in the setup request, and the plan only names the time.
+	Monitoring *FolderMonitoringOffer `json:"monitoring,omitempty"`
 	// Intent is the machine-readable promise behind the lines; server only.
 	Intent FolderSetupIntent `json:"-"`
+}
+
+// FolderMonitoringOffer names the daily time of an inbox folder's optional
+// watching: the blueprint recipe's, else File Janitor's default ("09:00").
+type FolderMonitoringOffer struct {
+	Time string `json:"time"`
 }
 
 // States of a prerequisite. They are deliberately distinct: a thing that is
@@ -433,6 +445,10 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 		stamped.Hire = &hire
 	}
 	stamped.BriefDefault = p.BriefDefault
+	if p.Monitoring != nil {
+		monitoring := *p.Monitoring
+		stamped.Monitoring = &monitoring
+	}
 	if p.Destination != nil {
 		destination := *p.Destination
 		stamped.Destination = &destination
@@ -500,6 +516,9 @@ type FolderSetupRequest struct {
 	// Brief is the user's answer to the card's question, set only for Run: the
 	// workspace the run creates takes it as its goal.
 	Brief string
+	// Monitoring is the user's tick on an inbox folder's watching checkbox, set
+	// only for Run.
+	Monitoring bool
 	// Plan is the confirmed plan a Run is held to.
 	Plan FolderSetupPlan
 	// Software is set for a built-in software offer: what the service holds
@@ -537,6 +556,9 @@ type FolderSetupInput struct {
 	PlanDigest string
 	EntryName  string
 	Brief      string
+	// Monitoring is the tick on an inbox folder's watching checkbox; false
+	// leaves the reviewed monitoring approval unset.
+	Monitoring bool
 }
 
 // FolderSetupView is a run as the browser sees it.
@@ -595,21 +617,30 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	// formed; anything else is refused rather than run on a guess.
 	switch intent.Recipe {
 	case "":
-		if intent.RecipeVersion != 0 || intent.Software != nil || intent.Structure != nil {
+		if intent.RecipeVersion != 0 || intent.Software != nil || intent.Structure != nil || intent.Inbox != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 	case folderdigest.BuiltinSoftwareProject:
-		if intent.RecipeVersion < 1 || intent.Software == nil || intent.Structure != nil {
+		if intent.RecipeVersion < 1 || intent.Software == nil || intent.Structure != nil || intent.Inbox != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 		if err := intent.Software.Validate(); err != nil {
 			return err
 		}
 	case FolderRecipeStructure:
-		if intent.RecipeVersion < 1 || intent.Structure == nil || intent.Software != nil {
+		if intent.RecipeVersion < 1 || intent.Structure == nil || intent.Software != nil || intent.Inbox != nil {
 			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
 		}
 		if err := intent.Structure.Validate(); err != nil {
+			return err
+		}
+	case folderdigest.BuiltinInboxFolder:
+		// The first batch never waits on a model: an inbox plan has no model
+		// witness to hold a run to.
+		if intent.RecipeVersion < 1 || intent.Inbox == nil || intent.Software != nil || intent.Structure != nil || intent.Model != nil {
+			return fmt.Errorf("%w: setup recipe", errFolderDigestInvalid)
+		}
+		if err := intent.Inbox.Validate(); err != nil {
 			return err
 		}
 	default:
@@ -675,6 +706,8 @@ type FolderSetupRun struct {
 	// a resume reuses both rather than asking again.
 	Brief string      `json:"brief,omitempty"`
 	Hire  *FolderHire `json:"hire,omitempty"`
+	// Monitoring is whether the user ticked watching on an inbox folder's card.
+	Monitoring bool `json:"monitoring,omitempty"`
 	// HomeID and Receipt are a portfolio run's Home and what it read back from
 	// canonical state when it finished; the offer resolves to that Home.
 	HomeID  string             `json:"home_id,omitempty"`

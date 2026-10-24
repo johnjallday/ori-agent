@@ -291,6 +291,10 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 				} else {
 					result.Controls = []string{workspaceContextText(view.Capability.AcceptLabel, 80), "Keep chatting"}
 				}
+			} else if view.Plan != nil && view.Plan.Hire != nil && view.Subject.IsRoot && view.Subject.Shape == "inbox" {
+				// An inbox folder's hire card: the host's own File Janitor plan,
+				// with no step-by-step journey to adjust.
+				result.Controls = []string{"Hire and start", "Keep chatting"}
 			} else if view.CreateAvailable {
 				if view.Operation == personalassistant.FolderOperationSupport {
 					result.Controls = []string{"Link supporting folder", "Keep chatting"}

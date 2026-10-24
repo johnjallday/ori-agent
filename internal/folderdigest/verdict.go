@@ -258,6 +258,41 @@ func IsCollection(r Result, now time.Time) bool {
 	return projects >= CollectionMinProjects
 }
 
+// IsInbox reports whether an attached root is an inbox folder: the fallback
+// below a collection and a recognized project. Nothing about the root's name
+// counts; only the verdict does. The root is one when, without the candidates
+// the user declined, it is a dump, an ambiguous or empty folder, a mixed one
+// that is also a dump, or a project only by the density of files of no kind Ori
+// knows (at the root or in one subfolder). A root the user declined is never one, and neither is
+// a root that holds one project of a known kind. The dump thresholds do not
+// gate it: attaching the folder is the ask.
+func IsInbox(r Result, now time.Time, declined func(Candidate) bool) bool {
+	if declined == nil {
+		declined = func(Candidate) bool { return false }
+	}
+	if declined(r.RootCandidate()) || IsCollection(r, now) {
+		return false
+	}
+	v := Exclude(r, now, declined)
+	switch v.Kind {
+	case KindDump, KindAmbiguous, KindEmpty:
+		return true
+	case KindMixed:
+		// Projects beside loose files: the tidy hire leads only when the root is
+		// a dump. Otherwise the project does (MixedHireLead).
+		return v.RootDump
+	case KindProject:
+		return v.Project != nil && !knownProject(*v.Project)
+	}
+	return false
+}
+
+// knownProject is a project of a kind Ori has a name for: a marker of its own,
+// or a dominant file kind with a shape.
+func knownProject(c Candidate) bool {
+	return c.Marker != nil || ShapeFor(c) != ""
+}
+
 func portfolioFromScan(r Result, now time.Time) *PortfolioSignal {
 	counts := map[Shape]int{}
 	for _, candidate := range r.Subfolders() {

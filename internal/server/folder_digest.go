@@ -59,6 +59,8 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		},
 		InspectSoftware: inspectSoftwareProject,
 		SoftwareProject: setupHost.softwareProject,
+		InboxProject:    setupHost.inboxProject,
+		InboxRetry:      setupHost.inboxRetryFirstBatch,
 		StructureGroup: func(_ context.Context, userID string, offer personalassistant.FolderOffer, root, groupID string) (personalassistant.FolderCreateResult, error) {
 			return structureGroupReceipt(b, userID, offer, root, groupID)
 		},
@@ -104,6 +106,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		b.sessionHandler.SetAssistantLibraryPortfolioResolver(service)
 	}
 	b.personalAssistantHandler.SetFolderDigest(service)
+	b.personalAssistantHandler.SetFirstBatchActions(service)
 	b.personalAssistantHandler.SetFolderHomeProvider(folderHomeProviderSetup{builder: b})
 	b.personalAssistantHandler.SetFolderProjectSelections(b.pathSelectionStore)
 }

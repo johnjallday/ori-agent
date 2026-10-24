@@ -252,10 +252,13 @@ export function existingProjectView(existing) {
   const subject = String(existing?.subject || 'This folder');
   const workspace = String(existing?.workspace || 'an existing project');
   const route = String(existing?.route || '');
+  const tidied = existing?.tidied === true;
   return {
-    message: `${subject} is already set up as the project “${workspace}”. Nothing new has been prepared.`,
+    message: tidied
+      ? `File Curator already tidies ${subject}. Nothing new has been prepared.`
+      : `${subject} is already set up as the project “${workspace}”. Nothing new has been prepared.`,
     route: /^\/workspaces\/[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(route) ? route : '',
-    openLabel: `Open ${workspace}`
+    openLabel: tidied ? 'Open it' : `Open ${workspace}`
   };
 }
 
@@ -627,8 +630,12 @@ async function review(candidateId, close = false, offerId, placement) {
           kind: 'workspace',
           art: 'neutral',
           state: 'existing',
-          label: 'Existing workspace',
-          scope: 'Already set up',
+          label:
+            result.folder_existing_project.tidied === true
+              ? 'File Janitor workspace'
+              : 'Existing workspace',
+          scope:
+            result.folder_existing_project.tidied === true ? 'Already tidies it' : 'Already set up',
           description: 'Nothing new has been prepared.',
           destination: ''
         },

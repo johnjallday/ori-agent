@@ -479,7 +479,7 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			// A finished one-card run's receipt is copied here whole, so every
 			// kind its host writes must be listed, or the run cannot resolve.
 			for _, row := range offer.Outcome.Receipt {
-				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|home|library|assistant|profile|", "|"+row.Kind+"|") ||
+				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|home|library|assistant|profile|batch|", "|"+row.Kind+"|") ||
 					row.Kind == "" || len(row.Name) > 512 || len(row.Detail) > 512 || len(row.Route) > 1024 ||
 					len(row.Operation) > 32 || len(row.Model) > 512 || len(row.Placement) > 32 ||
 					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {

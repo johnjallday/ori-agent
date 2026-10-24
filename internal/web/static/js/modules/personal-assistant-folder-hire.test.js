@@ -4,8 +4,12 @@ import { readFileSync } from 'node:fs';
 
 import {
   FIRST_LOOK_FOOTNOTE,
+  confirmationSummary,
+  conversationFolderOfferView,
+  planWithWatching,
   folderOfferView,
   folderReceiptView,
+  isInboxFolderOffer,
   hireLookView,
   hireView,
   setupResultView as setupModalView,
@@ -414,4 +418,300 @@ test('the run pop-up ends a hire on its agent at work, or on why the look waits'
   const finished = setupModalView(hiredOffer({ state: 'finished' }));
   assert.match(finished.status, /finished the first look/);
   assert.doesNotMatch(finished.status, /is reading/);
+});
+
+// An inbox hire, resolved: its first look is its first batch.
+function inboxHire(batch) {
+  return {
+    id: 'offer-inbox',
+    status: 'resolved',
+    subject: { name: 'Downloads', shape: 'inbox', is_root: true },
+    outcome: {
+      kind: 'project',
+      workspace_id: 'ws-downloads',
+      route: '/workspaces/downloads',
+      first_look: { started: false, batch, at: '2026-10-24T09:00:00Z' },
+      receipt: [
+        { kind: 'agent', name: 'File Curator', detail: 'file curator, added', assigned: true },
+        { kind: 'workspace', name: 'Downloads', detail: 'created', route: '/workspaces/downloads' },
+        { kind: 'folder', name: 'Downloads', detail: 'linked where it is' },
+        {
+          kind: 'batch',
+          name: 'First batch',
+          detail: '23 proposed · 4 need review',
+          route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+        }
+      ]
+    }
+  };
+}
+
+test('an inbox hire ends on its first batch: Review batch, never Start first look', () => {
+  const receipt = folderReceiptView(
+    inboxHire({
+      outcome: 'batch',
+      batch_id: 'batch-1',
+      eligible: 23,
+      needs_review: 4,
+      route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+    })
+  );
+  assert.equal(receipt.visible, true);
+  assert.equal(receipt.openLabel, 'Review batch');
+  assert.equal(receipt.route, '/workspaces/downloads?panel=file-janitor&batch_id=batch-1');
+  assert.equal('firstLook' in receipt, false);
+  assert.equal('hireLook' in receipt, false);
+  assert.deepEqual(
+    receipt.rows.map(row => [row.kind, row.detail]),
+    [
+      ['agent', 'file curator, added'],
+      ['workspace', 'created'],
+      ['folder', 'linked where it is'],
+      ['batch', '23 proposed · 4 need review']
+    ]
+  );
+  // Nothing to file opens File Janitor itself.
+  const empty = folderReceiptView(
+    inboxHire({ outcome: 'no_eligible', route: '/workspaces/downloads?panel=file-janitor' })
+  );
+  assert.equal(empty.openLabel, 'Open File Janitor');
+  assert.equal(empty.route, '/workspaces/downloads?panel=file-janitor');
+  // A route that is not a File Janitor review is never followed.
+  const elsewhere = folderReceiptView(
+    inboxHire({ outcome: 'batch', route: 'https://example.com/?panel=file-janitor' })
+  );
+  assert.equal(elsewhere.openLabel, 'Open Downloads');
+  assert.equal(elsewhere.route, '/workspaces/downloads');
+});
+
+// An inbox folder's review, as the server sends it: no capability, no software
+// block, the host's File Janitor plan with its hire.
+const inboxOffer = (hire = {}, overrides = {}) => ({
+  id: 'offer-inbox',
+  verdict: 'project',
+  status: 'pending',
+  folder: 'Downloads',
+  reason: '25 files of 6 kinds, edited today',
+  subject: { name: 'Downloads', kind: 'project', shape: 'inbox', is_root: true },
+  recognition: { verdict: 'project', label: 'inbox folder' },
+  create_available: false,
+  plan: {
+    digest: 'e'.repeat(64),
+    lines: [
+      { kind: 'agents', name: 'Hire File Curator' },
+      { kind: 'workspace', name: 'A File Janitor workspace named Downloads' },
+      { kind: 'folder', name: 'Linked where it is' },
+      {
+        kind: 'task',
+        name: 'A first look: a metadata-only scan that proposes the first filing batch'
+      }
+    ],
+    hire: { mode: 'create', agent_name: 'File Curator', role_label: 'specialist', ...hire },
+    brief_default:
+      'Prepare reviewable filing batches for the approved folder, explain uncertain classifications, and require approval before moving anything.',
+    visual: { requirements_checked: true, builtin: 'File Janitor', model: { state: 'not_needed' } }
+  },
+  ...overrides
+});
+
+test('an inbox folder is a hire card for File Curator: Hire & start or Not now, no Adjust', () => {
+  assert.equal(isInboxFolderOffer(inboxOffer()), true);
+  const view = folderOfferView(inboxOffer());
+  assert.equal(text(view.headline), 'Hire File Curator for Downloads');
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label]),
+    [
+      ['setup', 'Hire & start'],
+      ['no', 'Not now']
+    ]
+  );
+  assert.equal(view.actions[0].oneCard, true);
+  assert.equal(view.hire.adjust, null, 'no step-by-step journey to adjust');
+  assert.equal(view.hire.brief.hint, 'This becomes the workspace goal. You can change it later.');
+  assert.match(view.hire.brief.value, /^Prepare reviewable filing batches/);
+  assert.equal(view.plan.lines.length, 4);
+  assert.ok(!view.actions.some(action => action.recheck), 'no model to check again');
+  // A saved File Curator is assigned, never hired twice.
+  const assigned = folderOfferView(inboxOffer({ mode: 'bind', model: 'gpt-5-mini' }));
+  assert.equal(text(assigned.headline), 'Assign File Curator to Downloads');
+  assert.equal(assigned.actions[0].label, 'Assign & start');
+  // Another kind of folder is never mistaken for one.
+  assert.equal(isInboxFolderOffer(hireOffer()), false);
+  assert.equal(isInboxFolderOffer(reviewedSoftware()), false);
+});
+
+test('a folder another workspace already tidies, or a refused root, is said and creates nothing', () => {
+  const tidied = folderOfferView({
+    ...inboxOffer(),
+    plan: undefined,
+    setup_unavailable_reason: 'folder_tidied',
+    tidied: { name: 'Old Downloads', route: '/workspaces/old-downloads?panel=file-janitor' }
+  });
+  assert.equal(text(tidied.headline), 'File Curator already tidies Downloads');
+  assert.deepEqual(
+    tidied.actions.map(action => [action.label, action.href]),
+    [['Open it', '/workspaces/old-downloads?panel=file-janitor']]
+  );
+  assert.equal(tidied.plan, null);
+  assert.match(tidied.question, /Old Downloads already keeps this folder tidy/);
+  // A route that is not a workspace page is never offered.
+  const odd = folderOfferView({
+    ...inboxOffer(),
+    plan: undefined,
+    setup_unavailable_reason: 'folder_tidied',
+    tidied: { name: 'x', route: 'https://example.com/' }
+  });
+  assert.deepEqual(odd.actions, []);
+  const refused = folderOfferView({
+    ...inboxOffer(),
+    plan: undefined,
+    setup_unavailable_reason: 'root_refused',
+    setup_unavailable_message: "Ori's own workspaces folder cannot be tidied."
+  });
+  assert.equal(text(refused.headline), 'Hire File Curator for Downloads (unavailable)');
+  assert.equal(refused.question, "Ori's own workspaces folder cannot be tidied.");
+  assert.deepEqual(refused.actions, []);
+});
+
+test('watching is offered only by a plan that names its time, off until ticked', () => {
+  const none = hireView(inboxOffer().plan, 'Downloads');
+  assert.equal(none.monitoring, null);
+  const plan = { ...inboxOffer().plan, monitoring: { time: '09:00' } };
+  const view = hireView(plan, 'Downloads');
+  assert.deepEqual(view.monitoring, {
+    label: 'Also watch this folder and run a daily catch-up scan at 09:00',
+    hint: 'Ori notices new files after a short settle time and proposes them for review. Nothing is filed by itself.',
+    line: 'Watching turned on'
+  });
+  assert.equal(hireView({ ...plan, monitoring: { time: 'later' } }, 'Downloads').monitoring, null);
+  // The tick is sent with the click and only when chosen.
+  assert.match(
+    source,
+    /if \(offer\.plan\?\.monitoring && monitoringChosen\(offer\)\) body\.monitoring = true;/
+  );
+  assert.match(template, /<input id="personalAssistantFolderMonitoring"[^>]*type="checkbox"/);
+  assert.doesNotMatch(template, /id="personalAssistantFolderMonitoring"[^>]*checked/);
+});
+
+test('a folder with a project beside loose files shows why one hire leads and the other one link away', () => {
+  const reason =
+    '23 loose files of 6 kinds sit beside a Go module changed on Oct 20: the loose files are the bigger job.';
+  const tidy = folderOfferView({
+    ...inboxOffer(),
+    lead: {
+      leading: true,
+      reason,
+      alternative_id: 'candidate-1',
+      alternative_label: 'hire Development Assistant for widget instead'
+    }
+  });
+  assert.equal(tidy.leadReason, reason, 'the reason sits under "Why this suggestion?"');
+  assert.deepEqual(
+    tidy.actions.map(action => [action.id, action.label, action.swapCandidate || '']),
+    [
+      ['setup', 'Hire & start', ''],
+      ['no', 'Not now', ''],
+      ['lead-swap', 'Or: hire Development Assistant for widget instead', 'candidate-1']
+    ]
+  );
+  // The hire reached by the link does not lead: no reason, a link back.
+  const project = folderOfferView({
+    ...reviewedSoftware(),
+    lead: {
+      leading: false,
+      alternative_id: 'candidate-0',
+      alternative_label: 'hire File Curator to tidy the loose files instead'
+    }
+  });
+  assert.equal(project.leadReason, '');
+  assert.equal(project.actions.at(-1).swapCandidate, 'candidate-0');
+  assert.equal(
+    project.actions.at(-1).label,
+    'Or: hire File Curator to tidy the loose files instead'
+  );
+  // Without a lead, or once decided, there is no link.
+  assert.ok(!folderOfferView(inboxOffer()).actions.some(action => action.swapCandidate));
+  const decided = folderOfferView({
+    ...inboxOffer(),
+    status: 'awaiting_outcome',
+    lead: { leading: true, reason, alternative_id: 'candidate-1', alternative_label: 'x' }
+  });
+  assert.ok(!decided.actions.some(action => action.swapCandidate));
+  // The link only reviews the other hire; it posts nothing itself.
+  assert.match(
+    source,
+    /window\.PersonalAssistantFolderSetup\?\.reviewCandidate\?\.\(action\.swapCandidate\)/
+  );
+});
+
+test('ticking watching adds its fifth line to what the card lists, and the plan stays the same', () => {
+  const offer = { ...inboxOffer(), plan: { ...inboxOffer().plan, monitoring: { time: '09:00' } } };
+  assert.equal(planWithWatching(offer, false).lines.length, 4);
+  const ticked = planWithWatching(offer, true);
+  assert.equal(ticked.lines.length, 5);
+  assert.equal(ticked.lines[4].name, 'Watching turned on');
+  assert.equal(ticked.digest, offer.plan.digest, 'the tick is not in the digest');
+  assert.equal(offer.plan.lines.length, 4, 'the offer itself is not changed');
+  // A plan that offers no watching ignores a tick.
+  assert.equal(planWithWatching(inboxOffer(), true).lines.length, 4);
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences(ticked);
+  assert.ok(effects.some(effect => effect.startsWith('Watching turned on')));
+});
+
+test('the confirmation line names plugins only for a plan that installs one', () => {
+  assert.equal(
+    confirmationSummary(folderOfferView(inboxOffer()).plan),
+    'Confirmation covers the whole setup above.'
+  );
+  assert.equal(
+    confirmationSummary({ lines: [{ kind: 'integration', name: 'Installs REAPER' }] }),
+    'Confirmation covers the whole setup above, not just plugin installation.'
+  );
+});
+
+test('in a conversation the inbox hire keeps its own words and closes with Keep chatting', () => {
+  const view = conversationFolderOfferView(inboxOffer({}, { conversation_id: 'conversation-1' }));
+  assert.doesNotMatch(view.question, /unavailable here/);
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Hire & start', 'Keep chatting']
+  );
+});
+
+test('a stopped inbox run says what finished and offers its own recovery', () => {
+  const stopped = (reason, state = 'failed') =>
+    folderOfferView(
+      inboxOffer(
+        {},
+        {
+          status: 'awaiting_outcome',
+          decision: 'yes',
+          setup: {
+            status: 'stopped',
+            stop_reason: reason,
+            lines: [
+              { kind: 'agents', name: 'Hire File Curator', state: 'done' },
+              {
+                kind: 'workspace',
+                name: 'A File Janitor workspace named Downloads',
+                state: 'done'
+              },
+              { kind: 'folder', name: 'Linked where it is', state }
+            ]
+          }
+        }
+      )
+    );
+  const failed = stopped('failed');
+  assert.match(failed.question, /^2 of 3 steps finished\. A step did not finish\./);
+  assert.deepEqual(
+    failed.actions.map(action => [action.id, action.label]),
+    [['retry', 'Try again']]
+  );
+  const changed = stopped('plan_changed');
+  assert.match(changed.question, /File Janitor will not take this folder/);
+  assert.deepEqual(
+    changed.actions.map(action => [action.id, action.label]),
+    [['repick', 'Pick it again']]
+  );
 });

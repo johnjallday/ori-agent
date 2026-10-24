@@ -116,6 +116,97 @@ test('a hire report posts to its hire, never to a workspace the browser names', 
   assert.equal(calls.length, 3);
 });
 
+// An inbox hire's first batch as the server's Today sends it under Needs you.
+const batchReport = (overrides = {}) => ({
+  id: 'first-batch-offer-1',
+  kind: 'folder_first_batch',
+  state: 'finished',
+  title:
+    'File Curator prepared a first batch for Downloads: 23 files proposed for filing, 4 need your review.',
+  attribution: 'File Curator',
+  workspace: 'Downloads',
+  source_at: '2026-10-21T09:58:00Z',
+  route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1',
+  report_route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1',
+  actions: ['review_batch', 'not_now'],
+  ref: { workspace_id: 'ws-downloads', entity_type: 'folder_offer', entity_id: 'offer-1' },
+  ...overrides
+});
+
+test('an inbox hire reports its first batch with Review batch as a link and Not now', () => {
+  assert.equal(isFirstLookReportKind('folder_first_batch'), true);
+  const view = firstLookReportView(batchReport(), now);
+  assert.equal(view.kind, 'batch');
+  assert.equal(view.agent, 'File Curator');
+  assert.match(view.title, /23 files proposed for filing, 4 need your review\.$/);
+  assert.equal(view.meta, 'Downloads · finished 2 min ago');
+  assert.deepEqual(view.actions, [
+    {
+      id: 'review_batch',
+      label: 'Review batch',
+      primary: true,
+      href: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+    },
+    { id: 'not_now', label: 'Not now', primary: false }
+  ]);
+  assert.equal(view.suggestion, null);
+  assert.equal(view.report, null);
+  // Nothing to file opens File Janitor itself.
+  const empty = firstLookReportView(
+    batchReport({
+      title: 'Nothing to file in Downloads right now.',
+      report_route: '/workspaces/downloads?panel=file-janitor',
+      actions: ['open_janitor', 'not_now']
+    }),
+    now
+  );
+  assert.deepEqual(
+    empty.actions.map(action => [action.label, action.href || '']),
+    [
+      ['Open File Janitor', '/workspaces/downloads?panel=file-janitor'],
+      ['Not now', '']
+    ]
+  );
+  // A scan that did not complete offers Retry alone.
+  const failed = firstLookReportView(
+    batchReport({
+      state: 'failed',
+      title: 'The first scan of Downloads did not complete.',
+      actions: ['retry']
+    }),
+    now
+  );
+  assert.deepEqual(
+    failed.actions.map(action => action.id),
+    ['retry']
+  );
+  // A route that is not a File Janitor review is never offered as a link.
+  const elsewhere = firstLookReportView(
+    batchReport({ report_route: 'https://example.com/?panel=file-janitor' }),
+    now
+  );
+  assert.deepEqual(
+    elsewhere.actions.map(action => action.id),
+    ['not_now']
+  );
+});
+
+test('a first batch report posts Not now and Retry to its own setup, and Review batch posts nothing', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push([url, init.method, init.body]);
+    return { ok: true, json: async () => ({}) };
+  };
+  const view = firstLookReportView(batchReport(), now);
+  for (const action of ['not_now', 'retry', 'review_batch', 'start_this']) {
+    await firstLookReportAction(view, action, fetchImpl);
+  }
+  assert.deepEqual(calls, [
+    ['/api/personal-assistant/first-batch/offer-1/dismiss', 'POST', '{}'],
+    ['/api/personal-assistant/first-batch/offer-1/retry', 'POST', '{}']
+  ]);
+});
+
 test('Home reads Today before Personal HQ exists, so a hire reports there without a second Build link', () => {
   const home = read('personal-assistant-home.js');
   assert.match(

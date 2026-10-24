@@ -48,7 +48,8 @@ func folderScanApprovalID(offerID string) string {
 // LearnFromOffer proposes and approves the project fact, then proposes tool
 // candidates. It returns what the offer card may say about it.
 func (p *FolderScanProducer) LearnFromOffer(ctx context.Context, userID string, offer FolderOffer) FolderLearning {
-	if p == nil || p.learning == nil || offer.Outcome == nil || offer.Outcome.Kind != FolderChoiceProject {
+	// An inbox folder is a place files land, not a project the user works on.
+	if p == nil || p.learning == nil || offer.Outcome == nil || offer.Outcome.Kind != FolderChoiceProject || isInboxOffer(offer) {
 		return FolderLearning{}
 	}
 	subject := offer.Subject

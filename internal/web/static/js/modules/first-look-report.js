@@ -11,16 +11,28 @@ export const FIRST_LOOK_REPORT_KIND = 'folder_first_look';
 // An agent hired from the Agents page reports through the same card, keyed by
 // its hire (agents-hire-with-a-brief); a look that did not finish offers Retry.
 export const HIRE_LOOK_REPORT_KIND = 'hire_first_look_report';
-const REPORT_ACTIONS = ['start_this', 'not_now', 'retry'];
+// An inbox folder's File Curator reports its first batch through the same card
+// (folder-inbox-hire), keyed by its setup: Review batch (or Open File Janitor
+// when there was nothing to file), Not now, and Retry for a scan that did not
+// complete.
+export const FIRST_BATCH_REPORT_KIND = 'folder_first_batch';
+const REPORT_ACTIONS = ['start_this', 'not_now', 'retry', 'review_batch', 'open_janitor'];
 // A task's own page in a workspace, and nothing else.
 const REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
 // A workspace's own page, and nothing else.
 const WORKSPACE_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*$/;
+// A workspace's File Janitor review, on one batch or not, and nothing else.
+const FILE_JANITOR_ROUTE =
+  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&batch_id=[A-Za-z0-9_-]+)?$/;
 
 // isFirstLookReportKind says whether a Today item is drawn as a report card
 // rather than a row.
 export function isFirstLookReportKind(kind) {
-  return kind === FIRST_LOOK_REPORT_KIND || kind === HIRE_LOOK_REPORT_KIND;
+  return (
+    kind === FIRST_LOOK_REPORT_KIND ||
+    kind === HIRE_LOOK_REPORT_KIND ||
+    kind === FIRST_BATCH_REPORT_KIND
+  );
 }
 const LOOK_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const WORKSPACE_ID = /^[A-Za-z0-9_-]{1,200}$/;
@@ -83,6 +95,7 @@ export function finishedAgo(sourceAt, now = new Date()) {
 // an item that is not a finished first look's report.
 export function firstLookReportView(item, now = new Date()) {
   if (!item || !isFirstLookReportKind(item.kind)) return null;
+  if (item.kind === FIRST_BATCH_REPORT_KIND) return firstBatchReportView(item, now);
   const hire = item.kind === HIRE_LOOK_REPORT_KIND;
   const failed = hire && item.state === 'failed';
   if (item.state !== 'finished' && !failed) return null;
@@ -130,15 +143,60 @@ export function firstLookReportView(item, now = new Date()) {
   };
 }
 
+// firstBatchReportView is an inbox hire's report: the host's sentence with the
+// batch's counts, and one primary that opens the review (a link, never a post),
+// or Retry for a first scan that did not complete.
+function firstBatchReportView(item, now) {
+  const failed = item.state === 'failed';
+  if (item.state !== 'finished' && !failed) return null;
+  const lookId = String(item.ref?.entity_id || '').trim();
+  if (!LOOK_ID.test(lookId)) return null;
+  const agent = String(item.attribution || '').trim() || 'File Curator';
+  const workspace = String(item.workspace || '').trim();
+  const offered = (Array.isArray(item.actions) ? item.actions : []).filter(action =>
+    REPORT_ACTIONS.includes(action)
+  );
+  const route = String(item.report_route || '').trim();
+  const actions = [];
+  if (!failed && FILE_JANITOR_ROUTE.test(route)) {
+    if (offered.includes('review_batch'))
+      actions.push({ id: 'review_batch', label: 'Review batch', primary: true, href: route });
+    else if (offered.includes('open_janitor'))
+      actions.push({ id: 'open_janitor', label: 'Open File Janitor', primary: true, href: route });
+  }
+  if (failed && offered.includes('retry'))
+    actions.push({ id: 'retry', label: 'Retry', primary: true });
+  if (!failed && offered.includes('not_now'))
+    actions.push({ id: 'not_now', label: 'Not now', primary: false });
+  return {
+    kind: 'batch',
+    lookId,
+    agent,
+    initials: initialsOf(agent) || 'FC',
+    meta: [workspace, failed ? '' : finishedAgo(item.source_at, now)].filter(Boolean).join(' · '),
+    title: String(item.title || '').trim(),
+    summary: String(item.detail || '').trim(),
+    suggestion: null,
+    actions,
+    report: null,
+    map: mapPlacementView({ agent, home: item.home, workspaceId: item.ref?.workspace_id })
+  };
+}
+
 const ACTION_VERBS = { start_this: 'start-suggestion', not_now: 'dismiss', retry: 'retry' };
 
 // reportActionPath is where one report's action posts: a folder look by its
-// task, a hire by its hire id. Retry is the hire's alone.
+// task, a hire by its hire id, an inbox hire's first batch by its setup. Retry
+// is the hire's and the first batch's alone.
 function reportActionPath(view, action) {
   const verb = ACTION_VERBS[action];
   if (!verb) return '';
   if (view.kind === 'hire')
     return `/api/personal-assistant/hires/${encodeURIComponent(view.lookId)}/${verb}`;
+  if (view.kind === 'batch')
+    return action === 'start_this'
+      ? ''
+      : `/api/personal-assistant/first-batch/${encodeURIComponent(view.lookId)}/${verb}`;
   if (action === 'retry') return '';
   return `/api/personal-assistant/first-look/${encodeURIComponent(view.lookId)}/${verb}`;
 }
@@ -234,11 +292,22 @@ export function renderFirstLookReport(view, doc = document, { onAction } = {}) {
     const actions = doc.createElement('div');
     actions.className = 'first-look-report__actions';
     for (const action of view.actions) {
-      const button = doc.createElement('button');
-      button.type = 'button';
-      button.className = action.primary
+      const className = action.primary
         ? 'personal-assistant-today__action personal-assistant-today__action--primary'
         : 'personal-assistant-today__action';
+      // An action that opens a page is a link: following it changes nothing.
+      if (action.href) {
+        const link = doc.createElement('a');
+        link.className = className;
+        link.href = action.href;
+        link.dataset.firstLookAction = action.id;
+        link.textContent = action.label;
+        actions.append(link);
+        continue;
+      }
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.className = className;
       button.dataset.firstLookAction = action.id;
       button.textContent = action.label;
       button.addEventListener('click', () => onAction?.(action.id, button));

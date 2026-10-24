@@ -23,6 +23,11 @@ func reviewedObservation(t *testing.T, chip, candidateName string) (*folderDiges
 		}
 		return nil
 	}, func(foldercontext.Target) (func(), bool) { return func() {}, true })
+	if chip == "desktop" {
+		// This fixture is about the generic blank-workspace review; Desktop's
+		// two loose files would otherwise make it an inbox folder's hire card.
+		markNotInbox(t, f, "Desktop")
+	}
 	observation, err := service.Observe(context.Background(), source, "chip", chip)
 	if err != nil {
 		t.Fatal(err)

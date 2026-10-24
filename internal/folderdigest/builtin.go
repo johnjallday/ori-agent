@@ -3,6 +3,10 @@ package folderdigest
 // BuiltinSoftwareProject is the recipe identity of the software-project setup.
 const BuiltinSoftwareProject = "software_project"
 
+// BuiltinInboxFolder is the recipe identity of the inbox-folder setup: a File
+// Janitor workspace for a folder that is no project of a kind Ori knows.
+const BuiltinInboxFolder = "inbox_folder"
+
 // BuiltinCapability is a host-owned setup with nothing to install: no
 // integration, provider or plugin stands behind it, and no reviewed-registry
 // entry is invented for it. Recipe is its stable server-side identity and
@@ -35,4 +39,15 @@ func BuiltinCapabilityFor(shape Shape, markerName string) (CapabilityRow, bool) 
 		}
 	}
 	return CapabilityRow{}, false
+}
+
+// InboxCapability returns the host-owned setup for an inbox folder. Unlike
+// BuiltinCapabilityFor it is keyed by a verdict, never by a marker or a folder
+// name: the caller has already decided the root is an inbox (IsInbox).
+func InboxCapability() (CapabilityRow, bool) {
+	row, ok := CapabilityForShape(ShapeInbox)
+	if !ok || row.Builtin == nil || row.Builtin.Recipe != BuiltinInboxFolder {
+		return CapabilityRow{}, false
+	}
+	return row, true
 }

@@ -71,6 +71,9 @@ type folderSetupHost struct {
 	// availabilities is the short cache behind a structure proposal's two
 	// questions (HomeAvailability, IntegrationAvailability).
 	availabilities map[string]cachedAvailability
+	// inbox replaces the inbox setup's collaborators in tests; nil reads them
+	// from the builder at call time.
+	inbox *inboxCollaborators
 }
 
 type planWarning struct {
@@ -395,6 +398,9 @@ func (h *folderSetupHost) plan(ctx context.Context, req personalassistant.Folder
 	if row, builtin := softwareRow(req.Offer); builtin {
 		return h.softwarePlan(ctx, req, row)
 	}
+	if row, inbox := inboxRow(req.Offer); inbox {
+		return h.inboxPlan(ctx, req, row)
+	}
 	target, err := h.target(req.Offer)
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
@@ -440,11 +446,15 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	// journey service is required, and an intent naming any other recipe is
 	// refused rather than run as something else.
 	_, builtin := softwareRow(req.Offer)
-	if builtin || req.Plan.Intent.Recipe != "" {
-		if !builtin || req.Plan.Intent.Recipe != folderdigest.BuiltinSoftwareProject {
-			return errSetupUnavailable
+	_, inbox := inboxRow(req.Offer)
+	if builtin || inbox || req.Plan.Intent.Recipe != "" {
+		switch {
+		case builtin && req.Plan.Intent.Recipe == folderdigest.BuiltinSoftwareProject:
+			return h.softwareRun(ctx, req)
+		case inbox && req.Plan.Intent.Recipe == folderdigest.BuiltinInboxFolder:
+			return h.inboxRun(ctx, req)
 		}
-		return h.softwareRun(ctx, req)
+		return errSetupUnavailable
 	}
 	if h.builder.setupJourneyService == nil {
 		return errSetupUnavailable

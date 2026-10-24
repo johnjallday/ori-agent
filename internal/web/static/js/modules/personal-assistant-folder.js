@@ -170,6 +170,7 @@ function plural(n, noun) {
 // and Later, which belong to the offer it came from.
 function projectConfirmView(offer, base, subject, remember, { back = false } = {}) {
   if (offer.capability && !back) return capabilityConfirmView(offer, base, subject);
+  if (isInboxFolderOffer(offer) && !back) return inboxConfirmView(offer, base, subject);
   const marker = String(offer.subject?.marker || '').trim();
   // The plan names its blueprint only when that blueprint will be used; a
   // missing one is explained by the note instead.
@@ -271,6 +272,26 @@ const SOFTWARE_STOP_COPY = {
   failed:
     'A step did not finish. What finished is kept and nothing in the project folder was changed; Try again carries on from there.'
 };
+
+// An inbox folder's File Janitor setup is the host's own as well. A changed
+// review or a folder File Janitor will not take is reviewed afresh from a new
+// pick; anything else carries on from what is saved.
+const INBOX_STOP_COPY = {
+  plan_changed:
+    'What is saved no longer matches what you reviewed, or File Janitor will not take this folder, so I stopped before going further. Anything that finished is kept and no file was moved. Pick the folder again to review it afresh.',
+  needs_pick: subject =>
+    `Ori can no longer use ${subject}: the server was restarted, or the folder there is not the one you showed me. Pick the folder again to carry on.`,
+  interrupted:
+    'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
+  failed:
+    'A step did not finish. What finished is kept and no file was moved; Try again carries on from there.'
+};
+
+function inboxStoppedActions(reason) {
+  if (reason === 'plan_changed' || reason === 'needs_pick')
+    return [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }];
+  return [{ id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true }];
+}
 
 // A group setup is the host's own too. It creates workspaces one at a time, so
 // a stop always leaves what finished in place and is carried on from the card.
@@ -380,7 +401,7 @@ function stoppedActions(reason, setup) {
 export function setupRunView(
   setup,
   subject,
-  { portfolio = false, software = false, structure = false } = {}
+  { portfolio = false, software = false, structure = false, inbox = false } = {}
 ) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
@@ -409,6 +430,7 @@ export function setupRunView(
     (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (structure) sentence = STRUCTURE_STOP_COPY[reason] || STRUCTURE_STOP_COPY.failed;
+  if (inbox) sentence = INBOX_STOP_COPY[reason] || INBOX_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   const stopped = globalThis.OriFolderSetupVisual.stoppedRequirement(setup);
   if (stopped) sentence = `Stopped at ${stopped}. ${sentence}`;
@@ -421,7 +443,122 @@ export function setupRunView(
       ? structureStoppedActions(reason)
       : software
         ? softwareStoppedActions(reason)
-        : stoppedActions(reason, setup || {})
+        : inbox
+          ? inboxStoppedActions(reason)
+          : stoppedActions(reason, setup || {})
+  };
+}
+
+// confirmationSummary is the line under a plan's confirm button: what the click
+// covers. Only a plan that installs a plugin says that it covers more than that.
+export function confirmationSummary(plan) {
+  const installs = (Array.isArray(plan?.lines) ? plan.lines : []).some(line =>
+    ['integration', 'provider'].includes(line?.kind)
+  );
+  return installs
+    ? 'Confirmation covers the whole setup above, not just plugin installation.'
+    : 'Confirmation covers the whole setup above.';
+}
+
+// isInboxFolderOffer is an offer about an inbox folder (Downloads, Desktop,
+// Documents and the like), which the host's own File Janitor setup answers.
+export function isInboxFolderOffer(offer) {
+  return (
+    offer?.subject?.shape === 'inbox' &&
+    offer?.subject?.is_root === true &&
+    !offer?.capability &&
+    !offer?.software &&
+    !offer?.portfolio
+  );
+}
+
+const WORKSPACE_PAGE = /^\/workspaces\/[a-z0-9][a-z0-9-]*(?:\?panel=file-janitor)?$/;
+
+// inboxRefusalView is the card of an inbox folder that cannot be hired for (FR16):
+// "File Curator already tidies <folder>" with Open it, or the hire's headline with
+// File Janitor's own reason and no primary. Null while the folder can be hired for.
+function inboxRefusalView(offer, base, subject) {
+  if (base.decided || offer.plan) return null;
+  const reason = String(offer.setup_unavailable_reason || '');
+  const message = String(offer.setup_unavailable_message || '').trim();
+  if (reason === 'folder_tidied') {
+    const route = String(offer.tidied?.route || '').trim();
+    return {
+      ...base,
+      headline: segments(['File Curator already tidies ', { text: subject }]),
+      question: offer.tidied?.name
+        ? `${offer.tidied.name} already keeps this folder tidy, so nothing new is created.`
+        : 'Another workspace already keeps this folder tidy, so nothing new is created.',
+      reason: '',
+      actions: WORKSPACE_PAGE.test(route)
+        ? [{ id: 'open-tidied', label: 'Open it', style: 'primary', href: route }]
+        : [],
+      plan: null,
+      hire: null,
+      setup: null
+    };
+  }
+  if (reason === 'root_refused') {
+    return {
+      ...base,
+      headline: segments(['Hire File Curator for ', { text: subject }, ' (unavailable)']),
+      question: message || 'File Janitor cannot use this folder. Nothing is created.',
+      reason: '',
+      actions: [],
+      plan: null,
+      hire: null,
+      setup: null
+    };
+  }
+  return null;
+}
+
+// inboxConfirmView is an inbox folder's hire card: Hire File Curator (or
+// Assign it, when a saved File Curator exists), the one question, the plan's
+// lines and Hire & start or Not now. It installs nothing and has no
+// step-by-step journey, so there is no Adjust.
+function inboxConfirmView(offer, base, subject) {
+  const run = offer.setup ? setupRunView(offer.setup, subject, { inbox: true }) : null;
+  const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
+  const hasPlan = planLines.length > 0;
+  const continuing = base.status === 'awaiting_outcome';
+  const hire =
+    hasPlan && (continuing || !base.decided)
+      ? hireView(offer.plan, subject, { needs: offer.needs })
+      : null;
+  let actions = [];
+  if (run) actions = run.actions;
+  else if (hire && !base.decided)
+    actions = [
+      { id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true },
+      { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
+    ];
+  else if (hire && continuing)
+    actions = [{ id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true }];
+  // Another workspace already tidies this folder, or File Janitor will not take
+  // it: the card says so, creates nothing, and offers the owner when there is one.
+  const refusal = inboxRefusalView(offer, base, subject);
+  if (refusal) return refusal;
+  const lines = globalThis.OriFolderRecognitionLines;
+  return {
+    ...base,
+    headline: hire
+      ? hire.headline
+      : segments([{ text: subject }, ' is a folder File Curator can tidy.']),
+    question: run
+      ? run.question
+      : hasPlan
+        ? `${subject} holds loose files rather than one project, so File Curator can keep it tidy.`
+        : `Setting up ${subject} is unavailable right now.`,
+    recognitionLine: run || !lines ? '' : lines.recognitionLine(offer.recognition),
+    needsLine: '',
+    capabilityDetail: '',
+    reason: run ? '' : base.reason,
+    actions,
+    resume: continuing,
+    plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    hire,
+    setup: run
   };
 }
 
@@ -857,7 +994,29 @@ export function blockedFolderSetupAction(offer) {
 // string comes from the verdict and the server's counts and names.
 // options.confirm ('project' or 'tidy') shows the plan card for a mixed or
 // ambiguous offer instead of its question. The reason line remains present.
+// folderOfferView is the card for an offer. A folder that holds a project beside
+// loose files has two hires; the host chose which leads, so the leading card
+// carries its reason under "Why this suggestion?" and every undecided card
+// carries one link to the other hire (folder-inbox-hire FR12, FR13). Following
+// the link reviews the other hire in place; nothing is created.
 export function folderOfferView(offer, options = {}) {
+  const view = folderOfferViewWithoutLead(offer, options);
+  const lead = offer?.lead;
+  if (!view?.visible || !lead || view.decided || offer.status !== 'pending') return view;
+  const id = String(lead.alternative_id || '').trim();
+  const label = String(lead.alternative_label || '').trim();
+  if (!id || !label) return view;
+  return {
+    ...view,
+    leadReason: lead.leading === true ? String(lead.reason || '').trim() : '',
+    actions: [
+      ...(view.actions || []),
+      { id: 'lead-swap', label: `Or: ${label}`, style: 'link', swapCandidate: id }
+    ]
+  };
+}
+
+function folderOfferViewWithoutLead(offer, options = {}) {
   if (!offer || typeof offer !== 'object') return { visible: false };
   const verdict = String(offer.verdict || '').trim();
   const folder = String(offer.folder || '').trim() || 'that folder';
@@ -1052,7 +1211,14 @@ export function folderOfferView(offer, options = {}) {
           newTab: true
         });
     }
-    if (model && status === 'pending' && offer.conversation_id && offer.candidate_id)
+    // A plan whose model is not needed has nothing to check again.
+    if (
+      model &&
+      model.state !== 'not_needed' &&
+      status === 'pending' &&
+      offer.conversation_id &&
+      offer.candidate_id
+    )
       view.actions.push({ id: 'recheck', label: 'Check again', style: 'outline', recheck: true });
   }
   return view;
@@ -1698,6 +1864,23 @@ export function folderReceiptView(offer, options = {}) {
     )
   )
     return { visible: false };
+  // An inbox hire's first look is its first batch: the card leads to the review
+  // of that batch (or File Janitor, when there was nothing to file). No model
+  // task exists for it, so Start first look never appears.
+  const batch = firstBatchView(offer);
+  if (batch)
+    return {
+      visible: true,
+      rows: rows.map(row => ({
+        kind: String(row.kind || ''),
+        name: String(row.name || ''),
+        detail: String(row.detail || '')
+      })),
+      route: batch.route,
+      homeRoute: '',
+      openLabel: batch.label,
+      batch
+    };
   const openLabel = `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`;
   // The stored receipt is from the moment of setup. Where the first look stands
   // now is read live, so its row and the card's buttons follow it.
@@ -1742,6 +1925,31 @@ export function folderReceiptView(offer, options = {}) {
     ...(map ? { map } : {}),
     ...(hireLook.visible ? { hireLook } : {}),
     ...(firstLook.visible ? { firstLook } : {})
+  };
+}
+
+// The File Janitor review a first batch opens: its workspace's panel, on the
+// batch when the scan made one. Nothing else is followed.
+const FILE_JANITOR_ROUTE =
+  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&batch_id=[A-Za-z0-9_-]+)?$/;
+
+// firstBatchView is an inbox hire's first batch, as its outcome recorded it:
+// where Review batch (or Open File Janitor) leads, and the counts. Null for
+// any other outcome, or a route that is not a File Janitor review.
+export function firstBatchView(offer) {
+  const batch = offer?.outcome?.first_look?.batch;
+  if (!batch || typeof batch !== 'object') return null;
+  const route = String(batch.route || '').trim();
+  if (!FILE_JANITOR_ROUTE.test(route)) return null;
+  const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
+  const outcome = ['batch', 'no_eligible', 'failed'].includes(batch.outcome) ? batch.outcome : '';
+  if (!outcome) return null;
+  return {
+    outcome,
+    route,
+    label: outcome === 'batch' ? 'Review batch' : 'Open File Janitor',
+    eligible: count(batch.eligible),
+    needsReview: count(batch.needs_review)
   };
 }
 
@@ -2216,6 +2424,7 @@ const state = {
   // The brief typed on a hire card: which offer, and the text. Untouched, the
   // card shows the plan's default and sends nothing, so the server's applies.
   brief: { offerId: '', value: '', typed: false },
+  monitoring: { offerId: '', checked: false },
   digest: null,
   offer: null,
   busy: false,
@@ -2295,6 +2504,7 @@ const RECEIPT_LABELS = {
   blueprint: ['Blueprint', '✦'],
   agent: ['Agent', '●'],
   task: ['First task', '✓'],
+  batch: ['First batch', '▦'],
   home: ['Home', '⌂'],
   library: ['Library', '☰'],
   assistant: ['Shared assistant', '●'],
@@ -2386,6 +2596,10 @@ function elements() {
     hireDetail: document.getElementById('personalAssistantFolderHireDetail'),
     briefField: document.getElementById('personalAssistantFolderBriefField'),
     brief: document.getElementById('personalAssistantFolderBrief'),
+    monitoringField: document.getElementById('personalAssistantFolderMonitoringField'),
+    monitoring: document.getElementById('personalAssistantFolderMonitoring'),
+    monitoringLabel: document.getElementById('personalAssistantFolderMonitoringLabel'),
+    monitoringHint: document.getElementById('personalAssistantFolderMonitoringHint'),
     planHeading: document.getElementById('personalAssistantFolderPlanHeading'),
     planHeadingText: document.getElementById('personalAssistantFolderPlanHeadingText'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
@@ -2843,7 +3057,8 @@ export function conversationFolderOfferView(offer, options = {}) {
   // read, has said why no setup is offered; that is not "unavailable here".
   // A software project's card always says what it offers and why: a review, a
   // workspace to open, or the reason neither is possible.
-  const softwareExplained = Boolean(offer.software);
+  // An inbox folder's card says the same of its own File Janitor setup.
+  const softwareExplained = Boolean(offer.software) || isInboxFolderOffer(offer);
   if (!offer.needs_pick && !offer.capability && !offer.create_available && !softwareExplained)
     view.question =
       'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
@@ -2885,6 +3100,39 @@ function renderHire(els, hire, offer) {
     els.brief.value = typed === null ? hire.brief.value : typed;
   }
   if (els.brief) els.brief.disabled = state.busy;
+  // Watching is offered only by a plan that names it, and is off until ticked.
+  if (els.monitoringField) els.monitoringField.hidden = !hire.monitoring;
+  if (hire.monitoring && els.monitoring) {
+    setText(els.monitoringLabel, hire.monitoring.label, false);
+    setText(els.monitoringHint, hire.monitoring.hint, false);
+    els.monitoring.checked = monitoringChosen(offer);
+    els.monitoring.disabled = state.busy;
+  }
+}
+
+// planWithWatching is the offer's plan as the card shows it: with the fifth line
+// "Watching turned on" once the user ticked watching, so every list of what
+// Hire and start will do says it. The digest is the plan's own; the tick is not in it.
+export function planWithWatching(offer, chosen = monitoringChosen(offer)) {
+  const plan = offer?.plan;
+  if (!plan?.monitoring || !chosen) return plan || null;
+  return {
+    ...plan,
+    lines: [
+      ...(Array.isArray(plan.lines) ? plan.lines : []),
+      {
+        kind: 'mode',
+        name: 'Watching turned on',
+        detail:
+          'Ori notices new files after a short settle time and proposes them for review. Nothing is filed by itself.'
+      }
+    ]
+  };
+}
+
+// monitoringChosen is whether the user ticked watching on this offer's card.
+function monitoringChosen(offer) {
+  return Boolean(offer?.id) && state.monitoring.offerId === offer.id && state.monitoring.checked;
 }
 
 function renderOffer(place) {
@@ -2978,9 +3226,7 @@ function renderOffer(place) {
   );
   setText(
     document.getElementById('personalAssistantFolderActionSummary'),
-    view.plan && !view.setup && !receipt.visible
-      ? 'Confirmation covers the whole setup above, not just plugin installation.'
-      : ''
+    view.plan && !view.setup && !receipt.visible ? confirmationSummary(view.plan) : ''
   );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
@@ -2991,7 +3237,7 @@ function renderOffer(place) {
   }
   globalThis.OriFolderSetupVisual.renderConsequences(
     document.getElementById('personalAssistantFolderConsequences'),
-    !state.offer?.setup && !receipt.visible ? state.offer?.plan : null
+    !state.offer?.setup && !receipt.visible ? planWithWatching(state.offer) : null
   );
   globalThis.OriFolderSetupVisual.renderProgress(
     document.getElementById('personalAssistantFolderProgress'),
@@ -3047,6 +3293,16 @@ function renderOffer(place) {
   renderHidden(els.hidden, capabilityHiddenView(state.offer));
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
+  // The host's reason for which of a folder's two hires leads, in view on the card.
+  const leadWhy = document.getElementById('personalAssistantFolderLeadWhy');
+  if (leadWhy) {
+    leadWhy.hidden = !view.leadReason;
+    setText(
+      document.getElementById('personalAssistantFolderLeadReason'),
+      view.leadReason || '',
+      false
+    );
+  }
   if (els.receipt) {
     els.receipt.hidden = !receipt.visible;
     // A group's receipt is a list of workspaces to open: one to a row.
@@ -3067,7 +3323,10 @@ function renderOffer(place) {
   if (els.plan) {
     // After a hire, its agent's first look follows the receipt as two lines.
     const look = !view.setup && !view.plan && receipt.visible ? receipt.hireLook : null;
-    const lines = view.setup?.lines || view.plan?.lines || (look?.visible ? look.lines : []);
+    let lines = view.setup?.lines || view.plan?.lines || (look?.visible ? look.lines : []);
+    // Ticking watching adds its fifth line before the click; a run carries its own.
+    if (!view.setup && view.plan?.lines && view.hire?.monitoring && monitoringChosen(state.offer))
+      lines = [...lines, { kind: 'mode', name: view.hire.monitoring.line, detail: '', state: '' }];
     renderSetupLines(els.plan, lines);
     els.plan.hidden = !lines.length;
     els.plan.dataset.mode = view.setup ? view.setup.status : look?.visible ? 'look' : 'plan';
@@ -3359,6 +3618,12 @@ function runAction(action) {
     void window.PersonalAssistantFolderSetup?.closeReview?.(state.offer);
     return;
   }
+  if (action.swapCandidate) {
+    // The other hire of a folder that holds a project beside loose files: its
+    // own review takes this one's place, and nothing is created.
+    window.PersonalAssistantFolderSetup?.reviewCandidate?.(action.swapCandidate);
+    return;
+  }
   if (action.rename) {
     state.editingName = true;
     render();
@@ -3525,6 +3790,8 @@ async function startOneCardSetup(action) {
     // default, and a cleared field is sent empty for the same default.
     const brief = offer.plan?.brief_default ? briefFor(offer) : null;
     if (brief !== null) body.brief = brief;
+    // Watching is the user's own tick, sent with the click and not part of the plan.
+    if (offer.plan?.monitoring && monitoringChosen(offer)) body.monitoring = true;
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
     if (!current()) return;
     if (ok) {
@@ -4688,6 +4955,10 @@ function init() {
   });
   els.workspaceName?.addEventListener('input', () => {
     state.workspaceName = els.workspaceName.value;
+  });
+  els.monitoring?.addEventListener('change', () => {
+    state.monitoring = { offerId: String(state.offer?.id || ''), checked: els.monitoring.checked };
+    render();
   });
   els.brief?.addEventListener('input', () => {
     state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };

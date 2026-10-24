@@ -105,6 +105,7 @@ type Handler struct {
 	today                      TodayReader
 	firstLook                  FirstLookActioner
 	hireLook                   HireLookActioner
+	firstBatch                 FirstBatchActioner
 	continuity                 ContinuityService
 	renamer                    RenameService
 	capabilities               CapabilityReader

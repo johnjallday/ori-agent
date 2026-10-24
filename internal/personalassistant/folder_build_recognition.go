@@ -46,9 +46,26 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 		}
 		return recognition, nil
 	}
-	verdict := folderdigest.Exclude(held.result, now, func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) })
-	if verdict.Kind != folderdigest.KindProject || verdict.Project == nil {
+	tombstoned := func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) }
+	// Below a collection and any project of a known kind, the root itself is an
+	// inbox folder: Ori recognizes it by its verdict, never by its name.
+	if folderdigest.IsInbox(held.result, now, tombstoned) {
+		if recognition, ok := inboxRecognition(held); ok {
+			return recognition, nil
+		}
 		return unrecognized, nil
+	}
+	verdict := folderdigest.Exclude(held.result, now, tombstoned)
+	if verdict.Project == nil || (verdict.Kind != folderdigest.KindProject && verdict.Kind != folderdigest.KindMixed) {
+		return unrecognized, nil
+	}
+	// Projects beside loose files that are not a dump: the project leads (the
+	// dump rule has already sent a dump to its tidy above). Several projects and
+	// nothing loose stay as they were: a choice of project, not one hire.
+	if verdict.Kind == folderdigest.KindMixed {
+		if _, led := folderdigest.MixedHireLead(held.result, now, tombstoned); !led {
+			return unrecognized, nil
+		}
 	}
 	project := *verdict.Project
 	candidateID := ""
@@ -106,10 +123,45 @@ func (s *FolderObservationService) Recognize(ctx context.Context, target folderc
 	return recognition, nil
 }
 
+// inboxRecognition is an inbox folder as both entries say it: the root as the
+// one candidate, set up from the host's File Janitor row. ok is false when the
+// observation did not disclose the root, or the host has no such row.
+func inboxRecognition(held heldFolderObservation) (*BuildFolderRecognition, bool) {
+	row, ok := folderdigest.InboxCapability()
+	if !ok {
+		return nil, false
+	}
+	if _, ok := observedReviewCandidate(held, folderRootCandidateID); !ok {
+		return nil, false
+	}
+	return &BuildFolderRecognition{
+		Verdict: BuildFolderProject, Shape: string(folderdigest.ShapeInbox), ProjectCount: 1, CandidateID: folderRootCandidateID,
+		Label: row.Builtin.DisplayName, BlueprintID: row.Blueprint.BlueprintID, BlueprintLabel: row.Blueprint.Label,
+	}, true
+}
+
+// isInboxSubject is true for an offer's subject that is an inbox folder's root.
+func isInboxSubject(subject FolderCandidateRecord) bool {
+	return subject.Kind == FolderChoiceProject && subject.IsRoot && subject.Shape == string(folderdigest.ShapeInbox)
+}
+
+// isInboxOffer is true for an offer about an inbox folder that the host's own
+// File Janitor setup can answer. A suppressed capability, a supporting-folder
+// link and a collection are not one.
+func isInboxOffer(offer FolderOffer) bool {
+	return !offer.CapabilitySuppressed && offer.Portfolio == nil && offer.Structure == nil && isInboxSubject(offer.Subject)
+}
+
 // recognizedProjectLabel names a recognized project the way both entries say
 // it: "<integration> project" for a host capability row, or the software
 // table's own name. ok is false for any other project.
 func recognizedProjectLabel(subject FolderCandidateRecord) (string, bool) {
+	if isInboxSubject(subject) {
+		if row, ok := folderdigest.InboxCapability(); ok {
+			return row.Builtin.DisplayName, true
+		}
+		return "", false
+	}
 	if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(subject.Shape), subject.MarkerName, subject.DominantExtension); ok && row.Offer != nil {
 		return row.Offer.IntegrationName + " project", true
 	}

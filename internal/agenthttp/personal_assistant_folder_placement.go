@@ -182,6 +182,11 @@ func (h *HomeAssistantAskHandler) existingProjectHandoff(userID string, target f
 	if ref.Slug != "" {
 		existing["route"] = workspaceHref(ref.Slug)
 	}
+	// An inbox folder's workspace is File Curator's: the card says it tidies the
+	// folder rather than calling it a project.
+	if done.Subject.Shape == "inbox" {
+		existing["tidied"] = true
+	}
 	if done.ConversationID != "" && done.ConversationID != target.ConversationID {
 		existing["conversation_id"] = done.ConversationID
 	}

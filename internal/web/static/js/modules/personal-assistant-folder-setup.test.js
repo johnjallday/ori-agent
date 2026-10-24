@@ -347,6 +347,21 @@ test('only a real change in the card retires the last status sentence', () => {
     assert.notEqual(reviewStateKey(pending), reviewStateKey({ ...pending, ...changed }));
 });
 
+test('an inbox folder File Curator already tidies says so and opens it', () => {
+  const view = existingProjectView({
+    subject: 'Downloads',
+    workspace: 'Downloads',
+    route: '/workspaces/downloads',
+    tidied: true
+  });
+  assert.equal(
+    view.message,
+    'File Curator already tidies Downloads. Nothing new has been prepared.'
+  );
+  assert.equal(view.openLabel, 'Open it');
+  assert.equal(view.route, '/workspaces/downloads');
+});
+
 test('a folder that is already a project links its page and offers no setup control', () => {
   const view = existingProjectView({
     subject: 'Album-5',

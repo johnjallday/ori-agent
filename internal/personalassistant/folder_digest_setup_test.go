@@ -34,6 +34,7 @@ type fakeFolderSetup struct {
 	hire         *FolderHire
 	briefDefault string
 	visual       *FolderSetupVisual
+	monitoring   *FolderMonitoringOffer
 }
 
 func (f *fakeFolderSetup) entryNames() []string {
@@ -51,6 +52,7 @@ func (f *fakeFolderSetup) Plan(_ context.Context, req FolderSetupRequest) (Folde
 	plan.Intent = f.intent
 	plan.Hire, plan.BriefDefault = f.hire, f.briefDefault
 	plan.Visual = f.visual
+	plan.Monitoring = f.monitoring
 	return plan.Stamped(), f.planErr
 }
 
