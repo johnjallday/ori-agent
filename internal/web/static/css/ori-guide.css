@@ -1594,6 +1594,15 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: var(--pa-accent-text);
 }
 
+/* What the same item is when typed in the composer (New: /clear). */
+.personal-assistant-panel__menu-hint {
+  margin-left: auto;
+  color: var(--pa-ink-dim);
+  font-family: var(--bs-font-monospace, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 400;
+}
+
 /* With a folder attached, Add folder is "Replace folder" (its aria-label,
    set by personal-assistant-folder-context.js); in the menu that is also
    what it says. */
