@@ -434,18 +434,67 @@ export function setupRunView(
   if (typeof sentence === 'function') sentence = sentence(subject);
   const stopped = globalThis.OriFolderSetupVisual.stoppedRequirement(setup);
   if (stopped) sentence = `Stopped at ${stopped}. ${sentence}`;
+  const actions = structure
+    ? structureStoppedActions(reason)
+    : software
+      ? softwareStoppedActions(reason)
+      : inbox
+        ? inboxStoppedActions(reason)
+        : stoppedActions(reason, setup || {});
   return {
     status,
     lines,
     statusLine: '',
     question: `${progress}${sentence}`,
-    actions: structure
-      ? structureStoppedActions(reason)
-      : software
-        ? softwareStoppedActions(reason)
-        : inbox
-          ? inboxStoppedActions(reason)
-          : stoppedActions(reason, setup || {})
+    // Remove is last, so the first-glance primary stays "finish it".
+    actions: [...actions, REMOVE_SETUP]
+  };
+}
+
+// REMOVE_SETUP closes a stopped setup for good: it leaves Needs you and nothing
+// it created is undone. It opens a confirm first (removeConfirmView).
+const REMOVE_SETUP = { id: 'remove', label: 'Remove', style: 'link', remove: true };
+
+// What a finished plan line leaves behind, by line kind, for the confirm's
+// "Kept:" sentence. Kinds that are settings of a step, not a thing, say nothing.
+const KEPT_NOUNS = {
+  workspace: 'the workspace',
+  member: 'the workspaces',
+  workspaces: 'the workspaces',
+  group: 'the group',
+  home: 'the Home',
+  library: 'the library',
+  folder: 'the folder link',
+  agents: 'the agent',
+  assistant: 'the agent',
+  integration: 'the plugin',
+  provider: 'the plugin',
+  task: 'the first task'
+};
+
+// removeConfirmView is the card while the user is asked to confirm Remove: the
+// question, what stays, how to start over, and Remove / Keep. It takes the view
+// the offer would otherwise show and keeps all of it but the question and actions,
+// so the drawer's card and Home's mission card draw the same block.
+export function removeConfirmView(offer, view = {}) {
+  const kept = [];
+  setupLinesView(offer?.setup?.lines)
+    .filter(line => line.state === 'done')
+    .forEach(line => {
+      const noun = KEPT_NOUNS[line.kind];
+      if (noun && !kept.includes(noun)) kept.push(noun);
+    });
+  const keptLine = kept.length ? `Kept: ${kept.join(', ')}.` : 'Kept: nothing was created yet.';
+  return {
+    ...view,
+    removing: true,
+    question: `Remove this setup from Needs you? ${keptLine} Show the folder again to start over.`,
+    reason: '',
+    capabilityDetail: '',
+    actions: [
+      { id: 'remove-confirm', label: 'Remove', style: 'primary', removeConfirm: true },
+      { id: 'remove-keep', label: 'Keep', style: 'outline', removeKeep: true }
+    ]
   };
 }
 
@@ -647,7 +696,8 @@ export function setupResultView(offer, { songs = [], total = 0, now = new Date()
     receiptRows: [],
     route: '',
     openLabel: '',
-    actions: run.actions
+    // The pop-up has no place for Remove's confirm; the card does.
+    actions: run.actions.filter(action => !action.remove)
   };
 }
 
@@ -1001,6 +1051,10 @@ export function blockedFolderSetupAction(offer) {
 // the link reviews the other hire in place; nothing is created.
 export function folderOfferView(offer, options = {}) {
   const view = folderOfferViewWithoutLead(offer, options);
+  // Remove asked, and the card still offers it: the confirm replaces the actions.
+  // A card that moved on (the run restarted) simply shows itself again.
+  if (options?.confirm === 'remove' && view.visible && (view.actions || []).some(a => a.remove))
+    return removeConfirmView(offer, view);
   const lead = offer?.lead;
   if (!view?.visible || !lead || view.decided || offer.status !== 'pending') return view;
   const id = String(lead.alternative_id || '').trim();
@@ -3230,9 +3284,10 @@ function renderOffer(place) {
   );
   const diagram = document.getElementById('personalAssistantFolderVisual');
   if (diagram) {
-    diagram.hidden = !(state.offer?.plan || state.offer?.setup || receipt.visible);
+    diagram.hidden = !folderDiagramVisible(state.offer, receipt.visible);
     if (!diagram.hidden)
       globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
+    else diagram.replaceChildren();
     els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
   }
   globalThis.OriFolderSetupVisual.renderConsequences(
@@ -3666,6 +3721,28 @@ function runAction(action) {
     else openChooser();
     return;
   }
+  if (action.remove) {
+    state.confirm = 'remove';
+    showError('');
+    render();
+    announceOffer();
+    focusFolderAction('remove-keep');
+    // The question is above the buttons: bring the whole confirm into view.
+    window.PersonalAssistantTranscript?.revealControl?.(elements()?.question, true);
+    return;
+  }
+  if (action.removeKeep) {
+    state.confirm = '';
+    showError('');
+    render();
+    announceOffer();
+    focusFolderAction('remove');
+    return;
+  }
+  if (action.removeConfirm) {
+    void removeSetup();
+    return;
+  }
   if (action.confirm || action.back) {
     state.confirm = action.back ? '' : String(action.confirm);
     render();
@@ -3737,6 +3814,80 @@ function runAction(action) {
     return;
   }
   decide(action);
+}
+
+// folderDiagramVisible says whether an offer card draws the setup diagram: for a
+// receipt, or when the saved run or plan carries visual data. A run saved before
+// the diagram existed has none, and the renderer's placeholder ("Setup preview",
+// "Not reviewed", "No destination proposed") would read as state the card does
+// not know.
+export function folderDiagramVisible(offer, receiptVisible = false) {
+  return Boolean(receiptVisible || offer?.setup?.visual || offer?.plan?.visual);
+}
+
+// removeFailureSentence is what a refused or failed Remove tells the user. The
+// confirm stays, so they can read it and choose Keep or try again.
+export function removeFailureSentence(payload) {
+  if (payload?.reason === 'setup_running') return 'Setup is still running. Wait for it to stop.';
+  if (payload?.reason === 'offer_decided') return 'This setup already moved on. Reload to see it.';
+  return String(payload?.error || 'That could not be saved. Try again.');
+}
+
+// removeSetup is the confirmed Remove: the server closes the stopped setup, and
+// the card leaves every place it was shown. Nothing the setup made is touched.
+async function removeSetup() {
+  const offer = state.offer;
+  if (!offer?.id || state.busy || state.confirm !== 'remove') return;
+  const generation = state.reviewGeneration;
+  state.busy = true;
+  showError('');
+  render();
+  let removed = false;
+  try {
+    const response = await fetch(
+      `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offer.id)}/abandon`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ request_id: requestId() })
+      }
+    );
+    const payload = await readJSON(response);
+    if (generation !== state.reviewGeneration || state.offer?.id !== offer.id) return;
+    if (!response.ok) {
+      showError(removeFailureSentence(payload));
+      return;
+    }
+    removed = true;
+    const folder = String(offer.folder || offer.subject?.name || '').trim() || 'The folder';
+    const note = `${folder} setup removed. Show the folder again to start over.`;
+    setText(elements()?.offerNote, note);
+    state.offer = null;
+    state.pinned = '';
+    state.confirm = '';
+    state.progress = '';
+    sayInConversation(note);
+    announceOffer();
+    // Today's Needs you list and every count read the board again.
+    firstLookMoved();
+  } catch (_) {
+    if (generation === state.reviewGeneration) showError('That could not be saved. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+    if (removed) focusAfterRemove();
+  }
+}
+
+// focusAfterRemove puts focus where the user starts over: the Add folder chip
+// when it shows, else the composer.
+function focusAfterRemove() {
+  const chip = document.getElementById('personalAssistantFolderChip');
+  const target =
+    chip && !chip.hidden && !chip.closest('[hidden]')
+      ? chip
+      : document.getElementById('personalAssistantInput');
+  target?.focus?.({ preventScroll: true });
 }
 
 const SETUP_POLL_MS = 1500;
@@ -4302,15 +4453,23 @@ function startManualTidy() {
 // renders the same offer inline. Returns false when there is no such action
 // to run: no offer, an offer already decided, or an unknown id.
 function act(actionId) {
-  const view = folderOfferView(state.offer, { confirm: state.confirm });
-  if (!view.visible || (view.decided && !view.resume)) return false;
-  // A hire's Adjust sits beside its lines rather than in the action row.
-  const action = [...(view.actions || []), ...(view.hire?.adjust ? [view.hire.adjust] : [])].find(
-    candidate => candidate.id === actionId
-  );
+  const action = offerActionById(state.offer, state.confirm, actionId);
   if (!action) return false;
   runAction(action);
   return true;
+}
+
+// offerActionById finds the offer's action with this id, or null when there is
+// none to run: no offer, an offer already decided, or an unknown id.
+export function offerActionById(offer, confirm, actionId) {
+  const view = folderOfferView(offer, { confirm });
+  if (!view.visible || (view.decided && !view.resume)) return null;
+  // A hire's Adjust sits beside its lines rather than in the action row.
+  return (
+    [...(view.actions || []), ...(view.hire?.adjust ? [view.hire.adjust] : [])].find(
+      candidate => candidate.id === actionId
+    ) || null
+  );
 }
 
 // openHQCard opens the drawer on the card that builds the HQ, expanded even when
@@ -4959,6 +5118,13 @@ function init() {
   els.monitoring?.addEventListener('change', () => {
     state.monitoring = { offerId: String(state.offer?.id || ''), checked: els.monitoring.checked };
     render();
+  });
+  // Esc leaves the Remove confirm as Keep does, without closing the drawer.
+  els.offer?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || state.confirm !== 'remove' || state.busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    runAction({ removeKeep: true });
   });
   els.brief?.addEventListener('input', () => {
     state.brief = { offerId: String(state.offer?.id || ''), value: els.brief.value, typed: true };

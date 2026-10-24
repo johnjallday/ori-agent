@@ -565,6 +565,14 @@ you while a look is open or has just finished (an hour), so a reload keeps
 **Running…**. Today lists "First look at <folder>" under Working on while it
 runs and a `folder_result` under Done for seven days after it finishes.
 
+A confirmed setup that stopped stays in Needs you (a setup card, `awaiting_outcome`)
+until the user removes it. **Remove**, with an inline confirm, calls
+`POST …/folder-digest/offers/{offerID}/abandon`, which closes the offer as
+`abandoned`: it is not pinned, listed or counted any more, nothing the setup created
+is deleted, and no tombstone or domain decline is written, so showing the folder
+again starts a fresh offer. A run that is live in the server cannot be removed; one
+that a restart interrupted can.
+
 A look a hire started reports back instead (`first_look_report.go`): once it
 finishes, Today's Needs you carries one `folder_first_look` item, drawn as a
 card on Home's Today and in the assistant drawer on every page and counted in

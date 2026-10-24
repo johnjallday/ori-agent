@@ -1323,7 +1323,7 @@ test('a stopped collection says what is true for a collection', () => {
   assert.doesNotMatch(view.question, /workspace and folder are set up/);
   assert.deepEqual(
     view.actions.map(action => action.id),
-    ['model', 'retry', 'resume']
+    ['model', 'retry', 'resume', 'remove']
   );
   const modal = setupModalView({
     ...stoppedOffer('needs_model'),
@@ -1338,15 +1338,15 @@ test('a stopped setup offers the action that fixes its stop', () => {
     folderOfferView(stoppedOffer(reason, { entry_candidates: ['A.rpp', 'B.rpp'] })).actions.map(
       action => action.id
     );
-  assert.deepEqual(ids('failed'), ['retry', 'resume']);
-  assert.deepEqual(ids('install_failed'), ['retry', 'resume']);
-  assert.deepEqual(ids('interrupted'), ['retry', 'resume']);
-  assert.deepEqual(ids('needs_model'), ['model', 'retry', 'resume']);
-  assert.deepEqual(ids('needs_choice'), ['choose-0', 'choose-1', 'resume']);
-  assert.deepEqual(ids('plan_changed'), ['resume']);
+  assert.deepEqual(ids('failed'), ['retry', 'resume', 'remove']);
+  assert.deepEqual(ids('install_failed'), ['retry', 'resume', 'remove']);
+  assert.deepEqual(ids('interrupted'), ['retry', 'resume', 'remove']);
+  assert.deepEqual(ids('needs_model'), ['model', 'retry', 'resume', 'remove']);
+  assert.deepEqual(ids('needs_choice'), ['choose-0', 'choose-1', 'resume', 'remove']);
+  assert.deepEqual(ids('plan_changed'), ['resume', 'remove']);
   // The shared assistant cannot be added on its own: the user chooses in the journey.
-  assert.deepEqual(ids('consent_stale'), ['resume']);
-  assert.deepEqual(ids('assistant_missing'), ['resume']);
+  assert.deepEqual(ids('consent_stale'), ['resume', 'remove']);
+  assert.deepEqual(ids('assistant_missing'), ['resume', 'remove']);
   const model = folderOfferView(stoppedOffer('needs_model')).actions[0];
   assert.equal(model.href, '/settings#system-model');
   const choice = folderOfferView(stoppedOffer('needs_choice', { entry_candidates: ['A.rpp'] }))
