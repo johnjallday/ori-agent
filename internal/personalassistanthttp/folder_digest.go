@@ -30,6 +30,7 @@ type FolderDigestService interface {
 	ScanPicked(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
 	ScanPickedFile(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
 	Decide(ctx context.Context, userID, offerID string, input personalassistant.FolderDecisionInput) (personalassistant.FolderOfferView, error)
+	Abandon(ctx context.Context, userID, offerID, requestID string) (personalassistant.FolderOfferView, error)
 	Resolve(ctx context.Context, userID, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error)
 	ResolveJourney(ctx context.Context, userID, offerID string, input personalassistant.FolderJourneyInput) (personalassistant.FolderOfferView, error)
 	ResolvePortfolio(ctx context.Context, userID, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error)
@@ -324,6 +325,52 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 			"error":          "This folder already has a workspace. Open it instead of setting up another.",
 			"project_exists": true, "offer": offer,
+		})
+		return
+	}
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
+}
+
+// AbandonFolderDigest removes a stopped setup from Needs you. It deletes
+// nothing the setup created and writes no decline, so the folder can be shown
+// again. A setup that is still running is refused.
+func (h *Handler) AbandonFolderDigest(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if !decodeFolderDigestBody(w, r, &req, "request_id") {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	offer, err := h.folderDigest.Abandon(r.Context(), userID, offerID, req.RequestID)
+	if errors.Is(err, personalassistant.ErrFolderSetupRunning) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "Setup is still running. Wait for it to stop.", "reason": "setup_running",
+		})
+		return
+	}
+	if errors.Is(err, personalassistant.ErrFolderOfferDecided) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "That setup already moved on. Reload to see it.", "reason": "offer_decided",
 		})
 		return
 	}
