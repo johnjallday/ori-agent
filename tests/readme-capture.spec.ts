@@ -1238,8 +1238,9 @@ test('captures the Home command bridge and the Personal Assistant drawer', async
       await expect(scenePage.locator('#personalAssistantWorkspaceContext')).toHaveText(
         'Context · App-wide'
       );
-      // Ready chat keeps unrelated attention compact until the user opens it.
-      const attention = scenePage.locator('#personalAssistantSummaryToggle');
+      // Every opening folds Today behind its strip; the scene opens it so the
+      // brief row is in the photograph.
+      const attention = scenePage.locator('#personalAssistantTodayStripToggle');
       await expect(attention).toHaveAttribute('aria-expanded', 'false');
       await attention.click();
       await expect(scenePage.locator('#personalAssistantBriefRow')).toBeVisible();

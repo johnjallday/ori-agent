@@ -17,12 +17,15 @@
   <h3 id="personalAssistantTodayTitle" class="visually-hidden">Today</h3>
   <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
 
-  <!-- Ready assistants keep unrelated attention in this compact disclosure,
-       including on resume. Setup prerequisites remain expanded. Showing or
-       hiding never discards a card or anything typed into it. -->
-  <div id="personalAssistantSummary" class="personal-assistant-summary" hidden>
-    <span id="personalAssistantSummaryText" class="personal-assistant-summary__text"></span>
-    <button type="button" id="personalAssistantSummaryToggle" class="personal-assistant-summary__toggle"
+  <!-- The strip: one line, "Needs you · N" or "Today", that every opening of
+       the drawer starts folded so the conversation is what shows. Show opens
+       Needs you, the brief row and the progress row until the drawer closes;
+       this tab's own new report opens it once by itself. Setup prerequisites
+       stay expanded with no strip. Folding never discards a card or anything
+       typed into it. -->
+  <div id="personalAssistantTodayStrip" class="personal-assistant-summary" hidden>
+    <span id="personalAssistantTodayStripText" class="personal-assistant-summary__text"></span>
+    <button type="button" id="personalAssistantTodayStripToggle" class="personal-assistant-summary__toggle"
             aria-expanded="false" aria-controls="personalAssistantTodaySections">Show</button>
   </div>
 

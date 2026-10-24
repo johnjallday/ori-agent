@@ -8,6 +8,7 @@
 // conversation's saved proposals in whatever state they are in now.
 import './folder-plan-lines.js';
 import './agent-hire-card.js';
+import { claimNeedsItem } from './personal-assistant-needs-reveal.js';
 
 const HIRE_ACTION = 'hire_agent';
 const STATES = ['offered', 'declined', 'adjusted', 'hired'];
@@ -257,6 +258,8 @@ export function render(row, confirmationOrProposal, options = {}) {
         if (current.state === 'offered') paint();
       },
       onHired: result => {
+        // Hired from this tab: the agent's report opens Today's strip once.
+        if (text(result?.hire_id)) claimNeedsItem(`hire:${text(result.hire_id)}`);
         settle('hired', result);
         announceHired(result);
         if (typeof options.onHired === 'function') options.onHired(result, current);

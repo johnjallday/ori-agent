@@ -262,7 +262,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       'polite'
     );
     await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
-    await page.locator('#personalAssistantSummaryToggle').press('Enter');
+    await page.locator('#personalAssistantTodayStripToggle').press('Enter');
     await expect(page.locator('#personalAssistantBriefRow')).toBeVisible();
     await expect(page.locator('#personalAssistantProgressRow')).toBeVisible();
     await page.locator('#personalAssistantInput').focus();
@@ -289,7 +289,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     const visited = await tabBackThroughDrawer(page);
     const names = visited.map(stop => stop.name);
     for (const expected of [
-      'personalAssistantFolderChip',
+      'personalAssistantAttachMenu',
       'personalAssistantProgressRow',
       'personalAssistantBriefRow',
       'personalAssistantClose',
@@ -397,20 +397,28 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('#personalAssistantInput')).toBeFocused();
 
-    // The chip is the control just before the composer, and it has a name.
-    const chip = page
+    // "+" is the control just before the composer, and it has a name. Enter
+    // opens its menu with Add folder, which keeps its id, focused.
+    const attach = page
       .getByRole('dialog', { name: 'Atlas' })
-      .getByRole('button', { name: 'Add folder', exact: true });
+      .getByRole('button', { name: 'Attach', exact: true });
     await page.keyboard.press('Shift+Tab');
+    await expect(attach).toBeFocused();
+    await expect(attach).toHaveAttribute('id', 'personalAssistantAttachMenu');
+    await expect(attach).toHaveAttribute('aria-haspopup', 'menu');
+    await page.keyboard.press('Enter');
+    await expect(attach).toHaveAttribute('aria-expanded', 'true');
+    const chip = page.getByRole('menuitem', { name: 'Add folder', exact: true });
     await expect(chip).toBeFocused();
     await expect(chip).toHaveAttribute('id', 'personalAssistantFolderChip');
     expect(await contrastRatio(page, '#personalAssistantFolderChip')).toBeGreaterThanOrEqual(4.5);
 
-    // Ready attention is folded even before the first message.
-    const strip = page.locator('#personalAssistantSummary');
-    const toggle = page.locator('#personalAssistantSummaryToggle');
+    // Today is folded behind the strip on every opening, before any message.
+    const strip = page.locator('#personalAssistantTodayStrip');
+    const toggle = page.locator('#personalAssistantTodayStripToggle');
     await expect(strip).toBeVisible();
     await page.keyboard.press('Enter');
+    await expect(attach).toHaveAttribute('aria-expanded', 'false');
 
     // Opening the local chooser fabricates no user request or model answer.
     const chooser = page.locator('#personalAssistantContextChooser');
@@ -425,7 +433,8 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     );
     await page.keyboard.press('Escape');
     await expect(chooser).toBeHidden();
-    await expect(chip).toBeFocused();
+    // Add folder is in the closed menu now, so focus returns to "+".
+    await expect(attach).toBeFocused();
 
     // The strip is a real disclosure for what it folded.
     await expect(strip).toBeVisible();
@@ -433,7 +442,10 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle).toHaveAttribute('aria-controls', 'personalAssistantTodaySections');
     await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
-    for (const selector of ['#personalAssistantSummaryText', '#personalAssistantSummaryToggle']) {
+    for (const selector of [
+      '#personalAssistantTodayStripText',
+      '#personalAssistantTodayStripToggle'
+    ]) {
       expect(await contrastRatio(page, selector), `contrast of ${selector}`).toBeGreaterThanOrEqual(
         4.5
       );
@@ -441,7 +453,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // Reached with the keyboard, it shows where focus is.
     await page.locator('#personalAssistantInput').focus();
     const stops = await tabBackThroughDrawer(page);
-    expect(stops.map(stop => stop.name)).toContain('personalAssistantSummaryToggle');
+    expect(stops.map(stop => stop.name)).toContain('personalAssistantTodayStripToggle');
     expect(stops.filter(stop => !stop.outlined).map(stop => stop.name)).toEqual([]);
     await toggle.focus();
     await page.keyboard.press('Enter');
@@ -496,11 +508,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     expect(await contrastRatio(page, '#personalAssistantNeedsLineText')).toBeGreaterThanOrEqual(
       4.5
     );
-    // Reached with the keyboard, the line and the chip show where focus is.
+    // Reached with the keyboard, the line and "+" show where focus is.
     const stops = await tabBackThroughDrawer(page);
     const names = stops.map(stop => stop.name);
     expect(names).toContain('personalAssistantNeedsLine');
-    expect(names).toContain('personalAssistantFolderChip');
+    expect(names).toContain('personalAssistantAttachMenu');
     expect(stops.filter(stop => !stop.outlined).map(stop => stop.name)).toEqual([]);
     // The header works here too: the check-in line and the More links.
     await expect(page.locator('#personalAssistantCheckIn')).not.toHaveText('Personal Assistant');
@@ -683,11 +695,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.locator('#personalAssistantHQHeadline')).toContainText('Atlas is hired');
     await expect(page.getByRole('link', { name: 'Build Personal HQ' })).toHaveCount(0);
     // The composer is there but closed until HQ exists, so focus went to the
-    // first control in the drawer instead.
+    // first control in the drawer instead: on the desktop sheet, Expand.
     await expect(page.locator('#personalAssistantInput')).toBeVisible();
     await expect(page.locator('#personalAssistantInput')).toBeDisabled();
     await expect(page.locator('#personalAssistantSend')).toBeDisabled();
-    await expect(page.locator('#personalAssistantMore > summary')).toBeFocused();
+    await expect(page.locator('#personalAssistantExpand')).toBeFocused();
     // The HQ confirmation is what needs the user, and the heading's number is
     // what is listed: that card, plus whatever "Also needs you" holds.
     await expect(page.locator('#personalAssistantNeedsYou')).toBeVisible();
@@ -1005,5 +1017,271 @@ test.describe('Personal Assistant Foundation accessibility', () => {
 
     // Nothing here relied on the pulse/scroll animation reduced motion turns
     // off: every assertion above was outline, focus, or text.
+  });
+});
+
+// The full-height, resizable sheet, the Needs-you strip and the lighter
+// composer (assistant-drawer-redesign). Browser fixtures only: no model call.
+test.describe('Personal Assistant drawer sheet, strip and composer', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await mockCompletedOnboarding(page);
+    await mockAssistantState(page);
+  });
+
+  async function openDrawer(page: Page) {
+    const panel = page.locator('#personalAssistantPanel');
+    if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
+    await expect(panel).toBeVisible();
+  }
+
+  async function sheet(page: Page) {
+    return page.evaluate(() => {
+      const panel = document.getElementById('personalAssistantPanel')!.getBoundingClientRect();
+      const handle = document.getElementById('personalAssistantResize')!;
+      return {
+        left: panel.left,
+        width: Math.round(panel.width),
+        valueNow: Number(handle.getAttribute('aria-valuenow')),
+        valueMin: Number(handle.getAttribute('aria-valuemin')),
+        valueMax: Number(handle.getAttribute('aria-valuemax'))
+      };
+    });
+  }
+
+  test('the sheet resizes by drag and keys, keeps its width, and Expand keeps the page margin', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await openDrawer(page);
+    const handle = page.getByRole('separator', { name: 'Resize assistant' });
+    await expect(handle).toBeVisible();
+    await expect(handle).toHaveAttribute('aria-orientation', 'vertical');
+    expect(await sheet(page)).toMatchObject({
+      width: 640,
+      valueNow: 640,
+      valueMin: 560,
+      valueMax: 960
+    });
+
+    // Dragging the left edge outwards widens the sheet, live, without selecting text.
+    const box = (await handle.boundingBox())!;
+    const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x - 200, start.y, { steps: 5 });
+    await page.mouse.up();
+    // Input and page reads are not ordered, so each check waits for its value.
+    await expect(handle).toHaveAttribute('aria-valuenow', '840');
+    await expect.poll(async () => (await sheet(page)).width).toBe(840);
+    expect(await page.evaluate(() => window.getSelection()?.toString() || '')).toBe('');
+
+    // The keys: Home, Left (+16), Shift+Left (+64), Right (-16), End.
+    await handle.focus();
+    for (const [key, width] of [
+      ['Home', 560],
+      ['ArrowLeft', 576],
+      ['Shift+ArrowLeft', 640],
+      ['ArrowRight', 624],
+      ['End', 960]
+    ] as const) {
+      await page.keyboard.press(key);
+      await expect(handle, key).toHaveAttribute('aria-valuenow', String(width));
+      await expect.poll(async () => (await sheet(page)).width, { message: key }).toBe(width);
+    }
+
+    // The browser keeps the width.
+    await page.reload();
+    await openDrawer(page);
+    await expect.poll(async () => (await sheet(page)).width).toBe(960);
+
+    // Expand: the widest sheet that leaves min(180px, 20%) of the page.
+    const expand = page.locator('#personalAssistantExpand');
+    await expect(expand).toHaveAttribute('aria-pressed', 'false');
+    await expect(expand).toHaveAccessibleName('Expand');
+    await expand.click();
+    await expect(expand).toHaveAttribute('aria-pressed', 'true');
+    await expect(expand).toHaveAccessibleName('Shrink');
+    // The width follows on the next frame; the margin holds once it has.
+    await expect.poll(async () => (await sheet(page)).width).toBe(1180);
+    expect((await sheet(page)).left).toBeGreaterThanOrEqual(180);
+    await expect(handle).toHaveJSProperty('inert', true);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect.poll(async () => (await sheet(page)).width).toBe(1080);
+    expect((await sheet(page)).left).toBeGreaterThanOrEqual(180);
+    // Shrink returns to the remembered width.
+    await expand.click();
+    await expect.poll(async () => (await sheet(page)).width).toBe(960);
+    await expect(handle).toHaveJSProperty('inert', false);
+  });
+
+  test('the launcher steps aside while the drawer is open, and the phone sheet has no handle', async ({
+    page
+  }) => {
+    const launcher = page.locator('#personalAssistantLauncher');
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 }
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      await expect(launcher).toBeVisible();
+      await launcher.click();
+      await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+      // The sheet covers the launcher's corner; on phones nothing changed.
+      await expect(launcher).toBeHidden();
+      const desktop = viewport.width > 760;
+      await expect(page.locator('#personalAssistantResize')).toBeVisible({ visible: desktop });
+      await expect(page.locator('#personalAssistantExpand')).toBeVisible({ visible: desktop });
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+      await expect(launcher).toBeVisible();
+      await expect(launcher).toBeFocused();
+    }
+  });
+
+  test('a waiting card folds behind the strip on every opening, and the conversation shows', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.route('**/api/personal-assistant/folder-digest', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          folder_digest: {
+            offer: {
+              id: 'offer-waiting',
+              status: 'pending',
+              verdict: 'project',
+              folder: 'Thesis',
+              subject: { name: 'Thesis', marker: 'LaTeX manuscript' }
+            },
+            chips: [],
+            picker_available: false,
+            prompt_first_folder: false
+          }
+        })
+      })
+    );
+    await page.goto('/');
+    const card = page.locator('#personalAssistantFolderOffer');
+    const strip = page.locator('#personalAssistantTodayStrip');
+    const toggle = page.locator('#personalAssistantTodayStripToggle');
+    for (let opening = 0; opening < 2; opening++) {
+      await openDrawer(page);
+      await expect(card).toHaveAttribute('data-placement', 'needs');
+      await expect(strip).toBeVisible();
+      await expect(page.locator('#personalAssistantTodayStripText')).toHaveText(
+        /^Needs you · \d+$/
+      );
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
+      await expect(card).toBeHidden();
+      // The conversation is what shows: the composer is in the sheet, focused.
+      await expect(page.locator('#personalAssistantInput')).toBeFocused();
+      await expect(page.locator('#personalAssistantInput')).toBeInViewport();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(card).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+    }
+  });
+
+  test('at 1440×900 the pinned chrome stays within 200px and the conversation keeps 70%', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await openDrawer(page);
+    await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText(/^Context · /);
+    const layout = await page.evaluate(() => {
+      const height = (id: string) => document.getElementById(id)!.getBoundingClientRect().height;
+      const header = document
+        .querySelector('#personalAssistantPanel > .personal-assistant-panel__header')!
+        .getBoundingClientRect().height;
+      return {
+        header,
+        composer: height('personalAssistantForm'),
+        scroll: height('personalAssistantScroll'),
+        sheet: height('personalAssistantPanel')
+      };
+    });
+    expect(layout.header + layout.composer, JSON.stringify(layout)).toBeLessThanOrEqual(200);
+    expect(layout.scroll / layout.sheet, JSON.stringify(layout)).toBeGreaterThanOrEqual(0.7);
+  });
+
+  test('the attach and conversation menus work from the keyboard and have no WCAG A/AA violations', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await openDrawer(page);
+    const loaded = await page
+      .addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' })
+      .then(() => true)
+      .catch(() => false);
+    const violations = () =>
+      page.evaluate(
+        async () =>
+          (
+            await (window as any).axe.run(document.getElementById('personalAssistantPanel'), {
+              runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+            })
+          ).violations
+      );
+
+    // "+": ArrowDown opens it on its first item; Escape returns to "+".
+    const attach = page.locator('#personalAssistantAttachMenu');
+    await attach.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('#personalAssistantAttachItems')).toBeVisible();
+    await expect(page.locator('#personalAssistantFolderChip')).toBeFocused();
+    // It opens inside the sheet, not past its right edge ("+" sits near it).
+    const fit = await page.evaluate(() => {
+      const menu = document.getElementById('personalAssistantAttachItems')!.getBoundingClientRect();
+      const sheet = document.getElementById('personalAssistantPanel')!.getBoundingClientRect();
+      return { left: menu.left >= sheet.left, right: menu.right <= sheet.right + 0.5 };
+    });
+    expect(fit).toEqual({ left: true, right: true });
+    if (loaded) {
+      const found = await violations();
+      expect(found, JSON.stringify(found, null, 2)).toEqual([]);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#personalAssistantAttachItems')).toBeHidden();
+    await expect(attach).toBeFocused();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+
+    // The conversation menu: New, Continue… and the check-in row.
+    const conversation = page.locator('#personalAssistantConversationMenu');
+    await expect(conversation).toContainText('New conversation');
+    await conversation.click();
+    const items = page.locator('#personalAssistantConversationItems');
+    await expect(items).toBeVisible();
+    // Focus is on the first row that can be chosen (New is disabled until
+    // there is a conversation to leave).
+    const first = (await page.locator('#personalAssistantConversationNew').isEnabled())
+      ? '#personalAssistantConversationNew'
+      : '#personalAssistantConversationContinue';
+    await expect(page.locator(first)).toBeFocused();
+    if (first.endsWith('New')) await page.keyboard.press('ArrowDown');
+    await expect(page.locator('#personalAssistantConversationContinue')).toBeFocused();
+    await expect(items.getByRole('menuitem', { name: 'Continue…' })).toBeVisible();
+    await expect(page.locator('#personalAssistantCheckIn')).toBeVisible();
+    if (loaded) {
+      const found = await violations();
+      expect(found, JSON.stringify(found, null, 2)).toEqual([]);
+    }
+    // Continue… opens the earlier conversations directly under the header.
+    await page.keyboard.press('Enter');
+    await expect(items).toBeHidden();
+    await expect(page.locator('#personalAssistantConversationList')).toBeVisible();
+    test.info().annotations.push({
+      type: 'axe',
+      description: loaded ? 'axe-core ran on both open menus' : 'axe-core CDN unreachable: not run'
+    });
   });
 });

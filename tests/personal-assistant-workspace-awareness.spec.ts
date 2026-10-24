@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Findings-first baseline. Real host selection, review, Route/Ask and history;
 // no configured model or plugin. Provider-input characterization lives beside
@@ -57,13 +58,14 @@ test('baseline: canonical review survives chat; Set up is enabled until busy', a
   await page.goto('/');
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText('Context · App-wide');
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
   await expect(page.locator('#personalAssistantFolderChip')).toBeEnabled();
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // The attach opened Tree + Chat, so Review setup is in the "+" menu.
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page
     .locator('#personalAssistantFolderSetupCandidate')
     .selectOption({ label: 'Album-5 fixture' });

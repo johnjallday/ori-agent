@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { folderResponseFixtures } from './fixtures/assistant-folder-response.js';
+import { chooseAttach, chooseConversation, openAttachMenu } from './helpers/assistant-menus';
 
 // Browser controller/ordering fixtures, not proof of model grounding. Hire/HQ
 // use real host routes. Folder selection/Route/Ask/history below are explicit
@@ -299,7 +300,9 @@ async function open(page: Page, path = '/') {
   await page.goto(path);
   await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
   await page.locator('#personalAssistantLauncher').click();
+  await openAttachMenu(page);
   await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
+  await page.keyboard.press('Escape');
 }
 // The drawer's open state now survives a reload or navigation in the same tab,
 // so only open it when it is closed.
@@ -308,10 +311,12 @@ async function reopen(page: Page) {
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
   if (!(await page.locator('#personalAssistantPanel').isVisible()))
     await page.locator('#personalAssistantLauncher').click();
+  await openAttachMenu(page);
   await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
+  await page.keyboard.press('Escape');
 }
 async function choose(page: Page, name = 'Documents') {
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name, exact: true })
@@ -346,7 +351,8 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   });
   await open(page);
   await choose(page);
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // The attach opened Tree + Chat, so Review setup is in the "+" menu.
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   const setupChoice = page.locator(
     '#personalAssistantScroll [data-setup-composer-origin] #personalAssistantFolderSetupChoices'
   );
@@ -356,11 +362,9 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await expect(page.locator('#personalAssistantFolderSetupCandidate')).toHaveValue('');
   await page.keyboard.press('Escape');
   await expect(setupChoice).toHaveCount(0);
-  await expect(
-    page.getByRole('button', { name: 'Review workspace setup', exact: true })
-  ).toBeFocused();
+  await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
   expect(posts.some(path => path.endsWith('/review') || path.endsWith('/decide'))).toBe(false);
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   const card = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
@@ -399,7 +403,7 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, 'real-canonical-review-cancelled.png') });
   expect(posts.some(path => path.endsWith('/decide'))).toBe(false);
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   await expect(card).toBeVisible();
@@ -428,9 +432,9 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
   // The folder that just became a project is pointed at from a new conversation,
   // not reviewed a second time.
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   await choose(page);
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   const existing = page.getByRole('region', { name: 'Existing project' });
@@ -444,9 +448,9 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   // An orphaned pending review must fail closed without blocking all future
   // reviews. Closing it edits only its owned sidecar, never the missing Session.
   async function nextReview() {
-    await page.locator('#personalAssistantConversationNew').click();
+    await chooseConversation(page, '#personalAssistantConversationNew');
     await choose(page);
-    await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Later' });
     await page.getByRole('button', { name: 'Review selection', exact: true }).click();
     await expect(card).toBeVisible();
@@ -521,7 +525,7 @@ for (const path of ['/', '/settings']) {
     await expect(page.locator('#homeAssistantConversation [data-folder-event-id]')).toHaveCount(1);
     await expect(page.locator('#homeAssistantConversation [data-message-id]')).toHaveCount(4);
     await page.locator('#personalAssistantInput').fill('Keep this draft');
-    await page.locator('#personalAssistantConversationNew').click();
+    await chooseConversation(page, '#personalAssistantConversationNew');
     await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
     await expect(page.locator('#personalAssistantInput')).toHaveValue('Keep this draft');
   });
@@ -676,7 +680,7 @@ test('browser fixture: composer review errors stay visible past a long planning 
   release = undefined;
   await review.click();
   await expect.poll(() => Boolean(release)).toBe(true);
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   await release!();
   await expect(page.locator('[data-setup-composer-origin]')).toHaveCount(0);
   await expect(notice).not.toContainText('review unavailable');
@@ -792,7 +796,7 @@ test('browser fixture: a late placement response cannot reopen after New or repl
   await page.locator('#personalAssistantFolderSetupReview').click();
   await expect.poll(() => Boolean(release)).toBe(true);
   await input.focus();
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   await expect(page.locator('#personalAssistantConversationTitle')).toHaveText('New conversation');
   await release!();
   await expect(page.getByRole('region', { name: 'Choose folder placement' })).toHaveCount(0);
@@ -822,15 +826,15 @@ test('browser fixture: non-Home cancel/error/replacement retains drafts and late
   await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText('Desktop');
   await page.locator('#personalAssistantRemoveFolder').click();
   await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
-  await expect(page.locator('#personalAssistantFolderChip')).toBeFocused();
+  await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
   fixture.scan = 'delay';
-  await page.locator('#personalAssistantFolderChip').click();
+  await chooseAttach(page, '#personalAssistantFolderChip');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
   await expect(page.locator('#personalAssistantFolderChip')).toBeDisabled();
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   await expect.poll(() => Boolean(fixture.releaseScan)).toBe(true);
   await fixture.releaseScan?.();
   await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
@@ -847,6 +851,9 @@ for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const fixture = await installFixture(page);
     await open(page, '/settings');
+    // Add folder is in the composer's "+" menu: Enter on "+" opens the menu on
+    // Add folder, and Enter chooses it. Focus returned to Add folder lands on "+".
+    const attach = page.locator('#personalAssistantAttachMenu');
     const chip = page.locator('#personalAssistantFolderChip');
     let releaseChoices: (() => Promise<void>) | undefined;
     await page.route(
@@ -857,28 +864,32 @@ for (const theme of ['light', 'dark']) {
       },
       { times: 1 }
     );
-    await chip.focus();
-    await chip.press('Enter');
+    await attach.focus();
+    await attach.press('Enter');
+    await expect(chip).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(page.locator('#personalAssistantFolderChooserCancel')).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(chip).toBeFocused();
+    await expect(attach).toBeFocused();
     await expect.poll(() => Boolean(releaseChoices)).toBe(true);
     await releaseChoices!();
     await expect(page.locator('#personalAssistantContextChooser')).toBeHidden();
-    await expect(chip).toBeFocused();
+    await expect(attach).toBeFocused();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await chip.press('Enter');
+    await attach.press('Enter');
+    await expect(chip).toBeFocused();
+    await page.keyboard.press('Enter');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })
       .press('Enter');
-    await expect(chip).toBeFocused();
+    await expect(attach).toBeFocused();
     expect(fixture.requests).toHaveLength(0);
     await expect(page.locator('#personalAssistantFolderPreview')).toContainText(
       'Attached folder: contents not read.'
     );
     await page.locator('#personalAssistantRemoveFolder').press('Enter');
-    await expect(chip).toBeFocused();
+    await expect(attach).toBeFocused();
     await choose(page);
     await say(page, 'Discuss this long goal without reading contents. '.repeat(20));
     const actions = page
@@ -1038,7 +1049,7 @@ test('browser fixture: current choices survive cancellation but reject stale cal
   );
   await expect(page.locator('#personalAssistantConversationNote')).toContainText('most recent');
   await input.fill('New draft');
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   await expect(strip).toHaveCount(0);
   await expect(input).toHaveValue('New draft');
 });
@@ -1064,7 +1075,7 @@ test('browser fixture: failed save and delayed reply preserve intent and newer t
   const before = fixture.requests.filter(row => row.stage === 'ask').length;
   await page.locator('#personalAssistantInput').fill('Keep my new 🎼 typing exactly  ');
   await page.locator('#personalAssistantSend').click();
-  await page.locator('#personalAssistantConversationNew').click();
+  await chooseConversation(page, '#personalAssistantConversationNew');
   expect(await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId())).toBe(
     'folder-chat-fixture'
   );
@@ -1085,8 +1096,7 @@ for (const theme of ['light', 'dark']) {
     page
   }) => {
     const evidence =
-      process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
-      'tasks/evidence/folder-select-all-checkboxes';
+      process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR || 'tasks/evidence/folder-select-all-checkboxes';
     await mkdir(evidence, { recursive: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
@@ -1147,8 +1157,9 @@ for (const theme of ['light', 'dark']) {
     await expect(selectionStatus).toHaveText('64 topics for the next message');
     await checks.last().uncheck();
     await checks.nth(10).uncheck();
-    const remainingIDs = Array.from({ length: 64 }, (_, index) => `entry-${index}`)
-      .filter(id => id !== 'entry-63' && id !== 'entry-10');
+    const remainingIDs = Array.from({ length: 64 }, (_, index) => `entry-${index}`).filter(
+      id => id !== 'entry-63' && id !== 'entry-10'
+    );
     await expect(checkedEntries).toHaveCount(62);
     await expect(checks.last()).not.toBeChecked();
     await expect(checks.nth(10)).not.toBeChecked();
@@ -1202,9 +1213,9 @@ for (const theme of ['light', 'dark']) {
     await expect(checks.first()).toBeChecked();
     await expect(selectAll).toBeChecked();
     await expect(input).toHaveValue('  Newer exact text 🎼  ');
-    expect(
-      fixture.requests.find(row => row.stage === 'ask')!.folder_context.focus_ids
-    ).toEqual(remainingIDs);
+    expect(fixture.requests.find(row => row.stage === 'ask')!.folder_context.focus_ids).toEqual(
+      remainingIDs
+    );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#personalAssistantExplorerTreeTab').click();
     await checks.nth(2).focus();
@@ -1237,7 +1248,7 @@ for (const theme of ['light', 'dark']) {
     await expect(checkedEntries).toHaveCount(0);
     await expect(selectAll).not.toBeChecked();
     await page.locator('#personalAssistantExplorerBack').click();
-    await page.locator('#personalAssistantConversationNew').click();
+    await chooseConversation(page, '#personalAssistantConversationNew');
     await expect(pane).toBeHidden();
     await expect(input).toHaveValue('  Newer exact text 🎼  ');
     fixture.scenario = { tree: { nodes: [], omitted: 0 } };
@@ -1311,7 +1322,10 @@ for (const theme of ['light', 'dark']) {
     fixture.scenario = { tree: null };
     await choose(page);
     await expect(pane).toBeHidden();
-    await expect(page.locator('#personalAssistantExploreAttachedFolder')).toBeHidden();
+    await expect(page.locator('#personalAssistantExploreAttachedFolder')).toHaveJSProperty(
+      'hidden',
+      true
+    );
     await page.evaluate(() => (window as any).PersonalAssistantFolderContext.explore());
     await expect(pane).toContainText('metadata only, nothing read');
     await expect(page.locator('#personalAssistantFolderSelectAll')).toBeHidden();
@@ -1349,7 +1363,7 @@ for (const theme of ['light', 'dark']) {
           ? 'Full literal prose <b>not HTML</b> 🎼. '.repeat(400).trim()
           : 'Fixture: names suggest a collection. Contents are not known. What matters to you?';
       if (await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId()))
-        await page.locator('#personalAssistantConversationNew').click();
+        await chooseConversation(page, '#personalAssistantConversationNew');
       await choose(page);
       await say(page, 'Just discuss');
       const card = page.locator('[data-folder-event-id]');

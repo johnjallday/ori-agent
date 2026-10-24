@@ -1134,8 +1134,8 @@ test.describe('Personal Assistant Foundation first value', () => {
     );
     // Ready attention is compact until the user explicitly asks for it.
     await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
-    await expect(page.locator('#personalAssistantSummary')).toContainText('Needs you');
-    await page.locator('#personalAssistantSummaryToggle').click();
+    await expect(page.locator('#personalAssistantTodayStrip')).toContainText('Needs you ·');
+    await page.locator('#personalAssistantTodayStripToggle').click();
     await expect(page.locator('#personalAssistantNeedsYouItems')).toContainText(
       'Review launch plan'
     );
@@ -1314,7 +1314,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(todayText).not.toMatch(/\b[a-z]+(?:_[a-z]+)+\b/);
     expect(todayText).not.toContain('Source unavailable');
     await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
-    await page.locator('#personalAssistantSummaryToggle').click();
+    await page.locator('#personalAssistantTodayStripToggle').click();
     await page.locator('#personalAssistantNeedsYouQueue > summary').click();
     await expect(page.locator('#personalAssistantNeedsYouItems')).toBeVisible();
     await page.locator('#personalAssistantNeedsYouItems').scrollIntoViewIfNeeded();

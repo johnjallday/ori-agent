@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Real host + reviewed packages, explicitly controlled loopback provider. This
 // is configuration/consent evidence, NOT a live model or report-quality test.
@@ -126,7 +127,7 @@ test('real model Settings return preserves the review and requires refreshed exp
   const draft = '  Keep 🎼 this exact\ndraft  ';
   const brief = '  Keep 🎼 this exact\nbrief  ';
   await page.locator('#personalAssistantInput').fill(draft);
-  await page.locator('#personalAssistantFolderChip:enabled').click();
+  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Desktop', exact: true })
@@ -262,7 +263,7 @@ test('a real shared agent retains its own configured model after the default cha
   );
   const draft = '  Bound 🎼 agent draft  ';
   await page.locator('#personalAssistantInput').fill(draft);
-  await page.locator('#personalAssistantFolderChip:enabled').click();
+  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })

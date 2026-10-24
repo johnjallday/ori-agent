@@ -1,4 +1,5 @@
 import { test, expect, chromium, type Page, type Locator } from '@playwright/test';
+import { chooseAttach } from './helpers/assistant-menus';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { writeFile } from 'node:fs/promises';
 
@@ -45,7 +46,7 @@ async function preview(page: Page, value = observation) {
     route.fulfill({ json: { observation: value, revision: '' } })
   );
   await page.goto('/?panel=today');
-  await page.locator('#personalAssistantFolderChip:enabled').click();
+  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Desktop', exact: true })
@@ -918,7 +919,10 @@ test('fixture unsupported and multiple candidates do not invent a setup choice',
 }) => {
   const unsupported = await preview(page, { ...observation, projects: [] });
   await expect(unsupported.card).toContainText('No setup candidate was recorded');
-  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeHidden();
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toHaveJSProperty(
+    'hidden',
+    true
+  );
   expect(unsupported.forbidden).toEqual([]);
   if (process.env.ORI_VISUAL_EVIDENCE)
     await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/group1-unsupported.png` });

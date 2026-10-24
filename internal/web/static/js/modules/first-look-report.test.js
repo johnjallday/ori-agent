@@ -346,21 +346,17 @@ test('Home draws reports as Needs you cards that count, and the drawer draws the
   assert.match(home, /renderFirstLookReports\(els, today\?\.needs_you\?\.items\)/);
   assert.match(home, /!isFirstLookReportKind\(row\.kind\)/);
   assert.match(home, /card\.id === 'personalAssistantNeedsYouReports'/);
-  // Opening the drawer shows a report (FR20): while Today is folded behind its
-  // summary line, the cards (and a folder card waiting on its answer) wait in
-  // a slot right under that line, and still count.
-  assert.match(
-    home,
-    /if \(slot\.previousElementSibling !== els\.summary\) els\.summary\.after\(slot\);/
-  );
-  assert.match(home, /if \(list && slot\.firstElementChild !== list\) slot\.prepend\(list\);/);
-  assert.match(home, /if \(waiting && waiting\.parentElement !== slot\) slot\.append\(waiting\);/);
-  assert.match(home, /placeFirstLookReports\(els\);\n\}/);
-  assert.match(home, /const count = cards \+ reported \+ folded \+ queued;/);
-  assert.match(home, /needsHost: \(\) => needsHost\(\)/);
-  // The folder card asks Home where Needs you is, so the two agree.
+  // Behind Today's strip a report is counted in "Needs you · N"; a report this
+  // tab caused opens the strip when it is drawn (assistant-drawer-redesign).
+  assert.match(home, /const count = cards \+ reported \+ queued;/);
+  assert.match(home, /revealOwnReports\(list\);/);
+  assert.doesNotMatch(home, /personalAssistantNeedsFolded|needsHost/);
+  // The folder card waiting on its answer sits in Needs you itself.
   const folder = read('personal-assistant-folder.js');
-  assert.match(folder, /window\.PersonalAssistantToday\?\.needsHost\?\.\(\) \|\| els\.needs/);
+  assert.match(folder, /const home = state\.reviewSlot \|\| \(needs \? els\.needs : els\.root\);/);
+  assert.doesNotMatch(folder, /needsHost/);
+  // "Needs you" in the assistant's line opens the strip at that report.
+  assert.match(folder, /linkNeedsYouWords\(row, \(\) => revealReportCard\(look\?\.task_id\)\);/);
   const panel = read('personal-assistant-panel.js');
   assert.match(
     panel,

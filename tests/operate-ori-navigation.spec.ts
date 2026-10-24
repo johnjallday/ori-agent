@@ -54,6 +54,7 @@ test('wt demo: Ori opens a workspace and selects an agent for the one tab that w
   await page.goto('/');
   const here = drawer(page);
   await here.open();
+  await here.openMore();
   await expect(here.watchRow).toBeVisible();
   await expect(here.watch).not.toBeChecked(); // Watch is an explicit choice.
   await here.setWatch(true);
@@ -241,6 +242,8 @@ test('wt demo: Ori opens a workspace and selects an agent for the one tab that w
   expect(routed.intent).toBe('app_navigation'); // the existing owner keeps the request
   await page.goto('/');
   await here.open();
+  // Not just folded away in "…": the row itself is not offered here.
+  await here.openMore();
   await expect(here.watchRow).toBeHidden();
   await shot(page, '07-capability-missing-no-watch.png');
   expect(

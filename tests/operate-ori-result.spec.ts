@@ -383,10 +383,14 @@ test('wt demo (reopen): after the host restarts, an interrupted run is said as i
   await expect(page.locator('#personalAssistantOperationRecapList > li').last()).toHaveText(
     'From the task: It was interrupted before it finished.'
   );
-  // The Watch chip is the touch target; its box stays a box at this width.
+  // The Watch switch's label is the touch target; its box stays a box at this
+  // width. It is a row of the "…" menu.
+  await here.openMore();
   const chip = await page.evaluate(() => {
     const box = document.getElementById('personalAssistantWatch')!.getBoundingClientRect();
-    const label = document.getElementById('personalAssistantWatchRow')!.getBoundingClientRect();
+    const label = document
+      .querySelector('#personalAssistantWatchRow label')!
+      .getBoundingClientRect();
     return { box: Math.round(box.width), boxHeight: Math.round(box.height), label: label.height };
   });
   expect(chip.box).toBeLessThanOrEqual(20);

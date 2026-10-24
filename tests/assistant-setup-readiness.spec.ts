@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { chooseAttach } from './helpers/assistant-menus';
 import { verifySavedFirstLook } from './helpers/folder-saved-report';
 
 // Real host, no fixtures or preinstalled packages. Installation requires the
@@ -96,7 +97,7 @@ for (const route of ['/?panel=today', '/settings']) {
     );
     const draft = '  Keep 🎼 this exact\ndraft  ';
     await page.locator('#personalAssistantInput').fill(draft);
-    await page.locator('#personalAssistantFolderChip:enabled').click();
+    await chooseAttach(page, '#personalAssistantFolderChip:enabled');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Desktop', exact: true })
@@ -202,7 +203,7 @@ test(
     );
     const draft = '  Keep this 🎼 draft\nwhile installing  ';
     await page.locator('#personalAssistantInput').fill(draft);
-    await page.locator('#personalAssistantFolderChip:enabled').click();
+    await chooseAttach(page, '#personalAssistantFolderChip:enabled');
     await page
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Desktop', exact: true })
