@@ -1290,6 +1290,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/adjust", s.Handlers.PersonalAssistant.AdjustFolderSoftware)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/structure", s.Handlers.PersonalAssistant.AdjustFolderStructure)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/setup", s.Handlers.PersonalAssistant.SetupFolderDigest)
+		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/prerequisites", s.Handlers.PersonalAssistant.ReviewFolderPrerequisite)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/existing-home", s.Handlers.PersonalAssistant.ResolveFolderExistingHome)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/home-provider", s.Handlers.PersonalAssistant.SetupFolderHomeProvider)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/project-selection", s.Handlers.PersonalAssistant.FolderProjectSelection)

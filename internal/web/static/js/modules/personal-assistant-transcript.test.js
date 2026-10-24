@@ -299,6 +299,17 @@ test('explicit local choice navigation reveals its control beginning without cha
   assert.equal(f.doc.activeElement, null);
 });
 
+test('resize recovery reveals the beginning of an oversized focused review, never its tail', () => {
+  const f = fixture([80, 900]);
+  const review = f.transcript.children[1];
+  f.owner.revealControl(review);
+  assert.equal(review.getBoundingClientRect().top - f.pane.getBoundingClientRect().top, 8);
+  assert.equal(f.doc.activeElement, null);
+  f.scroll(400);
+  f.owner.revealControl(review);
+  assert.equal(review.getBoundingClientRect().top - f.pane.getBoundingClientRect().top, 8);
+});
+
 test('revealing an unread target never hides its focused jump control or steals focus', () => {
   const f = fixture(Array(8).fill(100));
   f.owner.send();

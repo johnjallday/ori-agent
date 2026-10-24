@@ -1,5 +1,6 @@
-import { test, expect, type Page, type Locator } from '@playwright/test';
+import { test, expect, chromium, type Page, type Locator } from '@playwright/test';
 import { mockHiredAssistant } from './helpers/hired-assistant';
+import { writeFile } from 'node:fs/promises';
 
 // Deterministic presentation fixtures against the real application. These prove
 // rendering/no unintended browser requests, not native selection or live setup.
@@ -125,6 +126,76 @@ async function mountReview(page: Page, offer = reviewOffer(), route = '/?panel=t
 test.beforeEach(async ({ request }) => {
   await request.post('/api/onboarding/skip');
 });
+
+for (const theme of ['light', 'dark']) {
+  test(`fixture inline package review preserves keyboard focus and newer typing ${theme}`, async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    const offer: any = reviewOffer();
+    offer.prerequisites_available = true;
+    const writes: any[] = [];
+    let release: (() => void) | null = null;
+    let hold = false;
+    await page.route(
+      '**/api/personal-assistant/folder-digest/offers/*/prerequisites',
+      async route => {
+        const body = route.request().postDataJSON();
+        writes.push(body);
+        if (hold)
+          await new Promise<void>(resolve => {
+            release = resolve;
+          });
+        await route.fulfill({
+          json: {
+            prerequisite: {
+              kind: 'integration',
+              operation: 'update',
+              name: 'REAPER',
+              version: 'fixture-reviewed',
+              source: 'owner/repository',
+              run_id: 'fixture-canonical-run',
+              revision: 7,
+              review_token: 'fixture-review-token',
+              action: 'update',
+              enabled_after: true,
+              disclosure: {},
+              details: { literal: '<img src=x onerror=alert(1)>' }
+            }
+          }
+        });
+      }
+    );
+    const card = await mountReview(page, offer);
+    const input = page.locator('#personalAssistantInput');
+    await input.fill('  Inline 🎼 draft\nkept exact  ');
+    const update = card.getByRole('button', { name: 'Update REAPER', exact: true });
+    await update.focus();
+    await page.keyboard.press('Enter');
+    const heading = card.getByRole('heading', { name: 'Update REAPER', exact: true });
+    await expect(heading).toBeFocused();
+    await keyboardReach(page, card.getByRole('button', { name: 'Confirm update', exact: true }));
+    await page.keyboard.press('Escape');
+    await expect(card).toBeVisible();
+    await expect(update).toBeFocused();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].confirm).toBeUndefined();
+    hold = true;
+    await update.click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await input.fill('  Newer 界 draft\nnot stolen  ');
+    release!();
+    await expect(heading).toBeVisible();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('  Newer 界 draft\nnot stolen  ');
+    await card.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(update).toBeFocused();
+    expect(writes).toHaveLength(2);
+    expect(writes.some(body => body.confirm)).toBe(false);
+    expect(await card.locator('img[src="x"]').count()).toBe(0);
+  });
+}
 
 test('fixture review preserves exact Unicode drafts and only submits the reviewed digest', async ({
   page
@@ -480,7 +551,10 @@ test('fixture New Workspace rechecks only its own requirements and preserves bot
     transcript: [],
     applied: ['name'],
     draft: { name: 'Session' },
-    folder: { observation, recognition: { verdict: 'project', candidate_id: 'candidate-0' } },
+    folder: {
+      observation,
+      recognition: { verdict: 'project', candidate_id: 'candidate-0', integration_key: 'reaper' }
+    },
     plan: {
       ...offer.plan,
       ready: true,
@@ -490,6 +564,8 @@ test('fixture New Workspace rechecks only its own requirements and preserves bot
     },
     folder_expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
   };
+  const checkedPlan = session.plan;
+  session.plan = { ready: false, unavailable: 'plan_unavailable', lines: [] };
   const writes: string[] = [];
   let rechecks = 0;
   await page.route('**/api/workspaces/build-sessions/availability', route =>
@@ -512,6 +588,12 @@ test('fixture New Workspace rechecks only its own requirements and preserves bot
   const review = page.locator('#workspaceBuildPlanReview');
   const requirements = page.locator('#workspaceBuildPlanReviewRequirements');
   await expect(review).toBeVisible();
+  await expect(page.locator('#workspaceBuildPlanReviewRecheck')).toHaveText('Check requirements');
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Review prerequisites');
+  expect(session.plan.digest).toBeUndefined();
+  expect(rechecks).toBe(0);
+  session.plan = checkedPlan;
+  await page.locator('#workspaceBuildPlanReviewRecheck').click();
   await expect(requirements).toContainText('Configuration needed');
   await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeHidden();
   const brief = page.locator('#workspaceBuildPlanReviewBrief');
@@ -526,7 +608,7 @@ test('fixture New Workspace rechecks only its own requirements and preserves bot
   await expect(settings).toHaveURL(/\/settings#system-model$/);
   await settings.close(); // cancelling configuration does not promote readiness
   await page.locator('#workspaceBuildPlanReviewRecheck').click();
-  await expect.poll(() => rechecks).toBe(1);
+  await expect.poll(() => rechecks).toBe(2);
   await expect(page.locator('#workspaceBuildPlanReviewSetup')).toBeHidden();
   session.plan.visual.model = {
     state: 'configured',
@@ -911,6 +993,32 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
   expect(errors).toEqual([]);
 });
 
+async function expectUnobscured(target: Locator) {
+  const visibility = await target.evaluate(node => {
+    const rect = node.getBoundingClientRect();
+    const x = rect.x + rect.width / 2;
+    const y = rect.y + rect.height / 2;
+    const points = [
+      [x, y],
+      [x, rect.top + 2],
+      [x, rect.bottom - 2],
+      [rect.left + 2, y],
+      [rect.right - 2, y]
+    ];
+    const coveredBy = points
+      .map(([left, top]) => document.elementFromPoint(left, top))
+      .filter(hit => !hit || !node.contains(hit))
+      .map(hit =>
+        hit ? `${hit.tagName}#${hit.id}.${Array.from(hit.classList).join('.')}` : 'outside viewport'
+      );
+    return { coveredBy, control: rect.toJSON() };
+  });
+  expect(
+    visibility.coveredBy,
+    `control is not covered by page chrome: ${JSON.stringify(visibility)}`
+  ).toEqual([]);
+}
+
 async function keyboardReach(page: Page, target: Locator) {
   // macOS Safari's default Tab visits text inputs; Option-Tab includes buttons
   // and links without changing the user's system keyboard-access preference.
@@ -920,15 +1028,161 @@ async function keyboardReach(page: Page, target: Locator) {
     await page.keyboard.press(key);
   }
   await expect(target, 'reachable by keyboard').toBeFocused();
+  const geometry = await target.evaluate(node => {
+    const scroll = node.closest('.personal-assistant-panel__scroll')!;
+    const viewport = scroll.getBoundingClientRect();
+    const bounds = node.getBoundingClientRect();
+    return {
+      visible: bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1,
+      viewport: viewport.toJSON(),
+      control: bounds.toJSON(),
+      window: { width: innerWidth, height: innerHeight },
+      scrollTop: scroll.scrollTop,
+      scrollHeight: scroll.scrollHeight
+    };
+  });
   expect(
-    await target.evaluate(node => {
-      const scroll = node.closest('.personal-assistant-panel__scroll')!;
-      const viewport = scroll.getBoundingClientRect();
-      const bounds = node.getBoundingClientRect();
-      return bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1;
-    }),
-    'focused control is fully visible, not clipped by the pinned composer'
+    geometry.visible,
+    `focused control is fully visible, not clipped by the pinned composer: ${JSON.stringify(geometry)}`
   ).toBe(true);
+  await expectUnobscured(target);
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`fixture requirements at actual Chromium 200% browser zoom ${theme}`, async ({
+    browserName
+  }, testInfo) => {
+    test.skip(browserName !== 'chromium', 'uses Chromium Settings in a disposable browser profile');
+    const context = await chromium.launchPersistentContext(testInfo.outputPath('zoom-profile'), {
+      channel: 'chromium',
+      headless: true,
+      viewport: null,
+      deviceScaleFactor: undefined, // Do not inherit Desktop Chrome's emulated scale.
+      baseURL: testInfo.project.use.baseURL,
+      args: ['--window-size=1280,900']
+    });
+    try {
+      const page = await context.newPage();
+      const forbidden: string[] = [];
+      page.on('request', request => {
+        if (
+          request.method() === 'POST' &&
+          /\/(setup|decide|ask|route|install|enable|prerequisites)$/.test(
+            new URL(request.url()).pathname
+          )
+        )
+          forbidden.push(request.url());
+      });
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      const offer: any = reviewOffer();
+      offer.prerequisites_available = true;
+      offer.plan.visual.requirements_checked = true;
+      offer.plan.visual.plugins = [
+        { kind: 'integration', name: 'REAPER', operation: 'install', version: 'fixture-target' },
+        {
+          kind: 'provider',
+          name: 'Music Project Management',
+          operation: 'install',
+          version: 'fixture-target'
+        }
+      ];
+      await mountReview(page, offer);
+      const metrics = () =>
+        page.evaluate(() => ({ innerWidth, innerHeight, outerWidth, devicePixelRatio }));
+      const before = await metrics();
+      const settings = await context.newPage();
+      await settings.goto('chrome://settings/appearance');
+      // This is the browser's own page-zoom setting, not CSS scaling, a
+      // narrower viewport, device-scale emulation or a user's browser profile.
+      const zoom = settings.getByRole('combobox', { name: 'Page zoom' });
+      await zoom.selectOption('2');
+      const card = await mountReview(page, offer);
+      await page.evaluate(() => document.fonts.ready);
+      const after = await metrics();
+      console.log('Native browser zoom:', JSON.stringify({ theme, before, after }));
+      expect(after.outerWidth).toBe(before.outerWidth);
+      expect(after.innerWidth).toBeCloseTo(before.innerWidth / 2, 0);
+      expect(after.devicePixelRatio).toBeCloseTo(before.devicePixelRatio * 2, 2);
+      await testInfo.attach('native-browser-zoom.json', {
+        contentType: 'application/json',
+        body: JSON.stringify({ browser: context.browser()?.version(), before, after })
+      });
+      // Geometry alone can pass with the navbar painted over the taller sheet.
+      // Check its real hit-testing before scrolling or moving focus.
+      await expectUnobscured(page.locator('#personalAssistantClose'));
+      const overflow = await card.evaluate(node =>
+        Math.max(
+          node.scrollWidth - node.clientWidth,
+          document.documentElement.scrollWidth - innerWidth
+        )
+      );
+      expect(overflow).toBeLessThanOrEqual(1);
+      const controls = await page.locator('#personalAssistantChips').evaluate(node =>
+        Array.from(node.children)
+          .filter(child => !child.hasAttribute('hidden'))
+          .map(child => ({
+            left: child.getBoundingClientRect().left,
+            right: child.getBoundingClientRect().right,
+            overflow: child.scrollWidth - child.clientWidth
+          }))
+      );
+      expect(
+        controls.every(
+          (control, n) => control.overflow <= 1 && (!n || control.left >= controls[n - 1].right)
+        )
+      ).toBe(true);
+      // The newly direct per-package controls must also remain keyboard
+      // reachable and unobscured at real browser zoom, without executing them.
+      await keyboardReach(
+        page,
+        card.getByRole('button', { name: 'Install Music Project Management', exact: true })
+      );
+      const draft = '  Native zoom 🎼\nexact draft  ';
+      await page.locator('#personalAssistantInput').fill(draft);
+      await card.getByLabel('What should it do with it?').focus();
+      const confirm = card.getByRole('button', { name: 'Install 2 plugins & set up', exact: true });
+      await expect(confirm).toBeVisible();
+      await keyboardReach(page, confirm);
+      expect(
+        await confirm.evaluate(
+          node =>
+            getComputedStyle(node).boxShadow !== 'none' ||
+            getComputedStyle(node).outlineStyle !== 'none'
+        )
+      ).toBe(true);
+      await keyboardReach(page, card.locator('#personalAssistantFolderDetails > summary'));
+      await page.keyboard.press('Enter');
+      await expect(card.locator('#personalAssistantFolderPlan')).toBeVisible();
+      await keyboardReach(page, confirm);
+      await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
+      if (process.env.ORI_VISUAL_EVIDENCE) {
+        // Capture the native viewport without Playwright's CSS-sized clip,
+        // which does not account for a browser-controlled zoom factor.
+        const capture = await context.newCDPSession(page);
+        const image = await capture.send('Page.captureScreenshot', {
+          format: 'png',
+          captureBeyondViewport: false
+        });
+        await writeFile(
+          `${process.env.ORI_VISUAL_EVIDENCE}/group5-native-zoom-${theme}.png`,
+          Buffer.from(image.data, 'base64')
+        );
+        await capture.detach();
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+      const launcher = page.locator('#personalAssistantLauncher');
+      await launcher.focus();
+      await page.keyboard.press('Enter');
+      await expect(card).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(launcher).toBeFocused();
+      expect(forbidden).toEqual([]);
+      await zoom.selectOption('1');
+    } finally {
+      await context.close();
+    }
+  });
 }
 
 // Explicit presentation fixtures, including a canonical-shaped saved receipt.

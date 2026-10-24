@@ -845,7 +845,10 @@
       missingModel &&
       model?.settings
     );
-    els.recheckButton.hidden = !(open && !session.setup && !expired && model);
+    const checkable =
+      model || (session.plan?.unavailable && session.folder?.recognition?.integration_key);
+    els.recheckButton.hidden = !(open && !session.setup && !expired && checkable);
+    els.recheckButton.textContent = model ? 'Check again' : 'Check requirements';
     els.modelButton.disabled = busy;
     els.recheckButton.disabled = busy;
     const candidates =

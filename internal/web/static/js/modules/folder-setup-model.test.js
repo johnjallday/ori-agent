@@ -74,6 +74,17 @@ test('only known missing project configuration replaces setup with model configu
   );
 });
 
+test('leaving Adjust cannot bypass a known missing model or recheck an accepted guided journey', () => {
+  const guided = {
+    ...withModel({ state: 'missing', settings: 'system' }),
+    status: 'awaiting_outcome'
+  };
+  const view = folderOfferView(guided);
+  assert.equal(view.actions[0].id, 'model');
+  assert.ok(!view.actions.some(action => action.oneCard || action.recheck));
+  assert.ok(view.actions.some(action => action.id === 'resume'));
+});
+
 test('selection/destination/run precedence remains ahead of model configuration', () => {
   const missing = withModel({ state: 'missing', settings: 'system' });
   const changed = folderOfferView({ ...missing, destination_status: 'changed' });

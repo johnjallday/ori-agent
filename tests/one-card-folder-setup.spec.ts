@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { createHash } from 'node:crypto';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
@@ -16,13 +16,15 @@ import { verifySavedFirstLook } from './helpers/folder-saved-report';
 //
 // Run again with ORI_ONE_CARD_PHASE=provider on a DIFFERENT fresh sandbox.
 // Both phases are required for delivery. Configure an explicit provider/model
-// for both: the no-model phase verifies that changing it requires fresh consent;
-// the provider phase reviews the intended model before the hire. A changed
-// model must not silently resume the old plan's approval.
+// for both: the no-model phase verifies the known-missing configuration gate
+// and refuses an old model digest without execution; the provider phase reviews
+// its intended model before the hire. Neither silently refreshes accepted work.
 //
 // It needs the reviewed REAPER integration and its Home provider to be available.
-// On a fresh sandbox, follow the offered guided setup to install/enable the
-// reviewed packages if the initial scan reports plan_unavailable. The steps that
+// This suite requires a complete plan: install/enable the reviewed packages
+// through the offered guided setup first when the scan is unavailable. Record
+// fresh-card installation separately; preinstallation is not that evidence.
+// The steps that
 // create agents also need explicit ORI_ONE_CARD_PROVIDER and ORI_ONE_CARD_MODEL;
 // without them only the no-model path is exercised. Never select a signed-in
 // CLI implicitly. An explicitly selected but refused model fails the run. No REAPER app is
@@ -30,6 +32,17 @@ import { verifySavedFirstLook } from './helpers/folder-saved-report';
 const sandbox = process.env.ORI_ONE_CARD_SANDBOX || '';
 const phase = process.env.ORI_ONE_CARD_PHASE || 'no-model';
 const providerPhase = phase === 'provider';
+const setupConfirmation =
+  /^(?:(?:Hire|Assign) & start|(?:Install|Update|Enable) .+ & set up|Set (?:up|it up))$/;
+
+async function expectPrimary(card: Locator) {
+  await expect(
+    card.getByRole('button', {
+      name: providerPhase ? setupConfirmation : 'Configure project model',
+      exact: true
+    })
+  ).toBeVisible();
+}
 // Slow local inference may take several tool rounds. Extend only the explicit
 // live-report wait, never the required finished-report assertion.
 const reportTimeout = Number(process.env.ORI_ONE_CARD_REPORT_TIMEOUT_MS || 180_000);
@@ -166,9 +179,8 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
   await expect(card.locator('#personalAssistantFolderPlanHeadingText')).toHaveText(
     'Also, in the background'
   );
-  await expect(
-    card.getByRole('button', { name: /^(Hire|Assign) & start$/, exact: true })
-  ).toBeVisible();
+  expect(offer.plan.visual?.model?.state).toBe(providerPhase ? 'configured' : 'missing');
+  await expectPrimary(card);
   await expect(card.getByRole('button', { name: 'Not now', exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Adjust', exact: true })).toBeVisible();
 
@@ -210,55 +222,45 @@ test('Adjust… opens today’s step-by-step journey instead of running the plan
   await page.reload();
   const resumed = await openCard(page);
   await expect(resumed).toContainText('Project setup has not finished');
-  await expect(
-    resumed.getByRole('button', { name: /^(Hire|Assign) & start$/, exact: true })
-  ).toBeVisible();
+  await expectPrimary(resumed);
   await expect(resumed.getByRole('button', { name: 'Continue setup' })).toBeVisible();
   await expect(resumed.locator('#personalAssistantFolderPlan li').first()).toBeVisible();
 });
 
-test('Set up without a model stops with one plain sentence and a way forward', async ({
+test('a known missing project model blocks confirmation without manufacturing a paused run', async ({
   page,
   request
 }) => {
   test.skip(providerPhase, 'no-model phase only');
-  // Make sure no model is configured for this step.
-  await request.post('/api/settings/system-model', { data: { provider: '', model: '' } });
+  const before = await workspaceIDs(request);
+  const source = join(sandbox, 'Downloads', 'Third');
+  const original = sourceSnapshot(source);
   const offer = await scan(request, 'downloads');
   expect(offer.plan?.digest).toBeTruthy();
-
-  const card = await openCard(page);
-  await card.getByRole('button', { name: /^(Hire|Assign) & start$/, exact: true }).click();
-  const stopped = card.locator('#personalAssistantFolderOfferQuestion');
-  await expect(stopped).toContainText('needs a model', { timeout: 120_000 });
-  await expect(card.locator('[aria-label="Saved setup progress"]')).toBeVisible();
-  await expect(card.locator('[role="progressbar"]')).toHaveCount(0);
-  await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
-  // Closing/reopening reads the saved pause, without another setup POST.
+  expect(offer.plan.visual?.model?.state).toBe('missing');
+  expect(offer.setup).toBeFalsy();
   const writes: string[] = [];
   page.on(
     'request',
     r => r.method() === 'POST' && /\/setup$/.test(r.url()) && writes.push(r.url())
   );
+  const card = await openCard(page);
+  await expectPrimary(card);
+  await expect(card.getByRole('region', { name: 'Project agent model' })).toContainText(
+    'Configuration needed'
+  );
+  await expect(card.getByRole('button', { name: setupConfirmation })).toHaveCount(0);
+  await expect(card.locator('[aria-label="Saved setup progress"]')).toHaveCount(0);
   await page.locator('#personalAssistantClose').click();
   await page.locator('#personalAssistantLauncher').click();
+  await expectPrimary(card);
   expect(writes).toEqual([]);
-  const sentence = card.locator('#personalAssistantFolderOfferQuestion');
-  await expect(sentence).toContainText('needs a model');
-  await expect(sentence).toContainText(/\d+ of \d+ steps finished/);
-  await expect(card).not.toContainText(/needs_model|plan_changed|install_failed/);
-  await expect(card.getByRole('button', { name: 'Set up a model' })).toBeVisible();
-  for (const name of ['Try again', 'Continue setup']) {
-    await expect(card.getByRole('button', { name })).toBeVisible();
-  }
-  // Completed setup work is kept; staffing and the first look wait for a model.
-  await expect(
-    card.locator('#personalAssistantFolderPlan li[data-state="done"]').first()
-  ).toBeVisible();
+  expect(await workspaceIDs(request)).toEqual(before);
+  expect(sourceSnapshot(source)).toEqual(original);
   await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
 });
 
-test('a model change preserves completed work and requires reviewed guided continuation', async ({
+test('a configured model invalidates the old review digest before effects', async ({
   page,
   request
 }) => {
@@ -270,23 +272,28 @@ test('a model change preserves completed work and requires reviewed guided conti
   const before = await workspaceIDs(request);
   const source = join(sandbox, 'Downloads', 'Third');
   const original = sourceSnapshot(source);
+  const pending = (await ok(await request.get(folderApi))).folder_digest.offer;
+  expect(pending.status).toBe('pending');
+  expect(pending.setup).toBeFalsy();
+  const oldDigest = pending.plan.digest;
   expect(await selectExplicitModel(request)).toBe(true);
-  const card = await openCard(page);
-  await card.getByRole('button', { name: 'Try again', exact: true }).click();
-  const review = card.getByRole('button', { name: 'Review changed setup', exact: true });
-  await expect(review).toBeVisible({ timeout: 30000 });
-  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
-    'differs from the plan you approved'
+  const refused = await request.post(
+    `${folderApi}/offers/${encodeURIComponent(pending.id)}/setup`,
+    {
+      data: { request_id: randomUUID(), plan_digest: oldDigest }
+    }
   );
-  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+  expect(refused.status()).toBe(409);
+  expect((await refused.json()).plan_changed).toBe(true);
   expect(await workspaceIDs(request)).toEqual(before);
-  await review.click();
-  const journey = page.locator('#specialistSetupJourneyModal');
-  await expect(journey).toBeVisible();
-  await expect(
-    journey.getByRole('button', { name: 'Manage Team and Extras', exact: true })
-  ).toBeVisible();
-  expect(await workspaceIDs(request)).toEqual(before);
+  const card = await openCard(page);
+  await expect(card.getByRole('region', { name: 'Project agent model' })).toContainText(
+    'Configured'
+  );
+  await expect(card.getByRole('button', { name: setupConfirmation })).toBeVisible();
+  const refreshed = (await ok(await request.get(folderApi))).folder_digest.offer;
+  expect(refreshed.plan.digest).not.toBe(oldDigest);
+  expect(refreshed.setup).toBeFalsy();
   expect(sourceSnapshot(source)).toEqual(original);
 });
 

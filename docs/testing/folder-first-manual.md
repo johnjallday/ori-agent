@@ -229,15 +229,106 @@ Feature evidence and the post-implementation guide stay ignored/local at
 `tasks/evidence/assistant-conversation-first/final/` and
 `tasks/test-guide-assistant-conversation-first.md`.
 
+## Setup readiness and model return
+
+On both Home and Settings, attach a synthetic project folder without sending a
+chat message. A single recognized project immediately opens What you need,
+including before its plugins supply a complete plan; no Review setup click is
+needed. Multiple candidates start unselected and retain their review control in
+Tree + Chat/compact preview; unsupported folders acquire no invented setup
+action. Keep an exact Unicode/whitespace
+draft and brief through every disclosure, cancellation and return.
+
+The current review leads with each known plugin's name, purpose, operation,
+versions and source disclosure. Check install/update/enable/ready independently;
+unknown or failed checks must not claim zero downloads. Missing Home metadata may
+require the separately opened existing Guided Setup. Requirements without a
+complete plan cannot confirm setup. Plugins are not the REAPER desktop app or
+model runtimes/weights. The smaller proposed outcome follows requirements and
+all material consequences; Full setup details still contains the complete plan.
+
+The project agent's model is separate from chat configuration. An unreadable
+blueprint says not checked; known missing configuration offers the applicable
+Settings/agent route instead of confirmation. Block the popup once, then allow
+it. Cancelling or saving Settings and returning must preserve the folder, exact
+draft/brief and canonical review without installing or executing anything.
+Explicit Check again rereads current facts. Configured is not Connected. A
+changed material model requires a fresh confirmation; accepted runs keep their
+recorded consent and recovery. On New Workspace, verify the same facts under its
+own session/name/brief, not the assistant's owner. A failed or late recheck must
+not enable stale confirmation or gate a newly attached model-free folder.
+
+After confirmation, waiting/working/done/failed rows describe saved milestones,
+not download bytes or percentages. A named failed prerequisite retains completed
+work. Restart/expiry/changed-selection reasons outrank retry; on reopening, the
+reason and re-pick action must be visible without scrolling past a diagram.
+Reopening/reading a saved result does not execute setup or a first look again.
+
+Fresh metadata/review checks (no provider credentials or plugin installation):
+
+```bash
+env -u CODEX_HOME -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u GEMINI_API_KEY \
+  -u ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE -u ORI_REVIEWED_INTEGRATION_DEV_SOURCE \
+  ./scripts/e2e-fresh.sh --sandbox-env ORI_READINESS_SANDBOX \
+  tests/assistant-setup-readiness.spec.ts -- --project=chromium --workers=1
+```
+
+To additionally exercise real reviewed integration and Home-provider installation,
+add `--env ORI_READINESS_INSTALL=1` to that fresh runner. It uses Install on each
+requirement card, reads the full inline source/version/trust disclosure, and
+explicitly confirms only that plugin. Cancel or Escape before confirming and
+check focus/draft retention. The Home provider can be installed first. REAPER
+installation leaves it disabled until a separate reviewed Enable confirmation;
+the Home provider's existing installer discloses installation and enablement
+together. Successful explicit repair refreshes readiness automatically, but never
+confirms workspace setup, configures a model or starts an agent. Record the
+packages actually selected by review. This opt-in case is separate from the complete provider-phase
+receipt/report acceptance below; the default metadata run skips it.
+
+For a continuous fresh inline → real Settings → explicit setup → saved live
+report check, run this same spec with `ORI_READINESS_INSTALL=1` and the paired,
+explicitly authorized `ORI_READINESS_LIVE_PROVIDER` / `ORI_READINESS_LIVE_MODEL`.
+It keeps the same canonical review, selection, exact draft and brief through
+configuration/recheck, then confirms setup only after showing the configured
+project model. Existing Settings may bootstrap the **Ask Ori system assistant**;
+that is separate from project staffing and is not an inline-package effect.
+`ORI_READINESS_REPORT_TIMEOUT_MS` accepts 1000–900000 (default 180000). Use a
+fresh `demo-server.sh` sandbox and `e2e.sh` so a browser timeout does not invoke
+the fresh runner's automatic server shutdown while accepted inference is running.
+Keep the store and inspect its task before any further action; never repeat an
+accepted setup just to obtain a green browser result.
+
+A CLI run must not inherit unapproved native MCP servers, hooks or user rules.
+Use a separately isolated invocation/configuration without editing shared CLI
+settings or changing workspace native-tool permissions, and record the actual
+CLI version, authentication method and per-run policy. A policy-only test shim
+must forward model responses unchanged and must not silently substitute a model;
+its evidence is live inference under that policy, not the default shared profile.
+Never put credentials in evidence files.
+
+Presentation fixtures in `visual-folder-agent-setup.spec.ts`, controlled
+model-return tests and preinstalled packages are not fresh installation or live
+report evidence. The visual suite includes actual 200% Chromium Page zoom in a
+disposable browser profile, verifying unchanged outer width and halved content
+width in addition to the separate viewport-reflow matrix. It does not establish
+native folder selection/drop/cancel or human screen-reader operation. For native
+folder checks, launch `scripts/demo-server.sh --native-picker <port> <sandbox>`;
+the browser still does not open automatically. Use an unlocked desktop and only
+the synthetic folder, cancel a replacement, and record which native drop gesture
+was actually exercised. Never unlock the machine, grant OS permissions or change
+system preferences on the user's behalf. Keep any unexercised native/live checks
+explicitly NOT RUN; DOM/accessibility assertions do not prove human screen-reader
+operation.
+
 ## Reviewed REAPER setup acceptance
 
 `tests/one-card-folder-setup.spec.ts` uses two **fresh disposable stores**:
-`ORI_ONE_CARD_PHASE=no-model` checks the saved pause and changed-consent review;
+`ORI_ONE_CARD_PHASE=no-model` checks no-model readiness/recovery and changed consent;
 `ORI_ONE_CARD_PHASE=provider` checks actual new/bound staffing and a finished
 first report. Both phases are required. Supply `ORI_ONE_CARD_SANDBOX` and an
 explicit `ORI_ONE_CARD_PROVIDER` / `ORI_ONE_CARD_MODEL` through `scripts/e2e.sh`.
-Suppress ambient cloud keys and CLI credentials in the demo launch. No implicit
-Codex selection is made. Slow local inference can explicitly set
+Suppress ambient credentials except the explicitly authorized provider's
+credential/login context. A signed-in Codex CLI alone is not selection or consent. Slow local inference can explicitly set
 `ORI_ONE_CARD_REPORT_TIMEOUT_MS=900000` (maximum 15 minutes; default 3 minutes).
 This only extends the report wait; a finished report is still required. The
 provider phase enters an explicit read-only brief through the normal review field;
@@ -247,7 +338,11 @@ use a new provider-phase store rather than replaying setup into a used store.
 
 Confirm the sandbox workspace root. If the initial offer has no plan, follow its
 existing guided setup to install/enable the reviewed integration and Home provider;
-record the actual versions. Changing a model after approval does not authorize a
+record the actual versions and which UI confirmation authorized each installation.
+If the installed blueprint establishes missing model configuration, confirmation
+must remain blocked; do not force a setup POST to manufacture a paused run. A
+pending/unreadable blueprint is a different case and may reach the existing
+model-repair stop after installation. Changing a model after approval does not authorize a
 silent retry: **Review changed setup** opens the existing guided continuation.
 The provider phase instead reviews its intended model before confirming the hire.
 
@@ -260,7 +355,14 @@ proof that a report is readable. After slow inference or a browser interruption,
 `tests/one-card-saved-report.spec.ts` can recheck this read-only tail with explicit
 `ORI_ONE_CARD_SANDBOX` and `ORI_ONE_CARD_REPORT_OFFER_ID`. It shares the provider
 suite's assertions, never provisions or retries work, and supplements rather than
-replaces fresh review/staffing and live-execution evidence. A finished task is not
+replaces fresh review/staffing and live-execution evidence. The default source
+fixture is `Downloads/Third`; set `ORI_ONE_CARD_REPORT_FIXTURE=desktop` for the
+fresh-inline `Desktop/Session.rpp` journey. Optional
+`ORI_ONE_CARD_REPORT_EVIDENCE` captures the actual report body after navigation,
+not an initial viewport. The checks cover a fresh page and an already-open
+drawer, close that drawer normally before using Tickets behind it, and compare
+all report body paragraphs/code lines without treating Markdown fence language
+tags as visible content. A finished task is not
 re-announced in the workspace's first-task banner on a new visit.
 
 A listed model is not proof of usable execution. For local models, verify the

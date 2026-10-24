@@ -1344,6 +1344,32 @@ test('build requirements share presentation but model and recheck controls retai
   pane.destroy();
 });
 
+test('an unavailable build offers an explicit requirements check without model or confirmation authority', () => {
+  const { pane, root, events } = loadPane();
+  pane.mount({ assistant, folders: true });
+  pane.applySession({
+    id: 'unavailable-build',
+    status: 'open',
+    transcript: [],
+    draft: {},
+    folder: { observation, recognition: { verdict: 'project', integration_key: 'reaper' } },
+    plan: { ready: false, unavailable: 'provider_not_installed', lines: [] }
+  });
+  const control = kind =>
+    root.querySelectorAll('button').find(button => button.dataset.buildControl === kind);
+  assert.equal(control('setup').hidden, true);
+  assert.equal(control('configure-model').hidden, true);
+  assert.equal(control('recheck').hidden, false);
+  assert.equal(control('recheck').textContent, 'Check requirements');
+  assert.equal(events.length, 0);
+  control('recheck').click();
+  assert.deepEqual(
+    events.map(event => event.type),
+    ['workspace-build-recheck']
+  );
+  pane.destroy();
+});
+
 test('Set it up is offered on a ready, named plan and follows the run it starts', () => {
   const { pane, root, events } = loadPane();
   pane.mount({ assistant, folders: true });

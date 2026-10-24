@@ -30,6 +30,7 @@ import { createFolderPathEntry } from './folder-path-entry.js';
 import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 import { setupQuestActionURL } from './setup-quest-links.js';
+import { createFolderPrerequisites, renderFolderPrerequisites } from './folder-prerequisites.js';
 import {
   declinedLine,
   proposalView,
@@ -936,7 +937,7 @@ export function folderOfferView(offer, options = {}) {
       plan: null,
       actions: guided
         ? [
-            guided,
+            ...(offer.prerequisites_available ? [] : [guided]),
             ...(offer.candidate_id && offer.conversation_id && !offer.setup
               ? [{ id: 'recheck', label: 'Check again', style: 'outline', recheck: true }]
               : [])
@@ -952,7 +953,9 @@ export function folderOfferView(offer, options = {}) {
             ]
           : [],
       question: guided
-        ? 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and check again. Opening it does not confirm installation or folder setup. Your draft stays here.'
+        ? offer.prerequisites_available
+          ? 'Install the required Ori plugins below. Each has its own review and confirmation. This does not create a workspace or start an agent; your folder and draft stay here.'
+          : 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and check again. Opening it does not confirm installation or folder setup. Your draft stays here.'
         : `${destination ? `${destination} ` : ''}${
             offer.destination_status === 'changed'
               ? 'The reviewed destination has changed.'
@@ -1031,7 +1034,12 @@ export function folderOfferView(offer, options = {}) {
           }
         : action
     );
-  if (view.plan && !view.setup && status === 'pending') {
+  if (
+    view.plan &&
+    !view.setup &&
+    !offer.setup &&
+    (status === 'pending' || status === 'awaiting_outcome')
+  ) {
     const model = globalThis.OriFolderSetupVisual.modelRequirementView(offer.plan?.visual?.model);
     if (model?.state === 'missing') {
       view.actions = view.actions.filter(action => !action.oneCard);
@@ -1044,7 +1052,7 @@ export function folderOfferView(offer, options = {}) {
           newTab: true
         });
     }
-    if (model && offer.conversation_id && offer.candidate_id)
+    if (model && status === 'pending' && offer.conversation_id && offer.candidate_id)
       view.actions.push({ id: 'recheck', label: 'Check again', style: 'outline', recheck: true });
   }
   return view;
@@ -2239,6 +2247,29 @@ const state = {
   firstLookMessage: ''
 };
 
+const prerequisites = createFolderPrerequisites({
+  key: () => `${state.reviewGeneration}:${state.offer?.id || ''}`,
+  id: requestId,
+  request: async body => {
+    const response = await fetch(
+      `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(state.offer.id)}/prerequisites`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body)
+      }
+    );
+    return { ok: response.ok, status: response.status, data: await readJSON(response) };
+  },
+  changed: () => render(),
+  refreshed: message => {
+    showError(message || '');
+    // Explicit package repair refreshes only this still-unaccepted canonical
+    // review. It never confirms the newly available workspace/model plan.
+    window.PersonalAssistantFolderSetup?.recheckReview?.(state.offer, document.activeElement);
+  }
+});
+
 // announceOffer tells the mission card (progression-widget.js) what the
 // chooser shows, so the two render the same offer in the same state. It also
 // carries the first look being followed, which may belong to another folder
@@ -2882,7 +2913,7 @@ function renderOffer(place) {
   const firstLook = receipt.firstLook || { visible: false };
   // A canonical conversation reload can replace this card. Do not let a fast
   // press mutate its offer while that older read is still being hydrated.
-  const actionBusy = state.busy || conversationReviewLoading();
+  const actionBusy = state.busy || conversationReviewLoading() || prerequisites.active();
   // The one offer card is a reply in the conversation while the flow runs
   // there, and a card in Needs you when it was found waiting on load (right
   // under Today's summary line while Today is folded, as Home says). It is
@@ -2935,6 +2966,15 @@ function renderOffer(place) {
   globalThis.OriFolderSetupVisual.renderRequirements(
     document.getElementById('personalAssistantFolderRequirements'),
     receipt.visible ? {} : { offer: state.offer }
+  );
+  renderFolderPrerequisites(
+    document.getElementById('personalAssistantFolderRequirements'),
+    receipt.visible ? null : state.offer,
+    prerequisites,
+    {
+      blocked: state.busy || conversationReviewLoading(),
+      trust: window.PluginLifecycle?.renderTrustReport
+    }
   );
   setText(
     document.getElementById('personalAssistantFolderActionSummary'),
@@ -3455,7 +3495,7 @@ function reviewResponseGuard(offer) {
 async function startOneCardSetup(action) {
   const offer = state.offer;
   const current = reviewResponseGuard(offer);
-  if (!offer?.id || state.busy || conversationReviewLoading()) return;
+  if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
   if (offer.needs_pick) {
     showOfferFailure({
       needs_pick: true,

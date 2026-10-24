@@ -58,6 +58,10 @@ func TestFolderBuildReadinessCannotBecomeAnExecutablePlan(t *testing.T) {
 	}}
 	setup.planErr = errors.New("no complete plan")
 	fx.folderDigestFixture.service.deps.Setup = setup
+	initial, err := fx.service.BuildPlan(t.Context(), fx.draft, fx.observation.ID, fx.candidate, "Exact name")
+	if err != nil || initial.Readiness != nil || setup.reads != 0 || setup.invalidations != 0 {
+		t.Fatal("attachment planning acquired independent release checks", err)
+	}
 	plan, err := fx.service.BuildPlan(WithFolderSetupRecheck(t.Context()), fx.draft, fx.observation.ID, fx.candidate, "Exact name")
 	if err != nil || plan.Ready || plan.Digest != "" || plan.Readiness == nil || len(plan.Readiness.Plugins) != 1 || setup.runs != 0 || setup.invalidations != 1 {
 		t.Fatalf("build partial readiness became a plan or lost facts: %+v %v", plan, err)

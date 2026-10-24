@@ -744,7 +744,7 @@ async function review(candidateId, close = false, offerId, placement) {
     window.PersonalAssistantFolder?.updateConversationReview?.(refreshed);
     applyReviewContext(null);
     window.PersonalAssistantFolderContext?.notify?.(
-      'Review refreshed. Nothing was installed or started.'
+      'Review refreshed. This check did not install plugins or start setup.'
     );
     if (shouldFocus) {
       const model = document.querySelector(

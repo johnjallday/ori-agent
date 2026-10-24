@@ -383,19 +383,25 @@
     for (const requirement of view.rows) {
       const row = node('li', '', 'folder-requirements__row');
       row.dataset.operation = requirement.operation;
+      row.dataset.requirementKind = requirement.kind;
       row.dataset.progress = requirement.progress || '';
       row.append(
         node('strong', requirement.name),
         node('p', requirement.status, 'folder-requirements__status')
       );
-      if (requirement.purpose) row.append(node('p', requirement.purpose, 'folder-visual__note'));
-      row.append(node('p', requirement.version, 'folder-visual__note'));
+      if (requirement.purpose)
+        row.append(
+          node('p', requirement.purpose, 'folder-visual__note folder-requirements__purpose')
+        );
+      row.append(
+        node('p', requirement.version, 'folder-visual__note folder-requirements__version')
+      );
       const details = node('details', '', 'folder-requirements__source');
       details.append(
         node('summary', 'Source details'),
         node('p', requirement.source || 'Source not reported', 'folder-visual__note')
       );
-      row.append(details);
+      row.append(details, node('div', '', 'folder-requirements__actions'));
       requirements.append(row);
     }
     section.append(

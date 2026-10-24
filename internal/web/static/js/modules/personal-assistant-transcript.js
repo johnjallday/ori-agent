@@ -213,7 +213,10 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     const bounds = control.getBoundingClientRect();
     const top = offset(control);
     const height = bounds.height / scale();
-    if (atStart) move(pane.scrollTop + top - 8);
+    // A focused review can be taller than the resized conversation viewport.
+    // Its beginning is the useful target; aligning its bottom hides all of
+    // the requirements after compact chrome changes the available height.
+    if (atStart || height > pane.clientHeight) move(pane.scrollTop + top - 8);
     else if (top < 0) move(pane.scrollTop + top - 1);
     else if (top + height > pane.clientHeight)
       move(pane.scrollTop + top + height - pane.clientHeight + 1);

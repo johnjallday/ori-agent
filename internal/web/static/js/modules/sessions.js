@@ -12942,6 +12942,16 @@ const sessionManager = {
     );
   },
 
+  workspaceBuildCanCheckRequirements() {
+    const session = this.workspaceBuild?.session;
+    return Boolean(
+      session?.status === 'open' &&
+      !session.setup &&
+      (this.workspaceBuildModelView() ||
+        (session.plan?.unavailable && session.folder?.recognition?.integration_key))
+    );
+  },
+
   configureWorkspaceBuildModel() {
     const build = this.workspaceBuild;
     const model = this.workspaceBuildModelView();
@@ -12972,7 +12982,7 @@ const sessionManager = {
     if (
       !build?.session ||
       !pane ||
-      !this.workspaceBuildModelView() ||
+      !this.workspaceBuildCanCheckRequirements() ||
       build.closing ||
       build.busy ||
       build.setupBusy ||
@@ -13000,6 +13010,7 @@ const sessionManager = {
         !result?.ok ||
         fresh?.id !== id ||
         fresh.version !== version ||
+        fresh.folder?.observation?.id !== build.session.folder?.observation?.id ||
         fresh.setup ||
         fresh.status !== 'open'
       ) {
@@ -13010,10 +13021,16 @@ const sessionManager = {
       }
       // Only readiness changes. Do not apply wizard fields, flush a draft,
       // submit a model turn, or adopt another tab's accepted setup.
-      build.session = { ...build.session, plan: fresh.plan || null };
+      build.session = {
+        ...build.session,
+        plan: fresh.plan || null,
+        folder_expires_at: fresh.folder_expires_at ?? build.session.folder_expires_at
+      };
       build.readinessStale = false;
       pane.applySession(build.session);
-      build.readinessMessage = 'Readiness refreshed. Nothing was installed or started.';
+      build.readinessMessage = this.workspaceBuildFolderSelectionExpired(build)
+        ? 'The folder selection is no longer available. Add it again to check requirements.'
+        : 'Readiness refreshed. Nothing was installed or started.';
     } catch (_) {
       if (this.workspaceBuild === build && build.session?.id === id) {
         build.readinessStale = true;
@@ -13382,7 +13399,8 @@ const sessionManager = {
     }
     const recheck = document.getElementById('workspaceBuildPlanReviewRecheck');
     if (recheck) {
-      recheck.hidden = Boolean(expired || frozen || !model);
+      recheck.hidden = Boolean(expired || frozen || !this.workspaceBuildCanCheckRequirements());
+      recheck.textContent = model ? 'Check again' : 'Check requirements';
       recheck.disabled = busy || build.readinessBusy;
     }
     const action = document.getElementById('workspaceBuildPlanReviewSetup');

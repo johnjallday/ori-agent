@@ -2909,8 +2909,20 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 @media (max-height: 520px) {
+  /* Native browser zoom also consumes browser chrome. Reserving a wrapped
+     page navbar can leave less than one 44px control in the conversation.
+     Use a taller sheet here; its own header, Close and composer stay visible. */
   .personal-assistant-panel {
+    height: calc(var(--pa-viewport-height, 100dvh) - 32px);
+    max-height: calc(var(--pa-viewport-height, 100dvh) - 32px);
     min-height: 0;
+  }
+
+  /* The tall sheet must paint above the navbar (10002), not just have a
+     larger rectangle behind it. Keep the closed launcher and any competing
+     Bootstrap modal at their existing layers. */
+  body:not(.modal-open) .ori-guide:has(> .personal-assistant-panel:not([hidden])) {
+    z-index: 10004;
   }
 }
 

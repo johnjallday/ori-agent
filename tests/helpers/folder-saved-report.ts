@@ -10,7 +10,8 @@ export async function verifySavedFirstLook(
   request: APIRequestContext,
   sandbox: string,
   offerID: string,
-  expectedWorkspaceRoute?: string
+  expectedWorkspaceRoute?: string,
+  sourceFixture = { subject: 'Third', folder: join('Downloads', 'Third'), file: 'Third.rpp' }
 ) {
   expect(offerID).toBeTruthy();
   const get = async (url: string) => {
@@ -22,7 +23,7 @@ export async function verifySavedFirstLook(
     await get(`/api/personal-assistant/folder-digest?offer_id=${encodeURIComponent(offerID)}`)
   ).folder_digest.offer;
   expect(offer.id).toBe(offerID);
-  expect(offer.subject.name).toBe('Third');
+  expect(offer.subject.name).toBe(sourceFixture.subject);
   expect(offer.first_task.state).toBe('finished');
   expect(offer.first_task.workspace_id).toBe(offer.outcome.workspace_id);
   expect(offer.outcome.route).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
@@ -43,14 +44,14 @@ export async function verifySavedFirstLook(
       .sort();
   };
   const ids = await workspaceIDs();
-  const source = join(sandbox, 'Downloads', 'Third');
+  const source = join(sandbox, sourceFixture.folder);
   const sourceUnchanged = () => {
     const entries = readdirSync(source, { withFileTypes: true });
-    expect(entries.map(entry => entry.name)).toEqual(['Third.rpp']);
+    expect(entries.map(entry => entry.name)).toEqual([sourceFixture.file]);
     expect(entries[0].isFile(), 'original file, not a new directory or symlink').toBe(true);
     expect(
       createHash('sha256')
-        .update(readFileSync(join(source, 'Third.rpp')))
+        .update(readFileSync(join(source, sourceFixture.file)))
         .digest('hex')
     ).toBe(createHash('sha256').update('<REAPER_PROJECT 0.1 "7.0"\n>\n').digest('hex'));
   };
@@ -61,6 +62,13 @@ export async function verifySavedFirstLook(
       starts.push(req.url());
   });
   await page.goto(offer.outcome.route);
+  // The live journey arrives with the drawer open; the standalone saved-tail
+  // check may not. Close it normally before using the workspace behind it.
+  const panel = page.locator('#personalAssistantPanel');
+  if (await panel.isVisible()) {
+    await page.locator('#personalAssistantClose').click();
+    await expect(panel).toBeHidden();
+  }
   await page.getByRole('button', { name: 'Tickets', exact: true }).click();
   await expect(page.locator(`[data-ticket-id="${look.task_id}"]`).first()).toBeVisible();
   // resumeFirstTaskBanner follows running tasks, but does not re-announce a
@@ -79,7 +87,8 @@ export async function verifySavedFirstLook(
     })
   );
   await page.goto('/');
-  await page.locator('#personalAssistantLauncher').click();
+  if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
+  await expect(panel).toBeVisible();
   const report = page.locator('#personalAssistantFolderOffer').getByRole('link', {
     name: 'Open the full report',
     exact: true
@@ -88,12 +97,24 @@ export async function verifySavedFirstLook(
   await report.click();
   const output = page.locator('#workspace-task-output');
   await expect(output).toBeVisible();
-  const plain = (text: string) => text.replace(/[`*#]/g, '').replace(/\s+/g, ' ').trim();
-  for (const paragraph of task.result.split(/\n\s*\n/).filter(Boolean)) {
-    await expect.poll(async () => plain(await output.innerText())).toContain(plain(paragraph));
-  }
+  // Fence language tags are Markdown metadata, not visible report content.
+  // Keep every body paragraph/code line in the comparison.
+  const plain = (text: string) =>
+    text
+      .replace(/^[\t ]{0,3}(?:`{3,}|~{3,})[^\n]*$/gm, '')
+      .replace(/[`*#]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const expectReportBody = async () => {
+    await expect(output).toBeVisible();
+    for (const paragraph of task.result.split(/\n\s*\n/).filter(Boolean)) {
+      await expect.poll(async () => plain(await output.innerText())).toContain(plain(paragraph));
+    }
+  };
+  await expectReportBody();
   await page.reload();
-  await expect(output).toBeVisible();
+  await expectReportBody();
+  await page.evaluate(() => document.fonts.ready);
   const executions = (items: { id: string; execution_count?: number }[]) =>
     items.map(item => [item.id, item.execution_count || 0]).sort();
   expect(executions(await listTasks())).toEqual(executions(before));

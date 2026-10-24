@@ -371,7 +371,7 @@ async function attach(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads') {
   const fresh = page.locator('#personalAssistantConversationNew');
   if ((await fresh.isVisible()) && (await fresh.isEnabled())) await fresh.click();
   await page.locator('#personalAssistantFolderChip').click();
-  await pickChip(page, chip);
+  return pickChip(page, chip);
 }
 
 // pickChip picks a folder in the open attachment picker.
@@ -386,10 +386,13 @@ async function pickChip(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads')
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: chip, exact: true })
     .click();
-  expect((await attached).ok()).toBeTruthy();
+  const response = await attached;
+  expect(response.ok()).toBeTruthy();
+  const selection = await response.json();
   await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeEnabled({
     timeout: 30_000
   });
+  return selection;
 }
 
 // chooseProject answers the setup chooser (shown after Review setup on a folder
@@ -419,9 +422,20 @@ async function show(
   chip: 'Documents' | 'Desktop' | 'Downloads',
   project?: string | RegExp
 ) {
-  await attach(page, chip);
-  await page.locator('#personalAssistantReviewFolderSetup').click();
-  if (project) await chooseProject(page, project);
+  const selection = await attach(page, chip);
+  if (selection.hire_candidate) {
+    // A single eligible project already opens its canonical review. Do not
+    // race that pending request with another composer click or manufacture a
+    // multi-project chooser. Verify it is precisely the requested candidate.
+    await expect(card(page)).toBeVisible({ timeout: 30_000 });
+    const offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
+    expect(offer.candidate_id).toBe(selection.hire_candidate);
+    if (project instanceof RegExp) expect(offer.subject.name).toMatch(project);
+    else if (project) expect(offer.subject.name).toBe(project);
+  } else {
+    await page.locator('#personalAssistantReviewFolderSetup').click();
+    if (project) await chooseProject(page, project);
+  }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
   await card(page).scrollIntoViewIfNeeded();

@@ -7394,6 +7394,78 @@ test('late and failed build readiness reads cannot overwrite newer drafts or ena
   assert.equal(applied.length, 0);
 });
 
+test('a build with no complete plan explicitly checks requirements without a model or draft write', async () => {
+  const { manager, build, applied } = readinessBuild();
+  build.session.folder.recognition = { verdict: 'project', integration_key: 'reaper' };
+  build.session.plan = { ready: false, unavailable: 'provider_not_installed' };
+  const draft = JSON.stringify(build.session.draft);
+  let reads = 0;
+  manager.workspaceBuildTransport = {
+    read: async () => {
+      reads++;
+      return {
+        ok: true,
+        body: {
+          session: {
+            ...build.session,
+            plan: {
+              ...build.session.plan,
+              readiness: { model: { state: 'not_checked' } }
+            }
+          }
+        }
+      };
+    }
+  };
+  assert.equal(manager.workspaceBuildModelView(), null);
+  assert.equal(manager.workspaceBuildCanCheckRequirements(), true);
+  await manager.recheckWorkspaceBuild();
+  assert.equal(reads, 1);
+  assert.equal(applied.length, 1);
+  assert.equal(JSON.stringify(build.session.draft), draft);
+  assert.equal(manager.workspaceBuildSetupPressable(), false);
+});
+
+test('a build recheck reports a lost hold without renewing its selection or replacing its draft', async () => {
+  const { manager, build } = readinessBuild();
+  const draft = JSON.stringify(build.session.draft);
+  manager.workspaceBuildTransport = {
+    read: async () => ({
+      ok: true,
+      body: {
+        session: {
+          ...build.session,
+          plan: null,
+          folder_expires_at: new Date(0).toISOString()
+        }
+      }
+    })
+  };
+  await manager.recheckWorkspaceBuild();
+  assert.equal(manager.workspaceBuildFolderSelectionExpired(build), true);
+  assert.equal(manager.workspaceBuildSetupPressable(), false);
+  assert.equal(JSON.stringify(build.session.draft), draft);
+  assert.match(build.readinessMessage, /no longer available/);
+});
+
+test('a mismatched observed folder cannot supply another build readiness snapshot', async () => {
+  const { manager, build, applied } = readinessBuild();
+  manager.workspaceBuildTransport = {
+    read: async () => ({
+      ok: true,
+      body: {
+        session: {
+          ...build.session,
+          folder: { observation: { id: 'another-folder' } }
+        }
+      }
+    })
+  };
+  await manager.recheckWorkspaceBuild();
+  assert.equal(applied.length, 0);
+  assert.equal(build.readinessStale, true);
+});
+
 test('a canonical replacement folder retires old readiness failure without gating a model-free plan', () => {
   const { manager, build, applied } = readinessBuild();
   manager.rememberWorkspaceBuildSession = () => {};

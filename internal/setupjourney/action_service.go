@@ -152,6 +152,13 @@ func (s *Service) Mutate(ctx context.Context, userID, runID string, actionID Act
 	}
 
 	result, commitErr := adapter.Commit(ctx, scope, actionID, request.Input, material)
+	// The reviewed consequence may have finished even if the browser closed.
+	// Keep execution on its original context, but give receipt finalization a
+	// bounded lifetime of its own. Otherwise a cancelled SQL write strands the
+	// durable claim as busy, including after restart. This never retries Commit.
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancelFinalize()
+	ctx = finalizeCtx
 	if commitErr != nil {
 		_, _ = s.store.MarkOperationReconcileRequired(ctx, projection.RunKind, projection.RunID, request.IdempotencyKey)
 		emitActionOutcome(projection, stepID, actionID, specialistevents.OutcomeReconcileRequired, ReasonOperationFailed)

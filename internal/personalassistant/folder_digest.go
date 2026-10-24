@@ -700,7 +700,8 @@ type FolderOfferView struct {
 	// capability offer. Setup is the run once Set up was pressed.
 	Plan                   *FolderSetupPlan   `json:"plan,omitempty"`
 	SetupUnavailableReason string             `json:"setup_unavailable_reason,omitempty"`
-	Readiness              *FolderSetupVisual `json:"readiness,omitempty"` // display only; never confirms setup
+	Readiness              *FolderSetupVisual `json:"readiness,omitempty"`               // display only; never confirms setup
+	PrerequisitesAvailable bool               `json:"prerequisites_available,omitempty"` // separate reviewed plugin-only controls
 	// Availability says, in the words a proposal uses (FolderAvailability*), why
 	// the offer has no plan: what the option is listed with instead of being
 	// dropped. Empty when a plan exists or none was looked for.

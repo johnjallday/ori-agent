@@ -308,6 +308,87 @@
   outline-offset: 2px;
 }
 
+.folder-requirements__actions > button {
+  min-height: 44px;
+}
+
+.folder-requirements__actions:not(:empty) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+/* Put the direct action alongside identity/status instead of adding another
+   full row to every package. Purpose, versions and source stay readable. */
+.folder-requirements__row--actionable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 42%);
+  column-gap: 12px;
+}
+
+.folder-requirements__row--actionable > strong {
+  grid-area: 1 / 1;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__status {
+  grid-area: 2 / 1;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__purpose {
+  grid-area: 3 / 1 / auto / -1;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__version {
+  grid-area: 4 / 1;
+  align-self: center;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__source {
+  grid-area: 4 / 2;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__source[open] {
+  grid-area: 5 / 1 / auto / -1;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__actions {
+  grid-area: 1 / 2 / 3;
+  align-content: start;
+  justify-content: end;
+  max-width: 14rem;
+  padding-top: 0;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__actions > button {
+  white-space: normal;
+}
+
+.folder-requirements__row--actionable > .folder-requirements__actions:has(section, p) {
+  grid-area: 6 / 1 / auto / -1;
+  justify-content: start;
+  max-width: none;
+}
+
+.folder-requirements__review {
+  width: 100%;
+  min-width: 0;
+  border-top: 1px solid var(--ori-line);
+  padding-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.folder-requirements__review pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.folder-requirements__error {
+  width: 100%;
+  font-weight: 600;
+}
+
 .folder-setup-next {
   display: flex;
   flex-wrap: wrap;
@@ -315,6 +396,47 @@
   padding-block: 0.5rem;
   background: var(--ori-paper, var(--bg-primary));
   border-top: 1px solid var(--ori-border, var(--border-color));
+}
+
+/* The requirements already are the open review. Avoid a duplicate entry in
+   the pinned chips and give the two package identities room on shorter pages. */
+#personalAssistantPanel:has(.folder-requirements__row--actionable)
+  #personalAssistantReviewFolderSetup {
+  display: none;
+}
+
+#personalAssistantPanel:has(.folder-requirements__row--actionable)
+  .personal-assistant-panel__attachments {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+#personalAssistantPanel:has(.folder-requirements__row--actionable)
+  .personal-assistant-panel__attachments
+  > * {
+  flex-shrink: 0;
+  transition-property: color, background-color, border-color, box-shadow;
+}
+
+#personalAssistantPanel:has(.folder-requirements__row--actionable) #personalAssistantActiveFolder {
+  flex: 0 0 auto;
+  max-width: 10rem;
+}
+
+@media (max-height: 850px) {
+  #personalAssistantPanel:has(.folder-requirements__row--actionable) {
+    gap: 4px;
+  }
+
+  #personalAssistantPanel:has(.folder-requirements__row--actionable) #personalAssistantModelSetup {
+    margin-bottom: 0;
+  }
+
+  #personalAssistantPanel:has(.folder-requirements__row--actionable)
+    .personal-assistant-panel__input {
+    height: 64px;
+    min-height: 64px;
+  }
 }
 
 /* At short/zoomed viewports, keep the navbar and pinned composer usable

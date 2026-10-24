@@ -488,7 +488,13 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 		}
 	}
 	option, ok := s.reviewOption(ctx, held, target, recognition.CandidateID)
-	if !ok || (option.Presentation != nil && option.Presentation.State == "unavailable") {
+	if !ok {
+		return FolderHireCandidate{}
+	}
+	// A recognized integration can explain its prerequisites before it has a
+	// complete plan. Opening that canonical review is observational, not a
+	// confirmation. Software keeps its existing eligibility rules.
+	if option.Presentation != nil && option.Presentation.State == "unavailable" && recognition.IntegrationKey == "" {
 		return FolderHireCandidate{}
 	}
 	return FolderHireCandidate{CandidateID: option.CandidateID}
