@@ -566,25 +566,25 @@ test('a setup that stopped says what is kept and offers the repair for that stop
 
   const model = stopped('needs_model');
   assert.match(model.question, /^1 of 5 steps finished\. The assistant has no model yet/);
-  assert.deepEqual(actionIds(model), ['model', 'retry']);
+  assert.deepEqual(actionIds(model), ['model', 'retry', 'remove']);
   assert.equal(model.actions[0].href, '/settings#system-model');
   assert.equal(model.actions[1].label, 'Continue');
   assert.equal(model.actions[1].oneCard, true);
 
   const changed = stopped('plan_changed');
   assert.match(changed.question, /no longer matches what you reviewed/);
-  assert.deepEqual(actionIds(changed), ['review']);
+  assert.deepEqual(actionIds(changed), ['review', 'remove']);
   assert.equal(changed.actions[0].softwareReview, true);
   // A changed plan is never confirmed again from the card it was stopped on.
   assert.equal(changed.actions.some(setsUp), false);
 
   const lost = stopped('needs_pick');
   assert.match(lost.question, /not the one you showed me/);
-  assert.deepEqual(actionIds(lost), ['repick']);
+  assert.deepEqual(actionIds(lost), ['repick', 'remove']);
 
   for (const reason of ['failed', 'interrupted', 'some_new_reason']) {
     const view = stopped(reason);
-    assert.deepEqual(actionIds(view), ['retry'], reason);
+    assert.deepEqual(actionIds(view), ['retry', 'remove'], reason);
     assert.match(view.question, /kept/, reason);
   }
   // There is no step-by-step journey behind a software setup to continue.

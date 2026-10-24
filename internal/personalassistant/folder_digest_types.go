@@ -48,6 +48,10 @@ const (
 	FolderOfferDeclined FolderOfferStatus = "declined"
 	// FolderOfferClosed had nothing to decide (an empty or declined root).
 	FolderOfferClosed FolderOfferStatus = "closed"
+	// FolderOfferAbandoned is a confirmed setup the user removed from Needs you
+	// after it stopped. Nothing it created is undone and the folder is not
+	// tombstoned, so showing the folder again starts a fresh offer.
+	FolderOfferAbandoned FolderOfferStatus = "abandoned"
 )
 
 // Decisions the user can give an offer.
@@ -218,6 +222,8 @@ type FolderOffer struct {
 	DecidedAt  *time.Time      `json:"decided_at,omitempty"`
 	LaterUntil *time.Time      `json:"later_until,omitempty"`
 	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+	// AbandonedAt is when the user removed a stopped setup from Needs you.
+	AbandonedAt *time.Time `json:"abandoned_at,omitempty"`
 }
 
 // FolderRootDecline is a folder's tombstone as its proposal shows it: the
@@ -430,7 +436,7 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		switch offer.Status {
 		case FolderOfferPending:
 			pending++
-		case FolderOfferLater, FolderOfferAwaitingOutcome, FolderOfferResolved, FolderOfferDeclined, FolderOfferClosed:
+		case FolderOfferLater, FolderOfferAwaitingOutcome, FolderOfferResolved, FolderOfferDeclined, FolderOfferClosed, FolderOfferAbandoned:
 		default:
 			return fmt.Errorf("%w: offer status", errFolderDigestInvalid)
 		}

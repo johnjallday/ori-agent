@@ -38,6 +38,10 @@ type fakeFolderDigest struct {
 	reviews []string
 	// decideErr, when set, is what Decide returns with a pending offer.
 	decideErr error
+	// abandoned records "offer/request" for every removal that reached the
+	// service; abandonErr, when set, is what Abandon returns.
+	abandoned  []string
+	abandonErr error
 	// namedOffers records every offer id a GET asked for by name.
 	namedOffers []string
 	// stored holds the offers StoredOffer can return, by id; storedReads records
@@ -233,6 +237,14 @@ func (f *fakeFolderDigest) Decide(_ context.Context, _ string, offerID string, i
 	view := personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferDeclined, Decision: input.Decision}
 	f.decisions[input.RequestID] = view
 	return view, nil
+}
+
+func (f *fakeFolderDigest) Abandon(_ context.Context, _ string, offerID, requestID string) (personalassistant.FolderOfferView, error) {
+	f.abandoned = append(f.abandoned, offerID+"/"+requestID)
+	if f.abandonErr != nil {
+		return personalassistant.FolderOfferView{}, f.abandonErr
+	}
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferAbandoned}, nil
 }
 
 func (f *fakeFolderDigest) Resolve(_ context.Context, _ string, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error) {
@@ -487,6 +499,64 @@ func TestFolderDecide_AnExistingWorkspaceIsAConflictCarryingTheOffer(t *testing.
 	}
 	if strings.Contains(w.Body.String(), "/Users") || strings.Contains(w.Body.String(), "/private") {
 		t.Fatalf("the conflict leaked a path: %s", w.Body.String())
+	}
+}
+
+func TestAbandonFolderDigest_RemovesAStoppedSetupAndMapsRefusals(t *testing.T) {
+	post := func(fake *fakeFolderDigest, offerID, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+offerID+"/abandon", strings.NewReader(body))
+		r.SetPathValue("offerID", offerID)
+		w := httptest.NewRecorder()
+		newFolderDigestHandler(fake).AbandonFolderDigest(w, r)
+		return w
+	}
+	reason := func(w *httptest.ResponseRecorder) string {
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return body.Reason
+	}
+
+	fake := &fakeFolderDigest{}
+	w := post(fake, "offer-1", `{"request_id":"r1"}`)
+	var ok struct {
+		Offer personalassistant.FolderOfferView `json:"offer"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &ok) != nil || ok.Offer.Status != personalassistant.FolderOfferAbandoned {
+		t.Fatalf("abandon => %d %s", w.Code, w.Body.String())
+	}
+	// A retried click reaches the service again, which answers the replay.
+	if w := post(fake, "offer-1", `{"request_id":"r1"}`); w.Code != http.StatusOK {
+		t.Fatalf("replay => %d %s", w.Code, w.Body.String())
+	}
+	if len(fake.abandoned) != 2 || fake.abandoned[0] != "offer-1/r1" {
+		t.Fatalf("service calls = %v", fake.abandoned)
+	}
+
+	running := post(&fakeFolderDigest{abandonErr: personalassistant.ErrFolderSetupRunning}, "offer-1", `{"request_id":"r2"}`)
+	if running.Code != http.StatusConflict || reason(running) != "setup_running" {
+		t.Fatalf("running => %d %s", running.Code, running.Body.String())
+	}
+	decided := post(&fakeFolderDigest{abandonErr: personalassistant.ErrFolderOfferDecided}, "offer-1", `{"request_id":"r3"}`)
+	if decided.Code != http.StatusConflict || reason(decided) != "offer_decided" {
+		t.Fatalf("decided => %d %s", decided.Code, decided.Body.String())
+	}
+	if missing := post(&fakeFolderDigest{abandonErr: personalassistant.ErrFolderOfferNotFound}, "offer-9", `{"request_id":"r4"}`); missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown offer => %d", missing.Code)
+	}
+	if bad := post(&fakeFolderDigest{abandonErr: personalassistant.ErrValidation}, "offer-1", `{"request_id":""}`); bad.Code != http.StatusBadRequest {
+		t.Fatalf("empty request id => %d", bad.Code)
+	}
+	if extra := post(&fakeFolderDigest{}, "offer-1", `{"request_id":"r5","path":"/etc"}`); extra.Code != http.StatusBadRequest {
+		t.Fatalf("an unknown field => %d", extra.Code)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/x", nil)
+	get.SetPathValue("offerID", "offer-1")
+	gw := httptest.NewRecorder()
+	newFolderDigestHandler(&fakeFolderDigest{}).AbandonFolderDigest(gw, get)
+	if gw.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET => %d", gw.Code)
 	}
 }
 

@@ -154,6 +154,14 @@ is not a second plugin-only approval. Full details remain available. Saved
 recovery is revealed before the diagram on initial load/current conversation
 return, without stealing focus or repeatedly overriding reader intent.
 
+An offer card draws the diagram only from data it was given: a resolved receipt,
+or a saved run or plan that carries `visual`. A run saved before the diagram
+carried its own data has no `visual`, and the card then draws no diagram at all
+(`folderDiagramVisible` in `personal-assistant-folder.js`). The renderer's
+fallbacks ("Setup preview", "Not reviewed", "No destination proposed") exist for
+the local-observation preview and the build pane, which pass their own evidence;
+on a saved-run card they would read as state Ori does not know.
+
 The renderer uses text nodes, existing building artwork and theme tokens, with
 literal text summaries, non-color statuses and decision-first narrow layout.
 Unknown identity uses a neutral fallback, not a fabricated portrait/name. Source

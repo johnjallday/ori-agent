@@ -46,6 +46,7 @@ var (
 	ErrFolderPickerUnavailable  = errors.New("personal assistant: the folder dialog is unavailable here")
 	ErrFolderOfferNotFound      = errors.New("personal assistant: folder offer not found")
 	ErrFolderOfferDecided       = errors.New("personal assistant: folder offer is no longer pending")
+	ErrFolderSetupRunning       = errors.New("personal assistant: the folder setup is still running")
 	ErrFolderOfferChoice        = errors.New("personal assistant: this offer needs a choice")
 	ErrFolderPathLost           = errors.New("personal assistant: pick the folder again")
 	errFolderReplay             = errors.New("personal assistant: replayed folder request")
@@ -1570,6 +1571,61 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	return s.viewFor(ctx, userID, result, binding.Paused), nil
 }
 
+// Abandon removes a confirmed setup that stopped from Needs you. Only an
+// awaiting_outcome offer whose run is not live is accepted; a stored "running"
+// with no live run is an interrupted setup and counts as stopped. Whatever the
+// setup created stays, and the folder is neither tombstoned nor counted as a
+// domain decline, so showing it again starts a fresh offer. The queue is
+// cleared so no follow-up offer is promoted from this scan. A retried request
+// returns the earlier result.
+func (s *FolderDigestService) Abandon(ctx context.Context, userID, offerID, requestID string) (FolderOfferView, error) {
+	if s == nil || s.store == nil {
+		return FolderOfferView{}, ErrRepairNeeded
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" || len(requestID) > folderRequestIDMax {
+		return FolderOfferView{}, fmt.Errorf("%w: request id", ErrValidation)
+	}
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	now := s.now()
+	var result FolderOffer
+	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		offer := d.Offer(offerID)
+		if offer == nil {
+			return ErrFolderOfferNotFound
+		}
+		if receipt := d.Receipt(requestID); receipt != nil {
+			if receipt.OfferID != offerID || receipt.Action != "abandon" {
+				return ErrFolderOfferDecided
+			}
+			result = *offer
+			return errFolderReplay
+		}
+		if offer.Status != FolderOfferAwaitingOutcome {
+			return ErrFolderOfferDecided
+		}
+		if s.isRunning(offer.ID) {
+			return ErrFolderSetupRunning
+		}
+		abandoned := now
+		offer.Status = FolderOfferAbandoned
+		offer.AbandonedAt = &abandoned
+		offer.Queue = nil
+		offer.NeedsCandidate = false
+		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: requestID, OfferID: offer.ID, Action: "abandon", At: now})
+		pruneFolderDigest(d)
+		result = *offer
+		return nil
+	})
+	if err != nil && !errors.Is(err, errFolderReplay) {
+		return FolderOfferView{}, err
+	}
+	return s.viewFor(ctx, userID, result, binding.Paused), nil
+}
+
 // FolderForgetInput names one earlier No thanks to undo: a folder's by its key
 // (the tombstone's own, never a path), or a kind of work's by its domain.
 // Exactly one is set.
@@ -2859,7 +2915,7 @@ func pruneFolderDigest(d *FolderDigestDocument) {
 		dropped := false
 		for i, o := range d.Offers {
 			switch o.Status {
-			case FolderOfferResolved, FolderOfferDeclined, FolderOfferClosed:
+			case FolderOfferResolved, FolderOfferDeclined, FolderOfferClosed, FolderOfferAbandoned:
 				d.Offers = append(d.Offers[:i], d.Offers[i+1:]...)
 				dropped = true
 			}
