@@ -3,28 +3,47 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 )
 
-// Default max tokens per Claude model
-var claudeModelDefaults = map[string]int64{
-	"claude-opus-4-20250514":     4096,
-	"claude-sonnet-4-20250514":   4096,
-	"claude-3-5-sonnet-20241022": 8192,
-	"claude-3-5-sonnet-latest":   8192,
-	"claude-3-5-haiku-20241022":  8192,
-	"claude-3-5-haiku-latest":    8192,
-	"claude-3-opus-20240229":     4096,
-	"claude-3-opus-latest":       4096,
-	"claude-3-sonnet-20240229":   4096,
-	"claude-3-haiku-20240307":    4096,
+// claudeModelCacheTTL bounds how long the model list fetched from Anthropic is
+// reused. Anthropic adds models rarely, so an hour keeps the list current
+// without a request each time a model picker opens or a task checks its model.
+const claudeModelCacheTTL = time.Hour
+
+// claudeModelRetryAfter is how long a failed model-list fetch is remembered,
+// so an offline machine does not wait on the fetch timeout at every call.
+const claudeModelRetryAfter = time.Minute
+
+// claudeDefaultMaxTokens caps a reply when the caller sets no MaxTokens.
+// Current models think before they answer and the thinking counts against
+// this cap, so it needs room; a much larger cap on a non-streaming call is
+// refused by the SDK because the reply could outlast its HTTP timeout.
+const claudeDefaultMaxTokens int64 = 16000
+
+// claudeTemperatureModelPrefixes are the models still served that accept a
+// temperature. Claude Opus 4.7 and every later model reject one with a 400
+// (Claude Sonnet 5.5 and Claude Haiku 5.5 any value but the default), so a
+// model not listed here, including one released later, is sent none.
+var claudeTemperatureModelPrefixes = []string{
+	"claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5",
+	"claude-opus-4-6", "claude-sonnet-4-6",
+}
+
+// claudeModel is one model from Anthropic's model list.
+type claudeModel struct {
+	id        string
+	maxTokens int64 // the largest max_tokens the model accepts
 }
 
 // ClaudeProvider implements the Provider interface for Anthropic's Claude
@@ -33,6 +52,15 @@ type ClaudeProvider struct {
 	client     anthropic.Client
 	apiKey     string
 	httpClient *http.Client
+
+	// fetchMu lets one model-list fetch run at a time; callers that wait on
+	// it reuse its result. modelsMu guards the cached list, so reading it
+	// never waits on a fetch.
+	fetchMu        sync.Mutex
+	modelsMu       sync.RWMutex
+	models         []claudeModel // newest first
+	modelsLoaded   time.Time
+	modelsFailedAt time.Time
 }
 
 // snapshot returns the current client and api key under read lock.
@@ -92,10 +120,159 @@ func (p *ClaudeProvider) ValidateConfig(config ProviderConfig) error {
 	return nil
 }
 
-// DefaultModels returns available Claude models from the curated pricing data.
-// This provides a consistent list without requiring an API call.
+// DefaultModels returns the models Anthropic lists for this API key, newest
+// first, or the curated catalog when that list cannot be fetched.
 func (p *ClaudeProvider) DefaultModels() []string {
-	return modelinfo.GetClaudeModels()
+	models := p.liveModels()
+	if len(models) == 0 {
+		return modelinfo.GetClaudeModels()
+	}
+	ids := make([]string, len(models))
+	for i, m := range models {
+		ids[i] = m.id
+	}
+	return ids
+}
+
+// liveModels returns Anthropic's model list for this key, fetching it when
+// the cached copy is older than claudeModelCacheTTL. A failed fetch keeps the
+// previous list and is not retried for claudeModelRetryAfter.
+func (p *ClaudeProvider) liveModels() []claudeModel {
+	p.fetchMu.Lock()
+	defer p.fetchMu.Unlock()
+
+	p.modelsMu.RLock()
+	models, loaded, failedAt := p.models, p.modelsLoaded, p.modelsFailedAt
+	p.modelsMu.RUnlock()
+	now := time.Now()
+	if (len(models) > 0 && now.Sub(loaded) < claudeModelCacheTTL) ||
+		(!failedAt.IsZero() && now.Sub(failedAt) < claudeModelRetryAfter) {
+		return models
+	}
+
+	client, apiKey := p.snapshot()
+	fetched, err := fetchClaudeModels(client, apiKey)
+
+	p.modelsMu.Lock()
+	defer p.modelsMu.Unlock()
+	if _, current := p.snapshot(); current != apiKey {
+		// The key changed during the fetch; its list belongs to the old key.
+		return p.models
+	}
+	if err != nil {
+		p.modelsFailedAt = now
+		return p.models
+	}
+	p.models, p.modelsLoaded, p.modelsFailedAt = fetched, now, time.Time{}
+	return p.models
+}
+
+// fetchClaudeModels lists the models the key can call. Retired models are
+// left out, and each dated model is preceded by its undated alias when the
+// curated catalog knows that alias (claude-opus-4-5 for
+// claude-opus-4-5-20251101): the API lists only dated IDs, and agents and
+// the system model may be set to the alias.
+func fetchClaudeModels(client anthropic.Client, apiKey string) ([]claudeModel, error) {
+	if apiKey == "" {
+		return nil, errors.New("claude API key is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultModelFetchTimeout)
+	defer cancel()
+
+	var infos []anthropic.ModelInfo
+	pager := client.Models.ListAutoPaging(ctx, anthropic.ModelListParams{Limit: anthropic.Int(1000)})
+	for pager.Next() {
+		info := pager.Current()
+		if info.ID == "" || info.Lifecycle == anthropic.ModelInfoLifecycleRetired {
+			continue
+		}
+		infos = append(infos, info)
+	}
+	if err := pager.Err(); err != nil {
+		return nil, classifyAnthropicError("anthropic", err)
+	}
+	if len(infos) == 0 {
+		return nil, errors.New("anthropic listed no models")
+	}
+	sort.SliceStable(infos, func(i, j int) bool {
+		if !infos[i].CreatedAt.Equal(infos[j].CreatedAt) {
+			return infos[i].CreatedAt.After(infos[j].CreatedAt)
+		}
+		return infos[i].ID < infos[j].ID
+	})
+
+	listed := make(map[string]bool, len(infos))
+	for _, info := range infos {
+		listed[info.ID] = true
+	}
+	models := make([]claudeModel, 0, len(infos))
+	for _, info := range infos {
+		if alias := claudeModelAlias(info.ID); alias != "" && !listed[alias] {
+			listed[alias] = true
+			models = append(models, claudeModel{id: alias, maxTokens: info.MaxTokens})
+		}
+		models = append(models, claudeModel{id: info.ID, maxTokens: info.MaxTokens})
+	}
+	return models, nil
+}
+
+// claudeModelAlias returns the undated alias of a dated model ID such as
+// claude-opus-4-5-20251101, or "" when the ID has no date suffix or the
+// curated catalog does not list the alias.
+func claudeModelAlias(id string) string {
+	i := strings.LastIndexByte(id, '-')
+	if i < 0 || len(id)-i-1 != 8 {
+		return ""
+	}
+	for _, r := range id[i+1:] {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	if alias := id[:i]; modelinfo.HasClaudeModel(alias) {
+		return alias
+	}
+	return ""
+}
+
+// knownMaxTokens is the largest max_tokens Anthropic listed for model, or 0
+// when the model is not in the cached list. It never fetches the list, so a
+// chat call never waits on one.
+func (p *ClaudeProvider) knownMaxTokens(model string) int64 {
+	p.modelsMu.RLock()
+	defer p.modelsMu.RUnlock()
+	for _, m := range p.models {
+		if m.id == model {
+			return m.maxTokens
+		}
+	}
+	return 0
+}
+
+// ClaudeAPIModelForAlias returns the Claude API model that a Claude Code alias
+// ("haiku", "sonnet" or "opus") stands for when the request goes to the API
+// instead of the CLI, or "" for any other name.
+func ClaudeAPIModelForAlias(alias string) string {
+	switch strings.ToLower(strings.TrimSpace(alias)) {
+	case "haiku":
+		return "claude-haiku-5-5"
+	case "sonnet":
+		return "claude-sonnet-5-5"
+	case "opus":
+		return "claude-opus-5-5"
+	}
+	return ""
+}
+
+// claudeAcceptsTemperature reports whether model accepts a temperature; see
+// claudeTemperatureModelPrefixes.
+func claudeAcceptsTemperature(model string) bool {
+	for _, prefix := range claudeTemperatureModelPrefixes {
+		if strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Chat sends a chat completion request to Claude
@@ -109,12 +286,11 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	// Build Claude request parameters
 	maxTokens := int64(req.MaxTokens)
 	if maxTokens == 0 {
-		// Use model-specific default, fallback to 4096
-		if modelDefault, ok := claudeModelDefaults[req.Model]; ok {
-			maxTokens = modelDefault
-		} else {
-			maxTokens = 4096 // Fallback default
-		}
+		maxTokens = claudeDefaultMaxTokens
+	}
+	// A max_tokens above the model's own limit is a 400.
+	if limit := p.knownMaxTokens(req.Model); limit > 0 && maxTokens > limit {
+		maxTokens = limit
 	}
 
 	params := anthropic.MessageNewParams{
@@ -132,8 +308,8 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		}
 	}
 
-	// Add temperature if specified
-	if req.Temperature > 0 {
+	// Add temperature if specified and the model accepts one
+	if req.Temperature > 0 && claudeAcceptsTemperature(req.Model) {
 		params.Temperature = anthropic.Float(req.Temperature)
 	}
 
@@ -343,8 +519,13 @@ func (p *ClaudeProvider) UpdateClient(apiKey string) {
 		option.WithMaxRetries(0), // Ori owns the retry budget; see NewClaudeProvider.
 	)
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.apiKey = apiKey
 	p.httpClient = httpClient
 	p.client = client
+	p.mu.Unlock()
+
+	// A different key can call a different set of models.
+	p.modelsMu.Lock()
+	p.models, p.modelsLoaded, p.modelsFailedAt = nil, time.Time{}, time.Time{}
+	p.modelsMu.Unlock()
 }

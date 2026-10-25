@@ -121,12 +121,37 @@ func TestGetOpenAIModels(t *testing.T) {
 	}
 }
 
-func TestGetClaudeModels(t *testing.T) {
+func TestGetClaudeModels_ListsCurrentModelsWithoutRetiredOnesInAStableOrder(t *testing.T) {
 	models := GetClaudeModels()
-	if len(models) == 0 {
-		t.Error("Expected at least one Claude model, got none")
+	listed := make(map[string]bool, len(models))
+	for _, m := range models {
+		listed[m] = true
 	}
-	t.Logf("Found %d Claude models", len(models))
+	for _, want := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-4-5"} {
+		if !listed[want] {
+			t.Errorf("%s is missing from %v", want, models)
+		}
+	}
+	// Retired by Anthropic, so a request naming one fails.
+	for _, retired := range []string{"claude-3-opus-20240229", "claude-3-7-sonnet-20250219", "claude-opus-4-1", "claude-sonnet-4-20250514"} {
+		if listed[retired] {
+			t.Errorf("retired model %s is listed", retired)
+		}
+	}
+	for i := 1; i < len(models); i++ {
+		if models[i-1] < models[i] {
+			t.Fatalf("not in reverse name order at %d: %v", i, models)
+		}
+	}
+}
+
+func TestHasClaudeModel(t *testing.T) {
+	if !HasClaudeModel("claude-opus-4-5") || !HasClaudeModel("claude-3-opus-20240229") {
+		t.Error("a catalog Claude model is reported missing")
+	}
+	if HasClaudeModel("claude-4-opus-20250514") || HasClaudeModel("gpt-4o") {
+		t.Error("an ID outside the Claude catalog is reported present")
+	}
 }
 
 func TestFormatPricing(t *testing.T) {

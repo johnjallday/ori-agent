@@ -465,7 +465,7 @@ func preferredModelsForProvider(providerName string) []string {
 	case "claude_code":
 		return []string{"opus", "sonnet", "haiku"}
 	case "claude":
-		return []string{"claude-3-haiku-20240307", "claude-3-5-sonnet-20241022", "claude-3-sonnet-20240229"}
+		return []string{"claude-haiku-5-5", "claude-haiku-4-5", "claude-sonnet-5-5"}
 	case "ollama":
 		return []string{"llama3", "llama3:latest", "llama2", "mistral"}
 	case "lmstudio":

@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -263,15 +264,29 @@ func GetCodexModels() []string {
 	return codexModels
 }
 
-// GetClaudeModels returns a list of Claude model IDs from the pricing data.
-// This provides a curated list of models without requiring an API call.
+// GetClaudeModels returns the Claude model IDs from the pricing data that have
+// not reached their retirement date, in reverse name order so the list is the
+// same on every call and each family's newest model comes first. The Claude
+// provider falls back to it when Anthropic's own model list is unreachable.
 func GetClaudeModels() []string {
 	pricing := loadPricing()
+	today := currentDate()
 	models := make([]string, 0, len(pricing.Claude))
-	for name := range pricing.Claude {
+	for name, p := range pricing.Claude {
+		if p.DeprecationDate != "" && p.DeprecationDate <= today {
+			continue
+		}
 		models = append(models, name)
 	}
+	sort.Sort(sort.Reverse(sort.StringSlice(models)))
 	return models
+}
+
+// HasClaudeModel reports whether id is a Claude model ID in the pricing data,
+// retired or not.
+func HasClaudeModel(id string) bool {
+	_, ok := loadPricing().Claude[id]
+	return ok
 }
 
 // isChatModel checks if a model ID is a chat model (not embedding, tts, etc.)
