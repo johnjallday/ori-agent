@@ -92,7 +92,9 @@ func firstLookNeedsHome(offer FolderOffer, view FolderFirstTaskView, now time.Ti
 		return false
 	}
 	switch view.State {
-	case FolderFirstTaskSeeded, FolderFirstTaskRunning, FolderFirstTaskWaiting, FolderFirstTaskFailed:
+	case FolderFirstTaskSeeded:
+		return !view.Optional
+	case FolderFirstTaskRunning, FolderFirstTaskWaiting, FolderFirstTaskFailed:
 		return true
 	case FolderFirstTaskFinished:
 		return view.FinishedAt != nil && !view.FinishedAt.After(now) && now.Sub(*view.FinishedAt) <= folderFirstLookResultWindow

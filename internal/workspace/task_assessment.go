@@ -44,6 +44,11 @@ func FirstTaskRecipe(task *Task) string {
 	}
 	raw, present := task.Context[TaskContextFirstTaskRecipe]
 	if !present {
+		// Legacy folder starters must not regain the ordinary tool-enabled
+		// path on retry. Missing scoped evidence will fail closed in the host.
+		if task.Context["template_id"] == "folder-digest" && task.Context["template_starter_task"] == true {
+			return FirstTaskRecipeFolderSummary
+		}
 		return ""
 	}
 	recipe, _ := raw.(string)
@@ -360,6 +365,11 @@ func (h *LLMTaskHandler) runRecipeTask(ctx context.Context, agentName string, ta
 	if blocked != nil {
 		return "", blocked
 	}
+	current := recipeExecutor(task, agentName, chosen)
+	reviewed, _ := task.Context[TaskContextReviewedExecutor].(string)
+	if (recipe == FirstTaskRecipeFolderSummary || reviewed != "") && reviewed != current.Digest {
+		return "", &TaskBlockedError{ReasonCode: "execution_changed", Reason: "Review the current task executor, model and permitted file scope before starting this summary. Nothing was read or sent to a model."}
+	}
 	runner := h.recipes[recipe]
 	window := llm.ResolveModelContextWindow(chosen.provider, chosen.model)
 	brief, err := runner.Brief(ctx, task, window)
@@ -452,7 +462,7 @@ func withoutReservedTaskContext(context map[string]any) map[string]any {
 // ReservedTaskContextKey reports a context key only the server may write.
 func ReservedTaskContextKey(key string) bool {
 	switch strings.TrimSpace(key) {
-	case TaskContextFirstTaskRecipe, TaskContextFirstTaskRecipeVersion, TaskContextFirstTaskFailure:
+	case TaskContextFirstTaskRecipe, TaskContextFirstTaskRecipeVersion, TaskContextFirstTaskFailure, TaskContextFolderSummaryScope, TaskContextReviewedExecutor:
 		return true
 	}
 	return false

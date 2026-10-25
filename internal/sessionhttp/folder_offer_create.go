@@ -201,10 +201,12 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		// Say only what will really happen: the task starts on one click when it
 		// has an agent and no setup dialog is still to open. Nothing starts it
 		// without that click, so no model tokens are spent until the user asks.
+		detail := "Optional task; execution status unavailable"
+		if view, ok := h.FolderFirstTaskView(context.Background(), ws.ID); ok {
+			detail = view.Detail
+		}
 		rows = append(rows, personalassistant.FolderReceiptRow{
-			Kind: "task", Name: task.Description,
-			Detail: personalassistant.FolderFirstTaskRowDetail(
-				personalassistant.FolderFirstTaskStateOf(task), h.folderFirstTaskStartsOnClick(ws), task.Result),
+			Kind: "task", Name: task.Description, Detail: detail,
 		})
 	}
 	return rows, nil

@@ -40,10 +40,8 @@ func hireAndStartFixture(t *testing.T, look *fakeFirstLook) (*oneCardFixture, *f
 	return f, seeder
 }
 
-// Hire and start covers the first look: once the workspace is verified and its
-// look seeded with the user's brief, the look is started, and what happened is
-// kept on the outcome.
-func TestFolderHire_TheFirstLookStartsUnderTheConsentOnce(t *testing.T) {
+// Setup seeds the optional task but never borrows execution consent from hire.
+func TestFolderHire_SetupSeedsTheOptionalLookWithoutStartingIt(t *testing.T) {
 	look := &fakeFirstLook{result: FolderFirstLookStart{Started: true, TaskID: "look-1"}}
 	f, seeder := hireAndStartFixture(t, look)
 	ctx := context.Background()
@@ -51,27 +49,23 @@ func TestFolderHire_TheFirstLookStartsUnderTheConsentOnce(t *testing.T) {
 		FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest, Brief: "Tighten the mix."}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the look to be recorded", func() bool {
-		o := f.stored(t)
-		return o.Status == FolderOfferResolved && o.Outcome != nil && o.Outcome.FirstLook != nil
-	})
+	waitFor(t, "the workspace to be ready", func() bool { return f.stored(t).Status == FolderOfferResolved })
 	outcome := f.stored(t).Outcome
-	if look.callCount() != 1 || look.calls[0] != "quest-project" || !outcome.FirstLook.Started || outcome.FirstLook.TaskID != "look-1" {
-		t.Fatalf("calls = %v, record = %+v", look.calls, outcome.FirstLook)
+	if look.callCount() != 0 || outcome.FirstLook != nil {
+		t.Fatalf("setup must not start or claim a summary: calls=%v, record=%+v", look.calls, outcome.FirstLook)
 	}
 	if seeder.callCount() != 1 || seeder.calls[0].Brief != "Tighten the mix." {
 		t.Fatalf("the look was seeded with %+v", seeder.calls)
 	}
 	// A replayed settle starts nothing more.
 	f.service.startHiredLook(ctx, "local", f.offer.ID)
-	if look.callCount() != 1 {
-		t.Fatalf("a replay started the look again: %v", look.calls)
+	if look.callCount() != 0 {
+		t.Fatalf("a legacy replay started the optional look: %v", look.calls)
 	}
 }
 
-// A look that cannot start (its agent has no usable model, say) is left for the
-// user with its reason; a start that errors reads as one that did not start.
-func TestFolderHire_ALookThatCannotStartKeepsItsReason(t *testing.T) {
+// Optional execution readiness is not a failed or blocked setup.
+func TestFolderHire_OptionalExecutorReadinessDoesNotStartOrUndoSetup(t *testing.T) {
 	for name, tc := range map[string]struct {
 		look   *fakeFirstLook
 		reason string
@@ -84,12 +78,9 @@ func TestFolderHire_ALookThatCannotStartKeepsItsReason(t *testing.T) {
 			FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
 			t.Fatal(err)
 		}
-		waitFor(t, "the look to be recorded", func() bool {
-			o := f.stored(t)
-			return o.Outcome != nil && o.Outcome.FirstLook != nil
-		})
-		if got := f.stored(t).Outcome.FirstLook; got.Started || got.Reason != tc.reason {
-			t.Errorf("%s: record = %+v", name, got)
+		waitFor(t, "the workspace to be ready", func() bool { return f.stored(t).Status == FolderOfferResolved })
+		if got := f.stored(t).Outcome.FirstLook; got != nil || tc.look.callCount() != 0 {
+			t.Errorf("%s: optional task must remain unstarted: record=%+v", name, got)
 		}
 		if f.stored(t).Status != FolderOfferResolved {
 			t.Errorf("%s: a look that did not start must not undo the hire", name)

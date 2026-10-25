@@ -405,7 +405,7 @@ func TestSeedFolderOfferAssessmentKeepsALegacyFirstLook(t *testing.T) {
 	}
 	ws, _ := handler.workspaceStore.Get(id)
 	if len(ws.Tasks) != 1 || ws.Tasks[0].Result != "Three TODOs." || ws.Tasks[0].Status != agentworkspace.TaskStatusCompleted ||
-		agentworkspace.FirstTaskRecipe(&ws.Tasks[0]) != "" {
+		ws.Tasks[0].Context[agentworkspace.TaskContextFirstTaskRecipe] != nil {
 		t.Fatalf("the legacy first look was rewritten: %+v", ws.Tasks)
 	}
 	if !strings.Contains(ws.Tasks[0].Description, "TODOs") {

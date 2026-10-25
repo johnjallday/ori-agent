@@ -105,7 +105,12 @@ const (
 // setup may install, in a form the run can check. A resumed run is held to this,
 // not to a recomputed plan: the plan shrinks as steps finish, the promise does not.
 // It never leaves the server.
+// FolderOptionalSummaryPolicy binds setup-only consent and the separately
+// started, host-restricted summary contract. Empty is a legacy reviewed plan.
+const FolderOptionalSummaryPolicy = "optional_read_only_summary_v1"
+
 type FolderSetupIntent struct {
+	OptionalTaskPolicy string `json:"optional_task_policy,omitempty"`
 	// Model is the separately witnessed configuration of a known plugin hire.
 	// Display metadata cannot set it; legacy/pending-blueprint plans omit it.
 	Model              *FolderSetupModelIntent `json:"model,omitempty"`
@@ -347,10 +352,11 @@ func (i FolderSoftwareIntent) Validate() error {
 // Digest back with the click and the server recomputes the plan: a mismatch
 // means the card on screen is stale and the click is refused.
 type FolderSetupPlan struct {
-	Visual      *FolderSetupVisual      `json:"visual,omitempty"`
-	Lines       []FolderPlanLine        `json:"lines"`
-	Digest      string                  `json:"digest"`
-	Destination *FolderSetupDestination `json:"destination,omitempty"`
+	OptionalTask bool                    `json:"optional_task,omitempty"`
+	Visual       *FolderSetupVisual      `json:"visual,omitempty"`
+	Lines        []FolderPlanLine        `json:"lines"`
+	Digest       string                  `json:"digest"`
+	Destination  *FolderSetupDestination `json:"destination,omitempty"`
 	// Prerequisites say what the setup needs and what it can use, as it stands
 	// now. They are read fresh for each plan and are not part of the digest: a
 	// prerequisite that changes the setup itself (the assistant's model) is in
@@ -431,6 +437,7 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	stamped.OptionalTask = p.Intent.OptionalTaskPolicy == FolderOptionalSummaryPolicy
 	if p.Intent.Model != nil {
 		model := *p.Intent.Model
 		stamped.Intent.Model = &model
@@ -454,6 +461,9 @@ func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 		stamped.Destination = &destination
 		stamped.Intent.Destination = &destination
 		stamped.Digest = DestinationPlanDigest(stamped.Lines, &destination)
+	}
+	if stamped.Intent.OptionalTaskPolicy != "" {
+		stamped.Digest = recipePlanDigest(stamped.Digest, stamped.Intent)
 	}
 	if stamped.Intent.Recipe != "" {
 		stamped.Digest = recipePlanDigest(stamped.Digest, stamped.Intent)
@@ -603,6 +613,9 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		}
 	}
 	intent := run.Intent
+	if intent.OptionalTaskPolicy != "" && intent.OptionalTaskPolicy != FolderOptionalSummaryPolicy {
+		return fmt.Errorf("%w: optional task policy", errFolderDigestInvalid)
+	}
 	if intent.Model != nil {
 		if err := intent.Model.Validate(); err != nil {
 			return err

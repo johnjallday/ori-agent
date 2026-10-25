@@ -245,6 +245,27 @@
   overflow-wrap: anywhere;
 }
 
+.folder-optional-task {
+  min-width: 0;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-radius: 0.75rem;
+  background: var(--ori-paper, var(--bg-secondary));
+  overflow-wrap: anywhere;
+}
+
+.folder-optional-task h3 {
+  margin-block: 0.5rem;
+  font:
+    700 1.1rem "Chakra Petch",
+    sans-serif;
+}
+
+.folder-optional-task .pa-specialist-offer__actions {
+  margin-top: 0.75rem;
+}
+
 .folder-setup-decision > h3 {
   font:
     700 1.1rem "Chakra Petch",

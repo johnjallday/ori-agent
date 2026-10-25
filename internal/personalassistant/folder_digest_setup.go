@@ -531,8 +531,8 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
 			return
 		}
-		s.startHiredLook(ctx, userID, offerID)
-		return
+		s.linkOptionalLook(ctx, userID, offerID)
+		return // Setup consent never starts the optional project task.
 	}
 	_, err = s.ResolveJourney(ctx, userID, offerID, FolderJourneyInput{
 		RunID: offer.Setup.RunID, RequestID: "setup-" + offerID + "-" + offer.Setup.RunID,
@@ -542,9 +542,9 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 		_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
 		return
 	}
-	// The workspace is verified and its first look seeded: the hire's consent
-	// covers starting it now.
-	s.startHiredLook(ctx, userID, offerID)
+	s.linkOptionalLook(ctx, userID, offerID)
+	// The workspace is verified and its first task seeded. A separate user
+	// action owns its start, including when this was an old run being resumed.
 }
 
 // recordSetup writes a run snapshot onto the offer. It never touches an offer

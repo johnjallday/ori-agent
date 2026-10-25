@@ -1348,7 +1348,7 @@ func TestFolderDigest_BlueprintFallsBackToBlankWithNote(t *testing.T) {
 func TestFolderFirstTask_PerShape(t *testing.T) {
 	cases := map[string]string{
 		"code":       "List the open TODOs and the last thing changed",
-		"audio":      "Summarize the session's tracks and the most recent edits",
+		"audio":      "Summarize the saved session and suggest one next step",
 		"manuscript": "Summarize the current draft and its open sections",
 		"corpus":     "Build the sources index from the documents already in this folder: one line per document with a citation and a one-paragraph summary",
 		"notes":      "Tell me what is in this folder and what looks most active",
@@ -1356,7 +1356,11 @@ func TestFolderFirstTask_PerShape(t *testing.T) {
 	}
 	for shape, want := range cases {
 		description, details := FolderFirstTask(folderdigestShape(shape))
-		if description != want || !strings.Contains(details, "workspace_directory_read") {
+		policy := strings.Contains(details, "workspace_directory_read")
+		if shape == "audio" {
+			policy = strings.Contains(details, "No source changes, tools or external actions are permitted.") && strings.Contains(details, "A single saved file does not establish edit history")
+		}
+		if description != want || !policy || !strings.Contains(details, `"Next:"`) {
 			t.Errorf("%q: %q / %q", shape, description, details)
 		}
 	}

@@ -280,6 +280,12 @@ func (h *LLMTaskHandler) SetUtilityToolProvider(provider UtilityToolProvider) {
 func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task Task) (string, error) {
 	logger.Debug("🤖 Executing task for agent", logger.Fields{"task_id": task.ID, "agentName": agentName})
 
+	// Restrictions are canonical, not supplied by a run payload or retry.
+	canonical, policyErr := h.canonicalRecipeTask(task)
+	if policyErr != nil {
+		return "", policyErr
+	}
+	task = canonical
 	// A task seeded under a host recipe is run by that recipe or not at all.
 	if recipe := FirstTaskRecipe(&task); recipe != "" {
 		return h.executeRecipeTask(ctx, agentName, task, recipe)
@@ -1518,6 +1524,11 @@ func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *resolvedTaskA
 func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
 	logger.Debug("Executing tool", logger.Fields{"tool": toolCall.Name})
 
+	canonical, policyErr := h.canonicalRecipeTask(task)
+	if policyErr != nil {
+		return toolCallResult{Name: toolCall.Name, Error: policyErr}
+	}
+	task = canonical
 	// A task under a host recipe has no tools. Its run never reaches the tool
 	// loop; this refusal is here so that no future path into the loop can
 	// dispatch a tool for one.

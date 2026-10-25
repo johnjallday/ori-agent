@@ -96,7 +96,7 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 	agents := assistantLine(facts.Assistant)
 	task := personalassistant.FolderPlanLine{
 		Kind: personalassistant.FolderPlanTask, Name: FirstLookLine,
-		Detail: "It reads this project's README, instructions and build files and reports what it found, with one suggested first task. Model tokens are spent then; nothing in the project is run.",
+		Detail: "When you separately start it, it reads this project's README, instructions and build files and reports what it found, with one suggested first task. Model tokens are spent only then; nothing in the project is run.",
 	}
 
 	if existing := facts.Existing; existing != nil {
@@ -136,6 +136,7 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 	plan := personalassistant.NewFolderSetupPlan([]personalassistant.FolderPlanLine{workspace, folder, agents, mode, task})
 	plan.Intent = personalassistant.FolderSetupIntent{
 		Placement: "standalone", Recipe: facts.Recipe, RecipeVersion: facts.RecipeVersion, Software: software,
+		OptionalTaskPolicy: personalassistant.FolderOptionalSummaryPolicy,
 	}
 	if facts.Destination != nil && facts.Destination.Status == "existing" {
 		plan.Intent.Placement = "grouped"

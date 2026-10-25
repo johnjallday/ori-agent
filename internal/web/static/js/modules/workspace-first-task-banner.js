@@ -4,6 +4,8 @@
 // after that it makes plain that the agent is working, and says where the task
 // ended up.
 
+import { folderTaskDisclosure } from './folder-task-disclosure.js';
+
 const WORKING = new Set(['', 'pending', 'in_progress', 'running', 'started']);
 const NEEDS_YOU = new Set(['blocked', 'waiting_for_choice', 'needs_input']);
 const FAILED = new Set(['failed', 'timeout', 'cancelled', 'canceled']);
@@ -132,6 +134,8 @@ const ASSESSMENT_NOT_STARTED = 'The assessment could not start. Try again.';
 // own sentence and repair are shown instead.
 export function assessmentStartNote(reason) {
   switch (String(reason || '').trim()) {
+    case 'execution_changed':
+      return 'Executor/model or read scope changed. Review the refreshed disclosure, then start explicitly.';
     case 'start_failed':
     case 'execution_unavailable':
     case 'workspace_unavailable':
@@ -151,7 +155,7 @@ export function assessmentStartNote(reason) {
 // here. `busy` is a click still in flight, `message` what that click was told,
 // `taskHref` the page's own link to the task, and `dismissed` a finished
 // assessment the viewer has put away.
-export function assessmentBannerView(
+function recipeBannerView(
   look,
   { busy = false, message = '', taskHref = '', dismissed = false } = {}
 ) {
@@ -273,6 +277,32 @@ export function assessmentBannerView(
       };
     }
   }
+}
+
+export function assessmentBannerView(look, options = {}) {
+  const view = recipeBannerView(look, options);
+  if (!view.visible) return view;
+  if (look.recipe === 'folder_summary') {
+    view.heading = view.heading
+      .replaceAll('assessment', 'summary')
+      .replace('Assessing', 'Summarizing');
+    view.detail = view.detail.replaceAll('assessment', 'summary');
+    if (view.action?.id === 'start-first-look')
+      view.action.label = view.action.label.replace('Start assessment', 'Start summary');
+    view.links = view.links.map(link => ({
+      ...link,
+      label: link.label.replace('Open the assessment', 'Open summary')
+    }));
+  }
+  if (look.optional === true && ['seeded', 'failed'].includes(look.state)) {
+    view.heading =
+      look.state === 'seeded'
+        ? `Optional project task: ${String(look.description || 'Project summary')}`
+        : view.heading;
+    view.detail = `${view.detail} ${folderTaskDisclosure(look)}`;
+    if (look.state === 'seeded') view.phase = 'available';
+  }
+  return view;
 }
 
 // renderFirstTaskBanner draws the view into its mount (a hidden <section>).

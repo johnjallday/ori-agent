@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -50,6 +51,10 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 		FolderName: folder, Description: task.Description,
 		StartedAt: task.StartedAt, Recipe: agentworkspace.FirstTaskRecipe(task),
 	}
+	view.Optional = true
+	if h.firstTaskExecutor != nil && view.Recipe != "" {
+		view.Executor, _ = h.firstTaskExecutor(*task)
+	}
 	if assignee := strings.TrimSpace(task.To); assignee != "" && !strings.EqualFold(assignee, "unassigned") {
 		view.Agent = assignee
 	}
@@ -73,6 +78,17 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 	}
 	if view.Recipe != "" {
 		h.describeRecipeFirstTask(ctx, ws, task, &view)
+		view.InputScope = "Bounded README, instructions and build files in this workspace's linked project"
+		if view.Recipe == agentworkspace.FirstTaskRecipeFolderSummary {
+			view.InputScope = "The task's permitted linked folder; at most 8 supported files, 64 KiB each and 128 KiB total"
+			if scope, ok := agentworkspace.FolderSummaryScopeOf(*task); ok && scope.Entry != "" {
+				view.InputScope = "Saved file “" + filepath.Base(scope.Entry) + "” only (up to 64 KiB); no audio analysis"
+			}
+			view.Message = strings.ReplaceAll(strings.ReplaceAll(view.Message, "assessment", "summary"), "Assessment", "Summary")
+			if view.Reason == "nothing_to_summarize" {
+				view.Message = "No permitted saved text or supported session file could be read within the summary limits. Nothing was sent to a model."
+			}
+		}
 	} else {
 		view.Message = personalassistant.FolderFirstTaskMessageFor(view.Reason, ws.Name, view.Agent)
 		if state == personalassistant.FolderFirstTaskFinished {

@@ -34,6 +34,9 @@ func postFolderFirstTaskStart(t *testing.T, handler *Handler, wsID string) map[s
 // seedFolderFirstTask gives a workspace the starter task a shown folder gets.
 func seedFolderFirstTask(t *testing.T, handler *Handler, wsID string) {
 	t.Helper()
+	// Lifecycle fixtures use a stub executor; real model/read admission is
+	// covered by server/folder_summary_test.go, not bypassed in production.
+	handler.SetFirstTaskRecipeGate(func(agentworkspace.Task) string { return "" })
 	seeded, err := handler.SeedStarterTasks(wsID, projecttemplates.Template{
 		ID:           "folder-digest",
 		StarterTasks: []projecttemplates.StarterTask{{Description: "Summarize the folder", Details: "Read it and say what is in it."}},
@@ -117,7 +120,7 @@ func TestFolderFirstTaskIsNeverRetriedAfterAFailedStart(t *testing.T) {
 	view, ok := handler.FolderFirstTaskView(context.Background(), wsID)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed ||
 		view.Reason != personalassistant.FolderFirstTaskReasonStartFailed ||
-		view.Message != "Producer's first look could not start. Try again." {
+		view.Message != "The summary could not start. Try again." {
 		t.Fatalf("view after a refused start = %+v ok=%t", view, ok)
 	}
 	if second := postFolderFirstTaskStart(t, handler, wsID); second["reason"] != "already_consumed" {
@@ -285,7 +288,7 @@ func TestFolderFirstTaskReceiptPromisesOnlyWhatWillHappen(t *testing.T) {
 	_, resp := postCreateWorkspace(t, handler, `{"name":"Assigned","template_id":"starter-template"}`)
 	assigned := resp["folder"].(map[string]any)["id"].(string)
 	seedFolderFirstTask(t, handler, assigned)
-	if got := taskDetail(assigned); got != "Starts when you press Start first look" {
+	if got := taskDetail(assigned); got != "Optional · starts only when you press Start summary" {
 		t.Fatalf("an assigned task with no wizard = %q", got)
 	}
 	// The click was spent and the run is starting: no second start is promised.
@@ -305,7 +308,7 @@ func TestFolderFirstTaskReceiptPromisesOnlyWhatWillHappen(t *testing.T) {
 	_, resp = postCreateWorkspace(t, handler, `{"name":"Nobody","template_id":"optout-template","create_template_agents":false}`)
 	unassigned := resp["folder"].(map[string]any)["id"].(string)
 	seedFolderFirstTask(t, handler, unassigned)
-	if got := taskDetail(unassigned); got != "Ready to start" {
+	if got := taskDetail(unassigned); got != "Needs an assistant before it can start" {
 		t.Fatalf("an unassigned task = %q", got)
 	}
 }

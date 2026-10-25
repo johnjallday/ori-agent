@@ -54,7 +54,7 @@ func TestFolderFirstTaskView_FollowsTheTaskThroughItsLife(t *testing.T) {
 	if view.Agent == "" || view.StartedAt != nil || view.FinishedAt != nil || view.ResultExcerpt != "" {
 		t.Fatalf("seeded view carries run data: %+v", view)
 	}
-	if view.Detail != "Starts when you press Start first look" {
+	if view.Detail != "Optional · starts only when you press Start summary" {
 		t.Fatalf("seeded row detail = %q", view.Detail)
 	}
 	// Browser routes are built from the folder slug, never the internal id.
@@ -90,7 +90,7 @@ func TestFolderFirstTaskView_FollowsTheTaskThroughItsLife(t *testing.T) {
 	if view.FinishedAt == nil || !view.FinishedAt.Equal(finished) {
 		t.Fatalf("finished at %v, want %v", view.FinishedAt, finished)
 	}
-	if !strings.HasPrefix(view.ResultExcerpt, "Three drafts. The newest is chapter four.") ||
+	if view.ResultExcerpt != "Three drafts." || view.ReportRoute != "/workspaces/thesis-draft/task/"+task.ID ||
 		strings.Contains(view.ResultExcerpt, "\n") || len([]rune(view.ResultExcerpt)) > personalassistant.FolderFirstTaskExcerptMax {
 		t.Fatalf("excerpt = %q (%d runes)", view.ResultExcerpt, len([]rune(view.ResultExcerpt)))
 	}
@@ -109,7 +109,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok := handler.FolderFirstTaskView(ctx, unassigned)
 	if !ok || view.State != personalassistant.FolderFirstTaskSeeded || view.CanStart ||
 		view.Reason != personalassistant.FolderFirstTaskReasonUnassigned ||
-		view.Message != "The first task has no agent yet. Open Nobody to assign one." || view.Agent != "" {
+		view.Message != "The summary has no assistant in Nobody to run it. Open Nobody to assign one." || view.Agent != "" {
 		t.Fatalf("unassigned view = %+v ok=%t", view, ok)
 	}
 
@@ -149,7 +149,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok = handler.FolderFirstTaskView(ctx, stalled)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed || view.CanStart ||
 		view.Reason != personalassistant.FolderFirstTaskReasonStartFailed ||
-		view.Message != "Producer's first look could not start. Try again." || view.Detail != "Did not finish" {
+		view.Message != "The summary could not start. Try again." || view.Detail != "Did not finish" {
 		t.Fatalf("stalled view = %+v ok=%t", view, ok)
 	}
 
@@ -161,7 +161,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok = handler.FolderFirstTaskView(ctx, paused)
 	if !ok || view.State != personalassistant.FolderFirstTaskWaiting || view.CanStart ||
 		view.Reason != personalassistant.FolderFirstTaskReasonNeedsInput ||
-		view.Message != "Producer is waiting for your answer. Open Paused to continue." {
+		view.Message != "The summary is paused. Open Paused to continue." {
 		t.Fatalf("paused view = %+v ok=%t", view, ok)
 	}
 
@@ -173,7 +173,7 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 	view, ok = handler.FolderFirstTaskView(ctx, failed)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed ||
 		view.Reason != personalassistant.FolderFirstTaskReasonRunFailed ||
-		view.Message != "Producer's first look did not finish. Try again." {
+		view.Message != "The summary did not finish. Nothing in the project was run or changed. Try again." {
 		t.Fatalf("failed view = %+v ok=%t", view, ok)
 	}
 	// The run's own error text is never shown on Home.

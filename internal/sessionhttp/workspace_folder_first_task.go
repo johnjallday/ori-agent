@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -151,13 +152,34 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
-	start := h.StartFolderFirstTask(r.Context(), workspaceID)
+	var input struct {
+		ExecutionDigest string `json:"execution_digest"`
+		Retry           bool   `json:"retry,omitempty"`
+	}
+	if r.ContentLength != 0 {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			_ = orihttp.RespondError(w, http.StatusBadRequest, "Invalid summary start disclosure")
+			return
+		}
+	}
+	start := h.startReviewedFolderFirstTask(r.Context(), workspaceID, input.ExecutionDigest, input.Retry)
 	body := map[string]any{"success": true, "started": start.Started}
 	if start.Reason != "" {
 		body["reason"] = start.Reason
 	}
 	if start.TaskID != "" {
 		body["task_id"] = start.TaskID
+	}
+	if start.Reason == "execution_changed" {
+		read := h.FolderFirstTaskView
+		if h.firstTaskViewer != nil {
+			read = h.firstTaskViewer
+		}
+		if view, ok := read(r.Context(), workspaceID); ok {
+			body["first_task"] = view
+		}
 	}
 	_ = orihttp.RespondSuccess(w, body)
 }
@@ -184,6 +206,16 @@ func waitsToStart(task *agentworkspace.Task) bool {
 // consent. A task with no agent, or a setup wizard still open, is left seeded
 // and unconsumed so a later click starts it.
 func (h *Handler) StartFolderFirstTask(ctx context.Context, workspaceID string) FolderFirstTaskStart {
+	// Trusted internal caller; browser requests must supply the disclosure they
+	// actually saw. Setup never calls this compatibility entrypoint.
+	expected := ""
+	if view, ok := h.FolderFirstTaskView(ctx, workspaceID); ok && view.Executor != nil {
+		expected = view.Executor.Digest
+	}
+	return h.startReviewedFolderFirstTask(ctx, workspaceID, expected, false)
+}
+
+func (h *Handler) startReviewedFolderFirstTask(ctx context.Context, workspaceID, expected string, retry bool) FolderFirstTaskStart {
 	store := h.taskMutationStore()
 	if store == nil {
 		return FolderFirstTaskStart{Reason: "no_task_store"}
@@ -200,8 +232,9 @@ func (h *Handler) StartFolderFirstTask(ctx context.Context, workspaceID string) 
 	}
 
 	var (
-		taskID string
-		reason = "no_first_task"
+		taskID      string
+		candidateID string
+		reason      = "no_first_task"
 	)
 	err := store.Update(workspaceID, func(ws *agentworkspace.Workspace) error {
 		for i := range ws.Tasks {
@@ -209,11 +242,13 @@ func (h *Handler) StartFolderFirstTask(ctx context.Context, workspaceID string) 
 			if !isFolderFirstTask(task) {
 				continue
 			}
-			if _, consumed := task.Context[taskContextFolderFirstTaskConsumedAt]; consumed {
+			candidateID = task.ID
+			isRetry := retry && agentworkspace.FirstTaskRecipe(task) != "" && personalassistant.FolderFirstTaskStateOf(task) == personalassistant.FolderFirstTaskFailed
+			if _, consumed := task.Context[taskContextFolderFirstTaskConsumedAt]; consumed && !isRetry {
 				reason = "already_consumed"
 				return errFolderFirstTaskNoChange
 			}
-			if !waitsToStart(task) {
+			if !waitsToStart(task) && !isRetry {
 				// Already started by hand (or finished): not this trigger's to run.
 				reason = "not_pending"
 				return errFolderFirstTaskNoChange
@@ -229,6 +264,29 @@ func (h *Handler) StartFolderFirstTask(ctx context.Context, workspaceID string) 
 				reason = blocked
 				return errFolderFirstTaskNoChange
 			}
+			if h.firstTaskExecutor != nil && agentworkspace.FirstTaskRecipe(task) != "" {
+				executor, blocked := h.firstTaskExecutor(*task)
+				if executor == nil {
+					reason = blocked
+					if reason == "" {
+						reason = personalassistant.FolderFirstTaskReasonRecipeUnavailable
+					}
+					return errFolderFirstTaskNoChange
+				}
+				if expected != executor.Digest {
+					reason = "execution_changed"
+					return errFolderFirstTaskNoChange
+				}
+				task.Context[agentworkspace.TaskContextReviewedExecutor] = executor.Digest
+			}
+			if isRetry {
+				if err := task.SetStatus(agentworkspace.TaskStatusPending); err != nil {
+					return err
+				}
+				agentworkspace.ResetTaskRuntimeKeepingSteps(task)
+				delete(task.Context, personalassistant.FolderFirstTaskStartFailedKey)
+				delete(task.Context, agentworkspace.TaskContextFirstTaskFailure)
+			}
 			task.Context[taskContextFolderFirstTaskConsumedAt] = time.Now().UTC().Format(time.RFC3339)
 			taskID = task.ID
 			return nil
@@ -239,10 +297,16 @@ func (h *Handler) StartFolderFirstTask(ctx context.Context, workspaceID string) 
 		logger.Warn("Folder first task start sweep failed", logger.Fields{"workspace_id": workspaceID, "error": err})
 		return FolderFirstTaskStart{Reason: "workspace_unavailable"}
 	}
-	if taskID == "" {
-		return FolderFirstTaskStart{Reason: reason}
+	if errors.Is(err, errFolderFirstTaskNoChange) || taskID == "" {
+		return FolderFirstTaskStart{Reason: reason, TaskID: candidateID}
 	}
 
+	if h.firstTaskLinker != nil {
+		if err := h.firstTaskLinker(ctx, workspaceID, taskID); err != nil {
+			h.markFolderFirstTaskStartFailed(store, workspaceID, taskID)
+			return FolderFirstTaskStart{Reason: "report_link_unavailable", TaskID: taskID}
+		}
+	}
 	// The marker is committed: from here the outcome is started or
 	// consumed-but-failed, never retried automatically.
 	if h.templateSetupStarter == nil {

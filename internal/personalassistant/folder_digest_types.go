@@ -137,6 +137,9 @@ type FolderOutcome struct {
 	// FirstLook is what a hire did about the agent's first look once this
 	// outcome was verified; nil for a setup that hired no one.
 	FirstLook *FolderFirstLookRecord `json:"first_look,omitempty"`
+	// FirstTaskID is trusted ownership of a seeded optional task, not a claim
+	// that setup started it. Legacy automatic-start records stay separate.
+	FirstTaskID string `json:"first_task_id,omitempty"`
 }
 
 // FolderPortfolioEvidence is the bounded, path-free count seen at scan time.
@@ -476,6 +479,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			return err
 		}
 		if offer.Outcome != nil {
+			if len(offer.Outcome.FirstTaskID) > 200 || strings.ContainsAny(offer.Outcome.FirstTaskID, "/\\\x00\r\n") {
+				return fmt.Errorf("%w: first task linkage", errFolderDigestInvalid)
+			}
 			if offer.Outcome.Parent != nil && (offer.Outcome.Parent.Status != "existing" || offer.Outcome.Parent.Validate() != nil) {
 				return fmt.Errorf("%w: resulting parent", errFolderDigestInvalid)
 			}

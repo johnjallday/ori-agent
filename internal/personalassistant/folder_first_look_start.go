@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // FolderFirstLookStart is how one start of a hired agent's first look went:
@@ -18,10 +16,8 @@ type FolderFirstLookStart struct {
 	TaskID  string
 }
 
-// FolderFirstLookStarter starts the first look a setup seeded, under the hire's
-// consent: the same one start Start first look makes, through the same path,
-// and only when the look could start now. A look whose agent has no usable
-// model is left waiting with its reason.
+// FolderFirstLookStarter is the legacy injected starter. Setup no longer calls
+// it: an old hire record is not consent to launch a newly optional task.
 type FolderFirstLookStarter interface {
 	StartFirstLook(ctx context.Context, userID, workspaceID string) (FolderFirstLookStart, error)
 }
@@ -57,48 +53,7 @@ func (r *FolderFirstLookRecord) validate() error {
 	return nil
 }
 
-// startHiredLook starts the first look of a workspace a hire just set up, once.
-// Only a run that hired someone does this: the consent given by Hire and start
-// covers reading the folder, and nothing else. It runs after the outcome was
-// verified, so the workspace exists and the folder is linked; a failure to
-// start is recorded and leaves the look where Start first look can start it.
-func (s *FolderDigestService) startHiredLook(ctx context.Context, userID, offerID string) {
-	if s.deps.FirstLook == nil {
-		return
-	}
-	doc, err := s.store.Read(ctx, userID)
-	if err != nil {
-		return
-	}
-	offer := doc.Offer(offerID)
-	if offer == nil || offer.Status != FolderOfferResolved || offer.Outcome == nil || strings.TrimSpace(offer.Outcome.WorkspaceID) == "" ||
-		offer.Outcome.FirstLook != nil || offer.Setup == nil || offer.Setup.Hire == nil {
-		return
-	}
-	// An inbox hire's first look is the batch its setup prepared; no model
-	// task is ever started for it.
-	if offer.Setup.Intent.Inbox != nil || isInboxOffer(*offer) {
-		return
-	}
-	workspaceID := offer.Outcome.WorkspaceID
-	start, err := s.deps.FirstLook.StartFirstLook(ctx, userID, workspaceID)
-	record := FolderFirstLookRecord{Started: start.Started, Reason: start.Reason, TaskID: start.TaskID, At: s.now()}
-	if err != nil {
-		logger.Warn("The hired agent's first look could not be started", logger.Fields{"offer_id": offerID, "workspace_id": workspaceID, "error": err.Error()})
-		record.Started = false
-		if record.Reason == "" {
-			record.Reason = FolderFirstTaskReasonStartFailed
-		}
-	}
-	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
-		item := d.Offer(offerID)
-		if item == nil || item.Outcome == nil || item.Outcome.WorkspaceID != workspaceID || item.Outcome.FirstLook != nil {
-			return errFolderReplay
-		}
-		item.Outcome.FirstLook = &record
-		return nil
-	})
-	if err != nil && err != errFolderReplay {
-		logger.Warn("The hired agent's first look was not recorded", logger.Fields{"offer_id": offerID, "error": err.Error()})
-	}
-}
+// startHiredLook is deliberately inert for legacy callers/replays. Neither a
+// saved hire nor an old setup plan authorizes a new optional summary. Existing
+// task state and historical automatic-start records are left untouched.
+func (s *FolderDigestService) startHiredLook(_ context.Context, _, _ string) {}

@@ -35,6 +35,19 @@ func (b *TaskRunBridge) ExecuteTaskRun(ctx context.Context, agentName string, ta
 	if b == nil || b.store == nil || b.service == nil {
 		return workspace.TaskRunResult{}, fmt.Errorf("workspace run task bridge is not configured")
 	}
+	// A copied run payload cannot erase a persisted task's restriction.
+	if b.workspaceStore != nil {
+		ws, err := b.workspaceStore.Get(task.WorkspaceID)
+		if err != nil || ws == nil {
+			return workspace.TaskRunResult{}, fmt.Errorf("canonical task policy is unavailable")
+		}
+		for _, saved := range ws.Tasks {
+			if saved.ID == task.ID && workspace.FirstTaskRecipe(&saved) != "" {
+				task = saved
+				break
+			}
+		}
+	}
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return workspace.TaskRunResult{}, fmt.Errorf("marshal workspace task payload: %w", err)
@@ -46,6 +59,12 @@ func (b *TaskRunBridge) ExecuteTaskRun(ctx context.Context, agentName string, ta
 	}
 	rawConfig := RawConfig(cfgPayload)
 
+	policy := Policy{Mutation: PolicyMutationAllowed, Approval: PolicyApprovalNone}
+	contextPlan := DefaultTaskContextPlan()
+	if workspace.FirstTaskRecipe(&task) != "" {
+		policy.Mutation, policy.ExternalEffects = PolicyMutationDenied, PolicyExternalEffectsDenied
+		contextPlan = ContextPlan{Strategy: "host_recipe"}
+	}
 	run, err := b.service.CreateRun(ctx, task.WorkspaceID, CreateRunRequest{
 		ProfileID: ProfileGeneral,
 		Executor: Executor{
@@ -58,11 +77,8 @@ func (b *TaskRunBridge) ExecuteTaskRun(ctx context.Context, agentName string, ta
 		Scope: Scope{
 			TargetTaskID: task.ID,
 		},
-		Policy: Policy{
-			Mutation: PolicyMutationAllowed,
-			Approval: PolicyApprovalNone,
-		},
-		ContextPlan:       DefaultTaskContextPlan(),
+		Policy:            policy,
+		ContextPlan:       contextPlan,
 		ValidationRequest: &ValidationRequest{Profile: ValidationProfileNone},
 	})
 	if err != nil {

@@ -95,7 +95,23 @@ func (h *Handler) seedTemplateStarterTasks(workspaceID string, tpl projecttempla
 			ws.ApplyEntryAgentDefault(&task)
 			tasks = append(tasks, task)
 		}
-		if err := ws.AddTasks(tasks); err != nil {
+		if tpl.ID == folderFirstTaskTemplateID {
+			scope, bound := folderSummaryScope(ws)
+			for _, task := range tasks {
+				id, err := ws.AddRecipeTask(task, agentworkspace.FirstTaskRecipeFolderSummary, 1)
+				if err != nil {
+					return err
+				}
+				if bound {
+					if err := ws.MutateTask(id, func(saved *agentworkspace.Task) error {
+						saved.Context[agentworkspace.TaskContextFolderSummaryScope] = scope
+						return nil
+					}); err != nil {
+						return err
+					}
+				}
+			}
+		} else if err := ws.AddTasks(tasks); err != nil {
 			return err
 		}
 		seeded = len(tasks)

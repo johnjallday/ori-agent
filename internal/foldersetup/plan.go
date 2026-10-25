@@ -156,9 +156,8 @@ func joinAnd(names []string) string {
 // about: it is linked where it is and nothing in it is moved, copied or run.
 const FolderLinkLine = "Linked where it is; nothing is moved, copied or run"
 
-// FirstLookLine is how a hire card says the agent's first look is part of the
-// hire: read-only, and started under the same consent.
-const FirstLookLine = "A first read-only look, started right away"
+// FirstLookLine separates setup from optional task execution and its consent.
+const FirstLookLine = "An optional read-only summary, available for you to start after setup"
 
 // BuildPlan lists every consequence of one press of Set up, in the order the card
 // shows them, and the machine-readable intent a run is held to. Every string is
@@ -166,7 +165,8 @@ const FirstLookLine = "A first read-only look, started right away"
 func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 	lines := []personalassistant.FolderPlanLine{pluginLine(personalassistant.FolderPlanIntegration, "integration", facts.Integration)}
 	intent := personalassistant.FolderSetupIntent{
-		Integration: facts.Integration.State, IntegrationPlugin: facts.Integration.PluginID, IntegrationVersion: facts.Integration.Version,
+		OptionalTaskPolicy: personalassistant.FolderOptionalSummaryPolicy,
+		Integration:        facts.Integration.State, IntegrationPlugin: facts.Integration.PluginID, IntegrationVersion: facts.Integration.Version,
 	}
 	if facts.Provider != nil {
 		line := pluginLine(personalassistant.FolderPlanProvider, "plugin", *facts.Provider)
@@ -238,8 +238,8 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: FolderLinkLine},
 		mode,
 		agents,
-		// The hire's consent covers the agent's first read-only look: it starts
-		// once the workspace is verified, which is when model tokens are spent.
+		// Setup seeds availability only. Reading and model tokens require a
+		// separate task start after the workspace has been verified.
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: FirstLookLine},
 	)
 	plan := personalassistant.NewFolderSetupPlan(lines)

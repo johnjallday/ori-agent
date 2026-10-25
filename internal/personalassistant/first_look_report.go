@@ -143,7 +143,7 @@ func firstLookSummary(task *workspace.Task) string {
 // caller keeps its "First look at" item under Working on.
 func firstLookReportItems(offer FolderOffer, ws *workspace.Workspace, route string, now time.Time) (needs, working, done []TodayItem, handled bool) {
 	look := FindFolderFirstTask(ws)
-	if look == nil || offer.Outcome == nil || offer.Outcome.FirstLook == nil || FolderFirstTaskStateAt(look, now) != FolderFirstTaskFinished {
+	if look == nil || !ownsFirstLook(offer, look.ID) || FolderFirstTaskStateAt(look, now) != FolderFirstTaskFinished {
 		return nil, nil, nil, false
 	}
 	agent := truncateRunes(strings.TrimSpace(look.To), 100)
@@ -244,14 +244,14 @@ func (a *FirstLookActions) hiredLook(ctx context.Context, userID, lookTaskID str
 		return nil, nil, err
 	}
 	for _, offer := range doc.Offers {
-		if offer.Status != FolderOfferResolved || offer.Outcome == nil || offer.Outcome.FirstLook == nil || offer.Outcome.WorkspaceID == "" {
+		if offer.Status != FolderOfferResolved || offer.Outcome == nil || offer.Outcome.WorkspaceID == "" {
 			continue
 		}
 		ws, err := a.Workspaces.Get(offer.Outcome.WorkspaceID)
-		if err != nil || ws == nil {
+		if err != nil || ws == nil || ws.ID != offer.Outcome.WorkspaceID {
 			continue
 		}
-		if look := FindFolderFirstTask(ws); look != nil && look.ID == lookTaskID {
+		if look := FindFolderFirstTask(ws); look != nil && look.ID == lookTaskID && ownsFirstLook(offer, look.ID) {
 			return ws, look, nil
 		}
 	}
@@ -295,6 +295,16 @@ func (a *FirstLookActions) StartSuggestion(ctx context.Context, userID, lookTask
 		if started, _ := origin.Context[FirstLookSuggestionTaskKey].(string); started != "" {
 			taskID = started
 			return ErrFirstLookActedOn
+		}
+		if _, dismissed := origin.Context[FirstLookReportDismissedKey]; dismissed {
+			return ErrFirstLookActedOn
+		}
+		if FolderFirstTaskStateOf(origin) != FolderFirstTaskFinished {
+			return ErrFirstLookNotFinished
+		}
+		currentSuggestion := FirstLookSuggestionOf(current, origin)
+		if currentSuggestion == nil || currentSuggestion.Text != suggestion.Text {
+			return ErrFirstLookNoSuggestion
 		}
 		task := workspace.Task{
 			ID: taskID, WorkspaceID: current.ID, Description: suggestion.Text,
@@ -346,6 +356,9 @@ func (a *FirstLookActions) Dismiss(ctx context.Context, userID, lookTaskID strin
 	if started, _ := look.Context[FirstLookSuggestionTaskKey].(string); started != "" {
 		return ErrFirstLookActedOn
 	}
+	if FolderFirstTaskStateOf(look) != FolderFirstTaskFinished {
+		return ErrFirstLookNotFinished
+	}
 	suggestion := FirstLookSuggestionOf(ws, look)
 	now := a.now()
 	return workspace.CanonicalUpdate(a.Workspaces, ws.ID, func(current *workspace.Workspace) error {
@@ -355,6 +368,12 @@ func (a *FirstLookActions) Dismiss(ctx context.Context, userID, lookTaskID strin
 		}
 		if origin.Context == nil {
 			origin.Context = map[string]any{}
+		}
+		if started, _ := origin.Context[FirstLookSuggestionTaskKey].(string); started != "" {
+			return ErrFirstLookActedOn
+		}
+		if FolderFirstTaskStateOf(origin) != FolderFirstTaskFinished {
+			return ErrFirstLookNotFinished
 		}
 		if _, done := origin.Context[FirstLookReportDismissedKey]; done {
 			return nil

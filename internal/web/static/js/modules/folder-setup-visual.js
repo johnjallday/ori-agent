@@ -607,7 +607,11 @@
     }
     // A first look that calls no model (an inbox folder's first batch) spends
     // no tokens and reads no file contents.
-    if (
+    if (plan.optional_task === true)
+      effects.push(
+        'Setup makes the optional summary available. It does not start it or spend its model tokens.'
+      );
+    else if (
       plan.hire &&
       plan.visual?.model?.state !== MODEL_NOT_NEEDED &&
       list(plan.lines).some(line => line.kind === 'task')
