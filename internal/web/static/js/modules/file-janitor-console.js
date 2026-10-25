@@ -565,6 +565,17 @@
     return batchLoadState !== 'loading' && batchLoadState !== 'error';
   }
 
+  function updateConfirmationAvailability() {
+    const control = document.getElementById('fileJanitorConfirmApply');
+    if (!control || !pendingPreview) return;
+    const needsTrashAck = pendingPreview.preview.trash_count > 0;
+    control.disabled =
+      busy ||
+      batchLoadState !== 'loaded' ||
+      pendingPreview.preview.batch_id !== lastBatch?.id ||
+      (needsTrashAck && !document.getElementById('fileJanitorTrashAck')?.checked);
+  }
+
   function categoryPicker(candidate) {
     const select = document.createElement('select');
     select.className = 'fj-category';
@@ -1210,7 +1221,7 @@
       // unexplained.
       confirm.setAttribute('aria-describedby', 'fileJanitorTrashAckText');
       box.addEventListener('change', () => {
-        confirm.disabled = !box.checked;
+        updateConfirmationAvailability();
         // Ticking the box is the moment the action becomes available, so hand
         // the user straight to it instead of making them tab back.
         if (box.checked) confirm.focus?.();
@@ -1243,6 +1254,7 @@
     );
     panel.appendChild(actions);
     host.appendChild(panel);
+    updateConfirmationAvailability();
     initialFocus.focus?.();
   }
 
@@ -3411,6 +3423,7 @@
   function notifySubscribers() {
     if (disposed) return;
     const actionState = getActionState();
+    updateConfirmationAvailability();
     const statusLine = document.getElementById('fileJanitorConsoleStatus');
     const count = document.getElementById('fileJanitorReviewCount');
     const pending = pendingCount();

@@ -4151,6 +4151,38 @@ function deferredReply() {
   return { promise, reply: body => resolve({ ok: true, json: async () => body }) };
 }
 
+for (const trashCount of [0, 1]) {
+  test(`confirmation availability follows batch reads without bypassing Trash acknowledgement (${trashCount})`, async () => {
+    const doc = setup();
+    renderReview(doc);
+    await settle();
+    panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+    panel.renderBatch();
+    panel._select('c1');
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({ preview: { ...PREVIEW, trash_count: trashCount } })
+    });
+    doc.getElementById('fileJanitorApprove').click();
+    await settle();
+    const control = doc.getElementById('fileJanitorConfirmApply');
+    assert.equal(control.disabled, trashCount > 0);
+    const pending = deferredReply();
+    globalThis.fetch = () => pending.promise;
+    const refresh = panel._reloadBatch();
+    assert.equal(control.disabled, true);
+    pending.reply({ batch: batchFixture(), candidates: candidatesFixture() });
+    await refresh;
+    assert.equal(control.disabled, trashCount > 0);
+    if (trashCount) {
+      const ack = doc.getElementById('fileJanitorTrashAck');
+      ack.checked = true;
+      ack.dispatch('change');
+      assert.equal(control.disabled, false);
+    }
+  });
+}
+
 test('a late approval preview cannot reclaim a replaced root', async () => {
   const doc = setup();
   renderReview(doc);
