@@ -15,6 +15,13 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+type capturedCuratorProtection struct{ calls int }
+
+func (r *capturedCuratorProtection) ReadProtection(_ context.Context, owner, id string) (filecuratorguidance.ProtectionFact, error) {
+	r.calls++
+	return filecuratorguidance.ProtectionFact{WorkspaceID: id, RootGeneration: "root", State: "configured", AsOf: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}, nil
+}
+
 func TestCuratorAdviceReachesActualChatProviderRequests(t *testing.T) {
 	for _, providerName := range []string{"claude", "codex", "claude_code"} {
 		for _, scenario := range []string{"associated", "same-name skill", "unrelated", "ambiguous", "detached after resolution", "removed after resolution"} {
@@ -33,6 +40,8 @@ func TestCuratorAdviceReachesActualChatProviderRequests(t *testing.T) {
 					t.Fatal(err)
 				}
 				r := workspace.NewAgentRuntimeResolver(agents, s, nil, nil)
+				protection := &capturedCuratorProtection{}
+				r.SetCuratorProtectionReader(protection)
 				h := NewHandler(agents, nil)
 				h.SetRuntimeResolver(r)
 				provider := &scriptedChatProvider{name: providerName, responses: []llm.ChatResponse{{Content: "Filing is not a backup."}}}
@@ -72,6 +81,9 @@ func TestCuratorAdviceReachesActualChatProviderRequests(t *testing.T) {
 				want := 0
 				if scenario == "associated" || scenario == "same-name skill" {
 					want = 1
+				}
+				if strings.Count(prompt, "## File Janitor managed-folder protection") != want || protection.calls != want {
+					t.Fatal("role-scoped managed facts missing or leaked", prompt, protection.calls)
 				}
 				if strings.Count(prompt, filecuratorguidance.Heading) != want || !strings.Contains(prompt, "USER AUTHORED PROMPT") {
 					t.Fatalf("incorrect layered prompt: %q", prompt)

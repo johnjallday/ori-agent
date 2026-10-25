@@ -36,6 +36,7 @@ type FolderCoverage struct {
 	Provider            string     `json:"provider,omitempty"`
 	CoveringWorkspaceID string     `json:"covering_workspace_id,omitempty"`
 	LastCompletedAt     *time.Time `json:"last_completed_at,omitempty"`
+	ObservedAt          *time.Time `json:"observed_at,omitempty"`
 }
 
 // CoverageConsole is one installed Backup & Recovery workspace in scope.
@@ -109,6 +110,7 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 		state     string
 		reason    string
 		completed *time.Time
+		observed  *time.Time
 		// Time Machine only: each source's stored inclusion state and the
 		// preference exclusions, so a folder deeper than a source is excluded
 		// when listed. A deeper folder's own exclusion attribute is not read
@@ -131,6 +133,11 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 				status := s.storedStatus(row.record)
 				state, reason, completed := configurationCoverage(status)
 				entry := configuration{workspace: row.id, provider: cfg.Provider, state: state, reason: reason, completed: completed}
+				// Observation time is not projection time or completion time. Do not
+				// attach an earlier configuration's or suspect clock's observation.
+				if status.EvidenceCurrent && status.Health.Observation != "clock_suspect" && !status.RemovalPending {
+					entry.observed = status.LastSuccessfulRead
+				}
 				for _, source := range cfg.Sources {
 					entry.sources = append(entry.sources, source.Path)
 				}
@@ -178,6 +185,7 @@ func (s *Service) ReadFolderCoverage(ctx context.Context, owner string, workspac
 			if better {
 				row.State, row.Reason, row.Provider, row.CoveringWorkspaceID = state, reason, cfg.provider, cfg.workspace
 				row.LastCompletedAt = nil
+				row.ObservedAt = cfg.observed
 				if state == CoverageCovered && cfg.completed != nil {
 					at := *cfg.completed
 					row.LastCompletedAt = &at

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
@@ -69,6 +70,62 @@ func TestCuratorHostContextRejectsAmbiguousAndWrongBindings(t *testing.T) {
 	}
 }
 
+type curatorFactsStub struct {
+	fact  filecuratorguidance.ProtectionFact
+	after func()
+	calls int
+}
+
+func (r *curatorFactsStub) ReadProtection(_ context.Context, _, _ string) (filecuratorguidance.ProtectionFact, error) {
+	r.calls++
+	if r.after != nil {
+		r.after()
+	}
+	return r.fact, nil
+}
+
+func TestCuratorFactsRevalidateCachedAssociationAfterRead(t *testing.T) {
+	for _, change := range []string{"detach", "remove", "owner", "ambiguous", "revoked"} {
+		t.Run(change, func(t *testing.T) {
+			ws := curatorWorkspace()
+			s := newTestWorkspaceStore(t, ws)
+			r := NewAgentRuntimeResolver(&resolverAgentStoreStub{agents: map[string]*agent.Agent{"Renamed helper": {}}}, s, nil, nil)
+			facts := &curatorFactsStub{fact: filecuratorguidance.ProtectionFact{WorkspaceID: ws.ID, RootGeneration: "root", State: "covered", AsOf: time.Now()}}
+			facts.after = func() {
+				if err := s.Update(ws.ID, func(w *Workspace) error {
+					switch change {
+					case "detach":
+						w.AgentInstances = w.AgentInstances[:1]
+					case "remove":
+						w.InstalledCapabilities = nil
+					case "owner":
+						w.OwnerUserID = "other"
+					case "ambiguous":
+						w.AgentInstances = append(w.AgentInstances, w.AgentInstances[1])
+					case "revoked":
+						facts.fact.State = "unavailable"
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r.SetCuratorProtectionReader(facts)
+			resolved, err := r.ResolveAgentForWorkspace("Renamed helper", ws.ID, "helper-node")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := AppendHostContext("", resolved.HostContext)
+			if strings.Contains(got, "## File Janitor managed-folder protection") {
+				t.Fatal("late fact leaked", got)
+			}
+			if (got != "") != (change == "revoked") {
+				t.Fatal("generic guidance incorrectly retained/lost", got)
+			}
+		})
+	}
+}
+
 func TestCuratorCapturedTaskRequestsKeepHostAdviceAndRuntimeSkillOverrides(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		for _, toolbox := range []bool{false, true} {
@@ -88,6 +145,8 @@ func TestCuratorCapturedTaskRequestsKeepHostAdviceAndRuntimeSkillOverrides(t *te
 				agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Renamed helper": {Settings: types.Settings{Provider: "codex", Model: "gpt-test", SystemPrompt: "My user-authored instructions for {{agent.name}}", AllowNativeMCPTools: &native}}}}
 				s := newTestWorkspaceStore(t, ws)
 				r := NewAgentRuntimeResolver(agents, s, nil, nil)
+				facts := &curatorFactsStub{fact: filecuratorguidance.ProtectionFact{WorkspaceID: ws.ID, RootGeneration: "root", State: "configured", AsOf: time.Now()}}
+				r.SetCuratorProtectionReader(facts)
 				if toolbox {
 					r.mcpRegistry = &runtimeRegistryStub{}
 					r.mcpConfigManager = &templateLookupStub{}
@@ -104,6 +163,9 @@ func TestCuratorCapturedTaskRequestsKeepHostAdviceAndRuntimeSkillOverrides(t *te
 				prompt := provider.gotReq.SystemPrompt
 				if !provider.called || strings.Count(prompt, filecuratorguidance.Heading) != 1 || !strings.Contains(prompt, "My user-authored instructions") || !strings.Contains(prompt, "Runtime override advice") {
 					t.Fatalf("captured prompt missing layered context: %q", prompt)
+				}
+				if strings.Count(prompt, "## File Janitor managed-folder protection") != 1 || facts.calls != 1 {
+					t.Fatal("actual task request did not receive shared managed facts exactly once", prompt)
 				}
 				if len(provider.gotReq.MCPServers) != 0 {
 					t.Fatal("host guidance granted MCP")

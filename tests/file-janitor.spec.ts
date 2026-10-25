@@ -130,6 +130,49 @@ async function grantFolder(request: APIRequestContext, workspaceId: string, root
   expect(res.ok(), await res.text()).toBeTruthy();
 }
 
+test('managed protection endpoint is agentless, path-free and invalidated by revoke/relink', async ({
+  request
+}) => {
+  const created = await request.post('/api/workspaces', {
+    data: { name: `Protection facts ${RUN}` }
+  });
+  expect(created.ok()).toBeTruthy();
+  const body = await created.json();
+  const id = body.folder?.id || body.workspace?.id;
+  await installCapability(request, id);
+  const endpoint = `/api/workspaces/${id}/file-janitor/protection`;
+  const initial = await (await request.get(endpoint)).json();
+  expect(initial.state).toBe('unavailable');
+  const root = fixtureFolder('stored-protection', {});
+  await grantFolder(request, id, root);
+  const first = await (await request.get(endpoint)).json();
+  expect(first.state).toBe('not_covered');
+  expect(first.reason).toBe('no_configuration');
+  expect(first.root_generation).toBeTruthy();
+  expect(first.binding_id).toMatch(/^[a-f0-9]{64}$/);
+  expect(first.destination.kind).toBe('chooser');
+  expect(JSON.stringify(first)).not.toContain(root);
+  expect(first.last_completed_at).toBeUndefined();
+  const revoked = await request.post(`/api/workspaces/${id}/file-janitor/revoke`, { data: {} });
+  expect(revoked.ok(), await revoked.text()).toBeTruthy();
+  const unavailable = await (await request.get(endpoint)).json();
+  expect(unavailable.state).toBe('unavailable');
+  expect(unavailable.root_generation).toBeUndefined();
+  await grantFolder(request, id, fixtureFolder('stored-protection-relink', {}));
+  const relinked = await (await request.get(endpoint)).json();
+  expect(relinked.state).toBe('not_covered');
+  expect(relinked.root_generation).not.toBe(first.root_generation);
+  expect(relinked.binding_id).not.toBe(first.binding_id);
+  const alias = await request.get(`/api/workspaces/${id}/downloads-janitor/protection`);
+  expect((await alias.json()).binding_id).toBe(relinked.binding_id);
+  const evidence = 'tasks/evidence-file-curator-backup-guidance/group-2';
+  mkdirSync(evidence, { recursive: true });
+  writeFileSync(
+    join(evidence, 'stored-endpoint.json'),
+    JSON.stringify({ initial, first, unavailable, relinked }, null, 2)
+  );
+});
+
 const console_ = (page: Page) => page.locator('#fileJanitorConsole');
 const consoleBody = (page: Page) => page.locator('#fileJanitorConsoleBody');
 

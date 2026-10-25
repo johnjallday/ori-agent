@@ -1,6 +1,17 @@
 package workspace
 
-import "github.com/johnjallday/ori-agent/internal/filecuratorguidance"
+import (
+	"context"
+
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
+)
+
+func (r *AgentRuntimeResolver) SetCuratorProtectionReader(reader filecuratorguidance.ProtectionReader) {
+	if r != nil {
+		r.curatorProtection = reader
+	}
+}
 
 // HostContext is product-owned advice, separate from selectable user skills.
 // Resolve it at prompt composition time: a cached agent runtime is not evidence
@@ -22,15 +33,31 @@ func (r *AgentRuntimeResolver) fileCuratorHostContext(ws *Workspace, agentName, 
 	}
 	workspaceID, owner, instanceID := ws.ID, ws.OwnerUserID, instance.ID
 	return func() string {
-		current, err := r.workspaceStore.Get(workspaceID)
-		if err != nil || current == nil || current.OwnerUserID != owner {
+		valid := func() bool {
+			current, err := r.workspaceStore.Get(workspaceID)
+			if err != nil || current == nil || current.OwnerUserID != owner {
+				return false
+			}
+			bound, unique := current.FindUniqueAgentInstance(agentName, nodeID)
+			companion, present := current.FileCurator()
+			return unique && present && bound.ID == instanceID && companion.ID == instanceID
+		}
+		if !valid() {
 			return ""
 		}
-		bound, unique := current.FindUniqueAgentInstance(agentName, nodeID)
-		companion, present := current.FileCurator()
-		if !unique || !present || bound.ID != instanceID || companion.ID != instanceID {
+		facts := ""
+		if r.curatorProtection != nil {
+			userID := owner
+			if userID == "" {
+				userID = userprofile.LocalUserID
+			}
+			if fact, err := r.curatorProtection.ReadProtection(context.Background(), userID, workspaceID); err == nil && fact.WorkspaceID == workspaceID {
+				facts = fact.Prompt()
+			}
+		}
+		if !valid() {
 			return ""
 		}
-		return filecuratorguidance.Prompt()
+		return filecuratorguidance.Prompt() + facts
 	}
 }

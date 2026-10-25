@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -87,11 +88,12 @@ type ResolvedAgentRuntime struct {
 
 // AgentRuntimeResolver composes base agent configuration with workspace-owned MCP bindings and skills.
 type AgentRuntimeResolver struct {
-	agentStore       store.Store
-	workspaceStore   Store
-	mcpRegistry      runtimeMCPRegistry
-	mcpConfigManager mcpTemplateLookup
-	skillResolver    SkillResolver
+	agentStore        store.Store
+	workspaceStore    Store
+	mcpRegistry       runtimeMCPRegistry
+	mcpConfigManager  mcpTemplateLookup
+	skillResolver     SkillResolver
+	curatorProtection filecuratorguidance.ProtectionReader
 }
 
 // NewAgentRuntimeResolver creates a runtime resolver for workspace task execution.

@@ -49,6 +49,7 @@ func (h *Handler) registerUnder(mux *http.ServeMux, prefix string) {
 
 	mux.HandleFunc("GET "+base, h.GetStatus)
 	mux.HandleFunc("GET "+base+"/readiness", h.GetReadiness)
+	mux.HandleFunc("GET "+base+"/protection", h.GetProtection)
 	mux.HandleFunc("POST "+base+"/setup", h.ConfirmSetup)
 	mux.HandleFunc("GET "+base+"/setup-review", h.SetupReview)
 	mux.HandleFunc("POST "+base+"/setup-review", h.SetupReview)
