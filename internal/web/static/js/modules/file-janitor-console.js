@@ -2275,6 +2275,8 @@
       selected.size + trashMarked.size === 0
     )
       return;
+    const scope = requestScope();
+    const batchId = lastBatch.id;
     busy = true;
     showError('');
     rememberFocus();
@@ -2306,6 +2308,7 @@
         const apiError = body.error || body;
         throw new Error((apiError && apiError.message) || 'Ori could not prepare these moves.');
       }
+      if (!scopeCurrent(scope) || lastBatch?.id !== batchId) return;
       pendingPreview = { preview: body.preview, decisions };
       // Release the busy flag BEFORE the confirmation goes on screen. Rendering
       // it first left a window in which the confirm button was visible and
@@ -2316,10 +2319,13 @@
       busy = false;
       renderConfirmation(pendingPreview);
     } catch (error) {
-      showError(error.message || 'Ori could not prepare these moves.');
+      if (scopeCurrent(scope) && lastBatch?.id === batchId)
+        showError(error.message || 'Ori could not prepare these moves.');
     } finally {
-      busy = false;
-      updateSelectionSummary();
+      if (scopeCurrent(scope)) {
+        busy = false;
+        updateSelectionSummary();
+      }
     }
   }
 
@@ -2330,7 +2336,17 @@
     // state keeps older call sites working, but the button the user pressed is
     // the authority on what they approved.
     const active = approval && approval.preview ? approval : pendingPreview;
-    if (!id || busy || !active) return;
+    if (
+      !id ||
+      busy ||
+      !active ||
+      disposed ||
+      active !== pendingPreview ||
+      batchLoadState !== 'loaded' ||
+      active.preview.batch_id !== lastBatch?.id
+    )
+      return;
+    const scope = requestScope();
     busy = true;
     showError('');
     const control = document.getElementById('fileJanitorConfirmApply');
@@ -2353,19 +2369,22 @@
         const apiError = body.error || body;
         throw new Error((apiError && apiError.message) || 'Ori could not apply these moves.');
       }
+      if (!scopeCurrent(scope)) return;
       const result = body.result || {};
       pendingPreview = null;
       // Reload first so the table reflects the new states, then report the
       // outcome beneath it. History gains the entries this apply just wrote.
       await loadBatch();
+      if (!scopeCurrent(scope)) return;
       renderResults(result);
       await loadHistory();
     } catch (error) {
+      if (!scopeCurrent(scope)) return;
       pendingPreview = null;
       showError(error.message || 'Ori could not apply these moves.');
       await loadBatch();
     } finally {
-      busy = false;
+      if (scopeCurrent(scope)) busy = false;
     }
   }
 
@@ -2778,6 +2797,7 @@
     host.appendChild(confirmHost);
     host.appendChild(errorRegion());
     renderBatch();
+    if (pendingPreview && !confirmation) renderConfirmation(pendingPreview);
   }
 
   // repairAction offers "Choose the folder again" when readiness says the
@@ -3091,6 +3111,12 @@
     if (id) {
       const byID = document.getElementById(id);
       if (isVisibleFocusTarget(byID)) return byID;
+      // A read in flight can temporarily remove the recommendation's button.
+      // Return to its stable region; Command restores the primary when it settles.
+      if (id === 'workspaceNextAction') {
+        const region = document.getElementById('workspaceNextActionRegion');
+        if (isVisibleFocusTarget(region)) return region;
+      }
     }
     const station = firstVisible('[data-cmd-hq-station="file-janitor"]');
     if (station) return station;

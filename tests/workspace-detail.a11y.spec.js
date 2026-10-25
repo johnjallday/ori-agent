@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`work-first Details is keyboard accessible and wraps at narrow width (${theme})`, async ({
+  test(`next action is keyboard accessible in both views at all supported widths (${theme})`, async ({
     page
   }, testInfo) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
@@ -49,30 +49,77 @@ for (const theme of ['light', 'dark']) {
       await expect(area.getByRole('button', { name: 'All Tasks' })).toBeFocused();
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
       await expect(page.locator('#onboardingModal')).toBeHidden();
-      const scan = await page.evaluate(async () => {
-        const result = await window.axe.run('.ws-cmd-work-first, .ws-cmd-work-admin', {
-          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
-        });
-        return {
-          violations: result.violations,
-          contrastNodes: result.passes.find(rule => rule.id === 'color-contrast')?.nodes.length || 0
-        };
-      });
-      expect(scan.violations).toEqual([]);
-      expect(scan.contrastNodes).toBeGreaterThan(0);
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth > innerWidth + 1
+      // Response fixture only: no task or agent execution, and an unbroken name
+      // exercises wrapping rather than relying on conveniently short copy.
+      const longTitle = 'LongUnbrokenTaskName'.repeat(9);
+      await page.route('**/api/orchestration/tasks?**', route =>
+        route.fulfill({
+          json: { tasks: [{ id: 'reflow-task', status: 'blocked', description: longTitle }] }
+        })
       );
-      expect(overflow).toBe(false);
-      await page.screenshot({
-        path: testInfo.outputPath(`workspace-work-first-${theme}.png`),
-        fullPage: true
-      });
+      await page.evaluate(() => window.workspaceDetail.loadTasks());
+      await expect(area).toContainText(longTitle);
+      for (const mode of ['details', 'map']) {
+        await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
+        for (const width of [320, 390, 768, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          const primary = area.locator('.is-primary');
+          await expect(primary).toHaveCount(1);
+          await expect(primary).toBeVisible();
+          const boxes = await area.locator('button').evaluateAll(nodes =>
+            nodes.map(node => {
+              const box = node.getBoundingClientRect();
+              return { left: box.left, right: box.right };
+            })
+          );
+          for (const box of boxes) {
+            expect(box.left).toBeGreaterThanOrEqual(-1);
+            expect(box.right).toBeLessThanOrEqual(width + 1);
+          }
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)
+          ).toBe(false);
+          if (width === 390) {
+            const scan = await page.evaluate(async () => {
+              const result = await window.axe.run('.ws-cmd-work-first', {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+              });
+              return {
+                violations: result.violations,
+                contrastNodes:
+                  result.passes.find(rule => rule.id === 'color-contrast')?.nodes.length || 0
+              };
+            });
+            expect(scan.violations).toEqual([]);
+            expect(scan.contrastNodes).toBeGreaterThan(0);
+          }
+          await area.screenshot({
+            path: testInfo.outputPath(`next-action-${mode}-${width}-${theme}.png`),
+            animations: 'disabled'
+          });
+        }
+      }
       await checkNextActionReflow(page, '.ws-cmd-work-first, .ws-cmd-work-admin');
       await page.screenshot({
         path: testInfo.outputPath(`workspace-work-first-zoom-${theme}.png`),
         fullPage: true
       });
+      // Display fixture only: exercise the canonical HQ designation without
+      // building an HQ or invoking brief/model generation in this layout test.
+      await page.evaluate(() => {
+        window.workspaceDetail.workspace.designation = 'personal_hq';
+        window.workspaceCommand.refresh();
+      });
+      for (const mode of ['map', 'details']) {
+        await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
+        await expect(area).toHaveCount(0);
+        if (mode === 'map') await expect(page.locator('.ws-cmd-map-shell.is-hq')).toBeVisible();
+        await page.screenshot({
+          path: testInfo.outputPath(`next-action-hq-fixture-${mode}-${theme}.png`),
+          fullPage: true,
+          animations: 'disabled'
+        });
+      }
     } finally {
       await page.request.delete(`/api/workspaces/${folder.id}`);
     }
@@ -99,29 +146,23 @@ for (const theme of ['light', 'dark']) {
         })
       });
     });
-    const workspacesResponse = await page.request.get(`${baseUrl}/api/workspaces?tree=true`);
-    expect(workspacesResponse.ok()).toBeTruthy();
-    const workspaceData = await workspacesResponse.json();
-    let workspace = workspaceData.workspaces?.find(
-      candidate => candidate.kind === 'workspace' && candidate.agent_count > 0
-    );
-    if (!workspace) {
-      const stamp = Date.now();
-      const created = await page.request.post(`${baseUrl}/api/workspaces`, {
-        data: { name: `Accessibility Workspace ${stamp}`, blank: true }
-      });
-      expect(created.ok()).toBeTruthy();
-      workspace = (await created.json()).folder;
-      const agentName = `Accessibility Manager ${stamp}`;
-      const agent = await page.request.post(`${baseUrl}/api/agents`, {
-        data: { name: agentName, type: 'general' }
-      });
-      expect(agent.ok()).toBeTruthy();
-      const attached = await page.request.post(`${baseUrl}/api/workspaces/${workspace.id}/agents`, {
-        data: { agent_name: agentName }
-      });
-      expect(attached.ok()).toBeTruthy();
-    }
+    // Always isolate the generic journey: selecting an arbitrary prior fixture
+    // makes this depend on which plugin/folder suites ran before it.
+    const stamp = Date.now();
+    const created = await page.request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: `Accessibility Workspace ${stamp}`, blank: true }
+    });
+    expect(created.ok()).toBeTruthy();
+    const workspace = (await created.json()).folder;
+    const agentName = `Accessibility Manager ${stamp}`;
+    const agent = await page.request.post(`${baseUrl}/api/agents`, {
+      data: { name: agentName, type: 'general' }
+    });
+    expect(agent.ok()).toBeTruthy();
+    const attached = await page.request.post(`${baseUrl}/api/workspaces/${workspace.id}/agents`, {
+      data: { agent_name: agentName }
+    });
+    expect(attached.ok()).toBeTruthy();
     const workspaceId = workspace.id;
     const workspaceSlug = workspace.folder_slug;
     expect(workspaceId).toBeTruthy();
@@ -165,7 +206,7 @@ for (const theme of ['light', 'dark']) {
       const expectedNameColor =
         expectedTheme === 'light' ? 'rgb(10, 10, 10)' : 'rgb(238, 240, 243)';
       const expectedQuestColor =
-        expectedTheme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(214, 217, 222)';
+        expectedTheme === 'light' ? 'rgb(31, 33, 40)' : 'rgb(214, 217, 222)';
       await expect(operationsMap.locator('.ws-cmd-map-agent-copy strong').first()).toHaveCSS(
         'color',
         expectedNameColor

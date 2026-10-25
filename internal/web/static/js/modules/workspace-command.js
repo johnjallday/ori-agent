@@ -2237,6 +2237,27 @@ export class WorkspaceCommandView {
     return this.guidesNextAction() ? '' : ' is-primary';
   }
 
+  announceNextAction() {
+    if (typeof document === 'undefined') return;
+    const region = document.getElementById('workspaceNextActionStatus');
+    if (!region) return;
+    if (!this.active || !this.guidesNextAction()) {
+      region.textContent = '';
+      this._lastNextActionAnnouncement = '';
+      return;
+    }
+    const view = this.nextAction();
+    // Poll/retry starts and unchanged refreshes must not repeat the same action.
+    if (view.isLoading) return;
+    const text = [view.title, view.action?.label, ...view.qualifications]
+      .filter(Boolean)
+      .join('. ');
+    const key = this.workspaceId() + ':' + text;
+    if (key === this._lastNextActionAnnouncement) return;
+    this._lastNextActionAnnouncement = key;
+    region.textContent = text;
+  }
+
   renderWorkFirst() {
     // Groups and HQ retain their specialized journey; dashboards are user-owned.
     if (!this.guidesNextAction()) return '';
@@ -2250,7 +2271,7 @@ export class WorkspaceCommandView {
       ? `<button type="button" id="workspaceNextAction" class="ws-cmd-agent-action is-primary" data-cmd-next-action="${escapeHtml(action.key)}" data-cmd-work-key="next"${taskAttrs}>${escapeHtml(action.label)}</button>`
       : '';
     return (
-      '<section class="ws-cmd-work-first" aria-label="Next action">' +
+      '<section id="workspaceNextActionRegion" class="ws-cmd-work-first" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-task-drawer data-cmd-work-key="tasks">All Tasks</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
@@ -2389,10 +2410,17 @@ export class WorkspaceCommandView {
     // which would tear the dragged element out mid-gesture. Skip background
     // re-renders while dragging; the drop path re-renders once the gesture
     // ends, picking up any data that changed in the meantime (FR11).
-    if (this._stationDragActive) return;
+    if (this._stationDragActive) {
+      this._renderDeferredByDrag = true;
+      return;
+    }
     // Same for a gesture inside the Detachment map: this render would move its
     // host node out from under the pointer (group-map-build FR-5).
-    if (this._detachmentDragActive) return;
+    if (this._detachmentDragActive) {
+      this._renderDeferredByDrag = true;
+      return;
+    }
+    this._renderDeferredByDrag = false;
     const workFocus =
       typeof document !== 'undefined'
         ? document.activeElement?.getAttribute?.('data-cmd-work-key')
@@ -2468,10 +2496,15 @@ export class WorkspaceCommandView {
     this.bindIdentityControls();
     this.bindIdentityControls(this.container.querySelector('[data-cmd-admin]'));
     this.bindWorkFirst();
+    this.announceNextAction();
     if (workFocus) {
-      const replacement = Array.from(this.container.querySelectorAll('[data-cmd-work-key]')).find(
-        el => el.getAttribute('data-cmd-work-key') === workFocus
-      );
+      const key = workFocus === 'next-pending' ? 'next' : workFocus;
+      const controls = Array.from(this.container.querySelectorAll('[data-cmd-work-key]'));
+      const replacement =
+        controls.find(el => el.getAttribute('data-cmd-work-key') === key) ||
+        (['next', 'next-pending'].includes(workFocus)
+          ? this.container.querySelector('#workspaceNextActionRegion')
+          : null);
       replacement?.focus({ preventScroll: true });
     }
     if (parentGroupFocus) this.restoreParentGroupFocus(this.container.querySelector('.ws-cmd-nav'));
@@ -12737,6 +12770,16 @@ export class WorkspaceCommandView {
     });
     const release = () => {
       this._detachmentDragActive = false;
+      // Let the map finish processing pointerup before consuming deferred state.
+      queueMicrotask(() => {
+        if (
+          this.active &&
+          this._renderDeferredByDrag &&
+          !this._detachmentDragActive &&
+          !this._stationDragActive
+        )
+          this.render();
+      });
     };
     host.addEventListener('pointerup', release);
     host.addEventListener('pointercancel', release);

@@ -2921,6 +2921,19 @@ test('closing returns focus to the control that opened it', () => {
   assert.equal(doc.activeElement, station, 'focus must go back where the user left it');
 });
 
+test('closing during a recommendation read lands in its region, not the competing card', () => {
+  const doc = setup();
+  renderReview(doc);
+  const opener = doc.register('workspaceNextAction');
+  const region = doc.register('workspaceNextActionRegion');
+  panel.open({ source: 'workspace-next-action', trigger: opener });
+  opener.parent = null;
+  opener._connected = false;
+  doc.byId.delete(opener.id);
+  panel.close();
+  assert.equal(doc.activeElement, region);
+});
+
 test('closing after a view switch never restores focus to the now-hidden Details card', () => {
   const doc = setup();
   doc.body.dataset = { workspaceViewMode: 'details' };
@@ -4136,6 +4149,61 @@ function deferredReply() {
     resolve = done;
   });
   return { promise, reply: body => resolve({ ok: true, json: async () => body }) };
+}
+
+test('a late approval preview cannot reclaim a replaced root', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  panel._select('c1');
+  const pending = deferredReply();
+  globalThis.fetch = () => pending.promise;
+  doc.getElementById('fileJanitorApprove').click();
+  const replacement = statusFixture();
+  replacement.settings.root_id = 'replacement';
+  panel.render(replacement);
+  pending.reply({ preview: PREVIEW });
+  await settle();
+  assert.doesNotMatch(text(doc), /Confirm these moves/);
+});
+
+for (const started of [false, true]) {
+  test(`replaced root rejects ${started ? 'late apply callbacks' : 'detached confirmation buttons'}`, async () => {
+    const doc = setup();
+    renderReview(doc);
+    await settle();
+    panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+    panel.renderBatch();
+    panel._select('c1');
+    const pending = deferredReply();
+    let applies = 0;
+    globalThis.fetch = async url => {
+      if (String(url).endsWith('/preview'))
+        return { ok: true, json: async () => ({ preview: PREVIEW }) };
+      if (String(url).endsWith('/apply')) {
+        applies++;
+        return pending.promise;
+      }
+      return { ok: true, json: async () => ({}) };
+    };
+    doc.getElementById('fileJanitorApprove').click();
+    await settle();
+    const confirm = doc.getElementById('fileJanitorConfirmApply');
+    if (started) confirm.click();
+    const replacement = statusFixture();
+    replacement.settings.root_id = 'replacement';
+    panel.render(replacement);
+    if (started)
+      pending.reply({
+        result: { applied: 1, outcomes: [{ name: 'obsolete-result.pdf', result: 'applied' }] }
+      });
+    else confirm.click();
+    await settle();
+    assert.equal(applies, started ? 1 : 0);
+    assert.doesNotMatch(text(doc), /obsolete-result.pdf|Confirm these moves/);
+  });
 }
 
 const receiptFixture = (id, completed_at) => ({

@@ -321,6 +321,106 @@ test('idle readiness is separate from queued work and missing roles', () => {
   assert.match(command.commandNodeOrchestrationCopy(0), /Works directly/);
 });
 
+test('stable live region announces changes, not polling starts or unchanged refreshes', () => {
+  const previous = globalThis.document;
+  const writes = [];
+  globalThis.document = {
+    getElementById: id =>
+      id === 'workspaceNextActionStatus'
+        ? {
+            set textContent(text) {
+              writes.push(text);
+            }
+          }
+        : null
+  };
+  try {
+    const snapshot = reviewState();
+    const command = view([], { janitorState: snapshot });
+    command.active = true;
+    command.announceNextAction();
+    command.announceNextAction();
+    snapshot.batch.state = 'loading';
+    command.announceNextAction();
+    snapshot.batch.state = 'ready';
+    command.viewMode = 'map';
+    command.announceNextAction();
+    assert.equal(writes.length, 1);
+    snapshot.pendingCount = 5;
+    command.announceNextAction();
+    assert.match(writes[1], /5 files ready for review/);
+    command.page.tasksLoadFailed = true;
+    command.announceNextAction();
+    assert.match(writes[2], /Tasks are unavailable/);
+  } finally {
+    globalThis.document = previous;
+  }
+});
+
+for (const kind of ['station', 'detachment']) {
+  test(`${kind} drag retains DOM during notifications and flushes the latest action on release`, async () => {
+    const previous = globalThis.document;
+    const handlers = {};
+    globalThis.document = {
+      getElementById: () => null,
+      createElement: () => ({
+        addEventListener: (name, fn) => {
+          handlers[name] = fn;
+        }
+      })
+    };
+    let listener;
+    globalThis.window = {
+      location: { search: '' },
+      FileJanitorConsole: {
+        subscribe: fn => {
+          listener = fn;
+          return () => {};
+        }
+      }
+    };
+    try {
+      const snapshot = reviewState();
+      const command = view([], { janitorState: snapshot });
+      command.active = true;
+      command.viewMode = 'map';
+      command.publishWorkspaceViewMode = () => {};
+      command.container = {
+        querySelector: () => assert.fail('dragged DOM cannot be read or replaced')
+      };
+      command.ensureNextActionSubscription();
+      if (kind === 'station') command._stationDragActive = true;
+      else {
+        command.ensureDetachmentHost();
+        handlers.pointerdown();
+      }
+      snapshot.pendingCount = 5;
+      listener({ workspaceId: 'w' });
+      assert.equal(command._renderDeferredByDrag, true);
+      let painted = '';
+      command.render = () => {
+        painted = command.renderWorkFirst();
+        command._renderDeferredByDrag = false;
+      };
+      if (kind === 'station') {
+        command._stationDrag = {
+          moved: true,
+          el: { classList: { remove() {} }, releasePointerCapture() {} }
+        };
+        command.handleStationPointerUp({ type: 'pointercancel' });
+      } else {
+        handlers.pointerup();
+        await Promise.resolve();
+      }
+      assert.match(painted, /5 files ready for review/);
+      command.disposeNextAction();
+    } finally {
+      globalThis.document = previous;
+      delete globalThis.window;
+    }
+  });
+}
+
 test('HQ and group journeys do not acquire ordinary workspace guidance', () => {
   assert.equal(view([], { workspace: { designation: 'personal_hq' } }).renderWorkFirst(), '');
   assert.equal(view([], { workspace: { kind: 'group' } }).renderWorkFirst(), '');

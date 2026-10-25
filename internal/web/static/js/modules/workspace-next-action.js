@@ -13,6 +13,7 @@ import {
  * @property {string} title
  * @property {string} description
  * @property {string} tone
+ * @property {boolean} isLoading
  * @property {{owner:'task'|'console'|'workspace', kind:string, id:string, key:string, label:string}|null} action
  * @property {string[]} qualifications
  * @property {string[]} ongoing
@@ -100,7 +101,12 @@ export function resolveWorkspaceNextAction(input) {
         `Last filing: ${counts.applied || 0} applied, ${problems} not applied. See History in File Janitor.`
       );
   }
-  const finish = descriptor => ({ ...descriptor, qualifications, ongoing, taskWork });
+  const isLoading = [
+    taskState,
+    statusState,
+    ...(known ? [janitor.batch?.state, janitor.history?.state] : [])
+  ].includes('loading');
+  const finish = descriptor => ({ ...descriptor, isLoading, qualifications, ongoing, taskWork });
   const taskDescriptor = task => {
     const presentation = resolveTaskPresentation(task);
     const action = presentation.primaryAction;

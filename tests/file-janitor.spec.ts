@@ -259,6 +259,11 @@ test.describe('File Janitor capability', () => {
     await expect(consoleBody(page).locator('.fj-select').first()).toBeEnabled();
     await consoleBody(page).locator('.fj-select').first().check();
     const choice = await consoleBody(page).locator('.fj-select').first().getAttribute('id');
+    await page.getByRole('button', { name: 'Mark second.csv for Trash', exact: true }).click();
+    await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
+    await expect(
+      page.getByRole('button', { name: 'Unmark second.csv for Trash', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true');
     await page.keyboard.press('Escape');
     await expect(page.locator('#workspaceNextAction')).toBeFocused();
     await page.locator('[data-cmd-view-mode="details"]').click();
@@ -266,12 +271,19 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#' + choice)).toBeChecked();
     expect(operating).toEqual([]);
     expect(new URL(page.url()).searchParams.get('source')).toBe('next-action');
+    await page.getByRole('button', { name: 'Unmark second.csv for Trash', exact: true }).click();
     await consoleBody(page).locator('.fj-select').nth(1).check();
     await page.locator('#fileJanitorApprove').click();
     await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
     await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
     await page.keyboard.press('Escape');
     await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+    await page.goBack();
+    await expect(page.locator('#fileJanitorConsole')).toBeHidden();
+    await expect(page.locator('#workspaceNextAction')).toBeFocused();
+    await page.locator('#workspaceNextAction').click();
+    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+    expect(operating.filter(url => /\/(apply|scan|decisions)$/.test(url))).toEqual([]);
     // Only a synthetic fixture is changed after preview: the real apply must
     // refuse that one file while recording the other successful move.
     writeFileSync(join(root, 'second.csv'), 'changed after preview');
