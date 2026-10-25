@@ -134,7 +134,8 @@ test('package upgrade card offers a review only for an available release', () =>
   assert.equal(available.state, 'available');
   assert.equal(available.reviewable, true);
   assert.match(available.title, /music-project-management 0\.1\.1 is available/);
-  assert.match(available.text, /uses 0\.1\.0.*Plugins page cannot update it/s);
+  assert.match(available.text, /uses 0\.1\.0.*moves every Home that uses this plugin/s);
+  assert.doesNotMatch(available.text, /cannot update/);
 
   const attention = providerUpgradeCard({
     available: true,
@@ -153,6 +154,26 @@ test('package upgrade card offers a review only for an available release', () =>
     providerUpgradeCard({ operation: { status: 'replaced', to_version: '0.1.1' } }).state,
     'running'
   );
+
+  // An unreadable status is shown as such, not as "nothing running", and
+  // offers no review until it can be read.
+  const unreadable = providerUpgradeCard({
+    plugin_id: 'music-project-management',
+    available: true,
+    status_unavailable: true
+  });
+  assert.equal(unreadable.state, 'unavailable');
+  assert.equal(unreadable.reviewable, false);
+  assert.match(unreadable.text, /could not read.*Nothing is assumed to have finished/);
+  // A finished operation is history: the card still offers a newer release.
+  assert.equal(
+    providerUpgradeCard({
+      available: true,
+      available_version: '0.1.2',
+      last_operation: { status: 'succeeded' }
+    }).state,
+    'available'
+  );
 });
 
 test('package upgrade result counts updated and kept agents', () => {
@@ -167,7 +188,11 @@ test('package upgrade result counts updated and kept agents', () => {
   });
   assert.equal(card.state, 'succeeded');
   assert.equal(card.title, 'Upgraded to 0.1.1');
-  assert.match(card.text, /1 staffed agent got the new guidance; 2 kept their edited prompt/);
+  // A profile kept while its Home copy changed is neither kept nor updated.
+  assert.match(
+    card.text,
+    /1 staffed agent got the new guidance; 1 kept its edited prompt; 1 kept an edited prompt in one copy while the other got the new guidance/
+  );
   assert.match(card.text, /Approved library folders stay approved/);
   assert.equal(
     providerUpgradeAgentLine({ profile: 'missing', home_copy: 'missing' }),

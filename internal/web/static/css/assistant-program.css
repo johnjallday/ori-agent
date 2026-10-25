@@ -123,6 +123,19 @@
   background: rgba(163, 59, 44, 0.1);
   border-color: rgba(163, 59, 44, 0.32);
 }
+/* The card's paper-ink colours assume a light page. In the dark theme it
+   takes the theme's own opaque surface, so it reads the same whatever lies
+   behind it; the border keeps its amber (or red) meaning. */
+[data-bs-theme="dark"] .assistant-program-upgrade {
+  color: var(--text-primary, #c9ccd1);
+  background: var(--bg-secondary, #1f2128);
+  border-color: rgba(217, 130, 25, 0.6);
+}
+[data-bs-theme="dark"] .assistant-program-upgrade[data-state="reconcile_required"] {
+  color: var(--text-primary, #c9ccd1);
+  background: var(--bg-secondary, #1f2128);
+  border-color: rgba(239, 68, 68, 0.6);
+}
 .assistant-program-upgrade-copy {
   display: grid;
   gap: 0.2rem;

@@ -447,6 +447,102 @@ func TestReviewRefusesWhatItCannotMoveSafely(t *testing.T) {
 // A crash at every point between claim and success is settled by recovery:
 // before the replacement nothing changed and the operation is cancelled; after
 // it the idempotent rebind finishes the job.
+// An attempt names only its own review's operation: never an older one, never
+// another review's, and never a guess for a review that started nothing.
+func TestAttemptNamesOnlyTheReviewsOwnCommit(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	attempt := func(owner, plugin, token string) Attempt {
+		t.Helper()
+		got, err := h.service.Attempt(ctx, owner, plugin, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	first, err := h.service.Review(ctx, "local", testPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := attempt("local", testPlugin, first.Token); got.Operation != nil || got.Review != ReviewPending {
+		t.Fatalf("uncommitted review = %#v", got)
+	}
+	for _, scope := range [][3]string{{"local", testPlugin, "no-such-review"}, {"someone-else", testPlugin, first.Token}, {"local", "other-plugin", first.Token}} {
+		if got := attempt(scope[0], scope[1], scope[2]); got.Operation != nil || got.Review != ReviewUnknown {
+			t.Fatalf("attempt %v = %#v", scope, got)
+		}
+	}
+
+	// The first commit stops: its review names the cancelled operation.
+	h.plugins.replaceErr = errors.New("download failed")
+	if _, err := h.service.Commit(ctx, "local", testPlugin, first.Token); err == nil {
+		t.Fatal("a failed replacement committed")
+	}
+	h.plugins.replaceErr = nil
+	cancelled := attempt("local", testPlugin, first.Token)
+	if cancelled.Operation == nil || cancelled.Operation.Status != StatusCancelled {
+		t.Fatalf("stopped commit = %#v", cancelled)
+	}
+
+	// A second review is not answered with the first one's operation, although
+	// that operation is the newest the package has.
+	second, err := h.service.Review(ctx, "local", testPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest, _ := h.service.Status(ctx, "local", testPlugin); newest == nil || newest.ID != cancelled.Operation.ID {
+		t.Fatalf("newest operation = %#v", newest)
+	}
+	if got := attempt("local", testPlugin, second.Token); got.Operation != nil || got.Review != ReviewPending {
+		t.Fatalf("second review before its commit = %#v", got)
+	}
+	done, err := h.service.Commit(ctx, "local", testPlugin, second.Token)
+	if err != nil || done.Status != StatusSucceeded {
+		t.Fatalf("second commit = %#v, %v", done, err)
+	}
+	if got := attempt("local", testPlugin, second.Token); got.Operation == nil || got.Operation.ID != done.ID || got.Operation.Status != StatusSucceeded {
+		t.Fatalf("second review after its commit = %#v", got)
+	}
+	if got := attempt("local", testPlugin, first.Token); got.Operation == nil || got.Operation.ID != cancelled.Operation.ID || got.Operation.Status != StatusCancelled {
+		t.Fatalf("the first review now names %#v", got)
+	}
+}
+
+func TestAttemptOfAnExpiredOrInterruptedReview(t *testing.T) {
+	ctx := context.Background()
+	t.Run("expired", func(t *testing.T) {
+		h := newHarness(t)
+		review, err := h.service.Review(ctx, "local", testPlugin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.clock = h.clock.Add(reviewTTL)
+		if got, err := h.service.Attempt(ctx, "local", testPlugin, review.Token); err != nil || got.Operation != nil || got.Review != ReviewExpired {
+			t.Fatalf("expired review = %#v, %v", got, err)
+		}
+		if _, err := h.service.Commit(ctx, "local", testPlugin, review.Token); !errors.Is(err, ErrReviewStale) {
+			t.Fatalf("an expired review committed: %v", err)
+		}
+	})
+	t.Run("interrupted after its claim", func(t *testing.T) {
+		h := newHarness(t)
+		review, err := h.service.Review(ctx, "local", testPlugin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.service.claim(ctx, "crashed-op", "local", review.Token, review.Plan); err != nil {
+			t.Fatal(err)
+		}
+		// Reading the attempt settles the crashed claim, as every read does,
+		// and reports the settled operation: nothing was installed.
+		got, err := h.service.Attempt(ctx, "local", testPlugin, review.Token)
+		if err != nil || got.Operation == nil || got.Operation.ID != "crashed-op" || got.Operation.Status != StatusCancelled || h.plugins.replaced != 0 {
+			t.Fatalf("interrupted attempt = %#v, %v", got, err)
+		}
+	})
+}
+
 func TestRecoverySettlesACrashAtEveryStep(t *testing.T) {
 	ctx := context.Background()
 	claimed := func(t *testing.T, h *harness) Operation {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type HomePackageUpgrades interface {
 	Status(ctx context.Context, ownerID, pluginID string) (*homeupgrade.Operation, error)
 	Review(ctx context.Context, ownerID, pluginID string) (homeupgrade.Review, error)
 	Commit(ctx context.Context, ownerID, pluginID, reviewToken string) (homeupgrade.Operation, error)
+	Attempt(ctx context.Context, ownerID, pluginID, reviewToken string) (homeupgrade.Attempt, error)
 }
 
 // SetHomePackageUpgrades wires the upgrade and the Plugins page's cached update
@@ -30,11 +32,28 @@ func (h *Handler) SetHomePackageUpgrades(upgrades HomePackageUpgrades, availabil
 }
 
 type providerUpgradeView struct {
-	PluginID         string                        `json:"plugin_id"`
-	InstalledVersion string                        `json:"installed_version"`
-	AvailableVersion string                        `json:"available_version,omitempty"`
-	Available        bool                          `json:"available"`
-	Operation        *providerUpgradeOperationView `json:"operation,omitempty"`
+	PluginID         string `json:"plugin_id"`
+	InstalledVersion string `json:"installed_version"`
+	AvailableVersion string `json:"available_version,omitempty"`
+	Available        bool   `json:"available"`
+	// Operation is the package's operation while it still holds the package;
+	// LastOperation is the newest one once it has finished. Neither is the
+	// outcome of any particular review's commit.
+	Operation     *providerUpgradeOperationView `json:"operation,omitempty"`
+	LastOperation *providerUpgradeOperationView `json:"last_operation,omitempty"`
+	// StatusUnavailable says the operation could not be read, so its absence
+	// means nothing.
+	StatusUnavailable bool `json:"status_unavailable,omitempty"`
+	// Homes are the owner's Homes the package backs, listed only when the
+	// upgrade is addressed by plugin rather than from one of them.
+	Homes []providerUpgradeHomeLink `json:"homes,omitempty"`
+}
+
+// providerUpgradeHomeLink names one of the owner's Homes, with its page when
+// it has one.
+type providerUpgradeHomeLink struct {
+	Name string `json:"name"`
+	Link string `json:"link,omitempty"`
 }
 
 type providerUpgradeOperationView struct {
@@ -56,6 +75,7 @@ type providerUpgradeRoleView struct {
 
 type providerUpgradeHomeView struct {
 	Name     string                  `json:"name"`
+	Link     string                  `json:"link,omitempty"`
 	Projects []string                `json:"projects"`
 	Agents   []homeupgrade.PlanAgent `json:"agents"`
 }
@@ -108,6 +128,14 @@ type providerUpgradeCommitRequest struct {
 	Token string `json:"token"`
 }
 
+// providerUpgradeAttemptView is what became of one review's commit: its
+// operation, or, when it started none, the review's state (pending, expired
+// or unknown).
+type providerUpgradeAttemptView struct {
+	Operation *providerUpgradeOperationView `json:"operation,omitempty"`
+	Review    string                        `json:"review,omitempty"`
+}
+
 // providerUpgradeScope resolves the owner's Home and the package its pin names.
 func (h *Handler) providerUpgradeScope(w http.ResponseWriter, r *http.Request) (string, *workspace.Workspace, bool) {
 	unavailable := func() (string, *workspace.Workspace, bool) {
@@ -134,28 +162,60 @@ func (h *Handler) providerUpgradeScope(w http.ResponseWriter, r *http.Request) (
 }
 
 // providerUpgradeSummary reports whether a newer release of the Home's package
-// is available, and any operation still holding the package.
+// is available, and the package's newest operation.
 func (h *Handler) providerUpgradeSummary(ctx context.Context, owner string, station *workspace.Workspace) *providerUpgradeView {
 	state := station.GetAssistantProgramState()
 	if h == nil || h.homePackageUpgrades == nil || state == nil || state.HomeProvider == nil {
 		return nil
 	}
-	pin := state.HomeProvider
-	view := &providerUpgradeView{PluginID: pin.PluginID, InstalledVersion: pin.PluginVersion}
+	return h.providerUpgradeStatus(ctx, owner, state.HomeProvider.PluginID, state.HomeProvider.PluginVersion)
+}
+
+// providerUpgradeStatus reads the cached availability of a newer release, which
+// never resolves a source, and the package's newest operation.
+func (h *Handler) providerUpgradeStatus(ctx context.Context, owner, pluginID, installedVersion string) *providerUpgradeView {
+	view := &providerUpgradeView{PluginID: pluginID, InstalledVersion: installedVersion}
 	if h.pluginUpdateSnapshot != nil {
 		for _, update := range h.pluginUpdateSnapshot().Updates {
-			if update.Name == pin.PluginID && update.Available && update.AvailableVersion != pin.PluginVersion {
+			if update.Name == pluginID && update.Available && update.AvailableVersion != installedVersion {
 				view.Available, view.AvailableVersion = true, update.AvailableVersion
 			}
 		}
 	}
-	operation, err := h.homePackageUpgrades.Status(ctx, owner, pin.PluginID)
-	if err != nil {
-		logger.Warn("Home package upgrade status unavailable", logger.Fields{"plugin": pin.PluginID, "error": err.Error()})
-	} else if operation != nil && operation.Active() {
+	operation, err := h.homePackageUpgrades.Status(ctx, owner, pluginID)
+	switch {
+	case err != nil:
+		logger.Warn("Home package upgrade status unavailable", logger.Fields{"plugin": pluginID, "error": err.Error()})
+		view.StatusUnavailable = true
+	case operation == nil:
+	case operation.Active():
 		view.Operation = providerUpgradeOperation(*operation)
+	default:
+		view.LastOperation = providerUpgradeOperation(*operation)
 	}
 	return view
+}
+
+// providerUpgradeHomeLink is the page of one of the owner's live Homes, built
+// from the Home's own record. It is empty for a Home without a folder slug or
+// one that is not the owner's; it never carries the workspace ID.
+func (h *Handler) providerUpgradeHomeLink(owner, homeID string) string {
+	if h == nil || h.workspaceTaskStore == nil {
+		return ""
+	}
+	home, err := h.workspaceTaskStore.Get(homeID)
+	if err != nil || home == nil {
+		return ""
+	}
+	return ownerHomeLink(owner, home)
+}
+
+func ownerHomeLink(owner string, home *workspace.Workspace) string {
+	slug := strings.TrimSpace(home.FolderSlug)
+	if slug == "" || home.OwnerUserID != owner || home.Status == workspace.StatusTrashed || home.Status == workspace.StatusMissing {
+		return ""
+	}
+	return "/workspaces/" + url.PathEscape(slug) + "/assistant"
 }
 
 func providerUpgradeOperation(operation homeupgrade.Operation) *providerUpgradeOperationView {
@@ -175,7 +235,8 @@ func (h *Handler) GetAssistantProviderUpgrade(w http.ResponseWriter, r *http.Req
 }
 
 // ReviewAssistantProviderUpgrade is POST .../assistant-program/provider-upgrade/review.
-// It inspects the release the Plugins page would install and changes nothing.
+// It inspects the release the Plugins page would install and records the
+// review; it installs and rebinds nothing.
 func (h *Handler) ReviewAssistantProviderUpgrade(w http.ResponseWriter, r *http.Request) {
 	owner, station, ok := h.providerUpgradeScope(w, r)
 	if !ok {
@@ -185,7 +246,13 @@ func (h *Handler) ReviewAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 	if !h.decodeAssistantProgramJSON(w, r, &request) {
 		return
 	}
-	review, err := h.homePackageUpgrades.Review(r.Context(), owner, station.GetAssistantProgramState().HomeProvider.PluginID)
+	h.respondProviderUpgradeReview(w, r, owner, station.GetAssistantProgramState().HomeProvider.PluginID)
+}
+
+// respondProviderUpgradeReview reviews the upgrade of every Home the package
+// backs, whichever page asked.
+func (h *Handler) respondProviderUpgradeReview(w http.ResponseWriter, r *http.Request, owner, pluginID string) {
+	review, err := h.homePackageUpgrades.Review(r.Context(), owner, pluginID)
 	if err != nil {
 		respondProviderUpgradeError(w, err, nil)
 		return
@@ -214,7 +281,9 @@ func (h *Handler) ReviewAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 			projects = append(projects, project.Name)
 		}
 		agents := append([]homeupgrade.PlanAgent{}, home.Agents...)
-		view.Homes = append(view.Homes, providerUpgradeHomeView{Name: home.Name, Projects: projects, Agents: agents})
+		view.Homes = append(view.Homes, providerUpgradeHomeView{
+			Name: home.Name, Link: h.providerUpgradeHomeLink(owner, home.HomeID), Projects: projects, Agents: agents,
+		})
 	}
 	_ = orihttp.RespondSuccess(w, view)
 }
@@ -225,6 +294,12 @@ func (h *Handler) CommitAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	h.respondProviderUpgradeCommit(w, r, owner, station.GetAssistantProgramState().HomeProvider.PluginID)
+}
+
+// respondProviderUpgradeCommit commits exactly the reviewed plan the token
+// names; the service re-derives it and refuses one that changed.
+func (h *Handler) respondProviderUpgradeCommit(w http.ResponseWriter, r *http.Request, owner, pluginID string) {
 	var request providerUpgradeCommitRequest
 	if !h.decodeAssistantProgramJSON(w, r, &request) {
 		return
@@ -233,7 +308,7 @@ func (h *Handler) CommitAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 		_ = orihttp.RespondBadRequest(w, "Review the upgrade first")
 		return
 	}
-	operation, err := h.homePackageUpgrades.Commit(r.Context(), owner, station.GetAssistantProgramState().HomeProvider.PluginID, request.Token)
+	operation, err := h.homePackageUpgrades.Commit(r.Context(), owner, pluginID, request.Token)
 	if err != nil {
 		var view *providerUpgradeOperationView
 		if operation.ID != "" {
@@ -243,6 +318,40 @@ func (h *Handler) CommitAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 		return
 	}
 	_ = orihttp.RespondSuccess(w, providerUpgradeOperation(operation))
+}
+
+// OutcomeAssistantProviderUpgrade is POST .../assistant-program/provider-upgrade/outcome.
+func (h *Handler) OutcomeAssistantProviderUpgrade(w http.ResponseWriter, r *http.Request) {
+	owner, station, ok := h.providerUpgradeScope(w, r)
+	if !ok {
+		return
+	}
+	h.respondProviderUpgradeAttempt(w, r, owner, station.GetAssistantProgramState().HomeProvider.PluginID)
+}
+
+// respondProviderUpgradeAttempt answers a client that lost a commit's
+// response. The token travels in the body, never in a URL, and the answer is
+// only that review's own operation: reading it settles an interrupted
+// operation as every upgrade read does, and never commits.
+func (h *Handler) respondProviderUpgradeAttempt(w http.ResponseWriter, r *http.Request, owner, pluginID string) {
+	var request providerUpgradeCommitRequest
+	if !h.decodeAssistantProgramJSON(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.Token) == "" {
+		_ = orihttp.RespondBadRequest(w, "Name the reviewed update")
+		return
+	}
+	attempt, err := h.homePackageUpgrades.Attempt(r.Context(), owner, pluginID, request.Token)
+	if err != nil {
+		respondProviderUpgradeError(w, err, nil)
+		return
+	}
+	view := providerUpgradeAttemptView{Review: attempt.Review}
+	if attempt.Operation != nil {
+		view.Operation, view.Review = providerUpgradeOperation(*attempt.Operation), ""
+	}
+	_ = orihttp.RespondSuccess(w, view)
 }
 
 var providerUpgradeMessages = map[string]string{

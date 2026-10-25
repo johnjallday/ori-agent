@@ -903,6 +903,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/provider-upgrade", s.Handlers.Session.GetAssistantProviderUpgrade)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/review", s.Handlers.Session.ReviewAssistantProviderUpgrade)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/commit", s.Handlers.Session.CommitAssistantProviderUpgrade)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/outcome", s.Handlers.Session.OutcomeAssistantProviderUpgrade)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/roots", s.Handlers.Session.ListAssistantLibraryRoots)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/summary", s.Handlers.Session.GetAssistantLibrarySummary)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/arrangements/context", s.Handlers.Session.GetAssistantLibraryArrangementContext)
@@ -1696,6 +1697,15 @@ func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/plugins/{name}/enable", s.Handlers.Plugin.SetEnabledHandler(true))
 		mux.HandleFunc("POST /api/plugins/{name}/disable", s.Handlers.Plugin.SetEnabledHandler(false))
 		mux.HandleFunc("POST /api/plugins/{name}/update", s.Handlers.Plugin.UpdateHandler)
+		// The reviewed Home package upgrade, addressed by plugin so Update can
+		// review and apply it in place. Same service and contract as the Home
+		// page's provider-upgrade routes.
+		if s.Handlers.Session != nil {
+			mux.HandleFunc("GET /api/plugins/{name}/home-upgrade", s.Handlers.Session.GetPluginHomeUpgrade)
+			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/review", s.Handlers.Session.ReviewPluginHomeUpgrade)
+			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/commit", s.Handlers.Session.CommitPluginHomeUpgrade)
+			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/outcome", s.Handlers.Session.OutcomePluginHomeUpgrade)
+		}
 	}
 }
 

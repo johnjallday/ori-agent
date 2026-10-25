@@ -1,4 +1,18 @@
 import { workspaceRootURL } from './workspace-routes.js';
+import {
+  agentEffect,
+  homeUpgradeTransport,
+  openHomePackageUpgrade
+} from './home-package-upgrade.js';
+
+// The review's wording lives with the shared upgrade dialog; these stay
+// importable from here for the Home page's existing callers.
+export {
+  providerUpgradeAdditions,
+  providerUpgradeAgentLine,
+  providerUpgradeGuidanceNote,
+  providerUpgradeSummary
+} from './home-package-upgrade.js';
 
 // Announced on the document when a Home package upgrade made on this page has
 // finished, so the page's other panels can read what the new release declares
@@ -18,35 +32,28 @@ export function assistantProviderUnavailableMessage(program = {}, declaration = 
   );
 }
 
-// providerUpgradeAgentLine says what the reviewed Home package upgrade does to
-// one staffed agent: a prompt is replaced only while it still equals the old
-// role prompt, so an edited profile or Home copy keeps the owner's text.
-export function providerUpgradeAgentLine(agent = {}) {
-  if (agent.profile === 'keep' || agent.home_copy === 'keep') return 'keeps your edited prompt';
-  if (agent.profile === 'replace' || agent.home_copy === 'replace') return 'gets the new guidance';
-  return 'has no saved profile; nothing to update';
-}
-
 // providerUpgradeCard describes the Home page's package upgrade card: a newer
 // release to review, an operation that needs attention, or the result of the
 // upgrade just committed on this page.
 export function providerUpgradeCard(upgrade, result = null) {
   if (result && result.status === 'succeeded') {
     const agents = Array.isArray(result.agents) ? result.agents : [];
-    const kept = agents.filter(
-      agent => providerUpgradeAgentLine(agent) === 'keeps your edited prompt'
-    );
-    const updated = agents.filter(
-      agent => providerUpgradeAgentLine(agent) === 'gets the new guidance'
-    );
+    const count = effect => agents.filter(agent => agentEffect(agent) === effect).length;
+    const updated = count('replace');
+    const kept = count('keep');
+    const mixed = count('mixed');
     const parts = [];
-    if (updated.length) {
+    if (updated) {
       parts.push(
-        `${updated.length} staffed ${updated.length === 1 ? 'agent got' : 'agents got'} the new guidance`
+        `${updated} staffed ${updated === 1 ? 'agent got' : 'agents got'} the new guidance`
       );
     }
-    if (kept.length) {
-      parts.push(`${kept.length} kept ${kept.length === 1 ? 'its' : 'their'} edited prompt`);
+    if (kept) {
+      parts.push(`${kept} kept ${kept === 1 ? 'its' : 'their'} edited prompt`);
+    }
+    // One copy kept and one replaced is neither "kept" nor "updated".
+    if (mixed) {
+      parts.push(`${mixed} kept an edited prompt in one copy while the other got the new guidance`);
     }
     return {
       hidden: false,
@@ -75,12 +82,23 @@ export function providerUpgradeCard(upgrade, result = null) {
       reviewable: false
     };
   }
+  // An unreadable status is said to be unreadable: it is not evidence that
+  // nothing is running.
+  if (upgrade?.status_unavailable) {
+    return {
+      hidden: false,
+      state: 'unavailable',
+      title: 'Package upgrade status unavailable',
+      text: `Ori could not read whether an upgrade of ${text(upgrade.plugin_id)} is running. Nothing is assumed to have finished; reload to check again.`,
+      reviewable: false
+    };
+  }
   if (upgrade?.available) {
     return {
       hidden: false,
       state: 'available',
       title: `${text(upgrade.plugin_id)} ${text(upgrade.available_version)} is available`,
-      text: `This Home uses ${text(upgrade.installed_version)}. Review what changes before upgrading; the Plugins page cannot update it while this Home uses it.`,
+      text: `This Home uses ${text(upgrade.installed_version)}. Review what changes before updating; the update moves every Home that uses this plugin, from here or from the Plugins page.`,
       reviewable: true
     };
   }
@@ -88,37 +106,9 @@ export function providerUpgradeCard(upgrade, result = null) {
 }
 
 // requestedUpgradeReview reports whether the page was opened to review the
-// Home's package upgrade (the Plugins page sends the owner here with
-// ?upgrade=review when it refuses to replace a package this Home uses).
-// providerUpgradeAdditions lists what a newer release adds to a Home besides
-// guidance (for example a profile card), as plain sentences from the server.
-export function providerUpgradeAdditions(review) {
-  return (Array.isArray(review?.additions) ? review.additions : [])
-    .map(line => String(line || '').trim())
-    .filter(Boolean)
-    .slice(0, 8);
-}
-
-// providerUpgradeSummary is the review's opening sentence: what moves, and
-// honestly how much changes. "Only Home guidance changes" is true only for a
-// release that adds nothing.
-export function providerUpgradeSummary(review) {
-  const moves = `This Home and its linked projects move from ${text(review?.from_version)} to ${text(review?.to_version)}.`;
-  if (!providerUpgradeAdditions(review).length) return `${moves} Only Home guidance changes.`;
-  const guidance = Array.isArray(review?.roles) && review.roles.length > 0;
-  return guidance
-    ? `${moves} It changes Home guidance and adds what is listed below. Nothing else changes.`
-    : `${moves} It adds what is listed below. Nothing else changes.`;
-}
-
-// providerUpgradeGuidanceNote says why no role prompt is shown. A release
-// that adds something else is not described as a skill text change.
-export function providerUpgradeGuidanceNote(review) {
-  return providerUpgradeAdditions(review).length
-    ? 'Role prompts are unchanged.'
-    : 'Role prompts are unchanged; only packaged skill text changes.';
-}
-
+// Home's package upgrade. Older Plugins page refusals, and other surfaces
+// that name this Home, link here with ?upgrade=review; it opens the review
+// and never commits.
 export function requestedUpgradeReview(search = '') {
   return new URLSearchParams(String(search || '')).get('upgrade') === 'review';
 }
@@ -673,162 +663,32 @@ export class AssistantProgramPage {
     if (review) review.hidden = !card.reviewable;
   }
 
-  providerUpgradeSections(review) {
-    const container = document.createElement('div');
-    const section = (title, ...children) => {
-      const wrapper = document.createElement('section');
-      wrapper.className = 'assistant-program-upgrade-section';
-      const heading = document.createElement('h3');
-      heading.textContent = title;
-      wrapper.append(heading, ...children);
-      container.append(wrapper);
-    };
-    const list = lines => {
-      const items = document.createElement('ul');
-      items.className = 'assistant-program-impact-list';
-      lines.forEach(line => {
-        const item = document.createElement('li');
-        item.textContent = line;
-        items.append(item);
-      });
-      return items;
-    };
-
-    const roles = Array.isArray(review.roles) ? review.roles : [];
-    if (roles.length) {
-      section(
-        'Guidance changes',
-        ...roles.map(role => {
-          const details = document.createElement('details');
-          details.open = roles.length === 1;
-          const summary = document.createElement('summary');
-          summary.textContent = text(role.label || role.role_id);
-          const diff = document.createElement('div');
-          diff.className = 'assistant-program-upgrade-diff';
-          for (const [label, value] of [
-            ['Current', role.old],
-            ['New', role.new]
-          ]) {
-            const column = document.createElement('div');
-            const caption = document.createElement('strong');
-            caption.textContent = label;
-            const body = document.createElement('pre');
-            body.textContent = text(value);
-            column.append(caption, body);
-            diff.append(column);
-          }
-          details.append(summary, diff);
-          return details;
-        })
-      );
-    } else {
-      const note = document.createElement('p');
-      note.textContent = providerUpgradeGuidanceNote(review);
-      section('Guidance changes', note);
-    }
-
-    // What the newer release adds besides guidance, in the server's words.
-    const additions = providerUpgradeAdditions(review);
-    if (additions.length) section('What this release adds', list(additions));
-
-    const homes = (Array.isArray(review.homes) ? review.homes : []).map(home => {
-      const projects = Array.isArray(home.projects) ? home.projects : [];
-      return projects.length
-        ? `${text(home.name)}: ${projects.length} linked ${projects.length === 1 ? 'project' : 'projects'} (${projects.join(', ')})`
-        : `${text(home.name)}: no linked projects`;
-    });
-    if (Number(review.trashed_homes || 0) > 0) {
-      homes.push(`${review.trashed_homes} in the Trash keep the old release.`);
-    }
-    section('Homes and projects', list(homes));
-
-    const agents = (Array.isArray(review.homes) ? review.homes : []).flatMap(home =>
-      (Array.isArray(home.agents) ? home.agents : []).map(
-        agent =>
-          `${text(agent.agent_name)} (${text(agent.role_label)}): ${providerUpgradeAgentLine(agent)}`
-      )
-    );
-    section(
-      'Staffed agents',
-      list(agents.length ? agents : ['No staffed agent uses a changed role.'])
-    );
-
-    const stays = [
-      'Approved project library folders stay approved.',
-      'Pending library reviews and scans are cancelled; start them again afterwards.'
-    ];
-    const skills = Array.isArray(review.skills) ? review.skills : [];
-    if (skills.length) stays.push(`Skills in the new release: ${skills.join(', ')}.`);
-    (Array.isArray(review.warnings) ? review.warnings : []).forEach(warning =>
-      stays.push(text(warning))
-    );
-    section('What stays the same', list(stays));
-    return container;
-  }
-
-  async openProviderUpgradeReview(trigger) {
-    const { dialog, close } = this.newActionDialog('Review package upgrade', trigger);
-    const heading = document.createElement('h2');
-    heading.textContent = 'Review the Home upgrade';
-    const progress = document.createElement('p');
-    progress.setAttribute('role', 'status');
-    progress.setAttribute('aria-live', 'polite');
-    progress.textContent = 'Inspecting the new release…';
-    const error = document.createElement('p');
-    error.className = 'assistant-program-action-error';
-    error.setAttribute('role', 'alert');
-    const controls = document.createElement('div');
-    controls.className = 'assistant-program-action-buttons';
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.className = 'modern-btn modern-btn-secondary';
-    cancel.textContent = 'Cancel';
-    cancel.addEventListener('click', close);
-    controls.append(cancel);
-    dialog.append(heading, progress, error, controls);
-    let review;
-    try {
-      review = await this.request('/provider-upgrade/review', { method: 'POST', body: '{}' });
-    } catch (requestError) {
-      progress.textContent = requestError.message || 'The upgrade could not be reviewed.';
-      cancel.focus();
-      return;
-    }
-    heading.textContent = `Upgrade ${text(review.plugin_id)} to ${text(review.to_version)}?`;
-    progress.textContent = providerUpgradeSummary(review);
-    dialog.insertBefore(this.providerUpgradeSections(review), error);
-    const confirm = document.createElement('button');
-    confirm.type = 'button';
-    confirm.className = 'modern-btn modern-btn-primary';
-    confirm.textContent = 'Upgrade Home';
-    confirm.addEventListener('click', async () => {
-      confirm.disabled = true;
-      cancel.disabled = true;
-      error.textContent = '';
-      progress.textContent = `Installing ${text(review.to_version)} and moving this Home…`;
-      try {
-        const operation = await this.request('/provider-upgrade/commit', {
-          method: 'POST',
-          body: JSON.stringify({ token: review.token })
-        });
+  // openProviderUpgradeReview opens the shared upgrade review for this Home's
+  // package. It covers every Home the package backs, as the Plugins page's
+  // does; this page only addresses it through its own Home.
+  openProviderUpgradeReview(trigger) {
+    return openHomePackageUpgrade({
+      transport: homeUpgradeTransport(this.workspaceId, { fetchImpl: this.fetchImpl }),
+      trigger,
+      // A succeeded upgrade hides the Review button, so focus returns to the
+      // card that now says what happened.
+      returnFocus: () => {
+        const card = document.getElementById('assistantProgramUpgrade');
+        if (trigger && !trigger.hidden) return trigger;
+        return card && !card.hidden ? card : null;
+      },
+      label: 'Review package upgrade',
+      homeLinks: true,
+      currentPath: this.workspaceURL('/assistant'),
+      onSucceeded: async operation => {
         this.providerUpgradeResult = operation;
-        close();
         this.announceAction(`Upgraded to ${text(operation.to_version)}.`);
         await this.load();
         // The new release may declare things other panels on this page show
         // (the Home's profile card); they read again instead of needing a reload.
         globalThis.document?.dispatchEvent(new CustomEvent(PROVIDER_UPGRADED_EVENT));
-      } catch (commitError) {
-        progress.textContent = '';
-        error.textContent = commitError.details?.id
-          ? `${commitError.message} Operation ${text(commitError.details.id)}.`
-          : commitError.message || 'The upgrade was not applied.';
-        cancel.disabled = false;
-        cancel.focus();
       }
     });
-    controls.append(confirm);
-    confirm.focus();
   }
 
   async openHomeRemovalReview(trigger) {

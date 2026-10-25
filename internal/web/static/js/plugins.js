@@ -42,6 +42,8 @@
   let questCache = [];
   let pluginLoadGeneration = 0;
   let updateIndex = new Map();
+  // The Home upgrade status of each installed plugin Homes use, by name.
+  let homeUpgradeIndex = new Map();
   let lastNoticeSignature = '';
 
   function renderUpdateNotice(model) {
@@ -72,10 +74,92 @@
   function renderInstalledPlugins() {
     const list = byId('pluginList');
     if (!list || !installedLoaded) return;
+    // Redrawing replaces every row; keyboard focus stays on the same control.
+    const active = document.activeElement;
+    const focused =
+      active && list.contains(active) && active.getAttribute
+        ? {
+            action: active.getAttribute('data-plugin-action'),
+            name: active.getAttribute('data-plugin-name')
+          }
+        : null;
     list.innerHTML = installedCache.length
       ? installedCache.map(renderPlugin).join('')
       : '<p class="text-muted mb-0">No plugins installed yet.</p>';
+    if (focused && focused.action) {
+      const again = Array.from(list.querySelectorAll('[data-plugin-action]')).find(
+        button =>
+          button.getAttribute('data-plugin-action') === focused.action &&
+          button.getAttribute('data-plugin-name') === focused.name
+      );
+      if (again) again.focus();
+    }
     renderAvailableIntegrations();
+  }
+
+  // ---- Home upgrade status ----
+
+  function backsHomes(p) {
+    const homes = p && p.workspace_surfaces && p.workspace_surfaces.assistant_program_homes;
+    return Array.isArray(homes) && homes.length > 0;
+  }
+
+  // homeUpgradeStatus reads one plugin's Home upgrade status. A plugin none
+  // of this owner's Homes use has none (404); any other failure is shown as
+  // unavailable rather than as "nothing running".
+  async function homeUpgradeStatus(name) {
+    const upgrade = window.HomePackageUpgrade;
+    if (!upgrade) return null;
+    try {
+      return await upgrade.pluginUpgradeTransport(name).status();
+    } catch (e) {
+      return e && e.status === 404 ? null : { status_unavailable: true };
+    }
+  }
+
+  async function loadHomeUpgradeStatus(generation) {
+    const names = installedCache.filter(backsHomes).map(p => String(p.name));
+    const next = new Map();
+    await Promise.all(
+      names.map(async name => {
+        const view = await homeUpgradeStatus(name);
+        if (view) next.set(name, view);
+      })
+    );
+    if (generation !== pluginLoadGeneration) return;
+    homeUpgradeIndex = next;
+    renderInstalledPlugins();
+  }
+
+  async function refreshHomeUpgradeStatus(name) {
+    const generation = pluginLoadGeneration;
+    const view = await homeUpgradeStatus(name);
+    if (generation !== pluginLoadGeneration) return;
+    if (view) homeUpgradeIndex.set(name, view);
+    else homeUpgradeIndex.delete(name);
+    renderInstalledPlugins();
+  }
+
+  function homeUpgradeRow(rawName) {
+    const upgrade = window.HomePackageUpgrade;
+    if (!upgrade || typeof upgrade.homeUpgradeRowNotice !== 'function') return '';
+    const notice = upgrade.homeUpgradeRowNotice(homeUpgradeIndex.get(rawName));
+    if (!notice) return '';
+    const tone =
+      notice.state === 'attention'
+        ? 'text-danger'
+        : notice.state === 'homes'
+          ? 'text-muted'
+          : 'text-warning';
+    return (
+      '<div class="small mt-1 plugin-home-upgrade ' +
+      tone +
+      '" data-plugin-home-upgrade="' +
+      esc(notice.state) +
+      '">' +
+      esc(notice.text) +
+      '</div>'
+    );
   }
 
   // Host-generated install quests carry an integration key. The catalog lists
@@ -394,6 +478,7 @@
       installedLoaded = true;
       questCache = [];
       renderInstalledPlugins();
+      void loadHomeUpgradeStatus(generation);
       try {
         const { loadSetupQuests } = await import('/js/modules/setup-quest-links.js');
         const quests = await loadSetupQuests();
@@ -464,6 +549,7 @@
       ' &middot; Skills: ' +
       skills +
       '</div>' +
+      homeUpgradeRow(rawName) +
       // Lifecycle state in the same words the creation wizard uses, so a user
       // moving between the two surfaces is never told two different things
       // about one plugin.
@@ -518,7 +604,7 @@
           window.pluginToggle(name, button.getAttribute('data-plugin-enable') === 'true');
           break;
         case 'update':
-          window.pluginUpdate(name);
+          window.pluginUpdate(name, { trigger: button });
           break;
         case 'uninstall':
           window.pluginUninstall(name);
@@ -584,27 +670,63 @@
     }
   };
 
-  // homeUpgradeToastOptions offers the Home page named by a home_upgrade_required
-  // refusal. Only a same-origin workspace route is followed.
-  function homeUpgradeToastOptions(details) {
-    const path = String((details && details.home_path) || '');
-    const name = String((details && details.home_name) || '');
-    const title = name ? 'Upgrade from ' + name : 'Upgrade from the Home';
-    if (!/^\/workspaces\/[^/?#]+\/assistant(\?upgrade=review)?$/.test(path)) return { title };
-    // The action label stays short: the toast never shrinks its button.
-    return {
-      title,
-      duration: 15000,
-      action: { label: 'Open Home', onClick: () => window.location.assign(path) }
-    };
+  // ---- the reviewed Home package upgrade ----
+
+  // A plugin a Home uses is not replaced on its own: its Homes, their linked
+  // projects and staffed agents move with it. Update reviews and applies that
+  // upgrade here, in the dialog the Home page uses, without leaving the page.
+  function liveUpdateButton(name) {
+    return (
+      Array.from(document.querySelectorAll('[data-plugin-action="update"]')).find(
+        button => button.getAttribute('data-plugin-name') === name
+      ) || null
+    );
   }
+
+  function openHomeUpgradeReview(name, trigger) {
+    const upgrade = window.HomePackageUpgrade;
+    if (!upgrade) {
+      notify('The update review could not be opened. Reload the page and try again.', 'error');
+      return null;
+    }
+    return upgrade.openHomePackageUpgrade({
+      transport: upgrade.pluginUpgradeTransport(name),
+      trigger,
+      // Refreshing the list replaces the row, so focus returns to the same
+      // plugin's Update button as it is now, or to the list's heading when
+      // the row is gone.
+      returnFocus: () => liveUpdateButton(name) || byId('pluginInstalledHeading'),
+      documentRef: document,
+      label: 'Review plugin update',
+      homeLinks: true,
+      // The installed version, its update badge and the notice count read
+      // again; the reader stays where they were on the page.
+      onSucceeded: async () => {
+        const scroll = typeof window.scrollY === 'number' ? window.scrollY : null;
+        await window.refreshPluginsPage();
+        if (scroll !== null && typeof window.scrollTo === 'function') window.scrollTo(0, scroll);
+      },
+      // Whatever the dialog last showed (a hold, an unknown outcome), the row
+      // reads the plugin's status again; closing stopped nothing on the server.
+      onClosed: dialog => {
+        if (!dialog.operation || dialog.operation.status !== 'succeeded') {
+          void refreshHomeUpgradeStatus(name);
+        }
+      }
+    });
+  }
+
+  let updateAttempt = 0;
 
   // pluginUpdate updates from the plugin's recorded source, or, with
   // options.fromList, switches it to the version the Workspace Directory's
   // plugin list names. A switch always shows the review first: the list is
   // untrusted, so its source and commit are disclosed before anything runs.
+  // options.trigger is the control that asked, for focus on return.
   window.pluginUpdate = async function (name, options) {
     const fromList = Boolean(options && options.fromList);
+    const trigger = (options && options.trigger) || document.activeElement || null;
+    const attempt = ++updateAttempt;
     const url = '/api/plugins/' + encodeURIComponent(name) + '/update';
     const prev = installedCache.find(p => p.name === name);
     const oldVersion = (prev && prev.version) || '';
@@ -619,10 +741,21 @@
         notify(result.error, 'info');
         return null;
       }
-      // A Home uses this plugin: its upgrade is reviewed on that Home's page,
-      // where its linked projects and staffed agents move with it.
+      // A Home uses this plugin, so its update is the reviewed Home upgrade.
+      // That upgrade reviews the plugin's own newer release, never the plugin
+      // list's source, so a switch to the list's version stays refused rather
+      // than quietly becoming an update from a different source.
       if (result.status === 409 && result.data && result.data.code === 'home_upgrade_required') {
-        notify(result.error, 'info', homeUpgradeToastOptions(result.data.details));
+        if (fromList) {
+          notify(
+            name +
+              " cannot switch to the plugin list's version while a Home uses it. Nothing was changed.",
+            'warning'
+          );
+        } else if (attempt === updateAttempt) {
+          // Only the newest Update click opens a review.
+          openHomeUpgradeReview(name, trigger);
+        }
         return null;
       }
       throw new Error(result.error);

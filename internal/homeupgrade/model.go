@@ -211,6 +211,27 @@ type AgentOutcome struct {
 	HomeCopy  string `json:"home_copy"`
 }
 
+// What became of a review whose commit started no operation.
+const (
+	// ReviewPending: not committed, and still committable. A commit may not
+	// have arrived yet, may still be checking the release before its claim,
+	// or was refused before it claimed anything.
+	ReviewPending = "pending"
+	// ReviewExpired: never committed, and it never can be now.
+	ReviewExpired = "expired"
+	// ReviewUnknown: there is no such review for this owner and package.
+	ReviewUnknown = "unknown"
+)
+
+// Attempt is what became of the commit of one review: the operation it
+// started, or, when there is none, the review's own state. A review is
+// consumed in the same transaction that creates its operation, so it names
+// at most one operation and never another review's.
+type Attempt struct {
+	Operation *Operation
+	Review    string
+}
+
 // Active reports whether the operation still holds its package's slot.
 func (o Operation) Active() bool {
 	return o.Status == StatusClaimed || o.Status == StatusReplaced || o.Status == StatusReconcileRequired

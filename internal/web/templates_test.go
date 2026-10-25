@@ -54,6 +54,57 @@ func TestRenderPluginsIncludesAccessibleUpdateNoticeAndHelperOrder(t *testing.T)
 	}
 }
 
+// Both entry points to the reviewed Home package upgrade load the one shared
+// dialog and its styles, and every asset they name is actually served.
+func TestRenderedUpgradeEntryPointsLoadTheSharedDialog(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	plugins, err := r.RenderTemplate("plugins", TemplateData{Title: "Plugins - Ori Agent", CurrentPage: "plugins"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(plugins) failed: %v", err)
+	}
+	home, err := r.RenderTemplate("workspace-assistant", TemplateData{
+		Title: "Assistant - Ori Agent",
+		Extra: map[string]any{"WorkspaceID": "ws-1", "WorkspaceSlug": "project-one"},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(workspace-assistant) failed: %v", err)
+	}
+	const style = `href="/css/home-package-upgrade.css"`
+	for page, html := range map[string]string{"plugins": plugins, "workspace-assistant": home} {
+		if strings.Count(html, style) != 1 {
+			t.Errorf("%s page must link the shared upgrade styles exactly once", page)
+		}
+	}
+	// The Home's action announcements are for screen readers only; Bootstrap 5
+	// has no .sr-only, so that class left them printed on the page.
+	if !strings.Contains(home, `id="assistantProgramActionLive" class="visually-hidden"`) {
+		t.Error("the Home page's action announcements must be visually hidden")
+	}
+	if strings.Count(plugins, `<script type="module" src="/js/modules/home-package-upgrade.js"></script>`) != 1 {
+		t.Error("plugins page must load the shared upgrade dialog as a module exactly once")
+	}
+	for _, asset := range []string{"static/css/home-package-upgrade.css", "static/js/modules/home-package-upgrade.js"} {
+		if _, err := Static.ReadFile(asset); err != nil {
+			t.Errorf("shared upgrade asset %s is not served: %v", asset, err)
+		}
+	}
+	source, err := Static.ReadFile("static/js/modules/assistant-program.js")
+	if err != nil || !strings.Contains(string(source), `from './home-package-upgrade.js'`) {
+		t.Errorf("the Home page module must import the shared upgrade dialog: %v", err)
+	}
+	dialog, err := Static.ReadFile("static/js/modules/home-package-upgrade.js")
+	if err != nil || !strings.Contains(string(dialog), "window.HomePackageUpgrade =") {
+		t.Errorf("the shared upgrade dialog must register the global plugins.js uses: %v", err)
+	}
+	page, err := Static.ReadFile("static/js/plugins.js")
+	if err != nil || !strings.Contains(string(page), "window.HomePackageUpgrade") {
+		t.Errorf("plugins.js must open the shared upgrade dialog: %v", err)
+	}
+}
+
 func TestRenderProfileIncludesReviewableKnowledgeScopes(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
