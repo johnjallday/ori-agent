@@ -959,6 +959,18 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { status: { applies: false } });
       return;
     }
+    // The stored-only protection projection mounts beside that status check.
+    // This fixture has no approved Janitor root, so no folder facts or destination
+    // are available; do not fabricate backup evidence for README screenshots.
+    if (/^\/api\/workspaces\/[^/]+\/(file|downloads)-janitor\/protection$/.test(url.pathname)) {
+      await json(route, {
+        workspace_id: url.pathname.split('/')[3],
+        state: 'unavailable',
+        reason: 'managed_folder_unavailable',
+        as_of: README_CAPTURE_CLOCK
+      });
+      return;
+    }
     // Blueprint Intake's Command-view status check also mounts on every
     // workspace page. This fixture has no intake provenance or pending proposal,
     // so its canonical empty response keeps the screenshot unchanged.
