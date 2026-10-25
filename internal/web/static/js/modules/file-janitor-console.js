@@ -2528,7 +2528,7 @@
     const primaryAction = compactPrimaryAction(status);
     // A control that promises Review always requests Review explicitly. It must
     // not inherit History or Settings merely because that was the last tab.
-    const openButton = button(primaryAction.label, 'fj-btn fj-btn-primary', event => {
+    const openButton = button(primaryAction.label, 'fj-btn fj-btn-secondary', event => {
       open({
         source: 'workspace-details',
         tab: primaryAction.tab || undefined,
@@ -4187,6 +4187,9 @@
 
   if (typeof document !== 'undefined') {
     document.addEventListener(WORKSPACE_VIEW_MODE_EVENT, () => syncSummaryVisibility());
+    document.addEventListener('ori:capabilities-changed', () => {
+      if (!disposed) void refresh();
+    });
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => init(), { once: true });
     } else {
@@ -4394,8 +4397,8 @@
   // scrolled a surface the user could not see, so the press appeared to do
   // nothing at all. Opening in place over the Map is the whole point of the
   // console (FR-97, FR-98).
-  function focusSetup(trigger) {
-    return open({ source: 'setup', trigger });
+  function focusSetup(trigger, { source = 'setup' } = {}) {
+    return open({ source, tab: 'review', trigger });
   }
 
   // ---------------------------------------------------- setup wizard steps

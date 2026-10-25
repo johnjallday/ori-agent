@@ -2708,6 +2708,24 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex-wrap: wrap;
   gap: 10px;
 }
+.ws-cmd-work-first + .ws-cmd-map-shell {
+  margin-top: 18px;
+}
+.ws-cmd-work-first + .ws-cmd-map-shell .ws-cmd-map-quest-fab {
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  border-color: var(--ws-line-bright);
+  box-shadow: none;
+}
+.ws-cmd-work-first + .ws-cmd-map-shell .ws-cmd-map-quest-fab i {
+  color: inherit;
+}
+.ws-cmd-work-context:empty {
+  display: none;
+}
+.ws-cmd-work-first button {
+  max-width: 100%;
+}
 .ws-cmd-work-first h3 {
   font-size: 20px;
   line-height: 1.35;

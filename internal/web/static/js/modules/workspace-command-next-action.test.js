@@ -258,6 +258,49 @@ test('console subscription is identity scoped, deduplicated and disposable', () 
   delete globalThis.window;
 });
 
+test('Map shell and Details render the identical action without replacing stations or all tasks', () => {
+  const command = view([], { janitorState: reviewState() });
+  command.viewMode = 'details';
+  const details = command.renderWorkFirst();
+  command.viewMode = 'map';
+  const map = command.renderOperationsMap();
+  assert.ok(map.includes(details));
+  assert.match(map, /Workspace operations map/);
+  assert.match(map, /data-cmd-open-task-drawer/);
+  assert.equal((map.match(/id="workspaceNextAction"/g) || []).length, 1);
+  assert.equal((map.match(/ws-cmd-agent-action is-primary/g) || []).length, 1);
+});
+
+for (const [variant, patch, destination] of [
+  ['setup', { configured: false }, 'setup'],
+  ['repair', { readiness: 'needs_attention' }, 'review'],
+  ['consent', { consentRequired: true }, 'settings'],
+  [
+    'history',
+    {
+      pendingCount: 0,
+      latestReceipt: { id: 'receipt', completedAt: '2026-10-01T00:00:00Z', result: 'applied' }
+    },
+    'history'
+  ]
+]) {
+  test(`${variant} binding uses the existing console destination without operating`, () => {
+    const command = view([], { janitorState: { ...reviewState(), ...patch } });
+    const calls = [];
+    globalThis.window = {
+      location: { search: '' },
+      FileJanitorConsole: {
+        open: options => calls.push(options.tab),
+        focusSetup: () => calls.push('setup')
+      }
+    };
+    globalThis.fetch = () => assert.fail('navigation must not operate');
+    bindPrimary(command).click();
+    assert.deepEqual(calls, [destination]);
+    delete globalThis.window;
+  });
+}
+
 test('HQ and group journeys do not acquire ordinary workspace guidance', () => {
   assert.equal(view([], { workspace: { designation: 'personal_hq' } }).renderWorkFirst(), '');
   assert.equal(view([], { workspace: { kind: 'group' } }).renderWorkFirst(), '');

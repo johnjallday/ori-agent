@@ -1202,10 +1202,16 @@ export class WorkspaceCommandView {
     if (!this._urlSyncEnabled || typeof window === 'undefined' || !window.history) return;
     const nextState = this.currentURLState();
     if (urlStatesEqual(nextState, this._lastSyncedURLState)) return;
-    const url = buildWorkspaceURL(window.location.pathname, nextState);
+    const url = buildWorkspaceURL(
+      window.location.pathname,
+      nextState,
+      window.location.search || '',
+      window.location.hash || ''
+    );
     // Nothing to rewrite if the target URL already matches the address bar —
     // avoids an unnecessary history.replaceState on an already-clean URL.
-    const currentUrl = window.location.pathname + (window.location.search || '');
+    const currentUrl =
+      window.location.pathname + (window.location.search || '') + (window.location.hash || '');
     if (url === currentUrl) {
       this._lastSyncedURLState = nextState;
       return;
@@ -1990,7 +1996,9 @@ export class WorkspaceCommandView {
       'This workspace has no agent yet — fill the primary role to start working.' +
       '</p>' +
       '<div class="ws-cmd-unstaffed-actions">' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-fill-primary>' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-fill-primary>' +
       'Fill the primary role</button>' +
       '<button type="button" class="ws-cmd-icon-btn" data-cmd-dismiss-unstaffed' +
       ' aria-label="Dismiss this message">×</button>' +
@@ -2070,7 +2078,9 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-mission-btn" id="workspace-command-mission-edit" data-cmd-mission-action="edit">' +
       editLabel +
       '</button>' +
-      '<button type="button" class="ws-cmd-mission-btn is-primary" id="workspace-command-mission-run" data-cmd-mission-action="run"' +
+      '<button type="button" class="ws-cmd-mission-btn' +
+      this.secondaryActionClass() +
+      '" id="workspace-command-mission-run" data-cmd-mission-action="run"' +
       runDisabled +
       ' title="' +
       escapeHtml(runTitle) +
@@ -2217,9 +2227,19 @@ export class WorkspaceCommandView {
     return `<button type="button" class="ws-cmd-agent-action${label ? '' : ' is-primary'}" data-cmd-work-action="${escapeHtml(action.id)}" data-cmd-work-task="${escapeHtml(task.id)}" data-cmd-work-key="${escapeHtml(action.id + ':' + task.id)}">${escapeHtml(label || action.label)}</button>`;
   }
 
+  guidesNextAction() {
+    return (
+      !this.isGroupWorkspace() && !this.isPersonalHQ() && ['details', 'map'].includes(this.viewMode)
+    );
+  }
+
+  secondaryActionClass() {
+    return this.guidesNextAction() ? '' : ' is-primary';
+  }
+
   renderWorkFirst() {
     // Groups and HQ retain their specialized journey; dashboards are user-owned.
-    if (this.isGroupWorkspace() || this.isPersonalHQ()) return '';
+    if (!this.guidesNextAction()) return '';
     const view = this.nextAction();
     const action = view.action;
     const taskAttrs =
@@ -2267,7 +2287,8 @@ export class WorkspaceCommandView {
     } else if (action.owner === 'console') {
       const console = typeof window === 'undefined' ? null : window.FileJanitorConsole;
       if (action.kind === 'retry') return void console?.refresh?.();
-      if (action.kind === 'setup') return console?.focusSetup?.(trigger);
+      if (action.kind === 'setup')
+        return console?.focusSetup?.(trigger, { source: 'workspace-next-action' });
       console?.open?.({
         source: 'workspace-next-action',
         trigger,
@@ -4473,7 +4494,9 @@ export class WorkspaceCommandView {
       '</span></p>' +
       '</div>' +
       '<div class="ws-cmd-stage-actions">' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-task="' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-add-task="' +
       escapeHtml(agent.encodedName) +
       '">Give Task</button>' +
       detailAction +
@@ -5339,7 +5362,9 @@ export class WorkspaceCommandView {
       '<span>' +
       EMPTY_ROSTER_LINE +
       '</span>' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-add-agent' +
       (offer.roleId ? ' data-cmd-hire-role="' + escapeHtml(offer.roleId) + '"' : '') +
       '>' +
       escapeHtml(offer.label) +
@@ -9157,7 +9182,9 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-command-repair">' +
       '<strong>No Commander</strong>' +
       '<span>Chats, routing, and task orchestration need a Commander.</span>' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Hire a Commander</button>' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-add-agent>Hire a Commander</button>' +
       '</div>'
     );
   }
@@ -11154,6 +11181,7 @@ export class WorkspaceCommandView {
     // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
     // no whole-frame tint, layout/density unchanged.
     return (
+      this.renderWorkFirst() +
       '<div class="ws-cmd-map-shell' +
       (this.isPersonalHQ() ? ' is-hq' : '') +
       '">' +
