@@ -1211,7 +1211,10 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     // A confirmed setup that has not finished still has something to press
     // (Continue, Try again, Review again): the card draws a decided offer's
     // actions only when it is marked as one to carry on with.
-    return status === 'awaiting_outcome' ? { ...software, resume: true } : software;
+    return reviewedModelActions(
+      offer,
+      status === 'awaiting_outcome' ? { ...software, resume: true } : software
+    );
   }
   if (view.visible && !view.decided) {
     enclosingView(offer, view);
@@ -1255,6 +1258,11 @@ function folderOfferViewWithoutLead(offer, options = {}) {
           }
         : action
     );
+  return reviewedModelActions(offer, view);
+}
+
+function reviewedModelActions(offer, view) {
+  const status = String(offer?.status || '');
   if (
     view.plan &&
     !view.setup &&
@@ -2088,11 +2096,19 @@ export const FIRST_LOOK_HINT = 'Spends model tokens for one read-only look at th
 // something to show on Home: it is waiting for its click, running, waiting on
 // the user, did not finish, or has a result. The server only sends the block
 // while that is so.
-export function folderFirstLookOpen(offer) {
+// Availability on the completed card is distinct from Home urgency. This is
+// only record ownership/shape, not permission to execute (can_start gates that).
+export function folderFirstLookAvailable(offer) {
   return (
     String(offer?.status || '') === 'resolved' &&
     Boolean(offer?.id) &&
-    FIRST_LOOK_STATES.includes(String(offer?.first_task?.state || '')) &&
+    FIRST_LOOK_STATES.includes(String(offer?.first_task?.state || ''))
+  );
+}
+
+export function folderFirstLookOpen(offer) {
+  return (
+    folderFirstLookAvailable(offer) &&
     !(offer?.first_task?.optional === true && offer.first_task.state === 'seeded')
   );
 }
@@ -4097,7 +4113,7 @@ function firstLookPolling() {
 // currentFirstLook is the first look this page follows: the one on the card
 // when the card is a set-up folder, else the latest one the digest names.
 function currentFirstLook() {
-  if (folderFirstLookOpen(state.offer)) return state.offer.first_task;
+  if (folderFirstLookAvailable(state.offer)) return state.offer.first_task;
   const look = state.digest?.first_look;
   return look && FIRST_LOOK_STATES.includes(String(look.state || '')) ? look : null;
 }

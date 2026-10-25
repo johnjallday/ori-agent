@@ -221,7 +221,9 @@ test('findings rendering is bounded text, including literal hostile labels', () 
   const nodes = allNodes(container);
   assert.ok(nodes.some(node => node.textContent === 'What I found'));
   assert.ok(nodes.some(node => node.textContent.includes('<script>')));
-  assert.ok(nodes.some(node => node.textContent.includes('File contents have not been read')));
+  assert.ok(
+    nodes.some(node => node.textContent.includes('No file contents were read for this snapshot'))
+  );
   assert.equal(
     nodes.some(node => 'innerHTML' in node),
     false

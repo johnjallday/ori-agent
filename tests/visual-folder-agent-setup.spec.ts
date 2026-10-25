@@ -997,7 +997,7 @@ test('fixture findings precede recommendation and stay bound through replace and
   const findings = card.getByRole('region', { name: 'What I found', exact: true });
   const recommendation = card.getByRole('region', { name: 'Recommendation', exact: true });
   await expect(findings).toContainText('1 file observed in this scope');
-  await expect(findings).toContainText('File contents have not been read');
+  await expect(findings).toContainText('No file contents were read for this snapshot');
   await expect(findings).toContainText('REAPER project marker');
   expect(
     await findings.evaluate(
@@ -1172,6 +1172,108 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
   expect(forbidden).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+for (const theme of ['light', 'dark']) {
+  test(`fixture optional summary remains separate, disclosed and keyboard reachable ${theme}`, async ({
+    page
+  }) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    const offer: any = reviewOffer();
+    const longName = 'Saved session 長い名前 '.repeat(6);
+    const agentName = 'Project assistant '.repeat(5);
+    offer.folder = offer.subject.name = offer.plan.visual.entity.name = longName;
+    offer.status = 'resolved';
+    offer.plan.optional_task = true;
+    offer.outcome = {
+      kind: 'project',
+      workspace_id: 'summary-ws',
+      route: '/workspaces/session',
+      receipt: [
+        {
+          kind: 'workspace',
+          name: longName,
+          detail: 'created',
+          route: '/workspaces/session',
+          operation: 'create'
+        },
+        { kind: 'folder', name: longName, detail: 'linked where it is; source files stay here' },
+        {
+          kind: 'agent',
+          name: agentName,
+          detail: 'added',
+          assigned: true,
+          model: 'configured-model'
+        }
+      ]
+    };
+    offer.first_task = {
+      optional: true,
+      recipe: 'folder_summary',
+      state: 'seeded',
+      can_start: true,
+      task_id: 'summary-task',
+      workspace_id: 'summary-ws',
+      workspace_route: '/workspaces/session',
+      workspace_name: longName,
+      agent: agentName,
+      description: 'Summarize the REAPER session: tracks, overview and one next step',
+      input_scope: 'Saved session file only, up to 64 KiB; no audio analysis',
+      executor: {
+        agent: agentName,
+        provider: 'scripted-provider',
+        model: 'configured-model-with-a-long-version-'.repeat(4),
+        digest: 'fixture-summary-digest'
+      }
+    };
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (
+        request.method() !== 'GET' &&
+        /\/folder-first-task\/start$|\/tasks\/execute$|\/offers\/[^/]+\/setup$/.test(
+          new URL(request.url()).pathname
+        )
+      )
+        writes.push(request.url());
+    });
+    const card = await mountReview(page, offer);
+    const panel = card.locator('#personalAssistantFolderOptionalTask');
+    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
+      'Workspace ready'
+    );
+    await expect(panel).toContainText('Configuration only; connection not verified');
+    await expect(panel).toContainText('Each explicit attempt uses model tokens');
+    await expect(panel).toContainText('no model tools, source-file changes or external actions');
+    await expect(card.locator('[aria-label="Folder setup relationship"]')).toHaveCount(1);
+    await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width > 400 ? 1100 : 844 });
+      const open = card.getByRole('link', { name: 'Open workspace', exact: true });
+      await open.focus();
+      const start = panel.getByRole('button', { name: 'Start summary', exact: true });
+      await keyboardReach(page, start);
+      expect(await panel.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(
+        1
+      );
+      expect(await card.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(
+        1
+      );
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+      ).toBeLessThanOrEqual(1);
+      expect(
+        await card
+          .locator('[id]')
+          .evaluateAll(nodes => new Set(nodes.map(node => node.id)).size === nodes.length)
+      ).toBe(true);
+      await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
+      if (process.env.ORI_VISUAL_EVIDENCE)
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/optional-${theme}-${width}.png`
+        });
+    }
+    expect(writes).toEqual([]);
+  });
+}
 
 async function expectUnobscured(target: Locator) {
   const visibility = await target.evaluate(node => {
@@ -1478,16 +1580,20 @@ for (const theme of ['light', 'dark']) {
               node.scrollWidth - node.clientWidth,
               document.documentElement.scrollWidth - innerWidth
             ),
-            decisionFirst: Boolean(
-              decision.compareDocumentPosition(diagram) & Node.DOCUMENT_POSITION_FOLLOWING
-            ),
-            diagramBelow:
-              diagram.getBoundingClientRect().top >= decision.getBoundingClientRect().bottom
+            storyOrder:
+              Boolean(
+                node
+                  .querySelector('#personalAssistantFolderFindings')!
+                  .compareDocumentPosition(diagram) & Node.DOCUMENT_POSITION_FOLLOWING
+              ) &&
+              Boolean(diagram.compareDocumentPosition(decision) & Node.DOCUMENT_POSITION_FOLLOWING),
+            decisionBelow:
+              decision.getBoundingClientRect().top >= diagram.getBoundingClientRect().bottom
           };
         });
         expect(layout.overflow).toBeLessThanOrEqual(1);
-        expect(layout.decisionFirst).toBe(true);
-        if (width <= 768) expect(layout.diagramBelow).toBe(true);
+        expect(layout.storyOrder).toBe(true);
+        if (width <= 768) expect(layout.decisionBelow).toBe(true);
         const target = await confirm.boundingBox();
         expect(target!.height).toBeGreaterThanOrEqual(24);
         expect(target!.x).toBeGreaterThanOrEqual(0);

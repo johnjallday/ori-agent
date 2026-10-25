@@ -460,6 +460,24 @@ const reviewedOffer = (overrides = {}, software = {}) =>
     ...overrides
   });
 
+test('a software review uses the same known-missing model gate as other project reviews', () => {
+  const offer = reviewedOffer();
+  offer.plan.visual = { model: { state: 'missing', settings: 'system' } };
+  const view = folderOfferView(offer);
+  assert.equal(
+    view.actions.some(action => action.oneCard),
+    false
+  );
+  assert.equal(view.actions[0].id, 'model');
+  assert.equal(view.actions[0].label, 'Configure project model');
+  assert.ok(view.actions[0].href.startsWith('/settings'));
+  offer.plan.visual.model = { state: 'configured', provider: 'fixture', name: 'fixture-model' };
+  assert.equal(
+    folderOfferView(offer).actions.some(action => action.oneCard),
+    true
+  );
+});
+
 test('a reviewed project shows what was read, the whole plan, and what the setup needs', () => {
   const view = folderOfferView(reviewedOffer());
   assert.equal(headlineText(view), 'Here is what I found in widget.');

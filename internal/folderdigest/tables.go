@@ -81,6 +81,8 @@ var capabilityRows = []CapabilityRow{
 		Shape: ShapeAudio,
 		Markers: []Marker{
 			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session", ProjectFormat: "reaper",
+				SummaryTitle:    "Summarize the REAPER session: tracks, overview and one next step",
+				SummaryGuidance: "For this saved session report its actual track names, a supported session overview, and one evidence-based next step. A single saved session does not establish edit history, recent edits, audio quality, or listening results.",
 				Facts: &ProjectFacts{Root: "<REAPER_PROJECT", Tempo: "TEMPO", TempoChanges: "TEMPOENVEX", TempoPoint: "PT",
 					Track: "TRACK", Item: "ITEM", ItemStart: "POSITION", ItemLength: "LENGTH"}},
 			{Name: "*.logicx", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Logic Pro project", ProjectFormat: "logic", ProjectBundle: true},

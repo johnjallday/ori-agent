@@ -15,6 +15,7 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
   test.skip(!sandbox || !port, 'requires the isolated folder-summary wrapper');
   test.setTimeout(240_000);
   const evidence = process.env.ORI_FOLDER_SUMMARY_EVIDENCE || '';
+  const upgrade = process.env.ORI_FOLDER_SUMMARY_UPGRADE === '1';
   if (evidence) await mkdir(evidence, { recursive: true, mode: 0o750 });
   const calls: any[] = [];
   const isSummary = (body: any) =>
@@ -87,6 +88,20 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
   try {
     await json('/api/onboarding/skip', {});
     await json('/api/settings/workspace-root', { workspace_root: '' });
+    if (upgrade) {
+      // Released historical package, staged only via the real installer in the
+      // disposable sandbox; no installed checkout or metadata is edited.
+      const source =
+        'https://github.com/johnjallday/reaper-plugin#sha=3e3234bfae3465f909fe2aa5189f685a41c7a2ed';
+      expect((await json('/api/plugins/install', { source })).installed).toBe(false);
+      const installed = await json('/api/plugins/install', { source, confirm: true });
+      expect(installed.plugin.version).toBe('0.8.0');
+      console.log(
+        'Historical sandbox package before canonical update:',
+        installed.plugin.version,
+        source
+      );
+    }
     let pa = (await json('/api/personal-assistant')).personal_assistant;
     if (pa.state === 'needs_hire') {
       await json('/api/personal-assistant/hire', {
@@ -131,9 +146,12 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
     );
     const requirements = card.locator('#personalAssistantFolderRequirements');
     for (const name of ['Music Project Management', 'REAPER']) {
-      await requirements.getByRole('button', { name: `Install ${name}`, exact: true }).click();
+      const update = upgrade && name === 'REAPER';
+      await requirements
+        .getByRole('button', { name: `${update ? 'Update' : 'Install'} ${name}`, exact: true })
+        .click();
       const confirm = requirements.getByRole('button', {
-        name: 'Confirm installation',
+        name: update ? 'Confirm update' : 'Confirm installation',
         exact: true
       });
       await expect(confirm).toBeEnabled({ timeout: 60_000 });
@@ -152,10 +170,27 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
     expect(offer.plan.optional_task).toBe(true);
     const conversation = offer.conversation_id;
     await card.getByRole('button', { name: 'Hire & set up', exact: true }).click();
-    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
-      'Workspace ready',
-      { timeout: 60_000 }
-    );
+    try {
+      await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
+        'Workspace ready',
+        { timeout: 60_000 }
+      );
+    } catch (error) {
+      const canonical = (
+        await json(`/api/personal-assistant/folder-digest?offer_id=${encodeURIComponent(offer.id)}`)
+      ).folder_digest?.offer;
+      const shown = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
+      console.log(
+        'Setup timeout diagnostic:',
+        JSON.stringify({
+          host_status: canonical?.status,
+          host_setup: canonical?.setup,
+          shown_status: shown?.status,
+          shown_setup: shown?.setup
+        })
+      );
+      throw error;
+    }
     const optional = card.locator('#personalAssistantFolderOptionalTask');
     await expect(optional).toBeVisible();
     await expect(optional).toContainText('tracks, overview and one next step');

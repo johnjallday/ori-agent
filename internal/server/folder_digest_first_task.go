@@ -3,8 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -52,9 +50,12 @@ func (s folderFirstTaskSeeder) SeedFirstTask(_ context.Context, req personalassi
 }
 
 func shownFolderTask(ws *workspace.Workspace, shape folderdigest.Shape, brief string) (string, string) {
-	if shape == folderdigest.ShapeAudio && ws != nil {
-		if entry, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && entry != nil && strings.EqualFold(filepath.Ext(entry.RelativePath), ".rpp") {
-			return personalassistant.FolderReaperSummaryTask(brief)
+	if ws != nil {
+		if entry, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && entry != nil {
+			if matched, title, _, ok := folderdigest.ProjectSummaryForFile(entry.RelativePath); ok && matched == shape {
+				_, details := personalassistant.FolderFirstTaskFor(shape, brief)
+				return title, details
+			}
 		}
 	}
 	return personalassistant.FolderFirstTaskFor(shape, brief)

@@ -2422,13 +2422,6 @@ func FolderFirstTaskFor(shape folderdigest.Shape, brief string) (description, de
 	return description, details + " " + folderFirstLookNext
 }
 
-// FolderReaperSummaryTask is used only after a supported REAPER saved-entry
-// marker is observed; an audio extension alone never selects this label.
-func FolderReaperSummaryTask(brief string) (description, details string) {
-	_, details = FolderFirstTaskFor(folderdigest.ShapeAudio, brief)
-	return "Summarize the REAPER session: tracks, overview and one next step", details
-}
-
 func folderFirstTaskBase(shape folderdigest.Shape) (description, details string) {
 	switch shape {
 	case folderdigest.ShapeCode:

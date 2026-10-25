@@ -143,9 +143,25 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 	}
 	plan.Destination = facts.Destination
 	plan.Prerequisites = append([]personalassistant.FolderPrerequisite(nil), facts.Prerequisites...)
-	plan.Visual = &personalassistant.FolderSetupVisual{Entity: &personalassistant.FolderSetupEntity{
-		Kind: "workspace", Name: software.WorkspaceName, Operation: software.Outcome,
-	}}
+	model := &personalassistant.FolderSetupModel{State: "not_checked"}
+	// New staffing uses this exact resolved agent configuration. A kept entry
+	// agent may have workspace-local overrides, so do not guess from a profile.
+	if facts.Existing == nil || facts.Existing.EntryAgent == "" {
+		model.Provider, model.Name, model.AgentName = facts.Assistant.Provider, facts.Assistant.Model, facts.Assistant.Name
+		model.Settings = "system"
+		if facts.Assistant.Action == personalassistant.FolderSoftwareReuse {
+			model.Settings = "agent"
+		}
+		if strings.TrimSpace(model.Name) == "" {
+			model.State = "missing"
+		} else if strings.TrimSpace(model.Provider) != "" {
+			model.State = "configured"
+		}
+	}
+	plan.Visual = &personalassistant.FolderSetupVisual{
+		Entity:              &personalassistant.FolderSetupEntity{Kind: "workspace", Name: software.WorkspaceName, Operation: software.Outcome},
+		RequirementsChecked: true, Builtin: facts.BlueprintLabel, Model: model,
+	}
 	return plan.Stamped()
 }
 

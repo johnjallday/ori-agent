@@ -4,12 +4,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 evidence="$PWD/test-results/folder-summary-evidence"
-if [[ "${1:-}" == --evidence && $# -eq 2 ]]; then
-  evidence="$2"
-elif [[ $# -ne 0 ]]; then
-  echo "Usage: $0 [--evidence DIR]" >&2
-  exit 2
-fi
+upgrade=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --evidence) [[ -n "${2:-}" ]] || { echo 'Missing evidence directory' >&2; exit 2; }; evidence="$2"; shift 2 ;;
+    --upgrade) upgrade=1; shift ;;
+    *) echo "Usage: $0 [--upgrade] [--evidence DIR]" >&2; exit 2 ;;
+  esac
+done
 model_port="${ORI_FOLDER_SUMMARY_MODEL_PORT:-18974}"
 app_port="${ORI_FOLDER_SUMMARY_APP_PORT:-8955}"
 for port in "$model_port" "$app_port"; do
@@ -19,7 +21,10 @@ for port in "$model_port" "$app_port"; do
     exit 2
   fi
 done
+unset CODEX_HOME OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
+export ORI_DEMO_NO_CODEX=1
 export LM_STUDIO_BASE_URL="http://127.0.0.1:$model_port/v1"
 exec ./scripts/e2e-fresh.sh --port "$app_port" --sandbox-env ORI_FOLDER_SUMMARY_SANDBOX \
   --env "ORI_FOLDER_SUMMARY_MODEL_PORT=$model_port" --env "ORI_FOLDER_SUMMARY_EVIDENCE=$evidence" \
+  --env "ORI_FOLDER_SUMMARY_UPGRADE=$upgrade" \
   tests/folder-optional-summary.spec.ts -- --project=chromium --workers=1

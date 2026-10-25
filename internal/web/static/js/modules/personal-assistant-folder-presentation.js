@@ -113,7 +113,7 @@ export function folderFindings({ observation, offer, candidateId = '', locale } 
     ],
     interpretation,
     disclosure:
-      'Names, kinds and dates only. File contents have not been read; this is not a complete inventory.'
+      'Names, kinds and dates only. No file contents were read for this snapshot; this is not a complete inventory.'
   };
 }
 

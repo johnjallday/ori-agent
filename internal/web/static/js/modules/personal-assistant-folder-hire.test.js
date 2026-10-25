@@ -9,12 +9,31 @@ import {
   planWithWatching,
   folderOfferView,
   folderReceiptView,
+  folderFirstLookAvailable,
+  folderFirstLookOpen,
   isInboxFolderOffer,
   hireLookView,
   hireView,
   setupResultView as setupModalView,
   setupRunView
 } from './personal-assistant-folder.js';
+
+test('an optional seeded task remains available to its card without urgent Home work', () => {
+  const offer = {
+    id: 'owned',
+    status: 'resolved',
+    first_task: { optional: true, state: 'seeded', can_start: true }
+  };
+  assert.equal(folderFirstLookAvailable(offer), true);
+  assert.equal(folderFirstLookOpen(offer), false);
+  for (const state of ['running', 'waiting', 'finished', 'failed']) {
+    const changed = { ...offer, first_task: { ...offer.first_task, state } };
+    assert.equal(folderFirstLookAvailable(changed), true);
+    assert.equal(folderFirstLookOpen(changed), true);
+  }
+  assert.equal(folderFirstLookAvailable({ ...offer, status: 'pending' }), false);
+  assert.equal(folderFirstLookAvailable({ ...offer, id: '' }), false);
+});
 
 test('stop families keep distinct reviewed recovery actions and never guess a plugin update', () => {
   const cases = [

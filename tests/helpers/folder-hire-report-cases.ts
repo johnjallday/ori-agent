@@ -43,6 +43,8 @@ export function folderHireReportCases() {
     expect(other, 'needs a second finished unread report').toBeTruthy();
     await page.goto('/');
     await openDrawer(page);
+    const strip = page.locator('#personalAssistantTodayStripToggle');
+    if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
     const home = page.locator(
       `#personalAssistantNeedsYouReports article[data-look-id="${startable!.ref.entity_id}"]`
     );
@@ -115,6 +117,8 @@ export function folderHireReportCases() {
     expect(other).toBeTruthy();
     await page.goto('/');
     await openDrawer(page);
+    const strip = page.locator('#personalAssistantTodayStripToggle');
+    if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
     const card = page.locator(
       `#personalAssistantNeedsYouReports article[data-look-id="${other!.ref.entity_id}"]`
     );
@@ -218,6 +222,10 @@ export async function expectFirstBatchCard(
   ]) {
     await page.goto(path);
     await open();
+    if (path === '/') {
+      const strip = page.locator('#personalAssistantTodayStripToggle');
+      if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
+    }
     const card = page.locator(`${host} article[data-look-id="${item.ref.entity_id}"]`);
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toContainText(item.title);

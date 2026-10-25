@@ -1,8 +1,9 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Locator } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chooseAttach } from './helpers/assistant-menus';
+import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
 
 // Real host + reviewed packages, explicitly controlled loopback provider. This
 // is configuration/consent evidence, NOT a live model or report-quality test.
@@ -15,6 +16,16 @@ test.setTimeout(120_000);
 let provider: Server;
 let executions = 0;
 
+async function revealModel(card: Locator) {
+  const ready = card.locator('details.folder-requirements__ready');
+  await expect(ready).toBeVisible();
+  if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
+    await ready.locator('summary').first().click();
+  await card
+    .getByRole('region', { name: 'Project agent model' })
+    .scrollIntoViewIfNeeded({ timeout: 10_000 });
+}
+
 async function json(request: APIRequestContext, path: string) {
   const response = await request.get(path);
   expect(response.ok(), await response.text()).toBeTruthy();
@@ -23,6 +34,7 @@ async function json(request: APIRequestContext, path: string) {
 
 test.beforeAll(async ({ request }) => {
   expect((await json(request, '/api/settings/system-model')).configured).toBe(false);
+  if (process.env.ORI_READINESS_MODEL_INSTALL === '1') await stageReviewedFolderPackages(request);
   expect((await json(request, '/api/plugins')).plugins.length).toBeGreaterThanOrEqual(2);
   const post = async (path: string, data: object) => {
     const response = await request.post(path, { data });
@@ -178,6 +190,7 @@ test('real model Settings return preserves the review and requires refreshed exp
   );
   await card.getByRole('button', { name: 'Check again', exact: true }).click();
   expect((await refreshed).ok()).toBeTruthy();
+  await revealModel(card);
   await expect(card.getByRole('region', { name: 'Project agent model' })).toContainText(
     'readiness-control-a'
   );
@@ -190,7 +203,14 @@ test('real model Settings return preserves the review and requires refreshed exp
   const after = await json(request, `/api/home-assistant/conversations/${current.conversation_id}`);
   expect(after.messages.length).toBe(history.messages.length);
   expect(after.folder_context.revision).toBe(history.folder_context.revision);
-  await expect(card.getByRole('region', { name: 'Project agent model' })).toBeInViewport();
+  // The refreshed conversation/history read can finish after the recheck.
+  // Read the current disclosure and verify its focus/visibility, not the
+  // scroll position of the earlier node before that hydration completed.
+  await revealModel(card);
+  const refreshedModel = card.getByRole('region', { name: 'Project agent model' });
+  await refreshedModel.focus();
+  await expect(refreshedModel).toBeFocused();
+  await expect(refreshedModel).toBeInViewport();
   expect(current.plan.digest).not.toBe(original.plan.digest);
   await expect(card.getByLabel('What should it do with it?')).toHaveValue(brief);
   if (evidence)
@@ -283,9 +303,13 @@ test('a real shared agent retains its own configured model after the default cha
     name: 'readiness-control-b'
   });
   expect(current.plan.visual.model.agent_name).toBe(current.plan.hire.agent_name);
+  await revealModel(card);
   const model = card.getByRole('region', { name: 'Project agent model' });
   await expect(model).toContainText('readiness-control-b');
-  await expect(card.locator('[data-folder-action="setup"]')).toHaveText('Assign & start');
+  await expect(card.locator('[data-folder-action="setup"]')).toHaveText('Assign & set up');
+  const ready = card.locator('details.folder-requirements__ready');
+  if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
+    await ready.locator('summary').first().click();
   await model.scrollIntoViewIfNeeded();
   if (evidence)
     await page.screenshot({ path: join(evidence, 'group3-real-bound-agent-model.png') });
