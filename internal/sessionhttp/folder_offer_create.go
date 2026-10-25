@@ -186,13 +186,15 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		rows = append(rows, personalassistant.FolderReceiptRow{
 			Kind: "blueprint", Name: provenance.TemplateName,
 		})
-		for _, instance := range ws.AgentInstances {
-			if strings.TrimSpace(instance.Name) != "" {
-				_, model, _ := h.SavedAgentModel(instance.Name)
-				rows = append(rows, personalassistant.FolderReceiptRow{
-					Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model),
-				})
-			}
+	}
+	// Membership belongs to this workspace, independent of whether it was
+	// created from a blueprint. A profile alone never contributes a row.
+	for _, instance := range ws.AgentInstances {
+		if strings.TrimSpace(instance.Name) != "" {
+			_, model, _ := h.SavedAgentModel(instance.Name)
+			rows = append(rows, personalassistant.FolderReceiptRow{
+				Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model),
+			})
 		}
 	}
 	if task := personalassistant.FindFolderFirstTask(ws); task != nil {

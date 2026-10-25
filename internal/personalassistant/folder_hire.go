@@ -39,6 +39,9 @@ type FolderHire struct {
 	RoleLabel string `json:"role_label,omitempty"`
 	// Model is the model the agent is set to use; empty when it has none yet.
 	Model string `json:"model,omitempty"`
+	// AssignedHere is display-only membership observed in the exact reused
+	// workspace. A saved agent/profile or a completed staffing step is not proof.
+	AssignedHere bool `json:"assigned_here,omitempty"`
 }
 
 // validate keeps a hire bounded and path-free.
@@ -50,6 +53,9 @@ func (h *FolderHire) validate() error {
 	case FolderHireCreate, FolderHireBind, FolderHirePending:
 	default:
 		return fmt.Errorf("%w: hire mode", errFolderDigestInvalid)
+	}
+	if h.AssignedHere && (h.Mode != FolderHireBind || strings.TrimSpace(h.AgentName) == "") {
+		return fmt.Errorf("%w: hire membership", errFolderDigestInvalid)
 	}
 	for _, text := range []string{h.AgentName, h.RoleLabel, h.Model} {
 		if len(text) > 200 || strings.ContainsAny(text, "\x00\r\n") || looksLikeFilesystemPath(text) {

@@ -76,12 +76,19 @@ func TestFolderOfferWorkspaceReceipt_ReadsActualCreatedRecordsAndReuse(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws.SetTemplateProvenance(&agentworkspace.TemplateProvenance{TemplateID: "writing-project", TemplateName: "Writing project"})
 	ws.AgentInstances = []agentworkspace.AgentInstance{
 		{Name: "Editor", Role: "Lead", RoleSource: agentworkspace.RoleSourceCreated},
 		// The Home's shared assistant joins; it was not made for this project.
 		{Name: "REAPER Assistant", Role: "REAPER Assistant", RoleSource: agentworkspace.RoleSourceAssigned},
 	}
+	if err := handler.workspaceStore.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	withoutBlueprint, err := handler.FolderOfferWorkspaceReceipt(id, false)
+	if err != nil || len(withoutBlueprint) != 5 || withoutBlueprint[2].Name != "Editor" || !withoutBlueprint[2].Assigned {
+		t.Fatalf("membership must not depend on blueprint provenance: %+v %v", withoutBlueprint, err)
+	}
+	ws.SetTemplateProvenance(&agentworkspace.TemplateProvenance{TemplateID: "writing-project", TemplateName: "Writing project"})
 	if err := handler.workspaceStore.Save(ws); err != nil {
 		t.Fatal(err)
 	}

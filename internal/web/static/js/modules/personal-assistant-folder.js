@@ -3155,6 +3155,13 @@ function renderHire(els, hire, offer) {
   if (!hire) return;
   setText(els.hireInitials, hire.agent.initials, false);
   setText(els.hireDetail, hire.agent.detail, false);
+  // Identity is already in the full diagram. Keep this mount for the editable
+  // goal/monitoring controls and for legacy records without a visual identity.
+  const identity = els.hireDetail?.closest('.pa-folder__hire-agent');
+  if (identity)
+    identity.hidden = Boolean(
+      (offer?.plan?.visual || offer?.setup?.visual) && (offer?.plan?.hire || offer?.setup?.hire)
+    );
   if (els.briefField) els.briefField.hidden = !hire.brief;
   if (els.brief && hire.brief && document.activeElement !== els.brief) {
     const typed = briefFor(offer);

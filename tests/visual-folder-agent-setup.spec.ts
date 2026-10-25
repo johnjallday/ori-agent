@@ -794,7 +794,8 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
 test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {
   const card = await mountReview(page, reviewOffer('bind'));
   await expect(card.getByRole('button', { name: 'Assign & start', exact: true })).toBeVisible();
-  await expect(card.locator('.folder-visual__agent')).toContainText('Proposed assignment');
+  await expect(card.locator('.folder-visual__agent')).toContainText('Already hired');
+  await expect(card.locator('.folder-visual__agent')).toContainText('Assign on setup');
   await page.evaluate(
     offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
     reviewOffer('pending')
@@ -802,6 +803,64 @@ test('fixture bind and pending reviews do not invent a completed hire', async ({
   await expect(card.locator('.folder-visual__agent')).toContainText('Identity pending');
   await expect(card.locator('.folder-visual__agent')).not.toContainText('Ari');
   await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
+});
+
+test('fixture agent existence and exact workspace membership stay distinct on reload', async ({
+  page
+}) => {
+  const card = await mountReview(page);
+  const agent = card.locator('.folder-visual__agent');
+  await expect(agent).toContainText('Needs hiring');
+  await expect(agent).toContainText('Hire & assign on setup');
+  await expect(card.locator('.pa-folder__hire-agent')).toBeHidden();
+  const capture = async (name: string) => {
+    if (!process.env.ORI_VISUAL_EVIDENCE) return;
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+    await card
+      .locator('.folder-visual')
+      .screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/${name}.png` });
+  };
+  await capture('agent-needs-hiring');
+  const brief = card.getByLabel('What should it do with it?');
+  await brief.fill('');
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    reviewOffer('bind')
+  );
+  await expect(agent).toContainText('Already hired');
+  await expect(agent).toContainText('Assign on setup');
+  await capture('agent-already-hired');
+  const pending = reviewOffer('pending');
+  pending.plan.hire.model = '';
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    pending
+  );
+  await expect(agent).toContainText('Identity pending');
+  await expect(agent).toContainText('Model not yet known');
+  await capture('agent-pending');
+  const reused: any = reviewOffer('bind');
+  reused.plan.visual.entity.operation = 'reuse';
+  reused.plan.hire.assigned_here = true;
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    reused
+  );
+  await expect(agent).toContainText('Assigned here');
+  await expect(agent).toContainText('On this workspace');
+  await expect(brief).toHaveValue('');
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(agent).toContainText('Assigned here');
+  await expect(brief).toHaveValue('');
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+    await card
+      .locator('.folder-visual')
+      .screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/agent-assigned-here.png` });
+  }
 });
 
 test('fixture requirements keep independently known operations ahead of the proposed outcome', async ({
@@ -1440,11 +1499,11 @@ for (const theme of ['light', 'dark']) {
         await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
           'Integration · Did not finish'
         );
-        await expect(card).not.toContainText('Confirmed workspace member');
+        await expect(card.locator('.folder-visual__agent')).not.toContainText('Assigned here');
         const retry = card.getByRole('button', { name: 'Try again', exact: true });
         await keyboardReach(page, retry);
         await page.keyboard.press('Enter');
-        await expect(card.locator('.folder-visual')).toContainText('Confirmed workspace member');
+        await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
         await expect(card.locator('.folder-visual')).toContainText('Separate workspace');
         const open = card.getByRole('link', { name: 'Open Session', exact: true });
         await expect(open).toHaveAttribute('href', '/workspaces/fixture-session');

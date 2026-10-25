@@ -15,7 +15,9 @@ test('review uses typed names and proposed assignment, never plan prose as evide
   assert.equal(view.entity.name, 'Song');
   assert.equal(view.entity.status, 'Proposed · new');
   assert.equal(view.parent, 'Existing Home · Music');
-  assert.equal(view.agent.status, 'Proposed new agent');
+  assert.equal(view.agent.status, 'Needs hiring');
+  assert.equal(view.agent.action, 'Hire & assign on setup');
+  assert.equal(view.agent.membership, 'unknown');
   assert.match(view.summary, /Nothing here proves creation or assignment/);
   assert.equal(
     visualView({ plan: { lines: [{ kind: 'workspace', name: 'Creates Fake' }] } }).entity,
@@ -58,7 +60,9 @@ test('new/existing/standalone destinations and bind are distinct', () => {
       }
     });
     assert.equal(view.parent, expected);
-    assert.equal(view.agent.status, 'Proposed assignment');
+    assert.equal(view.agent.status, 'Already hired');
+    assert.equal(view.agent.action, 'Assign on setup');
+    assert.equal(view.agent.existence, 'existing');
   }
 });
 
@@ -129,7 +133,7 @@ test('run milestones use applicable line evidence, not timers, profiles or first
     offer: { plan, setup: { ...setup, visual: plan.visual, hire: plan.hire } }
   });
   assert.equal(view.entity.status, 'Created');
-  assert.equal(view.agent.status, 'Proposed new agent');
+  assert.equal(view.agent.status, 'Needs hiring');
   assert.match(view.footer, /separate from the first look/);
   assert.doesNotMatch(JSON.stringify(view), /percent|first look complete|Assigned/);
   const group = globalThis.OriFolderSetupVisual.setupMilestones({
@@ -169,7 +173,9 @@ test('resolved visuals trust structured canonical receipts, never hire names or 
   assert.equal(view.agent.name, 'Actual member');
   assert.equal(view.agent.model, 'Recorded model');
   assert.match(view.parent, /Separate workspace/);
-  assert.match(view.agent.status, /Confirmed/);
+  assert.equal(view.agent.status, 'Assigned here');
+  assert.equal(view.agent.action, 'On this workspace');
+  assert.equal(view.agent.membership, 'assigned');
   offer.outcome.receipt = [
     { kind: 'workspace', name: 'Old record', detail: 'created' },
     { kind: 'agent', name: 'Legacy row' }
@@ -201,6 +207,41 @@ test('an unknown or incomplete result cannot claim a workspace is ready', () => 
     assert.match(view.footer, /saved receipt/);
     assert.doesNotMatch(view.footer, /Workspace ready/);
   }
+});
+
+test('existing membership requires evidence for this exact reused workspace', () => {
+  const reused = {
+    ...plan,
+    visual: { entity: { kind: 'workspace', name: 'Existing', operation: 'reuse' } },
+    hire: { mode: 'bind', agent_name: 'Ari', assigned_here: true }
+  };
+  let view = visualView({ plan: reused });
+  assert.equal(view.agent.status, 'Assigned here');
+  assert.equal(view.agent.action, 'On this workspace');
+  assert.equal(view.agent.membership, 'assigned');
+  assert.match(view.footer, /Existing workspace membership is kept/);
+  assert.match(view.summary, /Existing membership observed/);
+  assert.doesNotMatch(view.footer, /nothing created or assigned/);
+  view = visualView({ plan: { ...reused, visual: plan.visual } });
+  assert.equal(
+    view.agent.status,
+    'Already hired',
+    'a new workspace cannot inherit another workspace membership'
+  );
+  assert.equal(view.agent.membership, 'unknown');
+  view = visualView({
+    offer: {
+      setup: { hire: plan.hire, visual: plan.visual, lines: [{ kind: 'agents', state: 'done' }] }
+    }
+  });
+  assert.equal(view.agent.status, 'Needs hiring');
+  assert.match(view.agent.progress, /membership awaits receipt/);
+  assert.equal(view.agent.membership, 'unknown');
+  const pending = visualView({
+    plan: { ...plan, hire: { mode: 'pending', agent_name: 'Fake', model: 'Fake model' } }
+  });
+  assert.equal(pending.agent.name, '');
+  assert.equal(pending.agent.model, '');
 });
 
 function documentFixture() {
@@ -396,7 +437,7 @@ test('an inbox hire is a File Janitor workspace with no parent and no model to w
   assert.equal(view.entity.label, 'File Janitor workspace');
   assert.equal(view.entity.status, 'Proposed · new');
   assert.equal(view.parent, 'Separate workspace · no parent Home');
-  assert.equal(view.agent.status, 'Proposed new agent');
+  assert.equal(view.agent.status, 'Needs hiring');
   assert.equal(view.agent.name, 'File Curator');
   const container = documentFixture().createElement('div');
   renderDiagram(

@@ -28,7 +28,8 @@
         ? {
             kind,
             name: text(resource.name),
-            status: { create: 'Created', reuse: 'Reused' }[resource.operation] || 'Ready'
+            status: { create: 'Created', reuse: 'Reused' }[resource.operation] || 'Ready',
+            complete: true
           }
         : null;
     const member = rows.find(
@@ -39,7 +40,10 @@
           name: text(member.name),
           role: '',
           model: text(member.model),
-          status: 'Confirmed workspace member'
+          existence: 'existing',
+          membership: 'assigned',
+          status: 'Assigned here',
+          action: 'On this workspace'
         }
       : null;
     const parent = outcome?.parent;
@@ -59,6 +63,7 @@
       agent,
       parent: placement,
       entries: [],
+      sourceLinked: rows.some(row => row.kind === 'folder'),
       sourceNote: rows.some(row => row.kind === 'folder')
         ? 'Linked where it is · kept in place'
         : 'Source folder · kept in place',
@@ -89,8 +94,10 @@
     const setup = offer?.setup;
     const done = kind =>
       list(setup?.lines).some(line => line.kind === kind && line.state === 'done');
-    if (entity && done(entity.kind))
+    if (entity && done(entity.kind)) {
       entity.status = proposed.operation === 'reuse' ? 'Reused' : 'Created';
+      entity.complete = true;
+    }
     const destination = setup?.destination || plan?.destination || offer?.destination;
     let parent = 'Destination not yet reviewed';
     if (
@@ -106,25 +113,41 @@
         ? {
             name: hire.mode === 'pending' ? '' : text(hire.agent_name),
             role: text(hire.role_label),
-            model: text(hire.model),
+            model: hire.mode === 'pending' ? '' : text(hire.model),
             modelNotNeeded: visual?.model?.state === MODEL_NOT_NEEDED,
+            existence:
+              hire.mode === 'bind' ? 'existing' : hire.mode === 'create' ? 'new' : 'unknown',
+            membership:
+              hire.mode === 'bind' && hire.assigned_here === true && proposed?.operation === 'reuse'
+                ? 'assigned'
+                : 'unknown',
             status:
               hire.mode === 'bind'
-                ? 'Proposed assignment'
-                : hire.mode === 'pending'
+                ? hire.assigned_here === true && proposed?.operation === 'reuse'
+                  ? 'Assigned here'
+                  : 'Already hired'
+                : hire.mode === 'pending' || !text(hire.agent_name)
                   ? 'Identity pending'
-                  : 'Proposed new agent'
+                  : 'Needs hiring',
+            action:
+              hire.mode === 'bind'
+                ? hire.assigned_here === true && proposed?.operation === 'reuse'
+                  ? 'On this workspace'
+                  : 'Assign on setup'
+                : hire.mode === 'pending' || !text(hire.agent_name)
+                  ? 'Review identity after prerequisites'
+                  : 'Hire & assign on setup'
           }
         : null;
-    if (agent && done('agents'))
-      agent.status = 'Planned agent · staffing complete; identity awaits receipt';
+    if (agent && done('agents') && agent.membership !== 'assigned')
+      agent.progress = 'Staffing complete · membership awaits receipt';
     const source =
       text(offer?.subject?.name) ||
       text(observation?.folder) ||
       text(offer?.folder) ||
       'Selected folder';
     // Observations belong to the chosen root, never to a guessed child scope.
-    const observed = observation && (!offer || source === observation.folder);
+    const observed = observation && !offer;
     const entries = observed
       ? list(observation.tree?.nodes)
           .filter(row => !row.parent_id)
@@ -139,19 +162,22 @@
         name: text(row.name),
         kind: row.kind === 'folder' ? 'Folder' : 'File'
       })),
+      sourceLinked: done('folder'),
       sourceNote: done('folder')
         ? 'Folder link complete · kept in place'
         : observed && !setup && !plan
           ? 'Observed names only · contents not read'
           : 'Source folder · kept in place',
       summary: entity
-        ? `${source} → ${entity.status.toLowerCase()} ${entity.label.toLowerCase()} ${entity.name}. ${parent}.${agent ? ` ${agent.status}: ${agent.name || agent.role || 'agent not yet known'}.` : ''}${setup ? ' Status comes from the saved run.' : ' Nothing here proves creation or assignment.'}`
+        ? `${source} → ${entity.status.toLowerCase()} ${entity.label.toLowerCase()} ${entity.name}. ${parent}.${agent ? ` ${agent.status}: ${agent.name || agent.role || 'agent not yet known'}.` : ''}${setup ? ' Status comes from the saved run.' : agent?.membership === 'assigned' ? ' Existing membership observed; setup still needs confirmation.' : ' Nothing here proves creation or assignment.'}`
         : `${source}. Destination and agent are not yet reviewed.${setup ? ' Setup status comes from the saved run.' : ' No setup has started.'}`,
       footer: setup
         ? 'Setup is separate from the first look. Completed work is kept.'
-        : entity
-          ? 'Proposed setup · nothing created or assigned yet'
-          : 'Review a supported setup to see its destination and agent.'
+        : agent?.membership === 'assigned'
+          ? 'Existing workspace membership is kept. Setup changes still need confirmation.'
+          : entity
+            ? 'Proposed setup · nothing created or assigned yet'
+            : 'Review a supported setup to see its destination and agent.'
     };
   }
 
@@ -171,6 +197,7 @@
     const source = node('section', '', 'folder-visual__source');
     const folder = node('span', '', 'folder-visual__folder-art');
     folder.setAttribute('aria-hidden', 'true');
+    source.dataset.state = view.sourceLinked ? 'linked' : 'proposed';
     source.append(
       folder,
       node('p', 'Your folder', 'folder-visual__label'),
@@ -187,10 +214,12 @@
       source.append(entries);
     }
     const connection = node('span', '→', 'folder-visual__connection');
+    connection.dataset.state = view.sourceLinked ? 'linked' : 'proposed';
     connection.setAttribute('aria-hidden', 'true');
     const destination = node('section', '', 'folder-visual__destination');
     destination.append(node('p', view.parent, 'folder-visual__label'));
     const workspace = node('div', '', 'folder-visual__workspace');
+    workspace.dataset.state = view.entity?.complete ? 'complete' : 'proposed';
     if (view.entity && artwork?.svgForVariant) {
       const art = node('span', '', 'folder-visual__building');
       // Only the host's curated constant silhouette, never server/user HTML.
@@ -209,6 +238,8 @@
     );
     if (view.agent) {
       const agent = node('div', '', 'folder-visual__agent');
+      agent.dataset.membership = view.agent.membership;
+      agent.setAttribute('aria-label', 'Workspace agent');
       const initials = view.agent.name
         .split(/\s+/)
         .filter(Boolean)
@@ -222,6 +253,7 @@
       identity.append(
         node('p', view.agent.status, 'folder-visual__label'),
         node('strong', view.agent.name || view.agent.role || 'Agent not yet known'),
+        node('p', view.agent.action, 'folder-visual__action'),
         node(
           'p',
           [
@@ -237,6 +269,8 @@
           'folder-visual__note'
         )
       );
+      if (view.agent.progress)
+        identity.append(node('p', view.agent.progress, 'folder-visual__note'));
       agent.append(avatar, identity);
       workspace.append(agent);
     }

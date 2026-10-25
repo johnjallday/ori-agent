@@ -111,6 +111,15 @@
   font-size: 1.4rem;
 }
 
+.folder-visual__connection[data-state="proposed"] {
+  border-bottom: 1px dashed currentcolor;
+  opacity: 0.75;
+}
+
+.folder-visual__connection[data-state="linked"] {
+  border-bottom: 1px solid currentcolor;
+}
+
 .folder-visual__destination {
   padding: 0.5rem;
   border: 1px solid var(--fv-line);
@@ -150,8 +159,22 @@
   gap: 0.65rem;
   align-items: center;
   margin-top: 0.85rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--fv-line);
+  padding: 0.75rem;
+  border: 1px dashed var(--fv-accent);
+  border-radius: 0.6rem;
+  background: var(--fv-paper);
+}
+
+.folder-visual__workspace[data-state="complete"],
+.folder-visual__agent[data-membership="assigned"],
+.folder-visual__agent[data-membership="assigned"] .folder-visual__initials {
+  border-style: solid;
+}
+
+.folder-visual__action {
+  margin: 0.3rem 0;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .folder-visual__initials {
