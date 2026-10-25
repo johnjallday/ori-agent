@@ -146,26 +146,24 @@ async function scan(page: Page, _request: APIRequestContext, chip: string) {
     )
   );
   await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+  const selected = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/home-assistant/folder-context/select'
+  );
   await page
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: chip[0].toUpperCase() + chip.slice(1), exact: true })
     .click();
-  await chooseAttach(page, '#personalAssistantReviewFolderSetup');
+  const selectionResponse = await selected;
+  expect(selectionResponse.ok()).toBeTruthy();
+  const selection = await selectionResponse.json();
   const expected = chip === 'downloads' ? 'Third' : chip === 'documents' ? 'Fourth' : 'Desktop';
-  await page.waitForFunction(
-    name => {
-      const current = (window as any).PersonalAssistantFolder.current();
-      const choices = document.getElementById('personalAssistantFolderSetupChoices');
-      return (
-        Boolean(current?.plan && current.subject?.name === name) ||
-        Boolean(choices && !choices.hidden && choices.querySelector('option'))
-      );
-    },
-    expected,
-    { timeout: 30_000 }
-  );
-  const choices = page.locator('#personalAssistantFolderSetupChoices');
-  if (await choices.isVisible()) {
+  // The real selection says whether it is opening a single canonical review.
+  // Do not race that request with a second chooser that will be removed by it.
+  if (!selection.hire_candidate) {
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
+    await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
     const label = await page
       .locator('#personalAssistantFolderSetupCandidate option')
       .evaluateAll(
@@ -177,11 +175,14 @@ async function scan(page: Page, _request: APIRequestContext, chip: string) {
     await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label });
     await page.locator('#personalAssistantFolderSetupReview').click({ timeout: 10_000 });
   }
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).PersonalAssistantFolder.current()?.subject?.name)
-    )
-    .toBe(expected);
+  await page.waitForFunction(
+    name => {
+      const current = (window as any).PersonalAssistantFolder.current();
+      return current?.subject?.name === name && Boolean(current.plan?.digest);
+    },
+    expected,
+    { timeout: 30_000 }
+  );
   const offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
   scopedOfferID = offer.id;
   return offer;
