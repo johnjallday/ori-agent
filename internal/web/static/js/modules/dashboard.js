@@ -1974,6 +1974,9 @@
 
   function setHomeAssistantBusy(isBusy, busyLabel) {
     homeAssistantState.busy = Boolean(isBusy);
+    document.dispatchEvent(
+      new CustomEvent('personal-assistant:busy', { detail: { busy: homeAssistantState.busy } })
+    );
     var personalPending =
       Boolean(window.PersonalAssistantTranscript) &&
       (homeAssistantState.personalConversation || Boolean(homeAssistantState.entryAgentTurn)) &&

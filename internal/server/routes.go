@@ -382,6 +382,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	homeAssistantRouteHandler.ReviewedIntegrationSetup = homeAssistantAskHandler.ReviewedIntegrationSetupOpen
 	homeAssistantRouteHandler.FolderPathNamed = homeAssistantAskHandler.FolderPathNamed
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
+	mux.HandleFunc("/api/home-assistant/model", homeAssistantAskHandler.ModelHandler)
 	// Assistant operations ("Operate Ori"): the asking tab reads an operation
 	// and reports what it observed. None of these can create or start work.
 	mux.HandleFunc("GET /api/home-assistant/operations/capability", homeAssistantAskHandler.OperationCapabilityHandler)
@@ -486,6 +487,7 @@ func registerChatRoutes(mux *http.ServeMux, s *Server) {
 	// Chat Endpoint
 	// =============================================================================
 	mux.HandleFunc("/api/chat", s.Handlers.Chat.ChatHandler)
+	mux.HandleFunc("/api/chat/model", s.Handlers.Chat.ModelHandler)
 }
 
 // registerUpdateRoutes registers update-check endpoints.

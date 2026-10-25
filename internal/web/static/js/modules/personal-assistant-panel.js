@@ -1593,7 +1593,7 @@ function clearConversation(who) {
   return true;
 }
 
-function submit(event) {
+async function submit(event) {
   event?.preventDefault();
   moveSharedWorkActivity();
   const who = identity();
@@ -1640,6 +1640,11 @@ function submit(event) {
     setStatus('The work controller is unavailable on this page. Nothing was submitted.');
     return false;
   }
+  // Inspect the next-message choice before routing, without changing the
+  // draft or allowing a second Send/recipient switch during this bounded read.
+  state.pending = true;
+  state.els.send.disabled = true;
+  await window.PersonalAssistantModel?.beforeSend?.();
   // Attribution is per turn: a workspace agent's turn never carries the hired
   // assistant's name, and the hired assistant's never carries the agent's.
   window.OriAskRouting.setRecipient?.(entry || { kind: 'personal' });
@@ -1672,10 +1677,14 @@ function submit(event) {
   if (sendHadFocus && state.els.panel?.hidden !== true) state.els.send.focus();
   operation.then(
     () => {
+      window.PersonalAssistantModel?.afterSend?.();
       // Keep recovery/busy notices produced since Send; only clear our receipt.
       if (state.els?.status?.textContent === sentStatus) setStatus('');
     },
-    () => setStatus('The request could not be routed. Nothing ran without confirmation.')
+    () => {
+      window.PersonalAssistantModel?.afterSend?.();
+      setStatus('The request could not be routed. Nothing ran without confirmation.');
+    }
   );
   try {
     document.dispatchEvent(new CustomEvent('personal-assistant:sent'));

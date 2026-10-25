@@ -695,6 +695,48 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   flex: 1;
 }
 
+.personal-assistant-panel__model {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 3px 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.personal-assistant-panel__model[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__model span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-panel__model a {
+  flex: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.personal-assistant-panel__model a:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 3px;
+}
+
+/* Build has its own profile-first choice in a separate modal/composer. Never
+   present the conversation-only line as the model for that mode. */
+.modal-open .personal-assistant-panel__model {
+  visibility: hidden;
+}
+
 /* Avatar, name and sub-line. With more than one recipient the name is a menu
    button whose hit area is stretched over the whole block, so the heading
    keeps its semantics and the block is still one target (FR8). */
