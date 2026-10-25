@@ -67,10 +67,11 @@
                   </select>
                 </div>
                 <div class="col-md-6 mb-3">
-                  <label class="form-label" for="editAgentModelSelect" style="color: var(--text-primary);">Model</label>
+                  <label id="editAgentModelLabel" class="form-label" for="editAgentModelSelect" style="color: var(--text-primary);">Model</label>
                   <select id="editAgentModelSelect" class="modern-input w-100">
                     <option value="">Select a model...</option>
                   </select>
+                  <p id="editAgentConversationModel" class="mb-0 mt-1" style="font-size: 12px; color: var(--text-secondary);" hidden></p>
                   <p id="editAgentSystemModelHint" class="mb-0 mt-1" style="font-size: 12px; color: var(--text-secondary);" hidden>This is the agent's saved configuration. Saving a new model here also updates <a href="/settings#system-model">Settings → Default model</a> for Assistant conversations and Ori's AI features.</p>
                 </div>
               </div>

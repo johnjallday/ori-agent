@@ -1,14 +1,22 @@
 package agenthttp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/modelview"
 )
+
+type modelConversationOwnerStore struct{ *fakeConversationStore }
+
+func (s modelConversationOwnerStore) ReadConversationOwner(ctx context.Context, id string, _ assistantcontext.SaveOwner) (PersonalAssistantConversationRecord, error) {
+	return s.Get(ctx, id)
+}
 
 func assistantModel(t *testing.T, h *HomeAssistantAskHandler, query string) (int, modelview.Selection) {
 	t.Helper()
@@ -65,6 +73,7 @@ func TestAssistantModel_UnavailableAndScopedReads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newConversationFixture(t)
+			f.handler.SetConversationStore(modelConversationOwnerStore{f.store})
 			f.context.State = tc.relationship
 			f.handler.SystemModel = stubSystemModel{provider: tc.provider, model: tc.model}
 			f.store.seed("mine", "hq-owned", "nova-profile-key")

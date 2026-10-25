@@ -2914,6 +2914,15 @@ const sessionManager = {
     if (!modalEl) return;
 
     this.editAgentModalInitialized = true;
+    const refreshConversationModel = () => {
+      if (document.hidden || !modalEl.classList.contains('show')) return;
+      void window.PersonalAssistantModel?.renderLinkedNote?.(
+        document.getElementById('editAgentConversationModel'),
+        this.editAgentSystemModelLinked
+      );
+    };
+    window.addEventListener('focus', refreshConversationModel);
+    document.addEventListener('visibilitychange', refreshConversationModel);
 
     modalEl.addEventListener('hidden.bs.modal', () => {
       this.resetEditAgentModal();
@@ -2997,6 +3006,7 @@ const sessionManager = {
 
     const agent = await response.json();
     this.populateEditAgentForm(agent);
+    return agent;
   },
 
   populateEditAgentForm(agent) {
@@ -3013,9 +3023,16 @@ const sessionManager = {
 
     this.updateEditAgentModelOptions(agent.model);
 
-    // The assistant's model is the System Model; say so before it is changed.
+    // The saved profile is not necessarily the conversation's Default model.
+    this.editAgentSystemModelLinked = Boolean(agent.system_model_linked);
     const systemModelHint = document.getElementById('editAgentSystemModelHint');
     if (systemModelHint) systemModelHint.hidden = !agent.system_model_linked;
+    const modelLabel = document.getElementById('editAgentModelLabel');
+    if (modelLabel) modelLabel.textContent = agent.system_model_linked ? 'Saved model' : 'Model';
+    void window.PersonalAssistantModel?.renderLinkedNote?.(
+      document.getElementById('editAgentConversationModel'),
+      this.editAgentSystemModelLinked
+    );
 
     const descriptionInput = document.getElementById('editAgentDescription');
     if (descriptionInput) {
@@ -3418,6 +3435,9 @@ const sessionManager = {
       }
 
       const data = await response.json();
+      const feedback = data.system_model
+        ? await window.PersonalAssistantModel?.saveFeedback?.(data.system_model)
+        : { message: 'Agent updated successfully.', type: 'success' };
       const updatedName = data.name || newName || this.editAgentOriginalName;
       const previousName = this.editAgentOriginalName;
       this.editAgentOriginalName = updatedName;
@@ -3430,27 +3450,29 @@ const sessionManager = {
       });
 
       this.agentModelCache.delete(previousName);
-      if (model) {
-        this.agentModelCache.set(updatedName, model);
+      // Reread the saved profile, but never replace it with the conversational
+      // default. A rejected mirror is a partial success, not a failed profile save.
+      let savedAgent;
+      try {
+        savedAgent = await this.loadEditAgentDetails(updatedName);
+      } catch (_) {
+        this.showEditAgentError(
+          'Agent saved, but its configuration could not be reloaded. Reopen the editor to verify it.'
+        );
+        void window.PersonalAssistantModel?.refresh?.();
+        return;
       }
-
+      if (savedAgent.model) this.agentModelCache.set(updatedName, savedAgent.model);
       this.updateCurrentAgent(updatedName);
       this.renderSessions();
-      const mirror = data.system_model;
-      if (mirror && mirror.mirrored) {
-        this.showEditAgentSuccess(
-          `Agent updated. Default model is now ${mirror.provider} / ${mirror.model}.`
+      void window.PersonalAssistantModel?.refresh?.();
+      if (!feedback || feedback.type !== 'success') {
+        this.showEditAgentError(
+          feedback?.message || 'Agent saved. Check Default model in Settings.'
         );
-        if (window.EventBus) {
-          EventBus.emit('systemModel:changed', { provider: mirror.provider, model: mirror.model });
-        }
-      } else if (mirror) {
-        this.showEditAgentSuccess(
-          `Agent updated, but ${mirror.reason || 'the Default model was left unchanged'}.`
-        );
-      } else {
-        this.showEditAgentSuccess('Agent updated successfully.');
+        return; // Keep partial-outcome feedback visible instead of closing it.
       }
+      this.showEditAgentSuccess(feedback.message);
 
       const modalEl = document.getElementById('editAgentModal');
       const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
@@ -3502,6 +3524,7 @@ const sessionManager = {
     if (errorEl) {
       errorEl.textContent = message;
       errorEl.classList.remove('d-none');
+      errorEl.scrollIntoView?.({ block: 'nearest' });
     }
     if (successEl) {
       successEl.classList.add('d-none');

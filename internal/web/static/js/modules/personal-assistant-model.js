@@ -42,6 +42,60 @@ export async function readModelSelection(context = {}, { signal } = {}) {
   return response.json();
 }
 
+const linkedNoteReads = new WeakMap();
+
+export async function refreshLinkedModelNote(
+  element,
+  linked,
+  { read = readDefaultSelection } = {}
+) {
+  if (!element) return;
+  const ticket = (linkedNoteReads.get(element) || 0) + 1;
+  linkedNoteReads.set(element, ticket);
+  element.hidden = !linked;
+  element.textContent = linked ? 'Conversation uses Default model: checking…' : '';
+  if (!linked) return;
+  let selection = null;
+  try {
+    selection = await read();
+  } catch (_) {
+    /* Unknown is not an old model. */
+  }
+  if (linkedNoteReads.get(element) !== ticket) return;
+  element.textContent = `Conversation uses Default model: ${modelDescription(selection)}.`;
+}
+
+function readDefaultSelection() {
+  return readModelSelection({}, { signal: AbortSignal.timeout(2500) });
+}
+
+export async function sharedModelSaveFeedback(
+  mirror,
+  { read = readDefaultSelection, emit = () => {} } = {}
+) {
+  if (!mirror) return { message: 'Agent saved successfully.', type: 'success' };
+  let selection = null;
+  try {
+    selection = await read();
+  } catch (_) {
+    /* The save and read are distinct outcomes. */
+  }
+  if (mirror.mirrored) emit(selection);
+  const current = selection
+    ? `Conversation uses Default model: ${modelDescription(selection)}.`
+    : 'The current conversational model could not be read. Check Default model in Settings.';
+  if (!mirror.mirrored) {
+    return {
+      message: `Agent saved, but the Default model update was not confirmed. ${mirror.reason || 'Check Settings before retrying.'} ${current}`,
+      type: 'error'
+    };
+  }
+  return {
+    message: `Agent saved. Default model update saved. ${current}`,
+    type: selection ? 'success' : 'error'
+  };
+}
+
 export function createModelController({ load = readModelSelection, render = () => {} } = {}) {
   let context = {};
   let generation = 0;
@@ -175,7 +229,16 @@ export function bindModelLifecycle(controller, { doc, win, context = currentCont
     },
     afterSend: () => controller.setBusy(false),
     refresh,
-    readDefault: () => readModelSelection(),
+    readDefault: readDefaultSelection,
+    renderLinkedNote: refreshLinkedModelNote,
+    saveFeedback: mirror =>
+      sharedModelSaveFeedback(mirror, {
+        emit: selection =>
+          win.EventBus?.emit?.('systemModel:changed', {
+            provider: selection?.provider || '',
+            model: selection?.model || ''
+          })
+      }),
     describe: modelDescription
   };
 }

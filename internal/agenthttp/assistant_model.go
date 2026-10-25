@@ -1,10 +1,12 @@
 package agenthttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/modelview"
 )
@@ -17,7 +19,19 @@ func (h *HomeAssistantAskHandler) ModelHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	view := modelview.Selection{Recipient: "personal", Source: "default", State: "unknown", SettingsHref: "/settings#system-model"}
-	work, err := h.resolvePersonalAssistantContext(r.Context())
+	// Production supplies a relationship-only reader; avoid profile, memory and
+	// transcript reads for a model label. Legacy adapters retain their reader.
+	var work *PersonalAssistantWorkContext
+	user, err := h.currentAssistantUser(r.Context())
+	if err == nil {
+		if provider, ok := h.PersonalAssistantContext.(interface {
+			ResolvePersonalAssistantRelationship(context.Context, string) (*PersonalAssistantWorkContext, error)
+		}); ok {
+			work, err = provider.ResolvePersonalAssistantRelationship(r.Context(), user)
+		} else {
+			work, err = h.resolvePersonalAssistantContext(r.Context())
+		}
+	}
 	if err != nil {
 		orihttp.WriteJSON(w, view)
 		return
@@ -34,8 +48,14 @@ func (h *HomeAssistantAskHandler) ModelHandler(w http.ResponseWriter, r *http.Re
 			orihttp.BadRequest(w, "Conversation context unavailable")
 			return
 		}
-		record, err := h.Conversations.Get(r.Context(), id)
-		if err != nil || !scope.owns(record) {
+		reader, ok := h.Conversations.(PersonalAssistantConversationOwnerReader)
+		if !ok {
+			orihttp.ServiceUnavailable(w, "Conversation context unavailable")
+			return
+		}
+		owner := assistantcontext.SaveOwner{UserID: user, WorkspaceID: scope.workspaceID, AgentName: scope.agentName, StateVersion: work.StateVersion}
+		record, err := reader.ReadConversationOwner(r.Context(), id, owner)
+		if err != nil || record.ID != id || !scope.owns(record) {
 			orihttp.NotFound(w, "Conversation context unavailable")
 			return
 		}
