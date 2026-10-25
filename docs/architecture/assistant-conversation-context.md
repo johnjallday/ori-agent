@@ -3,7 +3,10 @@
 Canonical Messages remain the transcript. Migration 079 adds a **disposable,
 Session-owned** recap checkpoint, not another conversation store, Personal HQ
 memory, a saved Ticket, current source evidence, or permission. The existing
-conversation owner and configured **system model** remain authoritative.
+conversation owner and configured **Default model** remain authoritative.
+The visible setting is Default model; `/settings#system-model`,
+`/api/settings/system-model`, `system_model*` fields, and the
+`systemModel:changed` browser event retain their existing names for compatibility.
 
 Version 078 remains the delivered folder-selection capacity migration. Version
 079 also reapplies that idempotent migration so pre-merge feature databases

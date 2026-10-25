@@ -1047,7 +1047,7 @@
   function modelSourceLabel(source) {
     switch (text(source)) {
       case 'system':
-        return 'System model';
+        return 'Default model';
       case 'template':
         return 'Template model';
       case 'existing':
@@ -1908,7 +1908,7 @@
         : planForSummary
           ? planForSummary.systemModelConfigured
             ? `Agents without their own model use ${planForSummary.systemProvider} / ${planForSummary.systemModel}.`
-            : 'Agents without their own model use the app default because no system model is configured.'
+            : 'Agents without their own model use the built-in agent fallback because no Default model is configured.'
           : '',
       isModifiedFromBlueprint: assistantProgram
         ? !assistantProgram.existingHired &&

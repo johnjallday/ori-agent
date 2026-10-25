@@ -305,7 +305,7 @@ Classify a home page assistant prompt and find the best matching existing agent.
 Answer an app-introspection or app-navigation prompt inline. The server builds a
 cross-workspace **home snapshot** (the agent roster, workspaces, windowed task
 activity, recent sessions, open Action Center opportunities, usage), runs the
-system model with read-only `home_*` tools, and returns a written answer plus
+Default model with read-only `home_*` tools, and returns a written answer plus
 grounded next-step actions. Used by the home page "Ask Ori" panel when
 `/api/home-assistant/route` classifies the prompt as `app_introspection` or
 `app_navigation` (route mode `home_inline`).
@@ -1661,7 +1661,7 @@ Bodies are capped at 256 KiB and must be one JSON object with only the fields na
 { "available": false, "reason": "no_model" }
 ```
 
-`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the system model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. When available, `folders` says whether the pane may offer Add folder (the composer's folder chooser is wired for builds), and `links` whether it may offer Add link (the link observer is wired). The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
+`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the Default model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. When available, `folders` says whether the pane may offer Add folder (the composer's folder chooser is wired for builds), and `links` whether it may offer Add link (the link observer is wired). The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
 
 ### Create or Resume
 

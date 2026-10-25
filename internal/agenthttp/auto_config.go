@@ -99,7 +99,7 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 		if len(availableProviders) == 0 {
 			response.Message = "No LLM provider configured. Please set up an API key (OpenAI, Anthropic, or Gemini) or install Ollama."
 		} else if !systemModelConfigured {
-			response.Message = "System model not configured. Please configure a system model in Settings to use auto-config."
+			response.Message = "Default model not configured. Please configure a Default model in Settings to use auto-config."
 		} else {
 			response.Message = availabilityMessage
 		}
@@ -110,13 +110,13 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 
 func (h *AutoConfigHandler) checkSystemModelAvailability(systemProvider, systemModel string) (bool, string) {
 	if strings.TrimSpace(systemProvider) == "" || strings.TrimSpace(systemModel) == "" {
-		return false, "System model not configured. Please configure a system model in Settings to use auto-config."
+		return false, "Default model not configured. Please configure a Default model in Settings to use auto-config."
 	}
 
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		return false, fmt.Sprintf(
-			"Configured system model %q for provider %q is not available. Update Settings or configure that provider before using auto-config.",
+			"Configured Default model %q for provider %q is not available. Update Settings or configure that provider before using auto-config.",
 			systemModel,
 			systemProvider,
 		)
@@ -132,13 +132,13 @@ func (h *AutoConfigHandler) checkSystemModelAvailability(systemProvider, systemM
 func unavailableLocalModelMessage(providerName string) string {
 	switch strings.ToLower(strings.TrimSpace(providerName)) {
 	case "ollama":
-		return "Configured Ollama system model is unavailable. Make sure the Ollama server is running and the selected model is installed."
+		return "Configured Ollama Default model is unavailable. Make sure the Ollama server is running and the selected model is installed."
 	case "lmstudio":
-		return "Configured LM Studio system model is unavailable. Make sure the LM Studio server is running and the selected model is loaded."
+		return "Configured LM Studio Default model is unavailable. Make sure the LM Studio server is running and the selected model is loaded."
 	case "mlx_lm":
-		return "Configured MLX-LM system model is unavailable. Make sure mlx_lm.server is running and serving the selected model."
+		return "Configured MLX-LM Default model is unavailable. Make sure mlx_lm.server is running and serving the selected model."
 	default:
-		return "Configured local system model is unavailable. Make sure the local model server is running and the selected model is available."
+		return "Configured local Default model is unavailable. Make sure the local model server is running and the selected model is available."
 	}
 }
 
@@ -166,10 +166,10 @@ func (h *AutoConfigHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, llm.ErrSystemModelNotConfigured) {
 			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-				"System model not configured. Please configure a system model in Settings to use auto-config.", err)
+				"Default model not configured. Please configure a Default model in Settings to use auto-config.", nil)
 		} else {
 			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-				"System model provider not available: "+err.Error(), err)
+				"Default model provider not available. Check the provider in Settings to use auto-config.", nil)
 		}
 		return
 	}

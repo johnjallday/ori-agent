@@ -897,7 +897,7 @@ export class OnboardingManager {
         body: JSON.stringify({ provider, model, reasoning_effort })
       });
 
-      if (!response.ok) throw new Error('Failed to save system model');
+      if (!response.ok) throw new Error('Failed to save Default model');
 
       const successAlert = document.getElementById('onboardingSystemModelSuccess');
       if (successAlert) {

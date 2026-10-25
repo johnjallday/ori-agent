@@ -999,7 +999,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if !executionAgent.isResolved() {
-		responseText := "❌ **Error**: Assistant is unavailable because no execution agent is configured. Configure a System Model so Assistant can be created, or use a session pinned to a specific agent."
+		responseText := "❌ **Error**: Assistant is unavailable because no execution agent is configured. Configure a Default model so Assistant can be created, or use a session pinned to a specific agent."
 		reason := "no execution agent resolved"
 		if strings.TrimSpace(normalizedRouteContext.WorkspaceID) != "" {
 			responseText = "❌ **Error**: This workspace has no runnable entry agent. Add or repair the workspace's entry agent, then try again."

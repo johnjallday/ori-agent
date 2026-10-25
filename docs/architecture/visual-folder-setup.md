@@ -86,8 +86,8 @@ workspace rows, not the group's agent rows.
 ## Applicable project model and explicit return
 
 The model row concerns the project's actual agent, not the conversational model.
-Resolution follows saved agent, resolved roster, then the new-agent system model.
-A missing bound-agent configuration does not fall back to the system model;
+Resolution follows saved agent, resolved roster, then the Default model for new agents.
+A missing bound-agent configuration does not fall back to the Default model;
 a missing/unreadable blueprint is **not checked**, not proof of missing
 configuration. **Configured** describes local settings, not connectivity or a
 successful model execution. Applicable model facts are reread independently of

@@ -1264,6 +1264,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const statusIndicator = document.getElementById('systemModelStatusIndicator');
   const statusText = document.getElementById('systemModelStatusText');
   const statusDetails = document.getElementById('systemModelStatusDetails');
+  let modelFormDirty = false;
+  let modelReadGeneration = 0;
+  let providerReadGeneration = 0;
+  let modelWritePending = false;
 
   // Available providers cache
   let availableProviders = [];
@@ -1289,7 +1293,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
         </svg>
       `;
-      statusText.textContent = 'System Model Configured';
+      statusText.textContent = 'Default model configured';
       if (provider === 'codex' && reasoningEffort) {
         statusDetails.textContent = `Using ${provider}/${model} (reasoning: ${reasoningEffort})`;
       } else {
@@ -1301,8 +1305,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
         </svg>
       `;
-      statusText.textContent = 'System Model Not Configured';
-      statusDetails.textContent = 'Auto-config and other AI features require a system model.';
+      statusText.textContent = 'Default model not configured';
+      statusDetails.textContent =
+        "Choose a Default model for your Assistant and Ori's AI features.";
     }
   }
 
@@ -1404,13 +1409,15 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   // Load current system model configuration
-  async function loadSystemModel() {
+  async function loadSystemModel(preserveDraft = false) {
+    const generation = ++modelReadGeneration;
     try {
-      const response = await fetch('/api/settings/system-model');
+      const response = await fetch('/api/settings/system-model', { cache: 'no-store' });
       if (!response.ok) {
-        throw new Error('Failed to fetch system model');
+        throw new Error('Failed to fetch Default model');
       }
       const data = await response.json();
+      if (generation !== modelReadGeneration) return null;
 
       updateStatusIndicator(
         data.configured,
@@ -1419,25 +1426,47 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         data.reasoning_effort || ''
       );
 
+      if (preserveDraft && modelFormDirty) return data;
       if (data.configured && providerSelect && modelSelect) {
         providerSelect.value = data.provider;
         updateReasoningVisibility(data.provider, data.reasoning_effort || '');
         await loadModelsForProvider(data.provider);
+        if (generation !== modelReadGeneration) return data;
+        if (
+          data.model &&
+          !Array.from(modelSelect.options).some(option => option.value === data.model)
+        ) {
+          const current = document.createElement('option');
+          current.value = data.model;
+          current.textContent = `${data.model} (configured)`;
+          modelSelect.appendChild(current);
+        }
         modelSelect.value = data.model;
         updateSaveButtonState();
       } else {
+        if (providerSelect) providerSelect.value = '';
+        if (modelSelect) {
+          modelSelect.innerHTML = '<option value="">Select provider first...</option>';
+          modelSelect.disabled = true;
+        }
         updateReasoningVisibility('');
+        updateSaveButtonState();
       }
+      return data;
     } catch (error) {
       console.error('Error loading system model:', error);
-      updateStatusIndicator(false);
-      updateReasoningVisibility('');
+      if (generation === modelReadGeneration && statusText && statusDetails) {
+        statusText.textContent = 'Default model could not be read';
+        statusDetails.textContent = 'Check the connection and reload. Your selections are kept.';
+      }
+      return null;
     }
   }
 
   // Load models for a specific provider
   async function loadModelsForProvider(providerName) {
     if (!modelSelect) return;
+    const generation = ++providerReadGeneration;
 
     modelSelect.innerHTML = '<option value="">Loading models...</option>';
     modelSelect.disabled = true;
@@ -1455,6 +1484,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         throw new Error('Failed to fetch models');
       }
       const data = await response.json();
+      if (generation !== providerReadGeneration || providerSelect.value !== providerName) return;
 
       if (!data.available) {
         modelSelect.innerHTML = '<option value="">Provider not available</option>';
@@ -1473,6 +1503,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       modelSelect.disabled = false;
     } catch (error) {
       console.error('Error loading models:', error);
+      if (generation !== providerReadGeneration || providerSelect.value !== providerName) return;
       modelSelect.innerHTML = '<option value="">Error loading models</option>';
     }
   }
@@ -1483,6 +1514,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     const hasProvider = providerSelect.value !== '';
     const hasModel = modelSelect.value !== '';
     saveBtn.disabled = !(hasProvider && hasModel);
+  }
+
+  for (const control of [providerSelect, modelSelect, reasoningSelect]) {
+    control?.addEventListener('change', () => {
+      modelFormDirty = true;
+      modelReadGeneration++;
+    });
   }
 
   // Provider selection change
@@ -1509,6 +1547,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
+    modelWritePending = true;
+    modelReadGeneration++;
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
 
@@ -1521,7 +1561,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to save system model');
+        throw new Error(error.error || 'Failed to save Default model');
       }
 
       const data = await response.json();
@@ -1532,22 +1572,33 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         data.reasoning_effort || ''
       );
       updateReasoningVisibility(data.provider, data.reasoning_effort || '');
-      showSystemModelAlert('System model saved successfully!', 'success');
+      modelFormDirty = false;
+      const saved = await loadSystemModel();
+      showSystemModelAlert(
+        saved
+          ? 'Default model saved successfully!'
+          : 'Default model saved, but its current value could not be reloaded.',
+        saved ? 'success' : 'warning'
+      );
 
-      // Notify navbar to update system model display
+      // Notify consumers with the authoritative result, not the form draft.
       if (typeof EventBus !== 'undefined') {
-        EventBus.emit('systemModel:changed', { provider, model });
+        EventBus.emit('systemModel:changed', {
+          provider: saved?.provider ?? data.provider,
+          model: saved?.model ?? data.model
+        });
       }
     } catch (error) {
       console.error('Error saving system model:', error);
-      showSystemModelAlert('Error saving system model: ' + error.message, 'danger');
+      showSystemModelAlert('Error saving Default model: ' + error.message, 'danger');
     } finally {
+      modelWritePending = false;
       saveBtn.disabled = false;
       saveBtn.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
           <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
         </svg>
-        Save System Model
+        Save Default model
       `;
       updateSaveButtonState();
     }
@@ -1557,12 +1608,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   clearBtn?.addEventListener('click', async function () {
     if (
       !confirm(
-        'Are you sure you want to clear the system model configuration? Auto-config and other AI features will not work without it.'
+        "Clear Default model? Your Assistant's conversational replies and Ori's AI features need it. Individual agents keep their own models."
       )
     ) {
       return;
     }
 
+    modelWritePending = true;
+    modelReadGeneration++;
     clearBtn.disabled = true;
 
     try {
@@ -1574,7 +1627,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to clear system model');
+        throw new Error(error.error || 'Failed to clear Default model');
       }
 
       // Reset dropdowns
@@ -1590,19 +1643,36 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       updateStatusIndicator(false);
       updateSaveButtonState();
-      showSystemModelAlert('System model cleared.', 'info');
+      modelFormDirty = false;
+      const saved = await loadSystemModel();
+      showSystemModelAlert(
+        saved
+          ? 'Default model cleared.'
+          : 'Default model cleared, but its current value could not be reloaded.',
+        saved ? 'info' : 'warning'
+      );
 
-      // Notify navbar to update system model display
+      // Notify consumers after readback, including clears in another tab.
       if (typeof EventBus !== 'undefined') {
-        EventBus.emit('systemModel:changed', { provider: '', model: '' });
+        EventBus.emit('systemModel:changed', {
+          provider: saved?.provider || '',
+          model: saved?.model || ''
+        });
       }
     } catch (error) {
       console.error('Error clearing system model:', error);
-      showSystemModelAlert('Error clearing system model: ' + error.message, 'danger');
+      showSystemModelAlert('Error clearing Default model: ' + error.message, 'danger');
     } finally {
+      modelWritePending = false;
       clearBtn.disabled = false;
     }
   });
+
+  const refreshModelOnReturn = () => {
+    if (providerSelect && !document.hidden && !modelWritePending) void loadSystemModel(true);
+  };
+  window.addEventListener('focus', refreshModelOnReturn);
+  document.addEventListener('visibilitychange', refreshModelOnReturn);
 
   // Initialize on page load
   if (document.getElementById('systemModelProvider')) {

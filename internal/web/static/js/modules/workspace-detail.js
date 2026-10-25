@@ -537,6 +537,16 @@ export class WorkspaceDetailPage {
         360
       );
     }
+    // The model indicator links to the effective workspace definition, never
+    // to a possibly different global namesake. Reuse the explicit-save editor.
+    const modelEditorName = new URLSearchParams(window.location.search).get('editAgentModel');
+    if (modelEditorName && !this.suppressSetupPrompts) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('editAgentModel');
+      window.history.replaceState({}, '', url);
+      await this.openAgentModelModal(encodeURIComponent(modelEditorName));
+      return;
+    }
     // Secondary workspace surfaces load shared data but must not launch setup
     // dialogs or redirect into agent creation on first paint.
     if (this.suppressSetupPrompts) return;

@@ -87,7 +87,7 @@ test('candidate handoff is static manual navigation, never a package/target disp
 test('capability reports actual system model, no-tool and optional search honestly', () => {
   assert.match(
     researchCapabilityView({ provider: 'codex', model: 'system-model', broker_tools: true }),
-    /System conversation model: codex \/ system-model.*exact review.*disabled\/unconfigured/
+    /Conversation model: codex \/ system-model.*exact review.*disabled\/unconfigured/
   );
   assert.match(
     researchCapabilityView({

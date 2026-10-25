@@ -873,7 +873,7 @@ over them.
   Getting Started clears the ask and the missions, never the connection.
 - **Consent first.** Before anything is read a card names the folder, says it is
   read-only, what is read, what leaves the machine (short excerpts to the named
-  system model, or "counts only" with none), and what Ori keeps (the path and the
+  Default model, or "counts only" with none), and what Ori keeps (the path and the
   open items, not the notes).
 - **One headline, one action.** The look reads within fixed bounds, extracts open
   items, decisions, stale notes and people without a model, and leads with one
@@ -1185,7 +1185,7 @@ A turn's prompt holds the system prompt, a window of the current conversation,
 the current request, and the existing eligible personal context (working
 agreement, Profile, reviewed HQ memory). Recent selection is at most 40 text rows with bounded message projections.
 Recent history plus eligible recap and same-thread older excerpts share one
-24,000-Unicode-rune answer-history allowance. The configured system model may
+24,000-Unicode-rune answer-history allowance. The configured Default model may
 select a compact, host-validated recap of complete exact role-grounded quotes
 through a separate tool-free bounded call. It can fail without blocking an
 ordinary bounded reply. Only a bounded older range is searched; this is not
@@ -1213,7 +1213,7 @@ schedule, send, or run anything.
 
 ### Model
 
-A conversation uses the configured system model through the existing provider
+A conversation uses the configured Default model through the existing provider
 factory — the same model the relationship's `model` availability reports. When
 none resolves, the turn returns the existing "choose a model" state, stores
 nothing, and keeps the user's text. Ori does not switch to another provider or

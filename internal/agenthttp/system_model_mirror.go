@@ -73,12 +73,12 @@ func (h *Handler) mirrorSystemModel(record *agent.Agent) *systemModelMirror {
 	model := strings.TrimSpace(record.Settings.Model)
 	out := &systemModelMirror{Provider: provider, Model: model}
 	if provider == "" || model == "" {
-		out.Reason = "the agent has no provider or model, so the System Model was left unchanged"
+		out.Reason = "the agent has no provider or model, so the Default model was left unchanged"
 		return out
 	}
 	if h.providers != nil {
 		if _, err := h.providers.GetProvider(provider); err != nil {
-			out.Reason = fmt.Sprintf("provider %q is not available on this server, so the System Model was left unchanged", provider)
+			out.Reason = fmt.Sprintf("provider %q is not available on this server, so the Default model was left unchanged", provider)
 			return out
 		}
 	}

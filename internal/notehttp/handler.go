@@ -116,7 +116,7 @@ func (h *Handler) GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 		if err != nil {
 			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-				"No LLM provider available. Please configure a system model in Settings.", err)
+				"No model available for note generation. Please configure a Default model in Settings.", nil)
 			return
 		}
 		provider = result.Provider
@@ -214,7 +214,7 @@ func (h *Handler) AssistHandler(w http.ResponseWriter, r *http.Request) {
 	provider, model, reasoningEffort, maxTokens, err := h.resolveProvider(req.AgentID)
 	if err != nil {
 		orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-			"No LLM provider available. Please configure a system model in Settings.", err)
+			"No model available for note assistance. Please configure a Default model in Settings.", nil)
 		return
 	}
 

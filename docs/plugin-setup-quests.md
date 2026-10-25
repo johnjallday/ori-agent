@@ -299,7 +299,7 @@ The Email Ops steps are:
    credential with read and search only, through the same linker as the
    workspace's own **Connect email** action.
 4. **Email Ops is ready** offers the workspace, and inbox triage only when a
-   system model can run. Triage is always a separate task the user starts.
+   Default model can run. Triage is always a separate task the user starts.
 
 Entry points all open the same saved progress:
 

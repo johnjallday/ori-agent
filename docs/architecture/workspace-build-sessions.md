@@ -66,7 +66,7 @@ Go 1.22's ServeMux never sees two conflicting patterns.
 Build mode is available when the assistant relationship is `active` or `paused` and a
 model resolves. Resolution: the assistant's global agent profile (its provider and
 model; an empty provider is inferred only from `claude-`/`gemini-`/local model names,
-and `anthropic` is read as `claude`), then the system model. The same resolver is used
+and `anthropic` is read as `claude`), then the Default model. The same resolver is used
 for every turn.
 
 Each turn is one model call, bounded at 60 s, temperature 0.2:
@@ -393,5 +393,5 @@ counts, and field or section names, never message text, draft values, or folder 
   `scripts/narrated-folder-demo.sh` (its header has the commands).
 - Live demos: `scripts/demo-build-assistant.mjs` drives the real pane against a demo
   server with a real model; `scripts/smoke.sh build-session <url> seed` hires an assistant
-  and seeds two saved agents and a system model (by default the Codex CLI with
+  and seeds two saved agents and a Default model (by default the Codex CLI with
   `gpt-5.6-luna`, which needs the demo server started with `CODEX_HOME="$HOME/.codex"`).

@@ -538,13 +538,13 @@ async function refreshSystemModelDisplay() {
       }
 
       if (indicatorEl) {
-        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+        indicatorEl.title = `Default model: ${data.model} (${data.provider}) - Click to configure`;
       }
     } else {
       modelNameEl.textContent = 'Not configured';
       providerEl.style.display = 'none';
       if (indicatorEl) {
-        indicatorEl.title = 'System Model not configured - Click to set up';
+        indicatorEl.title = 'Default model not configured - Click to set up';
       }
     }
 
@@ -1029,7 +1029,7 @@ async function fetchChatSpecialistCreationAvailability() {
 
 function buildChatSpecialistAvailabilityMessage(availability) {
   if (!availability || availability.systemModelConfigured !== true) {
-    return 'A System Model must be configured before I can create this specialist. Open Settings to configure it.';
+    return 'A Default model must be configured before I can create this specialist. Open Settings to configure it.';
   }
   return 'No suitable LLM provider is available right now. Open Settings to configure a provider or model before creating this specialist.';
 }

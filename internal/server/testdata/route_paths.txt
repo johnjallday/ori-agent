@@ -14,6 +14,7 @@
 /api/agents/x/reveal
 /api/api-key
 /api/chat
+/api/chat/model
 /api/chat/send
 /api/device/capabilities
 /api/device/detect-hardware
@@ -32,6 +33,7 @@
 /api/folder-picker/select-path
 /api/folders
 /api/home-assistant/ask
+/api/home-assistant/model
 /api/home-assistant/conversations
 /api/home-assistant/conversations/x
 /api/home-assistant/drafts/review

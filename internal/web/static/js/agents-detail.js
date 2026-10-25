@@ -126,13 +126,13 @@ async function refreshSystemModelDisplay() {
       }
 
       if (indicatorEl) {
-        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+        indicatorEl.title = `Default model: ${data.model} (${data.provider}) - Click to configure`;
       }
     } else {
       modelNameEl.textContent = 'Not configured';
       providerEl.style.display = 'none';
       if (indicatorEl) {
-        indicatorEl.title = 'System Model not configured - Click to set up';
+        indicatorEl.title = 'Default model not configured - Click to set up';
       }
     }
   } catch (error) {
@@ -622,6 +622,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
   }
 
+  const refreshOnReturn = () => {
+    if (document.hidden) return;
+    if (!isEditingConfig && !isEditingPrompt && !document.querySelector('.modal.show')) {
+      void refreshAgentDetails();
+    } else {
+      refreshAgentConversationModel();
+    }
+  };
+  window.addEventListener('focus', refreshOnReturn);
+  document.addEventListener('visibilitychange', refreshOnReturn);
+  window.EventBus?.on?.('systemModel:changed', refreshAgentConversationModel);
   focusRequestedSection();
 });
 
@@ -633,6 +644,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // This page is one scrolling document, not a tabbed one, so a "tab" resolves to
 // a section to scroll to. Overview still lands at the top.
 const TAB_SECTIONS = {
+  configuration: 'agentConfigurationSection',
   prompt: 'promptSection',
   toolbox: 'capabilitiesSection',
   workspaces: 'agentWorkspacesSection'
@@ -707,6 +719,7 @@ async function refreshAgentDetails() {
   try {
     currentAgent = await fetchAgentDetail();
     renderAgentDetails();
+    return true;
   } catch (error) {
     console.error('Error refreshing agent details:', error);
     if (isAgentNotFoundError(error)) {
@@ -739,9 +752,15 @@ function renderAgentDetails() {
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
-  // The assistant's model is the System Model; say so where the model is shown.
+  // Keep the saved profile on display and in the form. The conversation's
+  // independently resolved default is a read-only note, never form input.
   const systemModelNote = document.getElementById('agentModelSystemNote');
   if (systemModelNote) systemModelNote.hidden = !currentAgent.system_model_linked;
+  for (const id of ['agentModelLabel', 'editModelLabel']) {
+    const label = document.getElementById(id);
+    if (label) label.textContent = currentAgent.system_model_linked ? 'Saved model' : 'Model';
+  }
+  refreshAgentConversationModel();
 
   const providerEl = document.getElementById('agentProvider');
   const provider = currentAgent.provider || currentAgent.llm_provider || '';
@@ -1451,8 +1470,12 @@ async function saveConfigChanges() {
       .clone()
       .json()
       .catch(() => ({}));
-    await refreshAgentDetails();
-    const status = systemModelSaveStatus(saved && saved.system_model);
+    const profileReloaded = await refreshAgentDetails();
+    const status = await systemModelSaveStatus(saved && saved.system_model);
+    if (!profileReloaded) {
+      status.message += ' The saved profile could not be reloaded. Reopen the editor to verify it.';
+      status.type = 'error';
+    }
     setConfigStatus(status.message, status.type);
     setConfigEditMode(false);
     if (carried) showToast(carried, 'success');
@@ -1481,22 +1504,29 @@ function setConfigSavingState(isSaving) {
   }
 }
 
-// The assistant's model is the System Model (system_model_linked): after a
-// save, say what its conversations now run on, or why Settings were left as
-// they were.
-function systemModelSaveStatus(mirror) {
-  if (!mirror) return { message: 'Configuration updated successfully.', type: 'success' };
-  if (mirror.mirrored) {
-    refreshSystemModelDisplay();
-    return {
-      message: `Configuration updated. System Model is now ${mirror.provider} / ${mirror.model}.`,
-      type: 'success'
-    };
+function refreshAgentConversationModel() {
+  const api = window.PersonalAssistantModel;
+  if (!api) return;
+  const linked = Boolean(currentAgent?.system_model_linked);
+  const pending = linked ? api.readDefault() : Promise.resolve(null);
+  // Handle failure in renderLinkedNote; both notes share one authoritative read.
+  for (const id of ['agentConversationModel', 'editConversationModel']) {
+    void api.renderLinkedNote(document.getElementById(id), linked, { read: () => pending });
   }
-  return {
-    message: `Configuration updated, but ${mirror.reason || 'the System Model was left unchanged'}.`,
-    type: 'error'
-  };
+}
+
+async function systemModelSaveStatus(mirror) {
+  if (!mirror) return { message: 'Configuration updated successfully.', type: 'success' };
+  const status = await window.PersonalAssistantModel?.saveFeedback?.(mirror);
+  refreshSystemModelDisplay();
+  refreshAgentConversationModel();
+  void window.PersonalAssistantModel?.refresh?.();
+  return (
+    status || {
+      message: 'Agent saved. Check Default model in Settings to verify the conversational value.',
+      type: 'error'
+    }
+  );
 }
 
 function setConfigStatus(message, type = 'info') {

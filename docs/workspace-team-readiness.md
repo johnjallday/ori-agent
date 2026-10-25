@@ -198,7 +198,7 @@ hand, are choices and no longer steps.
   same blueprint, and replaces a recorded agent that no longer exists. A Home
   that shares another blueprint's agent keeps that consent, and this project
   gets its own agent.
-- **What blocks.** A role that needs a new agent while no system model is set
+- **What blocks.** A role that needs a new agent while no Default model is set
   up is returned with `blocked`, and Team shows one blocker, "<Role>: <reason>."
   The server's `team_readiness` conflict carries the same sentence. Assigning a
   saved agent needs no model and clears it. A Home role whose stored holder

@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,33 +10,42 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // mirrorSystemModelWriter records what an agent edit writes to Settings →
 // System Model.
 type mirrorSystemModelWriter struct {
-	provider, model, effort string
-	saves                   int
+	provider, model, effort      string
+	saves                        int
+	modelErr, effortErr, saveErr error
 }
 
 func (w *mirrorSystemModelWriter) GetSystemModel() (string, string) { return w.provider, w.model }
 
 func (w *mirrorSystemModelWriter) SetSystemModel(provider, model string) error {
+	if w.modelErr != nil {
+		return w.modelErr
+	}
 	w.provider, w.model = provider, model
 	return nil
 }
 
 func (w *mirrorSystemModelWriter) SetSystemReasoningEffort(effort string) error {
+	if w.effortErr != nil {
+		return w.effortErr
+	}
 	w.effort = effort
 	return nil
 }
 
 func (w *mirrorSystemModelWriter) Save() error {
 	w.saves++
-	return nil
+	return w.saveErr
 }
 
 type mirrorProviders map[string]bool
@@ -161,6 +171,59 @@ func TestSystemModelMirror_UnavailableProviderIsReportedNotWritten(t *testing.T)
 	reason, _ := mirror["reason"].(string)
 	if mirror["mirrored"] != false || !strings.Contains(reason, `"ollama"`) {
 		t.Fatalf("system_model in response = %v", body["system_model"])
+	}
+}
+
+func TestSystemModelMirror_PartialFailuresKeepProfileSaveDistinct(t *testing.T) {
+	for _, stage := range []string{"model", "reasoning", "save"} {
+		t.Run(stage, func(t *testing.T) {
+			h, writer := mirrorHandler(t)
+			failure := errors.New("controlled " + stage + " failure")
+			switch stage {
+			case "model":
+				writer.modelErr = failure
+			case "reasoning":
+				writer.effortErr = failure
+			case "save":
+				writer.saveErr = failure
+			}
+			rr, body := patchAgentJSON(t, h, "Atlas", `{"model":"profile-alias","llm_provider":"claude"}`)
+			if rr.Code != http.StatusOK {
+				t.Fatal(rr.Body.String())
+			}
+			profile, _ := h.State.GetAgent("Atlas")
+			if profile.Settings.Model != "profile-alias" {
+				t.Fatal("profile save was lost")
+			}
+			mirror := body["system_model"].(map[string]any)
+			if mirror["mirrored"] != false || mirror["reason"] != failure.Error() {
+				t.Fatalf("partial result: %v", mirror)
+			}
+			// No rollback is claimed: the existing writer can have changed memory
+			// before persistence failed. The UI must reread, not say 'unchanged'.
+			want := "profile-alias"
+			if stage == "model" {
+				want = "gpt-6-astra"
+			}
+			if writer.model != want {
+				t.Fatalf("effective readback = %q, want %q", writer.model, want)
+			}
+		})
+	}
+}
+
+type rejectedProfileStore struct{ store.Store }
+
+func (rejectedProfileStore) SetAgent(string, *agent.Agent) error {
+	return errors.New("controlled profile write failure")
+}
+
+func TestSystemModelMirror_ProfileSaveFailureNeverMirrors(t *testing.T) {
+	h, writer := mirrorHandler(t)
+	h.State = rejectedProfileStore{h.State}
+	rr, body := patchAgentJSON(t, h, "Atlas", `{"model":"profile-alias","llm_provider":"claude"}`)
+	if rr.Code == http.StatusOK || writer.saves != 0 || writer.model != "gpt-6-astra" || body["system_model"] != nil {
+		t.Fatalf("failed profile save touched default: status=%d body=%v writer=%+v", rr.Code, body, writer)
 	}
 }
 

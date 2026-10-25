@@ -226,7 +226,7 @@ var guideTopics = []GuideTopic{
 		Key:   "model-setup",
 		Label: "Model setup",
 		Explanation: "Ori needs a model provider and API key before agents can run. Settings is where you " +
-			"choose the provider, add the key, and pick the system model. Help and fixed walkthroughs work without a model.",
+			"choose the provider, add the key, and pick the Default model. Help and fixed walkthroughs work without a model.",
 		NavKey: "settings",
 		Setup:  SetupOpenModelSettings,
 		Aliases: []string{

@@ -469,7 +469,7 @@ func TestConversation_NoSystemModelIsAClearStateNotAnotherProvider(t *testing.T)
 	resp := handler.Ask(context.Background(), HomeAssistantAskRequest{
 		Prompt: "Write a toast", Intent: homeAssistantConversationIntent.Key, Conversation: &HomeAssistantConversationRef{},
 	})
-	if !resp.ModelUnavailable || !strings.Contains(resp.Response, "needs a system model") || len(store.sessions) != 0 {
+	if !resp.ModelUnavailable || !strings.Contains(resp.Response, "needs a Default model") || len(store.sessions) != 0 {
 		t.Fatalf("no-model turn: %+v sessions=%d", resp, len(store.sessions))
 	}
 	if len(resp.Actions) != 1 || resp.Actions[0].Href != "/settings" {

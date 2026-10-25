@@ -90,7 +90,7 @@ at most 10, with the newest notes' items standing in when none apply — and
 writes the headline.
 
 The rules-only headline is "{N} open items across {M} notes, {K} with dates."
-When a system model is set, the headline is asked of it through the same path
+When a Default model is set, the headline is asked of it through the same path
 as the Daily Brief and email triage, from the extracted signals only: counts,
 the top 15 items, open decisions, stale notes, people and active notes. Every
 string is folded to one line with angle brackets removed, and the whole block

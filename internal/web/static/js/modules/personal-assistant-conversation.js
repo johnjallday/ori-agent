@@ -80,7 +80,7 @@ const UNANSWERED_BECAUSE = {
   provider_overloaded: 'model at capacity',
   model_timeout: 'the model timed out',
   request_cancelled: 'the request was cancelled',
-  model_not_configured: 'no system model is set',
+  model_not_configured: 'no Default model is set',
   invalid_hire_proposal: 'its hire proposal could not be used',
   context_changed: 'the conversation changed'
 };

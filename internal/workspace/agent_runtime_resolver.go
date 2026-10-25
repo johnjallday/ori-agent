@@ -128,7 +128,10 @@ func (r *AgentRuntimeResolver) ResolveAgentForWorkspace(agentName, workspaceID, 
 	return r.resolveAgentRuntime(agentName, workspaceID, nodeID)
 }
 
-func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeID string) (*ResolvedAgentRuntime, error) {
+// ResolveAgentDefinition selects the effective saved definition without resolving
+// skills, materializing MCP bindings, registering tools, or changing any store.
+// Model inspection and runtime execution share this snapshot-first selection.
+func (r *AgentRuntimeResolver) ResolveAgentDefinition(agentName, workspaceID string) (*ResolvedAgentRuntime, error) {
 	if r == nil || r.agentStore == nil {
 		return nil, fmt.Errorf("agent runtime resolver is not configured")
 	}
@@ -174,6 +177,14 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		MCPServers:        nil,
 	}
 
+	return resolved, nil
+}
+
+func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeID string) (*ResolvedAgentRuntime, error) {
+	resolved, err := r.ResolveAgentDefinition(agentName, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(workspaceID) == "" || r.workspaceStore == nil {
 		return resolved, nil
 	}

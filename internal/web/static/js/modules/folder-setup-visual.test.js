@@ -602,7 +602,7 @@ test('a portfolio review without a hire card keeps the complete staffing and sta
       {
         kind: 'agents',
         name: 'Adds the agents the Home requires',
-        detail: 'New agents use the configured system model: fixture / model.'
+        detail: 'New agents use the configured Default model: fixture / model.'
       },
       {
         kind: 'library',
@@ -622,7 +622,7 @@ test('a portfolio review without a hire card keeps the complete staffing and sta
       }
     ]
   });
-  assert.match(effects.join(' '), /Adds the agents.*configured system model/);
+  assert.match(effects.join(' '), /Adds the agents.*configured Default model/);
   assert.match(effects.join(' '), /tempo, length and track count/);
   assert.match(effects.join(' '), /templates folder/);
   assert.match(effects.join(' '), /turns it back on/);

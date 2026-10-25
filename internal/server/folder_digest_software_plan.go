@@ -162,7 +162,7 @@ func (h *folderSetupHost) softwarePrerequisites(ctx context.Context, facts folde
 	}}
 
 	model := personalassistant.FolderPrerequisite{ID: "model", Label: "Assistant's model", Required: true, Route: softwareModelRoute}
-	assistant, provider, name, source := facts.Assistant.Name, roster.Provider, roster.Model, "Ori's system model setting"
+	assistant, provider, name, source := facts.Assistant.Name, roster.Provider, roster.Model, "Ori's Default model setting"
 	switch {
 	case facts.Existing != nil && facts.Existing.EntryAgent != "":
 		assistant, source = facts.Existing.EntryAgent, "the workspace's saved assistant"

@@ -254,7 +254,7 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		logger.Error("System model not available for auto-task", logger.Fields{"error": err})
-		_ = orihttp.RespondServiceUnavailable(w, "System model not configured")
+		_ = orihttp.RespondServiceUnavailable(w, "Default model not configured or unavailable. Check Settings to create tasks in Auto mode.")
 		return
 	}
 
@@ -311,8 +311,9 @@ func (h *AutoTaskHandler) HandleOutputContractSuggestion(w http.ResponseWriter, 
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		logger.Error("System model not available for output contract suggestion", logger.Fields{"error": err})
-		h.publishOutputSpecSuggestionEvent(req, "suggestion_failed", err.Error())
-		_ = orihttp.RespondServiceUnavailable(w, "System model not configured")
+		const message = "Default model not configured or unavailable. Check Settings to suggest an output contract."
+		h.publishOutputSpecSuggestionEvent(req, "suggestion_failed", message)
+		_ = orihttp.RespondServiceUnavailable(w, message)
 		return
 	}
 
