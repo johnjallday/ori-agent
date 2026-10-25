@@ -1047,31 +1047,29 @@ test('upgrade keeps the library and plans with the new guidance', async ({ page,
       await rm(join(musicPath, entry), { recursive: true, force: true });
     await cp(upgradePath, musicPath, { recursive: true });
 
-    // The Plugins page hands off to the Home's own review of the new release.
+    // The Plugins page reviews and applies the Home upgrade in place.
     await page.goto('/plugins');
     const update = page.locator(
       '[data-plugin-action="update"][data-plugin-name="music-project-management"]'
     );
     await expect(update).toBeVisible({ timeout: 30_000 });
     await update.click();
-    const toast = page.locator('.toast', { hasText: 'A Home uses this plugin' });
-    await expect(toast).toBeVisible();
-    await toast.getByRole('button', { name: 'Open Home' }).click();
-    const dialog = page.locator('dialog.assistant-program-action-dialog');
-    await expect(dialog.getByRole('heading', { level: 2 })).toHaveText(
-      `Upgrade music-project-management to ${after.version}?`,
-      { timeout: 30_000 }
-    );
+    const dialog = page.locator('dialog.home-package-upgrade');
+    const heading = dialog.getByRole('heading', { level: 2 });
+    await expect(heading).toHaveText(`Update music-project-management to ${after.version}?`, {
+      timeout: 30_000
+    });
     await expect(dialog).toContainText(`move from ${before.version} to ${after.version}`);
     await expect(dialog).toContainText('Approved project library folders stay approved.');
     await dialog.screenshot({ path: join(evidence, '20-upgrade-review.png') });
     expect(await installedVersion()).toBe(before.version);
-    await dialog.getByRole('button', { name: 'Upgrade Home' }).click();
-    await expect(dialog).toBeHidden({ timeout: 60_000 });
-    await expect(page.locator('#assistantProgramUpgrade')).toHaveAttribute(
-      'data-state',
-      'succeeded'
-    );
+    await dialog.getByRole('button', { name: 'Confirm update' }).click();
+    await expect(heading).toHaveText(`music-project-management is updated to ${after.version}`, {
+      timeout: 60_000
+    });
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+    expect(new URL(page.url()).pathname).toBe('/plugins');
     expect(await installedVersion()).toBe(after.version);
 
     // The library survives as it was: no workspace, root or record was added,

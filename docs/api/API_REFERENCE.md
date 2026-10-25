@@ -2792,7 +2792,14 @@ Refusals are `409` with `code`: `not_attached`, `provider_unavailable`, `scope_r
 
 ## Home Package Upgrade API
 
-Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Three kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, and a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones. The review lists either addition under `additions`; neither creates, staffs or reads anything. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Three kinds of change are accepted: guidance (Home role prompts and packaged skill text), a release that adds a `home_profile` card to a Home that has none, and a release that appends a resource attachment (such as REAPER Studio, `docs/architecture/reaper-studio.md` §11) after the existing ones. The review lists either addition under `additions`; neither creates, staffs or reads anything. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source.
+
+The same service has two addresses, and both review and commit the plan for **every** Home the package backs:
+
+- From a Home: `/api/workspaces/{workspaceID}/assistant-program/provider-upgrade…`, for the authenticated owner of that exact Home, which must record a package pin.
+- By plugin (the Plugins page's in-place Update): `/api/plugins/{name}/home-upgrade…`. `{name}` is only a lookup key: it must name an installed plugin that backs at least one of the current owner's live Homes. The owner always comes from the request; no body, query or path field names an owner, a source or a Home.
+
+Anything else is `404`, and a plugin that is not installed, one no Home uses, and one only other owners' Homes use answer the same. All routes are ordinary admitted work under a reset fence. Reading status, reviewing, or asking an outcome may settle an operation a crash interrupted; none of them installs or commits. Refusals are `409` with a stable `code`:
 
 | Code | Meaning |
 | --- | --- |
@@ -2811,7 +2818,7 @@ Moves every Home pinned to an installed Home provider package, and the projects 
 
 ### Get Upgrade Status
 
-**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/provider-upgrade`
+**Endpoints:** `GET /api/workspaces/{workspaceID}/assistant-program/provider-upgrade`, `GET /api/plugins/{name}/home-upgrade`
 
 ```json
 {
@@ -2819,17 +2826,18 @@ Moves every Home pinned to an installed Home provider package, and the projects 
   "installed_version": "0.1.0",
   "available_version": "0.1.1",
   "available": true,
-  "operation": { "id": "…", "status": "reconcile_required", "from_version": "0.1.0", "to_version": "0.1.1", "reason": "…", "updated_at": "…" }
+  "operation": { "id": "…", "status": "reconcile_required", "from_version": "0.1.0", "to_version": "0.1.1", "reason": "…", "updated_at": "…" },
+  "homes": [ { "name": "Music Production Home", "link": "/workspaces/{slug}/assistant" } ]
 }
 ```
 
-`installed_version` is the Home's pin. `available` comes from the Plugins page's cached update check and never reads a source. `operation` appears only while an operation holds the package (`claimed`, `replaced`, `reconcile_required`); reading this route first settles an operation a crash interrupted. The Home's `GET …/assistant-program` summary carries the same object as `provider_upgrade`.
+`installed_version` is the Home's pin (from a Home) or the installed record's version (by plugin). `available` comes from the Plugins page's cached update check and never reads a source. `operation` appears only while an operation holds the package (`claimed`, `replaced`, `reconcile_required`); `last_operation` (same shape) is the newest operation once it has finished, as history only — it says nothing about any particular review's commit (see Outcome below). `status_unavailable: true` says the operation could not be read, so its absence means nothing. `homes` (plugin route only) names the owner's live Homes the package backs, each with its page when it has a folder slug; it never carries a workspace ID. The Home's `GET …/assistant-program` summary carries the same object (without `homes`) as `provider_upgrade`.
 
 ### Review an Upgrade
 
-**Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/review`
+**Endpoints:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/review`, `POST /api/plugins/{name}/home-upgrade/review`
 
-Body `{}` (strict JSON). Inspects the target without installing it and records a ten-minute review bound to a digest of the whole plan.
+Body `{}` (strict JSON). Inspects the target without installing it and records a ten-minute review bound to a digest of the whole plan. Each listed Home carries `link` (its page, `/workspaces/{slug}/assistant`) when it is the owner's live Home with a folder slug; the review never carries workspace IDs.
 
 ```json
 {
@@ -2837,7 +2845,7 @@ Body `{}` (strict JSON). Inspects the target without installing it and records a
   "plugin_id": "music-project-management", "from_version": "0.1.0", "to_version": "0.1.1",
   "roles": [ { "role_id": "portfolio_manager", "label": "Music Portfolio Manager", "old": "…", "new": "…" } ],
   "homes": [ {
-    "name": "Music Production Home", "projects": ["Album 1"],
+    "name": "Music Production Home", "link": "/workspaces/{slug}/assistant", "projects": ["Album 1"],
     "agents": [ { "role_id": "portfolio_manager", "role_label": "Music Portfolio Manager", "agent_name": "Portfolio Manager", "profile": "replace", "home_copy": "replace" } ]
   } ],
   "trashed_homes": 0,
@@ -2849,7 +2857,7 @@ Body `{}` (strict JSON). Inspects the target without installing it and records a
 
 ### Commit an Upgrade
 
-**Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/commit`
+**Endpoints:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/commit`, `POST /api/plugins/{name}/home-upgrade/commit`
 
 ```json
 { "token": "…" }
@@ -2863,9 +2871,21 @@ Re-derives the plan and requires the reviewed digest, then installs exactly the 
   "updated_at": "…" }
 ```
 
+A review commits at most once: its token is consumed in the same transaction that creates the operation, so a replayed, expired or changed review is `409 home_upgrade_review_stale` (or `home_upgrade_current` once nothing newer remains) and starts nothing.
+
+### Outcome of a Commit
+
+**Endpoints:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/outcome`, `POST /api/plugins/{name}/home-upgrade/outcome`
+
+```json
+{ "token": "…" }
+```
+
+For a client that lost a commit's answer. The token travels only in the body. The answer is the operation that consumed exactly this review — `{"operation": { …operation… }}` — or, when it started none, `{"review": "pending" | "expired" | "unknown"}`: `pending` is not committed yet (the commit may not have arrived, may still be checking the release, or was refused before claiming anything); `expired` was never committed and now never can be; `unknown` is no such review for this owner and package. Another review's operation, such as an older success, is never the answer. It never commits; `503 home_upgrade_unavailable` when the outcome cannot be read.
+
 ### Plugins Page Refusal
 
-`POST /api/plugins/{name}/update` (preview and confirm) and a same-name install refuse to replace a package a live Home is pinned to with `409 {"code":"home_upgrade_required","details":{"home_name":"…","home_path":"/workspaces/{slug}/assistant?upgrade=review"}}` before any trust dialog. The Home page opened at `home_path` starts the review above. The folder digest's `POST …/offers/{offerID}/home-provider` answers the same way when an older reviewed release it would update is still pinned by a Home; with no such Home, its preview reports `"update": true` and `installed_version`, and confirming updates to the newest reviewed release.
+`POST /api/plugins/{name}/update` (preview and confirm) and a same-name install refuse to replace a package a live Home is pinned to with `409 {"code":"home_upgrade_required","details":{"home_name":"…","home_path":"/workspaces/{slug}/assistant?upgrade=review"}}` before any trust dialog. The Plugins page answers that refusal by opening the review above in place, by plugin; it does not use `home_path`, which names only the first pinned Home found and remains for other callers and older links (the Home page opened there starts the same review, and commits nothing). A `from_list` switch to the Workspace Directory list's version of a pinned package stays refused: the upgrade reviews the plugin's own target, never the list's source. The folder digest's `POST …/offers/{offerID}/home-provider` answers the same way when an older reviewed release it would update is still pinned by a Home; with no such Home, its preview reports `"update": true` and `installed_version`, and confirming updates to the newest reviewed release.
 
 ## Workspace Memory API
 

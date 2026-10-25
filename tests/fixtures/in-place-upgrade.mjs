@@ -240,6 +240,30 @@ export async function writeHomeRelease(sandbox, version = NEW_VERSION, { long = 
   return root;
 }
 
+// writeListedRelease writes a release of the Home package somewhere else in
+// the sandbox: another source the Workspace Directory's plugin list can name.
+export async function writeListedRelease(sandbox, version = NEW_VERSION) {
+  const root = join(await assertSandbox(sandbox), 'in-place-upgrade', 'listed', HOME_PLUGIN);
+  await rm(root, { recursive: true, force: true });
+  await writeTree(root, homePackageFiles(version));
+  return root;
+}
+
+// writePlainPlugin writes a plugin no Home uses, at a version and with the
+// given skills, for checks that ordinary updates keep their own path.
+export async function writePlainPlugin(sandbox, name, version, skills) {
+  const root = join(await assertSandbox(sandbox), 'in-place-upgrade', 'plain', name);
+  await rm(root, { recursive: true, force: true });
+  const files = { '.claude-plugin/plugin.json': JSON.stringify({ name, version }) };
+  // Skill text does not mention the version, so a release that only bumps it
+  // registers the same components.
+  for (const skill of skills) {
+    files[`skills/${skill}/SKILL.md`] = `---\nname: ${skill}\ndescription: ${skill}.\n---\n${skill}.\n`;
+  }
+  await writeTree(root, files);
+  return root;
+}
+
 function client(baseURL) {
   const url = new URL(baseURL);
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {

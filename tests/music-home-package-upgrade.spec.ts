@@ -56,7 +56,7 @@ async function installedVersion(request: APIRequestContext): Promise<string> {
   return plugins.find((plugin: { name: string }) => plugin.name === PLUGIN)?.version || '';
 }
 
-test('a Home-pinned package upgrades through the Home, not the Plugins page', async ({
+test('a Home-pinned package is reviewed in place on Plugins and upgraded from its Home link', async ({
   page,
   request
 }) => {
@@ -121,28 +121,31 @@ test('a Home-pinned package upgrades through the Home, not the Plugins page', as
 
   swapInstalledExport();
 
-  // The Plugins page refuses to strand the Home and points to it instead.
+  // On the Plugins page, Update reviews the Home upgrade in place: no
+  // ordinary trust modal, no hand-off toast, no navigation.
   await page.goto('/plugins');
   const update = page.locator(`[data-plugin-action="update"][data-plugin-name="${PLUGIN}"]`);
   await expect(update).toBeVisible({ timeout: 30_000 });
   await update.click();
-  const toast = page.locator('.toast', { hasText: 'A Home uses this plugin' });
-  await expect(toast).toBeVisible();
+  const dialog = page.locator('dialog.home-package-upgrade');
+  const heading = dialog.getByRole('heading', { level: 2 });
+  await expect(heading).toHaveText(`Update ${PLUGIN} to ${UPGRADE_VERSION}?`, {
+    timeout: 30_000
+  });
   await expect(page.locator('#pluginUpdateModal')).toBeHidden();
-  await expect(toast).toContainText(`Upgrade from ${HOME_NAME}`);
-  const open = toast.getByRole('button', { name: 'Open Home' });
-  await expect(open).toBeVisible();
-  await evidence(page, '01-plugins-page-refusal');
+  await expect(page.locator('.toast', { hasText: 'Open Home' })).toHaveCount(0);
+  expect(new URL(page.url()).pathname).toBe('/plugins');
+  await evidence(page, '01-plugins-page-review');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
   expect(await installedVersion(request)).toBe(VERSION);
 
-  // The hand-off opens the Home's review of exactly the new release.
-  await open.click();
-  await page.waitForURL(url => url.pathname === `/workspaces/${home.folder_slug}/assistant`);
-  const dialog = page.locator('dialog.assistant-program-action-dialog');
-  await expect(dialog.getByRole('heading', { level: 2 })).toHaveText(
-    `Upgrade ${PLUGIN} to ${UPGRADE_VERSION}?`,
-    { timeout: 30_000 }
-  );
+  // The Home's own link (older refusals and other surfaces still use it)
+  // opens the same review of exactly the new release, and commits nothing.
+  await page.goto(`/workspaces/${home.folder_slug}/assistant?upgrade=review`);
+  await expect(heading).toHaveText(`Update ${PLUGIN} to ${UPGRADE_VERSION}?`, {
+    timeout: 30_000
+  });
   await expect(dialog).toContainText(`move from ${VERSION} to ${UPGRADE_VERSION}`);
   if (promptChanged) {
     await expect(dialog).toContainText('Music Portfolio Manager');
@@ -175,8 +178,12 @@ test('a Home-pinned package upgrades through the Home, not the Plugins page', as
   expect(new URL(page.url()).search).toBe('');
   expect(await installedVersion(request)).toBe(VERSION);
 
-  await dialog.getByRole('button', { name: 'Upgrade Home' }).click();
-  await expect(dialog).toBeHidden({ timeout: 60_000 });
+  await dialog.getByRole('button', { name: 'Confirm update' }).click();
+  await expect(heading).toHaveText(`${PLUGIN} is updated to ${UPGRADE_VERSION}`, {
+    timeout: 60_000
+  });
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
   const card = page.locator('#assistantProgramUpgrade');
   await expect(card).toHaveAttribute('data-state', 'succeeded');
   await expect(card).toContainText(`Upgraded to ${UPGRADE_VERSION}`);

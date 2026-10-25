@@ -867,19 +867,20 @@ test('an existing Home with a song upgrades through review, then offers the Stud
   );
   await expect(update).toBeVisible({ timeout: 30_000 });
   await update.click();
-  const toast = page.locator('.toast', { hasText: 'A Home uses this plugin' });
-  await expect(toast).toBeVisible();
-  await toast.getByRole('button', { name: 'Open Home' }).click();
-  const dialog = page.locator('dialog.assistant-program-action-dialog');
-  await expect(dialog.getByRole('heading', { level: 2 })).toHaveText(
-    `Upgrade music-project-management to ${after}?`,
-    { timeout: 30_000 }
-  );
+  // The Plugins page reviews and applies the Home upgrade in place.
+  const dialog = page.locator('dialog.home-package-upgrade');
+  const heading = dialog.getByRole('heading', { level: 2 });
+  await expect(heading).toHaveText(`Update music-project-management to ${after}?`, {
+    timeout: 30_000
+  });
   await expect(dialog).toContainText('REAPER Studio');
   await dialog.screenshot({ path: join(SHOTS, '01-upgrade-review.png') });
-  await dialog.getByRole('button', { name: 'Upgrade Home' }).click();
-  await expect(dialog).toBeHidden({ timeout: 60_000 });
-  await expect(page.locator('#assistantProgramUpgrade')).toHaveAttribute('data-state', 'succeeded');
+  await dialog.getByRole('button', { name: 'Confirm update' }).click();
+  await expect(heading).toHaveText(`music-project-management is updated to ${after}`, {
+    timeout: 60_000
+  });
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
 
   // The upgrade offers the Studio and creates or reads nothing; the song is untouched.
   expect(await studioSummary(request)).toMatchObject({ state: 'not_created' });

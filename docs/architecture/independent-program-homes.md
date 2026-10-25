@@ -555,7 +555,9 @@ Home that was upgraded. The Home page announces a finished upgrade on the
 document (`assistant-program:provider-upgraded`), and the profile card reads
 again, so the new card appears without a reload.
 
-**Review** (reads only, installs nothing). It resolves the same target the
+**Review** (installs and rebinds nothing; it records the review, and like every
+upgrade read it may first settle an operation a crash interrupted). It resolves
+the same target the
 Plugins page would install — the reviewed release's pinned source, or a local
 install's recorded source — and inspects it without installing to learn its
 version, trusted component fingerprint and Home declaration. It lists every
@@ -615,15 +617,57 @@ library reviews and running scans bound to it. A linked project's link
 `StateRevision` does not: approved library folders bind the exact link revision
 and stay approved.
 
-**Surfaces.** The Home page shows an upgrade card when the Plugins page's cached
-update check reports a newer release, and a review dialog with each changed
-role's current and new prompt, the affected Homes and projects, and each staffed
-agent's replace/keep outcome. The Plugins page's Update (preview and confirm)
-and a same-name install refuse a pinned package with `409
-home_upgrade_required`, naming the Home and linking to its page with
-`?upgrade=review`, which opens the review directly. "Show me a folder" offers an
-older reviewed release it finds installed as an update to the newest reviewed
-release when no live Home pins it, and returns the same refusal when one does.
+**Lost answers.** A commit runs to its end inside one request. A client that
+loses the answer asks the outcome route with its review token (in the body,
+never a URL). `Service.Attempt` runs recovery, then answers with the operation
+that consumed exactly that review — at most one, since the operation's
+`review_token` is unique and set in the claim transaction — or the review's own
+state: `pending` (not committed; the commit may not have arrived, may still be
+checking the release, or was refused before claiming), `expired` (never
+committed, and now never can be) or `unknown`. Another review's operation, such
+as an older success or another tab's commit, is never the answer, so a stale
+newest operation cannot be mistaken for this request's result. The client never
+replays a commit and never reconciles anything.
+
+**Surfaces.** The Home page and the Plugins page open one review dialog
+(`internal/web/static/js/modules/home-package-upgrade.js`) over two addresses of
+the same service: the Home page through its own Home, the Plugins page by plugin
+(`/api/plugins/{name}/home-upgrade…`, accepted only for an installed plugin that
+backs one of the current owner's live Homes). Either way the review covers every
+Home the package backs, never one chosen by the request.
+
+- The Home page shows an upgrade card when the Plugins page's cached update
+  check reports a newer release; `?upgrade=review` opens the review directly
+  and commits nothing.
+- On the Plugins page, Update's ordinary preview still answers `409
+  home_upgrade_required` for a pinned package (as does a same-name install);
+  the page opens the shared review in place instead of navigating, and does not
+  use the refusal's `home_path`. A switch to the Workspace Directory plugin
+  list's version (`from_list`) of a pinned package stays refused in place: the
+  upgrade reviews the plugin's own target, never the list's source.
+- The dialog reads the package's status first, so an operation that still holds
+  the package is shown (in progress with Check again, or needing reconciliation
+  with its ID and nothing to retry) instead of a second review. The review shows
+  each changed role's current and new prompt, what the release adds, the
+  affected Homes and projects, and each staffed agent's profile and Home-copy
+  outcome. Confirm update commits only the reviewed token; success is only the
+  operation's `succeeded` status; the dialog cannot be closed mid-commit, and
+  asks before the page is left. The result names every Home now on the release,
+  each linked to its page except the one already open. After a lost answer it
+  checks the outcome for about fifteen seconds, then says the outcome is not
+  known yet and offers Check again. A stale, cancelled or expired review offers
+  Review again, which needs a new confirmation. Closing never cancels server
+  work.
+- Plugins refreshes the installed version, update badge and notice in place;
+  the Home refreshes its card and announces `assistant-program:provider-upgraded`
+  so dependent panels read again. A Plugins row for a plugin that backs Homes
+  keeps an operation that holds the package visible whatever the update badge
+  says, says when the status cannot be read, and otherwise names the Homes an
+  Update moves together.
+
+"Show me a folder" offers an older reviewed release it finds installed as an
+update to the newest reviewed release when no live Home pins it, and returns the
+same refusal when one does.
 
 **Not covered.** A Home or linked project in the Trash keeps its old pin and
 stays read-only if restored. Moving back to an older release is not offered. An
