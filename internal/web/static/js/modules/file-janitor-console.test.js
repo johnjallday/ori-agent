@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { createProtectionTrips, protectionSentence, TRIP_KEY } from './file-janitor-protection.js';
 
 class FakeElement {
   constructor(tag) {
@@ -3859,22 +3860,60 @@ test('Settings offers a Curator when there is none', () => {
   restore();
 });
 
-// Presence comes from the install record's owned resources — the same
-// association the server uses for idempotency — never from an agent's name.
-test('Settings reports an existing Curator from the install record', () => {
+// Only the server's verified current attachment establishes availability.
+test('Settings reports built-in guidance for the verified Curator', () => {
   const doc = setup();
   const restore = withCatalog({
     id: 'file-janitor',
     owned_resources: [{ kind: 'companion_agent', id: 'agent-1' }]
   });
   panel._setBatch(null, [], CATEGORIES);
-  openConsole(statusFixture());
+  openConsole(
+    statusFixture({ guidance: { bundled: true, available: true, agent_instance_id: 'agent-1' } })
+  );
   panel._selectTab('settings');
 
   const body = text(doc);
   assert.match(body, /A Curator is helping in this workspace/);
   assert.match(body, /cannot approve, move, or delete/);
+  assert.match(body, /Built-in filing and backup guidance is available/);
+  assert.match(body, /not an enabled user skill or permission/);
   assert.equal(doc.getElementById('fileJanitorAddCurator'), null, 'no second Curator offer');
+  restore();
+});
+
+test('stale companion resource offers explicit association, not guidance availability', async () => {
+  const doc = setup();
+  const restore = withCatalog({
+    id: 'file-janitor',
+    owned_resources: [{ kind: 'companion_agent', id: 'gone' }]
+  });
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(
+    statusFixture({
+      guidance: {
+        bundled: true,
+        available: false,
+        candidates: [{ id: 'actual-id', name: 'My helper' }]
+      }
+    })
+  );
+  panel._selectTab('settings');
+  assert.doesNotMatch(text(doc), /Built-in filing and backup guidance is available/);
+  assert.match(text(doc), /could not verify a companion association/);
+  const select = doc.getElementById('fileJanitorCuratorCandidate');
+  select.value = 'actual-id';
+  let posted;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/companion')) {
+      posted = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ display_name: 'My helper' }) };
+    }
+    return { ok: true, json: async () => ({ status: statusFixture() }) };
+  };
+  doc.getElementById('fileJanitorAssociateCurator').click();
+  await settle();
+  assert.deepEqual(posted, { agent_instance_id: 'actual-id' });
   restore();
 });
 
@@ -4148,7 +4187,7 @@ function deferredReply() {
   const promise = new Promise(done => {
     resolve = done;
   });
-  return { promise, reply: body => resolve({ ok: true, json: async () => body }) };
+  return { promise, reply: (body, ok = true) => resolve({ ok, json: async () => body }) };
 }
 
 for (const trashCount of [0, 1]) {
@@ -4610,3 +4649,230 @@ test('scan completion publishes its new batch and end state without hiding pendi
     seen.some(state => state.scanning && state.batch.state === 'ready' && state.pendingCount === 2)
   );
 });
+
+async function protectionReview(t, count = 3) {
+  const doc = setup();
+  const state = {
+    fact: {
+      workspace_id: 'ws-1',
+      root_generation: 'root-one',
+      binding_id: 'a'.repeat(64),
+      state: 'unknown',
+      destination: { kind: 'chooser' }
+    },
+    batch: batchFixture(),
+    candidates: candidatesFixture(),
+    opened: 0,
+    calls: []
+  };
+  if (count > 3)
+    state.candidates = Array.from({ length: count }, (_, i) => ({
+      ...candidatesFixture()[0],
+      id: 'c' + i
+    }));
+  const stored = new Map();
+  const local = new Map();
+  const storage = values => ({
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  });
+  window.sessionStorage = storage(stored);
+  window.localStorage = storage(local);
+  window.location = { href: 'http://localhost/workspaces/filing', search: '' };
+  window.history = {
+    replaceState: (_, __, route) => {
+      window.location.href = new URL(route, window.location.href).href;
+      window.location.search = new URL(window.location.href).search;
+    }
+  };
+  window.FileJanitorProtection = createProtectionTrips(window);
+  window.FileJanitorProtection.sentence = protectionSentence;
+  window.OriProtectFolders = {
+    open: async () => {
+      state.opened++;
+      return true;
+    },
+    close() {}
+  };
+  t.after(() => {
+    delete window.FileJanitorProtection;
+    delete window.OriProtectFolders;
+  });
+  const status = statusFixture();
+  status.settings.root_id = 'root-one';
+  panel.render(status);
+  panel.open({ source: 'protection-return', tab: 'review' });
+  panel._setBatch(state.batch, state.candidates.slice(0, 50), CATEGORIES);
+  const reply = data => ({ ok: true, json: async () => data });
+  state.fetch = async (url, opts) => {
+    state.calls.push({ url, opts });
+    if (url.endsWith('/protection')) return reply(state.fact);
+    if (url.includes('/batches/')) {
+      const query = new URL(url, 'http://localhost').searchParams;
+      const offset = Number(query.get('offset') || 0);
+      const limit = Number(query.get('limit') || 50);
+      return reply({
+        batch: state.batch,
+        candidates: state.candidates.slice(offset, offset + limit),
+        total: state.candidates.length,
+        filtered_total: state.candidates.length,
+        categories: CATEGORIES
+      });
+    }
+    if (url.endsWith('/preview'))
+      return reply({ preview: { ...PREVIEW, trash_count: panel._trashMarked().length } });
+    return reply({ status, categories: CATEGORIES });
+  };
+  globalThis.fetch = state.fetch;
+  await panel._loadProtection();
+  return { doc, state, stored };
+}
+
+test('protection is optional, Not now keeps a passive link and filing selections', async t => {
+  const { doc } = await protectionReview(t);
+  panel._select('c1');
+  assert.match(text(doc), /Filing is not a backup/);
+  assert.match(text(doc), /Protection is unknown/);
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Not now')[0]
+    .click();
+  assert.deepEqual(panel._selected(), ['c1']);
+  assert.doesNotMatch(text(doc), /Filing is not a backup/);
+  assert.ok(doc.getElementById('fileJanitorCheckProtection'));
+  panel.close();
+  panel.open({ source: 'protection-return' });
+  assert.doesNotMatch(text(doc), /Filing is not a backup/);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
+});
+
+test('protection departure kills captured Apply and Trash acknowledgement, return needs a fresh preview', async t => {
+  const { doc, state, stored } = await protectionReview(t);
+  panel._select('c1');
+  surface(doc)
+    .all(node => node.id?.startsWith('fileJanitorTrash-'))[1]
+    .click();
+  doc.getElementById('fileJanitorApprove').click();
+  await settle();
+  const oldApply = doc.getElementById('fileJanitorConfirmApply');
+  const oldAck = doc.getElementById('fileJanitorTrashAck');
+  oldAck.checked = true;
+  oldAck.dispatch('change');
+  await panel._checkProtection();
+  assert.equal(state.opened, 1);
+  assert.equal(oldApply.disabled, true);
+  assert.equal(oldAck.checked, false);
+  oldApply.click();
+  await settle();
+  assert.equal(state.calls.filter(call => call.url.endsWith('/apply')).length, 0);
+  const trip = window.FileJanitorProtection.read();
+  assert.equal(stored.has(TRIP_KEY), false, 'same-page trip was persisted unnecessarily');
+  assert.deepEqual(trip.moves, ['c1']);
+  assert.deepEqual(trip.trash, ['c2']);
+  assert.doesNotMatch(JSON.stringify(trip), /token|acknowledgement|invoice|Filed|category/);
+  await panel.restoreProtectionTrip(trip);
+  assert.deepEqual(panel._selected(), ['c1']);
+  assert.deepEqual(panel._trashMarked(), ['c2']);
+  assert.equal(doc.getElementById('fileJanitorConfirmApply'), null);
+  oldApply.click();
+  assert.equal(state.calls.filter(call => call.url.endsWith('/apply')).length, 0);
+  assert.match(text(doc), /fresh preview/);
+  doc.getElementById('fileJanitorApprove').click();
+  await settle();
+  assert.equal(Boolean(doc.getElementById('fileJanitorTrashAck').checked), false);
+  assert.equal(doc.getElementById('fileJanitorConfirmApply').disabled, true);
+});
+
+test('return validates selected off-page candidates and preserves newer canonical category edits', async t => {
+  const { doc, state } = await protectionReview(t, 250);
+  panel._select('c1');
+  panel._select('c240');
+  panel._select('c249');
+  await panel._checkProtection();
+  const trip = window.FileJanitorProtection.read();
+  state.candidates[1].decision_category = 'images';
+  state.candidates[249].state = 'applied';
+  await panel.restoreProtectionTrip(trip);
+  assert.deepEqual(panel._selected(), ['c1', 'c240']);
+  assert.ok(state.calls.some(call => call.url.includes('limit=200&offset=200')));
+  assert.match(text(doc), /1 choices are no longer eligible/);
+  doc.getElementById('fileJanitorApprove').click();
+  await settle();
+  const preview = state.calls.filter(call => call.url.endsWith('/preview')).at(-1);
+  const decisions = JSON.parse(preview.opts.body).decisions;
+  assert.equal(decisions.find(row => row.candidate_id === 'c1').category, 'images');
+  assert.equal(decisions.find(row => row.candidate_id === 'c240').category, 'documents');
+  assert.equal(
+    state.calls.filter(call => call.url.endsWith('/decisions')).length,
+    0,
+    'snapshot rewrote server decisions'
+  );
+});
+
+test('departure waits for pending category writes and a failed save keeps review in place', async t => {
+  const { doc, state } = await protectionReview(t);
+  const pending = deferredReply();
+  globalThis.fetch = (url, opts) =>
+    url.endsWith('/decisions') ? pending.promise : state.fetch(url, opts);
+  const picker = surface(doc).all(node => node.className === 'fj-category')[0];
+  picker.value = 'images';
+  picker.dispatch('change');
+  const departure = panel._checkProtection();
+  await settle();
+  assert.equal(state.opened, 0);
+  pending.reply({ error: { message: 'save rejected' } }, false);
+  await departure;
+  assert.equal(state.opened, 0);
+  assert.equal(panel.isOpen(), true);
+  assert.match(
+    doc.getElementById('fileJanitorError').textContent,
+    /category change could not be saved/
+  );
+});
+
+test('Check protection becomes usable when an explicit scan finishes', async t => {
+  const { doc } = await protectionReview(t);
+  doc.getElementById('fileJanitorScan').click();
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorCheckProtection').disabled, false);
+});
+
+test('a failed canonical return keeps the descriptor and exposes a recoverable retry', async t => {
+  const { doc, state } = await protectionReview(t);
+  panel._select('c1');
+  await panel._checkProtection();
+  const trip = window.FileJanitorProtection.read();
+  globalThis.fetch = (url, opts) =>
+    url.includes('/batches/batch-1') ? Promise.resolve({ ok: false }) : state.fetch(url, opts);
+  await panel.restoreProtectionTrip(trip);
+  assert.equal(window.FileJanitorProtection.read().nonce, trip.nonce);
+  assert.equal(doc.getElementById('fileJanitorCheckProtection').disabled, true);
+  const retry = surface(doc).all(
+    node => node.tagName === 'BUTTON' && node.textContent === 'Retry returning to review'
+  )[0];
+  assert.ok(retry);
+  globalThis.fetch = state.fetch;
+  retry.click();
+  await settle();
+  assert.equal(window.FileJanitorProtection.read(), null);
+  assert.deepEqual(panel._selected(), ['c1']);
+});
+
+for (const changed of ['root', 'batch', 'permission']) {
+  test('return rejects changed ' + changed + ' without restoring old choices', async t => {
+    const { doc, state } = await protectionReview(t);
+    panel._select('c1');
+    await panel._checkProtection();
+    const trip = window.FileJanitorProtection.read();
+    if (changed === 'root') state.fact.root_generation = 'root-two';
+    if (changed === 'batch') state.batch = batchFixture({ id: 'batch-two' });
+    if (changed === 'permission')
+      globalThis.fetch = (url, opts) =>
+        url.endsWith('/protection') ? Promise.resolve({ ok: false }) : state.fetch(url, opts);
+    await panel.restoreProtectionTrip(trip);
+    assert.deepEqual(panel._selected(), []);
+    assert.equal(window.FileJanitorProtection.read(), null);
+    assert.match(doc.getElementById('fileJanitorError').textContent, /cannot be restored/);
+    assert.equal(state.calls.filter(call => call.url.endsWith('/apply')).length, 0);
+  });
+}

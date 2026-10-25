@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createProtectionTrips, TRIP_KEY } from './file-janitor-protection.js';
 
 import {
   chooserCards,
@@ -184,4 +185,82 @@ test('a protect=folders link opens the chooser once and is scrubbed', () => {
   assert.equal(win.location.href, 'http://localhost:8765/?panel=today');
   assert.equal(openChooserFromLocation(win), false, 'a refresh reopened the chooser');
   closeChooser(win.document);
+});
+
+function filingTrip(win) {
+  win.currentWorkspaceId = 'filing';
+  win.crypto = { randomUUID: () => 'nonce-one' };
+  const trips = createProtectionTrips(win);
+  win.FileJanitorProtection = trips;
+  const trip = trips.begin({
+    workspaceId: 'filing',
+    rootGeneration: 'root',
+    bindingId: 'a'.repeat(64),
+    batchId: 'batch',
+    moves: ['c1'],
+    trash: ['c2'],
+    filter: '',
+    page: 0
+  });
+  let restored = 0;
+  win.FileJanitorConsole = {
+    restoreProtectionTrip: async value => {
+      restored++;
+      trips.consume(value.nonce);
+    }
+  };
+  return { trips, trip, restored: () => restored };
+}
+
+test('filing chooser cancellation returns same-page choices without storage or creation', async () => {
+  const { win, doc, opened, store, calls } = fakeWindow();
+  const context = filingTrip(win);
+  await openChooser(win, { returnNonce: context.trip.nonce });
+  doc.body
+    .all()
+    .find(node => node.id === 'protectFoldersCancel')
+    .click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(context.restored(), 1);
+  assert.equal(opened.length, 0);
+  assert.equal(store.size, 0);
+  assert.ok(calls.every(call => !call.init?.method));
+});
+
+test('filing choice persists before explicit creation and carries a typed return through post-create', async () => {
+  const { win, opened, store } = fakeWindow();
+  const { trip, trips } = filingTrip(win);
+  assert.equal(confirmChoice('restic', win, { returnNonce: trip.nonce }), 'opened');
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].stayAfterCreate, true);
+  const stored = JSON.parse(store.get(TRIP_KEY));
+  assert.deepEqual(stored.moves, ['c1']);
+  assert.deepEqual(stored.trash, ['c2']);
+  trips.creatorFinished();
+  await opened[0].onCreated({ folder: { folder_slug: 'new-backup' }, workspaceId: 'backup' });
+  assert.equal(
+    win.location.href,
+    '/workspaces/new-backup?panel=backup-recovery&filing_return=nonce-one'
+  );
+});
+
+test('blocked trip storage cannot open the creator and leaves cancellation available', () => {
+  const { win, opened } = fakeWindow();
+  const { trip, trips } = filingTrip(win);
+  win.sessionStorage.setItem = () => {
+    throw new Error('blocked');
+  };
+  assert.throws(() => confirmChoice('restic', win, { returnNonce: trip.nonce }), /cannot save/);
+  assert.equal(opened.length, 0);
+  assert.equal(trips.read().nonce, trip.nonce);
+});
+
+test('creator cancellation returns the original filing choices without creating a workspace', async () => {
+  const { win } = fakeWindow();
+  const context = filingTrip(win);
+  confirmChoice('restic', win, { returnNonce: context.trip.nonce });
+  await context.trips.creatorClosed();
+  assert.equal(context.restored(), 1);
+  await context.trips.creatorClosed();
+  assert.equal(context.restored(), 1, 'cancellation must be one-shot');
 });

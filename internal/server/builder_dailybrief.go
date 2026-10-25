@@ -429,6 +429,17 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
 	todayService.SetBackupReader(dailyBriefBackupSource{reader: b.backupRecoveryService})
+	// Managed-root facts are independent of the optional entry-agent/Today
+	// line and of whether a companion is attached. Both consumers use one read.
+	if b.fileJanitorService != nil && b.backupRecoveryService != nil {
+		protection := fileCuratorProtection{roots: b.fileJanitorService, scope: todayService, coverage: b.backupRecoveryService}
+		if b.fileJanitorHandler != nil {
+			b.fileJanitorHandler.SetProtectionReader(protection)
+		}
+		if b.runtimeResolver != nil {
+			b.runtimeResolver.SetCuratorProtectionReader(protection)
+		}
+	}
 	// The protection line: stored coverage of adopted folders, and its one
 	// sticky "Not now" kept in the folder digest (wired above).
 	if b.personalAssistantFolderDigest != nil {

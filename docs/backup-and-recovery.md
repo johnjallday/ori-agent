@@ -77,6 +77,44 @@ gains no tool for backups. A decline never hides this line. Covered means a
 configured source contains the folder and a completed backup was observed; it
 is computed from stored evidence only and never checks a drive.
 
+## Optional protection advice while filing
+
+File Janitor review has its own **Check protection** note for the exact folder
+approved in that workspace. It uses saved settings and backup evidence, not the
+workspace's Ori storage folder. **Covered**, **configured without an observed
+completion**, **unknown**, and **unavailable** are different states. Observation
+time is when metadata was read; completion time is when a backup finished. None
+of these claims that today's files are recoverable. The fact reader performs no
+live folder, drive, provider or credential check.
+
+The genuine File Curator companion receives the same stored facts, even as a
+specialist under another lead. Its filing/backup guidance is bundled with Ori,
+not an imported skill or a new tool grant. Settings shows whether its association
+is verified and offers explicit recovery when it is not. See
+[File Curator guidance](file-curator-guidance.md).
+
+**Not now** keeps manual filing usable. It remembers dismissal in this browser
+for the owner/workspace/folder generation, not per batch; a passive link remains.
+A relinked folder may prompt again. If browser storage is blocked, dismissal is
+page-only and says so. This is separate from Today's adopted-folder policy above:
+File Janitor folders still do not enter that generic coverage count.
+
+**Check protection** opens the existing chooser or an owned, in-scope Backup &
+Recovery console. It does not create a workspace, approve metadata access or run
+a backup. Explicit creation and provider approval remain separate controls.
+**Return to filing review** reloads the original batch and current category
+choices, retains eligible move/Trash selections, and explains dropped or stale
+choices. A new preview and fresh confirmation—including Trash acknowledgement—are
+always required. Ordinary File Janitor close/reopen is unchanged.
+
+Same-page return uses memory. Cross-page return uses one same-tab browser record,
+expiring after 30 minutes and limited to 64 KiB. It contains opaque IDs and review
+choices only: no names, paths, categories, file contents, passwords or approval
+tokens. Starting another trip supersedes it. Blocked/oversized storage keeps review
+in place rather than silently losing choices; open backup separately if needed.
+Changed folder, batch, ownership or access can make restoration unavailable.
+Neither a return record nor its correlation nonce grants filing authority.
+
 ## Set up Time Machine in Ori
 
 1. Turn on Time Machine with a backup disk in **System Settings → General →

@@ -85,7 +85,11 @@ function fixtureFolder(label: string, files: Record<string, string>): string {
  * test scaffolding — it is recorded in the manual test guide. File Janitor
  * itself needs no agent (FR-37), and nothing below ever uses this one.
  */
-async function createPlainWorkspace(request: APIRequestContext, name: string): Promise<string> {
+async function createPlainWorkspace(
+  request: APIRequestContext,
+  name: string,
+  withAgent = true
+): Promise<string> {
   const res = await request.post('/api/workspaces', { data: { name, description: '' } });
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
@@ -93,6 +97,7 @@ async function createPlainWorkspace(request: APIRequestContext, name: string): P
   const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
   workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
+  if (!withAgent) return workspaceId;
   const agentName = `${name} Manager`;
   const created = await request.post('/api/agents', {
     data: { name: agentName, type: 'general', model: 'gpt-4o-mini' }
@@ -130,8 +135,59 @@ async function grantFolder(request: APIRequestContext, workspaceId: string, root
   expect(res.ok(), await res.text()).toBeTruthy();
 }
 
+test('managed protection endpoint is agentless, path-free and invalidated by revoke/relink', async ({
+  request
+}) => {
+  const created = await request.post('/api/workspaces', {
+    data: { name: `Protection facts ${RUN}` }
+  });
+  expect(created.ok()).toBeTruthy();
+  const body = await created.json();
+  const id = body.folder?.id || body.workspace?.id;
+  await installCapability(request, id);
+  const endpoint = `/api/workspaces/${id}/file-janitor/protection`;
+  const initial = await (await request.get(endpoint)).json();
+  expect(initial.state).toBe('unavailable');
+  const root = fixtureFolder('stored-protection', {});
+  await grantFolder(request, id, root);
+  const first = await (await request.get(endpoint)).json();
+  expect(first.state).toBe('not_covered');
+  expect(first.reason).toBe('no_configuration');
+  expect(first.root_generation).toBeTruthy();
+  expect(first.binding_id).toMatch(/^[a-f0-9]{64}$/);
+  // Other disposable tests may already have installed an unconfigured console.
+  expect(['chooser', 'workspace']).toContain(first.destination.kind);
+  expect(JSON.stringify(first)).not.toContain(root);
+  expect(first.last_completed_at).toBeUndefined();
+  const revoked = await request.post(`/api/workspaces/${id}/file-janitor/revoke`, { data: {} });
+  expect(revoked.ok(), await revoked.text()).toBeTruthy();
+  const unavailable = await (await request.get(endpoint)).json();
+  expect(unavailable.state).toBe('unavailable');
+  expect(unavailable.root_generation).toBeUndefined();
+  await grantFolder(request, id, fixtureFolder('stored-protection-relink', {}));
+  const relinked = await (await request.get(endpoint)).json();
+  expect(relinked.state).toBe('not_covered');
+  expect(relinked.root_generation).not.toBe(first.root_generation);
+  expect(relinked.binding_id).not.toBe(first.binding_id);
+  const alias = await request.get(`/api/workspaces/${id}/downloads-janitor/protection`);
+  expect((await alias.json()).binding_id).toBe(relinked.binding_id);
+  const evidence = 'tasks/evidence-file-curator-backup-guidance/group-2';
+  mkdirSync(evidence, { recursive: true });
+  writeFileSync(
+    join(evidence, 'stored-endpoint.json'),
+    JSON.stringify({ initial, first, unavailable, relinked }, null, 2)
+  );
+});
+
 const console_ = (page: Page) => page.locator('#fileJanitorConsole');
 const consoleBody = (page: Page) => page.locator('#fileJanitorConsoleBody');
+
+async function captureCuratorSettings(page: Page, path: string) {
+  // The page has a persistent event stream, so networkidle is not a useful
+  // readiness condition. Await the console's own canonical refresh instead.
+  await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
+  await page.locator('.fj-setting-curator').screenshot({ path, animations: 'disabled' });
+}
 
 /**
  * Opens a workspace and clears the modals a brand-new one puts in the way.
@@ -192,7 +248,289 @@ async function openConsoleFromCard(page: Page) {
   await expect(console_(page)).toBeVisible({ timeout: 15000 });
 }
 
+test('protection round trip keeps choices through chooser, creation, existing console and Back', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(120000);
+  const id = await createPlainWorkspace(request, `Protection review ${RUN}`);
+  const root = fixtureFolder('protection-trip', {
+    'invoice.pdf': 'invented invoice',
+    'discard.csv': 'invented duplicate'
+  });
+  await installCapability(request, id);
+  await grantFolder(request, id, root);
+  const scan = await request.post(`/api/workspaces/${id}/file-janitor/scan`);
+  expect(scan.ok(), await scan.text()).toBeTruthy();
+  await openWorkspace(page, id, '?panel=file-janitor');
+  await expect(page.locator('#fileJanitorCheckProtection')).toBeVisible();
+  const moves = page.getByRole('checkbox', { name: 'Select invoice.pdf', exact: true });
+  await moves.check();
+  await page.getByRole('button', { name: 'Mark discard.csv for Trash', exact: true }).click();
+  const category = page.getByLabel('Category for invoice.pdf', { exact: true });
+  await category.selectOption('images');
+  await expect(category).toHaveValue('images');
+  await page.locator('#fileJanitorApprove').click();
+  await expect(page.locator('#fileJanitorTrashAck')).toBeVisible();
+  await page.locator('#fileJanitorTrashAck').check();
+  const oldApply = await page.locator('#fileJanitorConfirmApply').elementHandle();
+  const mutations: string[] = [];
+  page.on('request', req => {
+    if (
+      req.method() !== 'GET' &&
+      (req.url().includes('backup-recovery') ||
+        req.url().endsWith('/apply') ||
+        new URL(req.url()).pathname === '/api/workspaces')
+    )
+      mutations.push(req.method() + ' ' + new URL(req.url()).pathname);
+  });
+  await page.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#protectFoldersChooser')).toBeVisible();
+  await oldApply!.evaluate((node: HTMLButtonElement) => node.click());
+  expect(mutations).toEqual([]);
+  await page.locator('#protectFoldersCancel').click();
+  await expect(moves).toBeChecked();
+  await expect(
+    page.getByRole('button', { name: 'Unmark discard.csv for Trash', exact: true })
+  ).toBeVisible();
+  await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await expect(page.locator('#fileJanitorCheckProtection')).toBeFocused();
+  await page.locator('#fileJanitorCheckProtection').click();
+  await page.getByRole('button', { name: 'Use restic', exact: true }).click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await page
+    .locator('#addFolderModal')
+    .getByRole('button', { name: 'Cancel', exact: true })
+    .click();
+  await expect(moves).toBeChecked();
+  expect(mutations).toEqual([]);
+  await page.locator('#fileJanitorCheckProtection').click();
+  await page.getByRole('button', { name: 'Use restic', exact: true }).click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await page.locator('#wizardNextBtn').click();
+  await page.locator('#folderNameInput').fill(`Protection backup ${RUN}`);
+  await page.locator('#wizardNextBtn').click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).sessionManager.teamView()?.planStatus))
+    .toBe('ready');
+  const accept = page.locator('[data-team-accept-all]');
+  if (await accept.isVisible()) await accept.click();
+  const pending = page
+    .locator('#workspaceTeamRoster .workspace-team-row')
+    .filter({ hasText: 'New · Needs setup' });
+  while (await pending.count()) {
+    await pending.first().locator('[data-team-agent-setup]').click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+  }
+  const missingRoles = page.locator('#workspaceRoleRoster .ws-role-row:has(.ws-role-tag--missing)');
+  while (await missingRoles.count()) {
+    await missingRoles
+      .first()
+      .getByRole('button', { name: /^Create an agent for / })
+      .click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+  }
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#createFolderBtn')).toBeVisible();
+  const creation = page.waitForResponse(
+    res => new URL(res.url()).pathname === '/api/workspaces' && res.request().method() === 'POST'
+  );
+  await page.locator('#createFolderBtn').click();
+  const created = await creation;
+  expect(created.ok(), await created.text()).toBeTruthy();
+  await expect(page.locator('#backupRecoveryConsole')).toBeVisible({ timeout: 20000 });
+  await clearBlockingModals(page);
+  await expect(
+    page.locator('#backupRecoveryConsole').getByRole('button', { name: 'Return to filing review' })
+  ).toBeVisible();
+  const snapshot = await page.evaluate(() =>
+    sessionStorage.getItem('ori.fileJanitor.protectionTrip.v1')
+  );
+  expect(snapshot).toBeTruthy();
+  expect(snapshot).not.toMatch(
+    /invoice|discard|approval|token|acknowledgement|category|\/Users|\/private/
+  );
+  await page
+    .locator('#backupRecoveryConsole')
+    .getByRole('button', { name: 'Return to filing review' })
+    .click();
+  await expect(moves).toBeChecked({ timeout: 20000 });
+  await expect(category).toHaveValue('images');
+  await expect(
+    page.getByRole('button', { name: 'Unmark discard.csv for Trash', exact: true })
+  ).toBeVisible();
+  await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('ori.fileJanitor.protectionTrip.v1'))
+  ).toBeNull();
+  await page.locator('#fileJanitorApprove').click();
+  await expect(page.locator('#fileJanitorTrashAck')).not.toBeChecked();
+  await expect(page.locator('#fileJanitorConfirmApply')).toBeDisabled();
+  const evidence = 'tasks/evidence-file-curator-backup-guidance/group-3';
+  mkdirSync(evidence, { recursive: true });
+  await page
+    .locator('#fileJanitorConsole')
+    .screenshot({ path: join(evidence, 'returned-review-fresh-confirmation.png') });
+  // The now-existing console is the next destination; Back is a real return too.
+  await page.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#backupRecoveryConsole')).toBeVisible();
+  await page.goBack();
+  await expect(moves).toBeChecked({ timeout: 20000 });
+  await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  expect(mutations.filter(line => !line.endsWith(' /api/workspaces'))).toEqual([]);
+  expect(mutations.filter(line => line.endsWith(' /api/workspaces'))).toHaveLength(1);
+  writeFileSync(join(evidence, 'navigation-mutations.json'), JSON.stringify(mutations, null, 2));
+});
+
+test('agentless protection keeps review on blocked storage and refuses a relinked return', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(45000);
+  const id = await createPlainWorkspace(request, `Protection negative ${RUN}`, false);
+  await installCapability(request, id);
+  await grantFolder(
+    request,
+    id,
+    fixtureFolder('protection-negative', { 'original.pdf': 'invented' })
+  );
+  expect((await request.post(`/api/workspaces/${id}/file-janitor/scan`)).ok()).toBeTruthy();
+  // A real installed console, no configuration or provider permissions.
+  const backup = await createPlainWorkspace(request, `Protection destination ${RUN}`, false);
+  const origin = new URL((await request.get('/api/workspaces')).url()).origin;
+  const installed = await request.post(
+    `/api/workspaces/${backup}/capabilities/backup-recovery/install`,
+    {
+      data: { source: 'in-place' },
+      headers: { Origin: origin, 'X-Ori-Backup-Action': 'user-control' }
+    }
+  );
+  expect(installed.ok(), await installed.text()).toBeTruthy();
+  await openWorkspace(page, id, '?panel=file-janitor');
+  await expect(page.locator('#fileJanitorCheckProtection')).toBeVisible();
+  const choice = page.getByRole('checkbox', { name: 'Select original.pdf', exact: true });
+  await choice.check();
+  await page.evaluate(() => {
+    (window as any).__storageSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'ori.fileJanitor.protectionTrip.v1')
+        throw new DOMException('blocked', 'SecurityError');
+      (window as any).__storageSetItem.call(this, key, value);
+    };
+  });
+  await page.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#fileJanitorError')).toContainText('cannot save');
+  await expect(choice).toBeChecked();
+  await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+  const evidence = 'tasks/evidence-file-curator-backup-guidance/group-4';
+  mkdirSync(evidence, { recursive: true });
+  await page.locator('#fileJanitorError').scrollIntoViewIfNeeded();
+  await page
+    .locator('#fileJanitorConsole')
+    .screenshot({ path: join(evidence, 'blocked-storage-keeps-review.png') });
+  await page.evaluate(() => {
+    Storage.prototype.setItem = (window as any).__storageSetItem;
+  });
+  await page.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#backupRecoveryConsole')).toBeVisible();
+  const changed = await request.post(`/api/workspaces/${id}/file-janitor/relink`, {
+    data: { path: fixtureFolder('protection-new-root', { 'new.pdf': 'invented' }) }
+  });
+  expect(changed.ok(), await changed.text()).toBeTruthy();
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dialog = page.locator('#backupRecoveryConsole');
+    expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBeTruthy();
+    await expect(dialog.getByRole('button', { name: 'Return to filing review' })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'Return to filing review', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#backupRecoveryConsole')).toContainText(
+    'folder or its access changed'
+  );
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('ori.fileJanitor.protectionTrip.v1'))
+  ).toBeNull();
+  await page
+    .locator('#backupRecoveryConsole')
+    .screenshot({ path: join(evidence, 'relinked-return-refused.png') });
+});
+
 test.describe('File Janitor capability', () => {
+  test('built-in Curator guidance follows a renamed template role under another lead', async ({
+    page,
+    request
+  }, testInfo) => {
+    const lead = `Guidance Lead ${RUN}`;
+    const helper = `Guidance Helper ${RUN}`;
+    const created = await request.post('/api/agents', {
+      data: { name: lead, type: 'general', model: 'gpt-4o-mini' }
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const response = await request.post('/api/workspaces', {
+      data: {
+        name: `Guidance Template ${RUN}`,
+        template_id: 'file-janitor',
+        existing_agent_names: [lead],
+        entry_agent_name: lead,
+        template_agent_overrides: [{ index: 0, name: helper }]
+      }
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const { folder } = await response.json();
+    workspaceSlugs.set(folder.id, folder.folder_slug);
+    const statusResponse = await request.get(`/api/workspaces/${folder.id}/file-janitor`);
+    const { status } = await statusResponse.json();
+    expect(status.guidance.bundled).toBe(true);
+    expect(status.guidance.available).toBe(true);
+    const instance = folder.agent_instances.find(
+      (item: { id: string }) => item.id === status.guidance.agent_instance_id
+    );
+    expect(instance.name).toBe(helper);
+    expect(instance.entry_point).not.toBe(true);
+    await grantFolder(request, folder.id, fixtureFolder('guidance-template', {}));
+    await openWorkspace(page, folder.id, '?view=details&panel=file-janitor&tab=settings');
+    await expect(console_(page)).toBeVisible();
+    await expect(consoleBody(page)).toContainText(
+      'Built-in filing and backup guidance is available'
+    );
+    await expect(consoleBody(page)).toContainText('not an enabled user skill or permission');
+    await captureCuratorSettings(page, testInfo.outputPath('curator-template-guidance.png'));
+  });
+
+  test('Curator settings explicitly recover an unassociated agent and support in-place add', async ({
+    page,
+    request
+  }, testInfo) => {
+    const id = await createPlainWorkspace(request, `Guidance Recovery ${RUN}`);
+    await installCapability(request, id);
+    await grantFolder(request, id, fixtureFolder('guidance-recovery', {}));
+    await openWorkspace(page, id, '?view=details&panel=file-janitor&tab=settings');
+    await expect(consoleBody(page)).toContainText('could not verify a companion association');
+    await captureCuratorSettings(page, testInfo.outputPath('curator-association-recovery.png'));
+    await page.locator('#fileJanitorAssociateCurator').click();
+    await expect(consoleBody(page)).toContainText(
+      'Built-in filing and backup guidance is available'
+    );
+    await captureCuratorSettings(page, testInfo.outputPath('curator-associated-guidance.png'));
+
+    const addedID = await createPlainWorkspace(request, `Guidance Added ${RUN}`);
+    await installCapability(request, addedID);
+    await grantFolder(request, addedID, fixtureFolder('guidance-added', {}));
+    await openWorkspace(page, addedID, '?view=details&panel=file-janitor&tab=settings');
+    await page.locator('#fileJanitorAddCurator').click();
+    await expect(consoleBody(page)).toContainText(
+      'Built-in filing and backup guidance is available'
+    );
+    await captureCuratorSettings(page, testInfo.outputPath('curator-in-place-guidance.png'));
+  });
+
   test('next action follows setup, scan, shared review, partial receipts and undo', async ({
     page,
     request

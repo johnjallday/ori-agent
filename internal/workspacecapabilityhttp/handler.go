@@ -146,7 +146,21 @@ func (h *Handler) AddCompanion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.AddCompanion(workspaceID, capabilityID)
+	var req struct {
+		AgentInstanceID string `json:"agent_instance_id"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+	}
+	var result workspacecapability.CompanionResult
+	var err error
+	if req.AgentInstanceID != "" {
+		result, err = h.service.AssociateCompanion(workspaceID, capabilityID, req.AgentInstanceID)
+	} else {
+		result, err = h.service.AddCompanion(workspaceID, capabilityID)
+	}
 	if err != nil {
 		h.respondError(w, err, "Failed to add the companion agent")
 		return

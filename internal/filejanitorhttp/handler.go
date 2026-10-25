@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -53,6 +54,7 @@ type Handler struct {
 	automation     Automation
 	pathSelections PathSelectionResolver
 	assistantSetup AssistantSetupCoordinator
+	protection     filecuratorguidance.ProtectionReader
 }
 
 // SetAutomation wires the watcher lifecycle so setup and pause/resume take

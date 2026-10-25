@@ -1707,6 +1707,8 @@
     body.id = 'backupRecoveryBody';
     body.setAttribute('role', 'tabpanel');
     body.setAttribute('aria-labelledby', 'brTab-' + state.tab);
+    const filingReturn = window.FileJanitorProtection?.returnButton(document);
+    if (filingReturn) body.appendChild(filingReturn);
     if (state.error) {
       const alert = el('p', 'br-alert', state.error);
       alert.setAttribute('role', 'alert');

@@ -24,8 +24,11 @@ type createdAgent struct {
 
 // seedAgentsResult is the outcome of seeding a template's agent roster.
 type seedAgentsResult struct {
-	Created  []createdAgent
-	Warnings []string
+	// CuratorResources are actual attachments produced by trusted File Janitor
+	// roster seeding, including reused definitions and renamed role fills.
+	CuratorResources []workspace.CapabilityResource
+	Created          []createdAgent
+	Warnings         []string
 	// ReuseNotices carries an informational message for each roster entry that
 	// matched an existing global agent by name and was attached as-is (its saved
 	// prompt/model/tools win over the template's). Surfaced to the user so the
@@ -454,6 +457,7 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 		} else {
 			attachWorkspaceSpecialist(ws, spec.Name)
 		}
+		recordSeededCurator(&result, ws, tpl, i, spec.Name, exists)
 		// Only newly-created agents get the template's per-agent tools; a reused
 		// agent keeps its own (PRD FR14).
 		if !exists && !spec.Tools.IsEmpty() {

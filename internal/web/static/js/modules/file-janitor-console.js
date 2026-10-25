@@ -88,6 +88,16 @@
   // The approval issued by a preview, held only until the user confirms or
   // cancels. It is never persisted: an abandoned approval simply expires.
   let pendingPreview = null;
+  let approvalGeneration = 0;
+  let protectionFact = null;
+  let protectionRequest = 0;
+  let departingForProtection = false;
+  let restoringProtection = false;
+  let protectionCandidates = new Map();
+  let protectionReturnRetry = null;
+  const pendingDecisionWrites = new Set();
+  const failedDecisionIDs = new Set();
+  let decisionWriteChain = Promise.resolve();
   // Files the user has explicitly marked for Trash. Kept apart from `selected`
   // so a move selection and a removal can never be confused for one another.
   let trashMarked = new Set();
@@ -134,6 +144,13 @@
 
   function invalidateFolderState() {
     generation++;
+    discardProtectionApproval();
+    protectionRequest++;
+    protectionFact = null;
+    protectionCandidates.clear();
+    protectionReturnRetry = null;
+    departingForProtection = false;
+    failedDecisionIDs.clear();
     batchRequest++;
     historyRequest++;
     receiptRequest++;
@@ -194,6 +211,303 @@
 
   function apiBase(id) {
     return '/api/workspaces/' + encodeURIComponent(id) + '/' + API_PREFIX;
+  }
+
+  // Protection departure is narrower than ordinary console close/reopen.
+  // Destroy both DOM and captured authority, and fence a late preview response.
+  function discardProtectionApproval() {
+    approvalGeneration++;
+    pendingPreview = null;
+    const apply = document.getElementById('fileJanitorConfirmApply');
+    if (apply) apply.disabled = true;
+    const acknowledgement = document.getElementById('fileJanitorTrashAck');
+    if (acknowledgement) acknowledgement.checked = false;
+    clear(document.getElementById('fileJanitorConfirmHost'));
+    focusReturn = null;
+  }
+
+  async function loadProtection() {
+    const scope = requestScope();
+    const sequence = ++protectionRequest;
+    if (!scope.id || disposed || !window.FileJanitorProtection) return;
+    try {
+      const response = await fetch(apiBase(scope.id) + '/protection');
+      if (!response.ok) throw new Error('unavailable');
+      const fact = await response.json();
+      if (!scopeCurrent(scope) || sequence !== protectionRequest) return;
+      protectionFact =
+        fact.workspace_id === scope.id &&
+        (!fact.root_generation || fact.root_generation === lastStatus?.settings?.root_id)
+          ? fact
+          : null;
+    } catch (_) {
+      if (scopeCurrent(scope) && sequence === protectionRequest) protectionFact = null;
+    }
+    if (scopeCurrent(scope)) renderBatch();
+  }
+
+  function protectionPrompt() {
+    const trips = window.FileJanitorProtection;
+    if (!trips || !protectionFact) return null;
+    const fact = protectionFact;
+    const dismissed = trips.isDismissed(fact.binding_id);
+    const section = el('section', 'fj-protection' + (dismissed ? ' is-passive' : ''));
+    section.setAttribute('aria-label', 'Optional folder protection');
+    if (!dismissed) {
+      section.appendChild(el('h3', 'fj-protection-title', 'Filing is not a backup'));
+      section.appendChild(el('p', 'fj-protection-copy', trips.sentence(fact)));
+      const dates = [];
+      if (fact.observed_at)
+        dates.push('Evidence observed ' + new Date(fact.observed_at).toLocaleString());
+      if (fact.last_completed_at)
+        dates.push('Last completed backup ' + new Date(fact.last_completed_at).toLocaleString());
+      if (dates.length) section.appendChild(el('p', 'fj-protection-time', dates.join(' · ')));
+      section.appendChild(
+        el(
+          'p',
+          'fj-protection-copy',
+          'Optional: check protection for important originals. You can keep filing now. Undo is not a recovery copy.'
+        )
+      );
+    }
+    if (fact.destination && fact.binding_id) {
+      const actions = el('div', 'fj-actions');
+      const check = button(
+        'Check protection',
+        'fj-btn fj-btn-secondary',
+        () => void checkProtection()
+      );
+      check.id = 'fileJanitorCheckProtection';
+      check.disabled =
+        Boolean(protectionReturnRetry) ||
+        departingForProtection ||
+        busy ||
+        !batchActionsAvailable();
+      actions.appendChild(check);
+      if (!dismissed)
+        actions.appendChild(
+          button('Not now', 'fj-btn fj-btn-secondary', () => {
+            const durable = trips.dismiss(fact.binding_id);
+            reviewStatusMessage = durable
+              ? 'Protection prompt dismissed for this folder. Check protection is still available.'
+              : 'Dismissed for this page only: browser storage is unavailable. Filing is still available.';
+            renderBatch();
+            document.getElementById('fileJanitorCheckProtection')?.focus?.();
+          })
+        );
+      section.appendChild(actions);
+    }
+    return section;
+  }
+
+  async function checkProtection() {
+    const trips = window.FileJanitorProtection;
+    if (!trips || !lastBatch || !protectionFact?.destination || busy || departingForProtection)
+      return;
+    const scope = requestScope();
+    const batchID = lastBatch.id;
+    departingForProtection = true;
+    updateConfirmationAvailability();
+    try {
+      while (pendingDecisionWrites.size) await Promise.all([...pendingDecisionWrites]);
+      if (failedDecisionIDs.size)
+        throw new Error(
+          'A category change could not be saved. Retry that change before checking protection; review stays here.'
+        );
+      if (!scopeCurrent(scope) || lastBatch?.id !== batchID)
+        throw new Error('The folder or review changed. Review the current files before leaving.');
+      await loadProtection();
+      if (!protectionFact?.root_generation || !protectionFact?.destination)
+        throw new Error('Protection is unavailable for this folder. Review stays here.');
+      const trip = trips.begin({
+        workspaceId: scope.id,
+        rootGeneration: protectionFact.root_generation,
+        bindingId: protectionFact.binding_id,
+        batchId: batchID,
+        moves: [...selected],
+        trash: [...trashMarked],
+        filter,
+        page: pageOffset
+      });
+      const target = protectionFact.destination;
+      // Storage failure for cross-page trips is detected before hiding review.
+      if (target.kind === 'workspace' && target.workspace_id !== scope.id) trips.persist();
+      discardProtectionApproval();
+      close();
+      if (target.kind === 'chooser') {
+        if (!window.OriProtectFolders?.open)
+          throw new Error('The protection chooser is unavailable. Your choices are still here.');
+        await window.OriProtectFolders.open({ returnNonce: trip.nonce });
+      } else trips.openBackup(target);
+    } catch (error) {
+      open({ source: 'protection-return', tab: 'review' });
+      showError(error.message || 'Could not open protection. Your review choices are still here.');
+    } finally {
+      departingForProtection = false;
+      updateConfirmationAvailability();
+      renderBatch();
+    }
+  }
+
+  async function resumeProtectionTrip() {
+    const trips = window.FileJanitorProtection;
+    const trip = trips?.read();
+    const nonce = new URLSearchParams(window.location.search || '').get('filing_return');
+    if (!restoringProtection && trip?.workspaceId === wsId() && nonce === trip.nonce) {
+      await restoreProtectionTrip(trip);
+    } else if (!restoringProtection && trips && nonce && !trip && batchLoaded) {
+      trips.scrub();
+      open({ source: 'protection-return', tab: 'review' });
+      showError(
+        'This review return expired or is unavailable. Review the current files; no old approval was restored.'
+      );
+    }
+  }
+
+  async function restoreProtectionTrip(trip) {
+    const trips = window.FileJanitorProtection;
+    if (
+      restoringProtection ||
+      !trip ||
+      !trips ||
+      trips.read()?.nonce !== trip?.nonce ||
+      trip.workspaceId !== wsId()
+    )
+      return;
+    restoringProtection = true;
+    protectionReturnRetry = null;
+    departingForProtection = true;
+    discardProtectionApproval();
+    const scope = requestScope();
+    let stale = false;
+    try {
+      const response = await fetch(apiBase(scope.id) + '/protection');
+      if (!response.ok) {
+        stale = true;
+        throw new Error('Workspace access is no longer available. Old choices cannot be restored.');
+      }
+      const fact = await response.json();
+      if (
+        !scopeCurrent(scope) ||
+        fact.workspace_id !== trip.workspaceId ||
+        fact.binding_id !== trip.bindingId ||
+        fact.root_generation !== trip.rootGeneration
+      ) {
+        stale = true;
+        throw new Error(
+          'The approved folder or its access changed. Old choices cannot be restored. Review the current folder.'
+        );
+      }
+      const latestResponse = await fetch(apiBase(scope.id) + '/batches/latest?limit=1');
+      if (!latestResponse.ok)
+        throw new Error(
+          'Could not reload review. Return again to retry; choices have not been discarded.'
+        );
+      const latest = await latestResponse.json();
+      if (latest.batch?.id !== trip.batchId) {
+        stale = true;
+        throw new Error(
+          'This review batch has changed or finished. Old choices cannot be restored.'
+        );
+      }
+      const candidates = new Map();
+      let offset = 0;
+      let total = null;
+      do {
+        const pageResponse = await fetch(
+          apiBase(scope.id) +
+            '/batches/' +
+            encodeURIComponent(trip.batchId) +
+            '?limit=200&offset=' +
+            offset
+        );
+        if (!pageResponse.ok)
+          throw new Error(
+            'Could not validate every selected file. Return again to retry; choices are retained.'
+          );
+        const page = await pageResponse.json();
+        if (
+          page.batch?.id !== trip.batchId ||
+          !Array.isArray(page.candidates) ||
+          !Number.isSafeInteger(page.total) ||
+          page.total < 0 ||
+          page.total > 100000 ||
+          (total !== null && total !== page.total)
+        )
+          throw new Error('The review changed while reloading. Return again to retry.');
+        total = page.total;
+        for (const candidate of page.candidates) candidates.set(candidate.id, candidate);
+        offset += page.candidates.length;
+        if (!page.candidates.length && offset < total)
+          throw new Error('Not every file could be validated. Return again to retry.');
+      } while (offset < total);
+      // Revalidate the binding after all pages, not just before a slow read.
+      const finalResponse = await fetch(apiBase(scope.id) + '/protection');
+      const finalFact = finalResponse.ok ? await finalResponse.json() : null;
+      if (
+        !scopeCurrent(scope) ||
+        finalFact?.binding_id !== trip.bindingId ||
+        finalFact?.root_generation !== trip.rootGeneration
+      ) {
+        stale = true;
+        throw new Error('Folder access changed while returning. Old choices cannot be restored.');
+      }
+      const finalBatchResponse = await fetch(apiBase(scope.id) + '/batches/latest?limit=1');
+      if (!finalBatchResponse.ok)
+        throw new Error('Could not revalidate this batch. Return again to retry.');
+      const finalBatch = await finalBatchResponse.json();
+      if (!scopeCurrent(scope) || finalBatch.batch?.id !== trip.batchId) {
+        stale = true;
+        throw new Error(
+          'This review batch changed while returning. Old choices cannot be restored.'
+        );
+      }
+      if (!trips.consume(trip.nonce))
+        throw new Error(
+          'Could not consume this return safely. Your choices remain available to retry.'
+        );
+      protectionCandidates = candidates;
+      const eligible = id => ['pending', 'approved'].includes(candidates.get(id)?.state);
+      selected = new Set(
+        trip.moves.filter(id => eligible(id) && !unresolvedNeedsReview(candidates.get(id)))
+      );
+      trashMarked = new Set(trip.trash.filter(eligible));
+      const removed = trip.moves.length + trip.trash.length - selected.size - trashMarked.size;
+      protectionFact = finalFact;
+      filter = trip.filter;
+      pageOffset = trip.page;
+      linkedBatchID = trip.batchId;
+      // Keep the batch identity while loadBatch reloads current canonical
+      // categories. The snapshot contains no category decisions to replay.
+      lastBatch = latest.batch;
+      await loadBatch();
+      reviewStatusMessage =
+        (removed
+          ? removed + ' choices are no longer eligible and were removed. '
+          : 'Your valid review choices were kept. ') +
+        'Review selected changes again for a fresh preview and confirmation.';
+      open({ source: 'protection-return', tab: 'review' });
+      document.getElementById('fileJanitorCheckProtection')?.focus?.();
+    } catch (error) {
+      if (stale) {
+        trips.consume(trip.nonce);
+        trips.scrub();
+        selected.clear();
+        trashMarked.clear();
+        protectionCandidates.clear();
+        linkedBatchID = '';
+        await loadBatch();
+      } else {
+        protectionReturnRetry = trip;
+      }
+      open({ source: 'protection-return', tab: 'review' });
+      showError(error.message || 'The review could not be restored. Nothing was filed.');
+    } finally {
+      restoringProtection = false;
+      departingForProtection = false;
+      renderBatch();
+      document.getElementById('fileJanitorCheckProtection')?.focus?.();
+    }
   }
 
   function mount() {
@@ -562,7 +876,7 @@
   }
 
   function batchActionsAvailable() {
-    return batchLoadState !== 'loading' && batchLoadState !== 'error';
+    return !departingForProtection && batchLoadState !== 'loading' && batchLoadState !== 'error';
   }
 
   function updateConfirmationAvailability() {
@@ -571,6 +885,7 @@
     const needsTrashAck = pendingPreview.preview.trash_count > 0;
     control.disabled =
       busy ||
+      departingForProtection ||
       batchLoadState !== 'loaded' ||
       pendingPreview.preview.batch_id !== lastBatch?.id ||
       (needsTrashAck && !document.getElementById('fileJanitorTrashAck')?.checked);
@@ -820,10 +1135,9 @@
   function dropIneligibleSelections() {
     lastCandidates.forEach(candidate => {
       const eligible = candidate.state === 'pending' || candidate.state === 'approved';
-      if (!eligible || unresolvedNeedsReview(candidate)) {
-        selected.delete(candidate.id);
-        trashMarked.delete(candidate.id);
-      }
+      if (!eligible || unresolvedNeedsReview(candidate)) selected.delete(candidate.id);
+      // Trash is an independent explicit choice; it needs no filing category.
+      if (!eligible) trashMarked.delete(candidate.id);
     });
   }
 
@@ -960,6 +1274,13 @@
   }
 
   function updateSelectionSummary() {
+    const protectionControl = document.getElementById('fileJanitorCheckProtection');
+    if (protectionControl)
+      protectionControl.disabled =
+        Boolean(protectionReturnRetry) ||
+        departingForProtection ||
+        busy ||
+        !batchActionsAvailable();
     const node = document.getElementById('fileJanitorSelection');
     if (node) {
       const count = selected.size;
@@ -1030,6 +1351,21 @@
     if (!container) return;
     const focusedReviewControlID = String(document.activeElement?.id || '');
     clear(container);
+    if (protectionReturnRetry) {
+      const retry = button(
+        'Retry returning to review',
+        'fj-btn fj-btn-secondary',
+        () => void restoreProtectionTrip(protectionReturnRetry)
+      );
+      container.appendChild(
+        el(
+          'p',
+          'fj-protection-copy',
+          'Saved choices have not been discarded. Retry the canonical reload before another protection trip.'
+        )
+      );
+      container.appendChild(retry);
+    }
 
     const loadNotice = batchLoadNotice(Boolean(lastBatch));
     if (loadNotice) container.appendChild(loadNotice);
@@ -1073,6 +1409,8 @@
       return;
     }
 
+    const protection = protectionPrompt();
+    if (protection) container.appendChild(protection);
     container.appendChild(batchProgress(lastBatch));
     const summary = el('p', 'fj-batch-summary', batchSummaryLine(lastBatch));
     summary.setAttribute('role', 'status');
@@ -1652,25 +1990,21 @@
   //
   // The Curator is optional by design: File Janitor works fully without it, so
   // this states that plainly rather than presenting the agent as something
-  // missing. Presence is read from the install record's owned resources — the
-  // same association the server uses for idempotency — never from an agent's
-  // display name.
+  // missing. The server verifies the install's actual current attachment — a
+  // stale resource or an agent's display name is not evidence of guidance.
   function curatorSection() {
     const section = el('div', 'fj-setting fj-setting-curator');
     section.appendChild(el('h4', 'fj-setting-heading', 'Curator'));
 
-    const record = capabilityRecord();
-    const companions = (record && record.owned_resources ? record.owned_resources : []).filter(
-      resource => resource && resource.kind === 'companion_agent'
-    );
-
-    if (companions.length > 0) {
+    const guidance = lastStatus?.guidance;
+    if (guidance?.available) {
       section.appendChild(
         el(
           'p',
           'fj-setting-help',
           'A Curator is helping in this workspace. It explains proposals and answers questions; ' +
-            'it cannot approve, move, or delete anything.'
+            'it cannot approve, move, or delete anything. Built-in filing and backup guidance is available. ' +
+            'This is product advice, not an enabled user skill or permission to act.'
         )
       );
       return section;
@@ -1684,22 +2018,40 @@
           'helps you understand what is proposed, and can never act on your files.'
       )
     );
+    if (guidance?.candidates?.length) {
+      section.appendChild(
+        el(
+          'p',
+          'fj-setting-help',
+          'Ori could not verify a companion association. Choose an existing agent explicitly or add a Curator; no shared instructions or tools will change.'
+        )
+      );
+      const label = el('label', 'fj-setting-help', 'Existing workspace agent');
+      label.htmlFor = 'fileJanitorCuratorCandidate';
+      const select = el('select', 'fj-select');
+      select.id = 'fileJanitorCuratorCandidate';
+      for (const candidate of guidance.candidates) {
+        const option = el('option', '', candidate.name);
+        option.value = candidate.id;
+        select.appendChild(option);
+      }
+      const associate = button(
+        'Use as Curator',
+        'fj-btn fj-btn-secondary',
+        () => void addCurator(select.value)
+      );
+      associate.id = 'fileJanitorAssociateCurator';
+      section.appendChild(label);
+      section.appendChild(select);
+      section.appendChild(associate);
+    }
     const add = button('Add a Curator', 'fj-btn fj-btn-secondary', () => void addCurator());
     add.id = 'fileJanitorAddCurator';
     section.appendChild(add);
     return section;
   }
 
-  // capabilityRecord reads this workspace's install record from the catalog the
-  // capabilities module already loaded, rather than issuing another request.
-  function capabilityRecord() {
-    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
-    if (!catalog || typeof catalog.find !== 'function') return null;
-    const item = catalog.find('file-janitor');
-    return (item && item.record) || null;
-  }
-
-  async function addCurator() {
+  async function addCurator(instanceId = '') {
     const id = wsId();
     if (!id || busy) return;
     busy = true;
@@ -1707,7 +2059,11 @@
     try {
       const response = await fetch(
         '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor/companion',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          ...(instanceId ? { body: JSON.stringify({ agent_instance_id: instanceId }) } : {})
+        }
       );
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1722,6 +2078,7 @@
       );
       const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
       if (catalog && typeof catalog.reload === 'function') await catalog.reload();
+      await refresh();
       renderSettings();
     } catch (error) {
       setSettingsMessage(error.message || 'Ori could not add a Curator.');
@@ -2284,11 +2641,13 @@
       !lastBatch ||
       !batchActionsAvailable() ||
       busy ||
+      departingForProtection ||
       selected.size + trashMarked.size === 0
     )
       return;
     const scope = requestScope();
     const batchId = lastBatch.id;
+    const approvalEpoch = approvalGeneration;
     busy = true;
     showError('');
     rememberFocus();
@@ -2296,7 +2655,10 @@
     if (control) control.disabled = true;
     try {
       const decisions = Array.from(selected).map(candidateId => {
-        const candidate = lastCandidates.find(item => item.id === candidateId) || {};
+        const candidate =
+          lastCandidates.find(item => item.id === candidateId) ||
+          protectionCandidates.get(candidateId) ||
+          {};
         // For a flagged row the user's own choice is the ONLY acceptable
         // category. Falling back to candidate.category here would file it
         // using the guess that was flagged as not trustworthy — the exact
@@ -2320,8 +2682,9 @@
         const apiError = body.error || body;
         throw new Error((apiError && apiError.message) || 'Ori could not prepare these moves.');
       }
-      if (!scopeCurrent(scope) || lastBatch?.id !== batchId) return;
-      pendingPreview = { preview: body.preview, decisions };
+      if (!scopeCurrent(scope) || lastBatch?.id !== batchId || approvalEpoch !== approvalGeneration)
+        return;
+      pendingPreview = { preview: body.preview, decisions, approvalGeneration: approvalEpoch };
       // Release the busy flag BEFORE the confirmation goes on screen. Rendering
       // it first left a window in which the confirm button was visible and
       // enabled while applyApproval still saw busy === true and returned
@@ -2354,6 +2717,10 @@
       !active ||
       disposed ||
       active !== pendingPreview ||
+      active.approvalGeneration !== approvalGeneration ||
+      departingForProtection ||
+      (active.preview.trash_count > 0 &&
+        !document.getElementById('fileJanitorTrashAck')?.checked) ||
       batchLoadState !== 'loaded' ||
       active.preview.batch_id !== lastBatch?.id
     )
@@ -2396,7 +2763,10 @@
       showError(error.message || 'Ori could not apply these moves.');
       await loadBatch();
     } finally {
-      if (scopeCurrent(scope)) busy = false;
+      if (scopeCurrent(scope)) {
+        busy = false;
+        updateSelectionSummary();
+      }
     }
   }
 
@@ -2985,7 +3355,7 @@
     // A console opened from the Map may be showing status read minutes ago.
     // Preparation already awaited a fresh canonical result; do not immediately
     // disable it behind a redundant loading state on that handoff.
-    if (options.source !== 'folder-preparation') void refresh();
+    if (!['folder-preparation', 'protection-return'].includes(options.source)) void refresh();
     notifySubscribers();
     openJanitorParcels(id);
     return true;
@@ -4024,6 +4394,7 @@
       if (scopeCurrent(scope)) {
         busy = false;
         scanning = false;
+        updateSelectionSummary();
         notifySubscribers();
         refreshActivity();
         const done = document.getElementById('fileJanitorScan');
@@ -4091,9 +4462,18 @@
 
   // submitDecisions records review decisions server-side and repaints from the
   // response, so what the page shows is what was actually stored.
-  async function submitDecisions(decisions) {
-    const id = wsId();
-    if (!id || !decisions || decisions.length === 0) return;
+  function submitDecisions(decisions) {
+    const scope = requestScope();
+    const write = decisionWriteChain.then(() => saveDecisions(decisions, scope));
+    decisionWriteChain = write.catch(() => false);
+    pendingDecisionWrites.add(write);
+    void write.finally(() => pendingDecisionWrites.delete(write));
+    return write;
+  }
+
+  async function saveDecisions(decisions, scope) {
+    const id = scope.id;
+    if (!id || !decisions || decisions.length === 0 || !scopeCurrent(scope)) return false;
     showError('');
     try {
       const response = await fetch(apiBase(id) + '/decisions', {
@@ -4106,9 +4486,15 @@
         const apiError = result.error || result;
         throw new Error((apiError && apiError.message) || 'That change could not be saved.');
       }
+      if (scopeCurrent(scope))
+        decisions.forEach(decision => failedDecisionIDs.delete(decision.candidate_id));
     } catch (error) {
-      showError(error.message || 'That change could not be saved.');
+      if (scopeCurrent(scope)) {
+        decisions.forEach(decision => failedDecisionIDs.add(decision.candidate_id));
+        showError(error.message || 'That change could not be saved.');
+      }
     }
+    if (!scopeCurrent(scope)) return false;
     // Repaint from the server either way, so a rejected change never lingers
     // on screen as though it had been saved.
     await loadBatch();
@@ -4280,6 +4666,8 @@
         await loadBatch();
         if (!scopeCurrent(renderedScope) || renderedSequence !== statusRequest) return;
         await loadHistory();
+        await loadProtection();
+        if (!restoringProtection) await resumeProtectionTrip();
       }
       return;
     } catch (_) {
@@ -4308,7 +4696,11 @@
   }
 
   if (typeof document !== 'undefined') {
+    window.addEventListener?.('pageshow', () => void resumeProtectionTrip());
     document.addEventListener(WORKSPACE_VIEW_MODE_EVENT, () => syncSummaryVisibility());
+    document.addEventListener('ori:filing-protection-ready', () => {
+      void loadProtection().then(() => resumeProtectionTrip());
+    });
     document.addEventListener('ori:capabilities-changed', () => {
       if (!disposed) void refresh();
     });
@@ -4743,6 +5135,14 @@
     focusSetup,
     isOpen: () => consoleOpen,
     activeTab: () => (consoleOpen ? consoleTab : ''),
+    restoreProtectionTrip,
+    protectionFailure: message => {
+      open({ source: 'protection-return', tab: 'review' });
+      showError(message);
+    },
+    _loadProtection: loadProtection,
+    _checkProtection: checkProtection,
+    _trashMarked: () => Array.from(trashMarked),
     focusedItem: () => (consoleOpen ? consoleItem : ''),
     _applyUrlState: applyUrlState,
     _selectTab: selectTab,
@@ -4823,6 +5223,16 @@
       selected = new Set();
       trashMarked = new Set();
       pendingPreview = null;
+      approvalGeneration++;
+      protectionFact = null;
+      protectionCandidates.clear();
+      protectionReturnRetry = null;
+      protectionRequest++;
+      departingForProtection = false;
+      restoringProtection = false;
+      failedDecisionIDs.clear();
+      pendingDecisionWrites.clear();
+      decisionWriteChain = Promise.resolve();
       historyActions = [];
       historyLoaded = false;
       settingsOpen = false;

@@ -38,6 +38,7 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 				Agent:            resolved.Agent,
 				MCPServers:       append([]string{}, resolved.MCPServers...),
 				EffectiveSkills:  append([]ResolvedSkill{}, resolved.EffectiveSkills...),
+				HostContext:      resolved.HostContext,
 				MCPToolAllowlist: resolved.MCPToolAllowlist,
 				MCPRepoScope:     resolved.MCPRepoScope,
 			}, nil
