@@ -93,21 +93,44 @@ test('fixture Remove asks once, Keep and Esc back out, and a removed setup stays
   await page.goto('/?panel=today');
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toBeVisible();
-  await expect(card).toContainText('Album-4 needs you');
+  // The headline says what the setup needs, not only that it needs you.
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    'Album-4 needs you to finish setup'
+  );
   // A run saved without visual data draws no diagram and no placeholder text.
   await expect(card.locator('.folder-visual')).toHaveCount(0);
   await expect(card).not.toContainText('Setup preview');
   await expect(card).not.toContainText('Not reviewed');
   await expect(card).not.toContainText('No destination proposed');
+  // It leads with the ask: the sentence and the way forward are in view, and
+  // what it found and what it needed wait, collapsed, under the details.
+  await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
+    'Setup was interrupted before it finished.'
+  );
+  const details = card.locator('#personalAssistantFolderDetails');
+  await expect(details).not.toHaveAttribute('open', '');
+  await expect(details.locator('#personalAssistantFolderRequirements')).toHaveCount(1);
+  await expect(details.locator('#personalAssistantFolderFindings')).toHaveCount(1);
+  await expect(details.locator('#personalAssistantFolderProgress')).toHaveCount(1);
+  await expect(card.getByRole('region', { name: 'Setup requirements', exact: true })).toBeHidden();
   if (process.env.ORI_VISUAL_EVIDENCE)
     await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/no-diagram-pre-visual.png` });
-  // Remove is last, after the way forward.
-  const actions = card.locator('#personalAssistantFolderOfferActions button');
-  await expect(actions.last()).toHaveText('Remove');
+  // Remove sits beside the headline; the row below keeps only the way forward.
+  const head = card.locator('#personalAssistantFolderOfferHeadActions');
+  await expect(head.getByRole('button')).toHaveText(['Remove']);
+  await expect(
+    card
+      .locator('#personalAssistantFolderOfferActions')
+      .getByRole('button', { name: 'Remove', exact: true })
+  ).toHaveCount(0);
   await expect(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  const headBox = await head.boundingBox();
+  const rowBox = await card.locator('#personalAssistantFolderOfferActions').boundingBox();
+  expect(headBox!.y + headBox!.height).toBeLessThanOrEqual(rowBox!.y);
 
   // First click opens the confirm, which says what stays. Nothing is sent yet.
-  await actions.last().click();
+  await card.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(head).toBeHidden();
   await expect(card.locator('#personalAssistantFolderOfferQuestion')).toContainText(
     'Remove this setup from Needs you?'
   );
@@ -221,7 +244,10 @@ test('fixture a stopped run that saved its visual data still draws the diagram',
   await page.goto('/?panel=today');
   const card = page.locator('#personalAssistantFolderOffer');
   await expect(card).toBeVisible();
-  await expect(card.locator('.folder-visual')).toBeVisible();
+  // The diagram is evidence, so a stopped card keeps it under the details.
+  await expect(card.locator('.folder-visual')).toBeHidden();
+  await card.getByText('Full setup details', { exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderDetails .folder-visual')).toBeVisible();
   await expect(card.locator('.folder-visual')).toContainText('Album-4');
   if (process.env.ORI_VISUAL_EVIDENCE)
     await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/diagram-with-visual.png` });
