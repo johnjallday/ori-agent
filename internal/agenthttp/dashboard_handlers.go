@@ -151,6 +151,10 @@ type AgentDetailResponse struct {
 	// The Agents page echoes it back on update so the server can reject stale
 	// edits (PRD FR13). Empty for CLI agents, which are read-only.
 	Version string `json:"version,omitempty"`
+	// SystemModelLinked marks an agent whose conversations run on Settings →
+	// System Model (the system assistant, the hired personal assistant), so an
+	// editor can say a model change here is a System Model change.
+	SystemModelLinked bool `json:"system_model_linked,omitempty"`
 	// ClaudeSync carries read-only ~/.claude state for the Claude Code agent.
 	ClaudeSync any `json:"claude_sync,omitempty"`
 	// CodexSync carries read-only ~/.codex state for the Codex CLI agent.
@@ -440,6 +444,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 	membership := memberships[strings.ToLower(agentName)]
 	response.PresentationRole = h.support.classify(r.Context(), agentName, membership.Workspaces)
+	response.SystemModelLinked = systemModelLinkedAgent(r.Context(), h.support, agentName)
 	response.WorkspaceCount = membership.Count
 	response.Workspaces = membership.Workspaces
 	if response.Workspaces == nil {

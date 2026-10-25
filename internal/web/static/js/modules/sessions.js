@@ -3013,6 +3013,10 @@ const sessionManager = {
 
     this.updateEditAgentModelOptions(agent.model);
 
+    // The assistant's model is the System Model; say so before it is changed.
+    const systemModelHint = document.getElementById('editAgentSystemModelHint');
+    if (systemModelHint) systemModelHint.hidden = !agent.system_model_linked;
+
     const descriptionInput = document.getElementById('editAgentDescription');
     if (descriptionInput) {
       descriptionInput.value = agent.metadata?.description || '';
@@ -3432,7 +3436,21 @@ const sessionManager = {
 
       this.updateCurrentAgent(updatedName);
       this.renderSessions();
-      this.showEditAgentSuccess('Agent updated successfully.');
+      const mirror = data.system_model;
+      if (mirror && mirror.mirrored) {
+        this.showEditAgentSuccess(
+          `Agent updated. System Model is now ${mirror.provider} / ${mirror.model}.`
+        );
+        if (window.EventBus) {
+          EventBus.emit('systemModel:changed', { provider: mirror.provider, model: mirror.model });
+        }
+      } else if (mirror) {
+        this.showEditAgentSuccess(
+          `Agent updated, but ${mirror.reason || 'the System Model was left unchanged'}.`
+        );
+      } else {
+        this.showEditAgentSuccess('Agent updated successfully.');
+      }
 
       const modalEl = document.getElementById('editAgentModal');
       const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
@@ -3517,6 +3535,8 @@ const sessionManager = {
   resetEditAgentModal() {
     this.editAgentOriginalName = '';
     this.editAgentCurrentProvider = '';
+    const systemModelHint = document.getElementById('editAgentSystemModelHint');
+    if (systemModelHint) systemModelHint.hidden = true;
     this.editAgentSelectedTags = [];
     this.editAgentMCPServers = [];
     const form = document.getElementById('editAgentForm');

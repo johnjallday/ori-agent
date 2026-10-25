@@ -632,6 +632,7 @@
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Model</div>
                     <div id="agentModel" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
                     <div id="configModel" style="display: none;"></div>
+                    <div id="agentModelSystemNote" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;" hidden>Also the System Model: this assistant's conversational replies run on it (<a href="/settings#system-model">Settings → System Model</a>).</div>
                   </div>
                   <div class="info-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Provider</div>
@@ -677,6 +678,9 @@
                       <select id="editModel" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
                         <option value="">Loading models...</option>
                       </select>
+                    </div>
+                    <div class="col-12" id="editSystemModelHint" hidden>
+                      <p class="mb-0" style="font-size: 13px; color: var(--text-secondary);">This is the model your assistant talks on. Saving a new one here also updates <a href="/settings#system-model">Settings → System Model</a>, which Ori's setup, planning and conversational replies use.</p>
                     </div>
                     <div class="col-sm-6" id="editReasoningField" style="display: none;">
                       <label for="editReasoningEffort" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Reasoning Level</label>

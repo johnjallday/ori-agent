@@ -193,6 +193,16 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			systemModel = s.Core.ConfigManager.GetSystemModel
 		}
 		agentHandler.SetRunnableModelChooser(hireRunnableModel(s.Core.LLMFactory, systemModel))
+		// The assistant's model is the System Model: a model edit on the Agents
+		// page is mirrored into Settings, the reverse of the Settings page's own
+		// push onto the assistant record.
+		if s.Core.ConfigManager != nil {
+			var providers agenthttp.ProviderAvailability
+			if s.Core.LLMFactory != nil {
+				providers = s.Core.LLMFactory
+			}
+			agentHandler.SetSystemModelWriter(s.Core.ConfigManager, providers)
+		}
 	}
 	// A Researcher or Writer hire gets its role's blueprint through the
 	// ordinary create pipeline, with the hired agent in the primary role.

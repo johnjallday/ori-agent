@@ -138,6 +138,11 @@ type Handler struct {
 	runnableModel   RunnableModelChooser
 	hireWorkspaces  HireWorkspaces
 	hireMu          sync.Mutex
+	// systemModel is Settings → System Model, which the assistant's
+	// conversations run on; a model edit on a system-model agent is mirrored
+	// into it (system_model_mirror.go). providers vets the mirrored provider.
+	systemModel SystemModelWriter
+	providers   ProviderAvailability
 }
 
 func New(state store.Store) *Handler {
@@ -262,6 +267,11 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			"evolution":         cloneAgentEvolution(agent),
 			"version":           agentConfigVersion(agent),
 			"source":            "user",
+		}
+		// Tells an editor this model is the System Model, so it can say so
+		// before the user changes it.
+		if h.isSystemModelAgent(r.Context(), agentName) {
+			response["system_model_linked"] = true
 		}
 		memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 		if role := h.support.classify(r.Context(), agentName, memberships[strings.ToLower(agentName)].Workspaces); role != "" {
@@ -782,6 +792,15 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		carried = h.carryEdit(agentName)
 	}
 
+	// The assistant's conversations run on Settings → System Model, not on
+	// this record. A model edit on a system-model agent is mirrored there, so
+	// the card and the drawer cannot disagree about what it talks on.
+	var systemModel *systemModelMirror
+	if newName == agentName && (req.Model != nil || req.LLMProvider != nil || req.ReasoningEffort != nil) &&
+		h.isSystemModelAgent(r.Context(), agentName) {
+		systemModel = h.mirrorSystemModel(agent)
+	}
+
 	logger.Info("Agent metadata updated", logger.Fields{"agent": newName})
 
 	// Log activity
@@ -840,6 +859,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if carried != nil {
 		response["carried"] = carried
+	}
+	if systemModel != nil {
+		response["system_model"] = systemModel
 	}
 	orihttp.Success(w, response)
 }
