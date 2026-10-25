@@ -4127,3 +4127,295 @@ test('a failed removal is reported and leaves File Janitor in place', async () =
   assert.equal(panel.isOpen(), true, 'the console stays open after a failed removal');
   restore();
 });
+
+function deferredReply() {
+  let resolve;
+  const promise = new Promise(done => {
+    resolve = done;
+  });
+  return { promise, reply: body => resolve({ ok: true, json: async () => body }) };
+}
+
+const receiptFixture = (id, completed_at) => ({
+  id,
+  completed_at,
+  result: 'applied',
+  operation: 'move',
+  undo: 'available',
+  source_name: 'private.txt',
+  source_path: '/private/source',
+  destination_relative: 'Filed/private.txt'
+});
+
+test('public action state distinguishes cold, failed, absent and stale capability reads', async () => {
+  setup();
+  assert.equal(panel.getActionState().applies, null);
+  assert.equal(panel.getActionState().status.state, 'loading');
+  globalThis.fetch = async () => {
+    throw new Error('offline');
+  };
+  await panel.refresh();
+  assert.equal(panel.getActionState().applies, null);
+  assert.equal(panel.getActionState().status.state, 'unavailable');
+  panel.render({ applies: false });
+  assert.equal(panel.getActionState().status.state, 'not_applicable');
+  const pending = deferredReply();
+  globalThis.fetch = () => pending.promise;
+  const refresh = panel.refresh();
+  assert.deepEqual(panel.getActionState().status, { state: 'loading', stale: true });
+  pending.reply({ status: { applies: false } });
+  await refresh;
+  assert.equal(panel.getActionState().status.state, 'not_applicable');
+});
+
+test('public snapshot is immutable, excludes paths, and uses the real manual-mode rule', async () => {
+  setup();
+  const status = statusFixture();
+  status.settings.root_id = 'root-1';
+  status.settings.paused = true;
+  panel.render(status);
+  panel._setBatch(batchFixture(), candidatesFixture());
+  assert.equal(panel.getActionState().mode, 'paused');
+  status.settings.setup_decision = { mode: 'manual', root_id: 'root-1' };
+  assert.equal(panel.getActionState().mode, 'manual');
+  status.settings.automation_approved_at = '2026-10-01T00:00:00Z';
+  assert.equal(panel.getActionState().mode, 'paused');
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ actions: [receiptFixture('receipt', '2026-10-02T00:00:00Z')] })
+  });
+  await panel._reloadHistory();
+  const snapshot = panel.getActionState();
+  assert.equal(snapshot.workspaceId, 'ws-1');
+  assert.equal(snapshot.pendingCount, 2);
+  assert.equal(snapshot.latestReceipt.undoable, true);
+  assert.doesNotMatch(
+    JSON.stringify(snapshot),
+    /private|source_path|root_path|directory_reference/
+  );
+  assert.throws(() => {
+    snapshot.latestReceipt.id = 'tampered';
+  }, TypeError);
+  assert.throws(() => {
+    snapshot.actionKinds.push('scan');
+  }, TypeError);
+});
+
+test('latest receipt reads unfiltered later pages and compares completion time, not journal order', async () => {
+  setup();
+  panel.render(statusFixture());
+  const requests = [];
+  globalThis.fetch = async url => {
+    requests.push(url);
+    return {
+      ok: true,
+      json: async () =>
+        url.includes('offset=2')
+          ? { actions: [receiptFixture('a', '2026-10-03T00:00:00Z')], total: 3 }
+          : {
+              actions: [
+                receiptFixture('z', '2026-10-03T00:00:00Z'),
+                receiptFixture('old', '2026-10-01T00:00:00Z')
+              ],
+              total: 3
+            }
+    };
+  };
+  await panel._reloadHistory();
+  assert.equal(panel.getActionState().latestReceipt.id, 'a');
+  assert.equal(requests.length, 2);
+  assert.match(requests[1], /offset=2/);
+});
+
+test('batch loading qualifies stale counts synchronously and ignores an older response', async () => {
+  setup();
+  panel.render(statusFixture());
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  const first = deferredReply();
+  const second = deferredReply();
+  let calls = 0;
+  globalThis.fetch = () => (++calls === 1 ? first : second).promise;
+  const seen = [];
+  panel.subscribe(snapshot => seen.push(snapshot));
+  const old = panel._reloadBatch();
+  assert.deepEqual(panel.getActionState().batch, { state: 'loading', stale: true });
+  await settle();
+  const latest = panel._reloadBatch();
+  await settle();
+  second.reply({ batch: batchFixture({ id: 'new' }), candidates: [] });
+  await latest;
+  first.reply({ batch: batchFixture({ id: 'old' }), candidates: [] });
+  await old;
+  assert.equal(panel.getActionState().batchId, 'new');
+  assert.ok(seen.every(snapshot => snapshot.workspaceId === 'ws-1'));
+  assert.equal(seen.at(-1).actionState.batch.state, 'ready');
+});
+
+test('root changes invalidate in-flight batch/history and cached receipts', async () => {
+  setup();
+  panel.render(statusFixture());
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  const pending = deferredReply();
+  globalThis.fetch = () => pending.promise;
+  const batch = panel._reloadBatch();
+  const history = panel._reloadHistory();
+  await settle();
+  const changed = statusFixture();
+  changed.settings.root_id = 'new-root';
+  panel.render(changed);
+  pending.reply({
+    batch: batchFixture(),
+    actions: [receiptFixture('old', '2026-10-01T00:00:00Z')]
+  });
+  await Promise.all([batch, history]);
+  assert.equal(panel.getActionState().rootId, 'new-root');
+  assert.equal(panel.getActionState().batchId, '');
+  assert.equal(panel.getActionState().latestReceipt, null);
+  assert.equal(panel.getActionState().pendingCount, null);
+});
+
+test('teardown rejects status/history callbacks and detaches subscribers', async () => {
+  setup();
+  panel.render(statusFixture());
+  const pending = deferredReply();
+  globalThis.fetch = () => pending.promise;
+  let notifications = 0;
+  panel.subscribe(() => notifications++);
+  const status = panel.refresh();
+  const history = panel._reloadHistory();
+  panel.dispose();
+  const atDispose = notifications;
+  pending.reply({
+    status: statusFixture(),
+    actions: [receiptFixture('late', '2026-10-01T00:00:00Z')]
+  });
+  await Promise.all([status, history]);
+  assert.equal(notifications, atDispose);
+  assert.equal(panel.getActionState().latestReceipt, null);
+  assert.equal(panel.getActionState().applies, null);
+});
+
+test('workspace switch rejects old status and uses only the new identity', async () => {
+  setup();
+  const pending = deferredReply();
+  globalThis.fetch = url =>
+    url.includes('/ws-2/')
+      ? Promise.resolve({ ok: true, json: async () => ({ status: { applies: false } }) })
+      : pending.promise;
+  panel.init('ws-1');
+  panel.init('ws-2');
+  await settle();
+  pending.reply({ status: statusFixture() });
+  await settle();
+  assert.equal(panel.getActionState().workspaceId, 'ws-2');
+  assert.equal(panel.getActionState().applies, false);
+});
+
+test('history retry keeps last known receipt qualified and ignores out-of-order history', async () => {
+  setup();
+  panel.render(statusFixture());
+  const first = deferredReply();
+  const second = deferredReply();
+  let calls = 0;
+  globalThis.fetch = () => (++calls === 1 ? first : second).promise;
+  const old = panel._reloadHistory();
+  const latest = panel._reloadHistory();
+  second.reply({ actions: [receiptFixture('latest', '2026-10-02T00:00:00Z')] });
+  await latest;
+  first.reply({ actions: [receiptFixture('old', '2026-10-01T00:00:00Z')] });
+  await old;
+  assert.equal(panel.getActionState().latestReceipt.id, 'latest');
+  globalThis.fetch = async () => {
+    throw new Error('offline');
+  };
+  const retry = panel._reloadHistory();
+  assert.deepEqual(panel.getActionState().history, { state: 'loading', stale: true });
+  await retry;
+  assert.deepEqual(panel.getActionState().history, { state: 'unavailable', stale: true });
+  assert.equal(panel.getActionState().latestReceipt.id, 'latest');
+});
+
+test('scan publishes start/end and cannot return into a disposed workspace', async () => {
+  const doc = setup();
+  openConsole(statusFixture());
+  await settle();
+  const pending = deferredReply();
+  globalThis.fetch = () => pending.promise;
+  const seen = [];
+  panel.subscribe(snapshot => seen.push(snapshot.actionState.scanning));
+  doc.getElementById('fileJanitorScan').click();
+  assert.equal(seen.at(-1), true);
+  panel.dispose();
+  pending.reply({ created: true });
+  await settle();
+  assert.equal(panel.getActionState().scanning, false);
+  assert.equal(seen.length, 1, 'no callback into disposed subscribers');
+});
+
+test('History filters and filtered failures do not change canonical latest result or availability', async () => {
+  const doc = setup();
+  openConsole(statusFixture(), 'history');
+  await settle();
+  const canonical = receiptFixture('canonical', '2026-10-04T00:00:00Z');
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ actions: [canonical] }) });
+  await panel._reloadHistory();
+  const before = panel.getActionState();
+  globalThis.fetch = async url => {
+    assert.match(url, /operation=trash/);
+    throw new Error('filtered read failed');
+  };
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Trashed')[0]
+    .click();
+  assert.deepEqual(panel.getActionState().history, before.history);
+  await settle();
+  assert.deepEqual(panel.getActionState().latestReceipt, before.latestReceipt);
+  assert.deepEqual(panel.getActionState().history, before.history);
+  assert.equal(panel.getActionState().historyList.state, 'unavailable');
+  assert.match(text(doc), /Retry history/);
+});
+
+test('a list filter cannot cancel an in-flight canonical receipt refresh', async () => {
+  const doc = setup();
+  openConsole(statusFixture(), 'history');
+  await settle();
+  const pending = deferredReply();
+  globalThis.fetch = url =>
+    url.includes('operation=trash')
+      ? Promise.resolve({ ok: true, json: async () => ({ actions: [] }) })
+      : pending.promise;
+  const refresh = panel._reloadHistory();
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Trashed')[0]
+    .click();
+  await settle();
+  pending.reply({ actions: [receiptFixture('canonical', '2026-10-04T00:00:00Z')] });
+  await refresh;
+  assert.equal(panel.getActionState().history.state, 'ready');
+  assert.equal(panel.getActionState().latestReceipt.id, 'canonical');
+});
+
+test('scan completion publishes its new batch and end state without hiding pending review', async () => {
+  const doc = setup();
+  openConsole(statusFixture());
+  await settle();
+  const pending = deferredReply();
+  globalThis.fetch = url =>
+    url.endsWith('/scan')
+      ? pending.promise
+      : Promise.resolve({
+          ok: true,
+          json: async () => ({ batch: batchFixture(), candidates: [], categories: CATEGORIES })
+        });
+  const seen = [];
+  panel.subscribe(snapshot => seen.push(snapshot.actionState));
+  doc.getElementById('fileJanitorScan').click();
+  assert.equal(panel.getActionState().scanning, true);
+  pending.reply({ created: true });
+  await settle();
+  assert.equal(seen.at(-1).scanning, false);
+  assert.equal(seen.at(-1).pendingCount, 2);
+  assert.ok(
+    seen.some(state => state.scanning && state.batch.state === 'ready' && state.pendingCount === 2)
+  );
+});

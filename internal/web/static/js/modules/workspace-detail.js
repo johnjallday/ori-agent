@@ -460,6 +460,10 @@ export class WorkspaceDetailPage {
     this.stopExecutionMonitor();
     this.stopTaskActivityTick();
     this.membersPanel?.destroy?.();
+    const command = window.workspaceCommand;
+    if (command?.page === this) command.disposeNextAction?.();
+    const janitor = window.FileJanitorConsole;
+    if (janitor?.getActionState?.().workspaceId === this.workspaceId) janitor.dispose();
     for (const dispose of this._pageDisposers || []) dispose();
     this._pageDisposers = [];
     for (const timer of this._pageTimeouts || []) window.clearTimeout(timer);
@@ -3490,6 +3494,8 @@ export class WorkspaceDetailPage {
     this.tasksLoading = true;
     this.tasksLoadFailed = false;
     this.renderAgentGroups();
+    // Qualify the old recommendation before a retry can suspend on the network.
+    window.workspaceCommand?.refreshNextAction?.(this.workspaceId);
 
     try {
       const snapshot = await this.dataLoader.loadTasks({

@@ -35,6 +35,16 @@
   let setupReview = null;
   let setupReviewRequest = 0;
   let statusRequest = 0;
+  let batchRequest = 0;
+  let historyRequest = 0;
+  let receiptRequest = 0;
+  let generation = 0;
+  let disposed = false;
+  let statusLoadState = 'loading';
+  let historyLoadState = 'loading';
+  let historyListLoadState = 'loading';
+  let latestReceipt = null;
+  let receiptLoaded = false;
   let lastBatch = null;
   let lastCandidates = [];
   // Assistant-led setup may link to the exact first-review batch. Keep that
@@ -69,6 +79,7 @@
   // A failed read is not an empty batch. Keep its state separate from the last
   // successful payload so stale facts can be labelled and made inert.
   let batchLoadState = 'idle';
+  let batchLoaded = false;
   // The latest successful transition distinguishes first use, a scan with no
   // proposals, and a batch whose candidates all reached outcomes.
   let emptyReviewState = 'unscanned';
@@ -103,6 +114,67 @@
     if (workspaceId) return workspaceId;
     if (typeof window === 'undefined') return '';
     return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
+  }
+
+  function requestScope() {
+    return { id: wsId(), generation };
+  }
+
+  function scopeCurrent(scope) {
+    return !disposed && scope.id === wsId() && scope.generation === generation;
+  }
+
+  function completionTime(value) {
+    if (!value || String(value).startsWith('0001-')) return null;
+    const time = Date.parse(value);
+    return Number.isFinite(time) ? time : null;
+  }
+
+  function invalidateFolderState() {
+    generation++;
+    batchRequest++;
+    historyRequest++;
+    receiptRequest++;
+    setupReviewRequest++;
+    lastBatch = null;
+    lastCandidates = [];
+    categories = [];
+    selected = new Set();
+    trashMarked = new Set();
+    expandedCandidates = new Set();
+    pendingPreview = null;
+    linkedBatchID = '';
+    pageOffset = 0;
+    filter = '';
+    batchTotal = 0;
+    filteredTotal = 0;
+    filterCounts = {};
+    batchLoadState = 'idle';
+    batchLoaded = false;
+    historyActions = [];
+    historyLoaded = false;
+    historyFilter = '';
+    historyLoadState = 'loading';
+    historyListLoadState = 'loading';
+    latestReceipt = null;
+    receiptLoaded = false;
+    historyStatusMessage = '';
+    emptyReviewState = 'unscanned';
+    reviewStatusMessage = '';
+    scanning = false;
+    busy = false;
+  }
+
+  // Page teardown invalidates asynchronous callbacks, not operations already sent.
+  function dispose() {
+    disposed = true;
+    close({ keepUrl: true });
+    invalidateFolderState();
+    statusRequest++;
+    lastStatus = null;
+    setupReview = null;
+    statusLoadState = 'loading';
+    subscribers.clear();
   }
 
   // API_PREFIX is the canonical File Janitor route segment. Every request this
@@ -140,6 +212,7 @@
   // separate prevents a late capability refresh from resurrecting the card in
   // Map, Tickets, or Dashboard.
   function syncSummaryVisibility(status = lastStatus) {
+    if (disposed) return;
     const host = mount();
     if (!host) return;
     host.hidden = !status?.applies || workspaceViewMode() !== 'details';
@@ -1888,7 +1961,7 @@
         'fj-filter' + (historyFilter === option.id ? ' fj-filter-active' : ''),
         () => {
           historyFilter = option.id;
-          void loadHistory();
+          void loadHistory({ refreshReceipt: false });
         }
       );
       control.setAttribute('aria-pressed', historyFilter === option.id ? 'true' : 'false');
@@ -1896,7 +1969,12 @@
     });
     panel.appendChild(bar);
 
-    if (historyActions.length === 0) {
+    if (historyListLoadState === 'unavailable') {
+      panel.appendChild(
+        button('Retry history', 'fj-btn fj-btn-secondary', () => void loadHistory())
+      );
+    }
+    if (historyActions.length === 0 && historyListLoadState !== 'unavailable') {
       panel.appendChild(
         el(
           'p',
@@ -1919,26 +1997,102 @@
     host.appendChild(panel);
   }
 
-  async function loadHistory() {
-    const id = wsId();
-    if (!id) return;
+  // Filters own only the visible list. Read all canonical receipts: journal
+  // order is not completion order, and the latest result may be on another page.
+  async function loadLatestReceipt(scope, firstPage) {
+    const sequence = ++receiptRequest;
+    historyLoadState = 'loading';
+    notifySubscribers();
+    const current = () => scopeCurrent(scope) && sequence === receiptRequest;
+    try {
+      let page = await firstPage;
+      if (!current()) return;
+      let offset = 0;
+      let latest = null;
+      do {
+        if (!page) {
+          const response = await fetch(apiBase(scope.id) + '/history?limit=200&offset=' + offset);
+          if (!response.ok) throw new Error('history failed');
+          page = await response.json();
+        }
+        if (!current()) return;
+        const actions = Array.isArray(page.actions) ? page.actions : [];
+        for (const action of actions) {
+          const at = completionTime(action.completed_at);
+          if (at === null || !['applied', 'failed', 'stale'].includes(action.result)) continue;
+          if (
+            !latest ||
+            at > completionTime(latest.completedAt) ||
+            (at === completionTime(latest.completedAt) && String(action.id) < latest.id)
+          ) {
+            latest = Object.freeze({
+              id: String(action.id || ''),
+              completedAt: action.completed_at,
+              result: action.result,
+              operation: ['move', 'trash'].includes(action.operation) ? action.operation : '',
+              undoable: action.result === 'applied' && action.undo === 'available'
+            });
+          }
+        }
+        const total = Number(page.total) || 0;
+        if (!actions.length && offset < total) throw new Error('incomplete history');
+        offset += actions.length;
+        if (!actions.length || offset >= (total || actions.length)) break;
+        page = null;
+      } while (current());
+      if (!current()) return;
+      latestReceipt = latest;
+      receiptLoaded = true;
+      historyLoadState = 'ready';
+    } catch (_) {
+      if (!current()) return;
+      historyLoadState = 'unavailable';
+    }
+    notifySubscribers();
+  }
+
+  async function loadHistory({ refreshReceipt = true } = {}) {
+    const scope = requestScope();
+    if (!scope.id || disposed) return;
+    const sequence = ++historyRequest;
+    const current = () => scopeCurrent(scope) && sequence === historyRequest;
     const option = HISTORY_FILTERS.find(entry => entry.id === historyFilter);
     const query = option && option.query ? '?' + option.query : '';
-    try {
-      const response = await fetch(apiBase(id) + '/history' + query);
+    historyListLoadState = 'loading';
+    const read = async () => {
+      const response = await fetch(apiBase(scope.id) + '/history' + query);
       if (!response.ok) throw new Error('history failed');
-      const body = await response.json();
+      return response.json();
+    };
+    const listRead = read();
+    // Separate ownership: changing a list filter must not cancel or qualify
+    // the unfiltered canonical read. Share its first page when possible.
+    const receiptRead = refreshReceipt ? loadLatestReceipt(scope, query ? null : listRead) : null;
+    notifySubscribers();
+    try {
+      const body = await listRead;
+      if (!current()) return;
       historyActions = Array.isArray(body.actions) ? body.actions : [];
       historyLoaded = true;
+      historyListLoadState = 'ready';
+      if (historyStatusMessage.startsWith('History unavailable.')) historyStatusMessage = '';
       if (!lastBatch && historyActions.length > 0 && emptyReviewState === 'unscanned') {
         emptyReviewState = 'completed';
         renderBatch();
       }
+      renderHistory();
+      notifySubscribers();
     } catch (_) {
-      historyActions = [];
+      if (!current()) return;
+      historyListLoadState = 'unavailable';
+      historyStatusMessage =
+        'History unavailable. Showing last known records; retry to check current results.';
       historyLoaded = true;
+      renderHistory();
+      notifySubscribers();
+    } finally {
+      await receiptRead;
     }
-    renderHistory();
   }
 
   // undoAction reverses one applied action and reports the outcome honestly: a
@@ -2466,7 +2620,9 @@
   }
 
   function render(status) {
+    if (disposed) return;
     statusRequest++;
+    statusLoadState = typeof status?.applies === 'boolean' ? 'ready' : 'unavailable';
     // Marks and selections belong to the folder that was on screen. Changing
     // the managed folder invalidates every one of them, so they are discarded
     // here — but ONLY then.
@@ -2477,11 +2633,8 @@
     // silently emptied a selection the user had built up and disabled the
     // approve button under their cursor. The batch's own reload owns the
     // narrower rule — discard when the batch id actually changed (loadBatch).
-    if (managedFolderChanged(lastStatus, status)) {
-      trashMarked = new Set();
-      selected = new Set();
-      expandedCandidates = new Set();
-      pendingPreview = null;
+    if (managedFolderChanged(lastStatus, status) || (lastStatus?.applies && !status?.applies)) {
+      invalidateFolderState();
     }
     lastStatus = status;
 
@@ -2522,6 +2675,7 @@
     if (!before) return false;
     return (
       previous.root_path !== next.root_path ||
+      previous.root_id !== next.root_id ||
       previous.directory_reference_id !== next.directory_reference_id
     );
   }
@@ -2728,7 +2882,7 @@
    */
   function open(options = {}) {
     const id = wsId();
-    if (!id) return false;
+    if (!id || disposed) return false;
     // A workspace the capability is not installed in has no console to open.
     // The check is against a status we have actually read: on a cold load
     // lastStatus is still null, and refusing then would make the first press
@@ -2777,7 +2931,9 @@
   // a deep link while the page is still loading waits for the page to finish.
   function openJanitorParcels(id) {
     if (typeof window === 'undefined') return;
+    const scope = requestScope();
     const run = () => {
+      if (!scopeCurrent(scope)) return;
       const parcels = window.OriParcels;
       if (parcels && typeof parcels.openParcelByRef === 'function') {
         void parcels.openParcelByRef({ kind: 'file_janitor', workspaceId: id });
@@ -3143,6 +3299,7 @@
   // and on popstate, which is what makes Back close a deep-linked console
   // without leaving the workspace (FR-124).
   function applyUrlState(options = {}) {
+    if (disposed) return;
     if (typeof window === 'undefined' || !window.location) return;
     const params = new URLSearchParams(window.location.search || '');
     const wants = params.get('panel') === CONSOLE_PANEL_PARAM;
@@ -3182,7 +3339,9 @@
   }
 
   function notifySubscribers() {
-    const snapshot = stationState();
+    if (disposed) return;
+    const actionState = getActionState();
+    const snapshot = { ...stationState(), workspaceId: wsId(), generation, actionState };
     subscribers.forEach(listener => {
       try {
         listener(snapshot);
@@ -3232,7 +3391,7 @@
       const body = await response.json();
       if (!response.ok)
         throw new Error(body.error?.message || body.message || 'Could not review folder setup.');
-      if (sequence === setupReviewRequest && id === wsId()) {
+      if (!disposed && sequence === setupReviewRequest && id === wsId()) {
         setupReview = body.review || null;
         if (
           !choice &&
@@ -3699,10 +3858,12 @@
   // scanNow runs a real scan. It reports honestly when a scan finds nothing:
   // silence would be indistinguishable from a broken button.
   async function scanNow() {
-    const id = wsId();
-    if (!id || busy) return;
+    const scope = requestScope();
+    const id = scope.id;
+    if (!id || busy || disposed) return;
     busy = true;
     scanning = true;
+    notifySubscribers();
     reviewStatusMessage = '';
     showError('');
     refreshActivity();
@@ -3721,9 +3882,11 @@
         const apiError = result.error || result;
         throw new Error((apiError && apiError.message) || 'The scan could not run.');
       }
+      if (!scopeCurrent(scope)) return;
       linkedBatchID = '';
       setPreparationRoute('');
       await loadBatch();
+      if (!scopeCurrent(scope)) return;
       if (!result.created) {
         if (!lastBatch) {
           emptyReviewState = 'scan_empty';
@@ -3734,15 +3897,18 @@
         renderBatch();
       }
     } catch (error) {
-      showError(error.message || 'The scan could not run.');
+      if (scopeCurrent(scope)) showError(error.message || 'The scan could not run.');
     } finally {
-      busy = false;
-      scanning = false;
-      refreshActivity();
-      const done = document.getElementById('fileJanitorScan');
-      if (done) {
-        done.disabled = false;
-        done.textContent = 'Scan now';
+      if (scopeCurrent(scope)) {
+        busy = false;
+        scanning = false;
+        notifySubscribers();
+        refreshActivity();
+        const done = document.getElementById('fileJanitorScan');
+        if (done) {
+          done.disabled = false;
+          done.textContent = 'Scan now';
+        }
       }
     }
   }
@@ -3827,15 +3993,16 @@
   }
 
   async function loadCategories() {
-    const id = wsId();
-    if (!id || categories.length) return;
+    const scope = requestScope();
+    const id = scope.id;
+    if (!id || disposed || categories.length) return;
     try {
       const response = await fetch(apiBase(id) + '/categories');
       if (!response.ok) return;
       const body = await response.json();
-      categories = Array.isArray(body.categories) ? body.categories : [];
+      if (scopeCurrent(scope)) categories = Array.isArray(body.categories) ? body.categories : [];
     } catch (_) {
-      categories = [];
+      if (scopeCurrent(scope)) categories = [];
     }
   }
 
@@ -3843,14 +4010,18 @@
   // disclosure state survive a same-batch reload; a new batch clears both, and
   // candidates that became ineligible are dropped individually below.
   async function loadBatch() {
-    const id = wsId();
-    if (!id) return;
-    // The rows about to be rendered need the category vocabulary: without it
-    // the picker collapses to a single dead option showing the raw category id.
-    await loadCategories();
+    const scope = requestScope();
+    const id = scope.id;
+    if (!id || disposed) return;
+    const sequence = ++batchRequest;
+    const current = () => scopeCurrent(scope) && sequence === batchRequest;
     const previousBatchID = lastBatch && lastBatch.id;
     batchLoadState = 'loading';
+    notifySubscribers();
     renderBatch();
+    // Qualify stale data before even the category read can suspend this request.
+    await loadCategories();
+    if (!current()) return;
     const pendingControl = document.getElementById('fileJanitorConfirmApply');
     if (pendingPreview && pendingControl) pendingControl.disabled = true;
 
@@ -3867,6 +4038,7 @@
       const response = await fetch(apiBase(id) + batchPath + query);
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
+      if (!current()) return;
       lastBatch = body.batch || null;
       emptyReviewState = lastBatch ? 'active' : previousBatchID ? 'completed' : emptyReviewState;
       lastCandidates = Array.isArray(body.candidates) ? body.candidates : [];
@@ -3874,6 +4046,7 @@
       filteredTotal = Number(body.filtered_total) || 0;
       filterCounts = body.counts || {};
       batchLoadState = 'loaded';
+      batchLoaded = true;
 
       // A last page can shrink after decisions. Fetch the corrected final page
       // immediately instead of rendering an empty out-of-range page.
@@ -3888,7 +4061,9 @@
         return loadBatch();
       }
     } catch (_) {
+      if (!current()) return;
       batchLoadState = 'error';
+      notifySubscribers();
       const hadPendingPreview = Boolean(pendingPreview);
       pendingPreview = null;
       if (hadPendingPreview) clear(document.getElementById('fileJanitorConfirmHost'));
@@ -3931,24 +4106,30 @@
     // card instead of leaving two readouts that contradict each other.
     refreshActivity();
     refreshCompactAction();
+    notifySubscribers();
   }
 
   async function refresh() {
-    const id = wsId();
-    if (!id) return;
+    const scope = requestScope();
+    const id = scope.id;
+    if (!id || disposed) return;
     const sequence = ++statusRequest;
+    const current = () => scopeCurrent(scope) && sequence === statusRequest;
+    statusLoadState = 'loading';
+    notifySubscribers();
     try {
       const response = await fetch(apiBase(id));
       if (!response.ok) throw new Error('status failed');
       const body = await response.json();
       const status = body.status;
-      if (sequence !== statusRequest || id !== wsId()) return;
+      if (!current()) return;
+      if (typeof status?.applies !== 'boolean') throw new Error('invalid status');
       if (status?.applies && (!isConfigured(status) || status.settings?.setup_preparation)) {
         await loadSetupReview();
       } else {
         setupReview = null;
       }
-      if (sequence !== statusRequest || id !== wsId()) return;
+      if (!current()) return;
       // Creation links only an operation identity, never counts or success
       // flags. The first-result message comes from its canonical receipt.
       const preparationID = new URLSearchParams(window.location?.search || '').get('preparation');
@@ -3971,24 +4152,32 @@
         }
       }
       render(status);
+      const renderedScope = requestScope();
+      const renderedSequence = statusRequest;
       if (status && status.applies && status.settings && status.settings.root_path) {
-        await loadCategories();
         await loadBatch();
+        if (!scopeCurrent(renderedScope) || renderedSequence !== statusRequest) return;
         await loadHistory();
       }
       return;
     } catch (_) {
-      // A workspace that is not a File Janitor workspace, or a server that
-      // has not wired the feature, simply shows nothing here.
+      if (!current()) return;
+      statusLoadState = 'unavailable';
       const host = mount();
       if (host && !lastStatus) host.hidden = true;
+      notifySubscribers();
     }
   }
 
   function init(id) {
-    workspaceId = id || wsId();
+    const next = id || wsId();
+    if (workspaceId && workspaceId !== next) dispose();
+    disposed = false;
+    workspaceId = next;
     if (!workspaceId) return;
+    const epoch = generation;
     void refresh().then(() => {
+      if (disposed || epoch !== generation || workspaceId !== next) return;
       // A deep link is honoured only after the first status is in: opening
       // beforehand would show a console that does not yet know whether the
       // workspace even has a folder (FR-117).
@@ -4036,6 +4225,101 @@
   // paused janitor can still have twelve files waiting, and a broken one can be
   // both. Reporting the lower state in either case would hide the reason the
   // user needs to come back.
+  /**
+   * @typedef {'loading'|'ready'|'unavailable'|'not_applicable'} ActionSourceState
+   * @typedef {'setup'|'repair'|'consent'|'review'|'history'|'retry'} ConsoleActionKind
+   * @typedef {{state: ActionSourceState, stale: boolean}} ActionSource
+   * @typedef {{id:string, completedAt:string, result:string, operation:string, undoable:boolean}} ActionReceipt
+   * @typedef {object} ConsoleActionState
+   * @property {string} workspaceId
+   * @property {number} generation
+   * @property {boolean|null} applies - null is unknown, never absent capability
+   * @property {ActionSource} status
+   * @property {ActionSource} batch
+   * @property {ActionSource} history - unfiltered canonical receipt source
+   * @property {ActionSource} historyList - visible filtered list only
+   * @property {string} rootId
+   * @property {string} batchId
+   * @property {number|null} pendingCount
+   * @property {'manual'|'paused'|'watching'|null} mode
+   * @property {boolean} scanning
+   * @property {string} readiness
+   * @property {boolean} configured
+   * @property {boolean} consentRequired
+   * @property {string} emptyState
+   * @property {ActionReceipt|null} latestReceipt
+   * @property {readonly ConsoleActionKind[]} actionKinds
+   */
+
+  /** Public, immutable summary. No candidate content, folder paths, or approvals.
+   * @returns {ConsoleActionState}
+   */
+  function getActionState() {
+    const applies = typeof lastStatus?.applies === 'boolean' ? lastStatus.applies : null;
+    const absent = statusLoadState === 'ready' && applies === false;
+    const configured = applies === true && isConfigured(lastStatus);
+    const source = (state, stale) => Object.freeze({ state, stale: Boolean(stale) });
+    const status = source(
+      absent ? 'not_applicable' : statusLoadState,
+      statusLoadState !== 'ready' && lastStatus !== null
+    );
+    const batchState =
+      absent || (statusLoadState === 'ready' && applies === true && !configured)
+        ? 'not_applicable'
+        : batchLoadState === 'loaded'
+          ? 'ready'
+          : batchLoadState === 'error'
+            ? 'unavailable'
+            : 'loading';
+    const historyState =
+      absent || (statusLoadState === 'ready' && applies === true && !configured)
+        ? 'not_applicable'
+        : historyLoadState;
+    const settings = lastStatus?.settings || {};
+    const actionKinds = [];
+    if (
+      statusLoadState !== 'ready' ||
+      batchState === 'unavailable' ||
+      historyState === 'unavailable'
+    ) {
+      actionKinds.push('retry');
+    }
+    if (statusLoadState === 'ready' && applies) {
+      if (lastStatus?.readiness?.state === 'needs_attention') actionKinds.push('repair');
+      else if (!configured || lastStatus?.readiness?.state === 'setup_required')
+        actionKinds.push('setup');
+      else if (lastStatus?.privacy?.consent_required) actionKinds.push('consent');
+      else if (batchState === 'ready') actionKinds.push('review');
+      if (historyState === 'ready' && latestReceipt) actionKinds.push('history');
+    }
+    return Object.freeze({
+      workspaceId: wsId(),
+      generation,
+      applies,
+      status,
+      batch: source(batchState, batchState !== 'ready' && batchLoaded),
+      history: source(historyState, historyState !== 'ready' && receiptLoaded),
+      historyList: source(historyListLoadState, historyListLoadState !== 'ready' && historyLoaded),
+      rootId: String(settings.root_id || ''),
+      batchId: String(lastBatch?.id || ''),
+      pendingCount: batchLoaded ? pendingCount() : null,
+      mode: !configured
+        ? null
+        : manualScansOnly(settings)
+          ? 'manual'
+          : settings.paused
+            ? 'paused'
+            : 'watching',
+      scanning,
+      readiness: String(lastStatus?.readiness?.state || ''),
+      configured,
+      consentRequired: Boolean(lastStatus?.privacy?.consent_required),
+      emptyState: emptyReviewState,
+      latestReceipt,
+      actionKinds: Object.freeze(actionKinds)
+    });
+  }
+
   function stationState() {
     if (!lastStatus || !lastStatus.applies) return { applies: false };
     const readiness = lastStatus.readiness || {};
@@ -4320,6 +4604,8 @@
 
   const controller = {
     init,
+    dispose,
+    getActionState,
     refresh,
     render,
     renderBatch,
@@ -4339,6 +4625,7 @@
       lastBatch = batch;
       lastCandidates = candidates || [];
       batchLoadState = 'loaded';
+      batchLoaded = true;
       emptyReviewState = batch ? 'active' : 'unscanned';
       batchTotal = Number(batch?.summary?.total) || lastCandidates.length;
       filteredTotal = lastCandidates.length;
@@ -4353,6 +4640,7 @@
     _selected: () => Array.from(selected),
     _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
+    _reloadHistory: () => loadHistory(),
     _setLinkedBatchForTest: batchID => {
       linkedBatchID = /^[A-Za-z0-9_-]{1,128}$/.test(String(batchID || '')) ? String(batchID) : '';
     },
@@ -4364,6 +4652,7 @@
     },
     _setStatus: status => {
       lastStatus = status;
+      statusLoadState = status ? 'ready' : 'loading';
     },
     _syncSummaryVisibility: syncSummaryVisibility,
     _openSettings: () => {
@@ -4401,6 +4690,7 @@
       filteredTotal = 0;
       filterCounts = {};
       batchLoadState = 'idle';
+      batchLoaded = false;
       emptyReviewState = 'unscanned';
       reviewStatusMessage = '';
       selected = new Set();
@@ -4417,6 +4707,18 @@
       setupReview = null;
       setupReviewRequest++;
       statusRequest++;
+      batchRequest++;
+      historyRequest++;
+      receiptRequest++;
+      generation++;
+      disposed = false;
+      statusLoadState = 'loading';
+      historyLoadState = 'loading';
+      historyListLoadState = 'loading';
+      latestReceipt = null;
+      receiptLoaded = false;
+      historyFilter = '';
+      categories = [];
       busy = false;
     },
     _select: id => {

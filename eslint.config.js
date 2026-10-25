@@ -256,6 +256,7 @@ export default defineConfig([
       'internal/web/static/js/modules/tag-input.js',
       'internal/web/static/js/modules/tag-filter-bar.js',
       'internal/web/static/js/modules/task-presentation.js',
+      'internal/web/static/js/modules/workspace-next-action.js',
       'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/user-knowledge.js',
       'internal/web/static/js/modules/personal-hq-knowledge.js',

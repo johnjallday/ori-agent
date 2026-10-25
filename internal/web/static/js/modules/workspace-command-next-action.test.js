@@ -7,6 +7,12 @@ globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }
 function view(tasks, extra = {}) {
   const result = new WorkspaceCommandView(null);
   result.page = { workspaceId: 'w', workspaceSlug: 'desk', tasks, ...extra };
+  result.janitorActionState = () =>
+    extra.janitorState || {
+      workspaceId: 'w',
+      applies: false,
+      status: { state: 'not_applicable' }
+    };
   return result;
 }
 const running = { id: 'run', status: 'in_progress', description: 'Routine work' };
@@ -63,10 +69,10 @@ for (const [task, action] of [
 }
 
 test('loading and failure never masquerade as an idle workspace; Retry has one owner', () => {
-  assert.match(view(undefined).renderWorkFirst(), /Loading workspace tasks/);
-  assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Loading workspace tasks/);
+  assert.match(view(undefined).renderWorkFirst(), /Tasks are loading/);
+  assert.match(view([], { tasksLoading: true }).renderWorkFirst(), /Tasks are loading/);
   const failed = view([], { tasksLoadFailed: true });
-  assert.match(failed.renderWorkFirst(), /Retry tasks/);
+  assert.match(failed.renderWorkFirst(), /Retry workspace status/);
   assert.doesNotMatch(failed.renderWorkFirst(), /Give Task|No open work/);
   assert.match(failed.drawerListHTML(), /Tasks unavailable/);
   assert.match(failed.taskDrawerHTML(), /—/);
@@ -136,4 +142,123 @@ test('task titles stay text and configuration is a named secondary disclosure', 
   assert.match(command.renderWorkFirst(), /&lt;img/);
   assert.doesNotMatch(command.renderWorkFirst(), /<img/);
   assert.match(command.renderWorkspaceAdmin(), /<summary>Workspace details &amp; settings/);
+});
+
+const reviewState = () => ({
+  workspaceId: 'w',
+  generation: 1,
+  applies: true,
+  configured: true,
+  readiness: 'ready',
+  status: { state: 'ready' },
+  batch: { state: 'ready' },
+  history: { state: 'ready' },
+  pendingCount: 4,
+  rootId: 'root',
+  batchId: 'batch',
+  mode: 'manual'
+});
+
+function bindPrimary(command) {
+  const html = command.renderWorkFirst();
+  const key = html.match(/data-cmd-next-action="([^"]+)"/)?.[1];
+  let click;
+  const root = {
+    addEventListener: (type, handler) => {
+      if (type === 'click') click = handler;
+    }
+  };
+  command.container = { querySelector: () => root };
+  command.bindWorkFirst();
+  const button = {
+    id: 'workspaceNextAction',
+    hasAttribute: name => name === 'data-cmd-next-action',
+    getAttribute: name => (name === 'data-cmd-next-action' ? key : null)
+  };
+  return { html, button, click: () => click({ target: { closest: () => button } }) };
+}
+
+test('Details renders one review CTA and real binding dispatches only console navigation', () => {
+  const command = view([running], { janitorState: reviewState() });
+  const opened = [];
+  globalThis.window = {
+    location: { search: '' },
+    FileJanitorConsole: { open: options => opened.push(options) }
+  };
+  globalThis.fetch = () => assert.fail('navigation cannot issue a scan or operation');
+  const primary = bindPrimary(command);
+  assert.equal((primary.html.match(/is-primary/g) || []).length, 1);
+  assert.match(primary.html, /4 files ready for review/);
+  assert.match(primary.html, /Running: Routine work/);
+  assert.match(primary.html, /All Tasks/);
+  primary.click();
+  assert.deepEqual(opened, [
+    { source: 'workspace-next-action', trigger: primary.button, tab: 'review' }
+  ]);
+  delete globalThis.window;
+});
+
+test('an old button cannot navigate to a new batch or start a task after priority changes', () => {
+  const snapshot = reviewState();
+  const command = view([], { janitorState: snapshot });
+  const primary = bindPrimary(command);
+  command.render = () => {};
+  globalThis.window = {
+    location: { search: '' },
+    FileJanitorConsole: { open: () => assert.fail('old batch') }
+  };
+  snapshot.batchId = 'replacement';
+  primary.click();
+  assert.match(command.workNotice, /changed/);
+  const taskCommand = view([{ id: 'start', status: 'pending', to: 'Writer' }], {
+    janitorState: { ...snapshot, pendingCount: 0 }
+  });
+  const taskButton = bindPrimary(taskCommand);
+  taskCommand.render = () => {};
+  taskCommand.page.tasks.push({ id: 'urgent', status: 'blocked' });
+  taskCommand.runWorkAction = () => assert.fail('old priority cannot execute');
+  taskButton.click();
+  assert.match(taskCommand.workNotice, /changed/);
+  delete globalThis.window;
+});
+
+test('console subscription is identity scoped, deduplicated and disposable', () => {
+  const snapshot = reviewState();
+  const command = view([]);
+  command.janitorActionState = () => snapshot;
+  command.active = true;
+  command.viewMode = 'details';
+  let listener;
+  let subscriptions = 0;
+  let removals = 0;
+  let renders = 0;
+  const controller = {
+    subscribe: fn => {
+      listener = fn;
+      subscriptions++;
+      return () => removals++;
+    }
+  };
+  globalThis.window = { location: { search: '' }, FileJanitorConsole: controller };
+  command.render = () => renders++;
+  command.ensureNextActionSubscription();
+  command.ensureNextActionSubscription();
+  assert.equal(subscriptions, 1);
+  snapshot.pendingCount++;
+  listener({ workspaceId: 'other' });
+  assert.equal(renders, 0);
+  listener({ workspaceId: 'w' });
+  listener({ workspaceId: 'w' });
+  assert.equal(renders, 1);
+  command.disposeNextAction();
+  snapshot.pendingCount++;
+  listener({ workspaceId: 'w' });
+  assert.equal(renders, 1);
+  assert.equal(removals, 1);
+  delete globalThis.window;
+});
+
+test('HQ and group journeys do not acquire ordinary workspace guidance', () => {
+  assert.equal(view([], { workspace: { designation: 'personal_hq' } }).renderWorkFirst(), '');
+  assert.equal(view([], { workspace: { kind: 'group' } }).renderWorkFirst(), '');
 });
