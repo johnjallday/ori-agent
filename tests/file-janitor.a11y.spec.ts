@@ -104,6 +104,58 @@ async function openConsole(page: Page, workspaceId: string) {
 }
 
 test.describe('File Janitor console accessibility', () => {
+  for (const theme of ['light', 'dark']) {
+    test(`shared review guidance reflows and returns keyboard focus (${theme})`, async ({
+      page,
+      request
+    }, testInfo) => {
+      test.setTimeout(60000);
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      const root = inbox('guidance-long-folder-name', [
+        'long-synthetic-review-filename.pdf',
+        'second.csv'
+      ]);
+      const id = await workspaceWithFolder(request, `Guidance ${theme} ${RUN}`, root);
+      await openConsole(page, id);
+      await page.locator('#fileJanitorScan').click();
+      await expect(page.locator('.fj-select')).toHaveCount(2);
+      await page.keyboard.press('Escape');
+      const area = page.getByRole('region', { name: 'Next action', exact: true });
+      for (const mode of ['details', 'map']) {
+        await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
+        for (const width of [320, 390, 768, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          await expect(area).toContainText('2 files ready for review');
+          await expect(area.locator('.is-primary')).toHaveCount(1);
+          const primary = page.locator('#workspaceNextAction');
+          const box = await primary.boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+          await primary.focus();
+          await page.keyboard.press('Enter');
+          await expect(page.locator('#fileJanitorConsole')).toBeVisible();
+          await page.keyboard.press('Escape');
+          await expect(primary).toBeFocused();
+          await expect
+            .poll(() =>
+              page.evaluate(() => {
+                const state = (window as any).FileJanitorConsole.getActionState();
+                return [state.status, state.batch, state.history].every(
+                  source => source.state === 'ready'
+                );
+              })
+            )
+            .toBe(true);
+          await page.screenshot({
+            path: testInfo.outputPath(`next-action-review-${mode}-${width}-${theme}.png`),
+            fullPage: true,
+            animations: 'disabled'
+          });
+        }
+      }
+    });
+  }
+
   // Nothing may paint over the console.
   //
   // At the workspace-scoped modal layer the global nav (z 10002) clipped the

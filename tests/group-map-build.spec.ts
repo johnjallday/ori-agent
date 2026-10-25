@@ -61,6 +61,7 @@ async function openGroupMap(page: Page, slug: string) {
   const map = page.locator('.ws-cmd-opmap.is-combined');
   await map.waitFor({ timeout: 20000 });
   await map.locator('[data-ws-map-viewport]').waitFor({ timeout: 20000 });
+  await expect(page.getByRole('region', { name: 'Next action', exact: true })).toHaveCount(0);
   return map;
 }
 
@@ -71,7 +72,9 @@ function boxesOverlap(a: Box | null, b: Box | null) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
-test('a group page draws its own district, and its coordinates are Home’s', async ({ page }) => {
+test('a group page draws its own district, and its coordinates are Home’s', async ({
+  page
+}, testInfo) => {
   await skipOnboarding(page);
   const tag = String(Date.now()).slice(-5);
   const group = await createGroup(page, `Map Group ${tag}`);
@@ -102,6 +105,11 @@ test('a group page draws its own district, and its coordinates are Home’s', as
   // and nothing of its header (name tag, collapse, ⤧, ⋯) either.
   await expect(zone.locator('.ws-map-district')).toHaveCount(0);
   await expect(zone.locator('[data-group-collapse]')).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath('next-action-group-exclusion.png'),
+    fullPage: true,
+    animations: 'disabled'
+  });
 
   // FR-9: one layout, so the coordinate the group page draws is the coordinate
   // Home draws — no second store and no per-page offset.

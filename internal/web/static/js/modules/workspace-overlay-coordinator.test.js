@@ -67,6 +67,20 @@ test('close returns focus to the overlay trigger (FR121)', () => {
   assert.ok(calls.some(([op, arg]) => op === 'restoreFocus' && arg === trigger));
 });
 
+test('a live confirmation guard retains Escape without closing an underlying drawer', () => {
+  const { c } = makeCoordinator();
+  let confirming = true;
+  c.open({ id: 'drawer', kind: 'drawer' });
+  c.open({ id: 'console', kind: 'modal', canEscape: () => !confirming });
+  assert.equal(c.escapeTopmost(), null);
+  assert.deepEqual(c.openIds(), ['drawer', 'console']);
+  c.open({ id: 'menu', kind: 'menu' });
+  assert.equal(c.escapeTopmost(), 'menu');
+  confirming = false;
+  assert.equal(c.escapeTopmost(), 'console');
+  assert.equal(c.escapeTopmost(), 'drawer');
+});
+
 test('Escape closes menu/popover before a dialog (FR123)', () => {
   const { c } = makeCoordinator();
   c.open({ id: 'dialog', kind: 'modal' });

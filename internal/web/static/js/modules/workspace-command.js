@@ -22,6 +22,7 @@ import {
   FILTER
 } from './task-presentation.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
+import { resolveWorkspaceNextAction } from './workspace-next-action.js';
 import {
   consumeGroupTemplateLanding,
   fetchGroupTemplateStatus,
@@ -1201,10 +1202,16 @@ export class WorkspaceCommandView {
     if (!this._urlSyncEnabled || typeof window === 'undefined' || !window.history) return;
     const nextState = this.currentURLState();
     if (urlStatesEqual(nextState, this._lastSyncedURLState)) return;
-    const url = buildWorkspaceURL(window.location.pathname, nextState);
+    const url = buildWorkspaceURL(
+      window.location.pathname,
+      nextState,
+      window.location.search || '',
+      window.location.hash || ''
+    );
     // Nothing to rewrite if the target URL already matches the address bar —
     // avoids an unnecessary history.replaceState on an already-clean URL.
-    const currentUrl = window.location.pathname + (window.location.search || '');
+    const currentUrl =
+      window.location.pathname + (window.location.search || '') + (window.location.hash || '');
     if (url === currentUrl) {
       this._lastSyncedURLState = nextState;
       return;
@@ -1989,7 +1996,9 @@ export class WorkspaceCommandView {
       'This workspace has no agent yet — fill the primary role to start working.' +
       '</p>' +
       '<div class="ws-cmd-unstaffed-actions">' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-fill-primary>' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-fill-primary>' +
       'Fill the primary role</button>' +
       '<button type="button" class="ws-cmd-icon-btn" data-cmd-dismiss-unstaffed' +
       ' aria-label="Dismiss this message">×</button>' +
@@ -2069,7 +2078,9 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-mission-btn" id="workspace-command-mission-edit" data-cmd-mission-action="edit">' +
       editLabel +
       '</button>' +
-      '<button type="button" class="ws-cmd-mission-btn is-primary" id="workspace-command-mission-run" data-cmd-mission-action="run"' +
+      '<button type="button" class="ws-cmd-mission-btn' +
+      this.secondaryActionClass() +
+      '" id="workspace-command-mission-run" data-cmd-mission-action="run"' +
       runDisabled +
       ' title="' +
       escapeHtml(runTitle) +
@@ -2147,31 +2158,67 @@ export class WorkspaceCommandView {
     return '';
   }
 
-  nextWork() {
-    const page = this.page || {};
-    if (page.tasksLoadFailed) return { state: 'unavailable' };
-    if (page.tasksLoading || page.initialListsLoaded === false || !Array.isArray(page.tasks))
-      return { state: 'loading' };
-    const tasks = this.drawerTasks();
-    const attention = tasks.filter(task => taskMatchesFilter(task, FILTER.NEEDS_ATTENTION));
-    const current = tasks.find(task => resolveTaskPresentation(task).state === 'running');
-    const result = tasks.find(
-      task => taskMatchesFilter(task, FILTER.COMPLETED) && (task.result || task.structured_result)
-    );
-    const next =
-      attention[0] ||
-      current ||
-      tasks.find(task => taskMatchesFilter(task, FILTER.ACTIONABLE)) ||
-      tasks.find(task => resolveTaskPresentation(task).isUnknown) ||
-      result;
-    return {
-      state: next ? 'work' : 'idle',
-      next,
-      current,
-      result,
-      attention: attention.length,
-      unknown: tasks.filter(task => resolveTaskPresentation(task).isUnknown).length
+  refreshNextAction(workspaceId) {
+    if (this.active && this.workspaceId() === workspaceId) this.render();
+  }
+
+  disposeNextAction() {
+    this._renderDeferredByDrag = false;
+    this._nextActionUnsubscribe?.();
+    this._nextActionUnsubscribe = null;
+    this._nextActionController = null;
+    this._nextActionWorkspace = '';
+  }
+
+  ensureNextActionSubscription() {
+    if (!this.active || typeof window === 'undefined') return;
+    const controller = window.FileJanitorConsole;
+    const id = this.workspaceId();
+    if (this._nextActionController === controller && this._nextActionWorkspace === id) return;
+    this.disposeNextAction();
+    if (!id || !controller?.subscribe) return;
+    this._nextActionController = controller;
+    this._nextActionWorkspace = id;
+    const signatureOf = () => {
+      const { taskWork: _taskWork, ...descriptor } = this.nextAction();
+      return JSON.stringify(descriptor);
     };
+    let signature = signatureOf();
+    this._nextActionUnsubscribe = controller.subscribe(snapshot => {
+      if (
+        !this.active ||
+        this._nextActionController !== controller ||
+        this.workspaceId() !== id ||
+        snapshot.workspaceId !== id
+      )
+        return;
+      const next = signatureOf();
+      if (next === signature) return;
+      signature = next;
+      if (['map', 'details'].includes(this.viewMode)) this.render();
+    });
+  }
+
+  janitorActionState() {
+    return typeof window === 'undefined' ? null : window.FileJanitorConsole?.getActionState?.();
+  }
+
+  nextAction() {
+    const page = this.page || {};
+    const state = page.tasksLoadFailed
+      ? 'unavailable'
+      : page.tasksLoading || page.initialListsLoaded === false || !Array.isArray(page.tasks)
+        ? 'loading'
+        : 'ready';
+    return resolveWorkspaceNextAction({
+      workspaceId: this.workspaceId(),
+      tasks: { state, items: page.tasks },
+      console: this.janitorActionState()
+    });
+  }
+
+  nextWork() {
+    return this.nextAction().taskWork;
   }
 
   workActionHTML(task, label) {
@@ -2181,48 +2228,98 @@ export class WorkspaceCommandView {
     return `<button type="button" class="ws-cmd-agent-action${label ? '' : ' is-primary'}" data-cmd-work-action="${escapeHtml(action.id)}" data-cmd-work-task="${escapeHtml(task.id)}" data-cmd-work-key="${escapeHtml(action.id + ':' + task.id)}">${escapeHtml(label || action.label)}</button>`;
   }
 
-  renderWorkFirst() {
-    // Groups remain containers, not another task/execution owner.
-    if (this.isGroupWorkspace()) return '';
-    const view = this.nextWork();
-    const title = task =>
-      escapeHtml(task.description || task.name || task.title || 'Untitled task');
-    let body;
-    if (view.state === 'loading') body = '<p role="status">Loading workspace tasks…</p>';
-    else if (view.state === 'unavailable')
-      body =
-        '<p role="status">Tasks couldn’t be loaded. This workspace may still have work waiting.</p><button type="button" class="ws-cmd-agent-action" data-cmd-work-retry data-cmd-work-key="retry">Retry tasks</button>';
-    else if (view.state === 'idle')
-      body = '<h3>No open work</h3><p>Give your team a task to start something new.</p>';
-    else {
-      const presentation = resolveTaskPresentation(view.next);
-      body =
-        `<p class="ws-cmd-work-state">${escapeHtml(presentation.label)}${view.attention ? ` · ${view.attention} task${view.attention === 1 ? '' : 's'} needing attention` : ''}</p>` +
-        `<h3>${title(view.next)}</h3>` +
-        this.workActionHTML(view.next) +
-        (view.unknown
-          ? '<p>Some task states are unrecognized. Open Tasks to inspect them.</p>'
-          : '') +
-        '<div class="ws-cmd-work-context">' +
-        (view.current && view.current !== view.next
-          ? `<div><span>Current work</span><p>${title(view.current)}</p>${this.workActionHTML(view.current, 'Track')}</div>`
-          : '') +
-        (view.result && view.result !== view.next
-          ? `<div><span>Latest result</span><p>${title(view.result)}</p>${this.workActionHTML(view.result, 'View Result')}</div>`
-          : '') +
-        '</div>';
-    }
+  guidesNextAction() {
     return (
-      '<section class="ws-cmd-work-first" aria-label="Next action">' +
+      !this.isGroupWorkspace() && !this.isPersonalHQ() && ['details', 'map'].includes(this.viewMode)
+    );
+  }
+
+  secondaryActionClass() {
+    return this.guidesNextAction() ? '' : ' is-primary';
+  }
+
+  announceNextAction() {
+    if (typeof document === 'undefined') return;
+    const region = document.getElementById('workspaceNextActionStatus');
+    if (!region) return;
+    if (!this.active || !this.guidesNextAction()) {
+      region.textContent = '';
+      this._lastNextActionAnnouncement = '';
+      return;
+    }
+    const view = this.nextAction();
+    // Poll/retry starts and unchanged refreshes must not repeat the same action.
+    if (view.isLoading) return;
+    const text = [view.title, view.action?.label, ...view.qualifications]
+      .filter(Boolean)
+      .join('. ');
+    const key = this.workspaceId() + ':' + text;
+    if (key === this._lastNextActionAnnouncement) return;
+    this._lastNextActionAnnouncement = key;
+    region.textContent = text;
+  }
+
+  renderWorkFirst() {
+    // Groups and HQ retain their specialized journey; dashboards are user-owned.
+    if (!this.guidesNextAction()) return '';
+    const view = this.nextAction();
+    const action = view.action;
+    const taskAttrs =
+      action?.owner === 'task'
+        ? ` data-cmd-work-action="${escapeHtml(action.kind)}" data-cmd-work-task="${escapeHtml(action.id)}"`
+        : '';
+    const primary = action
+      ? `<button type="button" id="workspaceNextAction" class="ws-cmd-agent-action is-primary" data-cmd-next-action="${escapeHtml(action.key)}" data-cmd-work-key="next"${taskAttrs}>${escapeHtml(action.label)}</button>`
+      : '';
+    return (
+      '<section id="workspaceNextActionRegion" class="ws-cmd-work-first" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-task-drawer data-cmd-work-key="tasks">All Tasks</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
-      body +
-      (view.state === 'idle' || (view.result === view.next && view.state === 'work')
-        ? '<button type="button" class="ws-cmd-agent-action" data-cmd-work-create data-cmd-work-key="create">Give Task</button>'
+      `<h3>${escapeHtml(view.title)}</h3><p>${escapeHtml(view.description)}</p>` +
+      primary +
+      view.qualifications
+        .map(text => `<p class="ws-cmd-work-qualification">${escapeHtml(text)}</p>`)
+        .join('') +
+      (view.qualifications.length && action?.kind !== 'retry'
+        ? '<button type="button" class="ws-cmd-agent-action" data-cmd-work-retry data-cmd-work-key="retry">Retry workspace status</button>'
         : '') +
+      '<div class="ws-cmd-work-context">' +
+      view.ongoing.map(text => `<p>${escapeHtml(text)}</p>`).join('') +
+      '</div>' +
       '</section>'
     );
+  }
+
+  retryWorkSources() {
+    void this.page?.loadTasks?.();
+    if (typeof window !== 'undefined') void window.FileJanitorConsole?.refresh?.();
+  }
+
+  runNextAction(key, trigger) {
+    const action = this.nextAction().action;
+    if (!action || action.key !== key) {
+      this.workNotice = 'The next action changed. Review the current recommendation.';
+      this.render();
+      return;
+    }
+    this.workNotice = '';
+    if (action.owner === 'task') {
+      this.runWorkAction(action.kind, action.id, trigger);
+    } else if (action.owner === 'console') {
+      const console = typeof window === 'undefined' ? null : window.FileJanitorConsole;
+      if (action.kind === 'retry') return void console?.refresh?.();
+      if (action.kind === 'setup')
+        return console?.focusSetup?.(trigger, { source: 'workspace-next-action' });
+      console?.open?.({
+        source: 'workspace-next-action',
+        trigger,
+        ...(action.kind === 'history' ? { item: action.id } : {}),
+        tab:
+          action.kind === 'consent' ? 'settings' : action.kind === 'history' ? 'history' : 'review'
+      });
+    } else if (action.kind === 'retry') this.retryWorkSources();
+    else if (action.kind === 'create') this.page?.showAddTaskModal?.();
   }
 
   renderWorkspaceAdmin() {
@@ -2258,8 +2355,12 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
+      if (button.hasAttribute('data-cmd-next-action')) {
+        this.runNextAction(button.getAttribute('data-cmd-next-action'), button);
+        return;
+      }
       if (button.hasAttribute('data-cmd-work-retry')) {
-        void this.page?.loadTasks?.();
+        this.retryWorkSources();
         return;
       }
       if (button.hasAttribute('data-cmd-work-create')) {
@@ -2296,6 +2397,7 @@ export class WorkspaceCommandView {
   }
 
   render() {
+    this.ensureNextActionSubscription();
     const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
     if (surfaceHost && typeof surfaceHost.setMapVisible === 'function') {
       surfaceHost.setMapVisible(this.active && this.viewMode === 'map');
@@ -2309,10 +2411,17 @@ export class WorkspaceCommandView {
     // which would tear the dragged element out mid-gesture. Skip background
     // re-renders while dragging; the drop path re-renders once the gesture
     // ends, picking up any data that changed in the meantime (FR11).
-    if (this._stationDragActive) return;
+    if (this._stationDragActive) {
+      this._renderDeferredByDrag = true;
+      return;
+    }
     // Same for a gesture inside the Detachment map: this render would move its
     // host node out from under the pointer (group-map-build FR-5).
-    if (this._detachmentDragActive) return;
+    if (this._detachmentDragActive) {
+      this._renderDeferredByDrag = true;
+      return;
+    }
+    this._renderDeferredByDrag = false;
     const workFocus =
       typeof document !== 'undefined'
         ? document.activeElement?.getAttribute?.('data-cmd-work-key')
@@ -2388,10 +2497,15 @@ export class WorkspaceCommandView {
     this.bindIdentityControls();
     this.bindIdentityControls(this.container.querySelector('[data-cmd-admin]'));
     this.bindWorkFirst();
+    this.announceNextAction();
     if (workFocus) {
-      const replacement = Array.from(this.container.querySelectorAll('[data-cmd-work-key]')).find(
-        el => el.getAttribute('data-cmd-work-key') === workFocus
-      );
+      const key = workFocus === 'next-pending' ? 'next' : workFocus;
+      const controls = Array.from(this.container.querySelectorAll('[data-cmd-work-key]'));
+      const replacement =
+        controls.find(el => el.getAttribute('data-cmd-work-key') === key) ||
+        (['next', 'next-pending'].includes(workFocus)
+          ? this.container.querySelector('#workspaceNextActionRegion')
+          : null);
       replacement?.focus({ preventScroll: true });
     }
     if (parentGroupFocus) this.restoreParentGroupFocus(this.container.querySelector('.ws-cmd-nav'));
@@ -4222,7 +4336,7 @@ export class WorkspaceCommandView {
     const page = this.page || {};
     const name = String(group.name || 'Agent');
     const key = this.normalizeAgentKey(group.key || name);
-    const status =
+    const rosterStatus =
       typeof page.getAgentRosterStatus === 'function'
         ? page.getAgentRosterStatus(name)
         : { key: 'idle', label: 'Idle', detail: 'No active tasks' };
@@ -4241,6 +4355,7 @@ export class WorkspaceCommandView {
         ? page.getAgentModelPresentation(profile)
         : { model: '', label: 'Model not set', empty: true };
     const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const status = this.mapAgentStatus({ tasks, status: rosterStatus });
     const currentTask =
       tasks.find(task => String(task?.status || '').toLowerCase() === 'in_progress') || null;
 
@@ -4415,7 +4530,9 @@ export class WorkspaceCommandView {
       '</span></p>' +
       '</div>' +
       '<div class="ws-cmd-stage-actions">' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-task="' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-add-task="' +
       escapeHtml(agent.encodedName) +
       '">Give Task</button>' +
       detailAction +
@@ -5281,7 +5398,9 @@ export class WorkspaceCommandView {
       '<span>' +
       EMPTY_ROSTER_LINE +
       '</span>' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-add-agent' +
       (offer.roleId ? ' data-cmd-hire-role="' + escapeHtml(offer.roleId) + '"' : '') +
       '>' +
       escapeHtml(offer.label) +
@@ -5390,13 +5509,27 @@ export class WorkspaceCommandView {
     if (tasks.some(task => this.isNeedsInputTask(task))) {
       return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
     }
+    if (tasks.some(task => ['failed', 'timed_out'].includes(resolveTaskPresentation(task).state))) {
+      return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the task result' };
+    }
     if (tasks.some(task => this.isWorkingTask(task))) {
       return { key: 'working', label: 'Working', detail: 'Task in progress' };
     }
-    if (tasks.some(task => this.isQueuedTask(task))) {
+    if (
+      tasks.some(task =>
+        ['ready', 'needs_assignment'].includes(resolveTaskPresentation(task).state)
+      )
+    ) {
       return { key: 'waiting', label: 'Waiting', detail: 'Task queued' };
     }
-    return agent?.status || { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+    if (tasks.some(task => resolveTaskPresentation(task).isUnknown)) {
+      return { key: 'unknown', label: 'Check tasks', detail: 'Task state is unrecognized' };
+    }
+    if (this.page?.tasksLoading || this.page?.tasksLoadFailed) {
+      return { key: 'unknown', label: 'Checking work', detail: 'Task status is not confirmed' };
+    }
+    if (agent?.status && agent.status.key !== 'idle') return agent.status;
+    return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tasks' };
   }
 
   mapAgentViewModels() {
@@ -9087,7 +9220,7 @@ export class WorkspaceCommandView {
   // roster excluding the entry agent, unassigned placeholders, and duplicate
   // records — agentGroups() already dedupes and drops unassigned (FR69).
   commandNodeOrchestrationCopy(specialistCount) {
-    if (specialistCount <= 0) return 'No specialist agents yet';
+    if (specialistCount <= 0) return 'Works directly on assigned tasks';
     return (
       'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's')
     );
@@ -9099,7 +9232,9 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-command-repair">' +
       '<strong>No Commander</strong>' +
       '<span>Chats, routing, and task orchestration need a Commander.</span>' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Hire a Commander</button>' +
+      '<button type="button" class="ws-cmd-agent-action' +
+      this.secondaryActionClass() +
+      '" data-cmd-add-agent>Hire a Commander</button>' +
       '</div>'
     );
   }
@@ -11096,6 +11231,7 @@ export class WorkspaceCommandView {
     // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
     // no whole-frame tint, layout/density unchanged.
     return (
+      this.renderWorkFirst() +
       '<div class="ws-cmd-map-shell' +
       (this.isPersonalHQ() ? ' is-hq' : '') +
       '">' +
@@ -12635,6 +12771,16 @@ export class WorkspaceCommandView {
     });
     const release = () => {
       this._detachmentDragActive = false;
+      // Let the map finish processing pointerup before consuming deferred state.
+      queueMicrotask(() => {
+        if (
+          this.active &&
+          this._renderDeferredByDrag &&
+          !this._detachmentDragActive &&
+          !this._stationDragActive
+        )
+          this.render();
+      });
     };
     host.addEventListener('pointerup', release);
     host.addEventListener('pointercancel', release);

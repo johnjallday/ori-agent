@@ -41,9 +41,8 @@ const VALID_PANELS = new Set(['tasks', 'backlog', 'settings']);
 // not this page's drawers, so they are neither applied nor reported as stale.
 // The same holds for Calendar Ops' meeting deep link from Today and the Daily
 // Brief (`&event=<id>&calendar=<id>`): those params are not parsed here, so
-// they are never reported as stale either, and like `panel` they are gone once
-// the sanitized state is written back. calendar-console.js captures all three
-// at parse time, before that happens.
+// they are never reported as stale either. Serialization preserves their
+// parameters while updating only Command-owned view state.
 const CONSOLE_PANELS = new Set(['file-janitor', 'calendar', 'backup-recovery']);
 
 /** Parse a query string (with or without a leading `?`) into raw URL state. */
@@ -181,7 +180,14 @@ export function isSafeReturnTarget(raw, workspaceSlug) {
  * Build the full path+query for the workspace detail page from a state object,
  * given the current pathname (used for pushState/replaceState targets).
  */
-export function buildWorkspaceURL(pathname, state) {
-  const query = serializeWorkspaceURLState(state);
-  return query ? pathname + '?' + query : pathname;
+export function buildWorkspaceURL(pathname, state, search = '', hash = '') {
+  const params = new URLSearchParams(search);
+  const consolePanel = CONSOLE_PANELS.has(params.get('panel')) && !state?.panel;
+  for (const key of ['mode', 'task', 'agent', 'run', 'role']) params.delete(key);
+  if (!consolePanel) params.delete('panel');
+  for (const [key, value] of new URLSearchParams(serializeWorkspaceURLState(state))) {
+    params.set(key, value);
+  }
+  const query = params.toString();
+  return (query ? pathname + '?' + query : pathname) + hash;
 }

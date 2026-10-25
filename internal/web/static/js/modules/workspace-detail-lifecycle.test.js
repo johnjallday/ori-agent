@@ -80,6 +80,20 @@ function makePage(t, options = {}) {
   return { page, view };
 }
 
+test('task retry immediately qualifies the next action before its request resolves', async t => {
+  const pending = deferred();
+  const { page } = makePage(t, { dataLoader: { loadTasks: () => pending.promise } });
+  page.tasksLoadFailed = true;
+  const seen = [];
+  window.workspaceCommand.refreshNextAction = id =>
+    seen.push({ id, loading: page.tasksLoading, failed: page.tasksLoadFailed });
+  const loading = page.loadTasks();
+  assert.deepEqual(seen, [{ id: 'ws', loading: true, failed: false }]);
+  pending.resolve({ tasks: [] });
+  await loading;
+  assert.equal(page.tasksLoading, false);
+});
+
 const panels = [
   {
     method: 'loadTasks',

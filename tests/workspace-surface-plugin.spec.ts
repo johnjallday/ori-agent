@@ -143,6 +143,7 @@ test('plugin blueprint drives capability setup, granted agent surface, and full 
 
     await page.locator('.workspace-surface-close').click();
     await expect(page.locator('.workspace-surface-modal')).toBeHidden();
+    await page.getByRole('button', { name: /^map$/i }).click();
     const station = page.locator(`[data-cmd-hq-station="${SURFACE_KEY}"]`).first();
     await station.click();
     await expect(page.locator('.workspace-surface-modal')).toBeVisible({ timeout: 20_000 });
@@ -219,11 +220,11 @@ test('plugin blueprint drives capability setup, granted agent surface, and full 
     await expect(frame.locator('[data-result]')).toContainText('session_unknown');
     await capture('group3-06-trust-changing-update-invalidates-frame.png');
 
+    // The surface owns its URL parameter: Command mode changes must preserve
+    // it, so reload restores this open surface without a second station click.
     await page.reload();
-    await page.getByRole('button', { name: /^map$/i }).click();
     const updatedStation = page.locator(`[data-cmd-hq-station="${SURFACE_KEY}"]`).first();
     await expect(updatedStation).toContainText('Surface Demo', { timeout: 20_000 });
-    await updatedStation.click();
     await expect(page.locator('.workspace-surface-modal')).toBeVisible({ timeout: 20_000 });
     frame = page.frameLocator('iframe.workspace-surface-frame');
     await expect(frame.locator('[data-visit-count]')).toHaveText('4', { timeout: 15_000 });

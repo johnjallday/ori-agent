@@ -91,6 +91,7 @@ export class OverlayCoordinator {
    * @param {string} o.id - unique id
    * @param {string} o.kind - modal|menu|popover|drawer|tray
    * @param {Function} [o.onClose] - called when the coordinator closes it
+   * @param {Function} [o.canEscape] - live confirmation guard; false keeps Escape with this owner
    * @param {*} [o.trigger] - element/opaque ref focus returns to on close
    * @param {*} [o.container] - element to trap focus within / mark siblings inert
    * @returns {object} the registered record
@@ -100,6 +101,7 @@ export class OverlayCoordinator {
       id: String(o.id || ''),
       kind: String(o.kind || 'modal'),
       onClose: typeof o.onClose === 'function' ? o.onClose : null,
+      canEscape: typeof o.canEscape === 'function' ? o.canEscape : null,
       trigger: o.trigger || null,
       container: o.container || null,
       suspended: false
@@ -173,7 +175,7 @@ export class OverlayCoordinator {
         target = r;
       }
     }
-    if (!target) return null;
+    if (!target || (target.canEscape && !target.canEscape())) return null;
     this.close(target.id);
     return target.id;
   }

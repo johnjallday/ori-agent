@@ -251,6 +251,30 @@ test('isSafeReturnTarget rejects absolute URLs, protocol-relative links, and cro
   assert.equal(isSafeReturnTarget('/workspaces/ws-1', ''), false);
 });
 
+test('view changes preserve console ownership, unrelated parameters and fragment', () => {
+  const url = buildWorkspaceURL(
+    '/workspaces/ws-1',
+    { mode: MODE.MAP },
+    '?panel=file-janitor&tab=history&item=receipt&demo=next-action&mode=details&role=consumed',
+    '#kept'
+  );
+  const parsed = new URL(url, 'https://ori.invalid');
+  assert.equal(parsed.searchParams.get('panel'), 'file-janitor');
+  assert.equal(parsed.searchParams.get('tab'), 'history');
+  assert.equal(parsed.searchParams.get('item'), 'receipt');
+  assert.equal(parsed.searchParams.get('demo'), 'next-action');
+  assert.equal(parsed.searchParams.get('role'), null);
+  assert.equal(parsed.searchParams.get('mode'), 'map');
+  assert.equal(parsed.hash, '#kept');
+  assert.equal(
+    new URL(
+      buildWorkspaceURL('/workspaces/ws-1', { panel: 'tasks' }, '?panel=file-janitor&demo=kept'),
+      'https://ori.invalid'
+    ).searchParams.get('panel'),
+    'tasks'
+  );
+});
+
 test('buildWorkspaceURL composes pathname + serialized state', () => {
   assert.equal(
     buildWorkspaceURL('/workspaces/ws-1', { mode: MODE.MAP, task: 't1' }),

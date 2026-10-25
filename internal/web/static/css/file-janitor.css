@@ -1528,6 +1528,14 @@
   justify-content: flex-end;
 }
 
+.fj-card-read-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.875rem;
+}
+.fj-card-read-status button {
+  margin-inline-start: 0.5rem;
+}
 .fj-card > .fj-error {
   grid-column: 1 / -1;
   margin: 0;

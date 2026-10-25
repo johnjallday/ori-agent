@@ -132,6 +132,8 @@
         {{template "components/workspaces/setup-wizard-modal.tmpl" .}}
         <!-- Reviewed re-intake proposals are inert until opened and applied. -->
         <div id="blueprintIntakePending" class="blueprint-intake-pending" role="status" aria-live="polite" hidden></div>
+        <!-- Stable across Command rerenders: announce changed recommendations, not every poll. -->
+        <div id="workspaceNextActionStatus" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
         <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
         <!--
