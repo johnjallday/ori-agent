@@ -10,6 +10,7 @@ import { renderResearchSources } from './personal-assistant-research.js';
 import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
+import { createReviewVisit } from './personal-assistant-review-visit.js';
 // Installs window.PersonalAssistantFolderProposal, the reply card the work
 // controller draws for a folder path the user wrote.
 import './personal-assistant-folder-proposal.js';
@@ -155,6 +156,53 @@ const state = {
   generation: 0,
   els: null
 };
+
+const reviewVisit = createReviewVisit({
+  capture: () => {
+    if (
+      !state.available ||
+      !personalIsRecipient() ||
+      window.PersonalAssistantFolderContext?.isPending?.() ||
+      window.PersonalAssistantLink?.isPending?.()
+    )
+      return null;
+    return {
+      id: state.id,
+      title: state.title,
+      text: document.getElementById('personalAssistantInput')?.value || '',
+      folder: window.PersonalAssistantFolderContext?.snapshot?.(),
+      link: window.PersonalAssistantLink?.snapshot?.(),
+      focus: document.activeElement?.id || 'personalAssistantInput'
+    };
+  },
+  navigate: (id, beforeNavigate) => resume(id, { reviewVisit: true, beforeNavigate }),
+  fresh: () => startNew({ reviewVisit: true }),
+  restore: async saved => {
+    const input = document.getElementById('personalAssistantInput');
+    if (input) {
+      input.value = saved.text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    window.PersonalAssistantLink?.restore?.(saved.link);
+    document.getElementById(saved.focus)?.focus();
+    await window.PersonalAssistantFolderContext?.restore?.(saved.folder);
+  },
+  focus: () => {
+    const card = document.getElementById('personalAssistantFolderOffer');
+    if (card && !card.hidden) {
+      card.tabIndex = -1;
+      card.focus();
+    }
+  },
+  changed: origin => {
+    const button = document.getElementById('personalAssistantFolderReturn');
+    if (button) {
+      button.hidden = !origin;
+      button.textContent = `Return to ${origin?.folder?.observation?.folder || 'folder draft'}`;
+    }
+  },
+  notify: message => setNote(message)
+});
 
 function readStoredId() {
   try {
@@ -341,7 +389,7 @@ function leaveSavedDraft() {
 }
 
 /** Clears the tab's thread, its rendered log, and any pending confirmation. */
-function startNew() {
+function startNew(options = {}) {
   if (window.OriAskRouting?.resetConversation && !window.OriAskRouting.resetConversation()) {
     setNote('Wait for the current reply before starting a new conversation.');
     return false;
@@ -352,7 +400,10 @@ function startNew() {
   closeList();
   setCurrent('', '');
   window.PersonalAssistantFolderContext?.reset?.();
-  window.PersonalAssistantLink?.reset?.();
+  if (!options.reviewVisit) {
+    reviewVisit.clear();
+    window.PersonalAssistantLink?.reset?.();
+  }
   setNote('');
   document.getElementById('personalAssistantInput')?.focus();
   return true;
@@ -396,11 +447,24 @@ async function resume(id, options = {}) {
       }
       return false;
     }
+    if (options.beforeNavigate && !options.beforeNavigate()) {
+      setNote('Your draft changed while the review was opening. It is kept here.');
+      return false;
+    }
     if (window.OriAskRouting?.resetConversation && !window.OriAskRouting.resetConversation()) {
       setNote('Wait for the current reply before opening another conversation.');
       return false;
     }
+    if (options.reviewVisit) {
+      if (target !== state.id) window.PersonalAssistantLink?.park?.();
+      const input = document.getElementById('personalAssistantInput');
+      if (input) {
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
     closeReviews();
+    if (!options.reviewVisit && target !== state.id) reviewVisit.clear();
     window.PersonalAssistantFolderContext?.resetEvents?.();
     const conversation = result.body.conversation;
     const messages = result.body.messages || [];
@@ -599,7 +663,10 @@ function followRecipient() {
 
 function applyStatus(detail) {
   state.available = detail?.view?.available === true;
-  if (!state.available) closeList();
+  if (!state.available) {
+    closeList();
+    reviewVisit.clear();
+  }
   render();
   hydrate();
 }
@@ -717,6 +784,13 @@ function init() {
     list: document.getElementById('personalAssistantConversationList'),
     note: document.getElementById('personalAssistantConversationNote')
   };
+  const returnButton = document.createElement('button');
+  returnButton.id = 'personalAssistantFolderReturn';
+  returnButton.type = 'button';
+  returnButton.className = 'btn btn-sm btn-outline-secondary';
+  returnButton.hidden = true;
+  returnButton.addEventListener('click', () => void reviewVisit.back());
+  bar.append(returnButton);
   state.els.fresh.addEventListener('click', startNew);
   state.els.resume.addEventListener('click', () => void toggleList());
   // The panel's own Escape handler closes the whole drawer; an open list
@@ -741,6 +815,7 @@ const api = {
   applyReply,
   startNew,
   resume,
+  visitFolderReview: id => reviewVisit.open(id),
   reopenHistory: async () => {
     if (state.loading) return false;
     if (state.id) return resume(state.id);

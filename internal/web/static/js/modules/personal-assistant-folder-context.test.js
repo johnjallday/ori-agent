@@ -668,3 +668,65 @@ test('late review cannot bind a new conversation and historical context cannot r
   assert.equal(await f.controller.review('root'), null);
   assert.equal(f.calls.length, 1);
 });
+
+test('return restores an unsaved selection and rechecks references without scanning or extending authority', async () => {
+  const { controller, calls, setId } = fixture(async (url, body) =>
+    url.endsWith('/recommendation')
+      ? { observation_id: body.selection_id, structure: { version: 1, folder: 'Albums' } }
+      : {
+          observation: {
+            ...observation('a'),
+            tree: { nodes: [{ id: 'entry-0', name: 'Album-5', kind: 'folder' }] }
+          },
+          structure: { version: 1 },
+          blocker: { subject: 'Album-5' },
+          structure_unavailable: 'review_pending'
+        }
+  );
+  await controller.select('chip', 'music');
+  assert.equal(controller.setFocus(['entry-0']), true);
+  const saved = controller.snapshot();
+  setId('album-5');
+  controller.reset('album-5');
+  setId('');
+  controller.reset();
+  assert.equal(await controller.restore(saved), true);
+  assert.equal(controller.state.draftId, saved.draftId);
+  assert.deepEqual(controller.state.focusIDs, ['entry-0']);
+  assert.equal(controller.state.observation.id, 'a');
+  assert.equal(controller.state.blocker, null);
+  assert.equal(controller.state.authority, '');
+  assert.deepEqual(
+    calls.map(c => c.url),
+    [
+      '/api/home-assistant/folder-context/select',
+      '/api/home-assistant/folder-context/recommendation'
+    ]
+  );
+  assert.deepEqual(calls[1].body, { draft_id: saved.draftId, revision: '', selection_id: 'a' });
+});
+
+test('expired return keeps the observation but refuses execution; a late refresh cannot change a replacement', async () => {
+  let pending = deferred();
+  const f = fixture(async (url, body) =>
+    url.endsWith('/recommendation') ? pending.promise : { observation: observation(body.chip) }
+  );
+  await f.controller.select('chip', 'old');
+  const saved = f.controller.snapshot();
+  const returning = f.controller.restore(saved);
+  pending.reject(new Error('expired'));
+  assert.equal(await returning, false);
+  assert.equal(f.controller.state.observation.id, 'old');
+  assert.equal(f.controller.state.authority, 'expired');
+  assert.match(f.controller.state.notice, /draft is kept/);
+  assert.equal(await f.controller.review('root'), null);
+  pending = deferred();
+  const refreshing = f.controller.refreshRecommendation();
+  await f.controller.select('chip', 'new');
+  pending.resolve({ observation_id: 'old', blocker: { subject: 'Old' } });
+  assert.equal(await refreshing, false);
+  assert.equal(f.controller.state.observation.id, 'new');
+  assert.equal(f.controller.state.blocker, null);
+  f.setId('foreign');
+  assert.equal(await f.controller.restore(saved), false);
+});

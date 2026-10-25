@@ -610,7 +610,7 @@ async function review(candidateId, close = false, offerId, placement) {
     open.textContent = 'Open existing conversation';
     open.addEventListener('click', () => {
       placementNode?.remove();
-      void window.PersonalAssistantConversation?.resume?.(pending.conversation_id);
+      void window.PersonalAssistantConversation?.visitFolderReview?.(pending.conversation_id);
     });
     placementNode.append(message, open);
     showPlacement(open, shouldFocus);

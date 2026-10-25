@@ -2189,7 +2189,7 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 /* Under the header, the bar takes room only while the earlier-conversations
-   list, the note or the saved draft has something to show (FR21). */
+   list, the note, a saved draft or a folder return has something to show. */
 #personalAssistantConversationBar {
   flex: none;
 }
@@ -2198,7 +2198,8 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   :has(
     > #personalAssistantConversationList:not([hidden]),
     > #personalAssistantConversationNote:not(:empty),
-    > #personalAssistantSavedDraft:not([hidden])
+    > #personalAssistantSavedDraft:not([hidden]),
+    > #personalAssistantFolderReturn:not([hidden])
   )
 ) {
   display: none;

@@ -396,6 +396,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/personal-assistant/hire-proposals/{proposalID}/adjust", homeAssistantAskHandler.AdjustHireProposalHandler)
 	mux.HandleFunc("GET /api/home-assistant/folder-context/choices", homeAssistantAskHandler.FolderChoicesHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/select", homeAssistantAskHandler.SelectFolderContextHandler)
+	mux.HandleFunc("POST /api/home-assistant/folder-context/recommendation", homeAssistantAskHandler.RefreshFolderRecommendationHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/detach", homeAssistantAskHandler.DetachFolderContextHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/review", homeAssistantAskHandler.ReviewFolderSetupHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/review/close", homeAssistantAskHandler.CloseFolderReviewHandler)

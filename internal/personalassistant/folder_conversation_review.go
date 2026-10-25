@@ -573,6 +573,7 @@ type FolderStructureProposal struct {
 	Structure   *FolderStructure
 	Declined    *FolderRootDecline
 	Unavailable string
+	Blocker     *FolderRecommendationBlocker
 }
 
 // Structure describes an attached folder that holds several projects as one
@@ -615,7 +616,8 @@ func (s *FolderObservationService) Structure(ctx context.Context, target folderc
 	if tombstone := doc.Tombstone(FolderKey(held.root)); tombstone != nil {
 		proposal.Declined = &FolderRootDecline{FolderKey: tombstone.Key, Name: tombstone.Name, At: tombstone.CreatedAt}
 	}
-	if doc.Pending() != nil {
+	proposal.Blocker = s.recommendationBlocker(ctx, target, doc)
+	if proposal.Blocker != nil && proposal.Blocker.Blocks {
 		proposal.Unavailable = FolderStructureReviewPending
 	}
 	return proposal
