@@ -19,6 +19,7 @@ import {
   boundedAssistantHandoff,
   canSubmitAssistantWork,
   clampDrawerWidth,
+  composerCommand,
   composerHeight,
   conversationMenuView,
   createActionMenu,
@@ -210,6 +211,28 @@ test('the header names the conversation, and its menu holds New, Continue… and
   assert.ok(bar > markup.indexOf('</header>'));
   assert.ok(bar < markup.indexOf('id="personalAssistantScroll"'));
   assert.doesNotMatch(markup, /personalAssistantEntrySessionBar/);
+});
+
+test('/clear is New conversation typed; other text is a message', () => {
+  for (const text of ['/clear', '/CLEAR', '  /clear\n', '/Clear'])
+    assert.equal(composerCommand(text), 'clear', JSON.stringify(text));
+  for (const text of ['', 'clear', '/clear this', '/clearall', 'please /clear', '/ clear', null])
+    assert.equal(composerCommand(text), '', JSON.stringify(text));
+});
+
+test('both New items show /clear without changing their accessible name', () => {
+  const markup = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  for (const id of ['personalAssistantConversationNew', 'personalAssistantEntrySessionNew'])
+    assert.match(
+      markup,
+      new RegExp(
+        `id="${id}"[^>]*>New conversation<span class="personal-assistant-panel__menu-hint" aria-hidden="true">/clear</span></button>`
+      ),
+      id
+    );
 });
 
 test('the conversation menu holds what the recipient can use (FR21)', () => {

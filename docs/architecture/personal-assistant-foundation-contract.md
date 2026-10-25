@@ -1120,7 +1120,13 @@ route nor the store behind them.
 
 Each tab holds its own current conversation ID, so two tabs never share a
 thread by accident. **New conversation** clears the tab's ID and any pending
-confirmation. **Continue** picks a conversation from the validated list. Every
+confirmation. Typing `/clear` in the composer and sending it does the same,
+for the hired assistant and for an entry agent, and sends nothing to a model;
+the menu item shows `/clear` as a hint. It refuses while a reply is in flight
+and says "Nothing to clear." when New is disabled. Any other text, `/clear
+this` included, is an ordinary message. Nothing is deleted: the earlier
+conversation stays in Personal HQ (an entry agent's session in Sessions).
+**Continue** picks a conversation from the validated list. Every
 stored turn returns its canonical message IDs, and the rendered messages carry
 them, so a later action can name the exact message it means.
 

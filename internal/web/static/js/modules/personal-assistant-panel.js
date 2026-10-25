@@ -156,6 +156,10 @@ export function entrySessionStripView({ recipient, session, hasMessages } = {}) 
 export const ENTRY_HYDRATION_FAILED =
   'Could not load this conversation. Your next message starts where the server left off.';
 
+// What /clear says after leaving the hired assistant's conversation. Opening a
+// conversation again retires it.
+const CLEARED_STATUS = 'Cleared. Continue… reopens the earlier conversation.';
+
 export function boundedAssistantHandoff(value) {
   return Array.from(String(value || '').trim())
     .slice(0, HANDOFF_LIMIT)
@@ -188,6 +192,15 @@ export function canSubmitAssistantWork({ available, pending, busy, text }) {
   return (
     available === true && pending !== true && busy !== true && String(text || '').trim().length > 0
   );
+}
+
+/**
+ * The composer command a typed message is, or ''. A command runs in the drawer
+ * and is never sent to a model; any other text, "/clear this" included, is an
+ * ordinary message.
+ */
+export function composerCommand(text) {
+  return /^\/clear$/i.test(String(text || '').trim()) ? 'clear' : '';
 }
 
 /**
@@ -1539,12 +1552,54 @@ export function entryAgentSendRecipient(recipient, sessionId) {
   };
 }
 
+/** Empties the composer after it was used for something other than a turn. */
+function clearComposer() {
+  state.draft = '';
+  state.els.input.value = '';
+  syncComposerHeight();
+  saveTabValue(PANEL_DRAFT_KEY, '');
+}
+
+/**
+ * /clear: New conversation, typed. The thread, its folder and its link leave
+ * the drawer and nothing is sent. The conversation itself is kept: Continue…
+ * reopens the hired assistant's, and an entry agent's stays in Sessions.
+ */
+function clearConversation(who) {
+  if (window.OriAskRouting?.getState?.().busy === true) {
+    setStatus(`${who.name} is still replying. Clear when the reply arrives.`);
+    return false;
+  }
+  // New is disabled when there is nothing to leave; read it fresh.
+  let fresh;
+  if (who.personal) {
+    window.PersonalAssistantConversation?.refresh?.();
+    fresh = state.els.conversationNew;
+  } else {
+    renderEntrySessionBar();
+    fresh = state.els.entrySessionNew;
+  }
+  if (fresh?.disabled) {
+    clearComposer();
+    setStatus('Nothing to clear.');
+    return true;
+  }
+  const cleared = who.personal
+    ? window.PersonalAssistantConversation?.startNew?.() === true
+    : startNewEntryConversation();
+  if (!cleared) return false;
+  clearComposer();
+  setStatus(who.personal ? CLEARED_STATUS : 'Cleared. The earlier session is still in Sessions.');
+  return true;
+}
+
 function submit(event) {
   event?.preventDefault();
   moveSharedWorkActivity();
   const who = identity();
   const entry = entryAgentSendRecipient(recipients()?.current?.(), recipients()?.sessionId?.());
   const typed = String(state.els?.input?.value || '').trim();
+  if (composerCommand(typed) === 'clear') return clearConversation(who);
   // An empty Send explores an attached folder or link only in the hired
   // assistant's conversation; neither is attached to a workspace agent's turn.
   const text =
@@ -1606,10 +1661,7 @@ function submit(event) {
       ...(entry ? { recipient: entry } : {})
     })
   );
-  state.draft = '';
-  state.els.input.value = '';
-  syncComposerHeight();
-  saveTabValue(PANEL_DRAFT_KEY, '');
+  clearComposer();
   // Planning can intentionally remain pending while the user reviews a choice;
   // the existing work controller owns that lifecycle. Release only this
   // composer's duplicate-submit guard after delegation has been accepted.
@@ -1766,6 +1818,9 @@ function init() {
     void hydrateEntryConversation();
   });
   document.addEventListener('personal-assistant:entry-session', renderEntrySessionBar);
+  document.addEventListener('personal-assistant:conversation', event => {
+    if (event.detail?.id && state.els?.status?.textContent === CLEARED_STATUS) setStatus('');
+  });
   state.els.entrySessionNew?.addEventListener('click', startNewEntryConversation);
   state.recipientMenu = createRecipientMenu({
     button: state.els.recipientButton,

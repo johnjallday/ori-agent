@@ -128,16 +128,18 @@
         <div id="personalAssistantRecipientMenu" class="personal-assistant-recipient-menu" role="menu"
              aria-label="Who to talk to" hidden></div>
         <!-- New and Continue… for the hired assistant, New for the entry agent
-             (whose session is also listed in the Sessions station). The last
-             row says when the hired assistant next checks in; it does nothing. -->
+             (whose session is also listed in the Sessions station). New can
+             also be typed: /clear in the composer does the same and sends
+             nothing. The last row says when the hired assistant next checks
+             in; it does nothing. -->
         <div id="personalAssistantConversationItems" class="personal-assistant-recipient-menu personal-assistant-panel__menu"
              role="menu" aria-label="Conversation" hidden>
           <button type="button" id="personalAssistantConversationNew" class="personal-assistant-panel__menu-item"
-                  role="menuitem" tabindex="-1">New conversation</button>
+                  role="menuitem" tabindex="-1">New conversation<span class="personal-assistant-panel__menu-hint" aria-hidden="true">/clear</span></button>
           <button type="button" id="personalAssistantConversationContinue" class="personal-assistant-panel__menu-item"
                   role="menuitem" tabindex="-1" aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>
           <button type="button" id="personalAssistantEntrySessionNew" class="personal-assistant-panel__menu-item"
-                  role="menuitem" tabindex="-1" hidden>New conversation</button>
+                  role="menuitem" tabindex="-1" hidden>New conversation<span class="personal-assistant-panel__menu-hint" aria-hidden="true">/clear</span></button>
           <!-- When the next check-in is; "Personal Assistant" until known. -->
           <p id="personalAssistantCheckIn" class="personal-assistant-panel__checkin personal-assistant-panel__menu-note"
              role="menuitem" aria-disabled="true" tabindex="-1">Personal Assistant</p>
