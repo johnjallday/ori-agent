@@ -1652,25 +1652,21 @@
   //
   // The Curator is optional by design: File Janitor works fully without it, so
   // this states that plainly rather than presenting the agent as something
-  // missing. Presence is read from the install record's owned resources — the
-  // same association the server uses for idempotency — never from an agent's
-  // display name.
+  // missing. The server verifies the install's actual current attachment — a
+  // stale resource or an agent's display name is not evidence of guidance.
   function curatorSection() {
     const section = el('div', 'fj-setting fj-setting-curator');
     section.appendChild(el('h4', 'fj-setting-heading', 'Curator'));
 
-    const record = capabilityRecord();
-    const companions = (record && record.owned_resources ? record.owned_resources : []).filter(
-      resource => resource && resource.kind === 'companion_agent'
-    );
-
-    if (companions.length > 0) {
+    const guidance = lastStatus?.guidance;
+    if (guidance?.available) {
       section.appendChild(
         el(
           'p',
           'fj-setting-help',
           'A Curator is helping in this workspace. It explains proposals and answers questions; ' +
-            'it cannot approve, move, or delete anything.'
+            'it cannot approve, move, or delete anything. Built-in filing and backup guidance is available. ' +
+            'This is product advice, not an enabled user skill or permission to act.'
         )
       );
       return section;
@@ -1684,22 +1680,40 @@
           'helps you understand what is proposed, and can never act on your files.'
       )
     );
+    if (guidance?.candidates?.length) {
+      section.appendChild(
+        el(
+          'p',
+          'fj-setting-help',
+          'Ori could not verify a companion association. Choose an existing agent explicitly or add a Curator; no shared instructions or tools will change.'
+        )
+      );
+      const label = el('label', 'fj-setting-help', 'Existing workspace agent');
+      label.htmlFor = 'fileJanitorCuratorCandidate';
+      const select = el('select', 'fj-select');
+      select.id = 'fileJanitorCuratorCandidate';
+      for (const candidate of guidance.candidates) {
+        const option = el('option', '', candidate.name);
+        option.value = candidate.id;
+        select.appendChild(option);
+      }
+      const associate = button(
+        'Use as Curator',
+        'fj-btn fj-btn-secondary',
+        () => void addCurator(select.value)
+      );
+      associate.id = 'fileJanitorAssociateCurator';
+      section.appendChild(label);
+      section.appendChild(select);
+      section.appendChild(associate);
+    }
     const add = button('Add a Curator', 'fj-btn fj-btn-secondary', () => void addCurator());
     add.id = 'fileJanitorAddCurator';
     section.appendChild(add);
     return section;
   }
 
-  // capabilityRecord reads this workspace's install record from the catalog the
-  // capabilities module already loaded, rather than issuing another request.
-  function capabilityRecord() {
-    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
-    if (!catalog || typeof catalog.find !== 'function') return null;
-    const item = catalog.find('file-janitor');
-    return (item && item.record) || null;
-  }
-
-  async function addCurator() {
+  async function addCurator(instanceId = '') {
     const id = wsId();
     if (!id || busy) return;
     busy = true;
@@ -1707,7 +1721,11 @@
     try {
       const response = await fetch(
         '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor/companion',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          ...(instanceId ? { body: JSON.stringify({ agent_instance_id: instanceId }) } : {})
+        }
       );
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1722,6 +1740,7 @@
       );
       const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
       if (catalog && typeof catalog.reload === 'function') await catalog.reload();
+      await refresh();
       renderSettings();
     } catch (error) {
       setSettingsMessage(error.message || 'Ori could not add a Curator.');

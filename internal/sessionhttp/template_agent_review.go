@@ -317,6 +317,7 @@ func (h *Handler) seedTemplateAgentsStrict(ws *session.Workspace, tpl projecttem
 		} else {
 			attachWorkspaceSpecialist(ws, spec.Name)
 		}
+		recordSeededCurator(&result, ws, tpl, index, spec.Name, exists)
 	}
 	return result, nil
 }

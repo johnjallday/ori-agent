@@ -3859,22 +3859,60 @@ test('Settings offers a Curator when there is none', () => {
   restore();
 });
 
-// Presence comes from the install record's owned resources — the same
-// association the server uses for idempotency — never from an agent's name.
-test('Settings reports an existing Curator from the install record', () => {
+// Only the server's verified current attachment establishes availability.
+test('Settings reports built-in guidance for the verified Curator', () => {
   const doc = setup();
   const restore = withCatalog({
     id: 'file-janitor',
     owned_resources: [{ kind: 'companion_agent', id: 'agent-1' }]
   });
   panel._setBatch(null, [], CATEGORIES);
-  openConsole(statusFixture());
+  openConsole(
+    statusFixture({ guidance: { bundled: true, available: true, agent_instance_id: 'agent-1' } })
+  );
   panel._selectTab('settings');
 
   const body = text(doc);
   assert.match(body, /A Curator is helping in this workspace/);
   assert.match(body, /cannot approve, move, or delete/);
+  assert.match(body, /Built-in filing and backup guidance is available/);
+  assert.match(body, /not an enabled user skill or permission/);
   assert.equal(doc.getElementById('fileJanitorAddCurator'), null, 'no second Curator offer');
+  restore();
+});
+
+test('stale companion resource offers explicit association, not guidance availability', async () => {
+  const doc = setup();
+  const restore = withCatalog({
+    id: 'file-janitor',
+    owned_resources: [{ kind: 'companion_agent', id: 'gone' }]
+  });
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(
+    statusFixture({
+      guidance: {
+        bundled: true,
+        available: false,
+        candidates: [{ id: 'actual-id', name: 'My helper' }]
+      }
+    })
+  );
+  panel._selectTab('settings');
+  assert.doesNotMatch(text(doc), /Built-in filing and backup guidance is available/);
+  assert.match(text(doc), /could not verify a companion association/);
+  const select = doc.getElementById('fileJanitorCuratorCandidate');
+  select.value = 'actual-id';
+  let posted;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/companion')) {
+      posted = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ display_name: 'My helper' }) };
+    }
+    return { ok: true, json: async () => ({ status: statusFixture() }) };
+  };
+  doc.getElementById('fileJanitorAssociateCurator').click();
+  await settle();
+  assert.deepEqual(posted, { agent_instance_id: 'actual-id' });
   restore();
 });
 

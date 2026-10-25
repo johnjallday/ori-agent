@@ -61,6 +61,7 @@ type ResolvedAgentRuntime struct {
 	FromWorkspaceCopy bool
 	MCPServers        []string
 	EffectiveSkills   []ResolvedSkill
+	HostContext       HostContext
 	// MCPToolAllowlist maps a materialized runtime server name (see
 	// RuntimeMCPServerName) to the tool names its binding permits. A missing
 	// key means the server carries no restriction (legacy all-tools
@@ -171,7 +172,7 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		MCPServers:        nil,
 	}
 
-	if strings.TrimSpace(workspaceID) == "" || r.workspaceStore == nil || r.mcpRegistry == nil || r.mcpConfigManager == nil {
+	if strings.TrimSpace(workspaceID) == "" || r.workspaceStore == nil {
 		return resolved, nil
 	}
 
@@ -180,8 +181,12 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		return nil, fmt.Errorf("load workspace %s for runtime resolution: %w", workspaceID, err)
 	}
 
+	resolved.HostContext = r.fileCuratorHostContext(ws, agentName, nodeID)
 	instance, _ := ws.FindAgentInstance(agentName, nodeID)
 	resolved.AgentInstance = instance
+	if r.mcpRegistry == nil || r.mcpConfigManager == nil {
+		return resolved, nil
+	}
 
 	// An instance with an explicit Toolbox assignment resolves from that
 	// assignment alone (PRD §9.4). The legacy merge below runs only for

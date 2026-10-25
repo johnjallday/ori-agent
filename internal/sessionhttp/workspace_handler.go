@@ -980,7 +980,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			assistantSetupCreation.FolderReferenceID = buildFolderPlan.referenceID
 		}
 	}
-	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, assistantSetupCreation, groupSnapshot); capabilityWarning != "" {
+	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved, seed, assistantSetupCreation, groupSnapshot); capabilityWarning != "" {
 		if prov.projectWarning == "" {
 			prov.projectWarning = capabilityWarning
 		} else {
@@ -1665,7 +1665,7 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 // later Update on the same workspace id — starter-task seeding runs right
 // after template application — would clobber a provenance write made here
 // earlier. Doing it last avoids that.
-func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool, assistantSetup *agentworkspace.AssistantSetupCreation, snapshots ...*agentworkspace.GroupRequirementSnapshot) string {
+func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool, seed seedAgentsResult, assistantSetup *agentworkspace.AssistantSetupCreation, snapshots ...*agentworkspace.GroupRequirementSnapshot) string {
 	if !resolved || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
 		return ""
 	}
@@ -1727,6 +1727,16 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 			}
 			if _, err := w.AddInstalledCapability(record); err != nil {
 				return err
+			}
+		}
+		for _, resource := range seed.CuratorResources {
+			// Seeding supplied an actual attachment, not a name inferred here.
+			// Protect an entry role even if it became primary after seeding.
+			for _, instance := range w.AgentInstances {
+				if instance.ID == resource.ID {
+					resource.Shared = resource.Shared || instance.EntryPoint
+					w.RecordCapabilityResource(agentworkspace.CapabilityFileJanitor, resource)
+				}
 			}
 		}
 		if prov.AssistantSetup != nil && prov.AssistantSetup.FolderReferenceID != "" {

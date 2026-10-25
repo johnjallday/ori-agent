@@ -133,6 +133,13 @@ async function grantFolder(request: APIRequestContext, workspaceId: string, root
 const console_ = (page: Page) => page.locator('#fileJanitorConsole');
 const consoleBody = (page: Page) => page.locator('#fileJanitorConsoleBody');
 
+async function captureCuratorSettings(page: Page, path: string) {
+  // The page has a persistent event stream, so networkidle is not a useful
+  // readiness condition. Await the console's own canonical refresh instead.
+  await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
+  await page.locator('.fj-setting-curator').screenshot({ path, animations: 'disabled' });
+}
+
 /**
  * Opens a workspace and clears the modals a brand-new one puts in the way.
  *
@@ -193,6 +200,74 @@ async function openConsoleFromCard(page: Page) {
 }
 
 test.describe('File Janitor capability', () => {
+  test('built-in Curator guidance follows a renamed template role under another lead', async ({
+    page,
+    request
+  }, testInfo) => {
+    const lead = `Guidance Lead ${RUN}`;
+    const helper = `Guidance Helper ${RUN}`;
+    const created = await request.post('/api/agents', {
+      data: { name: lead, type: 'general', model: 'gpt-4o-mini' }
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const response = await request.post('/api/workspaces', {
+      data: {
+        name: `Guidance Template ${RUN}`,
+        template_id: 'file-janitor',
+        existing_agent_names: [lead],
+        entry_agent_name: lead,
+        template_agent_overrides: [{ index: 0, name: helper }]
+      }
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const { folder } = await response.json();
+    workspaceSlugs.set(folder.id, folder.folder_slug);
+    const statusResponse = await request.get(`/api/workspaces/${folder.id}/file-janitor`);
+    const { status } = await statusResponse.json();
+    expect(status.guidance.bundled).toBe(true);
+    expect(status.guidance.available).toBe(true);
+    const instance = folder.agent_instances.find(
+      (item: { id: string }) => item.id === status.guidance.agent_instance_id
+    );
+    expect(instance.name).toBe(helper);
+    expect(instance.entry_point).not.toBe(true);
+    await grantFolder(request, folder.id, fixtureFolder('guidance-template', {}));
+    await openWorkspace(page, folder.id, '?view=details&panel=file-janitor&tab=settings');
+    await expect(console_(page)).toBeVisible();
+    await expect(consoleBody(page)).toContainText(
+      'Built-in filing and backup guidance is available'
+    );
+    await expect(consoleBody(page)).toContainText('not an enabled user skill or permission');
+    await captureCuratorSettings(page, testInfo.outputPath('curator-template-guidance.png'));
+  });
+
+  test('Curator settings explicitly recover an unassociated agent and support in-place add', async ({
+    page,
+    request
+  }, testInfo) => {
+    const id = await createPlainWorkspace(request, `Guidance Recovery ${RUN}`);
+    await installCapability(request, id);
+    await grantFolder(request, id, fixtureFolder('guidance-recovery', {}));
+    await openWorkspace(page, id, '?view=details&panel=file-janitor&tab=settings');
+    await expect(consoleBody(page)).toContainText('could not verify a companion association');
+    await captureCuratorSettings(page, testInfo.outputPath('curator-association-recovery.png'));
+    await page.locator('#fileJanitorAssociateCurator').click();
+    await expect(consoleBody(page)).toContainText(
+      'Built-in filing and backup guidance is available'
+    );
+    await captureCuratorSettings(page, testInfo.outputPath('curator-associated-guidance.png'));
+
+    const addedID = await createPlainWorkspace(request, `Guidance Added ${RUN}`);
+    await installCapability(request, addedID);
+    await grantFolder(request, addedID, fixtureFolder('guidance-added', {}));
+    await openWorkspace(page, addedID, '?view=details&panel=file-janitor&tab=settings');
+    await page.locator('#fileJanitorAddCurator').click();
+    await expect(consoleBody(page)).toContainText(
+      'Built-in filing and backup guidance is available'
+    );
+    await captureCuratorSettings(page, testInfo.outputPath('curator-in-place-guidance.png'));
+  });
+
   test('next action follows setup, scan, shared review, partial receipts and undo', async ({
     page,
     request

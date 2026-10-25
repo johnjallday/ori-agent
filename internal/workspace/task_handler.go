@@ -159,6 +159,7 @@ type resolvedTaskAgent struct {
 	*agent.Agent
 	MCPServers      []string
 	EffectiveSkills []ResolvedSkill
+	HostContext     HostContext
 	// MCPToolAllowlist maps a runtime server name (see RuntimeMCPServerName)
 	// to the tool names its binding permits; a missing key means no
 	// restriction. See ResolvedAgentRuntime.MCPToolAllowlist.
@@ -387,6 +388,7 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 		effectiveSkills = task.RuntimeSkillPrompts
 	}
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, effectiveSkills)
+	taskSystemPrompt = AppendHostContext(taskSystemPrompt, ag.HostContext)
 	reviewedInBase := false
 	if resolvedBase, hadVars := h.resolveTaskAgentBasePrompt(ctx, ag, agentName, task); hadVars {
 		reviewedInBase = strings.Contains(ag.Settings.SystemPrompt, "workspace.memory")
