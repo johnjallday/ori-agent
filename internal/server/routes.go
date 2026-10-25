@@ -1694,6 +1694,13 @@ func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/plugins/{name}/enable", s.Handlers.Plugin.SetEnabledHandler(true))
 		mux.HandleFunc("POST /api/plugins/{name}/disable", s.Handlers.Plugin.SetEnabledHandler(false))
 		mux.HandleFunc("POST /api/plugins/{name}/update", s.Handlers.Plugin.UpdateHandler)
+		// The reviewed Home package upgrade, addressed by plugin so Update can
+		// review and apply it in place. Same service and contract as the Home
+		// page's provider-upgrade routes.
+		if s.Handlers.Session != nil {
+			mux.HandleFunc("GET /api/plugins/{name}/home-upgrade", s.Handlers.Session.GetPluginHomeUpgrade)
+			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/review", s.Handlers.Session.ReviewPluginHomeUpgrade)
+		}
 	}
 }
 

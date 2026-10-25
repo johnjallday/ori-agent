@@ -21,20 +21,27 @@ import (
 // Portfolio Manager prompt is the only thing that changes between releases.
 func writeHomePackage(t *testing.T, root, version, portfolioPrompt string) {
 	t.Helper()
+	writeNamedHomePackage(t, root, "music-project-management", version, portfolioPrompt)
+}
+
+// writeNamedHomePackage is writeHomePackage under another package name, for
+// tests that must not share an identity with a reviewed integration.
+func writeNamedHomePackage(t *testing.T, root, name, version, portfolioPrompt string) {
+	t.Helper()
 	files := map[string]string{
-		filepath.Join(".claude-plugin", "plugin.json"): fmt.Sprintf(`{"name":"music-project-management","version":%q}`, version),
+		filepath.Join(".claude-plugin", "plugin.json"): fmt.Sprintf(`{"name":%q,"version":%q}`, name, version),
 		filepath.Join(".ori-plugin", "plugin.json"): fmt.Sprintf(`{
-  "schema_version": 1, "name": "music-project-management", "version": %q, "protocol": {"min": 1, "max": 1},
+  "schema_version": 1, "name": %q, "version": %q, "protocol": {"min": 1, "max": 1},
   "requires_host_features": ["independent_program_homes_v1"], "capabilities": [], "services": [], "blueprints": [],
   "assistant_program_homes": [{
     "schema_version": 1, "version": 1, "id": "music-producer-assistant", "station_name": "Music Production Home",
     "default_primary_name": "Portfolio Manager", "hire_title": "Staff your music production Home",
-    "roles": [{"id":"portfolio_manager","label":"Music Portfolio Manager","required":true,"primary":true,"role":"orchestrator","system_prompt":%q,"skills":["music-project-management"]}],
+    "roles": [{"id":"portfolio_manager","label":"Music Portfolio Manager","required":true,"primary":true,"role":"orchestrator","system_prompt":%q,"skills":[%q]}],
     "stages": [{"id":"foundation","label":"Foundation","accepted_completion_threshold":0}],
     "reflection": {"minimum_projects":3,"cadence_hours":168,"max_projects":16,"max_events_per_project":16,"max_candidates":8,"max_evidence":8,"rubric":"Propose bounded improvements."}
   }]
-}`, version, portfolioPrompt),
-		filepath.Join("skills", "music-project-management", "SKILL.md"): "---\nname: music-project-management\ndescription: Portfolio guidance " + version + ".\n---\nGuidance for " + version + ".\n",
+}`, name, version, portfolioPrompt, name),
+		filepath.Join("skills", name, "SKILL.md"): "---\nname: " + name + "\ndescription: Portfolio guidance " + version + ".\n---\nGuidance for " + version + ".\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(root, name)

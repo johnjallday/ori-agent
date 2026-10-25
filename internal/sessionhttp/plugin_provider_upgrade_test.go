@@ -1,0 +1,172 @@
+package sessionhttp
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/johnjallday/ori-agent/internal/homeupgrade"
+	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+type fakeInstalledPlugins []plugin.InstalledPlugin
+
+func (f fakeInstalledPlugins) List() ([]plugin.InstalledPlugin, error) { return f, nil }
+
+func pluginUpgradeRequest(t *testing.T, handler func(http.ResponseWriter, *http.Request), method, name, suffix, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, "/api/plugins/"+name+"/home-upgrade"+suffix, strings.NewReader(body))
+	req.SetPathValue("name", name)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	return rr
+}
+
+func TestPluginHomeUpgradeHTTP(t *testing.T) {
+	handler, store, station, _ := assistantPortfolioHTTPFixture(t)
+	owner := station.OwnerUserID
+	handler.currentUserID = func(context.Context) (string, error) { return owner, nil }
+	pin := workspace.AssistantProgramHomeOwner{PluginID: "studio-home", PluginVersion: "0.1.0", ProgramID: "portfolio-guide",
+		HomeSchemaVersion: 1, HomeVersion: 1, DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 1, ComponentFingerprint: strings.Repeat("b", 64)}
+	if err := store.Update(station.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.HomeProvider = &pin
+		current.SetAssistantProgramState(state)
+		current.FolderSlug = "portfolio-home"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	get := func(name string) *httptest.ResponseRecorder {
+		return pluginUpgradeRequest(t, handler.GetPluginHomeUpgrade, http.MethodGet, name, "", "")
+	}
+	review := func(name, body string) *httptest.ResponseRecorder {
+		return pluginUpgradeRequest(t, handler.ReviewPluginHomeUpgrade, http.MethodPost, name, "/review", body)
+	}
+
+	if rr := get("studio-home"); rr.Code != http.StatusNotFound {
+		t.Fatalf("unwired status = %d %s", rr.Code, rr.Body.String())
+	}
+
+	fake := &fakeHomeUpgrades{review: homeupgrade.Review{Token: "review-1", ExpiresAt: time.Now().Add(time.Minute), Plan: homeupgrade.Plan{
+		PluginID: "studio-home", FromVersion: "0.1.0", ToVersion: "0.2.0",
+		Homes: []homeupgrade.PlanHome{
+			{HomeID: station.ID, Name: "Portfolio Home"},
+			{HomeID: "removed-since", Name: "Removed Home"},
+		},
+	}}}
+	handler.SetHomePackageUpgrades(fake, func() plugin.UpdateSnapshot {
+		return plugin.UpdateSnapshot{Updates: []plugin.UpdateAvailability{{Name: "studio-home", InstalledVersion: "0.1.5", AvailableVersion: "0.2.0", Available: true}}}
+	})
+	// The installed record, not the Home's pin, is the installed version.
+	handler.SetInstalledPluginLister(fakeInstalledPlugins{{Name: "studio-home", Version: "0.1.5"}, {Name: "unused", Version: "1.0.0"}})
+
+	// The path is only a lookup key: a package that is not installed, and one
+	// no Home of the owner uses, have no upgrade and reach no service.
+	for _, name := range []string{"not-installed", "unused"} {
+		if rr := get(name); rr.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d %s", name, rr.Code, rr.Body.String())
+		}
+		if rr := review(name, "{}"); rr.Code != http.StatusNotFound {
+			t.Fatalf("%s review = %d %s", name, rr.Code, rr.Body.String())
+		}
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("refused scopes reached the service: %v", fake.calls)
+	}
+
+	rr := get("studio-home")
+	var status providerUpgradeView
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &status) != nil {
+		t.Fatalf("status = %d %s", rr.Code, rr.Body.String())
+	}
+	if status.PluginID != "studio-home" || status.InstalledVersion != "0.1.5" || !status.Available || status.AvailableVersion != "0.2.0" ||
+		len(status.Homes) != 1 || status.Homes[0] != (providerUpgradeHomeLink{Name: "Portfolio Home", Link: "/workspaces/portfolio-home/assistant"}) ||
+		status.Operation != nil || status.LastOperation != nil || status.StatusUnavailable {
+		t.Fatalf("status = %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), station.ID) {
+		t.Fatalf("status disclosed the Home's workspace ID: %s", rr.Body.String())
+	}
+	if fake.calls[0] != "status "+owner+" studio-home" {
+		t.Fatalf("status reached the service as %q", fake.calls[0])
+	}
+
+	// A finished operation is history, an unfinished one holds the package,
+	// and an unreadable status is said to be unavailable.
+	decode := func(rr *httptest.ResponseRecorder) error {
+		status = providerUpgradeView{}
+		return json.Unmarshal(rr.Body.Bytes(), &status)
+	}
+	fake.status = &homeupgrade.Operation{ID: "op-1", Status: homeupgrade.StatusSucceeded, Plan: homeupgrade.Plan{FromVersion: "0.1.0", ToVersion: "0.1.5"}}
+	if rr := get("studio-home"); decode(rr) != nil || status.Operation != nil ||
+		status.LastOperation == nil || status.LastOperation.ID != "op-1" || status.LastOperation.Status != homeupgrade.StatusSucceeded {
+		t.Fatalf("finished status = %s", rr.Body.String())
+	}
+	fake.status = &homeupgrade.Operation{ID: "op-2", Status: homeupgrade.StatusReconcileRequired}
+	if rr := get("studio-home"); decode(rr) != nil || status.LastOperation != nil ||
+		status.Operation == nil || status.Operation.Status != homeupgrade.StatusReconcileRequired {
+		t.Fatalf("held status = %s", rr.Body.String())
+	}
+	fake.status, fake.statusErr = nil, errors.New("database is locked")
+	if rr := get("studio-home"); rr.Code != http.StatusOK || decode(rr) != nil ||
+		!status.StatusUnavailable || status.Operation != nil || strings.Contains(rr.Body.String(), "locked") {
+		t.Fatalf("unreadable status = %d %s", rr.Code, rr.Body.String())
+	}
+	fake.statusErr = nil
+
+	// The review is the service's plan for every Home, with each of the
+	// owner's Homes linked by its page and none by its ID.
+	rr = review("studio-home", "{}")
+	var reviewed providerUpgradeReviewView
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &reviewed) != nil || reviewed.Token != "review-1" || len(reviewed.Homes) != 2 ||
+		reviewed.Homes[0].Link != "/workspaces/portfolio-home/assistant" || reviewed.Homes[1].Name != "Removed Home" || reviewed.Homes[1].Link != "" {
+		t.Fatalf("review = %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), station.ID) {
+		t.Fatalf("review disclosed the Home's workspace ID: %s", rr.Body.String())
+	}
+	if last := fake.calls[len(fake.calls)-1]; last != "review "+owner+" studio-home" {
+		t.Fatalf("review reached the service as %q", last)
+	}
+	if rr := review("studio-home", `{"plugin_id":"other"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("review accepted a request field: %d", rr.Code)
+	}
+	// The Home page's review is the same review, with the same links.
+	rr = providerUpgradeRequest(t, handler.ReviewAssistantProviderUpgrade, http.MethodPost, station.ID, "/review", "{}")
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &reviewed) != nil || reviewed.Homes[0].Link != "/workspaces/portfolio-home/assistant" {
+		t.Fatalf("Home review = %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Another person sees neither the upgrade nor the Home, and reaches no
+	// service on its behalf.
+	handler.currentUserID = func(context.Context) (string, error) { return "someone-else", nil }
+	before := len(fake.calls)
+	for _, rr := range []*httptest.ResponseRecorder{get("studio-home"), review("studio-home", "{}")} {
+		if rr.Code != http.StatusNotFound || strings.Contains(rr.Body.String(), "Portfolio Home") {
+			t.Fatalf("other owner = %d %s", rr.Code, rr.Body.String())
+		}
+	}
+	if len(fake.calls) != before {
+		t.Fatalf("another owner reached the service: %v", fake.calls[before:])
+	}
+
+	// A Home in the Trash is not listed; it keeps its old release.
+	handler.currentUserID = func(context.Context) (string, error) { return owner, nil }
+	live, _ := store.Get(station.ID)
+	trashed := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Trashed Home"})
+	trashed.OwnerUserID, trashed.Status, trashed.FolderSlug = owner, workspace.StatusTrashed, "trashed-home"
+	trashed.SetAssistantProgramState(live.GetAssistantProgramState())
+	if err := store.Save(trashed); err != nil {
+		t.Fatal(err)
+	}
+	if rr := get("studio-home"); rr.Code != http.StatusOK || decode(rr) != nil || len(status.Homes) != 1 || status.Homes[0].Name != "Portfolio Home" {
+		t.Fatalf("status with a trashed Home = %d %s", rr.Code, rr.Body.String())
+	}
+}

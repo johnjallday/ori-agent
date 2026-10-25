@@ -18,6 +18,7 @@ import (
 
 type fakeHomeUpgrades struct {
 	status    *homeupgrade.Operation
+	statusErr error
 	review    homeupgrade.Review
 	reviewErr error
 	commit    homeupgrade.Operation
@@ -27,7 +28,7 @@ type fakeHomeUpgrades struct {
 
 func (f *fakeHomeUpgrades) Status(_ context.Context, owner, pluginID string) (*homeupgrade.Operation, error) {
 	f.calls = append(f.calls, "status "+owner+" "+pluginID)
-	return f.status, nil
+	return f.status, f.statusErr
 }
 
 func (f *fakeHomeUpgrades) Review(_ context.Context, owner, pluginID string) (homeupgrade.Review, error) {

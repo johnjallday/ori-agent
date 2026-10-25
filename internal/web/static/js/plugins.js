@@ -518,7 +518,7 @@
           window.pluginToggle(name, button.getAttribute('data-plugin-enable') === 'true');
           break;
         case 'update':
-          window.pluginUpdate(name);
+          window.pluginUpdate(name, { trigger: button });
           break;
         case 'uninstall':
           window.pluginUninstall(name);
@@ -584,27 +584,47 @@
     }
   };
 
-  // homeUpgradeToastOptions offers the Home page named by a home_upgrade_required
-  // refusal. Only a same-origin workspace route is followed.
-  function homeUpgradeToastOptions(details) {
-    const path = String((details && details.home_path) || '');
-    const name = String((details && details.home_name) || '');
-    const title = name ? 'Upgrade from ' + name : 'Upgrade from the Home';
-    if (!/^\/workspaces\/[^/?#]+\/assistant(\?upgrade=review)?$/.test(path)) return { title };
-    // The action label stays short: the toast never shrinks its button.
-    return {
-      title,
-      duration: 15000,
-      action: { label: 'Open Home', onClick: () => window.location.assign(path) }
-    };
+  // ---- the reviewed Home package upgrade ----
+
+  // A plugin a Home uses is not replaced on its own: its Homes, their linked
+  // projects and staffed agents move with it. Update reviews and applies that
+  // upgrade here, in the dialog the Home page uses, without leaving the page.
+  function liveUpdateButton(name) {
+    return (
+      Array.from(document.querySelectorAll('[data-plugin-action="update"]')).find(
+        button => button.getAttribute('data-plugin-name') === name
+      ) || null
+    );
   }
+
+  function openHomeUpgradeReview(name, trigger) {
+    const upgrade = window.HomePackageUpgrade;
+    if (!upgrade) {
+      notify('The update review could not be opened. Reload the page and try again.', 'error');
+      return null;
+    }
+    return upgrade.openHomePackageUpgrade({
+      transport: upgrade.pluginUpgradeTransport(name),
+      trigger,
+      // Refreshing the list replaces the row, so focus returns to the same
+      // plugin's Update button as it is now.
+      returnFocus: () => liveUpdateButton(name),
+      documentRef: document,
+      label: 'Review plugin update'
+    });
+  }
+
+  let updateAttempt = 0;
 
   // pluginUpdate updates from the plugin's recorded source, or, with
   // options.fromList, switches it to the version the Workspace Directory's
   // plugin list names. A switch always shows the review first: the list is
   // untrusted, so its source and commit are disclosed before anything runs.
+  // options.trigger is the control that asked, for focus on return.
   window.pluginUpdate = async function (name, options) {
     const fromList = Boolean(options && options.fromList);
+    const trigger = (options && options.trigger) || document.activeElement || null;
+    const attempt = ++updateAttempt;
     const url = '/api/plugins/' + encodeURIComponent(name) + '/update';
     const prev = installedCache.find(p => p.name === name);
     const oldVersion = (prev && prev.version) || '';
@@ -619,10 +639,21 @@
         notify(result.error, 'info');
         return null;
       }
-      // A Home uses this plugin: its upgrade is reviewed on that Home's page,
-      // where its linked projects and staffed agents move with it.
+      // A Home uses this plugin, so its update is the reviewed Home upgrade.
+      // That upgrade reviews the plugin's own newer release, never the plugin
+      // list's source, so a switch to the list's version stays refused rather
+      // than quietly becoming an update from a different source.
       if (result.status === 409 && result.data && result.data.code === 'home_upgrade_required') {
-        notify(result.error, 'info', homeUpgradeToastOptions(result.data.details));
+        if (fromList) {
+          notify(
+            name +
+              " cannot switch to the plugin list's version while a Home uses it. Nothing was changed.",
+            'warning'
+          );
+        } else if (attempt === updateAttempt) {
+          // Only the newest Update click opens a review.
+          openHomeUpgradeReview(name, trigger);
+        }
         return null;
       }
       throw new Error(result.error);
