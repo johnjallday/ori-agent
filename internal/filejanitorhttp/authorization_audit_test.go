@@ -152,6 +152,7 @@ func TestEveryRouteRefusesAnotherUsersWorkspace(t *testing.T) {
 	}{
 		{http.MethodGet, ""},
 		{http.MethodGet, "/readiness"},
+		{http.MethodGet, "/protection"},
 		{http.MethodPost, "/setup"},
 		{http.MethodPost, "/pause"},
 		{http.MethodPatch, "/settings"},

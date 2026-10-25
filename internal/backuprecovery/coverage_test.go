@@ -38,7 +38,7 @@ func TestFolderCoverageMatchesSourceAncestryAndExportsNoPath(t *testing.T) {
 	rows := coverageByWorkspace(t, read)
 	for _, id := range []string{"song-inside", "song-exact"} {
 		row := rows[id]
-		if row.State != CoverageCovered || row.Reason != "completed_backup_observed" || row.Provider != "restic" || row.CoveringWorkspaceID != localFixtureWorkspace || row.LastCompletedAt == nil {
+		if row.State != CoverageCovered || row.Reason != "completed_backup_observed" || row.Provider != "restic" || row.CoveringWorkspaceID != localFixtureWorkspace || row.LastCompletedAt == nil || row.ObservedAt == nil {
 			t.Fatal(id, row)
 		}
 	}
@@ -81,7 +81,7 @@ func TestFolderCoverageStaleEvidenceIsUnknown(t *testing.T) {
 	if err != nil || len(read.Folders) != 1 {
 		t.Fatal(read, err)
 	}
-	if row := read.Folders[0]; row.State != CoverageUnknown || row.Reason != "evidence_stale" || row.LastCompletedAt != nil {
+	if row := read.Folders[0]; row.State != CoverageUnknown || row.Reason != "evidence_stale" || row.LastCompletedAt != nil || row.ObservedAt == nil {
 		t.Fatal("stale evidence became a protection claim", row)
 	}
 }

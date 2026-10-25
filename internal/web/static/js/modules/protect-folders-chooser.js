@@ -3,6 +3,8 @@
 // reads only this server's fixed provider options: no drive, folder or OS
 // query, no backup read, and nothing is created until an option is confirmed.
 
+import './file-janitor-protection.js';
+
 export const PROTECT_ROUTE_PARAM = 'protect';
 export const PRESELECT_KEY = 'ori.backupRecovery.preselect';
 const BLUEPRINT = 'backup-and-recovery';
@@ -56,7 +58,12 @@ export async function fetchProtectionOptions(fetchImpl = fetch) {
 
 // Confirming hands the choice to the console as a one-time preselect, then
 // opens the existing Backup & Recovery create flow unchanged.
-export function confirmChoice(id, win = window) {
+export function confirmChoice(id, win = window, options = {}) {
+  const trips = win.FileJanitorProtection;
+  const returning = options.returnNonce && trips?.read()?.nonce === options.returnNonce;
+  // Verify storage before closing the chooser or opening a creator that will
+  // eventually destroy the review page. Failure leaves this dialog usable.
+  const returnOptions = returning ? trips.creatorOptions() : {};
   try {
     if (id === 'time_machine') win.sessionStorage?.setItem(PRESELECT_KEY, 'time_machine');
     else win.sessionStorage?.removeItem(PRESELECT_KEY);
@@ -65,10 +72,14 @@ export function confirmChoice(id, win = window) {
   }
   const manager = win.sessionManager;
   if (manager?.showAddWorkspaceModal && win.document?.getElementById?.('addFolderModal')) {
-    manager.showAddWorkspaceModal({ entryPoint: 'backup_and_recovery_cta', blueprint: BLUEPRINT });
+    manager.showAddWorkspaceModal({
+      entryPoint: 'backup_and_recovery_cta',
+      blueprint: BLUEPRINT,
+      ...returnOptions
+    });
     return 'opened';
   }
-  win.location.href = `/?create=1&blueprint=${BLUEPRINT}`;
+  win.location.href = returning ? trips.createRoute() : `/?create=1&blueprint=${BLUEPRINT}`;
   return 'navigated';
 }
 
@@ -92,19 +103,29 @@ export function closeChooser(doc = document) {
   void doc;
 }
 
-export async function openChooser(win = window) {
+export async function openChooser(win = window, options = {}) {
   const doc = win.document;
   if (!doc?.body) return false;
   closeChooser(doc);
   opener = doc.activeElement;
-  const options = (await fetchProtectionOptions(win.fetch?.bind(win))) || {};
+  const providerOptions = (await fetchProtectionOptions(win.fetch?.bind(win))) || {};
   dialog = el(doc, 'dialog', 'br-dialog br-chooser');
   dialog.id = 'protectFoldersChooser';
   dialog.setAttribute('aria-labelledby', 'protectFoldersTitle');
   dialog.setAttribute('aria-modal', 'true');
+  const cancelAndReturn = async () => {
+    closeChooser(doc);
+    if (options.returnNonce && win.FileJanitorProtection?.read()?.nonce === options.returnNonce) {
+      try {
+        await win.FileJanitorProtection.returnToReview();
+      } catch (error) {
+        win.FileJanitorConsole?.protectionFailure?.(error.message);
+      }
+    }
+  };
   dialog.addEventListener('cancel', event => {
     event.preventDefault();
-    closeChooser(doc);
+    void cancelAndReturn();
   });
   const shell = el(doc, 'div', 'br-shell');
   const head = el(doc, 'header', 'br-head');
@@ -124,7 +145,7 @@ export async function openChooser(win = window) {
     )
   );
   const cards = el(doc, 'div', 'br-chooser-cards');
-  for (const card of chooserCards(options)) {
+  for (const card of chooserCards(providerOptions)) {
     const section = el(doc, 'section', 'br-chooser-card');
     section.dataset.provider = card.id;
     section.appendChild(el(doc, 'h3', 'br-heading', card.title));
@@ -138,8 +159,19 @@ export async function openChooser(win = window) {
     choose.type = 'button';
     choose.dataset.protectChoice = card.id;
     choose.addEventListener('click', () => {
-      closeChooser(doc);
-      confirmChoice(card.id, win);
+      try {
+        confirmChoice(card.id, win, options);
+        closeChooser(doc);
+      } catch (error) {
+        let notice = doc.getElementById('protectFoldersReturnError');
+        if (!notice) {
+          notice = el(doc, 'p', 'br-alert');
+          notice.id = 'protectFoldersReturnError';
+          notice.setAttribute('role', 'alert');
+          body.appendChild(notice);
+        }
+        notice.textContent = error.message;
+      }
     });
     section.appendChild(choose);
     cards.appendChild(section);
@@ -148,8 +180,10 @@ export async function openChooser(win = window) {
   const cancel = el(doc, 'button', 'br-button br-button-secondary', 'Cancel');
   cancel.type = 'button';
   cancel.id = 'protectFoldersCancel';
-  cancel.addEventListener('click', () => closeChooser(doc));
+  cancel.addEventListener('click', () => void cancelAndReturn());
   body.appendChild(cancel);
+  const returnControl = options.returnNonce && win.FileJanitorProtection?.returnButton(doc);
+  if (returnControl) body.appendChild(returnControl);
   dialog.appendChild(shell);
   doc.body.appendChild(dialog);
   if (typeof dialog.showModal === 'function') dialog.showModal();
@@ -175,7 +209,7 @@ export function openChooserFromLocation(win = window) {
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.OriProtectFolders = {
-    open: () => openChooser(window),
+    open: options => openChooser(window, options),
     close: () => closeChooser(document)
   };
   if (document.readyState === 'loading')

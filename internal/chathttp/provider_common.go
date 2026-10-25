@@ -602,7 +602,7 @@ func resolveSystemPromptForAgent(ag *agent.Agent, defaultPrompt string) string {
 // When the resolved chat agent carries pre-resolved workspace skills, those
 // are used directly; otherwise falls back to SkillManager.
 func (h *Handler) buildSystemPromptWithSkills(ag *resolvedChatAgent, agentName, defaultPrompt string) string {
-	base := resolveSystemPromptForAgent(ag.Agent, defaultPrompt)
+	base := workspace.AppendHostContext(resolveSystemPromptForAgent(ag.Agent, defaultPrompt), ag.HostContext)
 
 	// Use pre-resolved effective skills from workspace runtime resolution when available.
 	if len(ag.EffectiveSkills) > 0 {

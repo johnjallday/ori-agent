@@ -139,6 +139,18 @@ func (m *Migrator) migrateOne(workspaceID string) migrationOutcome {
 	}
 
 	if ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
+		// Repair only an unambiguous persisted role fill, never a display name.
+		// This adds inert association, not tools or ownership of the definition.
+		if _, repairable := ws.LegacyFileCuratorResource(); repairable {
+			if err := m.store.Update(workspaceID, func(w *workspace.Workspace) error {
+				if resource, ok := w.LegacyFileCuratorResource(); ok {
+					w.RecordCapabilityResource(workspace.CapabilityFileJanitor, resource)
+				}
+				return nil
+			}); err != nil {
+				return migrationFailed
+			}
+		}
 		return migrationAlreadyInstalled
 	}
 	if !m.hasAuthoritativeLegacySignal(ws) {

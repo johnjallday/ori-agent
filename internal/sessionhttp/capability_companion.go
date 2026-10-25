@@ -52,6 +52,15 @@ func (p *CapabilityCompanionProvisioner) EnsureCompanionAgent(workspaceID, displ
 		return "", false, fmt.Errorf("workspace is unavailable")
 	}
 
+	matches := 0
+	for _, instance := range ws.AgentInstances {
+		if strings.EqualFold(strings.TrimSpace(instance.Name), name) {
+			matches++
+		}
+	}
+	if matches > 1 {
+		return "", false, fmt.Errorf("multiple attachments use this agent; explicitly choose the intended companion in settings")
+	}
 	_, definitionExisted := p.handler.agentStore.GetAgent(name)
 	if !definitionExisted {
 		if err := p.handler.agentStore.CreateAgent(name, p.companionConfig(name)); err != nil {

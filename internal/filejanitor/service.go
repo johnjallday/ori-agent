@@ -240,8 +240,9 @@ func (s *Service) notifyReviewedKnowledge(workspaceID, actionID string, undone b
 
 // Status is the full setup/readiness picture for one workspace.
 type Status struct {
-	Settings  JanitorSettings `json:"settings"`
-	Readiness Readiness       `json:"readiness"`
+	Guidance  CuratorGuidanceStatus `json:"guidance"`
+	Settings  JanitorSettings       `json:"settings"`
+	Readiness Readiness             `json:"readiness"`
 	// Applies reports whether this workspace is a File Janitor workspace at
 	// all. The UI mounts its panel only when it is true, so the Janitor surface
 	// never appears on an unrelated workspace.
@@ -405,6 +406,7 @@ func (s *Service) Status(workspaceID string) (Status, error) {
 		return Status{}, err
 	}
 	status := Status{
+		Guidance:  s.CuratorGuidance(workspaceID),
 		Settings:  settings,
 		Readiness: s.evaluateReadiness(settings),
 		Applies:   s.AppliesTo(workspaceID),

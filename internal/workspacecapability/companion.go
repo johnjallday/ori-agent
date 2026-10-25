@@ -121,12 +121,18 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 	}
 
 	// Already has one: return it rather than creating a second (FR-39).
-	if existing := record.ResourcesOfKind(workspace.ResourceCompanionAgent); len(existing) > 0 {
+	existing := record.ResourcesOfKind(workspace.ResourceCompanionAgent)
+	if len(existing) == 1 && s.companionNameFor(ws, existing[0].ID) != "" {
 		return CompanionResult{
 			AgentInstanceID: existing[0].ID,
 			DisplayName:     s.companionNameFor(ws, existing[0].ID),
 			AlreadyPresent:  true,
 		}, nil
+	}
+	for _, resource := range existing {
+		if s.companionNameFor(ws, resource.ID) != "" {
+			return CompanionResult{}, &Error{Code: CodeCompanionFailed, Message: "The companion association is ambiguous. Choose the intended agent in File Janitor settings. Filing still works without an agent."}
+		}
 	}
 
 	displayName := s.CompanionDisplayName(def, workspaceID)
@@ -143,6 +149,12 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 	// this agent. An agent we did NOT create is shared: it existed for the
 	// user's own reasons and must survive removal (FR-27).
 	if updateErr := s.store.Update(workspaceID, func(w *workspace.Workspace) error {
+		if !w.HasInstalledCapability(def.ID) {
+			return fmt.Errorf("capability was removed while adding the companion")
+		}
+		for _, stale := range existing {
+			w.ForgetCapabilityResource(def.ID, workspace.ResourceCompanionAgent, stale.ID)
+		}
 		w.RecordCapabilityResource(def.ID, workspace.CapabilityResource{
 			Kind:   workspace.ResourceCompanionAgent,
 			ID:     instanceID,
@@ -150,12 +162,8 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 		})
 		return nil
 	}); updateErr != nil {
-		// The agent exists and is usable; only the association failed to
-		// persist. Reporting failure would invite the user to add a second one.
-		return CompanionResult{
-			AgentInstanceID: instanceID,
-			DisplayName:     displayName,
-		}, nil
+		return CompanionResult{}, &Error{Code: CodeCompanionFailed,
+			Message: "The agent was attached, but its companion association could not be saved. Choose that agent in File Janitor settings to retry; filing is unaffected.", Err: updateErr}
 	}
 
 	return CompanionResult{AgentInstanceID: instanceID, DisplayName: displayName}, nil
@@ -165,10 +173,47 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 // repeat request reports what the agent is actually called now rather than what
 // it was called when it was created.
 func (s *Service) companionNameFor(ws *workspace.Workspace, instanceID string) string {
+	name := ""
+	count := 0
 	for _, instance := range ws.AgentInstances {
 		if instance.ID == instanceID {
-			return instance.Name
+			name = instance.Name
+			count++
 		}
 	}
-	return ""
+	if count != 1 {
+		return ""
+	}
+	return name
+}
+
+// AssociateCompanion is explicit recovery for a legacy or ambiguous association.
+// It replaces only the association, never an attachment, definition or tool grant.
+func (s *Service) AssociateCompanion(workspaceID, capabilityID, instanceID string) (CompanionResult, error) {
+	def, err := s.resolveInstallable(capabilityID)
+	if err != nil {
+		return CompanionResult{}, err
+	}
+	if def.Companion == nil {
+		return CompanionResult{}, &Error{Code: CodeCompanionUnavailable, Message: "This capability has no companion."}
+	}
+	var result CompanionResult
+	err = s.store.Update(workspaceID, func(w *workspace.Workspace) error {
+		record, ok := w.GetInstalledCapability(def.ID)
+		if !ok {
+			return &Error{Code: CodeCapabilityNotInstalled, Message: "The capability is no longer installed."}
+		}
+		name := s.companionNameFor(w, instanceID)
+		if name == "" {
+			return &Error{Code: CodeCompanionFailed, Message: "Choose one current workspace agent. The selected attachment is unavailable or ambiguous."}
+		}
+		for _, resource := range record.ResourcesOfKind(workspace.ResourceCompanionAgent) {
+			w.ForgetCapabilityResource(def.ID, workspace.ResourceCompanionAgent, resource.ID)
+		}
+		// Recovery never acquires ownership of an existing attachment.
+		w.RecordCapabilityResource(def.ID, workspace.CapabilityResource{Kind: workspace.ResourceCompanionAgent, ID: instanceID, Shared: true})
+		result = CompanionResult{AgentInstanceID: instanceID, DisplayName: name}
+		return nil
+	})
+	return result, err
 }

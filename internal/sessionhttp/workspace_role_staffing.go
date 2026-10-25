@@ -98,6 +98,7 @@ func (h *Handler) seedRoleStaffedAgents(
 			}
 		}
 		attachRoleStaffedAgent(ws, requested, roleID)
+		recordSeededCurator(&result, ws, tpl, index, requested.Name, exists)
 	}
 
 	// Entry agent resolves primary-first, then the first filled role in

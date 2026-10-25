@@ -8,6 +8,35 @@
   display: none;
 }
 
+/* Quiet, optional advice: a margin note rather than a filing gate. */
+.fj-protection {
+  border-inline-start: 2px solid var(--border-subtle, #697078);
+  padding: 0.65rem 1rem;
+  margin-block: 0.5rem 1rem;
+  color: var(--text-primary, #e8e8e8);
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  overflow-wrap: anywhere;
+}
+
+.fj-protection-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+}
+
+.fj-protection-copy,
+.fj-protection-time {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 0.25rem 0;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-protection.is-passive {
+  padding-block: 0.25rem;
+  background: transparent;
+}
+
 .fj-card {
   margin-bottom: 1rem;
   padding: 1rem 1.25rem;

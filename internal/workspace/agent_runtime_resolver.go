@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/filecuratorguidance"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -61,6 +62,7 @@ type ResolvedAgentRuntime struct {
 	FromWorkspaceCopy bool
 	MCPServers        []string
 	EffectiveSkills   []ResolvedSkill
+	HostContext       HostContext
 	// MCPToolAllowlist maps a materialized runtime server name (see
 	// RuntimeMCPServerName) to the tool names its binding permits. A missing
 	// key means the server carries no restriction (legacy all-tools
@@ -86,11 +88,12 @@ type ResolvedAgentRuntime struct {
 
 // AgentRuntimeResolver composes base agent configuration with workspace-owned MCP bindings and skills.
 type AgentRuntimeResolver struct {
-	agentStore       store.Store
-	workspaceStore   Store
-	mcpRegistry      runtimeMCPRegistry
-	mcpConfigManager mcpTemplateLookup
-	skillResolver    SkillResolver
+	agentStore        store.Store
+	workspaceStore    Store
+	mcpRegistry       runtimeMCPRegistry
+	mcpConfigManager  mcpTemplateLookup
+	skillResolver     SkillResolver
+	curatorProtection filecuratorguidance.ProtectionReader
 }
 
 // NewAgentRuntimeResolver creates a runtime resolver for workspace task execution.
@@ -182,7 +185,7 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(workspaceID) == "" || r.workspaceStore == nil || r.mcpRegistry == nil || r.mcpConfigManager == nil {
+	if strings.TrimSpace(workspaceID) == "" || r.workspaceStore == nil {
 		return resolved, nil
 	}
 
@@ -191,8 +194,12 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		return nil, fmt.Errorf("load workspace %s for runtime resolution: %w", workspaceID, err)
 	}
 
+	resolved.HostContext = r.fileCuratorHostContext(ws, agentName, nodeID)
 	instance, _ := ws.FindAgentInstance(agentName, nodeID)
 	resolved.AgentInstance = instance
+	if r.mcpRegistry == nil || r.mcpConfigManager == nil {
+		return resolved, nil
+	}
 
 	// An instance with an explicit Toolbox assignment resolves from that
 	// assignment alone (PRD §9.4). The legacy merge below runs only for
