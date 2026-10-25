@@ -19,14 +19,14 @@ func (s *localRecommendationSetup) ReadFolderRecommendation(context.Context, str
 }
 
 func TestFolderRecommendation_ObservedFormatsAndIntegrationAreDifferent(t *testing.T) {
-	result, verdict, now := scanAlbums(t)
+	result, _, now := scanAlbums(t)
 	// The named exact fixture's policy input: a Logic bundle, not another RPP.
 	for i := range result.Candidates {
 		if result.Candidates[i].Name == "Logic Sketch" {
 			result.Candidates[i].Marker = &folderdigest.Marker{Name: "*.logicx", Shape: folderdigest.ShapeAudio, Label: "Logic Pro project"}
 		}
 	}
-	verdict = folderdigest.Decide(result, now)
+	verdict := folderdigest.Decide(result, now)
 	r := collectionRecommendation(result, verdict, now)
 	if r == nil || r.Operation != FolderGroupLibrary || r.Projects != 6 || r.SupportedProjects != 5 ||
 		!strings.Contains(r.Evidence, "5 REAPER session folders") || !strings.Contains(r.Evidence, "1 Logic Pro project folder") || r.Limitation == "" {

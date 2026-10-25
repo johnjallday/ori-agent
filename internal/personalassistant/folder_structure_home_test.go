@@ -117,7 +117,7 @@ func TestFolderDigest_AdjustOnHomeChangesTheProposalAndItsPlan(t *testing.T) {
 		t.Fatalf("listed in the Home: %+v, %v", listed.Structure, err)
 	}
 	back, err := f.service.AdjustStructure(ctx, "local", offer.ID, FolderStructureAdjustment{GroupType: FolderGroupPlain})
-	if err != nil || !back.Structure.ProposesWorkspaces() || back.Structure.Group.Name != "Music" {
+	if err != nil || !back.Structure.ProposesWorkspaces() || back.Structure.Group.Name != "Albums 2026" || len(back.Structure.Included()) != 5 {
 		t.Fatalf("back to a plain group: %+v, %v", back.Structure, err)
 	}
 }

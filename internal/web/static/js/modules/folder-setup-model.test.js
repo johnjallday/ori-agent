@@ -88,8 +88,10 @@ test('leaving Adjust cannot bypass a known missing model or recheck an accepted 
 test('selection/destination/run precedence remains ahead of model configuration', () => {
   const missing = withModel({ state: 'missing', settings: 'system' });
   const changed = folderOfferView({ ...missing, destination_status: 'changed' });
+  assert.ok(!changed.actions.some(action => action.id === 'model' || action.oneCard));
+  assert.equal(changed.plan, null);
   assert.ok(
-    !changed.actions.some(action => action.id === 'model' || action.recheck || action.oneCard)
+    changed.actions.some(action => action.recheck && action.label === 'Review changed destination')
   );
   const running = folderOfferView({
     ...missing,

@@ -75,7 +75,10 @@ func (s *FolderDigestService) Prerequisite(ctx context.Context, userID, offerID 
 	// An expected missing-Home prerequisite is repairable; a changed concrete
 	// destination, or an unnamed destination failure, is not.
 	if review.DestinationUnavailable {
-		if review.DestinationBlocker == nil || (review.DestinationBlocker.IntegrationKey == "" && !(libraryReview(*offer) && review.DestinationBlocker.HomeProviderKey == offer.Portfolio.ProviderKey && offer.Portfolio.ProviderKey != "")) {
+		blocker := review.DestinationBlocker
+		repairable := blocker != nil && (blocker.IntegrationKey != "" ||
+			(libraryReview(*offer) && offer.Portfolio.ProviderKey != "" && blocker.HomeProviderKey == offer.Portfolio.ProviderKey))
+		if !repairable {
 			return FolderPrerequisiteReview{}, ErrFolderPlanChanged
 		}
 	} else if err := s.checkReviewDestination(ctx, *offer); err != nil {
