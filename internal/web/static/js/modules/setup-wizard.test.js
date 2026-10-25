@@ -246,6 +246,20 @@ test('a never-opened wizard opens itself once and records the open', async () =>
   assert.equal(elements.setupWizardDialog.showModalCalls, 1);
 });
 
+test('a filing protection detour keeps the owning console unobscured without spending setup', async () => {
+  const { api, elements, calls } = load({
+    status: status({ auto_open: true }),
+    search: '?panel=backup-recovery&filing_return=nonce-one'
+  });
+  await api.init();
+  assert.equal(elements.setupWizardDialog.showModalCalls, undefined);
+  assert.equal(elements.setupWizardBanner.hidden, false);
+  assert.equal(
+    calls.some(call => call.key === 'POST /open'),
+    false
+  );
+});
+
 test('a dismissed wizard does not auto-open, but its banner stays', async () => {
   const { api, elements } = load({
     status: status({ state: 'in_progress', dismissed: true, auto_open: false })

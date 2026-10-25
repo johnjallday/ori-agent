@@ -884,6 +884,9 @@ const sessionManager = {
       // is another, distinct in-draft navigation. Neither is cancellation.
       if (addFolderModal.dataset.suspendedForAgentSetup) return;
       if (addFolderModal.dataset.suspendedForMapPlacement) return;
+      void window.FileJanitorProtection?.creatorClosed?.().catch(error =>
+        this.showToast(error.message, 'warning')
+      );
       this.abandonWorkspaceMapPlacement();
       // The build session itself stays open on the server: closing is never
       // abandoning, and the build can be resumed from the assistant's Today.
@@ -16525,6 +16528,9 @@ const sessionManager = {
         }
       }
 
+      // A successful create is not cancellation of a filing protection trip.
+      if (createdWorkspaceId && creatorContext?.entryPoint === 'backup_and_recovery_cta')
+        window.FileJanitorProtection?.creatorFinished?.();
       // Close only after all of the confirmed workspace/team changes finish.
       window.SetupWorkspaceCreator?.setSubmitting(false);
       const modal = bootstrap.Modal.getInstance(modalElement);
@@ -21719,6 +21725,9 @@ document.addEventListener('DOMContentLoaded', () => {
               : 'home_first_run',
           blueprint: blueprint && !openImport ? blueprint : undefined,
           importMode: openImport,
+          ...(blueprint === 'backup-and-recovery' && !openImport
+            ? window.FileJanitorProtection?.creatorOptions?.() || {}
+            : {}),
           ...(lockedParent ? { parentId: lockedParent, parentLocked: true } : {})
         })
       );

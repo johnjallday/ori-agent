@@ -25,6 +25,7 @@ type ProtectionDestination struct {
 // AsOf is projection time; ObservedAt is the stored successful provider read.
 type ProtectionFact struct {
 	WorkspaceID     string                 `json:"workspace_id"`
+	WorkspaceSlug   string                 `json:"workspace_slug,omitempty"`
 	RootGeneration  string                 `json:"root_generation,omitempty"`
 	BindingID       string                 `json:"binding_id,omitempty"`
 	State           string                 `json:"state"`

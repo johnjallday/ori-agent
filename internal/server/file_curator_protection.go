@@ -45,7 +45,7 @@ func (r fileCuratorProtection) ReadProtection(ctx context.Context, owner, id str
 	if r.roots == nil || r.scope == nil {
 		return unavailable, nil
 	}
-	scope, _, err := r.scope.ProtectionScope(ctx, owner, id)
+	scope, ws, err := r.scope.ProtectionScope(ctx, owner, id)
 	if err != nil {
 		return unavailable, err
 	}
@@ -59,6 +59,9 @@ func (r fileCuratorProtection) ReadProtection(ctx context.Context, owner, id str
 		State:     "unknown", Reason: "evidence_unavailable", AsOf: now,
 		Destination: &filecuratorguidance.ProtectionDestination{Kind: "chooser"},
 	}
+	if ws != nil && workspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+		fact.WorkspaceSlug = ws.FolderSlug
+	}
 	ids := curatorScopeIDs(scope)
 	if r.coverage == nil {
 		return fact, nil
@@ -67,12 +70,17 @@ func (r fileCuratorProtection) ReadProtection(ctx context.Context, owner, id str
 	// Root identity, owner, permission and scope can change while stored reads
 	// are in flight. No previously scoped evidence may survive that change.
 	current, rootErr := r.roots.StoredManagedRoot(owner, id)
-	freshScope, _, scopeErr := r.scope.ProtectionScope(ctx, owner, id)
+	freshScope, freshWorkspace, scopeErr := r.scope.ProtectionScope(ctx, owner, id)
 	if scopeErr != nil {
 		return unavailable, scopeErr
 	}
 	if rootErr != nil || current != root || !slices.Equal(ids, curatorScopeIDs(freshScope)) || scope.Complete != freshScope.Complete {
 		return unavailable, nil
+	}
+	if freshWorkspace != nil && workspace.IsCanonicalWorkspaceSlug(freshWorkspace.FolderSlug) {
+		fact.WorkspaceSlug = freshWorkspace.FolderSlug
+	} else {
+		fact.WorkspaceSlug = ""
 	}
 	if readErr != nil {
 		return fact, nil

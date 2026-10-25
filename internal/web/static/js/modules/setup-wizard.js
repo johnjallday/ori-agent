@@ -1156,7 +1156,13 @@
       openDialog(runtimeStep);
       return status;
     }
-    if (current.auto_open && !openedOnce) {
+    // An explicit filing-protection detour opens the owning console. Do not
+    // cover its return control with a second automatic modal; the setup banner
+    // and explicit Continue setup remain available and no setup is completed.
+    const protectionConsoleRequested =
+      params.get('panel') === 'backup-recovery' &&
+      /^[A-Za-z0-9_-]{1,128}$/.test(params.get('filing_return') || '');
+    if (current.auto_open && !openedOnce && !protectionConsoleRequested) {
       // openDialog records the open server-side, so the one auto-open is spent
       // even if the user closes the tab without touching anything.
       openDialog();

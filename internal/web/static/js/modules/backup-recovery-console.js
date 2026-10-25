@@ -1672,6 +1672,8 @@
     closeButton.id = 'brClose';
     head.appendChild(closeButton);
     shell.appendChild(head);
+    const filingReturn = window.FileJanitorProtection?.returnButton(document);
+    if (filingReturn) head.appendChild(filingReturn);
     const nav = el('div', 'br-tabs');
     nav.setAttribute('role', 'tablist');
     nav.setAttribute('aria-label', 'Backup & Recovery');
