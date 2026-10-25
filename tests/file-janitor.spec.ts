@@ -193,6 +193,128 @@ async function openConsoleFromCard(page: Page) {
 }
 
 test.describe('File Janitor capability', () => {
+  test('next action follows setup, scan, shared review, partial receipts and undo', async ({
+    page,
+    request
+  }, testInfo) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const capture = (name: string) =>
+      page.screenshot({ path: testInfo.outputPath(name), fullPage: true, animations: 'disabled' });
+    const fixtureName = `Next Action Curator ${RUN}`;
+    const workspaceId = await createPlainWorkspace(request, fixtureName);
+    await installCapability(request, workspaceId);
+    await openWorkspace(page, workspaceId, '?mode=details&source=next-action');
+    const area = page.getByRole('region', { name: 'Next action', exact: true });
+    await expect(area).toContainText('Choose the folder to tidy');
+    await capture('next-action-setup.png');
+    const root = fixtureFolder('next-action', {
+      'first.pdf': 'synthetic',
+      'second.csv': 'synthetic'
+    });
+    await grantFolder(request, workspaceId, root);
+    await request.post(`/api/workspaces/${workspaceId}/file-janitor/pause`, {
+      data: { paused: true }
+    });
+    await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
+    await expect(area).toContainText('File Janitor is paused');
+    await page.locator('#workspaceNextAction').click();
+    await page.locator('#fileJanitorScan').click();
+    await expect(consoleBody(page).locator('.fj-select')).toHaveCount(2);
+    await page.keyboard.press('Escape');
+    await expect(area).toContainText('2 files ready for review');
+    await page.locator('[data-cmd-view-mode="map"]').click();
+    await expect(area).toContainText('2 files ready for review');
+    await expect(page.locator('[data-cmd-map-select-agent]').first()).toContainText(
+      'Ready to help'
+    );
+    await expect(page.locator('[data-cmd-hq-station="memory"]')).toBeVisible();
+    await capture('next-action-review-map.png');
+    // Queued work is a labelled response fixture; no task is started or written.
+    const tasksRoute = '**/api/orchestration/tasks?**';
+    await page.route(tasksRoute, route =>
+      route.fulfill({
+        json: {
+          tasks: [
+            {
+              id: 'queued-demo',
+              status: 'pending',
+              to: fixtureName + ' Manager',
+              description: 'Synthetic queued task'
+            }
+          ]
+        }
+      })
+    );
+    await page.evaluate(() => (window as any).workspaceDetail.loadTasks());
+    await expect(page.locator('[data-cmd-map-select-agent]').first()).toContainText('Waiting');
+    await capture('next-action-queued-fixture.png');
+    await page.unroute(tasksRoute);
+    await page.evaluate(() => (window as any).workspaceDetail.loadTasks());
+    const operating: string[] = [];
+    page.on('request', req => {
+      if (req.method() === 'POST' && /file-janitor\/(scan|preview|apply|decisions)/.test(req.url()))
+        operating.push(req.url());
+    });
+    await page.locator('#workspaceNextAction').click();
+    await expect(consoleBody(page).locator('.fj-select').first()).toBeEnabled();
+    await consoleBody(page).locator('.fj-select').first().check();
+    const choice = await consoleBody(page).locator('.fj-select').first().getAttribute('id');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#workspaceNextAction')).toBeFocused();
+    await page.locator('[data-cmd-view-mode="details"]').click();
+    await page.locator('#workspaceNextAction').click();
+    await expect(page.locator('#' + choice)).toBeChecked();
+    expect(operating).toEqual([]);
+    expect(new URL(page.url()).searchParams.get('source')).toBe('next-action');
+    await consoleBody(page).locator('.fj-select').nth(1).check();
+    await page.locator('#fileJanitorApprove').click();
+    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+    await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+    // Only a synthetic fixture is changed after preview: the real apply must
+    // refuse that one file while recording the other successful move.
+    writeFileSync(join(root, 'second.csv'), 'changed after preview');
+    await page.locator('#fileJanitorConfirmApply').click();
+    await expect(consoleBody(page).locator('.fj-results')).toContainText('1 file filed');
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as any).FileJanitorConsole.getActionState().latestReceipt?.counts
+        )
+      )
+      .toEqual({ applied: 1, failed: 0, stale: 1 });
+    await expect(page.locator('#fileJanitorConsoleStatus')).not.toContainText(
+      'files ready for review'
+    );
+    await capture('next-action-partial-result.png');
+    await page.keyboard.press('Escape');
+    await expect(area).toContainText('not applied');
+    await page.locator('#workspaceNextAction').click();
+    await page.locator('[data-fj-tab="history"]').click();
+    await expect(consoleBody(page)).toContainText('first.pdf');
+    await consoleBody(page).getByRole('button', { name: 'Undo move', exact: true }).click();
+    await expect.poll(() => existsSync(join(root, 'first.pdf'))).toBe(true);
+    await expect(consoleBody(page)).toContainText('put back');
+    await capture('next-action-undo.png');
+    const emptyWorkspace = await createPlainWorkspace(request, `Next Action Empty ${RUN}`);
+    await installCapability(request, emptyWorkspace);
+    await grantFolder(request, emptyWorkspace, fixtureFolder('next-action-empty', {}));
+    await request.post(`/api/workspaces/${emptyWorkspace}/file-janitor/pause`, {
+      data: { paused: true }
+    });
+    await openWorkspace(page, emptyWorkspace, '?mode=map');
+    await page.locator('#workspaceNextAction').click();
+    await page.locator('#fileJanitorScan').click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).FileJanitorConsole.getActionState().emptyState)
+      )
+      .toBe('scan_empty');
+    await page.keyboard.press('Escape');
+    await expect(area).toContainText('last scan found no eligible files');
+    await capture('next-action-empty.png');
+  });
   test('installs into an ordinary workspace and shows a card that opens the console', async ({
     page,
     request

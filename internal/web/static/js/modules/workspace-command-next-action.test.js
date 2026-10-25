@@ -301,6 +301,26 @@ for (const [variant, patch, destination] of [
   });
 }
 
+test('idle readiness is separate from queued work and missing roles', () => {
+  const command = view([]);
+  assert.equal(
+    command.mapAgentStatus({ tasks: [], status: { key: 'idle' } }).label,
+    'Ready to help'
+  );
+  for (const status of ['pending', 'queued', 'assigned', 'ready']) {
+    assert.equal(
+      command.mapAgentStatus({ tasks: [{ status, to: 'Curator' }], status: { key: 'idle' } }).key,
+      'waiting'
+    );
+  }
+  assert.equal(
+    command.mapAgentStatus({ tasks: [{ status: 'failed' }], status: { key: 'idle' } }).label,
+    'Needs attention'
+  );
+  assert.match(command.renderMapCommandRepair(), /No Commander/);
+  assert.match(command.commandNodeOrchestrationCopy(0), /Works directly/);
+});
+
 test('HQ and group journeys do not acquire ordinary workspace guidance', () => {
   assert.equal(view([], { workspace: { designation: 'personal_hq' } }).renderWorkFirst(), '');
   assert.equal(view([], { workspace: { kind: 'group' } }).renderWorkFirst(), '');

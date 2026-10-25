@@ -90,6 +90,16 @@ export function resolveWorkspaceNextAction(input) {
   }
   if (current) ongoing.push(`Running: ${taskTitle(current)}`);
   if (janitor?.scanning) ongoing.push('Scanning for files. Nothing moves without approval.');
+  if (known && janitor.scanState === 'failed')
+    ongoing.push('The last scan failed. Open File Janitor to retry explicitly.');
+  if (known && janitor.history?.state === 'ready') {
+    const counts = janitor.latestReceipt?.counts;
+    const problems = (counts?.failed || 0) + (counts?.stale || 0);
+    if (problems)
+      ongoing.push(
+        `Last filing: ${counts.applied || 0} applied, ${problems} not applied. See History in File Janitor.`
+      );
+  }
   const finish = descriptor => ({ ...descriptor, qualifications, ongoing, taskWork });
   const taskDescriptor = task => {
     const presentation = resolveTaskPresentation(task);
@@ -120,7 +130,7 @@ export function resolveWorkspaceNextAction(input) {
       action: {
         owner: 'console',
         kind,
-        id: '',
+        id: kind === 'history' ? janitor?.latestReceipt?.id || '' : '',
         label,
         key: `console:${workspaceId}:${janitor?.generation || 0}:${janitor?.rootId || ''}:${janitor?.batchId || ''}:${kind}:${kind === 'history' ? janitor?.latestReceipt?.id || '' : ''}`
       }
@@ -179,14 +189,17 @@ export function resolveWorkspaceNextAction(input) {
   if (results[0]?.task) return taskDescriptor(results[0].task);
   if (results[0]?.receipt) {
     const receipt = results[0].receipt;
+    const partial = (receipt.counts?.failed || 0) + (receipt.counts?.stale || 0) > 0;
     return consoleDescriptor(
       'history',
-      receipt.result === 'applied' ? 'Filing result recorded' : 'Some files could not be filed',
-      receipt.result === 'applied'
+      receipt.result === 'applied' && !partial
+        ? 'Filing result recorded'
+        : 'Some files could not be filed',
+      receipt.result === 'applied' && !partial
         ? `See the recorded result.${receipt.undoable ? ' Undo is available in History.' : ''}`
         : 'Check History for the recorded failure and any files still needing review.',
       'View filing history',
-      receipt.result === 'applied' ? 'success' : 'attention'
+      receipt.result === 'applied' && !partial ? 'success' : 'attention'
     );
   }
   if (qualifications.length) {

@@ -44,6 +44,7 @@
   let historyLoadState = 'loading';
   let historyListLoadState = 'loading';
   let latestReceipt = null;
+  let latestReceiptRecord = null;
   let receiptLoaded = false;
   let lastBatch = null;
   let lastCandidates = [];
@@ -102,6 +103,7 @@
   let historyStatusMessage = '';
   // True while a scan the user started is in flight, so the header can say so.
   let scanning = false;
+  let scanFailed = false;
   let settingsOpen = false;
   let settingsMessage = '';
   // Revoking asks once before acting: it is the one control that takes
@@ -157,11 +159,13 @@
     historyLoadState = 'loading';
     historyListLoadState = 'loading';
     latestReceipt = null;
+    latestReceiptRecord = null;
     receiptLoaded = false;
     historyStatusMessage = '';
     emptyReviewState = 'unscanned';
     reviewStatusMessage = '';
     scanning = false;
+    scanFailed = false;
     busy = false;
   }
 
@@ -310,9 +314,6 @@
     if (readiness.state === 'needs_attention') {
       return { id: 'needs_attention', label: 'Needs attention' };
     }
-    if (scanning) {
-      return { id: 'scanning', label: 'Scanning…' };
-    }
     if (status?.privacy?.consent_required) {
       return { id: 'consent_required', label: 'Consent required' };
     }
@@ -320,6 +321,7 @@
     if (pending > 0) {
       return { id: 'review_ready', label: 'Review ready' };
     }
+    if (scanning) return { id: 'scanning', label: 'Scanning…' };
     if (manualScansOnly(settings)) {
       return { id: 'ready', label: 'Ready · Manual scans' };
     }
@@ -1974,7 +1976,11 @@
         button('Retry history', 'fj-btn fj-btn-secondary', () => void loadHistory())
       );
     }
-    if (historyActions.length === 0 && historyListLoadState !== 'unavailable') {
+    const linkedReceipt =
+      historyLoadState === 'ready' && consoleItem === latestReceiptRecord?.id
+        ? latestReceiptRecord
+        : null;
+    if (historyActions.length === 0 && !linkedReceipt && historyListLoadState !== 'unavailable') {
       panel.appendChild(
         el(
           'p',
@@ -1984,6 +1990,11 @@
       );
     } else {
       const list = el('ul', 'fj-history-list');
+      if (linkedReceipt && !historyActions.some(action => action.id === consoleItem)) {
+        // Completion order differs from journal order. Keep an explicitly linked
+        // canonical result reachable even when it was beyond the first list page.
+        list.appendChild(historyLine(linkedReceipt));
+      }
       historyActions.forEach(action => list.appendChild(historyLine(action)));
       panel.appendChild(list);
     }
@@ -2009,6 +2020,9 @@
       if (!current()) return;
       let offset = 0;
       let latest = null;
+      let latestRecord = null;
+      let latestGroup = '';
+      const outcomes = new Map();
       do {
         if (!page) {
           const response = await fetch(apiBase(scope.id) + '/history?limit=200&offset=' + offset);
@@ -2020,11 +2034,17 @@
         for (const action of actions) {
           const at = completionTime(action.completed_at);
           if (at === null || !['applied', 'failed', 'stale'].includes(action.result)) continue;
+          const group = String(action.idempotency_key || 'action:' + action.id);
+          const counts = outcomes.get(group) || { applied: 0, failed: 0, stale: 0 };
+          counts[action.result]++;
+          outcomes.set(group, counts);
           if (
             !latest ||
             at > completionTime(latest.completedAt) ||
             (at === completionTime(latest.completedAt) && String(action.id) < latest.id)
           ) {
+            latestRecord = action;
+            latestGroup = group;
             latest = Object.freeze({
               id: String(action.id || ''),
               completedAt: action.completed_at,
@@ -2041,9 +2061,13 @@
         page = null;
       } while (current());
       if (!current()) return;
-      latestReceipt = latest;
+      latestReceipt = latest
+        ? Object.freeze({ ...latest, counts: Object.freeze(outcomes.get(latestGroup)) })
+        : null;
+      latestReceiptRecord = latestRecord;
       receiptLoaded = true;
       historyLoadState = 'ready';
+      renderHistory();
     } catch (_) {
       if (!current()) return;
       historyLoadState = 'unavailable';
@@ -2547,6 +2571,10 @@
       actions.appendChild(scan);
     }
     card.appendChild(actions);
+    const notice = el('p', 'fj-card-read-status');
+    notice.id = 'fileJanitorReadStatus';
+    notice.setAttribute('role', 'status');
+    card.appendChild(notice);
     card.appendChild(cardErrorRegion());
     host.appendChild(card);
   }
@@ -2695,7 +2723,7 @@
   // renderConsoleBody paints the console's active tab. It reuses the renderers
   // the inline panel already had: they address their hosts by id, so moving
   // those hosts into the console moves the surfaces with them.
-  function renderConsoleBody(host, status) {
+  function renderConsoleBody(host, status, confirmation = null) {
     if (
       ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
       !isConfigured(status)
@@ -2745,7 +2773,7 @@
     const batchHost = el('div', 'fj-batch');
     batchHost.id = 'fileJanitorBatch';
     host.appendChild(batchHost);
-    const confirmHost = el('div', 'fj-confirm-host');
+    const confirmHost = confirmation || el('div', 'fj-confirm-host');
     confirmHost.id = 'fileJanitorConfirmHost';
     host.appendChild(confirmHost);
     host.appendChild(errorRegion());
@@ -2894,6 +2922,11 @@
     consoleTrigger = options.trigger || consoleTrigger || activeElement();
     consoleTab = chooseTab(options.tab);
     consoleItem = String(options.item || '');
+    if (consoleTab === 'history' && consoleItem) {
+      // A result link names an actual receipt, not whichever filter was last used.
+      historyFilter = '';
+      historyLoaded = false;
+    }
     consoleOpen = true;
 
     const coordinator = overlayCoordinator();
@@ -2904,6 +2937,7 @@
         kind: 'modal',
         container: host,
         trigger: consoleTrigger,
+        canEscape: () => !pendingPreview && !revokeConfirmed,
         onClose: info => {
           // The coordinator closes this for its own reasons too (Escape, a
           // modal that must replace it). Mirror that into local state so the
@@ -3069,6 +3103,11 @@
     const host = consoleHost();
     if (!host) return;
     const status = lastStatus;
+    const confirmation = pendingPreview && document.getElementById('fileJanitorConfirmHost');
+    const focused = activeElement();
+    let ancestor = focused;
+    while (ancestor && ancestor !== host) ancestor = ancestor.parentElement || ancestor.parent;
+    const focusId = ancestor === host ? focused?.id : null;
     host.hidden = false;
     clear(host);
 
@@ -3107,10 +3146,12 @@
     // anywhere. It corrected itself on the next repaint, which is why it looked
     // intermittent.
     host.appendChild(dialog);
-    renderConsoleBody(body, status);
+    renderConsoleBody(body, status, confirmation);
 
     paintError();
-    focusRequestedItem() || focusConsole();
+    const liveFocus = focusId && document.getElementById(focusId);
+    if (isVisibleFocusTarget(liveFocus)) liveFocus.focus();
+    else focusRequestedItem() || focusConsole();
   }
 
   // focusRequestedItem puts the user on the exact row a notification named.
@@ -3225,7 +3266,10 @@
       control.addEventListener('keydown', event => handleConsoleTabKey(event, tab));
       if (tab === 'review') {
         const pending = pendingCount();
-        if (pending > 0) control.appendChild(el('span', 'fj-console-tab-count', String(pending)));
+        const count = el('span', 'fj-console-tab-count', pending > 0 ? String(pending) : '');
+        count.id = 'fileJanitorReviewCount';
+        count.hidden = pending <= 0;
+        control.appendChild(count);
       }
       list.appendChild(control);
     });
@@ -3341,6 +3385,41 @@
   function notifySubscribers() {
     if (disposed) return;
     const actionState = getActionState();
+    const statusLine = document.getElementById('fileJanitorConsoleStatus');
+    const count = document.getElementById('fileJanitorReviewCount');
+    const pending = pendingCount();
+    if (statusLine) {
+      const label =
+        activityState(lastStatus).label +
+        (pending > 0 ? ' · ' + reviewCountLabel(pending) : '') +
+        (pending > 0 && scanning ? ' · Scanning…' : '');
+      if (statusLine.textContent !== label) statusLine.textContent = label;
+    }
+    if (count) {
+      const label = pending > 0 ? String(pending) : '';
+      if (count.textContent !== label) count.textContent = label;
+      count.hidden = pending <= 0;
+    }
+    const notice = document.getElementById('fileJanitorReadStatus');
+    if (notice) {
+      const sources = [actionState.status, actionState.batch];
+      const failed = sources.some(source => source.state === 'unavailable');
+      const loading = sources.some(source => source.state === 'loading');
+      const text = failed
+        ? 'File Janitor information is unavailable. Last known details may be out of date.'
+        : loading
+          ? 'Checking File Janitor. Last known details may be out of date.'
+          : '';
+      if (notice.getAttribute('data-read-status') !== text) {
+        notice.setAttribute('data-read-status', text);
+        notice.textContent = text;
+        if (failed)
+          notice.appendChild(
+            button('Retry File Janitor', 'fj-btn fj-btn-secondary', () => void refresh())
+          );
+      }
+      notice.hidden = !text;
+    }
     const snapshot = { ...stationState(), workspaceId: wsId(), generation, actionState };
     subscribers.forEach(listener => {
       try {
@@ -3863,6 +3942,7 @@
     if (!id || busy || disposed) return;
     busy = true;
     scanning = true;
+    scanFailed = false;
     notifySubscribers();
     reviewStatusMessage = '';
     showError('');
@@ -3897,7 +3977,10 @@
         renderBatch();
       }
     } catch (error) {
-      if (scopeCurrent(scope)) showError(error.message || 'The scan could not run.');
+      if (scopeCurrent(scope)) {
+        scanFailed = true;
+        showError(error.message || 'The scan could not run.');
+      }
     } finally {
       if (scopeCurrent(scope)) {
         busy = false;
@@ -4232,7 +4315,7 @@
    * @typedef {'loading'|'ready'|'unavailable'|'not_applicable'} ActionSourceState
    * @typedef {'setup'|'repair'|'consent'|'review'|'history'|'retry'} ConsoleActionKind
    * @typedef {{state: ActionSourceState, stale: boolean}} ActionSource
-   * @typedef {{id:string, completedAt:string, result:string, operation:string, undoable:boolean}} ActionReceipt
+   * @typedef {{id:string, completedAt:string, result:string, operation:string, undoable:boolean, counts:{applied:number,failed:number,stale:number}}} ActionReceipt
    * @typedef {object} ConsoleActionState
    * @property {string} workspaceId
    * @property {number} generation
@@ -4246,6 +4329,7 @@
    * @property {number|null} pendingCount
    * @property {'manual'|'paused'|'watching'|null} mode
    * @property {boolean} scanning
+   * @property {'idle'|'running'|'failed'} scanState
    * @property {string} readiness
    * @property {boolean} configured
    * @property {boolean} consentRequired
@@ -4314,6 +4398,7 @@
             ? 'paused'
             : 'watching',
       scanning,
+      scanState: scanning ? 'running' : scanFailed ? 'failed' : 'idle',
       readiness: String(lastStatus?.readiness?.state || ''),
       configured,
       consentRequired: Boolean(lastStatus?.privacy?.consent_required),
@@ -4703,6 +4788,7 @@
       historyLoaded = false;
       settingsOpen = false;
       scanning = false;
+      scanFailed = false;
       lastStatus = null;
       lastBatch = null;
       lastCandidates = [];
@@ -4719,6 +4805,7 @@
       historyLoadState = 'loading';
       historyListLoadState = 'loading';
       latestReceipt = null;
+      latestReceiptRecord = null;
       receiptLoaded = false;
       historyFilter = '';
       categories = [];
@@ -4758,7 +4845,10 @@
           catalog && typeof catalog.find === 'function' ? catalog.find('file-janitor') : null;
         if (!item || !item.installed || item.available === false) return null;
         const status = item.status || {};
-        const folder = status.folder_display_name || '';
+        const folder =
+          lastStatus?.applies && isConfigured(lastStatus)
+            ? compactFolderName(lastStatus.settings.root_path)
+            : status.folder_display_name || '';
         return {
           key: 'file-janitor',
           label: 'File Janitor',

@@ -231,6 +231,33 @@ test('starter tasks and user edits are never mutated, renamed or filtered by pro
   assert.equal(JSON.stringify(tasks), before);
 });
 
+test('setup, manual ready, scan, review, partial result and undo state transition honestly', () => {
+  const console = consoleState({ configured: false, readiness: 'setup_required' });
+  assert.equal(guidance([], console).kind, 'setup');
+  Object.assign(console, { configured: true, readiness: 'ready' });
+  assert.equal(guidance([], console).title, 'Ready when you are');
+  console.scanning = true;
+  assert.equal(guidance([], console).title, 'Scanning for files');
+  Object.assign(console, { scanning: false, pendingCount: 3 });
+  assert.equal(guidance([], console).title, '3 files ready for review');
+  Object.assign(console, {
+    pendingCount: 0,
+    latestReceipt: receipt('result', '2026-10-02T00:00:00Z', {
+      counts: { applied: 1, failed: 1, stale: 1 }
+    })
+  });
+  assert.equal(guidance([], console).title, 'Some files could not be filed');
+  assert.equal(guidance([], console).action.id, 'result');
+  console.latestReceipt.counts = { applied: 3, failed: 0, stale: 0 };
+  console.latestReceipt.undoable = true;
+  assert.match(guidance([], console).description, /Undo is available/);
+  console.latestReceipt.undoable = false;
+  assert.doesNotMatch(guidance([], console).description, /Undo/);
+  console.latestReceipt = null;
+  console.emptyState = 'scan_empty';
+  assert.match(guidance([], console).description, /no eligible files/);
+});
+
 test('navigation keys change on workspace generation, root, batch and receipt identity', () => {
   const console = consoleState({ pendingCount: 2 });
   const before = guidance([], console).action.key;

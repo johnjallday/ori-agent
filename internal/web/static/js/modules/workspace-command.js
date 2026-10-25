@@ -2292,6 +2292,7 @@ export class WorkspaceCommandView {
       console?.open?.({
         source: 'workspace-next-action',
         trigger,
+        ...(action.kind === 'history' ? { item: action.id } : {}),
         tab:
           action.kind === 'consent' ? 'settings' : action.kind === 'history' ? 'history' : 'review'
       });
@@ -4301,7 +4302,7 @@ export class WorkspaceCommandView {
     const page = this.page || {};
     const name = String(group.name || 'Agent');
     const key = this.normalizeAgentKey(group.key || name);
-    const status =
+    const rosterStatus =
       typeof page.getAgentRosterStatus === 'function'
         ? page.getAgentRosterStatus(name)
         : { key: 'idle', label: 'Idle', detail: 'No active tasks' };
@@ -4320,6 +4321,7 @@ export class WorkspaceCommandView {
         ? page.getAgentModelPresentation(profile)
         : { model: '', label: 'Model not set', empty: true };
     const tasks = Array.isArray(group.tasks) ? group.tasks : [];
+    const status = this.mapAgentStatus({ tasks, status: rosterStatus });
     const currentTask =
       tasks.find(task => String(task?.status || '').toLowerCase() === 'in_progress') || null;
 
@@ -5473,13 +5475,27 @@ export class WorkspaceCommandView {
     if (tasks.some(task => this.isNeedsInputTask(task))) {
       return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
     }
+    if (tasks.some(task => ['failed', 'timed_out'].includes(resolveTaskPresentation(task).state))) {
+      return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the task result' };
+    }
     if (tasks.some(task => this.isWorkingTask(task))) {
       return { key: 'working', label: 'Working', detail: 'Task in progress' };
     }
-    if (tasks.some(task => this.isQueuedTask(task))) {
+    if (
+      tasks.some(task =>
+        ['ready', 'needs_assignment'].includes(resolveTaskPresentation(task).state)
+      )
+    ) {
       return { key: 'waiting', label: 'Waiting', detail: 'Task queued' };
     }
-    return agent?.status || { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+    if (tasks.some(task => resolveTaskPresentation(task).isUnknown)) {
+      return { key: 'unknown', label: 'Check tasks', detail: 'Task state is unrecognized' };
+    }
+    if (this.page?.tasksLoading || this.page?.tasksLoadFailed) {
+      return { key: 'unknown', label: 'Checking work', detail: 'Task status is not confirmed' };
+    }
+    if (agent?.status && agent.status.key !== 'idle') return agent.status;
+    return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tasks' };
   }
 
   mapAgentViewModels() {
@@ -9170,7 +9186,7 @@ export class WorkspaceCommandView {
   // roster excluding the entry agent, unassigned placeholders, and duplicate
   // records — agentGroups() already dedupes and drops unassigned (FR69).
   commandNodeOrchestrationCopy(specialistCount) {
-    if (specialistCount <= 0) return 'No specialist agents yet';
+    if (specialistCount <= 0) return 'Works directly on assigned tasks';
     return (
       'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's')
     );

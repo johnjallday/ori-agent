@@ -3110,12 +3110,14 @@ test('station state follows the required priority order', () => {
 test('the station keeps product identity, managed folder, depot art, and state distinct', () => {
   setup();
   panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
-  panel.render(statusFixture());
+  const status = statusFixture();
+  status.settings.root_path = '/tmp/A very long approved inbox folder';
+  panel.render(status);
   globalThis.window.WorkspaceCapabilities = {
     find: () => ({
       installed: true,
       available: true,
-      status: { folder_display_name: 'A very long approved inbox folder' }
+      status: { folder_display_name: 'Previous folder before relink' }
     })
   };
   const adapter = globalThis.window.WorkspaceBuiltinStationAdapters.find(
@@ -4393,6 +4395,95 @@ test('a list filter cannot cancel an in-flight canonical receipt refresh', async
   await refresh;
   assert.equal(panel.getActionState().history.state, 'ready');
   assert.equal(panel.getActionState().latestReceipt.id, 'canonical');
+});
+
+test('latest receipt summarizes partial outcomes from the same approval only', async () => {
+  setup();
+  panel.render(statusFixture());
+  const success = {
+    ...receiptFixture('last-success', '2026-10-04T00:00:00Z'),
+    idempotency_key: 'approval-private'
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      actions: [
+        success,
+        {
+          ...receiptFixture('failed', '2026-10-03T00:00:00Z'),
+          idempotency_key: 'approval-private',
+          result: 'failed',
+          undo: 'unavailable'
+        },
+        {
+          ...receiptFixture('other', '2026-10-01T00:00:00Z'),
+          idempotency_key: 'different',
+          result: 'failed'
+        }
+      ]
+    })
+  });
+  await panel._reloadHistory();
+  assert.deepEqual(panel.getActionState().latestReceipt.counts, {
+    applied: 1,
+    failed: 1,
+    stale: 0
+  });
+  assert.doesNotMatch(JSON.stringify(panel.getActionState()), /approval-private|idempotency/);
+});
+
+test('a receipt destination clears History filters and exposes a canonical later-page result', async () => {
+  const doc = setup();
+  openConsole(statusFixture(), 'history');
+  await settle();
+  globalThis.fetch = async url => ({
+    ok: true,
+    json: async () => (url.includes('/history') ? { actions: [] } : { status: statusFixture() })
+  });
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Trashed')[0]
+    .click();
+  await settle();
+  panel.close();
+  const urls = [];
+  globalThis.fetch = async url => {
+    urls.push(url);
+    return {
+      ok: true,
+      json: async () =>
+        url.includes('/history')
+          ? url.includes('offset=1')
+            ? {
+                total: 2,
+                actions: [
+                  {
+                    ...receiptFixture('latest', '2026-10-04T00:00:00Z'),
+                    source_name: 'linked-latest.txt'
+                  }
+                ]
+              }
+            : { total: 2, actions: [receiptFixture('first-page', '2026-10-01T00:00:00Z')] }
+          : { status: statusFixture() }
+    };
+  };
+  panel.open({ source: 'workspace-next-action', tab: 'history', item: 'latest' });
+  await settle();
+  assert.ok(urls.filter(url => url.includes('/history')).every(url => !url.includes('operation=')));
+  assert.match(text(doc), /linked-latest.txt/);
+});
+
+test('failed explicit scans publish a failure without inventing an empty result', async () => {
+  const doc = setup();
+  openConsole(statusFixture());
+  await settle();
+  globalThis.fetch = async () => {
+    throw new Error('scan offline');
+  };
+  doc.getElementById('fileJanitorScan').click();
+  await settle();
+  assert.equal(panel.getActionState().scanState, 'failed');
+  assert.notEqual(panel.getActionState().emptyState, 'scan_empty');
+  assert.match(text(doc), /scan offline/);
 });
 
 test('scan completion publishes its new batch and end state without hiding pending review', async () => {
