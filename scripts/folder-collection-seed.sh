@@ -6,7 +6,7 @@
 # sketch folder that no project marker names.
 #
 # Usage:
-#   ./scripts/folder-collection-seed.sh <sandbox> [folder-under-home]
+#   ./scripts/folder-collection-seed.sh [--exact-albums] <sandbox> [folder-under-home]
 #   ./scripts/folder-collection-seed.sh --tombstone <sandbox> [folder-under-home]
 #
 # The sandbox must be an existing directory under $TMPDIR; nothing outside it is
@@ -23,6 +23,11 @@
 set -euo pipefail
 
 tombstone=0
+exact_albums=0
+if [[ "${1:-}" == "--exact-albums" ]]; then
+	exact_albums=1
+	shift
+fi
 if [[ "${1:-}" == "--tombstone" ]]; then
 	tombstone=1
 	shift
@@ -86,14 +91,24 @@ fi
 stamp="$(date -v-14d +%Y%m%d%H%M 2>/dev/null || date -d '14 days ago' +%Y%m%d%H%M)"
 
 root="$sandbox/$folder"
+if ((exact_albums == 1)) && [[ -e "$root" ]]; then
+	echo "exact Albums fixture requires a fresh destination: $root" >&2
+	exit 2
+fi
+if ((exact_albums == 1)); then
+	stamp=202610010900
+fi
 session='<REAPER_PROJECT 0.1 "7.27/macOS-arm64" 1760000000\n  TEMPO 120 4 4\n  <TRACK\n    NAME "Drums"\n  >\n>\n'
 
 for number in 1 2 3 4 5; do
 	album="$root/Album-$number"
-	mkdir -p "$album/Media"
+	mkdir -p "$album"
 	# shellcheck disable=SC2059 # the session text is a fixed format string
 	printf "$session" >"$album/Song.rpp"
-	printf 'RIFF' >"$album/Media/drums.wav"
+	if ((exact_albums == 0)); then
+		mkdir -p "$album/Media"
+		printf 'RIFF' >"$album/Media/drums.wav"
+	fi
 done
 # shellcheck disable=SC2059
 printf "$session" >"$root/Album-3/Song.rpp-bak"
@@ -101,10 +116,15 @@ printf "$session" >"$root/Album-3/Song.rpp-bak"
 printf "$session" >"$root/Album-5/Alternate.rpp"
 
 sketch="$root/Logic Sketch"
-mkdir -p "$sketch"
-printf 'ideas\n' >"$sketch/ideas.txt"
-printf 'MThd' >"$sketch/sketch.mid"
-printf 'RIFF' >"$sketch/bounce.wav"
+if ((exact_albums == 1)); then
+	mkdir -p "$sketch/Sketch.logicx"
+	printf 'fixture metadata only\n' >"$sketch/Sketch.logicx/ProjectData"
+else
+	mkdir -p "$sketch"
+	printf 'ideas\n' >"$sketch/ideas.txt"
+	printf 'MThd' >"$sketch/sketch.mid"
+	printf 'RIFF' >"$sketch/bounce.wav"
+fi
 
 # Files first, then the folders that hold them, deepest first.
 find "$root" -type f -exec touch -t "$stamp" {} +

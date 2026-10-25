@@ -40,11 +40,12 @@ type cachedSetupReadiness struct {
 // Only explicit/current review reads call this seam, never attachment's
 // HireCandidate/ReviewOptions. It cannot create a journey, destination or plan.
 func (h *folderSetupHost) ReadSetupReadiness(ctx context.Context, req personalassistant.FolderSetupRequest) *personalassistant.FolderSetupVisual {
-	if h == nil || req.Offer.Portfolio != nil || req.Offer.Structure != nil || req.Offer.CapabilitySuppressed ||
+	library := req.Offer.Portfolio != nil && req.Offer.Structure != nil && req.Offer.Structure.Group.Type == personalassistant.FolderGroupLibrary
+	if h == nil || ((req.Offer.Portfolio != nil || req.Offer.Structure != nil) && !library) || req.Offer.CapabilitySuppressed ||
 		(req.Offer.ConversationReview != nil && req.Offer.ConversationReview.Operation == personalassistant.FolderOperationSupport) {
 		return nil
 	}
-	target, err := h.target(req.Offer)
+	target, err := h.prerequisiteTarget(req.Offer)
 	if err != nil {
 		return nil // no plugin requirement is imposed on built-in/unknown recipes
 	}
@@ -59,10 +60,19 @@ func (h *folderSetupHost) ReadSetupReadiness(ctx context.Context, req personalas
 				integration.State = row.Operation
 			}
 		}
-		_, _, visual.Model = h.pluginHire(req.UserID, target, integration)
+		if library {
+			if home, err := h.station(req.UserID, *target.provider); err == nil && (home == nil || !homeStaffed(home)) {
+				visual.Model = h.portfolioModel()
+			}
+		} else {
+			_, _, visual.Model = h.pluginHire(req.UserID, target, integration)
+		}
 		return personalassistant.CloneFolderSetupVisual(visual)
 	}
 	key := req.UserID + "|" + target.entry.Key
+	if library {
+		key += "|library:" + target.provider.Key
+	}
 	h.mu.Lock()
 	cached, known := h.readiness[key]
 	plan, planned := h.cache[key]
@@ -78,9 +88,11 @@ func (h *folderSetupHost) ReadSetupReadiness(ctx context.Context, req personalas
 			visual.Plugins = append(visual.Plugins, foldersetup.PluginVisual(personalassistant.FolderPlanProvider, *plan.facts.Provider))
 		}
 	} else {
-		integration, integrationErr := h.integrationFacts(ctx, req.UserID, target.entry)
-		visual.Plugins = append(visual.Plugins, foldersetup.PluginVisual(personalassistant.FolderPlanIntegration, integration))
-		visual.RequirementsChecked = integrationErr == nil
+		if target.entry.Key != "" {
+			integration, integrationErr := h.integrationFacts(ctx, req.UserID, target.entry)
+			visual.Plugins = append(visual.Plugins, foldersetup.PluginVisual(personalassistant.FolderPlanIntegration, integration))
+			visual.RequirementsChecked = integrationErr == nil
+		}
 		// Failure of one prerequisite must not hide the other known requirement.
 		if target.provider != nil {
 			provider, providerErr := h.providerFacts(ctx, *target.provider)

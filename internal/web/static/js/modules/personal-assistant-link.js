@@ -161,7 +161,7 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
   }
 
   /** A new conversation starts without a link. */
-  function reset() {
+  function reset(release = true) {
     const link = state.link;
     state.generation++;
     state.link = null;
@@ -171,7 +171,7 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
     state.adopted = '';
     state.conversationId = currentId();
     done();
-    if (link) letGo(link.id);
+    if (release && link) letGo(link.id);
   }
 
   /** The server no longer holds the link a turn named. */
@@ -189,7 +189,28 @@ export function createLinkController({ post, changed = () => {}, currentId }) {
     return Boolean(state.link) && state.conversationId === currentId();
   }
 
-  return { state, select, remove, request, adopt, reset, lost, shown };
+  function snapshot() {
+    return { ...state, active: shown() };
+  }
+  function restore(saved) {
+    if (!saved || saved.conversationId !== currentId()) return false;
+    Object.assign(state, saved, { generation: state.generation + 1, pending: false });
+    done();
+    return true;
+  }
+  return {
+    state,
+    select,
+    remove,
+    request,
+    adopt,
+    reset,
+    park: () => reset(false),
+    lost,
+    shown,
+    snapshot,
+    restore
+  };
 }
 
 /**
@@ -430,6 +451,9 @@ const api = {
   sendText: () => LINK_COPY.send,
   adopt: id => controller?.adopt(id),
   reset: () => controller?.reset(),
+  snapshot: () => controller?.snapshot(),
+  park: () => controller?.park(),
+  restore: saved => controller?.restore(saved),
   lost: () => controller?.lost(),
   refresh: () => render(),
   close: () => closeField({ restoreFocus: false }),

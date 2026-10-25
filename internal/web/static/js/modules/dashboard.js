@@ -10381,7 +10381,11 @@
   // Explicit personal-folder turns must not enter local create/specialist
   // shortcuts, including an old natural-language yes. Capture the exact refs
   // once, validate at Route, and validate again at Ask; never fall back locally.
-  async function runPersonalFolderTurn(text, routeContext, folderRef, linkRef) {
+  async function runPersonalFolderTurn(text, routeContext, folderRef, linkRef, composerDraft) {
+    // Keep the exact local draft for failure recovery; only normalized text
+    // crosses the provider boundary. It must describe this same submitted turn.
+    var restoreText =
+      typeof composerDraft === 'string' && composerDraft.trim() === text ? composerDraft : text;
     var conversations = window.PersonalAssistantConversation;
     var conversationRef = conversations && conversations.request(routeContext);
     clearHomeAssistantPlanning();
@@ -10415,7 +10419,8 @@
       await runHomeAssistantInline(text, routeContext, 'assistant_conversation', {
         conversationRef: conversationRef,
         folderRef: folderRef,
-        linkRef: linkRef
+        linkRef: linkRef,
+        restoreText: restoreText
       });
     } catch (error) {
       // Only the server's "no longer held" means the link is gone; any other
@@ -10432,7 +10437,7 @@
       var failedRow = appendHomeAssistantMessage('assistant', notice);
       window.PersonalAssistantTranscript?.reply?.(failedRow);
       conversations && conversations.notify(notice);
-      restorePersonalAssistantDraft(text);
+      restorePersonalAssistantDraft(restoreText);
       setHomeAssistantRoutingSummary('', '');
     } finally {
       setHomeAssistantBusy(false);
@@ -10602,7 +10607,7 @@
         !confirmedAction &&
         !options.researchApproval
       ) {
-        restorePersonalAssistantDraft(text);
+        restorePersonalAssistantDraft(options.restoreText ?? text);
       }
       // Arrangement replies are inert, canonical discussion only. Never feed
       // them into legacy setup suggestions, research or operation execution.
@@ -10878,7 +10883,7 @@
       assistantRow = appendHomeAssistantMessage('assistant', failure.message);
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', failure.summary);
       if (conversationRef && !confirmedAction && !options.researchApproval) {
-        restorePersonalAssistantDraft(text);
+        restorePersonalAssistantDraft(options.restoreText ?? text);
       }
       if (options.folderRef) {
         conversations.notify(
@@ -14084,7 +14089,13 @@
     var linkRef =
       fromPanel && window.PersonalAssistantLink && window.PersonalAssistantLink.request();
     if (folderRef || linkRef) {
-      await runPersonalFolderTurn(text, folderRouteContext, folderRef || null, linkRef || null);
+      await runPersonalFolderTurn(
+        text,
+        folderRouteContext,
+        folderRef || null,
+        linkRef || null,
+        options && options.composerDraft
+      );
       return;
     }
     var panelTurn = await runPersonalPanelTurn(text, folderRouteContext);
@@ -14790,7 +14801,8 @@
 
     await handleHomeAssistantPrompt(text, {
       routeContext: routeContext,
-      recipient: options && options.recipient
+      recipient: options && options.recipient,
+      composerDraft: options && options.composerDraft
     });
     return { handled: true, routeContext: routeContext };
   }

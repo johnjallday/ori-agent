@@ -2165,3 +2165,100 @@ test('a waiting card is placed in the Needs you cards, and opens the strip only 
     /needsItemClaimed\(`offer:\$\{id\}`\)\) claimNeedsItem\(`folder:\$\{lookTask\}`\);/
   );
 });
+
+test('a library review keeps structured alternatives and package-only prerequisite recovery', () => {
+  const offer = {
+    id: 'library',
+    status: 'pending',
+    verdict: 'project',
+    subject: { name: 'Albums' },
+    conversation_id: 'chat',
+    candidate_id: 'root',
+    portfolio: { projects: 6 },
+    capability: { workspace: 'Music Home', setup_source: 'portfolio' },
+    structure: {
+      version: 1,
+      group: { type: 'library', name: 'Music Home', home_available: true },
+      members: [],
+      recommendation: {
+        evidence: 'Five REAPER folders and one Logic folder.',
+        limitation: 'Logic can be listed; only supported integrations open project workspaces.'
+      }
+    },
+    plan: {
+      digest: 'plan',
+      lines: [{ kind: 'library', name: 'Lists projects', detail: 'Listing makes no workspace.' }]
+    }
+  };
+  const ready = folderOfferView(offer);
+  assert.equal(ready.actions.find(action => action.id === 'adjust').adjustStructure, true);
+  assert.match(ready.capabilityDetail, /Logic can be listed/);
+  const waiting = folderOfferView({
+    ...offer,
+    plan: null,
+    destination_status: 'unavailable',
+    destination_blocker: {
+      integration_key: 'ori_reaper',
+      home_provider_key: 'music_project_management'
+    },
+    prerequisites_available: true
+  });
+  assert.deepEqual(
+    waiting.actions.map(action => action.id),
+    ['recheck', 'group']
+  );
+  assert.match(waiting.question, /own review and confirmation/);
+  assert.equal(waiting.plan, null);
+  const changed = folderOfferView({
+    ...offer,
+    destination_status: 'changed',
+    prerequisites_available: false
+  });
+  assert.equal(
+    changed.actions.some(action => action.id === 'setup'),
+    false
+  );
+});
+
+test('a changed destination offers fresh review while keeping the library visible', () => {
+  const changed = folderOfferView({
+    id: 'library',
+    status: 'pending',
+    verdict: 'project',
+    subject: { name: 'Albums' },
+    conversation_id: 'chat',
+    candidate_id: 'root',
+    destination_status: 'changed',
+    portfolio: { projects: 6 },
+    structure: { version: 1, group: { type: 'library', name: 'Music Home' }, members: [] }
+  });
+  assert.equal(changed.visible, true);
+  assert.equal(changed.plan, null);
+  assert.deepEqual(
+    changed.actions.map(action => action.id),
+    ['recheck', 'group']
+  );
+});
+
+test('a declined library requires Ask again before setup or package controls', () => {
+  for (const destination_status of ['', 'unavailable']) {
+    const view = folderOfferView({
+      id: 'library',
+      status: 'pending',
+      verdict: 'project',
+      subject: { name: 'Albums' },
+      portfolio: { projects: 6 },
+      structure: { version: 1, group: { type: 'library', name: 'Music Home' }, members: [] },
+      declined: { folder_key: 'a'.repeat(64), name: 'Albums' },
+      destination_status,
+      prerequisites_available: true,
+      plan: { digest: 'digest', lines: [{ kind: 'library', name: 'Lists projects' }] }
+    });
+    assert.deepEqual(
+      view.actions.map(action => action.id),
+      ['ask']
+    );
+    assert.equal(view.plan, null);
+    assert.deepEqual(view.prerequisites, []);
+  }
+});

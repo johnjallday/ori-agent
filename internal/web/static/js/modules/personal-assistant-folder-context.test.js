@@ -454,7 +454,7 @@ test('an attached collection keeps its proposed group as a local preview until S
   assert.equal(f.controller.state.structure, null);
 });
 
-test('the attach card is the proposal with Set up, Adjust and Not now, or one line', async () => {
+test('the attach card offers explicit review, Adjust and Not now, or one line', async () => {
   const structure = {
     version: 1,
     folder: 'Albums',
@@ -470,7 +470,7 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   assert.deepEqual(
     view.actions.map(action => [action.label, action.disabled]),
     [
-      ['Set up', false],
+      ['Review group setup', false],
       ['Adjust…', false],
       ['Not now', false]
     ]
@@ -522,6 +522,40 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   assert.equal(folderDecline({ ...declined, folder_key: '../etc' }), null);
 });
 
+test('library discovery coexists with a pending review and never sends on attach', async () => {
+  let reply = {
+    observation: observation('albums'),
+    revision: '',
+    structure_unavailable: 'review_pending',
+    structure: {
+      version: 1,
+      folder: 'Albums',
+      group: { type: 'group', name: 'Albums' },
+      members: [],
+      recommendation: {
+        operation: 'library',
+        destination: { state: 'existing', name: 'My Music', readiness: 'review' }
+      }
+    }
+  };
+  const requests = [];
+  const f = fixture(async (url, body) => {
+    requests.push([url, body]);
+    return reply;
+  });
+  await f.controller.select('chip', 'downloads');
+  const view = structureCardView(f.controller.state);
+  assert.equal(view.kind, 'proposal');
+  assert.equal(view.actions[0].label, 'Review library setup');
+  assert.equal(view.actions[0].disabled, true);
+  assert.equal(f.controller.state.structureUnavailable, 'review_pending');
+  assert.equal(requests.length, 1);
+  assert.match(requests[0][0], /folder-context\/select$/);
+  reply = { ...reply, observation: observation('other'), structure_unavailable: '' };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(structureCardView(f.controller.state).actions[0].disabled, false);
+});
+
 test('the proposal card stays when the turn sent with it gets no answer', async () => {
   const structure = {
     version: 1,
@@ -535,7 +569,7 @@ test('the proposal card stays when the turn sent with it gets no answer', async 
   // folder is never accepted into a conversation and the preview stays.
   assert.ok(f.controller.request());
   assert.equal(structureCardView(f.controller.state).kind, 'proposal');
-  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Review group setup');
   // Retry asks again with the same references.
   assert.deepEqual(f.controller.request(), f.controller.request());
 });
@@ -563,7 +597,7 @@ test('Ask again sends only the decline key and gives the card its Set up back', 
   // The folder was not looked at again: same observation, same proposal.
   assert.equal(f.controller.state.observation.id, 'a');
   assert.equal(f.controller.state.structure, structure);
-  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Review group setup');
   // Nothing to ask again about: no request.
   assert.equal(await f.controller.askAgain(), false);
   assert.equal(f.calls.length, 2);
@@ -581,8 +615,8 @@ test('Ask again sends only the decline key and gives the card its Set up back', 
 
 test('an empty Send asks for the proposal on a collection and explores any other folder', () => {
   assert.deepEqual(emptySendView('Albums', true), {
-    placeholder: 'Propose workspaces for Albums',
-    text: 'Propose workspaces for this folder'
+    placeholder: 'Explain setup for Albums',
+    text: 'Explain the setup recommendation for this folder'
   });
   assert.deepEqual(emptySendView('Thesis', false), {
     placeholder: 'Explore this folder',
@@ -633,4 +667,66 @@ test('late review cannot bind a new conversation and historical context cannot r
   });
   assert.equal(await f.controller.review('root'), null);
   assert.equal(f.calls.length, 1);
+});
+
+test('return restores an unsaved selection and rechecks references without scanning or extending authority', async () => {
+  const { controller, calls, setId } = fixture(async (url, body) =>
+    url.endsWith('/recommendation')
+      ? { observation_id: body.selection_id, structure: { version: 1, folder: 'Albums' } }
+      : {
+          observation: {
+            ...observation('a'),
+            tree: { nodes: [{ id: 'entry-0', name: 'Album-5', kind: 'folder' }] }
+          },
+          structure: { version: 1 },
+          blocker: { subject: 'Album-5' },
+          structure_unavailable: 'review_pending'
+        }
+  );
+  await controller.select('chip', 'music');
+  assert.equal(controller.setFocus(['entry-0']), true);
+  const saved = controller.snapshot();
+  setId('album-5');
+  controller.reset('album-5');
+  setId('');
+  controller.reset();
+  assert.equal(await controller.restore(saved), true);
+  assert.equal(controller.state.draftId, saved.draftId);
+  assert.deepEqual(controller.state.focusIDs, ['entry-0']);
+  assert.equal(controller.state.observation.id, 'a');
+  assert.equal(controller.state.blocker, null);
+  assert.equal(controller.state.authority, '');
+  assert.deepEqual(
+    calls.map(c => c.url),
+    [
+      '/api/home-assistant/folder-context/select',
+      '/api/home-assistant/folder-context/recommendation'
+    ]
+  );
+  assert.deepEqual(calls[1].body, { draft_id: saved.draftId, revision: '', selection_id: 'a' });
+});
+
+test('expired return keeps the observation but refuses execution; a late refresh cannot change a replacement', async () => {
+  let pending = deferred();
+  const f = fixture(async (url, body) =>
+    url.endsWith('/recommendation') ? pending.promise : { observation: observation(body.chip) }
+  );
+  await f.controller.select('chip', 'old');
+  const saved = f.controller.snapshot();
+  const returning = f.controller.restore(saved);
+  pending.reject(new Error('expired'));
+  assert.equal(await returning, false);
+  assert.equal(f.controller.state.observation.id, 'old');
+  assert.equal(f.controller.state.authority, 'expired');
+  assert.match(f.controller.state.notice, /draft is kept/);
+  assert.equal(await f.controller.review('root'), null);
+  pending = deferred();
+  const refreshing = f.controller.refreshRecommendation();
+  await f.controller.select('chip', 'new');
+  pending.resolve({ observation_id: 'old', blocker: { subject: 'Old' } });
+  assert.equal(await refreshing, false);
+  assert.equal(f.controller.state.observation.id, 'new');
+  assert.equal(f.controller.state.blocker, null);
+  f.setId('foreign');
+  assert.equal(await f.controller.restore(saved), false);
 });

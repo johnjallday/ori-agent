@@ -38,7 +38,7 @@ test('bounded/partial, omitted and historical facts never wait for a disclosure'
     'Some folder and file-kind summaries were left out of this bounded look.'
   );
   assert.equal(view.moreRows.length, 5);
-  assert.match(view.disclosure, /Attached folder: contents not read/);
+  assert.match(view.disclosure, /12 files observed.*File contents were not opened/);
   assert.match(folderPresentation(fixtures.album).status, /Bounded look/);
   assert.match(
     folderPresentation(fixtures.album, { local: true }).status,

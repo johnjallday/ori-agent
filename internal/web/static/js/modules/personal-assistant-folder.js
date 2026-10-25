@@ -799,7 +799,12 @@ function capabilityConfirmView(offer, base, subject) {
         style: 'primary',
         oneCard: true
       },
-      { id: 'adjust', label: 'Adjust…', style: 'outline', journey: true },
+      {
+        id: 'adjust',
+        label: 'Adjust…',
+        style: 'outline',
+        ...(portfolio && offer.structure ? { adjustStructure: true } : { journey: true })
+      },
       decline,
       later
     ];
@@ -814,11 +819,14 @@ function capabilityConfirmView(offer, base, subject) {
       decline,
       later
     ];
-  const headline = hire
-    ? hire.headline
-    : portfolio
-      ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
-      : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
+  const headline =
+    offer.structure?.recommendation && !run
+      ? segments([String(offer.structure.recommendation.evidence || '')])
+      : hire
+        ? hire.headline
+        : portfolio
+          ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
+          : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
   let question = portfolio
     ? String(capability.question || `Set up a ${capability.workspace}?`)
     : `Set up ${subject} as a ${capability.workspace}?`;
@@ -860,7 +868,13 @@ function capabilityConfirmView(offer, base, subject) {
     needsLine: hasPlan && lines ? lines.needsLine(offer.needs) : '',
     // The plan lists every consequence, so the pre-setup install promise would
     // only repeat it; a run shows its own progress instead.
-    capabilityDetail: hasPlan || run ? '' : String(capability.integration || ''),
+    capabilityDetail: run
+      ? ''
+      : portfolio && offer.structure?.recommendation?.limitation
+        ? String(offer.structure.recommendation.limitation)
+        : hasPlan
+          ? ''
+          : String(capability.integration || ''),
     reason: run ? '' : String(capability.evidence || base.reason),
     actions,
     resume: continuing,
@@ -1135,6 +1149,29 @@ function folderOfferViewWithoutLead(offer, options = {}) {
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
   // before offering anything a yes would need.
+  if (
+    view.visible &&
+    status === 'pending' &&
+    !offer.setup &&
+    offer.structure?.group?.type === 'library' &&
+    /^[0-9a-f]{64}$/.test(offer.declined?.folder_key || '')
+  ) {
+    return {
+      ...view,
+      plan: null,
+      readiness: null,
+      prerequisites: [],
+      question: declinedLine(offer.declined, subject),
+      actions: [
+        {
+          id: 'ask',
+          label: 'Ask again',
+          style: 'outline',
+          forget: { folder_key: offer.declined.folder_key }
+        }
+      ]
+    };
+  }
   if (view.visible && ['changed', 'unavailable'].includes(offer.destination_status)) {
     const destination = folderSetupDestinationLabel(offer);
     // A blocked Home must not strand the user's manual fallback. This action
@@ -1147,6 +1184,11 @@ function folderOfferViewWithoutLead(offer, options = {}) {
       offer.structure?.version === 1 &&
       offer.structure.group?.type === 'library';
     const guided = blockedFolderSetupAction(offer);
+    const repairable =
+      guided ||
+      (plainReview &&
+        offer.prerequisites_available &&
+        offer.destination_blocker?.home_provider_key);
     if (view.needsPick)
       return {
         ...repickView(view, subject),
@@ -1156,24 +1198,46 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     return {
       ...view,
       plan: null,
-      actions: guided
+      actions: repairable
         ? [
             ...(offer.prerequisites_available ? [] : [guided]),
             ...(offer.candidate_id && offer.conversation_id && !offer.setup
               ? [{ id: 'recheck', label: 'Check again', style: 'outline', recheck: true }]
+              : []),
+            ...(plainReview
+              ? [
+                  {
+                    id: 'group',
+                    label: 'Review plain group instead…',
+                    style: 'link',
+                    structureGroup: true
+                  }
+                ]
               : [])
           ]
-        : plainReview
-          ? [
-              {
-                id: 'group',
-                label: 'Review plain group instead…',
-                style: 'link',
-                structureGroup: true
-              }
-            ]
-          : [],
-      question: guided
+        : [
+            ...(offer.candidate_id && offer.conversation_id && !offer.setup
+              ? [
+                  {
+                    id: 'recheck',
+                    label: 'Review changed destination',
+                    style: 'primary',
+                    recheck: true
+                  }
+                ]
+              : []),
+            ...(plainReview
+              ? [
+                  {
+                    id: 'group',
+                    label: 'Review plain group instead…',
+                    style: 'link',
+                    structureGroup: true
+                  }
+                ]
+              : [])
+          ],
+      question: repairable
         ? offer.prerequisites_available
           ? 'Install the required Ori plugins below. Each has its own review and confirmation. This does not create a workspace or start an agent; your folder and draft stay here.'
           : 'The required Home is not ready. Open Guided Setup in a separate tab to review its prerequisites, then return and check again. Opening it does not confirm installation or folder setup. Your draft stays here.'
@@ -3343,11 +3407,11 @@ function renderOffer(place) {
     );
   globalThis.OriFolderSetupVisual.renderRequirements(
     document.getElementById('personalAssistantFolderRequirements'),
-    receipt.visible ? {} : { offer: state.offer }
+    receipt.visible || state.offer?.declined ? {} : { offer: state.offer }
   );
   renderFolderPrerequisites(
     document.getElementById('personalAssistantFolderRequirements'),
-    receipt.visible ? null : state.offer,
+    receipt.visible || state.offer?.declined ? null : state.offer,
     prerequisites,
     {
       blocked: state.busy || conversationReviewLoading(),
@@ -4054,9 +4118,12 @@ async function startOneCardSetup(action) {
       revealRunSurface();
       return;
     }
-    if (payload?.plan_changed && payload.offer) {
-      // The card on screen was stale: show what Set up would do now.
-      state.offer = payload.offer;
+    if (payload?.plan_changed) {
+      // Keep the current review visible even if a failed response has no view.
+      state.offer =
+        payload.offer?.id === offer.id && payload.offer?.status
+          ? payload.offer
+          : { ...offer, plan: null, destination_status: 'changed' };
       announceOffer();
       showError(String(payload.error || 'What Set up does has changed. Review the new plan.'));
       return;
@@ -5252,6 +5319,11 @@ function init() {
         state.editingName = false;
         slot.replaceChildren();
       }
+      if (
+        state.offer?.id !== offer.id ||
+        (offer.plan?.digest && state.offer?.plan?.digest !== offer.plan.digest)
+      )
+        showError('');
       state.reviewSlot = slot;
       state.offer = offer;
       state.inThread = true;
@@ -5270,6 +5342,7 @@ function init() {
     },
     updateConversationReview: offer => {
       if (state.offer?.id !== offer?.id || !offer?.conversation_id) return;
+      if (offer.plan?.digest && state.offer?.plan?.digest !== offer.plan.digest) showError('');
       state.offer = offer;
       render();
     },

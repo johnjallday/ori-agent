@@ -1290,6 +1290,12 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 			// The collection's Home is in place: it is listed there, as before.
 			offer.Structure = structure
 		}
+		if offer.Structure != nil {
+			domain, evidence, legacyDeclined = "", "", false
+			if tombstone := doc.Tombstone(offer.Subject.Key); tombstone != nil {
+				offer.Declined = &FolderRootDecline{FolderKey: tombstone.Key, Name: tombstone.Name, At: tombstone.CreatedAt}
+			}
+		}
 	}
 
 	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -1424,7 +1430,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if input.Decision == FolderDecisionYes {
 		// A proposed group is set up through its own reviewed plan (Set up). A
 		// bare yes on its review would make one workspace out of the whole folder.
-		if offer.Status == FolderOfferPending && offer.Structure.ProposesWorkspaces() {
+		if offer.Status == FolderOfferPending && (offer.Structure.ProposesWorkspaces() || (offer.Portfolio != nil && input.Create)) {
 			return FolderOfferView{}, ErrFolderReviewRequired
 		}
 		if input.Create && isProjectCapabilityOffer(*offer) {
@@ -2222,7 +2228,7 @@ func (s *FolderDigestService) PortfolioProvider(ctx context.Context, userID, off
 func folderOfferDomainClass(offer FolderOffer) (domain, evidence string) {
 	// A proposed group is the host's own setup, not a capability: a no to it is
 	// a no to that folder, never to a kind of work.
-	if offer.Structure.ProposesWorkspaces() {
+	if offer.Structure != nil {
 		return "", ""
 	}
 	if offer.Portfolio != nil {

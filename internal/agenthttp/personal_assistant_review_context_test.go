@@ -212,3 +212,11 @@ func TestReviewContext_SerializedBoundsAndEscaping(t *testing.T) {
 		t.Fatal("serialization mutated frozen projection")
 	}
 }
+
+func TestReviewContext_DeclinedLibraryRequiresAskAgainEvenWithMissingHome(t *testing.T) {
+	view := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending, Declined: &personalassistant.FolderRootDecline{}, Portfolio: &personalassistant.FolderPortfolioEvidence{Projects: 6}, PrerequisitesAvailable: true, DestinationStatus: "unavailable", DestinationBlocker: &personalassistant.FolderDestinationBlocker{HomeProviderKey: "music_project_management"}}
+	projected := projectReviewContext(view, true)
+	if projected.Status != "declined" || projected.Blocker != "folder_declined" || !reflect.DeepEqual(projected.Controls, []string{"Ask again", "Keep chatting"}) {
+		t.Fatalf("decline lost precedence: %+v", projected)
+	}
+}

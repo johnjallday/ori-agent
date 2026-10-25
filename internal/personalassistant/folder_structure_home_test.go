@@ -117,7 +117,7 @@ func TestFolderDigest_AdjustOnHomeChangesTheProposalAndItsPlan(t *testing.T) {
 		t.Fatalf("listed in the Home: %+v, %v", listed.Structure, err)
 	}
 	back, err := f.service.AdjustStructure(ctx, "local", offer.ID, FolderStructureAdjustment{GroupType: FolderGroupPlain})
-	if err != nil || !back.Structure.ProposesWorkspaces() || back.Structure.Group.Name != "Music" {
+	if err != nil || !back.Structure.ProposesWorkspaces() || back.Structure.Group.Name != "Albums 2026" || len(back.Structure.Included()) != 5 {
 		t.Fatalf("back to a plain group: %+v, %v", back.Structure, err)
 	}
 }
@@ -332,5 +332,31 @@ func TestFolderDigest_OtherFoldersKeepTheirQuestion(t *testing.T) {
 	}
 	if _, err := f.service.AdjustStructure(ctx, "local", picked.ID, FolderStructureAdjustment{GroupType: FolderGroupLibrary}); !errors.Is(err, ErrFolderStructureAdjustment) {
 		t.Fatalf("a folder with no Home was listed in one: %v", err)
+	}
+}
+
+func TestFolderDigest_DeclinedLibraryRequiresAskAgainBeforeSetup(t *testing.T) {
+	f, _ := homeCollectionFixture(t)
+	offer, err := f.service.ScanChip(t.Context(), "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(t.Context(), "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "decline-library"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.service.ScanChip(t.Context(), "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	library, err := f.service.AdjustStructure(t.Context(), "local", again.ID, FolderStructureAdjustment{GroupType: FolderGroupLibrary})
+	if err != nil || library.Declined == nil {
+		t.Fatal("library lost decline", err)
+	}
+	if _, err := f.service.StartSetup(t.Context(), "local", library.ID, FolderSetupInput{RequestID: "bypass-ask", PlanDigest: "stale"}); !errors.Is(err, ErrFolderReviewRequired) {
+		t.Fatal("library bypassed Ask again", err)
+	}
+	forgotten, err := f.service.Forget(t.Context(), "local", FolderForgetInput{FolderKey: library.Declined.FolderKey})
+	if err != nil || forgotten.Offer == nil || forgotten.Offer.Declined != nil || forgotten.Offer.Structure.Group.Type != FolderGroupLibrary {
+		t.Fatal("Ask again lost alternative", err)
 	}
 }

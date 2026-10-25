@@ -308,6 +308,13 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 	}
 	if active && view.DestinationStatus != "" {
 		result.Status, result.Blocker, result.Controls = "setup_unavailable", "destination_"+view.DestinationStatus, nil
+		if view.Portfolio != nil && view.DestinationStatus == "unavailable" && view.DestinationBlocker != nil && view.PrerequisitesAvailable {
+			result.Blocker = "home_prerequisites"
+			result.Controls = []string{"Review plugin requirements", "Check again", "Review plain group instead…", "Keep chatting"}
+		}
+	}
+	if active && view.Status == personalassistant.FolderOfferPending && view.Declined != nil {
+		result.Status, result.Blocker, result.Controls = "declined", "folder_declined", []string{"Ask again", "Keep chatting"}
 	}
 	if !active {
 		result.Historical = true

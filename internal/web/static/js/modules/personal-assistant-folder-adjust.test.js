@@ -34,10 +34,11 @@ test('the sheet edits a copy and sends members only by the ids the proposal gave
   assert.deepEqual(adjustmentFrom(model), {
     group_type: 'group',
     group_name: 'Albums 2026',
+    group_name_set: true,
     members: [
-      { candidate_id: 'candidate-1', included: true, name: 'First Record' },
-      { candidate_id: 'candidate-2', included: true, name: 'Album-2' },
-      { candidate_id: 'candidate-3', included: false, name: 'Logic Sketch' }
+      { candidate_id: 'candidate-1', included: true, name: 'First Record', name_set: true },
+      { candidate_id: 'candidate-2', included: true, name: 'Album-2', name_set: true },
+      { candidate_id: 'candidate-3', included: false, name: 'Logic Sketch', name_set: true }
     ]
   });
   // The record the card was drawn from is untouched.
@@ -62,7 +63,8 @@ test('Done is stopped by one sentence: no folder, no name, or one name twice', (
   // Listing in the Home makes no workspace, so no member is needed.
   model.groupType = 'library';
   assert.equal(adjustProblem(model), '');
-  assert.equal('group_name' in adjustmentFrom(model), false);
+  assert.equal(adjustmentFrom(model).group_name, '');
+  assert.equal(adjustmentFrom(model).group_name_set, true);
 });
 
 test('group types are offered only when the folder has a Home, and only when it can be used', () => {
@@ -220,4 +222,32 @@ test('the sheet reports a problem instead of sending, then sends the adjustment 
       ['library', true, false]
     ]
   );
+});
+
+test('library reopening preserves explicit plain-group edits and deliberate empty fields', () => {
+  const source = structure({
+    type: 'library',
+    name: 'Renamed Home',
+    home_name: 'Renamed Home',
+    home_available: true
+  });
+  source.edits = {
+    group_type: 'library',
+    group_name: '',
+    group_name_set: true,
+    members: [
+      { candidate_id: source.members[0].candidate_id, name: '', name_set: true, included: true }
+    ]
+  };
+  const model = adjustModel(source);
+  assert.equal(model.plainName, '');
+  assert.equal(model.members[0].name, '');
+  assert.equal(adjustProblem(model), '');
+  const sent = adjustmentFrom(model);
+  assert.equal(sent.group_name, '');
+  assert.equal(sent.members[0].name_set, true);
+  model.groupType = 'group';
+  assert.equal(adjustProblem(model), 'Give the group a name.');
+  model.plainName = 'Records';
+  assert.match(adjustProblem(model), /Give the workspace/);
 });

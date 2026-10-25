@@ -53,12 +53,67 @@ export function structureOption(structure) {
   };
 }
 
+// Recognition remains useful before prerequisites or an executable plan exist.
+export function recommendationView(structure) {
+  const r = structure?.recommendation;
+  if (!r || r.operation !== 'library') return null;
+  const destination = r.destination || {};
+  const name = bounded(destination.name) || 'Music Production Home';
+  const notes = {
+    provider_missing: 'The Home provider needs to be installed through reviewed setup.',
+    provider_disabled: 'The Home provider needs to be enabled through reviewed setup.',
+    provider_outdated: 'The Home provider needs an update through reviewed setup.',
+    destination_ambiguous:
+      'More than one Home matches. Resolve the destination before reviewing library setup.',
+    destination_incompatible:
+      'The Home is incompatible with this setup. Its destination needs review.',
+    unavailable: 'The destination could not be verified. No new Home is assumed.'
+  };
+  return {
+    kind: 'collection',
+    state: 'proposed',
+    art: 'district',
+    label: bounded(r.evidence),
+    subject: '',
+    scope: '',
+    description:
+      destination.state === 'existing'
+        ? `Suggested: add this collection to your ${name} library.`
+        : destination.state === 'absent'
+          ? `Suggested: review a new ${name} and its collection library.`
+          : `Suggested: ${name} library. The destination needs verification.`,
+    destination: 'Listing projects does not create a workspace for every folder.',
+    action: 'Review library setup',
+    members: [],
+    omitted: 0,
+    notes: [notes[destination.readiness], r.limitation, r.alternative].filter(Boolean)
+  };
+}
+
 // A folder that holds several projects: the host's own proposal of one group
 // and its member workspaces. Every string is the host's; nothing here is read
 // out of prose, and an availability reason only ever becomes a fixed short note.
 function structureView(option) {
   const p = option.presentation;
   const s = option.structure;
+  const recommendation = recommendationView(s);
+  if (recommendation) return recommendation;
+  if (s?.version === 1 && s.group?.type === 'library') {
+    return {
+      kind: 'collection',
+      state: 'proposed',
+      art: 'district',
+      label: 'Collection library',
+      subject: bounded(s.folder),
+      scope: '',
+      description: effects.library,
+      destination: `${s.group.destination_state === 'existing' ? 'Existing' : 'Proposed new'} destination · ${bounded(s.group.name)}`,
+      action: 'Review library setup',
+      members: [],
+      notes: [],
+      omitted: 0
+    };
+  }
   // Version 2 is a saved arrangement's exact selection: a new plain group,
   // never the rule-based proposal, and labelled as such.
   const arranged = s?.version === 2 && s.group?.type === 'group' && Boolean(s.arrangement);
@@ -104,7 +159,9 @@ function structureView(option) {
     kind: 'structure',
     state: 'proposed',
     art: 'district',
-    label: `Set up ${folder} as a group?`,
+    label: s.recommendation?.evidence
+      ? bounded(s.recommendation.evidence)
+      : `Set up ${folder} as a group?`,
     subject: '',
     scope: '',
     description: structureLine(members.length),
@@ -117,7 +174,7 @@ function structureView(option) {
           : '',
     action: 'Set up',
     members,
-    notes: [],
+    notes: s.recommendation?.alternative ? [bounded(s.recommendation.alternative)] : [],
     omitted
   };
 }
@@ -234,7 +291,7 @@ export function renderProposal(view, doc, art) {
     node.textContent = value;
     text.append(node);
   }
-  if (view.members?.length) text.append(...renderMembers(view, doc));
+  if (view.members?.length || view.notes?.length) text.append(...renderMembers(view, doc));
   card.append(image, text);
   return card;
 }

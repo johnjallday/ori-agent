@@ -670,3 +670,14 @@ test('Review setup stays away for a collection, whose card is the way in', () =>
   // Nothing to set up: no link either way.
   assert.equal(reviewLinkHidden({ projects: [] }, null), true);
 });
+
+test('a verified absent Home provider is explained as a prerequisite, not an unreadable destination', () => {
+  const view = reviewStatusView({
+    version: 1,
+    status: 'setup_unavailable',
+    subject: 'Albums',
+    blocker: 'home_prerequisites'
+  });
+  assert.match(view.text, /needs its Home provider.*Check again/);
+  assert.doesNotMatch(view.text, /could not be read/);
+});

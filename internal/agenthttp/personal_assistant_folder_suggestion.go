@@ -170,19 +170,8 @@ func folderSetupOptionsPrompt(observation *foldercontext.Observation, options []
 // turn's options, or nil when the attached folder is not a collection.
 func folderStructureOption(options []personalassistant.FolderReviewOption) *personalassistant.FolderReviewPresentation {
 	for _, option := range options {
-		if p := option.Presentation; p != nil && p.Kind == "structure" && p.State == "proposed" {
+		if p := option.Presentation; p != nil && p.Kind == "structure" && p.State == "proposed" && p.GroupType != personalassistant.FolderGroupLibrary {
 			return p
-		}
-	}
-	return nil
-}
-
-// folderProposedStructure is the group the options propose for a collection,
-// as the attach response carried it, or nil.
-func folderProposedStructure(options []personalassistant.FolderReviewOption) *personalassistant.FolderStructure {
-	for _, option := range options {
-		if p := option.Presentation; p != nil && p.Kind == "structure" && p.State == "proposed" && option.Structure != nil {
-			return option.Structure
 		}
 	}
 	return nil

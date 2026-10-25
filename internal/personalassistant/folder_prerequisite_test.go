@@ -118,3 +118,49 @@ func TestFolderHireCandidateUnavailableIntegrationStillOpensRequirements(t *test
 		t.Fatal("eligibility persisted a review", err)
 	}
 }
+
+func TestFolderPrerequisite_LibraryReviewOnlyRepairsPackagesBeforeAcceptance(t *testing.T) {
+	f, observations, source, observation := albumsObservation(t)
+	setup := &prerequisiteSetup{fakeFolderSetup: &fakeFolderSetup{lines: oneCardLines(), destination: &FolderSetupDestination{Status: "standalone"}}}
+	f.service.deps.Setup = setup
+	active := ""
+	observations.ConfigureConversationReviews(func(_ context.Context, offer FolderOffer) error {
+		if active != offer.ID {
+			return ErrFolderSelection
+		}
+		return nil
+	}, func(foldercontext.Target) (func(), bool) { return func() {}, true })
+	ctx := WithFolderStructureAdjustment(WithFolderReviewPlacement(t.Context(), FolderReviewPlacement{Operation: FolderOperationCreate}), &FolderStructureAdjustment{GroupType: FolderGroupLibrary})
+	view, err := observations.Review(ctx, source, "library-chat", observation.ID, folderRootCandidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations.BindSaved(source, observation.ID, "library-chat")
+	active = view.ID
+	before, _ := f.store.Read(t.Context(), "local")
+	if _, err := f.service.Prerequisite(t.Context(), "local", view.ID, FolderPrerequisiteInput{Kind: FolderPlanProvider, RequestID: "preview-library-provider"}); err != nil || setup.calls != 1 {
+		t.Fatalf("library package review: %d %v", setup.calls, err)
+	}
+	after, _ := f.store.Read(t.Context(), "local")
+	if !reflect.DeepEqual(before, after) || setup.runs != 0 {
+		t.Fatal("package preview changed library consent or effects")
+	}
+	// A provider-only library has no REAPER key but can still repair its Home.
+	if _, err := f.store.Mutate(t.Context(), "local", func(d *FolderDigestDocument) error {
+		o := d.Offer(view.ID)
+		o.ConversationReview.Destination, o.ConversationReview.DestinationUnavailable = nil, true
+		o.ConversationReview.DestinationBlocker = &FolderDestinationBlocker{HomeProviderKey: o.Portfolio.ProviderKey}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Prerequisite(t.Context(), "local", view.ID, FolderPrerequisiteInput{Kind: FolderPlanProvider, RequestID: "provider-only"}); err != nil || setup.calls != 2 {
+		t.Fatal("provider-only library stranded", err)
+	}
+	if _, err := f.store.Mutate(t.Context(), "local", func(d *FolderDigestDocument) error { d.Offer(view.ID).Status = FolderOfferAwaitingOutcome; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Prerequisite(t.Context(), "local", view.ID, FolderPrerequisiteInput{Kind: FolderPlanProvider, RequestID: "accepted-library-provider"}); !errors.Is(err, ErrFolderOfferDecided) || setup.calls != 2 {
+		t.Fatal("accepted library entered prerequisite repair", err)
+	}
+}

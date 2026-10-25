@@ -7,11 +7,17 @@ const text = value => String(value == null ? '' : value).trim();
 // adjustModel is the sheet's editable copy of a structure record.
 export function adjustModel(structure) {
   const group = structure?.group || {};
+  const edits = structure?.edits || {};
   return {
     folder: text(structure?.folder),
     groupName: text(group.name),
     // The plain group's own name, kept while another type is selected.
-    plainName: group.type === 'group' ? text(group.name) : text(structure?.folder),
+    plainName:
+      edits.group_name_set || edits.group_name
+        ? text(edits.group_name)
+        : group.type === 'group'
+          ? text(group.name)
+          : text(structure?.folder),
     groupType: group.type === 'library' ? 'library' : 'group',
     homeName: text(group.home_name),
     homeAvailable: group.home_available === true,
@@ -20,7 +26,10 @@ export function adjustModel(structure) {
     members: (Array.isArray(structure?.members) ? structure.members : []).map(member => ({
       id: text(member.candidate_id),
       folder: text(member.folder) || text(member.name),
-      name: text(member.name),
+      name: (() => {
+        const edited = edits.members?.find(value => value.candidate_id === member.candidate_id);
+        return edited && (edited.name_set || edited.name) ? text(edited.name) : text(member.name);
+      })(),
       type: text(member.type_label),
       included: member.included === true,
       existing: text(member.existing_workspace)
@@ -91,11 +100,13 @@ export function adjustProblem(model) {
 export function adjustmentFrom(model) {
   return {
     group_type: model.groupType,
-    ...(model.groupType === 'group' ? { group_name: text(model.plainName) } : {}),
+    group_name: text(model.plainName),
+    group_name_set: true,
     members: model.members.map(member => ({
       candidate_id: member.id,
       included: member.included,
-      name: text(member.name)
+      name: text(member.name),
+      name_set: true
     }))
   };
 }

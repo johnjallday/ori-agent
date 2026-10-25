@@ -199,13 +199,15 @@ export function reviewStatusView(context, elsewhere = null) {
       break;
     case 'setup_unavailable':
       text =
-        context.blocker === 'destination_changed'
-          ? `The reviewed destination for ${subject} has changed. Use Review setup to refresh the review.`
-          : context.blocker === 'destination_unavailable'
-            ? `The reviewed destination for ${subject} could not be read. Use Review setup to refresh the review.`
-            : context.blocker === 'project_exists'
-              ? `${subject} already has a workspace. Open it from its card instead of setting up another.`
-              : `Setup is not available for ${subject} here. You can keep discussing the folder.`;
+        context.blocker === 'home_prerequisites'
+          ? `Library setup for ${subject} needs its Home provider. Review the package requirements on its card, then choose Check again.`
+          : context.blocker === 'destination_changed'
+            ? `The reviewed destination for ${subject} has changed. Use Review setup to refresh the review.`
+            : context.blocker === 'destination_unavailable'
+              ? `The reviewed destination for ${subject} could not be read. Use Review setup to refresh the review.`
+              : context.blocker === 'project_exists'
+                ? `${subject} already has a workspace. Open it from its card instead of setting up another.`
+                : `Setup is not available for ${subject} here. You can keep discussing the folder.`;
       break;
     case 'completed':
       text = `${subject} is set up${place}.`;
@@ -610,7 +612,7 @@ async function review(candidateId, close = false, offerId, placement) {
     open.textContent = 'Open existing conversation';
     open.addEventListener('click', () => {
       placementNode?.remove();
-      void window.PersonalAssistantConversation?.resume?.(pending.conversation_id);
+      void window.PersonalAssistantConversation?.visitFolderReview?.(pending.conversation_id);
     });
     placementNode.append(message, open);
     showPlacement(open, shouldFocus);
@@ -917,7 +919,14 @@ export function recheckReview(offer, trigger) {
 }
 
 function reviewStructure(trigger) {
-  if (currentStructure()) reviewFrom(trigger, rootCandidate());
+  const structure = currentStructure();
+  if (structure)
+    reviewFrom(trigger, rootCandidate(), {
+      structure: {
+        group_type:
+          structure.recommendation?.operation === 'library' ? 'library' : structure.group.type
+      }
+    });
 }
 
 // Adjust is one sheet: the group's name and type, the member checklist with

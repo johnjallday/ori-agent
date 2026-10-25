@@ -44,6 +44,10 @@ type FolderPrerequisiteSetup interface {
 	Prerequisite(context.Context, FolderSetupRequest, FolderPrerequisiteInput) (FolderPrerequisiteReview, error)
 }
 
+func libraryReview(offer FolderOffer) bool {
+	return offer.Portfolio != nil && offer.Structure != nil && offer.Structure.Group.Type == FolderGroupLibrary
+}
+
 // Prerequisite requires this pending canonical creation review and live folder
 // even though installing a package itself never reads the folder's contents.
 func (s *FolderDigestService) Prerequisite(ctx context.Context, userID, offerID string, input FolderPrerequisiteInput) (FolderPrerequisiteReview, error) {
@@ -65,13 +69,16 @@ func (s *FolderDigestService) Prerequisite(ctx context.Context, userID, offerID 
 	}
 	review := offer.ConversationReview
 	if offer.Status != FolderOfferPending || offer.Setup != nil || review == nil || review.Operation != FolderOperationCreate ||
-		offer.CapabilitySuppressed || offer.Portfolio != nil || offer.Structure != nil || IsBuildReview(review.Target) {
+		offer.CapabilitySuppressed || doc.Tombstoned(offer.Subject.Key) || ((offer.Portfolio != nil || offer.Structure != nil) && !libraryReview(*offer)) || IsBuildReview(review.Target) {
 		return FolderPrerequisiteReview{}, ErrFolderOfferDecided
 	}
 	// An expected missing-Home prerequisite is repairable; a changed concrete
 	// destination, or an unnamed destination failure, is not.
 	if review.DestinationUnavailable {
-		if review.DestinationBlocker == nil || review.DestinationBlocker.IntegrationKey == "" {
+		blocker := review.DestinationBlocker
+		repairable := blocker != nil && (blocker.IntegrationKey != "" ||
+			(libraryReview(*offer) && offer.Portfolio.ProviderKey != "" && blocker.HomeProviderKey == offer.Portfolio.ProviderKey))
+		if !repairable {
 			return FolderPrerequisiteReview{}, ErrFolderPlanChanged
 		}
 	} else if err := s.checkReviewDestination(ctx, *offer); err != nil {

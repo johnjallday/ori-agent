@@ -265,3 +265,23 @@ test('a build that cannot start or take the link opens nothing and says why', as
     false
   );
 });
+
+test('a review visit keeps the unsent link without detaching and restores only its origin', async () => {
+  let owner = '';
+  const { post, calls } = fakePost([{ ok: true, body: { link_id: 'obs-1', observation: repo } }]);
+  const controller = createLinkController({ post, currentId: () => owner });
+  await controller.select(repo.url);
+  const saved = controller.snapshot();
+  controller.park();
+  owner = 'album-5';
+  controller.adopt('album-5');
+  assert.equal(controller.shown(), false);
+  assert.equal(controller.restore(saved), false);
+  owner = '';
+  assert.equal(controller.restore(saved), true);
+  assert.deepEqual(controller.request(), { link_id: 'obs-1' });
+  assert.deepEqual(
+    calls.map(call => call.url),
+    ['/api/home-assistant/link-context/select']
+  );
+});

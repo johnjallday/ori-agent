@@ -35,13 +35,19 @@ type FolderReviewMember struct {
 }
 
 func folderReviewPresentation(offer FolderOffer, view FolderOfferView) *FolderReviewPresentation {
-	if structure := offer.Structure.view(); structure.ProposesWorkspaces() {
+	if structure := offer.Structure.view(); structure != nil {
 		// A structure is always proposed: what it cannot use, it says.
 		p := &FolderReviewPresentation{
 			Version: 1, Kind: "structure", State: "proposed", Effect: "group_workspaces",
 			DestinationState: structure.Group.DestinationState, DestinationName: structure.Group.Name,
 			Availability: structure.Group.Availability, Notes: structure.Notes,
 			GroupType: structure.Group.Type, MembersOmitted: structure.Omitted,
+		}
+		if structure.Group.Type == FolderGroupLibrary {
+			p.Effect = "library"
+			if structure.Group.DestinationState == "new" {
+				p.Effect = "home_library"
+			}
 		}
 		for _, member := range structure.Members {
 			p.Members = append(p.Members, FolderReviewMember{

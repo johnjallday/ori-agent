@@ -47,6 +47,7 @@ export function createFolderContextController({
     // The earlier No thanks on that folder, and why no card could be shown.
     declined: null,
     structureUnavailable: '',
+    blocker: null,
     focusIDs: [],
     accepted: null,
     offerId: '',
@@ -58,6 +59,7 @@ export function createFolderContextController({
     generation: 0,
     notice: ''
   };
+  let recommendationGeneration = 0;
   const target = () => ({
     ...(state.conversationId
       ? { conversation_id: state.conversationId }
@@ -78,6 +80,7 @@ export function createFolderContextController({
       structure: null,
       declined: null,
       structureUnavailable: '',
+      blocker: null,
       hireCandidate: '',
       hireUnavailable: '',
       focusIDs: [],
@@ -120,9 +123,8 @@ export function createFolderContextController({
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
       state.declined = state.structure ? folderDecline(result.declined) : null;
-      state.structureUnavailable = state.structure
-        ? ''
-        : String(result.structure_unavailable || '');
+      state.structureUnavailable = String(result.structure_unavailable || '');
+      state.blocker = result.blocker || null;
       // One project Ori can set up as a hire: its review opens on attach.
       state.hireCandidate = state.structure ? '' : String(result.hire_candidate || '');
       // Or why it cannot open now (another setup review waits), said in one line.
@@ -177,6 +179,7 @@ export function createFolderContextController({
       state.structure = null;
       state.declined = null;
       state.structureUnavailable = '';
+      state.blocker = null;
       state.hireCandidate = '';
       state.hireUnavailable = '';
       state.focusIDs = [];
@@ -339,6 +342,59 @@ export function createFolderContextController({
       }
     }
   }
+  const snapshot = () => ({ ...state, focusIDs: [...state.focusIDs] });
+  async function refreshRecommendation() {
+    if (!state.observation || state.pending || isBusy()) return false;
+    const generation = state.generation;
+    const observationId = state.observation.id;
+    const owner = state.conversationId;
+    const ticket = ++recommendationGeneration;
+    try {
+      const result = await post(`${ENDPOINT}/recommendation`, {
+        ...target(),
+        selection_id: observationId
+      });
+      if (
+        ticket !== recommendationGeneration ||
+        generation !== state.generation ||
+        owner !== currentId() ||
+        state.observation?.id !== observationId
+      )
+        return false;
+      if (result.observation_id !== observationId) return false;
+      state.structure = result.structure || null;
+      state.declined = folderDecline(result.declined);
+      state.blocker = result.blocker || null;
+      state.structureUnavailable = String(result.structure_unavailable || '');
+      state.authority = '';
+      notify('');
+      return true;
+    } catch (_) {
+      if (
+        ticket === recommendationGeneration &&
+        generation === state.generation &&
+        owner === currentId()
+      ) {
+        state.authority = 'expired';
+        notify(
+          'This selection could not be revalidated. Your draft is kept; pick the folder again to review setup.'
+        );
+      }
+      return false;
+    }
+  }
+  async function restore(saved) {
+    if (!saved || saved.conversationId !== currentId()) return false;
+    const generation = state.generation + 1;
+    Object.assign(state, saved, {
+      generation,
+      pending: false,
+      selecting: false,
+      authority: 'revalidating'
+    });
+    changed(state);
+    return refreshRecommendation();
+  }
   return {
     state,
     select,
@@ -350,7 +406,10 @@ export function createFolderContextController({
     adopt,
     review,
     notify,
-    askAgain
+    askAgain,
+    snapshot,
+    restore,
+    refreshRecommendation
   };
 }
 
@@ -500,9 +559,12 @@ export function structureCardView(state, parkedId = '') {
   if (state.structure) {
     if (parkedId && parkedId === id) return { kind: 'none', key: '' };
     const declined = Boolean(state.declined);
+    const recommendation = state.structure.recommendation;
+    const library = recommendation?.operation === 'library';
+    const blocked = state.structureUnavailable === 'review_pending';
     return {
       kind: 'proposal',
-      key: `${id}:${declined ? 'declined' : 'open'}`,
+      key: `${id}:${declined ? 'declined' : 'open'}:${JSON.stringify(recommendation || null)}:${JSON.stringify(state.blocker || null)}:${state.structureUnavailable || ''}`,
       actions: [
         // An earlier No thanks stands where Set up would, until Ask again.
         declined
@@ -514,15 +576,23 @@ export function structureCardView(state, parkedId = '') {
             }
           : {
               id: 'setup',
-              label: 'Set up',
+              label: library ? 'Review library setup' : 'Review group setup',
               style: 'btn btn-sm btn-primary',
-              disabled: Boolean(state.pending)
+              disabled: Boolean(
+                state.pending ||
+                blocked ||
+                (library &&
+                  (recommendation.destination?.state === 'unknown' ||
+                    ['unavailable', 'destination_incompatible', 'destination_ambiguous'].includes(
+                      recommendation.destination?.readiness
+                    )))
+              )
             },
         {
           id: 'adjust',
-          label: 'Adjust…',
+          label: library ? 'Choose another setup…' : 'Adjust…',
           style: 'btn btn-sm btn-outline-secondary',
-          disabled: Boolean(state.pending)
+          disabled: Boolean(state.pending || blocked)
         },
         { id: 'later', label: 'Not now', style: 'btn btn-sm btn-link', disabled: false }
       ]
@@ -540,14 +610,14 @@ export function structureCardView(state, parkedId = '') {
 let parkedStructure = '';
 
 // emptySendView is what an empty Send means with a folder attached: a folder
-// Ori proposed a group for is asked for that proposal, any other is explored.
+// Ori recommended setup for is asked to explain that recommendation.
 // The placeholder says it before Send.
 export function emptySendView(folder, collection) {
   if (!folder) return null;
   return collection
     ? {
-        placeholder: `Propose workspaces for ${folder}`,
-        text: 'Propose workspaces for this folder'
+        placeholder: `Explain setup for ${folder}`,
+        text: 'Explain the setup recommendation for this folder'
       }
     : { placeholder: 'Explore this folder', text: 'Explore this folder' };
 }
@@ -594,6 +664,38 @@ function renderStructure(state) {
       window.OriWorkspaceBuildingArt
     )
   );
+  if (state.blocker || state.structureUnavailable === 'review_pending') {
+    const status = node(
+      'p',
+      state.blocker
+        ? `${state.blocker.subject}: ${state.blocker.message}`
+        : 'Another setup review is open. Finish or close it before reviewing this collection.',
+      'personal-assistant-proposal__note'
+    );
+    status.setAttribute('role', 'status');
+    host.append(status);
+    if (state.blocker?.conversation_id) {
+      const open = node(
+        'button',
+        `Open ${state.blocker.subject || 'existing'} review`,
+        'btn btn-sm btn-outline-secondary'
+      );
+      open.type = 'button';
+      open.dataset.structureAction = 'blocker';
+      open.addEventListener(
+        'click',
+        () =>
+          void window.PersonalAssistantConversation?.visitFolderReview?.(
+            state.blocker.conversation_id
+          )
+      );
+      host.append(open);
+    }
+    const refresh = node('button', 'Refresh recommendation', 'btn btn-sm btn-link');
+    refresh.type = 'button';
+    refresh.addEventListener('click', () => void controller.refreshRecommendation());
+    host.append(refresh);
+  }
   const actions = node('div', '', 'personal-assistant-structure__actions');
   const runs = {
     setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
@@ -1052,6 +1154,9 @@ const api = {
   review: (candidateId, close = false, offerId, placement) =>
     controller?.review(candidateId, close, offerId, placement),
   current: () => controller?.state,
+  snapshot: () => controller?.snapshot(),
+  restore: saved => controller?.restore(saved),
+  refreshRecommendation: () => controller?.refreshRecommendation(),
   notify: message => controller?.notify(message),
   resetEvents: () => {
     lastEventKey = undefined;

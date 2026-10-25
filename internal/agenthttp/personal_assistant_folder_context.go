@@ -346,6 +346,12 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 	// no model is called and nothing is offered or created. An earlier No
 	// thanks travels with it; a card that cannot be shown says why.
 	proposal := h.folderStructure(r.Context(), target, observation)
+	if proposal.Blocker != nil {
+		response["blocker"] = proposal.Blocker
+	}
+	if proposal.Unavailable != "" {
+		response["structure_unavailable"] = proposal.Unavailable
+	}
 	if proposal.Structure != nil {
 		response["structure"] = proposal.Structure
 		if proposal.Declined != nil {

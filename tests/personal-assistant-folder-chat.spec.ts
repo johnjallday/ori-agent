@@ -330,7 +330,8 @@ async function say(page: Page, prompt: string) {
 }
 
 test('real host: local review, Keep chatting, adjusted setup and canonical receipt without a model', async ({
-  page
+  page,
+  request
 }) => {
   const sandbox = process.env.ORI_FOLDER_CHAT_SANDBOX;
   test.skip(
@@ -345,12 +346,19 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   // A second folder for the later reviews: Chosen will already be a project.
   await mkdir(join(sandbox!, 'Documents', 'Later'), { recursive: true, mode: 0o750 });
   await writeFile(join(sandbox!, 'Documents', 'Later', 'later.txt'), 'Later.', { mode: 0o600 });
+  // Match the generic-workspace service fixture: an unsupported Obsidian
+  // marker keeps the root out of File Janitor's separate automatic hire flow.
+  await mkdir(join(sandbox!, 'Documents', '.obsidian'), { recursive: true, mode: 0o750 });
+  await writeFile(join(sandbox!, 'Documents', '.obsidian', 'app.json'), '{}', { mode: 0o600 });
   const posts: string[] = [];
   page.on('request', request => {
     if (request.method() === 'POST') posts.push(new URL(request.url()).pathname);
   });
   await open(page);
+  const workspacesBefore = await (await request.get('/api/workspaces')).json();
   await choose(page);
+  // Opening/cancelling the chooser must add no review or setup effects.
+  const reviewsAfterAttach = posts.filter(path => path.endsWith('/review'));
   // The attach opened Tree + Chat, so Review setup is in the "+" menu.
   await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   const setupChoice = page.locator(
@@ -363,7 +371,9 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await page.keyboard.press('Escape');
   await expect(setupChoice).toHaveCount(0);
   await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
-  expect(posts.some(path => path.endsWith('/review') || path.endsWith('/decide'))).toBe(false);
+  expect(posts.filter(path => path.endsWith('/review'))).toEqual(reviewsAfterAttach);
+  expect(posts.some(path => /\/(setup|decide|ask)$/.test(path))).toBe(false);
+  expect(await (await request.get('/api/workspaces')).json()).toEqual(workspacesBefore);
   await chooseAttach(page, '#personalAssistantReviewFolderSetup');
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
@@ -886,7 +896,7 @@ for (const theme of ['light', 'dark']) {
     await expect(attach).toBeFocused();
     expect(fixture.requests).toHaveLength(0);
     await expect(page.locator('#personalAssistantFolderPreview')).toContainText(
-      'Attached folder: contents not read.'
+      'File contents were not opened.'
     );
     await page.locator('#personalAssistantRemoveFolder').press('Enter');
     await expect(attach).toBeFocused();
@@ -1370,7 +1380,7 @@ for (const theme of ['light', 'dark']) {
       const strip = page.locator('[data-folder-discussion]');
       await expect(card.getByRole('heading')).toHaveText(scenario.folder);
       await expect(card).toContainText(/[Bb]ounded look/);
-      await expect(card).toContainText('contents not read');
+      await expect(card).toContainText('File contents were not opened.');
       await expect(card.locator('img, b, script')).toHaveCount(0);
       const tree = await ax.send('Accessibility.getFullAXTree');
       const group = tree.nodes.find(

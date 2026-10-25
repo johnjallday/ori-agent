@@ -15,11 +15,14 @@ import (
 // journey and the existing reviewed Home-provider installer. It never calls Run,
 // creates a workspace, grants folder access or staffs/executes an agent.
 func (h *folderSetupHost) Prerequisite(ctx context.Context, req personalassistant.FolderSetupRequest, input personalassistant.FolderPrerequisiteInput) (personalassistant.FolderPrerequisiteReview, error) {
-	target, err := h.target(req.Offer)
+	target, err := h.prerequisiteTarget(req.Offer)
 	if err != nil {
 		return personalassistant.FolderPrerequisiteReview{}, err
 	}
 	if input.Kind == personalassistant.FolderPlanIntegration {
+		if target.entry.Key == "" {
+			return personalassistant.FolderPrerequisiteReview{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
 		return h.integrationPrerequisite(ctx, req, target, input)
 	}
 	if input.Kind != personalassistant.FolderPlanProvider || target.provider == nil {
@@ -81,6 +84,26 @@ func (h *folderSetupHost) Prerequisite(ctx context.Context, req personalassistan
 	h.InvalidateSetupReadiness(req.UserID)
 	review.Completed = true
 	return review, nil
+}
+
+// The same reviewed packages serve an individual project and its collection.
+// This adapter resolves package identities only, never a new setup operation.
+func (h *folderSetupHost) prerequisiteTarget(offer personalassistant.FolderOffer) (setupTarget, error) {
+	if offer.Portfolio == nil {
+		return h.target(offer)
+	}
+	if offer.Structure == nil || offer.Structure.Group.Type != personalassistant.FolderGroupLibrary {
+		return setupTarget{}, errSetupUnavailable
+	}
+	collection, err := h.portfolioTarget(offer)
+	if err != nil {
+		return setupTarget{}, err
+	}
+	target := setupTarget{row: collection.row, provider: &collection.provider}
+	if collection.integration != nil {
+		target.entry = *collection.integration
+	}
+	return target, nil
 }
 
 func (h *folderSetupHost) integrationPrerequisite(ctx context.Context, req personalassistant.FolderSetupRequest, target setupTarget, input personalassistant.FolderPrerequisiteInput) (personalassistant.FolderPrerequisiteReview, error) {

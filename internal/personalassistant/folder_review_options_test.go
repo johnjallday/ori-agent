@@ -277,7 +277,7 @@ func TestFolderReviewOptions_ADeclinedCollectionIsStillProposedAndSaysSo(t *test
 	}
 }
 
-func TestFolderStructure_OnlyAPendingReviewOrNoSetupHostKeepsTheCardAway(t *testing.T) {
+func TestFolderStructure_PendingReviewKeepsDiscoveryWithASeparateBlocker(t *testing.T) {
 	ctx := context.Background()
 	f, service, target, observation := albumsObservation(t)
 	f.service.deps.Setup = nil
@@ -291,7 +291,7 @@ func TestFolderStructure_OnlyAPendingReviewOrNoSetupHostKeepsTheCardAway(t *test
 	if _, err := f.service.ScanChip(ctx, target.UserID, "documents"); err != nil {
 		t.Fatal(err)
 	}
-	if got := service.Structure(ctx, target, observation.ID); got.Structure != nil || got.Unavailable != FolderStructureReviewPending {
+	if got := service.Structure(ctx, target, observation.ID); got.Structure == nil || got.Structure.Recommendation == nil || got.Unavailable != FolderStructureReviewPending {
 		t.Fatalf("another review pending: %+v", got)
 	}
 	// A single folder has no card and no reason.

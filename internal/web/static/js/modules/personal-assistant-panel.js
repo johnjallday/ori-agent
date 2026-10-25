@@ -1598,7 +1598,8 @@ function submit(event) {
   moveSharedWorkActivity();
   const who = identity();
   const entry = entryAgentSendRecipient(recipients()?.current?.(), recipients()?.sessionId?.());
-  const typed = String(state.els?.input?.value || '').trim();
+  const composerDraft = String(state.els?.input?.value || '');
+  const typed = composerDraft.trim();
   if (composerCommand(typed) === 'clear') return clearConversation(who);
   // An empty Send explores an attached folder or link only in the hired
   // assistant's conversation; neither is attached to a workspace agent's turn.
@@ -1656,6 +1657,7 @@ function submit(event) {
   setStatus(sentStatus);
   const operation = Promise.resolve(
     window.OriAskRouting.submit(text, {
+      composerDraft,
       routeContext: routeContext(),
       openThinkingModal: false,
       ...(entry ? { recipient: entry } : {})

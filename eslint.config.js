@@ -179,6 +179,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-research.js',
       'internal/web/static/js/modules/personal-assistant-folder-proposal.js',
       'internal/web/static/js/modules/personal-assistant-conversation.js',
+      'internal/web/static/js/modules/personal-assistant-review-visit.js',
       'internal/web/static/js/modules/personal-assistant-drafts.js',
       'internal/web/static/js/modules/personal-assistant-memory.js',
       'internal/web/static/js/modules/personal-assistant-operations.js',

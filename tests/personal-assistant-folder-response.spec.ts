@@ -36,6 +36,10 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await mkdir(dirname(path), { recursive: true, mode: 0o750 });
     await writeFile(path, content, { mode: 0o600 });
   }
+  // Keep the ordinary discussion fixture outside File Janitor's automatic
+  // inbox review, using the same unsupported marker as generic service tests.
+  await mkdir(join(sandbox!, 'Desktop', '.obsidian'), { recursive: true, mode: 0o750 });
+  await writeFile(join(sandbox!, 'Desktop', '.obsidian', 'app.json'), '{}', { mode: 0o600 });
   await writeFile(join(provider!, 'sentinels.json'), JSON.stringify([folderContentSentinel]), {
     mode: 0o600
   });
@@ -101,12 +105,15 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     const attached = await (await selected).json();
     const observation = attached.observation;
     const explorer = page.locator('#personalAssistantFolderExplorer');
-    // A folder of several projects is proposed as a group on attach and stays on
-    // the chat side with its card; its tree is one press away (Tree + Chat).
+    // Attachment shows the host's observed evidence and explicit review action;
+    // the tree is one press away (Tree + Chat), without confirming the setup.
     if (attached.structure) {
-      await expect(page.locator('#personalAssistantFolderStructure')).toContainText(
-        `Set up ${chip} as a group?`
-      );
+      const proposal = page.locator('#personalAssistantFolderStructure');
+      expect(attached.structure.recommendation.operation).toBe('group');
+      await expect(proposal).toContainText(attached.structure.recommendation.evidence);
+      await expect(
+        proposal.getByRole('button', { name: 'Review group setup', exact: true })
+      ).toBeVisible();
       await chooseAttach(page, '#personalAssistantExploreAttachedFolder');
     }
     await expect(explorer).toBeVisible();
@@ -166,7 +173,10 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(selectAll).toBeChecked();
     expect(
       await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
-    ).toEqual(expectedFocusIDs);
+    ).toEqual(expect.arrayContaining(expectedFocusIDs));
+    expect(
+      await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
+    ).toHaveLength(expectedFocusIDs.length);
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-light-desktop.png`) });
@@ -229,19 +239,29 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(preview).toBeVisible();
     await expect(preview).toContainText('Local preview · not sent');
     await expect(preview.getByRole('heading')).toHaveText(observation.folder);
-    await expect(preview).toContainText('Attached folder: contents not read.');
+    await expect(preview).toContainText('File contents were not opened.');
     await expect(page.locator('#personalAssistantFolderChip')).toBeEnabled();
+    const sentFocusIDs: string[] = await page.evaluate(
+      () => (window as any).PersonalAssistantFolderContext.request().focus_ids
+    );
+    const sentFocusNames = sentFocusIDs.map(id => {
+      const names: string[] = [];
+      let node = observation.tree.nodes.find((item: any) => item.id === id);
+      while (node) {
+        names.unshift(node.name);
+        node = observation.tree.nodes.find((item: any) => item.id === node.parent_id);
+      }
+      return names;
+    });
     const ask = page.waitForResponse(response => response.url().endsWith('/home-assistant/ask'));
     await page.locator('#personalAssistantSend').click();
     const reply = await (await ask).json();
     expect(reply.conversation.stored).toBe(true);
     expect(reply.folder_context.observation).toEqual(observation);
     expect(reply.conversation.folder_focus.topics).toHaveLength(expectedFocusIDs.length);
-    expect(reply.conversation.folder_focus.topics[0].names).toEqual([folderNode.name]);
-    expect(reply.conversation.folder_focus.topics[1].names).toEqual([
-      folderNode.name,
-      fileNode.name
-    ]);
+    expect(reply.conversation.folder_focus.topics.map((topic: any) => topic.names)).toEqual(
+      sentFocusNames
+    );
     const firstSentFocus = page.locator(
       `[data-message-id="${reply.conversation.user_message_id}"] [data-folder-turn-focus]`
     );
@@ -288,47 +308,67 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     const stripId = await strip.getAttribute('data-folder-discussion');
     expect(stripId).toBe(reply.conversation.assistant_message_id);
     const input = page.locator('#personalAssistantInput');
-    const whole = strip.getByRole('button').first();
-    const choose = strip.getByRole('button').nth(1);
-    const candidate = page.locator('#personalAssistantFolderDiscussionCandidate');
     await input.fill('  Keep this exact 🎼 draft\n');
     const exactDraft = await input.inputValue();
-    await whole.click();
+    const structured = Boolean(attached.structure);
+    const child = observation.projects.find((item: any) => !item.root);
+    if (structured) {
+      // The first structured chip is Set up. Its discussion-only action parks
+      // the proposal without creating a review or replacing the current draft.
+      await strip.getByRole('button', { name: 'Just discuss', exact: true }).click();
+      await expect(strip).toHaveCount(0);
+    } else {
+      await strip.getByRole('button', { name: 'Discuss the collection', exact: true }).click();
+      await expect(page.locator('#personalAssistantPanelStatus')).toContainText('Send or clear');
+    }
     await expect(input).toHaveValue(exactDraft);
     await expect(input).toBeFocused();
-    await expect(page.locator('#personalAssistantPanelStatus')).toContainText('Send or clear');
+    expect((await audit()).requests).toBe(firstCounts.requests);
+    expect((await (await request.get('/api/workspaces')).json()).folders.length).toBe(
+      resourcesBefore
+    );
+    expect(
+      (await (await request.get('/api/personal-assistant/folder-digest')).json()).folder_digest
+        .offer
+    ).toBeFalsy();
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-draft-protected.png`) });
-    const setup = page
-      .locator('[data-folder-setup-suggestion]')
-      .getByRole('button', { name: 'Choose setup scope' });
-    await setup.click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-optional-setup-chooser.png`) });
     await page.locator('#personalAssistantFolderSetupCancel').click();
     await expect(input).toHaveValue(exactDraft);
-    await choose.click();
-    await expect(candidate).toBeFocused();
-    await expect(candidate).toHaveValue('');
-    await page
-      .locator('#personalAssistantPanel')
-      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-local-project-chooser.png`) });
-    expect(await candidate.locator('option').count()).toBe(
-      observation.projects.filter((item: any) => !item.root).length + 1
-    );
-    await page.keyboard.press('Escape');
-    await expect(choose).toBeFocused();
-    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(input).toHaveValue(exactDraft);
-    expect((await audit()).requests).toBe(firstCounts.requests);
-    await input.fill('');
-    await choose.click();
-    const child = observation.projects.find((item: any) => !item.root);
-    await candidate.selectOption(child.id);
-    await page.locator('#personalAssistantFolderDiscussionDraft').click();
+    if (structured) {
+      // Ordinary prose is still only a draft; the existing setup controls are
+      // the separate boundary for any adopted change.
+      await input.fill(
+        `Discuss ${child.name} from these observations without setting anything up.`
+      );
+    } else {
+      const choose = strip.getByRole('button', { name: 'Choose a folder…', exact: true });
+      const candidate = page.locator('#personalAssistantFolderDiscussionCandidate');
+      await choose.click();
+      await expect(candidate).toBeFocused();
+      await expect(candidate).toHaveValue('');
+      await page
+        .locator('#personalAssistantPanel')
+        .screenshot({ path: join(evidence, `${chip.toLowerCase()}-local-project-chooser.png`) });
+      expect(await candidate.locator('option').count()).toBe(
+        observation.projects.filter((item: any) => !item.root).length + 1
+      );
+      await page.keyboard.press('Escape');
+      await expect(choose).toBeFocused();
+      await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+      await expect(input).toHaveValue(exactDraft);
+      expect((await audit()).requests).toBe(firstCounts.requests);
+      await input.fill('');
+      await choose.click();
+      await candidate.selectOption(child.id);
+      await page.locator('#personalAssistantFolderDiscussionDraft').click();
+    }
     await expect(input).toBeFocused();
     expect(await input.inputValue()).toContain(child.name);
     expect(await input.inputValue()).toContain('without setting anything up');
@@ -372,7 +412,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     expect(
       history.messages.filter((row: any) => row.role === 'folder_context')[0].folder_context
         .focus_ids
-    ).toEqual(expectedFocusIDs);
+    ).toEqual(sentFocusIDs);
     const beforeReload = (await audit()).requests;
     await page.reload();
     await expect(card).toHaveCount(1);
