@@ -69,7 +69,7 @@ type Settings struct {
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
 	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm")
-	SystemModel           string `json:"system_model,omitempty"`            // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
+	SystemModel           string `json:"system_model,omitempty"`            // Model for system tasks (e.g., "gpt-4o-mini", "claude-haiku-4-5")
 	SystemReasoningEffort string `json:"system_reasoning_effort,omitempty"` // Optional reasoning effort for system tasks (currently used by Codex: low, medium, high, xhigh)
 
 	NativeMCPExecTimeoutSeconds int `json:"native_mcp_exec_timeout_seconds,omitempty"` // Optional timeout (seconds) for native-MCP CLI task runs; 0 uses the built-in default (300s)
