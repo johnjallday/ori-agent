@@ -615,8 +615,8 @@ test('Ask again sends only the decline key and gives the card its Set up back', 
 
 test('an empty Send asks for the proposal on a collection and explores any other folder', () => {
   assert.deepEqual(emptySendView('Albums', true), {
-    placeholder: 'Propose workspaces for Albums',
-    text: 'Propose workspaces for this folder'
+    placeholder: 'Explain setup for Albums',
+    text: 'Explain the setup recommendation for this folder'
   });
   assert.deepEqual(emptySendView('Thesis', false), {
     placeholder: 'Explore this folder',

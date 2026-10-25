@@ -118,8 +118,8 @@ func TestAssistantFolderSuggestion_ADeclinedCollectionIsStillInTheFirstPrompt(t 
 	for _, message := range provider.requests[0].Messages {
 		sent.WriteString(message.Content)
 	}
-	if !strings.Contains(sent.String(), "folder_structure_proposal") {
-		t.Fatalf("the declined collection's group was not in the prompt:\n%s", sent.String())
+	if !strings.Contains(sent.String(), "<folder_recommendation>") || !strings.Contains(sent.String(), `"declined":true`) || strings.Contains(sent.String(), "<folder_structure_proposal>") {
+		t.Fatalf("the declined library recommendation was lost or became a group:\n%s", sent.String())
 	}
 }
 

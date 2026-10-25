@@ -610,14 +610,14 @@ export function structureCardView(state, parkedId = '') {
 let parkedStructure = '';
 
 // emptySendView is what an empty Send means with a folder attached: a folder
-// Ori proposed a group for is asked for that proposal, any other is explored.
+// Ori recommended setup for is asked to explain that recommendation.
 // The placeholder says it before Send.
 export function emptySendView(folder, collection) {
   if (!folder) return null;
   return collection
     ? {
-        placeholder: `Propose workspaces for ${folder}`,
-        text: 'Propose workspaces for this folder'
+        placeholder: `Explain setup for ${folder}`,
+        text: 'Explain the setup recommendation for this folder'
       }
     : { placeholder: 'Explore this folder', text: 'Explore this folder' };
 }

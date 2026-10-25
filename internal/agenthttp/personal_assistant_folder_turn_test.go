@@ -29,29 +29,20 @@ func TestFolderTurnInstructions_ACollectionReplySpeaksOverTheCardOriShowed(t *te
 
 	collection := folderTurnInstructions(structure)
 	for _, want := range []string{
-		"Ori has already shown the user, right under your reply, a card",
-		"folder_structure_proposal",
-		"A request to propose workspaces for this folder, or to explore it, is answered by that card",
-		"at most two short sentences and about 40 words",
-		"one sentence on what the group would do for this folder",
-		"at most one observation",
-		"at most one observation from the metadata that the card does not show",
-		"Never list the member folders, give counts or totals, say what kinds of folders there are, repeat availability notes or describe the controls",
-		"only when the user's goal is unclear",
-		"Do not pitch alternatives",
-		"Set up and Adjust… are Ori's controls",
-		"leaving the folders as they are is a valid outcome",
+		"folder_recommendation", "actual operation", "Library listing", "creates no per-project workspace",
+		"plain group", "at most two short sentences and about 40 words", "at most one observation",
+		"collection is still recognized", "Recognition is not activation support", "Logic project",
+		"prose refinement is discussion", "never yes or continue in chat", "follow-ups",
+		"Leaving the folders as they are is a valid outcome",
 	} {
 		if !strings.Contains(collection, want) {
-			t.Fatalf("the collection instructions lack %q", want)
+			t.Fatalf("collection instructions lack %q", want)
 		}
 	}
-	// The single-folder framing that made setup background noise is gone.
-	for _, gone := range []string{"optional background", "never choose a candidate on the user's behalf", "rule-based setup fallback", "Do not prefer a child"} {
-		if strings.Contains(collection, gone) {
-			t.Fatalf("the collection instructions still say %q", gone)
-		}
+	if folderTurnInstructions(nil, true) != folderCollectionInstructions {
+		t.Fatal("empty executable options hid recommendation instructions")
 	}
+
 	// Everything about contents, privacy and who runs setup is shared.
 	for _, shared := range []string{
 		"File contents have NOT been read", "picking a folder is not permission to read it",

@@ -183,8 +183,8 @@ const (
 	folderDiscussionLead    = " For an initial exploratory request, aim for two or three short sentences, normally no more than about 80 words, and at most one consequential question when the user's goal is unknown."
 	folderDiscussionOptions = " New setup options are optional background, not a required recommendation or final paragraph. Do not prefer a child merely because it is the only available setup option. Keep the next decision conversational unless the user wants setup, or an existing review needs an accurate explanation. Explain whole-folder versus individual scope only when relevant to that decision, never choose a candidate on the user's behalf."
 
-	folderCollectionLead    = " Ori has already shown the user, right under your reply, a card that proposes one group for this folder (folder_structure_proposal): a workspace for each listed folder, each linked where it is, nothing moved, with its own Set up and Adjust… controls. A request to propose workspaces for this folder, or to explore it, is answered by that card. Reply in at most two short sentences and about 40 words: one sentence on what the group would do for this folder, then at most one observation from the metadata that the card does not show, such as the most recent activity or a folder that differs from the rest. Never list the member folders, give counts or totals, say what kinds of folders there are, repeat availability notes or describe the controls: the card shows all of them. If the user asked something else specific, answer that briefly instead. Ask at most one question, and only when the user's goal is unclear."
-	folderCollectionOptions = " Set up and Adjust… are Ori's controls on that card, not something you run or confirm; never ask the user to say yes in chat. Do not pitch alternatives such as single-folder setups, the Home or another layout unless the user asks; a different arrangement goes through Adjust… or Suggest arrangement, and this conversation has not saved one. Do not infer progress, quality or authoritative versions from names, counts or dates. If the user would rather just discuss the folder, discuss it; leaving the folders as they are is a valid outcome."
+	folderCollectionLead    = " Ori has already shown a collection recommendation card. Use folder_recommendation as the shared evidence and actual operation; folder_structure_proposal, when present, describes a plain group alternative. Library listing organizes catalog entries in the disclosed Home and creates no per-project workspace. A plain group creates only its reviewed selected member workspaces. For an initial exploration, reply in at most two short sentences and about 40 words: explain the actual operation and, if useful, at most one observation not already clear from the card. If a setup review is blocking it, the collection is still recognized; explain that separate status accurately. Answer a specific question directly and ask at most one question only when the user's goal is unclear."
+	folderCollectionOptions = " Recognition is not activation support: a Logic project may be listed without a supported project-open integration. Do not claim to read project contents, musical quality or progress. Existing, absent, unknown and unavailable destinations differ; never infer a new Home from an unavailable lookup. Setup and package changes require Ori's current structured review controls, never yes or continue in chat. A prose refinement is discussion until adopted through those controls; an explicitly requested saved arrangement uses the separate Suggest arrangement action. Do not claim this conversation saved a plan. On follow-ups, continue the user's question without reintroducing the collection. Leaving the folders as they are is a valid outcome."
 )
 
 const (
@@ -196,8 +196,8 @@ const (
 
 // folderTurnInstructions picks the instructions for a turn: the collection ones
 // when Ori proposed a structure for the attached folder, else the ordinary ones.
-func folderTurnInstructions(options []personalassistant.FolderReviewOption) string {
-	if folderStructureOption(options) != nil {
+func folderTurnInstructions(options []personalassistant.FolderReviewOption, recommendation ...bool) string {
+	if folderStructureOption(options) != nil || (len(recommendation) > 0 && recommendation[0]) {
 		return folderCollectionInstructions
 	}
 	return folderConversationInstructions
@@ -275,7 +275,9 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 		return folderTurnRefusal(err, identity, conversation)
 	}
 	options := h.folderReviewOptions(ctx, turn.target, &PersonalAssistantFolderState{Observation: turn.observation, OfferID: turn.offerID, Historical: turn.ref.Historical})
-	contextText += folderSetupOptionsPrompt(turn.observation, options)
+	proposal, currentReview := h.folderTurnRecommendation(ctx, turn)
+	recommendationText := folderRecommendationPrompt(proposal, currentReview, turn.observation)
+	contextText += folderSetupOptionsPrompt(turn.observation, options) + recommendationText
 	savedDraft, draftContext := h.savedDraftPromptContext(draft, workContext)
 	answer := ""
 	// Picking a folder never becomes permission to read it. A request for file
@@ -290,7 +292,7 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 			user += folderContentsAuthority
 		}
 		answer, err = h.runModel(ctx, modelTurn{
-			system:  buildAssistantConversationSystemPrompt(workContext) + folderTurnInstructions(options) + folderReplyPresentation(conversation, turn),
+			system:  buildAssistantConversationSystemPrompt(workContext) + folderTurnInstructions(options, recommendationText != "") + folderReplyPresentation(conversation, turn),
 			history: conversation.history,
 			user:    user,
 			sources: personalAssistantPromptSources(h.Sources, workContext), temperature: 0.6,
@@ -299,9 +301,9 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 			resp := h.conversationModelUnavailable(ctx, prompt, homeAssistantConversationIntent.Key, workContext, conversation, err)
 			resp.DraftContext = draftContext
 			// The proposal never depended on the model: it stays, with its controls.
-			resp.FolderStructure = folderProposedStructure(options)
-			if proposal := h.folderStructure(ctx, turn.target, turn.observation); proposal.Structure != nil {
-				resp.FolderStructure = proposal.Structure
+			resp.FolderStructure = proposal.Structure
+			if currentReview != nil && currentReview.Structure != nil {
+				resp.FolderStructure = currentReview.Structure
 			}
 			return resp
 		}

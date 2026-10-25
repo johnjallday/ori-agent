@@ -158,3 +158,10 @@ func TestFolderSuggestion_ModelOptionsAreBoundedEscapedDataNotReferences(t *test
 		t.Fatal(text)
 	}
 }
+
+func TestFolderSuggestion_LibraryIsNeverProjectedAsMemberWorkspaces(t *testing.T) {
+	options := []personalassistant.FolderReviewOption{{Presentation: &personalassistant.FolderReviewPresentation{Kind: "structure", State: "proposed", GroupType: personalassistant.FolderGroupLibrary, DestinationName: "Music Home", Members: []personalassistant.FolderReviewMember{{Name: "Album", Included: true}}}}}
+	if text := folderStructureProposalPrompt(options); text != "" {
+		t.Fatal("library became a false plain-group alternative", text)
+	}
+}

@@ -10,8 +10,10 @@ const source = await readFile(new URL('./dashboard.js', import.meta.url), 'utf8'
 function harness(route, options = {}) {
   const calls = [];
   const notices = [];
+  const restored = [];
   const window = {
     location: { pathname: '/' },
+    PersonalAssistantPanel: { restoreDraft: text => restored.push(text) },
     PersonalAssistantFolderContext: options.folderRef
       ? {
           request: () => options.folderRef
@@ -21,7 +23,10 @@ function harness(route, options = {}) {
       request: () => ({ id: 'canonical-thread' }),
       currentId: () => (options.changedThread ? 'another-thread' : 'canonical-thread'),
       notify: notice => notices.push(notice),
-      applyReply: () => ({ stored: true })
+      applyReply: () => ({
+        stored: !options.unavailable,
+        restoreInput: Boolean(options.unavailable)
+      })
     }
   };
   const context = vm.createContext({
@@ -46,6 +51,7 @@ function harness(route, options = {}) {
         if (path === '/api/home-assistant/ask') {
           return {
             response: 'Fixture discussion only.',
+            model_unavailable: Boolean(options.unavailable),
             intent: payload.intent,
             conversation: { id: 'canonical-thread', stored: true }
           };
@@ -60,7 +66,7 @@ function harness(route, options = {}) {
     }
   });
   vm.runInContext(source, context, { filename: 'dashboard.js' });
-  return { window, calls, notices };
+  return { window, calls, notices, restored };
 }
 
 for (const refs of [
@@ -333,3 +339,28 @@ for (const options of [{ refused: true }, { changedThread: true }]) {
     assert.ok(h.notices.length);
   });
 }
+
+test('a failed folder turn restores exact composer whitespace without sending extra draft data', async () => {
+  const draft = '  Explain this choice. 🎼\n  ';
+  for (const refused of [false, true]) {
+    const h = harness(
+      { route_mode: 'home_inline', intent: 'assistant_conversation' },
+      {
+        folderRef: { selection_id: 'held-folder' },
+        unavailable: true,
+        refused
+      }
+    );
+    await h.window.OriAskRouting.submit(draft.trim(), {
+      composerDraft: draft,
+      openThinkingModal: false,
+      routeContext: { origin: 'personal_assistant_panel' }
+    });
+    assert.deepEqual(h.restored, [draft]);
+    for (const call of h.calls) {
+      assert.equal(call.payload.prompt, draft.trim());
+      assert.equal(call.payload.composerDraft, undefined);
+      assert.equal(call.payload.restoreText, undefined);
+    }
+  }
+});
