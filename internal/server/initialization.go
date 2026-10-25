@@ -128,9 +128,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		logger.Debug("Checking for Claude API key", logger.Fields{"hasKey": claudeAPIKey != "", "keyLength": len(claudeAPIKey)})
 	}
 	if claudeAPIKey != "" {
-		claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
-			APIKey: claudeAPIKey,
-		})
+		claudeProvider := llm.NewClaudeProvider(llm.ClaudeProviderConfig(claudeAPIKey, configMgr.GetAnthropicWorkspaceID()))
 		factory.Register("claude", claudeProvider)
 		if verbose {
 			logger.Debug("Claude provider registered", logger.Fields{})

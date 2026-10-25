@@ -394,6 +394,22 @@
               <span id="anthropicKeyHelp" class="settings-help">Used for Claude models. Your API key starts with "sk-ant-".</span>
             </div>
 
+            <!-- Anthropic Workspace ID -->
+            <div class="settings-field">
+              <label class="settings-label" for="anthropicWorkspaceIdInput">Anthropic Workspace ID <span class="text-muted">(optional)</span></label>
+              <div class="input-group">
+                <input type="text"
+                       id="anthropicWorkspaceIdInput"
+                       class="form-control settings-input"
+                       placeholder="wrkspc_..."
+                       autocomplete="off"
+                       spellcheck="false"
+                       aria-describedby="anthropicWorkspaceHelp">
+                <button class="btn btn-primary modern-btn-primary" type="button" id="saveAnthropicWorkspace">Save</button>
+              </div>
+              <span id="anthropicWorkspaceHelp" class="settings-help">Only needed when Anthropic says your key isn't scoped to a workspace. Copy the ID from your workspace in the Anthropic Console. Save it empty to clear it.</span>
+            </div>
+
             <!-- Gemini API Key -->
             <div class="settings-field">
               <label class="settings-label" for="geminiApiKeyInput">Gemini API Key</label>
