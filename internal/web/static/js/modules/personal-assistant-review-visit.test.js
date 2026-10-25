@@ -146,6 +146,16 @@ test('resolved, replaced, failed or cancelled rechecks leave the source and retu
   }
 });
 
+test('/clear retires an existing return trip without closing or revisiting either setup', async () => {
+  const f = fixture();
+  await f.visit.open('album-5-review');
+  const calls = [...f.calls];
+  f.visit.clear();
+  assert.equal(f.visit.current(), null);
+  assert.equal(await f.visit.back(), false);
+  assert.deepEqual(f.calls, calls);
+});
+
 test('a new draft in the visited review is never overwritten by Return', async () => {
   const f = fixture();
   await f.visit.open('album-5-review');

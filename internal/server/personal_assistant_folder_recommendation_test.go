@@ -84,6 +84,15 @@ func TestFolderRecommendationRefresh_HireBlockerAndRecoveryAreReadOnly(t *testin
 		}
 	})
 	selection := attached["observation"].(map[string]any)["id"]
+	for _, invalid := range []map[string]any{
+		{"draft_id": uuid.NewString(), "revision": "", "selection_id": selection},
+		{"draft_id": draft, "revision": "stale", "selection_id": selection},
+		{"draft_id": draft, "revision": "", "selection_id": uuid.NewString()},
+	} {
+		if status, got := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/recommendation", invalid); status == http.StatusOK || got["blocker"] != nil || got["hire_candidate"] != nil {
+			t.Fatalf("invalid hire refresh: %d %v", status, got)
+		}
+	}
 	refresh := func() map[string]any {
 		t.Helper()
 		status, got := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/recommendation", map[string]any{"draft_id": draft, "revision": "", "selection_id": selection})

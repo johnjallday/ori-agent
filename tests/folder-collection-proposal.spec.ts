@@ -5,8 +5,10 @@ import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
 import {
-  collectionModel, existingCollectionHome,
-  watchFolderRequests as watch, expectNoFolderExecution as expectNoExecution
+  collectionModel,
+  existingCollectionHome,
+  watchFolderRequests as watch,
+  expectNoFolderExecution as expectNoExecution
 } from './helpers/folder-aware-collection';
 
 // A folder that holds several projects, from the moment it is shown to the

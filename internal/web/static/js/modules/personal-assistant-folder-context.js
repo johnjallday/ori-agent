@@ -773,7 +773,11 @@ function renderBlockerNotice(host, state, fallback) {
   status.setAttribute('role', 'status');
   notice.append(status);
   const actions = node('div', '', 'personal-assistant-structure__actions');
-  if (view?.open) {
+  if (
+    view?.open &&
+    (blocker.kind !== 'home' ||
+      typeof window.PersonalAssistantToday?.revealFolderReview === 'function')
+  ) {
     const open = node('button', view.label, 'btn btn-sm btn-outline-secondary');
     open.type = 'button';
     open.dataset.structureAction = 'blocker';

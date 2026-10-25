@@ -44,6 +44,7 @@ func TestFolderHireCandidate_ExactPendingOwnerAndReadOnlyExceptions(t *testing.T
 			}
 			stopped := offer
 			stopped.ID, stopped.Subject.Name, stopped.Status = "album-4", "Album-4", FolderOfferAwaitingOutcome
+			stopped.Setup = &FolderSetupRun{Status: FolderSetupStopped, StopReason: FolderStopInstallFailed}
 			if _, err := fx.store.Mutate(t.Context(), target.UserID, func(doc *FolderDigestDocument) error {
 				doc.Offers = []FolderOffer{stopped}
 				if mode != "stopped only" {

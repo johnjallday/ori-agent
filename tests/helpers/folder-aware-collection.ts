@@ -24,7 +24,9 @@ export function watchFolderRequests(page: Page) {
 export function expectNoFolderExecution(seen: ReturnType<typeof watchFolderRequests>) {
   expect(
     seen.posts.filter(item =>
-      /\/offers\/[^/]+\/(setup|decide)$|\/plugins\/.*(install|enable|update)|\/tasks.*execute/.test(item.path)
+      /\/offers\/[^/]+\/(setup|decide)$|\/plugins\/.*(install|enable|update)|\/tasks.*execute/.test(
+        item.path
+      )
     )
   ).toEqual([]);
   expect(seen.asks).toEqual([]);

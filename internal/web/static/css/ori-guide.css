@@ -2508,10 +2508,14 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   overflow-wrap: anywhere;
 }
 .personal-assistant-blocker button {
+  color: var(--ori-ink);
   max-width: 100%;
   white-space: normal;
   text-align: left;
   overflow-wrap: anywhere;
+}
+.personal-assistant-blocker .btn-link {
+  color: var(--pa-accent-text);
 }
 /* An earlier No thanks stands where Set up would; it wraps rather than clips. */
 .personal-assistant-structure__declined {
