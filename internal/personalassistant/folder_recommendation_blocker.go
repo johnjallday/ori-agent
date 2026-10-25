@@ -35,6 +35,12 @@ func (s *FolderObservationService) recommendationBlocker(ctx context.Context, ta
 			}
 		}
 	}
+	return s.blockerForOffer(ctx, target, offer)
+}
+
+// blockerForOffer projects an offer already read from this user's canonical
+// store. Selection policy belongs to the caller, not to navigation.
+func (s *FolderObservationService) blockerForOffer(ctx context.Context, target foldercontext.Target, offer *FolderOffer) *FolderRecommendationBlocker {
 	if offer == nil {
 		return nil
 	}

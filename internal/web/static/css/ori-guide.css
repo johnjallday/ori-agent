@@ -2503,6 +2503,16 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   gap: 6px;
   margin-top: 8px;
 }
+.personal-assistant-blocker {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.personal-assistant-blocker button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
 /* An earlier No thanks stands where Set up would; it wraps rather than clips. */
 .personal-assistant-structure__declined {
   max-width: 100%;

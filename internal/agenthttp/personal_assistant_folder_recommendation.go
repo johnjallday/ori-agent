@@ -45,6 +45,12 @@ func (h *HomeAssistantAskHandler) RefreshFolderRecommendationHandler(w http.Resp
 		return
 	}
 	proposal := h.folderStructure(r.Context(), target, observation)
-	orihttp.WriteJSON(w, map[string]any{"observation_id": observation.ID, "structure": proposal.Structure,
-		"declined": proposal.Declined, "structure_unavailable": proposal.Unavailable, "blocker": proposal.Blocker})
+	response := map[string]any{"observation_id": observation.ID, "structure": proposal.Structure,
+		"declined": proposal.Declined, "structure_unavailable": proposal.Unavailable, "blocker": proposal.Blocker,
+		"hire_candidate": "", "hire_unavailable": ""}
+	if proposal.Structure == nil && proposal.Unavailable == "" {
+		hire := h.folderHireCandidate(r.Context(), target, observation)
+		response["hire_candidate"], response["hire_unavailable"], response["blocker"] = hire.CandidateID, hire.Unavailable, hire.Blocker
+	}
+	orihttp.WriteJSON(w, response)
 }

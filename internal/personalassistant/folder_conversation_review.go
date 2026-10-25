@@ -478,6 +478,7 @@ type FolderHireCandidate struct {
 	// Unavailable is FolderStructureReviewPending while another setup review
 	// waits for its answer, the one thing that keeps the card away.
 	Unavailable string
+	Blocker     *FolderRecommendationBlocker
 }
 
 // HireCandidate is the one project an attached folder is, when its setup can be
@@ -509,7 +510,7 @@ func (s *FolderObservationService) HireCandidate(ctx context.Context, target fol
 		// (Review closes it); any other waiting card keeps it away.
 		offer, err := s.prepareReviewOffer(ctx, held, target, recognition.CandidateID)
 		if err != nil || !sameProjectHomeOffer(pending, offer.Subject.Key) {
-			return FolderHireCandidate{Unavailable: FolderStructureReviewPending}
+			return FolderHireCandidate{Unavailable: FolderStructureReviewPending, Blocker: s.blockerForOffer(ctx, target, pending)}
 		}
 	}
 	option, ok := s.reviewOption(ctx, held, target, recognition.CandidateID)

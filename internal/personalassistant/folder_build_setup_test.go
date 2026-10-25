@@ -224,7 +224,7 @@ func TestFolderHireCandidate_ARecognizedProjectWithAPlanIsReviewedOnAttach(t *te
 	if err != nil || waiting.ID == "" || waiting.Status != FolderOfferPending {
 		t.Fatalf("a card waiting on Home: %+v %v", waiting, err)
 	}
-	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got != (FolderHireCandidate{Unavailable: FolderStructureReviewPending}) {
+	if got := fx.service.HireCandidate(ctx, fx.draft, fx.observation.ID); got.Unavailable != FolderStructureReviewPending || got.CandidateID != "" || got.Blocker == nil || got.Blocker.Kind != "home" {
 		t.Fatalf("while a card waits: %+v", got)
 	}
 	closeOffer := func(id string) {

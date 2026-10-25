@@ -4,7 +4,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { chooseAttach, chooseConversation } from './helpers/assistant-menus';
-import { collectionModel, existingCollectionHome } from './helpers/folder-aware-collection';
+import {
+  collectionModel, existingCollectionHome,
+  watchFolderRequests as watch, expectNoFolderExecution as expectNoExecution
+} from './helpers/folder-aware-collection';
 
 // A folder that holds several projects, from the moment it is shown to the
 // group and workspaces it becomes, in a real browser against the real server
@@ -113,24 +116,6 @@ async function workspaces(request: APIRequestContext) {
   return (Array.isArray(listed) ? listed : listed.folders || listed.workspaces || []) as Listed[];
 }
 
-// watch records what would make a run fail its promises: a page error, or any
-// request to the assistant's model.
-function watch(page: Page) {
-  const seen = {
-    errors: [] as string[],
-    asks: [] as string[],
-    posts: [] as { path: string; body: any }[]
-  };
-  page.on('pageerror', error => seen.errors.push(error.message));
-  page.on('request', request => {
-    if (request.method() === 'POST')
-      seen.posts.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
-    if (/\/api\/home-assistant\/ask$/.test(new URL(request.url()).pathname))
-      seen.asks.push(request.url());
-  });
-  return seen;
-}
-
 // groupOf waits for the group of this name and returns it with its workspaces.
 async function groupOf(request: APIRequestContext, name: string, children: number) {
   await expect
@@ -215,18 +200,6 @@ function expectExactAlbums(selected: any) {
   // Discovery is independent of the editable generic structure. Only the
   // explicit review action adopts the recommended operation into consent.
   expect(selected.structure.recommendation.operation).toBe('library');
-}
-
-function expectNoExecution(seen: ReturnType<typeof watch>) {
-  expect(
-    seen.posts.filter(item =>
-      /\/offers\/[^/]+\/(setup|decide)$|\/plugins\/.*(install|enable|update)|\/tasks.*execute/.test(
-        item.path
-      )
-    )
-  ).toEqual([]);
-  expect(seen.asks).toEqual([]);
-  expect(seen.errors).toEqual([]);
 }
 
 test.describe('[collection:composer] the legacy unmarked-sketch collection', () => {

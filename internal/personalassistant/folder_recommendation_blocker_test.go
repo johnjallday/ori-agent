@@ -9,6 +9,81 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 )
 
+func TestFolderHireCandidate_ExactPendingOwnerAndReadOnlyExceptions(t *testing.T) {
+	for _, mode := range []string{"pending beside stopped", "stopped only", "identical names", "foreign", "missing", "own conversation", "same project Home", "other Home"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newBuildSetupFixture(t)
+			target := fx.draft
+			target.DraftID, target.ConversationID = "", "attached"
+			observation := observeSelected(t, fx.folderDigestFixture, fx.service, target, fx.song)
+			held := fx.service.selections[observation.ID]
+			offer, err := fx.service.prepareReviewOffer(t.Context(), held, target, fx.candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			offer.ID, offer.Subject.Name = "album-5", "Album-5"
+			offer.ConversationReview.Target.ConversationID = "owner-5"
+			fx.service.reviewGuard = func(context.Context, FolderOffer) error {
+				if mode == "missing" {
+					return errors.New("deleted conversation")
+				}
+				return nil
+			}
+			switch mode {
+			case "identical names":
+				offer.Subject.Name = held.observation.Folder
+			case "foreign":
+				offer.ConversationReview.Target.UserID = "someone-else"
+			case "own conversation":
+				offer.ConversationReview.Target = target
+			case "same project Home", "other Home":
+				offer.ConversationReview = nil
+				if mode == "other Home" {
+					offer.Subject.Key = FolderKey("other-project")
+				}
+			}
+			stopped := offer
+			stopped.ID, stopped.Subject.Name, stopped.Status = "album-4", "Album-4", FolderOfferAwaitingOutcome
+			if _, err := fx.store.Mutate(t.Context(), target.UserID, func(doc *FolderDigestDocument) error {
+				doc.Offers = []FolderOffer{stopped}
+				if mode != "stopped only" {
+					doc.Offers = append(doc.Offers, offer)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := fx.store.Read(t.Context(), target.UserID)
+			encoded, _ := json.Marshal(before)
+			ids := fx.ids
+			got := fx.service.HireCandidate(t.Context(), target, observation.ID)
+			allowed := mode == "stopped only" || mode == "own conversation" || mode == "same project Home"
+			if allowed {
+				if got.CandidateID != fx.candidate || got.Blocker != nil || got.Unavailable != "" {
+					t.Fatalf("allowed hire: %+v", got)
+				}
+			} else {
+				if got.CandidateID != "" || got.Unavailable != FolderStructureReviewPending || got.Blocker == nil {
+					t.Fatalf("blocked hire: %+v", got)
+				}
+				b := got.Blocker
+				if mode == "foreign" || mode == "missing" {
+					if b.Kind != "unavailable" || b.Subject != "Another setup" || b.ConversationID != "" || b.OfferID != "" {
+						t.Fatalf("unverified owner leaked: %+v", b)
+					}
+				} else if b.Subject != offer.Subject.Name || (mode != "other Home" && (b.OfferID != offer.ID || b.ConversationID != "owner-5")) {
+					t.Fatalf("wrong pending owner: %+v", b)
+				}
+			}
+			after, _ := fx.store.Read(t.Context(), target.UserID)
+			encodedAfter, _ := json.Marshal(after)
+			if string(encoded) != string(encodedAfter) || fx.ids != ids || fx.setup.runCount() != 0 || fx.service.selections[observation.ID].observation.ScannedAt != held.observation.ScannedAt {
+				t.Fatal("hire read changed stored state, allocated, ran setup or extended the selection")
+			}
+		})
+	}
+}
+
 func TestFolderRecommendationBlocker_OwnerAndStatusMatrix(t *testing.T) {
 	target := foldercontext.Target{UserID: "local", WorkspaceID: "hq", AgentName: "ori", ConversationID: "albums"}
 	for _, tc := range []struct {
