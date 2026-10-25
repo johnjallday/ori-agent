@@ -296,7 +296,7 @@ func TestSoftwareReview_ModelAndNamesAreReadLiveIntoThePlan(t *testing.T) {
 		t.Fatalf("assistant line with a model: %q", detail)
 	}
 	model := prerequisite(withModel, "model")
-	if model["state"] != "configured" || !strings.Contains(model["detail"].(string), "has not been called") || model["source"] != "Ori's system model setting" {
+	if model["state"] != "configured" || !strings.Contains(model["detail"].(string), "has not been called") || model["source"] != "Ori's Default model setting" {
 		t.Fatalf("model prerequisite: %v", model)
 	}
 	modelDigest := withModel["plan"].(map[string]any)["digest"]

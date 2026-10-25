@@ -334,7 +334,7 @@
         ? `${text(model.provider)} · ${text(model.name)} — configuration only; connection not verified.`
         : missing
           ? home
-            ? 'The new Home agents need a system model configuration before setup.'
+            ? 'The new Home agents need a Default model configuration before setup.'
             : 'This project agent needs a model configuration before setup.'
           : 'The project blueprint and agent must be available before their model requirement can be checked.',
       saved,

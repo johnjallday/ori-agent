@@ -331,7 +331,7 @@ test(
     await settings.locator('#systemModelProvider').selectOption(liveProvider);
     await settings.locator('#systemModelModel').selectOption(liveModel);
     await settings.locator('#saveSystemModelBtn').click();
-    await expect(settings.locator('#systemModelStatusText')).toHaveText('System Model Configured');
+    await expect(settings.locator('#systemModelStatusText')).toHaveText('Default model configured');
     await settings.close();
     await page.bringToFront();
     await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);

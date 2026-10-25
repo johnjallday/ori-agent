@@ -126,13 +126,13 @@ async function refreshSystemModelDisplay() {
       }
 
       if (indicatorEl) {
-        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+        indicatorEl.title = `Default model: ${data.model} (${data.provider}) - Click to configure`;
       }
     } else {
       modelNameEl.textContent = 'Not configured';
       providerEl.style.display = 'none';
       if (indicatorEl) {
-        indicatorEl.title = 'System Model not configured - Click to set up';
+        indicatorEl.title = 'Default model not configured - Click to set up';
       }
     }
   } catch (error) {
@@ -1489,12 +1489,12 @@ function systemModelSaveStatus(mirror) {
   if (mirror.mirrored) {
     refreshSystemModelDisplay();
     return {
-      message: `Configuration updated. System Model is now ${mirror.provider} / ${mirror.model}.`,
+      message: `Configuration updated. Default model is now ${mirror.provider} / ${mirror.model}.`,
       type: 'success'
     };
   }
   return {
-    message: `Configuration updated, but ${mirror.reason || 'the System Model was left unchanged'}.`,
+    message: `Configuration updated, but ${mirror.reason || 'the Default model was left unchanged'}.`,
     type: 'error'
   };
 }

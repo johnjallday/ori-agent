@@ -146,13 +146,13 @@ async function refreshSystemModelDisplay() {
       }
 
       if (indicatorEl) {
-        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+        indicatorEl.title = `Default model: ${data.model} (${data.provider}) - Click to configure`;
       }
     } else {
       modelNameEl.textContent = 'Not configured';
       providerEl.style.display = 'none';
       if (indicatorEl) {
-        indicatorEl.title = 'System Model not configured - Click to set up';
+        indicatorEl.title = 'Default model not configured - Click to set up';
       }
     }
   } catch (error) {
@@ -719,7 +719,7 @@ function handleCreateConfigModeChange(mode) {
       // Update warning message based on what's missing
       if (llmWarningMessage) {
         if (!createSystemModelConfigured) {
-          llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
+          llmWarningMessage.textContent = 'Auto-config requires a Default model to be configured.';
         } else {
           llmWarningMessage.textContent =
             'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';

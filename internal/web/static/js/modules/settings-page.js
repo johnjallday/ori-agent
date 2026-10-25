@@ -1289,7 +1289,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
         </svg>
       `;
-      statusText.textContent = 'System Model Configured';
+      statusText.textContent = 'Default model configured';
       if (provider === 'codex' && reasoningEffort) {
         statusDetails.textContent = `Using ${provider}/${model} (reasoning: ${reasoningEffort})`;
       } else {
@@ -1301,8 +1301,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
         </svg>
       `;
-      statusText.textContent = 'System Model Not Configured';
-      statusDetails.textContent = 'Auto-config and other AI features require a system model.';
+      statusText.textContent = 'Default model not configured';
+      statusDetails.textContent =
+        "Choose a Default model for your Assistant and Ori's AI features.";
     }
   }
 
@@ -1408,7 +1409,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     try {
       const response = await fetch('/api/settings/system-model');
       if (!response.ok) {
-        throw new Error('Failed to fetch system model');
+        throw new Error('Failed to fetch Default model');
       }
       const data = await response.json();
 
@@ -1521,7 +1522,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to save system model');
+        throw new Error(error.error || 'Failed to save Default model');
       }
 
       const data = await response.json();
@@ -1532,7 +1533,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         data.reasoning_effort || ''
       );
       updateReasoningVisibility(data.provider, data.reasoning_effort || '');
-      showSystemModelAlert('System model saved successfully!', 'success');
+      showSystemModelAlert('Default model saved successfully!', 'success');
 
       // Notify navbar to update system model display
       if (typeof EventBus !== 'undefined') {
@@ -1540,14 +1541,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
     } catch (error) {
       console.error('Error saving system model:', error);
-      showSystemModelAlert('Error saving system model: ' + error.message, 'danger');
+      showSystemModelAlert('Error saving Default model: ' + error.message, 'danger');
     } finally {
       saveBtn.disabled = false;
       saveBtn.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
           <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
         </svg>
-        Save System Model
+        Save Default model
       `;
       updateSaveButtonState();
     }
@@ -1557,7 +1558,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   clearBtn?.addEventListener('click', async function () {
     if (
       !confirm(
-        'Are you sure you want to clear the system model configuration? Auto-config and other AI features will not work without it.'
+        "Clear Default model? Your Assistant's conversational replies and Ori's AI features need it. Individual agents keep their own models."
       )
     ) {
       return;
@@ -1574,7 +1575,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to clear system model');
+        throw new Error(error.error || 'Failed to clear Default model');
       }
 
       // Reset dropdowns
@@ -1590,7 +1591,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       updateStatusIndicator(false);
       updateSaveButtonState();
-      showSystemModelAlert('System model cleared.', 'info');
+      showSystemModelAlert('Default model cleared.', 'info');
 
       // Notify navbar to update system model display
       if (typeof EventBus !== 'undefined') {
@@ -1598,7 +1599,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
     } catch (error) {
       console.error('Error clearing system model:', error);
-      showSystemModelAlert('Error clearing system model: ' + error.message, 'danger');
+      showSystemModelAlert('Error clearing Default model: ' + error.message, 'danger');
     } finally {
       clearBtn.disabled = false;
     }

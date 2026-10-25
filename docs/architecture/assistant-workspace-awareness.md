@@ -45,7 +45,7 @@ new permission boundary.
   repeatedly, for a question or a draft edit, or after the user put one aside
   in that conversation. Natural requests (for example, “help me compare the
   three CRMs we're evaluating”) use `assistant_propose_hire` in the existing
-  configured-system-model conversation turn, as the only tool call in its
+  configured Default model conversation turn, as the only tool call in its
   batch. Phrase matching is only a routing hint, not the offer gate. The
   normal provider/broker bounds apply; Codex uses its existing structured
   broker protocol. The tool's arguments are a catalog role, a short name, the
@@ -116,7 +116,7 @@ new permission boundary.
   eight candidates, 16,000 serialized runes, 4,000 excerpt runes and a 45-second
   aggregate deadline. HTTP calls have a ten-second deadline. A cache hit grants
   no second budget, and ordinary discussion performs no discovery scan.
-- The actual **configured system model** determines broker-tool support.
+- The actual **configured Default model** determines broker-tool support.
   Snapshot-only/CLI providers receive no unavailable tools or native fallback;
   native workspace/execution fields remain empty. Broader search stays disabled
   unless explicitly configured; no provider switch, paid-service requirement,

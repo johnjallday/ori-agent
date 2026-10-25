@@ -174,7 +174,7 @@ export function researchCapabilityView(capability) {
     capability.broader_search === 'configured_review_required'
       ? 'Broader search requires a separate exact review.'
       : 'Broader search is disabled/unconfigured.';
-  return `System conversation model: ${model} — ${tools}. ${search}`;
+  return `Conversation model: ${model} — ${tools}. ${search}`;
 }
 
 export function renderResearchResponse(row, data, { post, approve, isCurrent = () => false } = {}) {
@@ -197,7 +197,7 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
     if (!capability.provider || !capability.model) {
       const settings = doc.createElement('a');
       settings.href = '/settings';
-      settings.textContent = 'Choose system model';
+      settings.textContent = 'Choose Default model';
       note.append(' ', settings);
     }
     bubble.append(note);

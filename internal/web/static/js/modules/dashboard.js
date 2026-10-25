@@ -9243,7 +9243,7 @@
   function getHomeAssistantLLMRequirementMessage(availability) {
     var systemModelConfigured = Boolean(availability && availability.system_model_configured);
     if (!systemModelConfigured) {
-      return 'No suitable agent is configured for this task, and a System Model must be configured before I can create one. Open Settings to configure it.';
+      return 'No suitable agent is configured for this task, and a Default model must be configured before I can create one. Open Settings to configure it.';
     }
     return 'No suitable agent is configured for this task, and no LLM provider is available right now. Open Settings to configure a provider or model.';
   }
@@ -9277,7 +9277,7 @@
         }
       ]);
       if (window.Toast) {
-        Toast.warning('System Model setup is required before creating a new agent.');
+        Toast.warning('Default model setup is required before creating a new agent.');
       }
       return;
     }
@@ -11305,7 +11305,8 @@
         model_timeout: 'The model timed out. Your draft is kept.',
         provider_overloaded: 'The model is at capacity. Your draft is kept.',
         request_cancelled: 'Request cancelled. Your draft is kept.',
-        model_not_configured: 'No system model is configured. Manual workspace setup is available.',
+        model_not_configured:
+          'No Default model is configured. Manual workspace setup is available.',
         context_changed: 'The context changed. Reopen the original conversation.'
       };
       return failures[data.failure_reason] || 'No answer was completed. Your draft is kept.';
@@ -14516,7 +14517,7 @@
             }
           ]);
           if (window.Toast) {
-            Toast.warning('System Model setup is required before creating a new agent.');
+            Toast.warning('Default model setup is required before creating a new agent.');
           }
           return;
         }

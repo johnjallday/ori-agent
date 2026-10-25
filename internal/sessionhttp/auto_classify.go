@@ -117,7 +117,7 @@ func (h *AutoClassifyHandler) HandleAutoClassify(w http.ResponseWriter, r *http.
 	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
 	if err != nil {
 		logger.Error("System model not available for auto-classify", logger.Fields{"error": err})
-		_ = orihttp.RespondServiceUnavailable(w, "System model not configured")
+		_ = orihttp.RespondServiceUnavailable(w, "Default model not configured. Choose one in Settings to auto-classify this session.")
 		return
 	}
 

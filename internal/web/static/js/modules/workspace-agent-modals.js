@@ -300,7 +300,7 @@ function handleConfigModeChange(mode) {
       // Update warning message based on what's missing
       if (llmWarningMessage) {
         if (!workspaceSystemModelConfigured) {
-          llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
+          llmWarningMessage.textContent = 'Auto-config requires a Default model to be configured.';
         } else {
           llmWarningMessage.textContent =
             'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';

@@ -434,7 +434,7 @@ const reviewedOffer = (overrides = {}, software = {}) =>
           label: "Assistant's model",
           state: 'absent',
           detail: 'No model yet.',
-          source: "Ori's system model setting",
+          source: "Ori's Default model setting",
           required: true,
           route: '/settings#system-model'
         },
@@ -539,7 +539,7 @@ test('a reviewed project shows what was read, the whole plan, and what the setup
   );
   // A missing model is said twice, in words, and neither place blocks the review.
   assert.equal(view.prerequisites[1].text, 'No model yet.');
-  assert.equal(view.prerequisites[1].source, "Ori's system model setting");
+  assert.equal(view.prerequisites[1].source, "Ori's Default model setting");
 });
 
 // A confirmed setup, as the server sends it while it runs or after it stopped.

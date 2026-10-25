@@ -675,7 +675,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 	item.Appearance = cfg.Appearance.Clone()
 	item.ModelSource = modelSource
 	if item.Model == "" {
-		item.Warning = fmt.Sprintf("Agent %q has no template or system model; it will use the app's default agent model.", name)
+		item.Warning = fmt.Sprintf("Agent %q has no template model or configured Default model; it will use the built-in agent fallback.", name)
 	}
 	return item
 }

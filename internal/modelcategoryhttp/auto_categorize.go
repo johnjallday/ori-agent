@@ -99,7 +99,7 @@ func (h *AutoCategorizeHandler) CheckAvailabilityHandler(w http.ResponseWriter, 
 
 	if !available {
 		if !systemModelConfigured {
-			response.Message = "System model not configured. Please configure a system model in Settings to use auto-categorize."
+			response.Message = "Default model not configured. Please configure a Default model in Settings to use auto-categorize."
 		} else if !hasCategories {
 			response.Message = "No categories available. Please create at least one category before using auto-categorize."
 		}
@@ -159,10 +159,10 @@ func (h *AutoCategorizeHandler) Suggest(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		if errors.Is(err, llm.ErrSystemModelNotConfigured) {
 			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-				"System model not configured. Please configure a system model in Settings to use auto-categorize.", err)
+				"Default model not configured. Please configure a Default model in Settings to use auto-categorize.", nil)
 		} else {
 			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-				"System model provider not available: "+err.Error(), err)
+				"Default model provider not available. Check the provider in Settings to use auto-categorize.", nil)
 		}
 		return
 	}

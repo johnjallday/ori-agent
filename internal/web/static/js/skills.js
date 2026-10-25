@@ -104,7 +104,7 @@ async function refreshSystemModelDisplay() {
       }
 
       if (indicatorEl) {
-        indicatorEl.title = `System Model: ${data.model} (${data.provider || 'unknown'}) - Click to configure`;
+        indicatorEl.title = `Default model: ${data.model} (${data.provider || 'unknown'}) - Click to configure`;
       }
       return;
     }
@@ -112,7 +112,7 @@ async function refreshSystemModelDisplay() {
     modelNameEl.textContent = 'Not configured';
     providerEl.style.display = 'none';
     if (indicatorEl) {
-      indicatorEl.title = 'System Model not configured - Click to set up';
+      indicatorEl.title = 'Default model not configured - Click to set up';
     }
   } catch (error) {
     console.error('Failed to load system model:', error);

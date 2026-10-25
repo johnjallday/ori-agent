@@ -24,7 +24,7 @@ the same list.
    The mailbox readers fetch these headers with the rest of the metadata
    (`mailbox/signals.go`). The IMAP reader never sets a flag: it opens the inbox
    read-only and fetches with `BODY.PEEK`.
-2. **The system model** (`Explain`) is asked about the conversations the rules
+2. **The Default model** (`Explain`) is asked about the conversations the rules
    were unsure of, at most 12 per read: the ones that need the user, the
    automated ones, and the copied ones. It sees the sender, the subject, and a
    400-character snippet, and returns for each whether it needs the user, what
@@ -34,7 +34,7 @@ the same list.
    can promote a conversation to needs you or demote it to worth knowing; it
    cannot mark anything ignorable.
 
-Without a system model the list still works on rules alone, and the panel says
+Without a Default model the list still works on rules alone, and the panel says
 so.
 
 ## State

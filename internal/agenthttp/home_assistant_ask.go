@@ -741,7 +741,7 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 	if name == "" {
 		name = "Your assistant"
 	}
-	msg := fmt.Sprintf("%s could not get an answer from the system model. Your draft is kept and no answer was saved. You can retry or open the workspace form manually.", name)
+	msg := fmt.Sprintf("%s could not get an answer from the Default model. Your draft is kept and no answer was saved. You can retry or open the workspace form manually.", name)
 	reason := "provider_unavailable"
 	state := unstoredConversation(conversation)
 	if ctx.Err() != nil {
@@ -759,7 +759,7 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 		msg = "The request was cancelled. No answer was saved and nothing was created. Your draft is kept."
 	case errors.Is(err, errHomeModelNotConfigured):
 		reason = "model_not_configured"
-		msg = fmt.Sprintf("%s needs a system model to answer. Choose one in Settings, or open the workspace form manually without a model.", name)
+		msg = fmt.Sprintf("%s needs a Default model to answer. Choose one in Settings, or open the workspace form manually without a model.", name)
 	case providerOverloaded(err):
 		reason = "provider_overloaded"
 		msg = fmt.Sprintf("%s could not get an answer: the model is at capacity right now. Your draft is kept; try again in a moment.", name)
@@ -1070,11 +1070,11 @@ func (h *HomeAssistantAskHandler) resolveProvider() (llm.Provider, string, error
 
 func (h *HomeAssistantAskHandler) modelUnavailableResponse(ctx context.Context, prompt, intent string, snapshot HomeSnapshot, workContext *PersonalAssistantWorkContext, err error) HomeAssistantAskResponse {
 	meta := snapshot.Meta
-	msg := "I can't reach the system model right now, so I can't compose a written summary. "
+	msg := "I can't reach the Default model right now, so I can't compose a written summary. "
 	if errors.Is(err, errHomeModelNotConfigured) {
-		msg = "No system model is configured yet, so I can't answer in writing. Set one up in Settings and try again. "
+		msg = "No Default model is configured yet, so I can't answer in writing. Set one up in Settings and try again. "
 		if workContext != nil && workContext.ReadyForWork() {
-			msg = fmt.Sprintf("%s's conversational answers are paused until a system model is configured. Set one up in Settings and try again. ", workContext.DisplayName)
+			msg = fmt.Sprintf("%s's conversational answers are paused until a Default model is configured. Set one up in Settings and try again. ", workContext.DisplayName)
 		}
 	}
 	msg += "Here's what I can point you to from your data: " + describeSnapshotBriefly(snapshot)

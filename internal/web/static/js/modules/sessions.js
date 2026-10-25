@@ -1812,7 +1812,7 @@ const sessionManager = {
         if (llmWarningMessage) {
           if (!this.chatSystemModelConfigured) {
             llmWarningMessage.textContent =
-              'Assistant mode requires a System Model to be configured.';
+              'Assistant mode requires a Default model to be configured.';
           } else {
             llmWarningMessage.textContent =
               'Assistant mode requires an LLM provider. Please set up an API key or install Ollama.';
@@ -3439,14 +3439,14 @@ const sessionManager = {
       const mirror = data.system_model;
       if (mirror && mirror.mirrored) {
         this.showEditAgentSuccess(
-          `Agent updated. System Model is now ${mirror.provider} / ${mirror.model}.`
+          `Agent updated. Default model is now ${mirror.provider} / ${mirror.model}.`
         );
         if (window.EventBus) {
           EventBus.emit('systemModel:changed', { provider: mirror.provider, model: mirror.model });
         }
       } else if (mirror) {
         this.showEditAgentSuccess(
-          `Agent updated, but ${mirror.reason || 'the System Model was left unchanged'}.`
+          `Agent updated, but ${mirror.reason || 'the Default model was left unchanged'}.`
         );
       } else {
         this.showEditAgentSuccess('Agent updated successfully.');

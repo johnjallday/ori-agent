@@ -1584,7 +1584,7 @@ func validateSystemModel(provider, model string) error {
 
 	// Validate model is not empty (we already checked this above, but be explicit)
 	if model == "" {
-		return fmt.Errorf("system model cannot be empty when provider is set")
+		return fmt.Errorf("Default model cannot be empty when provider is set")
 	}
 
 	// Basic model format validation - must contain only alphanumeric, dash,
@@ -1596,7 +1596,7 @@ func validateSystemModel(provider, model string) error {
 		isDigit := char >= '0' && char <= '9'
 		isAllowed := char == '-' || char == '_' || char == '.' || char == ':' || char == '/'
 		if !isLower && !isUpper && !isDigit && !isAllowed {
-			return fmt.Errorf("invalid system model %q: contains invalid character %q", model, string(char))
+			return fmt.Errorf("invalid Default model %q: contains invalid character %q", model, string(char))
 		}
 	}
 

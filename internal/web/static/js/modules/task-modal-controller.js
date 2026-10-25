@@ -656,7 +656,7 @@ class TaskModalController {
         if (saveButtonText) saveButtonText.textContent = 'Go to Settings';
         if (llmWarningMessage) {
           if (!this.systemModelConfigured) {
-            llmWarningMessage.textContent = 'Auto mode requires a System Model to be configured.';
+            llmWarningMessage.textContent = 'Auto mode requires a Default model to be configured.';
           } else {
             llmWarningMessage.textContent =
               'Auto mode requires an LLM provider. Please set up an API key or install Ollama.';
@@ -2107,8 +2107,8 @@ class TaskModalController {
     if (/request was canceled|context canceled/i.test(normalized)) {
       return 'Auto parsing was canceled before the assistant returned a task plan. No task was created.';
     }
-    if (/system model not configured/i.test(normalized)) {
-      return 'Auto mode needs a configured system model before it can create a task.';
+    if (/(?:system|default) model not configured/i.test(normalized)) {
+      return 'Auto mode needs a configured Default model before it can create a task.';
     }
     if (!normalized) {
       return 'No task was created. Try again or switch to Manual.';

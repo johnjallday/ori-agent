@@ -70,7 +70,7 @@ var homeNavCatalog = []HomeNavEntry{
 		Key:         "settings",
 		Label:       "Settings",
 		Href:        "/settings",
-		Description: "Global configuration: API keys, LLM provider, system model, and preferences.",
+		Description: "Global configuration: API keys, LLM provider, Default model, and preferences.",
 		Aliases:     []string{"settings", "preferences", "configuration", "config", "api keys"},
 	},
 	{

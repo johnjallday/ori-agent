@@ -175,7 +175,7 @@ test('real model Settings return preserves the review and requires refreshed exp
   await settings.locator('#systemModelProvider').selectOption('lmstudio');
   await settings.locator('#systemModelModel').selectOption('readiness-control-a');
   await settings.locator('#saveSystemModelBtn').click();
-  await expect(settings.locator('#systemModelStatusText')).toHaveText('System Model Configured');
+  await expect(settings.locator('#systemModelStatusText')).toHaveText('Default model configured');
   await page.bringToFront();
   await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
   await expect(card.getByLabel('What should it do with it?')).toHaveValue(brief);

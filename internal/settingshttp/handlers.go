@@ -1223,11 +1223,11 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 		// If clearing the system model (both empty), allow it
 		if provider == "" && model == "" {
 			if err := h.configManager.SetSystemModel("", ""); err != nil {
-				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear system model", err)
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear Default model", err)
 				return
 			}
 			if err := h.configManager.SetSystemReasoningEffort(""); err != nil {
-				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear system reasoning", err)
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear Default model reasoning", err)
 				return
 			}
 			if err := h.configManager.Save(); err != nil {
@@ -1251,7 +1251,7 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Set the system model
 		if err := h.configManager.SetSystemModel(provider, model); err != nil {
-			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid system model configuration", err)
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid Default model configuration", err)
 			return
 		}
 
