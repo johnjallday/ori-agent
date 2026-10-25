@@ -46,12 +46,17 @@ type claudeModel struct {
 	maxTokens int64 // the largest max_tokens the model accepts
 }
 
+// claudeWorkspaceIDOption is the ProviderConfig.Options key for the Anthropic
+// workspace ID; see ClaudeProviderConfig.
+const claudeWorkspaceIDOption = "workspace_id"
+
 // ClaudeProvider implements the Provider interface for Anthropic's Claude
 type ClaudeProvider struct {
-	mu         sync.RWMutex
-	client     anthropic.Client
-	apiKey     string
-	httpClient *http.Client
+	mu          sync.RWMutex
+	client      anthropic.Client
+	apiKey      string
+	workspaceID string // sent as anthropic-workspace-id; empty sends none
+	httpClient  *http.Client
 
 	// fetchMu lets one model-list fetch run at a time; callers that wait on
 	// it reuse its result. modelsMu guards the cached list, so reading it
@@ -70,25 +75,47 @@ func (p *ClaudeProvider) snapshot() (anthropic.Client, string) {
 	return p.client, p.apiKey
 }
 
+// ClaudeProviderConfig is the configuration of a Claude API provider. An API
+// key that belongs to the whole organization rather than one workspace is
+// refused on every request unless it names the workspace to use, so a
+// non-empty workspaceID is sent with each one.
+func ClaudeProviderConfig(apiKey, workspaceID string) ProviderConfig {
+	config := ProviderConfig{APIKey: apiKey}
+	if workspaceID = strings.TrimSpace(workspaceID); workspaceID != "" {
+		config.Options = map[string]any{claudeWorkspaceIDOption: workspaceID}
+	}
+	return config
+}
+
 // NewClaudeProvider creates a new Claude provider
 func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 	httpClient := NewHTTPClient(DefaultCloudTimeout)
+	workspaceID, _ := config.Options[claudeWorkspaceIDOption].(string)
 
 	var client anthropic.Client
 	if config.APIKey != "" {
-		client = anthropic.NewClient(
-			option.WithHTTPClient(httpClient),
-			option.WithAPIKey(config.APIKey),
-			// One shared retry budget, owned by Ori — see the OpenAI provider.
-			option.WithMaxRetries(0),
-		)
+		client = newClaudeClient(httpClient, config.APIKey, workspaceID)
 	}
 
 	return &ClaudeProvider{
-		client:     client,
-		apiKey:     config.APIKey,
-		httpClient: httpClient,
+		client:      client,
+		apiKey:      config.APIKey,
+		workspaceID: workspaceID,
+		httpClient:  httpClient,
 	}
+}
+
+func newClaudeClient(httpClient *http.Client, apiKey, workspaceID string) anthropic.Client {
+	opts := []option.RequestOption{
+		option.WithHTTPClient(httpClient),
+		option.WithAPIKey(apiKey),
+		// One shared retry budget, owned by Ori — see the OpenAI provider.
+		option.WithMaxRetries(0),
+	}
+	if workspaceID != "" {
+		opts = append(opts, option.WithHeader("anthropic-workspace-id", workspaceID))
+	}
+	return anthropic.NewClient(opts...)
 }
 
 // Name returns the provider name
@@ -513,11 +540,7 @@ func (p *ClaudeProvider) UpdateClient(apiKey string) {
 		return
 	}
 	httpClient := NewHTTPClient(DefaultCloudTimeout)
-	client := anthropic.NewClient(
-		option.WithHTTPClient(httpClient),
-		option.WithAPIKey(apiKey),
-		option.WithMaxRetries(0), // Ori owns the retry budget; see NewClaudeProvider.
-	)
+	client := newClaudeClient(httpClient, apiKey, p.workspaceID)
 	p.mu.Lock()
 	p.apiKey = apiKey
 	p.httpClient = httpClient

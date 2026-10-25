@@ -534,14 +534,17 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			HasAnthropic    bool   `json:"has_anthropic"`
 			HasGemini       bool   `json:"has_gemini"`
 			Masked          string `json:"masked,omitempty"`
+			// Not a secret: it names a workspace and grants nothing.
+			AnthropicWorkspaceID string `json:"anthropic_workspace_id"`
 		}{
-			OpenAIMasked:    h.configManager.MaskAPIKey(),
-			AnthropicMasked: maskAnthropicAPIKey(h.configManager.GetAnthropicAPIKey()),
-			GeminiMasked:    maskGeminiAPIKey(h.configManager.GetGeminiAPIKey()),
-			HasOpenAI:       h.configManager.GetAPIKey() != "",
-			HasAnthropic:    h.configManager.GetAnthropicAPIKey() != "",
-			HasGemini:       h.configManager.GetGeminiAPIKey() != "",
-			Masked:          h.configManager.MaskAPIKey(),
+			OpenAIMasked:         h.configManager.MaskAPIKey(),
+			AnthropicMasked:      maskAnthropicAPIKey(h.configManager.GetAnthropicAPIKey()),
+			GeminiMasked:         maskGeminiAPIKey(h.configManager.GetGeminiAPIKey()),
+			HasOpenAI:            h.configManager.GetAPIKey() != "",
+			HasAnthropic:         h.configManager.GetAnthropicAPIKey() != "",
+			HasGemini:            h.configManager.GetGeminiAPIKey() != "",
+			Masked:               h.configManager.MaskAPIKey(),
+			AnthropicWorkspaceID: h.configManager.GetAnthropicWorkspaceID(),
 		}
 		orihttp.WriteJSON(w, response)
 
@@ -551,9 +554,19 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
 			GeminiAPIKey    string `json:"gemini_api_key,omitempty"`
 			APIKey          string `json:"api_key,omitempty"`
+			// Absent leaves the workspace as it is; "" clears it.
+			AnthropicWorkspaceID *string `json:"anthropic_workspace_id,omitempty"`
 		}
 		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
+		}
+		if req.AnthropicWorkspaceID != nil {
+			id := strings.TrimSpace(*req.AnthropicWorkspaceID)
+			if err := config.ValidateAnthropicWorkspaceID(id); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid Anthropic workspace ID", err)
+				return
+			}
+			req.AnthropicWorkspaceID = &id
 		}
 
 		// Backwards compatibility: accept api_key as OpenAI API key
@@ -603,15 +616,12 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			cfg.AnthropicAPIKey = req.AnthropicAPIKey
-
-			// Register/update Claude provider in LLM factory
-			claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
-				APIKey: req.AnthropicAPIKey,
-			})
-			h.llmFactory.Register("claude", claudeProvider)
 			settingsLog.Info("Anthropic API key updated", logger.Fields{
 				"setup_token_exchanged": setupTokenExchanged,
 			})
+		}
+		if req.AnthropicWorkspaceID != nil {
+			cfg.AnthropicWorkspaceID = *req.AnthropicWorkspaceID
 		}
 
 		// Update Gemini API key if provided
@@ -626,10 +636,19 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			settingsLog.Info("Gemini API key updated")
 		}
 
-		if req.AnthropicAPIKey != "" || req.GeminiAPIKey != "" {
+		if req.AnthropicAPIKey != "" || req.GeminiAPIKey != "" || req.AnthropicWorkspaceID != nil {
 			if err := h.configManager.Update(cfg); err != nil {
 				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid API key", err)
 				return
+			}
+		}
+
+		// Register/update Claude provider in LLM factory with the key and
+		// workspace the update leaves in place.
+		if req.AnthropicAPIKey != "" || req.AnthropicWorkspaceID != nil {
+			if apiKey := h.configManager.GetAnthropicAPIKey(); apiKey != "" {
+				h.llmFactory.Register("claude", llm.NewClaudeProvider(
+					llm.ClaudeProviderConfig(apiKey, h.configManager.GetAnthropicWorkspaceID())))
 			}
 		}
 
@@ -1429,9 +1448,7 @@ func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.R
 				// Register Claude provider if discovery works
 				apiKey := h.configManager.GetAnthropicAPIKey()
 				if apiKey != "" {
-					claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
-						APIKey: apiKey,
-					})
+					claudeProvider := llm.NewClaudeProvider(llm.ClaudeProviderConfig(apiKey, h.configManager.GetAnthropicWorkspaceID()))
 					h.llmFactory.Register("claude", claudeProvider)
 				}
 			}

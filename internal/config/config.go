@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,11 @@ type Settings struct {
 	OpenAIAPIKey    string `json:"openai_api_key"`
 	AnthropicAPIKey string `json:"anthropic_api_key"`
 	GeminiAPIKey    string `json:"gemini_api_key"`
+
+	// The Anthropic workspace (wrkspc_...) that Claude API requests name. An
+	// organization-wide key needs one; empty falls back to the
+	// ANTHROPIC_WORKSPACE_ID environment variable.
+	AnthropicWorkspaceID string `json:"anthropic_workspace_id,omitempty"`
 
 	// Personal HQ email OAuth client credentials (Google), settable in-app so a
 	// self-hosted user does not need env vars. Empty falls back to the
@@ -829,6 +835,30 @@ func (m *Manager) GetAnthropicAPIKey() string {
 	}
 
 	return ""
+}
+
+// GetAnthropicWorkspaceID returns the Anthropic workspace that Claude API
+// requests name: the setting, else ANTHROPIC_WORKSPACE_ID, else "".
+func (m *Manager) GetAnthropicWorkspaceID() string {
+	m.mu.RLock()
+	id := strings.TrimSpace(m.settings.AnthropicWorkspaceID)
+	m.mu.RUnlock()
+	if id == "" {
+		id = strings.TrimSpace(os.Getenv("ANTHROPIC_WORKSPACE_ID"))
+	}
+	return id
+}
+
+var anthropicWorkspaceIDPattern = regexp.MustCompile(`^wrkspc_[A-Za-z0-9]+$`)
+
+// ValidateAnthropicWorkspaceID accepts "" (no workspace) or an Anthropic
+// workspace ID such as wrkspc_011CZkZaBF1tNoB5wlCeusgy. The ID is sent as a
+// request header, so nothing else is accepted.
+func ValidateAnthropicWorkspaceID(id string) error {
+	if id != "" && !anthropicWorkspaceIDPattern.MatchString(id) {
+		return fmt.Errorf("an Anthropic workspace ID starts with \"wrkspc_\" followed by letters and digits")
+	}
+	return nil
 }
 
 // GetEmailGoogleOAuth returns the Google email OAuth client credentials,

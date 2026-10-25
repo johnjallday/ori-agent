@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -612,6 +613,83 @@ func TestAPIKeyHandler_SecretStoreWritesDoNotPersistPlaintext(t *testing.T) {
 	}
 	if got := configManager.GetGeminiAPIKey(); got != "gemini-secret" {
 		t.Fatalf("GetGeminiAPIKey() = %q", got)
+	}
+}
+
+func TestAPIKeyHandler_SavesTheAnthropicWorkspaceIDAndSendsItWithClaudeRequests(t *testing.T) {
+	var sentWorkspace []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		sentWorkspace = append(sentWorkspace, r.Header.Get("Anthropic-Workspace-Id"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-fixture",
+			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+	t.Setenv("ANTHROPIC_WORKSPACE_ID", "")
+
+	tmpFile := filepath.Join(t.TempDir(), "settings.json")
+	configManager := config.NewManagerWithSecretStore(tmpFile, vault.NewMemorySecretStore())
+	_ = configManager.Load()
+	llmFactory := llm.NewFactory()
+	handler := NewHandler(nil, configManager, client.NewFactory(""), llmFactory)
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.APIKeyHandler(rec, httptest.NewRequest(http.MethodPost, "/api/api-key", strings.NewReader(body)))
+		return rec
+	}
+	chat := func() {
+		t.Helper()
+		provider, err := llmFactory.GetProvider("claude")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := provider.Chat(t.Context(), llm.ChatRequest{Model: "claude-fixture", Messages: []llm.Message{llm.NewUserMessage("Hello")}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if rec := post(`{"anthropic_api_key":"sk-ant-test1234567890abcdefghijklmnopqrstuvwxyz"}`); rec.Code != http.StatusOK {
+		t.Fatalf("saving the key: %d %s", rec.Code, rec.Body.String())
+	}
+	chat()
+	// Saving only the workspace keeps the key and rebuilds the provider with it.
+	if rec := post(`{"anthropic_workspace_id":" wrkspc_011CZkZaBF1tNoB5wlCeusgy "}`); rec.Code != http.StatusOK {
+		t.Fatalf("saving the workspace: %d %s", rec.Code, rec.Body.String())
+	}
+	chat()
+	if rec := post(`{"anthropic_workspace_id":"wrkspc_abc\r\nX-Other: 1"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("an invalid workspace ID: %d %s, want 400", rec.Code, rec.Body.String())
+	}
+
+	rec := httptest.NewRecorder()
+	handler.APIKeyHandler(rec, httptest.NewRequest(http.MethodGet, "/api/api-key", nil))
+	var status struct {
+		AnthropicWorkspaceID string `json:"anthropic_workspace_id"`
+		HasAnthropic         bool   `json:"has_anthropic"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.AnthropicWorkspaceID != "wrkspc_011CZkZaBF1tNoB5wlCeusgy" || !status.HasAnthropic {
+		t.Fatalf("status = %+v", status)
+	}
+	raw, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"anthropic_workspace_id": "wrkspc_011CZkZaBF1tNoB5wlCeusgy"`) {
+		t.Fatalf("settings.json lacks the workspace ID:\n%s", raw)
+	}
+
+	// Saving it empty clears it.
+	if rec := post(`{"anthropic_workspace_id":""}`); rec.Code != http.StatusOK {
+		t.Fatalf("clearing the workspace: %d %s", rec.Code, rec.Body.String())
+	}
+	chat()
+	if want := []string{"", "wrkspc_011CZkZaBF1tNoB5wlCeusgy", ""}; strings.Join(sentWorkspace, ",") != strings.Join(want, ",") {
+		t.Fatalf("anthropic-workspace-id sent %q, want %q", sentWorkspace, want)
 	}
 }
 

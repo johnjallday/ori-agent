@@ -104,6 +104,54 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
   }
 });
 
+// Show the saved Anthropic workspace ID
+(async function loadAnthropicWorkspaceId() {
+  const input = document.getElementById('anthropicWorkspaceIdInput');
+  if (!input) return;
+  try {
+    const response = await fetch('/api/api-key');
+    if (!response.ok) return;
+    const data = await response.json();
+    input.value = data.anthropic_workspace_id || '';
+  } catch (error) {
+    console.error('Error loading Anthropic workspace ID:', error);
+  }
+})();
+
+// Save Anthropic Workspace ID (empty clears it)
+document.getElementById('saveAnthropicWorkspace')?.addEventListener('click', async function () {
+  const workspaceId = document.getElementById('anthropicWorkspaceIdInput').value.trim();
+
+  if (workspaceId && !/^wrkspc_[A-Za-z0-9]+$/.test(workspaceId)) {
+    notify('Invalid workspace ID. Anthropic workspace IDs start with "wrkspc_"', 'warning');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/api-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ anthropic_workspace_id: workspaceId })
+    });
+
+    if (response.ok) {
+      console.log('[settings] Anthropic workspace ID updated');
+      notify(
+        workspaceId ? 'Anthropic workspace ID saved!' : 'Anthropic workspace ID cleared',
+        'success'
+      );
+    } else {
+      const error = await response.text();
+      notify('Failed to save workspace ID: ' + error, 'error');
+    }
+  } catch (error) {
+    console.error('Error saving workspace ID:', error);
+    notify('Error saving workspace ID: ' + error.message, 'error');
+  }
+});
+
 // Toggle Claude setup token visibility
 document.getElementById('toggleClaudeSetupToken')?.addEventListener('click', function () {
   const input = document.getElementById('claudeSetupTokenInput');

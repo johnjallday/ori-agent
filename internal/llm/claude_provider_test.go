@@ -397,7 +397,8 @@ func TestClaudeProviderStreamChatNotImplemented(t *testing.T) {
 // Claude API: it fetches the model list, then runs one tool round trip on a
 // current model with a temperature set, which that model must not be sent.
 // It spends a few cents, so it runs only with ORI_LIVE_CLAUDE_API=1 and
-// ANTHROPIC_API_KEY set; ORI_LIVE_CLAUDE_API_MODEL picks another model.
+// ANTHROPIC_API_KEY set; ORI_LIVE_CLAUDE_API_MODEL picks another model, and
+// an organization-wide key also needs ANTHROPIC_WORKSPACE_ID.
 func TestClaudeProviderLive_ListsModelsAndRunsAToolRoundTrip(t *testing.T) {
 	if os.Getenv("ORI_LIVE_CLAUDE_API") != "1" {
 		t.Skip("live Claude API check; set ORI_LIVE_CLAUDE_API=1 and ANTHROPIC_API_KEY to run")
@@ -410,7 +411,7 @@ func TestClaudeProviderLive_ListsModelsAndRunsAToolRoundTrip(t *testing.T) {
 	if model == "" {
 		model = "claude-opus-5-5"
 	}
-	provider := NewClaudeProvider(ProviderConfig{APIKey: apiKey})
+	provider := NewClaudeProvider(ClaudeProviderConfig(apiKey, os.Getenv("ANTHROPIC_WORKSPACE_ID")))
 
 	// Fetched directly first: DefaultModels would hide a failure behind the catalog.
 	if _, err := fetchClaudeModels(provider.snapshot()); err != nil {
