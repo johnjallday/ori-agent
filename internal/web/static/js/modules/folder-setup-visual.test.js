@@ -533,3 +533,48 @@ test('all external strings are text nodes with a semantic diagram alternative an
   assert.ok(all.some(node => node.attributes['aria-label'] === 'Folder setup relationship'));
   assert.ok(!all.some(node => ['button', 'a', 'input', 'img'].includes(node.tag)));
 });
+
+test('a portfolio review without a hire card keeps the complete staffing and standing consent', () => {
+  const effects = globalThis.OriFolderSetupVisual.reviewConsequences({
+    lines: [
+      {
+        kind: 'agents',
+        name: 'Adds the agents the Home requires',
+        detail: 'New agents use the configured system model: fixture / model.'
+      },
+      {
+        kind: 'library',
+        name: 'Lists six music projects',
+        detail: 'Reads each REAPER project’s tempo, length and track count.'
+      },
+      { kind: 'profile', name: 'Home profile', detail: 'Reads the templates folder' },
+      {
+        kind: 'assistant',
+        name: 'Project assistant joins each project you open',
+        detail: 'This turns it back on.'
+      },
+      {
+        kind: 'songs',
+        name: 'Supported projects get a workspace when opened',
+        detail: 'Listing makes no workspace.'
+      }
+    ]
+  });
+  assert.match(effects.join(' '), /Adds the agents.*configured system model/);
+  assert.match(effects.join(' '), /tempo, length and track count/);
+  assert.match(effects.join(' '), /templates folder/);
+  assert.match(effects.join(' '), /turns it back on/);
+  assert.match(effects.join(' '), /Listing makes no workspace/);
+});
+
+test('library staffing labels the Home model without inventing a project agent', () => {
+  const view = globalThis.OriFolderSetupVisual.requirementsView({
+    offer: {
+      portfolio: { projects: 6 },
+      readiness: { model: { state: 'missing', settings: 'system' } }
+    }
+  });
+  assert.equal(view.model.label, 'Home agent model');
+  assert.match(view.model.detail, /new Home agents/);
+  assert.equal(view.model.settings, '/settings#system-model');
+});

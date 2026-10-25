@@ -145,24 +145,20 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 	target.ConversationID, target.DraftID = conversationID, ""
 	d := s.digest
 	// A review opened again without new Adjust choices keeps the ones its
-	// pending review already has. If they no longer fit (the Home they chose is
-	// gone), the proposal is made afresh rather than refused.
-	carried := false
-	if folderStructureAdjustment(ctx) == nil {
+	// pending review already has. Changed facts cannot silently discard an
+	// explicit choice or a deliberately cleared name.
+	{
 		if doc, readErr := d.store.Read(ctx, source.UserID); readErr == nil {
 			for _, prior := range doc.Offers {
 				review := prior.ConversationReview
 				if prior.Status == FolderOfferPending && review != nil && review.Target == target &&
 					review.ObservationID == observationID && review.CandidateID == candidateID && review.Structure != nil {
-					ctx, carried = WithFolderStructureAdjustment(ctx, review.Structure), true
+					ctx = WithFolderStructureAdjustment(ctx, mergeStructureEdits(review.Structure, folderStructureAdjustment(ctx)))
 				}
 			}
 		}
 	}
 	offer, err := s.prepareReviewOffer(ctx, held, target, candidateID)
-	if carried && errors.Is(err, ErrFolderStructureAdjustment) {
-		offer, err = s.prepareReviewOffer(context.WithValue(ctx, folderStructureAdjustmentKey{}, (*FolderStructureAdjustment)(nil)), held, target, candidateID)
-	}
 	if err != nil {
 		return FolderOfferView{}, err
 	}
@@ -610,6 +606,9 @@ func (s *FolderObservationService) Structure(ctx context.Context, target folderc
 	if recommendation := structure.Recommendation; recommendation != nil {
 		recommendation.ObservationID, recommendation.Coverage = held.observation.ID, held.observation.Coverage
 		structure.Group.HomeAvailable = recommendation.Operation == FolderGroupLibrary && recommendation.Destination.State != "unknown"
+		if recommendation.Destination.State == "existing" {
+			structure.Group.HomeName = recommendation.Destination.Name
+		}
 	}
 	s.digest.freeStructureNames(ctx, structure)
 	proposal := FolderStructureProposal{Structure: structure.view()}
@@ -746,16 +745,23 @@ func (s *FolderDigestService) checkReviewDestination(ctx context.Context, offer 
 }
 
 func (s *FolderDigestService) acquireConversationReview(ctx context.Context, offer FolderOffer) (func(), error) {
+	release := func() {}
+	if offer.ConversationReview != nil {
+		if s.conversationLease == nil {
+			return nil, ErrFolderSelection
+		}
+		var err error
+		release, err = s.conversationLease(ctx, offer)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Verify ownership and the held selection before exposing destination changes.
 	if err := s.checkReviewDestination(ctx, offer); err != nil {
+		release()
 		return nil, ErrFolderPlanChanged
 	}
-	if offer.ConversationReview == nil {
-		return func() {}, nil
-	}
-	if s.conversationLease == nil {
-		return nil, ErrFolderSelection
-	}
-	return s.conversationLease(ctx, offer)
+	return release, nil
 }
 
 func conversationReviewDigest(offer FolderOffer, view FolderOfferView) string {

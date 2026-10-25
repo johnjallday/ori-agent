@@ -24,6 +24,11 @@ import (
 // old. It returns the folder.
 func seedAlbumsCollection(t *testing.T) string {
 	t.Helper()
+	return seedAlbumsCollectionVariant(t, false)
+}
+
+func seedAlbumsCollectionVariant(t *testing.T, exact bool) string {
+	t.Helper()
 	root := filepath.Join(os.Getenv("HOME"), "Music") // sandboxed by the fixture, never the user's home
 	write := func(rel string) {
 		full := filepath.Join(root, rel)
@@ -40,12 +45,18 @@ func seedAlbumsCollection(t *testing.T) string {
 	}
 	for n := 1; n <= 5; n++ {
 		write(fmt.Sprintf("Album-%d/Song.rpp", n))
-		write(fmt.Sprintf("Album-%d/Media/drums.wav", n))
+		if !exact {
+			write(fmt.Sprintf("Album-%d/Media/drums.wav", n))
+		}
 	}
 	write("Album-3/Song.rpp-bak")
 	write("Album-5/Alternate.rpp")
-	for _, name := range []string{"ideas.txt", "sketch.mid", "bounce.wav"} {
-		write("Logic Sketch/" + name)
+	if exact {
+		write("Logic Sketch/Sketch.logicx/ProjectData")
+	} else {
+		for _, name := range []string{"ideas.txt", "sketch.mid", "bounce.wav"} {
+			write("Logic Sketch/" + name)
+		}
 	}
 	return root
 }

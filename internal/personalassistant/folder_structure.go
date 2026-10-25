@@ -74,9 +74,10 @@ const (
 // optional: an empty one keeps what was proposed. It names members only by the
 // ids the proposal itself gave, and holds no path.
 type FolderStructureAdjustment struct {
-	GroupName string                            `json:"group_name,omitempty"`
-	GroupType string                            `json:"group_type,omitempty"`
-	Members   []FolderStructureMemberAdjustment `json:"members,omitempty"`
+	GroupName    string                            `json:"group_name,omitempty"`
+	GroupNameSet bool                              `json:"group_name_set,omitempty"`
+	GroupType    string                            `json:"group_type,omitempty"`
+	Members      []FolderStructureMemberAdjustment `json:"members,omitempty"`
 }
 
 // FolderStructureMemberAdjustment is one member's change: whether it gets a
@@ -85,6 +86,7 @@ type FolderStructureMemberAdjustment struct {
 	CandidateID string `json:"candidate_id"`
 	Included    bool   `json:"included"`
 	Name        string `json:"name,omitempty"`
+	NameSet     bool   `json:"name_set,omitempty"`
 }
 
 // ErrFolderStructureAdjustment is an adjustment the proposal cannot take. Its
@@ -137,6 +139,38 @@ func (a *FolderStructureAdjustment) clone() *FolderStructureAdjustment {
 	return &copied
 }
 
+func mergeStructureEdits(prior, change *FolderStructureAdjustment) *FolderStructureAdjustment {
+	if prior == nil {
+		return change.clone()
+	}
+	next := prior.clone()
+	if change == nil {
+		return next
+	}
+	if change.GroupType != "" {
+		next.GroupType = change.GroupType
+	}
+	if change.GroupNameSet || change.GroupName != "" {
+		next.GroupName, next.GroupNameSet = change.GroupName, change.GroupNameSet
+	}
+	for _, member := range change.Members {
+		found := false
+		for i := range next.Members {
+			if next.Members[i].CandidateID == member.CandidateID {
+				if !member.NameSet && member.Name == "" {
+					member.Name, member.NameSet = next.Members[i].Name, next.Members[i].NameSet
+				}
+				next.Members[i], found = member, true
+				break
+			}
+		}
+		if !found {
+			next.Members = append(next.Members, member)
+		}
+	}
+	return next
+}
+
 type folderStructureAdjustmentKey struct{}
 
 // WithFolderStructureAdjustment carries the user's Adjust choices to an explicit
@@ -160,15 +194,22 @@ func (s *FolderStructure) applyMembers(adjustment *FolderStructureAdjustment) er
 	if adjustment == nil {
 		return nil
 	}
+	s.Edits = adjustment.clone()
+	if s.Group.Type == FolderGroupPlain && adjustment.GroupNameSet && adjustment.GroupName == "" {
+		return structureAdjustmentError("give the group a name")
+	}
 	for _, change := range adjustment.Members {
 		member := s.Member(change.CandidateID)
 		if member == nil {
 			return structureAdjustmentError("a folder is not part of this proposal")
 		}
-		if change.Included && member.ExistingWorkspace != "" {
+		if s.Group.Type != FolderGroupLibrary && change.Included && member.ExistingWorkspace != "" {
 			return structureAdjustmentError(member.Folder + " is already the workspace " + member.ExistingWorkspace)
 		}
 		member.Included = change.Included
+		if s.Group.Type != FolderGroupLibrary && change.Included && change.NameSet && change.Name == "" {
+			return structureAdjustmentError("give the workspace for " + member.Folder + " a name")
+		}
 		if change.Name != "" {
 			member.Name = change.Name
 		}
@@ -283,6 +324,9 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 		return nil, nil
 	}
 	structure.Recommendation = s.recommendCollection(ctx, userID, result, verdict)
+	if r := structure.Recommendation; r != nil && r.Destination.State == "existing" {
+		structure.Group.HomeName = r.Destination.Name
+	}
 	reader, _ := s.deps.Setup.(FolderStructureAvailabilityReader)
 	if declined == nil {
 		declined = func(string) bool { return false }
@@ -488,9 +532,11 @@ func (s *FolderDigestService) checkStructureNames(ctx context.Context, structure
 // the owner already has the Home the collection would be listed in.
 func (s *FolderStructure) adjusted(adjustment *FolderStructureAdjustment, existingHome bool) (*FolderStructure, error) {
 	next := s.stored()
+	adjustment = mergeStructureEdits(s.Edits, adjustment)
 	switch adjustment.GroupType {
 	case "":
 	case FolderGroupPlain:
+		next.Recommendation = nil
 		if next.Group.Type != FolderGroupPlain {
 			next.Group.Type, next.Group.Name, next.Group.DestinationState = FolderGroupPlain, s.Folder, "new"
 		}
@@ -501,6 +547,9 @@ func (s *FolderStructure) adjusted(adjustment *FolderStructureAdjustment, existi
 		next.Group.Type, next.Group.Name, next.Group.DestinationState = FolderGroupLibrary, s.Group.HomeName, "new"
 		if existingHome {
 			next.Group.DestinationState = "existing"
+			if s.Recommendation != nil && s.Recommendation.Destination.State == "existing" {
+				next.Group.Name = s.Recommendation.Destination.Name
+			}
 		}
 	default:
 		return nil, structureAdjustmentError("a workspace for each folder inside " + s.Group.HomeName + " is not available yet")
@@ -646,8 +695,11 @@ func validFolderAvailability(reason string) bool {
 // FolderStructure is a path-free proposal: one group and its member
 // workspaces. It is a description, never a plan or an execution grant.
 type FolderStructure struct {
-	Version        int                   `json:"version"`
-	Recommendation *FolderRecommendation `json:"recommendation,omitempty"`
+	// Edits keeps dormant plain-group choices while library mode is selected.
+	// Empty explicit draft names remain editable; they are never executable names.
+	Edits          *FolderStructureAdjustment `json:"edits,omitempty"`
+	Version        int                        `json:"version"`
+	Recommendation *FolderRecommendation      `json:"recommendation,omitempty"`
 	// Folder is the attached folder's display name.
 	Folder  string                  `json:"folder"`
 	Group   FolderStructureGroup    `json:"group"`
@@ -889,6 +941,7 @@ func (s *FolderStructure) clone() *FolderStructure {
 		return nil
 	}
 	copied := *s
+	copied.Edits = s.Edits.clone()
 	copied.Members = append([]FolderStructureMember(nil), s.Members...)
 	copied.Notes = append([]string(nil), s.Notes...)
 	if s.Recommendation != nil {
@@ -938,6 +991,16 @@ func (s FolderStructure) Validate() error {
 	invalid := func(part string) error { return fmt.Errorf("%w: structure %s", errFolderDigestInvalid, part) }
 	if !s.Recommendation.valid() {
 		return invalid("recommendation")
+	}
+	if s.Edits != nil {
+		if s.Edits.Validate() != nil {
+			return invalid("edits")
+		}
+		for _, member := range s.Edits.Members {
+			if s.Member(member.CandidateID) == nil {
+				return invalid("edit member")
+			}
+		}
 	}
 	selected := s.Version == FolderStructureSelectedVersion
 	if selected {

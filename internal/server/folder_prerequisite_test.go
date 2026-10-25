@@ -41,3 +41,30 @@ func TestFolderPrerequisiteProviderReviewIsIndependentAndStaleConsentCannotInsta
 		})
 	}
 }
+
+func TestFolderPrerequisite_LibraryProviderUsesTheSameExactPackageConsent(t *testing.T) {
+	f := newDraftServerFixture(t)
+	f.builder.server.reviewedReleases = newHomeReleases(t, "0.4.0").updates()
+	host := &folderSetupHost{builder: f.builder}
+	req := personalassistant.FolderSetupRequest{UserID: "local", Offer: personalassistant.FolderOffer{
+		Portfolio: &personalassistant.FolderPortfolioEvidence{Shape: "audio", Projects: 6, ProviderKey: "music_project_management", IntegrationKey: "ori_reaper", IntegrationProjects: 5},
+		Structure: &personalassistant.FolderStructure{Group: personalassistant.FolderStructureGroup{Type: personalassistant.FolderGroupLibrary}},
+	}}
+	input := personalassistant.FolderPrerequisiteInput{Kind: personalassistant.FolderPlanProvider, RequestID: "library-preview"}
+	review, err := host.Prerequisite(t.Context(), req, input)
+	if err != nil || review.Operation != "install" || review.Version != "0.4.0" || len(review.Digest) != 64 || review.Disclosure == nil {
+		t.Fatalf("library disclosure: %+v %v", review, err)
+	}
+	input.Confirm, input.Digest, input.ReviewedVersion = true, "wrong", review.Version
+	if _, err := host.Prerequisite(t.Context(), req, input); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		t.Fatal("unreviewed package installed", err)
+	}
+	req.Offer.Structure.Group.Type = personalassistant.FolderGroupPlain
+	if _, err := host.Prerequisite(t.Context(), req, input); err == nil {
+		t.Fatal("plain group acquired a package requirement")
+	}
+	plugins, err := f.builder.pluginHandler.Manager().List()
+	if err != nil || len(plugins) != 0 {
+		t.Fatal("preview or refusal installed packages", err)
+	}
+}

@@ -334,3 +334,29 @@ func TestFolderDigest_OtherFoldersKeepTheirQuestion(t *testing.T) {
 		t.Fatalf("a folder with no Home was listed in one: %v", err)
 	}
 }
+
+func TestFolderDigest_DeclinedLibraryRequiresAskAgainBeforeSetup(t *testing.T) {
+	f, _ := homeCollectionFixture(t)
+	offer, err := f.service.ScanChip(t.Context(), "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(t.Context(), "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "decline-library"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.service.ScanChip(t.Context(), "local", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	library, err := f.service.AdjustStructure(t.Context(), "local", again.ID, FolderStructureAdjustment{GroupType: FolderGroupLibrary})
+	if err != nil || library.Declined == nil {
+		t.Fatal("library lost decline", err)
+	}
+	if _, err := f.service.StartSetup(t.Context(), "local", library.ID, FolderSetupInput{RequestID: "bypass-ask", PlanDigest: "stale"}); !errors.Is(err, ErrFolderReviewRequired) {
+		t.Fatal("library bypassed Ask again", err)
+	}
+	forgotten, err := f.service.Forget(t.Context(), "local", FolderForgetInput{FolderKey: library.Declined.FolderKey})
+	if err != nil || forgotten.Offer == nil || forgotten.Offer.Declined != nil || forgotten.Offer.Structure.Group.Type != FolderGroupLibrary {
+		t.Fatal("Ask again lost alternative", err)
+	}
+}

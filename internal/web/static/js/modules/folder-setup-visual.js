@@ -305,7 +305,7 @@
 
   // Configuration is not connectivity. Routes are compiled from the host's
   // applicable configuration owner; no URL or credential is accepted here.
-  function modelRequirementView(model, { saved = false } = {}) {
+  function modelRequirementView(model, { saved = false, home = false } = {}) {
     if (!model) return null;
     // Nothing waits on a model: the setup and its first look call none.
     if (model.state === MODEL_NOT_NEEDED)
@@ -327,12 +327,15 @@
           ? `/agents/${encodeURIComponent(text(model.agent_name))}`
           : '';
     return {
+      ...(home ? { label: saved ? 'Home model configuration at review' : 'Home agent model' } : {}),
       state: configured ? 'configured' : missing ? 'missing' : 'not_checked',
       status: configured ? 'Configured' : missing ? 'Configuration needed' : 'Not checked',
       detail: configured
         ? `${text(model.provider)} · ${text(model.name)} — configuration only; connection not verified.`
         : missing
-          ? 'This project agent needs a model configuration before setup.'
+          ? home
+            ? 'The new Home agents need a system model configuration before setup.'
+            : 'This project agent needs a model configuration before setup.'
           : 'The project blueprint and agent must be available before their model requirement can be checked.',
       saved,
       settings: saved ? '' : settings
@@ -419,7 +422,10 @@
     const builtin = complete && !rows.length ? text(visual?.builtin).trim() : '';
     return {
       rows,
-      model: modelRequirementView(visual?.model, { saved }),
+      model: modelRequirementView(visual?.model, {
+        saved,
+        home: Boolean(offer?.portfolio || visual?.entity?.kind === 'home')
+      }),
       complete,
       downloads,
       saved,
@@ -546,7 +552,7 @@
       );
     if (view.model) {
       const model = node('section', '', 'folder-requirements__model');
-      model.setAttribute('aria-label', 'Project agent model');
+      model.setAttribute('aria-label', view.model.label || 'Project agent model');
       model.dataset.state = view.model.state;
       model.append(
         node(
@@ -602,7 +608,7 @@
       ) {
         effects.push([text(line.name), text(line.detail)].filter(Boolean).join('. '));
       } else if (line.kind === 'agents' && line.detail) {
-        effects.push(text(line.detail));
+        effects.push([text(line.name), text(line.detail)].filter(Boolean).join('. '));
       }
     }
     // A first look that calls no model (an inbox folder's first batch) spends

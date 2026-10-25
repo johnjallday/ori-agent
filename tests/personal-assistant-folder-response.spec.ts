@@ -229,7 +229,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(preview).toBeVisible();
     await expect(preview).toContainText('Local preview · not sent');
     await expect(preview.getByRole('heading')).toHaveText(observation.folder);
-    await expect(preview).toContainText('Attached folder: contents not read.');
+    await expect(preview).toContainText('File contents were not opened.');
     await expect(page.locator('#personalAssistantFolderChip')).toBeEnabled();
     const ask = page.waitForResponse(response => response.url().endsWith('/home-assistant/ask'));
     await page.locator('#personalAssistantSend').click();

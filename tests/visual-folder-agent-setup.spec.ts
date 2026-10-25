@@ -1079,7 +1079,7 @@ test('fixture preview and disclosure stay compact and metadata-only, with a mode
   await expect(card.getByRole('figure', { name: 'Folder setup relationship' })).toHaveCount(0);
   await expect(card).toContainText('No model is needed to review');
   await expect(card.getByRole('button', { name: 'Review workspace setup' })).toBeVisible();
-  await expect(card).toContainText('contents not read');
+  await expect(card).toContainText('File contents were not opened.');
   await expect(card).toContainText('30 minutes');
   const details = card.locator('summary', { hasText: 'Scan details' });
   await details.focus();

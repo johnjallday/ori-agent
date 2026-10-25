@@ -119,9 +119,9 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 // never raw selection, ambiguous attachment or an eligibility check.
 func (s *FolderDigestService) attachSetupReadiness(ctx context.Context, userID string, offer FolderOffer, v *FolderOfferView) {
 	_, pluginControls := s.deps.Setup.(FolderPrerequisiteSetup)
-	v.PrerequisitesAvailable = pluginControls && offer.Status == FolderOfferPending && offer.Setup == nil && !v.NeedsPick &&
+	v.PrerequisitesAvailable = pluginControls && offer.Status == FolderOfferPending && offer.Setup == nil && offer.Declined == nil && !v.NeedsPick &&
 		offer.ConversationReview != nil && !IsBuildReview(offer.ConversationReview.Target) && offer.ConversationReview.Operation == FolderOperationCreate &&
-		v.Capability != nil && (v.Capability.SetupSource == "host" || v.Capability.SetupSource == "plugin") && v.DestinationStatus != "changed"
+		v.Capability != nil && (v.Capability.SetupSource == "host" || v.Capability.SetupSource == "plugin" || libraryReview(offer)) && v.DestinationStatus != "changed"
 	if v.Plan != nil || v.Setup != nil || v.NeedsPick || !planPending(offer) || !eligibleForOneCard(offer) {
 		return
 	}
@@ -242,6 +242,9 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		return s.viewFor(ctx, userID, *offer, binding.Paused), nil
 	}
+	if offer.Status == FolderOfferPending && doc.Tombstoned(offer.Subject.Key) {
+		return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderReviewRequired
+	}
 	if !eligibleForOneCard(*offer) {
 		return FolderOfferView{}, ErrFolderOutcomeUnavailable
 	}
@@ -256,6 +259,9 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	}
 	release, guardErr := s.acquireConversationReview(ctx, *offer)
 	if guardErr != nil {
+		if errors.Is(guardErr, ErrFolderPlanChanged) {
+			return s.viewFor(ctx, userID, *offer, binding.Paused), guardErr
+		}
 		return FolderOfferView{}, guardErr
 	}
 	defer release()

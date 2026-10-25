@@ -83,7 +83,7 @@ func TestHomeFolderCollection_ADeclinedFolderIsStillProposedAndSaysWhen(t *testi
 	// That scan's offer is now waiting on Home: the composer says so in one line.
 	status, body = f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",
 		map[string]any{"draft_id": uuid.NewString(), "revision": "", "mode": "chip", "chip": "music"})
-	if status != http.StatusOK || body["structure"] != nil || body["structure_unavailable"] != "review_pending" {
+	if status != http.StatusOK || body["structure"] == nil || body["blocker"] == nil || body["structure_unavailable"] != "review_pending" {
 		t.Fatalf("attach while a review waits on Home: %d %v", status, body)
 	}
 }
@@ -140,6 +140,13 @@ func TestHomeFolderCollection_AdjustThenSetUpCreatesTheRenamedGroup(t *testing.T
 	offer := body["offer"].(map[string]any)
 	id := offer["id"].(string)
 	offers := "/api/personal-assistant/folder-digest/offers/" + id
+
+	// The default library listing is distinct from this explicit generic setup.
+	status, body = f.call(t, http.MethodPost, offers+"/structure", map[string]any{"structure": map[string]any{"group_type": "group"}})
+	if status != http.StatusOK {
+		t.Fatalf("choose group: %d %v", status, body)
+	}
+	offer = body["offer"].(map[string]any)
 
 	// A bare yes is not how a group is confirmed: it is confirmed on its plan.
 	if status, body := f.call(t, http.MethodPost, offers+"/decide",

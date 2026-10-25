@@ -42,7 +42,7 @@ export function folderPresentation(
       : date.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' }),
     scannedAt: Number.isNaN(date.getTime()) ? '' : date.toISOString(),
     status: `${local ? 'Local preview · not sent' : historical ? 'Saved observations · historical' : 'Saved observations'} · ${coverage.partial ? 'Partial, bounded look' : 'Bounded look'}`,
-    disclosure: 'Attached folder: contents not read.',
+    disclosure: `${observationSummary(observation)} File contents were not opened.`,
     rootMarker: root?.marker ? `${String(root.marker)} marker in the whole folder` : '',
     visibleRows: children.slice(0, 3),
     moreRows: children.slice(3),

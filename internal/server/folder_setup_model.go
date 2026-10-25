@@ -16,6 +16,13 @@ func (h *folderSetupHost) validateSetupModel(req personalassistant.FolderSetupRe
 	if expected.Validate() != nil || h == nil || h.builder == nil || h.builder.sessionHandler == nil {
 		return personalassistant.ErrFolderPlanChanged
 	}
+	if req.Plan.Intent.Portfolio {
+		provider, model := h.builder.systemModel()
+		if expected.Source != "system" || provider != expected.Provider || model != expected.Model {
+			return personalassistant.ErrFolderPlanChanged
+		}
+		return nil
+	}
 	if expected.Source == "agent" {
 		provider, model, found := h.builder.sessionHandler.SavedAgentModel(expected.AgentName)
 		if !found || provider != expected.Provider || model != expected.Model {

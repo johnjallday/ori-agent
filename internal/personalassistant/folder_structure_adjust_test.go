@@ -210,13 +210,51 @@ func TestFolderStructureAdjustment_APendingReviewKeepsItsChoicesWhenOpenedAgain(
 	if err != nil || again.ID != first.ID || again.Structure.Group.Name != "Albums 2026" || len(again.Structure.Included()) != 5 {
 		t.Fatalf("reopened review: %+v, %v", again.Structure, err)
 	}
-	// A new choice replaces the old one on the same offer.
+	// Renaming keeps an earlier explicit member exclusion on the same offer.
 	replaced, err := service.Review(WithFolderStructureAdjustment(ctx, &FolderStructureAdjustment{GroupName: "Records"}), saved, "chat-1", observation.ID, folderRootCandidateID)
-	if err != nil || replaced.ID != first.ID || replaced.Structure.Group.Name != "Records" || len(replaced.Structure.Included()) != 6 {
+	if err != nil || replaced.ID != first.ID || replaced.Structure.Group.Name != "Records" || len(replaced.Structure.Included()) != 5 {
 		t.Fatalf("replaced choices: %+v, %v", replaced.Structure, err)
 	}
 	doc, err := f.store.Read(ctx, target.UserID)
 	if err != nil || len(doc.Offers) != 1 || doc.Offers[0].Structure.Group.Name != "Records" || doc.Offers[0].Structure.Members[0].RelPath == "" {
 		t.Fatalf("stored offer: %+v, %v", doc.Offers, err)
+	}
+}
+
+func TestFolderStructureAdjustment_LibraryKeepsDormantNamesAndClearedDrafts(t *testing.T) {
+	result, verdict, now := scanAlbums(t)
+	base := BuildFolderStructure(result, verdict, now, false)
+	base.Group.HomeAvailable, base.Group.HomeName = true, "Renamed Music Home"
+	first := base.Members[0].CandidateID
+	group, err := base.adjusted(&FolderStructureAdjustment{GroupType: FolderGroupPlain, GroupName: "My records", GroupNameSet: true, Members: []FolderStructureMemberAdjustment{{CandidateID: first, Included: true, Name: "First record", NameSet: true}}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	library, err := group.adjusted(&FolderStructureAdjustment{GroupType: FolderGroupLibrary}, true)
+	if err != nil || library.Group.Name != "Renamed Music Home" || library.Group.DestinationState != "existing" || library.Edits.GroupName != "My records" {
+		t.Fatalf("library lost edits or canonical name: %+v %v", library, err)
+	}
+	back, err := library.adjusted(&FolderStructureAdjustment{GroupType: FolderGroupPlain}, true)
+	if err != nil || back.Group.Name != "My records" || back.Member(first).Name != "First record" || back.Recommendation != nil {
+		t.Fatalf("group return: %+v %v", back, err)
+	}
+	cleared, err := library.adjusted(&FolderStructureAdjustment{GroupNameSet: true, Members: []FolderStructureMemberAdjustment{{CandidateID: first, Included: true, NameSet: true}}}, true)
+	if err != nil || cleared.Edits.GroupName != "" || !cleared.Edits.GroupNameSet || cleared.Edits.Members[0].Name != "" || cleared.Validate() != nil {
+		t.Fatalf("cleared library draft not preserved: %+v %v", cleared, err)
+	}
+	if _, err := cleared.adjusted(&FolderStructureAdjustment{GroupType: FolderGroupPlain}, true); err == nil {
+		t.Fatal("cleared draft names became executable defaults")
+	}
+}
+
+func TestFolderStructure_DormantLibraryEditsDoNotRecreateLinkedMembers(t *testing.T) {
+	structure := &FolderStructure{Group: FolderStructureGroup{Type: FolderGroupLibrary}, Members: []FolderStructureMember{{CandidateID: "member", Folder: "Album", Name: "Album", ExistingWorkspace: "Already linked"}}}
+	edits := &FolderStructureAdjustment{Members: []FolderStructureMemberAdjustment{{CandidateID: "member", Included: true, Name: "My edit", NameSet: true}}}
+	if err := structure.applyMembers(edits); err != nil || structure.Edits.Members[0].Name != "My edit" {
+		t.Fatal("dormant edits blocked listing", err)
+	}
+	structure.Group.Type = FolderGroupPlain
+	if err := structure.applyMembers(edits); !errors.Is(err, ErrFolderStructureAdjustment) {
+		t.Fatal("group duplicated linked member", err)
 	}
 }

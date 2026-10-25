@@ -238,7 +238,38 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
 	}
 	facts.Profile = h.profileFacts(target.provider, target.row.Offer.IntegrationKey, home)
-	return foldersetup.BuildPortfolioPlan(facts), nil
+	return h.bindPortfolioModel(foldersetup.BuildPortfolioPlan(facts))
+}
+
+func (h *folderSetupHost) bindPortfolioModel(plan personalassistant.FolderSetupPlan) (personalassistant.FolderSetupPlan, error) {
+	if plan.Intent.StaffsHome {
+		plan.Visual.Model = h.portfolioModel()
+		for i := range plan.Lines {
+			if plan.Lines[i].Kind == personalassistant.FolderPlanAgents {
+				if model := plan.Visual.Model; model.State == "configured" {
+					plan.Lines[i].Detail += " New agents use the configured system model: " + model.Provider + " · " + model.Name + "."
+				} else {
+					plan.Lines[i].Detail += " Configure a system model for these new agents before setup."
+				}
+			}
+		}
+		if model := plan.Visual.Model; model.State == "configured" {
+			plan.Intent.Model = &personalassistant.FolderSetupModelIntent{Source: "system", Provider: model.Provider, Model: model.Name}
+			if plan.Intent.Model.Validate() != nil {
+				return personalassistant.FolderSetupPlan{}, errSetupUnavailable
+			}
+		}
+	}
+	return plan.Stamped(), nil
+}
+
+func (h *folderSetupHost) portfolioModel() *personalassistant.FolderSetupModel {
+	provider, model := h.builder.systemModel()
+	state := "missing"
+	if provider != "" && model != "" {
+		state = "configured"
+	}
+	return &personalassistant.FolderSetupModel{State: state, Provider: provider, Name: model, Settings: "system"}
 }
 
 // portfolioRun drives a collection's setup on the server.
@@ -251,7 +282,7 @@ func (h *folderSetupHost) portfolioRun(ctx context.Context, req personalassistan
 	runner := &foldersetup.PortfolioRunner{
 		ValidateDestination: func(ctx context.Context, homeID string) error { return h.ValidateSetupDestination(ctx, req) },
 		Homes:               &portfolioHomes{host: h, userID: req.UserID, provider: target.provider},
-		Staffing:            portfolioHomeStaffing{builder: b},
+		Staffing:            portfolioHomeStaffing{builder: b, model: req.Plan.Intent.Model},
 		Library:             portfolioLibrary{builder: b, userID: req.UserID, offerID: req.Offer.ID},
 		Receipts:            portfolioReceipts{host: h, folder: strings.TrimSpace(req.Offer.Subject.Name), noun: target.row.Offer.DisplayName, projectLabel: target.row.Blueprint.Label},
 		Folder:              req.Path,
@@ -339,7 +370,10 @@ func (p *portfolioHomes) Commit(ctx context.Context, review foldersetup.HomeRevi
 
 // portfolioHomeStaffing fills the Home's required roles through the one
 // staffing seam (StaffRoleOnWorkspace), creating new agents only.
-type portfolioHomeStaffing struct{ builder *ServerBuilder }
+type portfolioHomeStaffing struct {
+	builder *ServerBuilder
+	model   *personalassistant.FolderSetupModelIntent
+}
 
 func (s portfolioHomeStaffing) Missing(_ context.Context, homeID string) ([]foldersetup.HomeRole, error) {
 	home, err := s.builder.workspaceStore.Get(homeID)
@@ -385,13 +419,20 @@ func (s portfolioHomeStaffing) Missing(_ context.Context, homeID string) ([]fold
 }
 
 func (s portfolioHomeStaffing) ModelReady(context.Context) bool {
+	if s.model != nil {
+		return s.builder.validateModel(s.model.Provider, s.model.Model) == nil
+	}
 	return s.builder.systemModelAvailable()
 }
 
 func (s portfolioHomeStaffing) Staff(ctx context.Context, homeID string, role foldersetup.HomeRole) error {
-	return s.builder.assistantStaffing.StaffRoleOnWorkspace(ctx, homeID, []setupjourney.RoleFill{{
+	fill := setupjourney.RoleFill{
 		RoleID: role.RoleID, Mode: setupjourney.StaffingModeCreate, Name: role.Name,
-	}})
+	}
+	if s.model != nil {
+		fill.Provider, fill.Model = s.model.Provider, s.model.Model
+	}
+	return s.builder.assistantStaffing.StaffRoleOnWorkspace(ctx, homeID, []setupjourney.RoleFill{fill})
 }
 
 // portfolioLibrary is the Home library's own reviews, driven in process.

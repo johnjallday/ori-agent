@@ -47,6 +47,11 @@ func TestFolderConversationDestination_BlockedReaderNamesTheIntegrationByKey(t *
 	if err != nil || reread.DestinationStatus != "unavailable" || reread.DestinationBlocker == nil || *reread.DestinationBlocker != want {
 		t.Fatal("re-read lost the blocker", reread, err)
 	}
+	// Ownership/selection is checked before disclosing destination failure.
+	if _, err := f.service.acquireConversationReview(context.Background(), *doc.Offer(offer.ID)); !errors.Is(err, ErrFolderSelection) {
+		t.Fatal("unbound review acquired authority", err)
+	}
+	service.BindSaved(source, observed.ID, "conversation")
 	// The stored review is not a grant: it still cannot authorize a setup.
 	if _, err := f.service.acquireConversationReview(context.Background(), *doc.Offer(offer.ID)); !errors.Is(err, ErrFolderPlanChanged) {
 		t.Fatal("blocked review could authorize setup", err)
@@ -54,7 +59,7 @@ func TestFolderConversationDestination_BlockedReaderNamesTheIntegrationByKey(t *
 	// A plain failure, or a blocked error with no keys, names nothing.
 	for _, failure := range []error{errors.New("private reader failure"), &FolderSetupBlockedError{Err: errors.New("private reader failure")}} {
 		setup.destinationErr = failure
-		plain, err := service.PreviewReview(context.Background(), source, observed.ID, candidate)
+		plain, err := service.PreviewReview(context.Background(), target, observed.ID, candidate)
 		if err != nil || plain.DestinationStatus != "unavailable" || plain.DestinationBlocker != nil {
 			t.Fatal("failure without a reason named one", plain, err)
 		}

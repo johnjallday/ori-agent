@@ -886,7 +886,7 @@ for (const theme of ['light', 'dark']) {
     await expect(attach).toBeFocused();
     expect(fixture.requests).toHaveLength(0);
     await expect(page.locator('#personalAssistantFolderPreview')).toContainText(
-      'Attached folder: contents not read.'
+      'File contents were not opened.'
     );
     await page.locator('#personalAssistantRemoveFolder').press('Enter');
     await expect(attach).toBeFocused();
@@ -1370,7 +1370,7 @@ for (const theme of ['light', 'dark']) {
       const strip = page.locator('[data-folder-discussion]');
       await expect(card.getByRole('heading')).toHaveText(scenario.folder);
       await expect(card).toContainText(/[Bb]ounded look/);
-      await expect(card).toContainText('contents not read');
+      await expect(card).toContainText('File contents were not opened.');
       await expect(card.locator('img, b, script')).toHaveCount(0);
       const tree = await ax.send('Accessibility.getFullAXTree');
       const group = tree.nodes.find(
