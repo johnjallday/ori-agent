@@ -85,7 +85,11 @@ function fixtureFolder(label: string, files: Record<string, string>): string {
  * test scaffolding — it is recorded in the manual test guide. File Janitor
  * itself needs no agent (FR-37), and nothing below ever uses this one.
  */
-async function createPlainWorkspace(request: APIRequestContext, name: string): Promise<string> {
+async function createPlainWorkspace(
+  request: APIRequestContext,
+  name: string,
+  withAgent = true
+): Promise<string> {
   const res = await request.post('/api/workspaces', { data: { name, description: '' } });
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
@@ -93,6 +97,7 @@ async function createPlainWorkspace(request: APIRequestContext, name: string): P
   const workspaceSlug = (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
   workspaceSlugs.set(workspaceId, workspaceSlug || workspaceId);
 
+  if (!withAgent) return workspaceId;
   const agentName = `${name} Manager`;
   const created = await request.post('/api/agents', {
     data: { name: agentName, type: 'general', model: 'gpt-4o-mini' }
@@ -150,7 +155,8 @@ test('managed protection endpoint is agentless, path-free and invalidated by rev
   expect(first.reason).toBe('no_configuration');
   expect(first.root_generation).toBeTruthy();
   expect(first.binding_id).toMatch(/^[a-f0-9]{64}$/);
-  expect(first.destination.kind).toBe('chooser');
+  // Other disposable tests may already have installed an unconfigured console.
+  expect(['chooser', 'workspace']).toContain(first.destination.kind);
   expect(JSON.stringify(first)).not.toContain(root);
   expect(first.last_completed_at).toBeUndefined();
   const revoked = await request.post(`/api/workspaces/${id}/file-janitor/revoke`, { data: {} });
@@ -380,6 +386,80 @@ test('protection round trip keeps choices through chooser, creation, existing co
   expect(mutations.filter(line => !line.endsWith(' /api/workspaces'))).toEqual([]);
   expect(mutations.filter(line => line.endsWith(' /api/workspaces'))).toHaveLength(1);
   writeFileSync(join(evidence, 'navigation-mutations.json'), JSON.stringify(mutations, null, 2));
+});
+
+test('agentless protection keeps review on blocked storage and refuses a relinked return', async ({
+  page,
+  request
+}) => {
+  test.setTimeout(45000);
+  const id = await createPlainWorkspace(request, `Protection negative ${RUN}`, false);
+  await installCapability(request, id);
+  await grantFolder(
+    request,
+    id,
+    fixtureFolder('protection-negative', { 'original.pdf': 'invented' })
+  );
+  expect((await request.post(`/api/workspaces/${id}/file-janitor/scan`)).ok()).toBeTruthy();
+  // A real installed console, no configuration or provider permissions.
+  const backup = await createPlainWorkspace(request, `Protection destination ${RUN}`, false);
+  const origin = new URL((await request.get('/api/workspaces')).url()).origin;
+  const installed = await request.post(
+    `/api/workspaces/${backup}/capabilities/backup-recovery/install`,
+    {
+      data: { source: 'in-place' },
+      headers: { Origin: origin, 'X-Ori-Backup-Action': 'user-control' }
+    }
+  );
+  expect(installed.ok(), await installed.text()).toBeTruthy();
+  await openWorkspace(page, id, '?panel=file-janitor');
+  await expect(page.locator('#fileJanitorCheckProtection')).toBeVisible();
+  const choice = page.getByRole('checkbox', { name: 'Select original.pdf', exact: true });
+  await choice.check();
+  await page.evaluate(() => {
+    (window as any).__storageSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'ori.fileJanitor.protectionTrip.v1')
+        throw new DOMException('blocked', 'SecurityError');
+      (window as any).__storageSetItem.call(this, key, value);
+    };
+  });
+  await page.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#fileJanitorError')).toContainText('cannot save');
+  await expect(choice).toBeChecked();
+  await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+  const evidence = 'tasks/evidence-file-curator-backup-guidance/group-4';
+  mkdirSync(evidence, { recursive: true });
+  await page.locator('#fileJanitorError').scrollIntoViewIfNeeded();
+  await page
+    .locator('#fileJanitorConsole')
+    .screenshot({ path: join(evidence, 'blocked-storage-keeps-review.png') });
+  await page.evaluate(() => {
+    Storage.prototype.setItem = (window as any).__storageSetItem;
+  });
+  await page.locator('#fileJanitorCheckProtection').click();
+  await expect(page.locator('#backupRecoveryConsole')).toBeVisible();
+  const changed = await request.post(`/api/workspaces/${id}/file-janitor/relink`, {
+    data: { path: fixtureFolder('protection-new-root', { 'new.pdf': 'invented' }) }
+  });
+  expect(changed.ok(), await changed.text()).toBeTruthy();
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dialog = page.locator('#backupRecoveryConsole');
+    expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBeTruthy();
+    await expect(dialog.getByRole('button', { name: 'Return to filing review' })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'Return to filing review', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#backupRecoveryConsole')).toContainText(
+    'folder or its access changed'
+  );
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('ori.fileJanitor.protectionTrip.v1'))
+  ).toBeNull();
+  await page
+    .locator('#backupRecoveryConsole')
+    .screenshot({ path: join(evidence, 'relinked-return-refused.png') });
 });
 
 test.describe('File Janitor capability', () => {

@@ -1274,6 +1274,13 @@
   }
 
   function updateSelectionSummary() {
+    const protectionControl = document.getElementById('fileJanitorCheckProtection');
+    if (protectionControl)
+      protectionControl.disabled =
+        Boolean(protectionReturnRetry) ||
+        departingForProtection ||
+        busy ||
+        !batchActionsAvailable();
     const node = document.getElementById('fileJanitorSelection');
     if (node) {
       const count = selected.size;
@@ -2756,7 +2763,10 @@
       showError(error.message || 'Ori could not apply these moves.');
       await loadBatch();
     } finally {
-      if (scopeCurrent(scope)) busy = false;
+      if (scopeCurrent(scope)) {
+        busy = false;
+        updateSelectionSummary();
+      }
     }
   }
 
@@ -4384,6 +4394,7 @@
       if (scopeCurrent(scope)) {
         busy = false;
         scanning = false;
+        updateSelectionSummary();
         notifySubscribers();
         refreshActivity();
         const done = document.getElementById('fileJanitorScan');

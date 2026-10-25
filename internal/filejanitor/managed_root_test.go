@@ -2,6 +2,7 @@ package filejanitor
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -46,6 +47,20 @@ func TestStoredManagedRootReadsOnlySavedMetadata(t *testing.T) {
 	}
 }
 
+type unreadableRootWorkspace struct{ WorkspaceStore }
+
+func (unreadableRootWorkspace) GetFolderWorkspace(string) (*workspace.Workspace, error) {
+	return nil, errors.New("canonical record is unreadable")
+}
+
+func TestStoredManagedRootRejectsStaleFallbackGrant(t *testing.T) {
+	s, ws, _ := storedRootFixture(t)
+	s.workspaces = unreadableRootWorkspace{s.workspaces}
+	if _, err := s.StoredManagedRoot("local", ws.ID); err != ErrManagedRootUnavailable {
+		t.Fatal("unreadable canonical metadata fell back to an older grant", err)
+	}
+}
+
 func TestStoredManagedRootFailsClosed(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -65,6 +80,7 @@ func TestStoredManagedRootFailsClosed(t *testing.T) {
 		}},
 		{"disabled access", func(ws *workspace.Workspace, _ *JanitorSettings) { ws.MCPBindings[0].Enabled = false }},
 		{"widened access", func(ws *workspace.Workspace, _ *JanitorSettings) { ws.MCPBindings[0].AllowedTools = nil }},
+		{"removed tools", func(ws *workspace.Workspace, _ *JanitorSettings) { ws.MCPBindings[0].AllowedTools = []string{} }},
 		{"wrong binding root", func(ws *workspace.Workspace, _ *JanitorSettings) {
 			ws.MCPBindings[0].Config["roots"] = []string{"/Invented/other"}
 		}},

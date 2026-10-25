@@ -1672,8 +1672,6 @@
     closeButton.id = 'brClose';
     head.appendChild(closeButton);
     shell.appendChild(head);
-    const filingReturn = window.FileJanitorProtection?.returnButton(document);
-    if (filingReturn) head.appendChild(filingReturn);
     const nav = el('div', 'br-tabs');
     nav.setAttribute('role', 'tablist');
     nav.setAttribute('aria-label', 'Backup & Recovery');
@@ -1709,6 +1707,8 @@
     body.id = 'backupRecoveryBody';
     body.setAttribute('role', 'tabpanel');
     body.setAttribute('aria-labelledby', 'brTab-' + state.tab);
+    const filingReturn = window.FileJanitorProtection?.returnButton(document);
+    if (filingReturn) body.appendChild(filingReturn);
     if (state.error) {
       const alert = el('p', 'br-alert', state.error);
       alert.setAttribute('role', 'alert');

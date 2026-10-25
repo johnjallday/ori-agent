@@ -29,7 +29,7 @@
   font-size: 0.8rem;
   line-height: 1.5;
   margin: 0.25rem 0;
-  color: var(--text-secondary, #9aa0a6);
+  color: var(--text-primary, #e8e8e8);
 }
 
 .fj-protection.is-passive {

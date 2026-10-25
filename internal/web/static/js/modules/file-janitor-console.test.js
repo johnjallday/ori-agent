@@ -4830,6 +4830,13 @@ test('departure waits for pending category writes and a failed save keeps review
   );
 });
 
+test('Check protection becomes usable when an explicit scan finishes', async t => {
+  const { doc } = await protectionReview(t);
+  doc.getElementById('fileJanitorScan').click();
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorCheckProtection').disabled, false);
+});
+
 test('a failed canonical return keeps the descriptor and exposes a recoverable retry', async t => {
   const { doc, state } = await protectionReview(t);
   panel._select('c1');

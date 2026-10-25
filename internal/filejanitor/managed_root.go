@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -33,7 +34,18 @@ func (s *Service) StoredManagedRoot(owner, workspaceID string) (ManagedRoot, err
 	if s == nil || s.store == nil || strings.TrimSpace(owner) == "" {
 		return unavailable()
 	}
-	ws, err := s.readWorkspace(workspaceID)
+	if s.workspaces == nil {
+		return unavailable()
+	}
+	var ws *workspace.Workspace
+	var err error
+	if folders, ok := s.workspaces.(FolderWorkspaceSource); ok {
+		// Unlike the generic operational fallback, facts cannot resurrect a
+		// stale database grant when the authoritative folder record is unreadable.
+		ws, err = folders.GetFolderWorkspace(workspaceID)
+	} else {
+		ws, err = s.workspaces.Get(workspaceID)
+	}
 	if err != nil || ws == nil || ws.ID != workspaceID || !ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
 		return unavailable()
 	}
@@ -73,6 +85,11 @@ func (s *Service) StoredManagedRoot(owner, workspaceID string) (ManagedRoot, err
 		encoded, err := json.Marshal(binding.Config["roots"])
 		if err != nil || json.Unmarshal(encoded, &roots) != nil || len(roots) != 1 || roots[0] != settings.RootPath || !binding.Enabled || binding.ServerName != filesystemServerName || !bindingToolsAreReadOnly(binding) {
 			return unavailable()
+		}
+		for _, tool := range JanitorReadTools {
+			if !slices.Contains(binding.AllowedTools, tool) {
+				return unavailable()
+			}
 		}
 		bindingID = binding.ID
 	}

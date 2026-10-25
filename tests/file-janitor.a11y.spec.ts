@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdtempSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -104,6 +104,100 @@ async function openConsole(page: Page, workspaceId: string) {
 }
 
 test.describe('File Janitor console accessibility', () => {
+  for (const theme of ['light', 'dark']) {
+    test(`optional protection reflows, dismisses and preserves keyboard filing (${theme})`, async ({
+      page,
+      request
+    }) => {
+      test.setTimeout(60000);
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      const id = await workspaceWithFolder(
+        request,
+        `Protection layout ${theme} ${RUN}`,
+        inbox('protection', ['important-original.pdf'])
+      );
+      await openConsole(page, id);
+      await page.locator('#fileJanitorScan').click();
+      const note = page.getByRole('region', { name: 'Optional folder protection' });
+      await expect(note).toBeVisible();
+      await expect(note).toContainText('Filing is not a backup');
+      await expect(page.locator('#fileJanitorCheckProtection')).toBeEnabled();
+      // Scope the audit to the new surface; unrelated page chrome has its own suite.
+      await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+      const evidence = 'tasks/evidence-file-curator-backup-guidance/group-4';
+      mkdirSync(evidence, { recursive: true });
+      for (const width of [320, 390, 768, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await note.scrollIntoViewIfNeeded();
+        const bounds = await note.boundingBox();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+        expect(await note.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBeTruthy();
+        const violations = await page.evaluate(
+          async () =>
+            (
+              await (window as any).axe.run('.fj-protection', {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
+              })
+            ).violations
+        );
+        expect(violations).toEqual([]);
+        await note.screenshot({
+          path: join(evidence, `protection-${width}-${theme}.png`),
+          animations: 'disabled'
+        });
+      }
+      // Deterministic presentation fixtures only: no provider check or backup
+      // is claimed by these two uncertainty states.
+      for (const state of ['unknown', 'unavailable']) {
+        await page.route(`**/api/workspaces/${id}/file-janitor/protection`, async route => {
+          const fact = await (await route.fetch()).json();
+          fact.state = state;
+          if (state === 'unavailable') {
+            delete fact.root_generation;
+            delete fact.binding_id;
+            delete fact.destination;
+          }
+          await route.fulfill({ json: fact });
+        });
+        await page.evaluate(() => (window as any).FileJanitorConsole._loadProtection());
+        await expect(note).toContainText(
+          state === 'unknown' ? 'Protection is unknown' : 'Protection is unavailable'
+        );
+        await note.screenshot({
+          path: join(evidence, `protection-${state}-${theme}.png`),
+          animations: 'disabled'
+        });
+        await page.unroute(`**/api/workspaces/${id}/file-janitor/protection`);
+      }
+      await page.evaluate(() => (window as any).FileJanitorConsole._loadProtection());
+      const notNow = note.getByRole('button', { name: 'Not now' });
+      await notNow.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#fileJanitorCheckProtection')).toBeFocused();
+      await expect(note).not.toContainText('Filing is not a backup');
+      await expect(page.locator('.fj-batch-scan-status')).toContainText(
+        'dismissed for this folder'
+      );
+      await page.reload();
+      await expect(page.locator('#fileJanitorCheckProtection')).toBeVisible();
+      await expect(note).not.toContainText('Filing is not a backup');
+      const select = page.getByRole('checkbox', {
+        name: 'Select important-original.pdf',
+        exact: true
+      });
+      await select.check();
+      await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+      const changed = await request.post(`/api/workspaces/${id}/file-janitor/relink`, {
+        data: { path: inbox('protection-relinked', ['new-original.pdf']) }
+      });
+      expect(changed.ok(), await changed.text()).toBeTruthy();
+      await request.post(`/api/workspaces/${id}/file-janitor/scan`);
+      await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
+      await expect(note).toContainText('Filing is not a backup');
+    });
+  }
+
   for (const theme of ['light', 'dark']) {
     test(`shared review guidance reflows and returns keyboard focus (${theme})`, async ({
       page,
