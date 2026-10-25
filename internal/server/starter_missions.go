@@ -163,6 +163,10 @@ func (b *ServerBuilder) folderFirstTaskView(ctx context.Context, workspaceID str
 	if !ok {
 		return personalassistant.FolderFirstTaskView{}, false
 	}
+	if view.Recipe == workspace.FirstTaskRecipeFolderSummary {
+		// This uses its assigned execution agent/model, never the PA system model.
+		return view, true
+	}
 	if view.Recipe != "" {
 		// An assessment runs on its own workspace's assistant and that
 		// assistant's model, which its gate has already checked. The personal

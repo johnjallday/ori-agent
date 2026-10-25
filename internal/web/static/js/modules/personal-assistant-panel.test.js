@@ -688,14 +688,15 @@ test('Add folder sits inside the composer, on every page', () => {
   // The attachment row remains outside the scrolling region.
   assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
   assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
-  // Add folder, Add link and Tree + Chat are chips inside the "+" menu.
+  // Folder/link utilities and the secondary arrangement entry share the "+" menu.
   assert.equal(
     (
       drawer.match(/class="personal-assistant-panel__chip personal-assistant-panel__menu-item"/g) ||
       []
     ).length,
-    3
+    4
   );
+  assert.equal((drawer.match(/id="personalAssistantArrangeFolder"/g) || []).length, 1);
   assert.match(
     drawer,
     /id="personalAssistantExploreAttachedFolder"[^>]+hidden>[\s\S]{0,120}Tree \+ Chat/

@@ -1835,7 +1835,9 @@ function firstTaskPage(response, { task } = {}) {
     workspaceId: 'ws 1',
     tasks: [{ id: 't-0', to: 'Atlas', status: 'assigned', context: {} }, seeded],
     findFolderFirstTask: WorkspaceDetailPage.prototype.findFolderFirstTask,
-    isAssessmentTask: WorkspaceDetailPage.prototype.isAssessmentTask,
+    // Explicit legacy presentation adapter. Production folder starters now
+    // use the canonical recipe view exercised below, including old markers.
+    isAssessmentTask: () => false,
     isFirstTaskWaitingToStart: WorkspaceDetailPage.prototype.isFirstTaskWaitingToStart,
     getTaskExecutionState: item => item.status,
     loadTasks: async () => {
@@ -2140,8 +2142,61 @@ const seededAssessment = {
   state: 'seeded',
   can_start: true,
   task_id: 't-1',
-  folder_name: 'widget'
+  folder_name: 'widget',
+  executor: {
+    agent: 'Robin',
+    provider: 'fixture',
+    model: 'configured',
+    digest: 'reviewed-executor'
+  }
 };
+
+test('a legacy folder starter now reads the canonical optional summary without starting it', async () => {
+  const f = assessmentPage({
+    look: {
+      ...seededAssessment,
+      recipe: 'folder_summary',
+      optional: true,
+      description: 'Tracks, session overview and one next step',
+      input_scope: 'Saved Session.rpp only'
+    }
+  });
+  delete f.page.tasks[0].context.folder_first_task_recipe;
+  f.page.showFolderFirstTaskBanner();
+  await f.settle();
+  assert.deepEqual(f.posts(), []);
+  assert.deepEqual(
+    f.calls.fetch.map(call => call.method),
+    ['GET']
+  );
+  assert.equal(f.controls().phase, 'available');
+  assert.deepEqual(f.controls().buttons, ['Start summary']);
+});
+
+test('changed executor disclosure refreshes before a second explicit start', async () => {
+  const f = assessmentPage({
+    look: seededAssessment,
+    start: { started: false, reason: 'execution_changed' }
+  });
+  f.page.showFolderFirstTaskBanner();
+  await f.settle();
+  f.answers.look = {
+    ...seededAssessment,
+    executor: { ...seededAssessment.executor, model: 'new', digest: 'new-disclosure' }
+  };
+  f.press('Start assessment')();
+  await f.settle();
+  await f.settle();
+  assert.equal(f.posts().length, 1);
+  assert.equal(f.calls.monitor.length, 0);
+  assert.match(f.page.firstTaskStartMessage, /changed.*Review the refreshed disclosure/);
+  f.answers.start = { started: true, task_id: 't-1' };
+  f.press('Start assessment')();
+  await f.settle();
+  await f.settle();
+  assert.equal(f.posts().length, 2);
+  assert.equal(JSON.parse(f.posts()[1].body).execution_digest, 'new-disclosure');
+});
 
 test('opening the workspace reads an assessment and starts nothing', async () => {
   const { page, calls, controls, posts } = assessmentPage({ look: seededAssessment });
@@ -2181,7 +2236,7 @@ test('Start assessment asks the one-time start once and follows the same task', 
 
   assert.deepEqual(
     posts().map(call => [call.url, call.body]),
-    [['/api/workspaces/ws%201/folder-first-task/start', '{}']]
+    [['/api/workspaces/ws%201/folder-first-task/start', '{"execution_digest":"reviewed-executor"}']]
   );
   assert.equal(calls.loadTasks, 1);
   assert.deepEqual(calls.monitor, ['t-1']);
@@ -2237,7 +2292,7 @@ test('an assessment that did not finish is run again as the same task, never a n
   };
   const { page, calls, answers, controls, press, posts, settle } = assessmentPage({
     look: failed,
-    execute: { success: true, task_id: 't-1' }
+    start: { success: true, started: true, task_id: 't-1' }
   });
   page.showFolderFirstTaskBanner();
   await settle();
@@ -2250,7 +2305,12 @@ test('an assessment that did not finish is run again as the same task, never a n
 
   assert.deepEqual(
     posts().map(call => [call.url, call.body]),
-    [['/api/orchestration/tasks/execute', '{"task_id":"t-1"}']]
+    [
+      [
+        '/api/workspaces/ws%201/folder-first-task/start',
+        '{"execution_digest":"reviewed-executor","retry":true}'
+      ]
+    ]
   );
   assert.deepEqual(calls.monitor, ['t-1']);
   assert.equal(controls().phase, 'working');

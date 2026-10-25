@@ -116,6 +116,9 @@ for (const route of ['/?panel=today', '/settings']) {
     await expect(page.getByRole('link', { name: /Guided Setup/ })).toHaveCount(0);
     await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
     await page.evaluate(() => document.fonts.ready);
+    // Findings and the full recommendation now lead the review. Scroll to the
+    // single decision area to check that its actionable package rows are usable.
+    await requirements.scrollIntoViewIfNeeded();
     const initial = await requirements.evaluate(section => {
       const viewport = section
         .closest('.personal-assistant-panel__scroll')!

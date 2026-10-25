@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/workspace"
+
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
@@ -20,7 +23,11 @@ func (s folderFirstTaskSeeder) SeedFirstTask(_ context.Context, req personalassi
 	if s.builder == nil || s.builder.sessionHandler == nil {
 		return personalassistant.FolderReceiptRow{}, errors.New("workspace tasks are unavailable")
 	}
-	description, details := personalassistant.FolderFirstTaskFor(req.Shape, req.Brief)
+	var ws *workspace.Workspace
+	if s.builder.workspaceStore != nil {
+		ws, _ = s.builder.workspaceStore.Get(req.WorkspaceID)
+	}
+	description, details := shownFolderTask(ws, req.Shape, req.Brief)
 	handler := s.builder.sessionHandler
 	if _, err := handler.SeedStarterTasks(req.WorkspaceID, projecttemplates.Template{
 		ID:           "folder-digest",
@@ -40,6 +47,18 @@ func (s folderFirstTaskSeeder) SeedFirstTask(_ context.Context, req personalassi
 		}
 	}
 	return personalassistant.FolderReceiptRow{}, errors.New("the first task was not found after seeding")
+}
+
+func shownFolderTask(ws *workspace.Workspace, shape folderdigest.Shape, brief string) (string, string) {
+	if ws != nil {
+		if entry, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && entry != nil {
+			if matched, title, _, ok := folderdigest.ProjectSummaryForFile(entry.RelativePath); ok && matched == shape {
+				_, details := personalassistant.FolderFirstTaskFor(shape, brief)
+				return title, details
+			}
+		}
+	}
+	return personalassistant.FolderFirstTaskFor(shape, brief)
 }
 
 // folderFirstLookStarter starts a hired agent's first look under the hire's

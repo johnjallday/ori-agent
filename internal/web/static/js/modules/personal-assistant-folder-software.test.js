@@ -460,6 +460,24 @@ const reviewedOffer = (overrides = {}, software = {}) =>
     ...overrides
   });
 
+test('a software review uses the same known-missing model gate as other project reviews', () => {
+  const offer = reviewedOffer();
+  offer.plan.visual = { model: { state: 'missing', settings: 'system' } };
+  const view = folderOfferView(offer);
+  assert.equal(
+    view.actions.some(action => action.oneCard),
+    false
+  );
+  assert.equal(view.actions[0].id, 'model');
+  assert.equal(view.actions[0].label, 'Configure project model');
+  assert.ok(view.actions[0].href.startsWith('/settings'));
+  offer.plan.visual.model = { state: 'configured', provider: 'fixture', name: 'fixture-model' };
+  assert.equal(
+    folderOfferView(offer).actions.some(action => action.oneCard),
+    true
+  );
+});
+
 test('a reviewed project shows what was read, the whole plan, and what the setup needs', () => {
   const view = folderOfferView(reviewedOffer());
   assert.equal(headlineText(view), 'Here is what I found in widget.');
@@ -1143,8 +1161,10 @@ test('starting an assessment asks the one-time start, and a repair-first failure
   assert.match(body, /if \(retry && assessment && look\.can_retry !== true\) return idle;/);
   const guard = body.indexOf('look.can_retry !== true');
   assert.ok(guard > 0 && guard < body.indexOf('fetch('));
-  // The card sends the task's id and nothing about the project or the model.
-  assert.match(body, /body: JSON\.stringify\(\{ task_id: taskID \}\)/);
-  assert.match(body, /folder-first-task\/start`, \{\s*\.\.\.request,\s*body: '\{\}'/);
-  assert.doesNotMatch(body, /path|model|prompt|evidence/);
+  // Start/retry sends only the opaque reviewed disclosure and retry intent,
+  // never client-supplied project paths, model selection or instructions.
+  assert.match(body, /execution_digest: look\.executor\?\.digest \|\| ''/);
+  assert.match(body, /\(retry \? \{ retry: true \} : \{\}\)/);
+  assert.match(body, /folder-first-task\/start/);
+  assert.doesNotMatch(body, /\b(?:path|model|prompt|evidence)\s*:/);
 });

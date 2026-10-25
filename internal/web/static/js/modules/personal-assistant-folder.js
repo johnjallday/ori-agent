@@ -45,6 +45,8 @@ import {
   structureOption
 } from './personal-assistant-proposal.js';
 import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
+import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
+import { folderTaskDisclosure } from './folder-task-disclosure.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
 // can use it without mounting this card; it is re-exported for existing callers.
@@ -1209,7 +1211,10 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     // A confirmed setup that has not finished still has something to press
     // (Continue, Try again, Review again): the card draws a decided offer's
     // actions only when it is marked as one to carry on with.
-    return status === 'awaiting_outcome' ? { ...software, resume: true } : software;
+    return reviewedModelActions(
+      offer,
+      status === 'awaiting_outcome' ? { ...software, resume: true } : software
+    );
   }
   if (view.visible && !view.decided) {
     enclosingView(offer, view);
@@ -1253,6 +1258,11 @@ function folderOfferViewWithoutLead(offer, options = {}) {
           }
         : action
     );
+  return reviewedModelActions(offer, view);
+}
+
+function reviewedModelActions(offer, view) {
+  const status = String(offer?.status || '');
   if (
     view.plan &&
     !view.setup &&
@@ -1953,7 +1963,7 @@ export function folderReceiptView(offer, options = {}) {
   const liveDetail = firstLook.visible ? String(offer.first_task.detail || '').trim() : '';
   const hireLook = hireLookView(offer);
   // A look the hire started can be stopped from the card while it runs.
-  if (firstLook.visible && hireLook.stoppable)
+  if (firstLook.visible && (hireLook.stoppable || offer?.first_task?.state === 'running'))
     firstLook.actions = [
       {
         id: 'stop-first-look',
@@ -2086,11 +2096,20 @@ export const FIRST_LOOK_HINT = 'Spends model tokens for one read-only look at th
 // something to show on Home: it is waiting for its click, running, waiting on
 // the user, did not finish, or has a result. The server only sends the block
 // while that is so.
-export function folderFirstLookOpen(offer) {
+// Availability on the completed card is distinct from Home urgency. This is
+// only record ownership/shape, not permission to execute (can_start gates that).
+export function folderFirstLookAvailable(offer) {
   return (
     String(offer?.status || '') === 'resolved' &&
     Boolean(offer?.id) &&
     FIRST_LOOK_STATES.includes(String(offer?.first_task?.state || ''))
+  );
+}
+
+export function folderFirstLookOpen(offer) {
+  return (
+    folderFirstLookAvailable(offer) &&
+    !(offer?.first_task?.optional === true && offer.first_task.state === 'seeded')
   );
 }
 
@@ -2296,8 +2315,22 @@ export function folderFirstLookView(look, options = {}) {
   };
   // A first task under a host recipe is an assessment, with its own wording,
   // its own repairs, and no retry while something must be repaired first.
-  if (String(look.recipe || '').trim())
-    return assessmentLookView(look, { state, base, open, busy, said, local });
+  if (String(look.recipe || '').trim()) {
+    const view = assessmentLookView(look, { state, base, open, busy, said, local });
+    if (look.recipe === 'folder_summary') {
+      view.status = view.status.replace('Assessing', 'Summarizing');
+      view.message = view.message.replaceAll('assessment', 'summary');
+      view.actions = view.actions.map(action => ({
+        ...action,
+        label: action.label
+          .replace('Start assessment', 'Start summary')
+          .replace('Open the assessment', 'Open summary')
+      }));
+    }
+    if (look.optional === true && ['seeded', 'failed'].includes(state))
+      view.hint = folderTaskDisclosure(look);
+    return view;
+  }
 
   switch (state) {
     case 'seeded': {
@@ -3154,6 +3187,13 @@ function renderHire(els, hire, offer) {
   if (!hire) return;
   setText(els.hireInitials, hire.agent.initials, false);
   setText(els.hireDetail, hire.agent.detail, false);
+  // Identity is already in the full diagram. Keep this mount for the editable
+  // goal/monitoring controls and for legacy records without a visual identity.
+  const identity = els.hireDetail?.closest('.pa-folder__hire-agent');
+  if (identity)
+    identity.hidden = Boolean(
+      (offer?.plan?.visual || offer?.setup?.visual) && (offer?.plan?.hire || offer?.setup?.hire)
+    );
   if (els.briefField) els.briefField.hidden = !hire.brief;
   if (els.brief && hire.brief && document.activeElement !== els.brief) {
     const typed = briefFor(offer);
@@ -3219,6 +3259,24 @@ function renderOffer(place) {
     message: state.firstLookMessage
   });
   const firstLook = receipt.firstLook || { visible: false };
+  const taskPanel = document.getElementById('personalAssistantFolderOptionalTask');
+  const taskActions = document.getElementById('personalAssistantFolderTaskActions');
+  const separateTask = Boolean(taskPanel && receipt.visible && firstLook.visible);
+  if (taskPanel) {
+    taskPanel.hidden = !separateTask;
+    setText(
+      document.getElementById('personalAssistantFolderTaskTitle'),
+      state.offer?.first_task?.description || 'Optional project task'
+    );
+    setText(
+      document.getElementById('personalAssistantFolderTaskDisclosure'),
+      separateTask ? folderTaskDisclosure(state.offer.first_task) : ''
+    );
+    setText(
+      document.getElementById('personalAssistantFolderTaskStatus'),
+      separateTask ? firstLook.status || firstLook.message : ''
+    );
+  }
   // A canonical conversation reload can replace this card. Do not let a fast
   // press mutate its offer while that older read is still being hydrated.
   const actionBusy = state.busy || conversationReviewLoading() || prerequisites.active();
@@ -3256,7 +3314,7 @@ function renderOffer(place) {
               state.offer.subject?.name ||
               'Workspace'
           },
-          ' is ready'
+          receipt.homeName || receipt.group || receipt.batch ? ' is ready' : ' · Workspace ready'
         ])
       : view.setup
         ? segments([
@@ -3274,7 +3332,15 @@ function renderOffer(place) {
       }
     });
   }
+  renderFolderFindings(document.getElementById('personalAssistantFolderFindings'), {
+    offer: state.offer
+  });
   renderHire(els, view.hire, state.offer);
+  const confirmTitle = document.getElementById('personalAssistantFolderConfirmTitle');
+  if (confirmTitle)
+    confirmTitle.hidden = Boolean(
+      receipt.visible || view.setup || !folderOfferWaiting(state.offer)
+    );
   globalThis.OriFolderSetupVisual.renderRequirements(
     document.getElementById('personalAssistantFolderRequirements'),
     receipt.visible ? {} : { offer: state.offer }
@@ -3299,6 +3365,18 @@ function renderOffer(place) {
       globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
     else diagram.replaceChildren();
     els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
+    const recommendation = document.getElementById('personalAssistantFolderRecommendation');
+    if (recommendation) {
+      recommendation.hidden = diagram.hidden;
+      recommendation.querySelector('h3').textContent = receipt.visible
+        ? 'Setup result'
+        : 'Recommendation:';
+    }
+    // The diagram already names the proposed workspace and agent. Keep the
+    // recognition reason above it rather than repeating the hire headline.
+    if (!diagram.hidden && !receipt.visible && !view.setup && view.hire && els.headline)
+      els.headline.hidden = true;
+    else if (els.headline) els.headline.hidden = false;
   }
   globalThis.OriFolderSetupVisual.renderConsequences(
     document.getElementById('personalAssistantFolderConsequences'),
@@ -3437,7 +3515,10 @@ function renderOffer(place) {
     });
     const rebuild = els.actions.dataset.signature !== signature;
     els.actions.dataset.signature = signature;
-    if (rebuild) els.actions.replaceChildren();
+    if (rebuild) {
+      els.actions.replaceChildren();
+      taskActions?.replaceChildren();
+    }
     if (rebuild && firstLook.visible) {
       // The first look's own actions: its one primary (Start first look, Try
       // again, or the report) and the workspace as the other.
@@ -3457,7 +3538,11 @@ function renderOffer(place) {
             () => void (action.stop ? stopFirstLook() : startFirstLook())
           );
         }
-        els.actions.append(control);
+        if (separateTask && action.id !== 'open') taskActions.append(control);
+        else {
+          if (separateTask && action.id === 'open') control.textContent = 'Open workspace';
+          els.actions.append(control);
+        }
       });
     } else if (rebuild && receipt.route) {
       const open = document.createElement('a');
@@ -3500,9 +3585,10 @@ function renderOffer(place) {
     // needs in the question, so the outcome note would only repeat it.
     // The first look speaks on the same line: that it is running, why it cannot
     // start, or what its click will cost.
-    const lookNote = firstLook.visible
-      ? firstLook.status || firstLook.message || firstLook.hint
-      : '';
+    const lookNote =
+      firstLook.visible && !separateTask
+        ? firstLook.status || firstLook.message || firstLook.hint
+        : '';
     const note =
       state.progress ||
       lookNote ||
@@ -4027,7 +4113,7 @@ function firstLookPolling() {
 // currentFirstLook is the first look this page follows: the one on the card
 // when the card is a set-up folder, else the latest one the digest names.
 function currentFirstLook() {
-  if (folderFirstLookOpen(state.offer)) return state.offer.first_task;
+  if (folderFirstLookAvailable(state.offer)) return state.offer.first_task;
   const look = state.digest?.first_look;
   return look && FIRST_LOOK_STATES.includes(String(look.state || '')) ? look : null;
 }
@@ -4141,18 +4227,18 @@ async function startFirstLook() {
   let reason = 'start_failed';
   try {
     const request = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
-    const response = retry
-      ? await fetch('/api/orchestration/tasks/execute', {
-          ...request,
-          body: JSON.stringify({ task_id: taskID })
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspaceID)}/folder-first-task/start`,
+      {
+        ...request,
+        body: JSON.stringify({
+          execution_digest: look.executor?.digest || '',
+          ...(retry ? { retry: true } : {})
         })
-      : await fetch(`/api/workspaces/${encodeURIComponent(workspaceID)}/folder-first-task/start`, {
-          ...request,
-          body: '{}'
-        });
+      }
+    );
     const payload = await readJSON(response);
-    if (retry) started = response.ok && payload?.success !== false;
-    else if (response.ok) {
+    if (response.ok) {
       started = payload?.started === true;
       reason = String(payload?.reason || 'start_failed');
     }
@@ -4171,6 +4257,9 @@ async function startFirstLook() {
       message: '',
       detail: 'Running…'
     });
+  } else if (reason === 'execution_changed') {
+    state.firstLookMessage =
+      'Executor/model or read scope changed. Review the refreshed disclosure, then start explicitly.';
   } else if (assessment) {
     state.firstLookMessage = retry ? ASSESSMENT_NOT_STARTED : assessmentStartMessage(reason);
   } else {

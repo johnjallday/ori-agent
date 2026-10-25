@@ -339,6 +339,14 @@ func TestBuildPlanSaysTheFolderStaysWhereItIs(t *testing.T) {
 
 func TestBuildPlanDigestMovesWithWhatItPromises(t *testing.T) {
 	base := BuildPlan(baseFacts())
+	if !base.OptionalTask || base.Intent.OptionalTaskPolicy != personalassistant.FolderOptionalSummaryPolicy {
+		t.Fatal("new review must bind setup-only consent and optional read-only execution")
+	}
+	legacy := base
+	legacy.Intent.OptionalTaskPolicy = ""
+	if legacy.Stamped().Digest == base.Digest {
+		t.Fatal("execution policy must change the reviewed digest even with identical wording")
+	}
 	installing := baseFacts()
 	installing.Integration.State = personalassistant.FolderInstallInstall
 	if BuildPlan(installing).Digest == base.Digest {

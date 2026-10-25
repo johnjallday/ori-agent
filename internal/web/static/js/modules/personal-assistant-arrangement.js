@@ -61,11 +61,15 @@ function init() {
   const form = document.getElementById('personalAssistantForm');
   const input = document.getElementById('personalAssistantInput');
   if (!form || !input) return;
+  const openButton = document.getElementById('personalAssistantArrangeFolder');
+  const returnFocus = document.getElementById('personalAssistantAttachMenu');
+  if (!openButton) return;
   const details = document.createElement('details');
+  details.hidden = true;
   details.id = 'personalAssistantArrangement';
   details.className = 'personal-assistant-folder-context';
   const title = document.createElement('summary');
-  title.textContent = 'Suggest arrangement';
+  title.textContent = 'Arrangement planning';
   const hint = document.createElement('p');
   hint.className = 'small';
   hint.textContent =
@@ -89,19 +93,24 @@ function init() {
   homes.hidden = true;
   details.append(title, hint, refreshButton, historyButton, status, body, homes);
   const scroll = document.getElementById('personalAssistantScroll');
-  const chips = document.getElementById('personalAssistantChips');
-  if (!scroll || !chips) return;
+  if (!scroll) return;
   scroll.append(details);
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.className = 'personal-assistant-panel__chip';
-  openButton.textContent = 'Suggest arrangement';
-  openButton.setAttribute('aria-controls', details.id);
-  openButton.setAttribute('aria-expanded', 'false');
-  chips.append(openButton);
+  const close = (focus = false) => {
+    details.open = false;
+    details.hidden = true;
+    openButton.setAttribute('aria-expanded', 'false');
+    consent.clearChoices();
+    if (focus) returnFocus?.focus({ preventScroll: true });
+  };
   openButton.addEventListener('click', () => {
+    if (details.open) {
+      close(true);
+      return;
+    }
     window.PersonalAssistantFolderContext?.showChat?.();
-    details.open = !details.open;
+    details.hidden = false;
+    details.open = true;
+    title.focus({ preventScroll: true });
   });
   let model = null;
   let generation = 0;
@@ -158,12 +167,26 @@ function init() {
         `[data-message-id="${CSS.escape(saved.conversation.assistant_message_id)}"]`
       );
       row?.scrollIntoView({ block: 'start' });
-      if (restoreFocus) openButton.focus({ preventScroll: true });
+      if (restoreFocus) returnFocus?.focus({ preventScroll: true });
     }
   });
+  let sourceKey = '';
   const refresh = () => {
-    details.hidden = !window.PersonalAssistantFolderContext?.hasFolder?.();
-    openButton.hidden = details.hidden;
+    const context = refs();
+    const next = JSON.stringify([context.conversation, context.folder]);
+    if (next !== sourceKey) {
+      sourceKey = next;
+      generation++;
+      homesGeneration++;
+      model = null;
+      refreshButton.disabled = false;
+      homes.hidden = true;
+      homes.replaceChildren();
+      close(details.contains(document.activeElement));
+    }
+    const attached = Boolean(window.PersonalAssistantFolderContext?.hasFolder?.());
+    openButton.hidden = !attached;
+    details.hidden = !attached || !details.open;
     consent.refresh();
   };
   const loadModel = async () => {
@@ -234,8 +257,15 @@ function init() {
       void loadModel();
       void loadHomes();
       details.scrollIntoView({ block: 'start' });
-    } else consent.clearChoices();
+    } else close(details.contains(document.activeElement));
   });
+  details.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    close(true);
+  });
+  document.addEventListener('personal-assistant:closed', () => close());
   refreshButton.addEventListener('click', () => void loadModel());
   historyButton.addEventListener('click', async () => {
     if (window.OriAskRouting?.getState?.().busy) return;

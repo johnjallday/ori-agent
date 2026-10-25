@@ -334,7 +334,7 @@ func (l folderWorkspaceLinker) seedShownFolderTask(ws *workspace.Workspace, req 
 	if l.tasks == nil {
 		return false
 	}
-	description, details := personalassistant.FolderFirstTask(req.Shape)
+	description, details := shownFolderTask(ws, req.Shape, "")
 	seeded, err := l.tasks.SeedStarterTasks(req.WorkspaceID, projecttemplates.Template{
 		ID:           "folder-digest",
 		StarterTasks: []projecttemplates.StarterTask{{Description: description, Details: details}},

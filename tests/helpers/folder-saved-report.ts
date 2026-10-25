@@ -71,9 +71,9 @@ export async function verifySavedFirstLook(
   }
   await page.getByRole('button', { name: 'Tickets', exact: true }).click();
   await expect(page.locator(`[data-ticket-id="${look.task_id}"]`).first()).toBeVisible();
-  // resumeFirstTaskBanner follows running tasks, but does not re-announce a
-  // previously finished one. Requiring a visible banner here was incorrect.
-  await expect(page.locator('#workspaceFirstTaskBanner')).toBeHidden();
+  // Recipe-backed optional work remains discoverable after completion.
+  if (look.recipe) await expect(page.locator('#workspaceFirstTaskBanner')).toBeVisible();
+  else await expect(page.locator('#workspaceFirstTaskBanner')).toBeHidden();
   expect(look.report_route).toMatch(/^\/workspaces\/[a-z0-9-]+\/task\/[A-Za-z0-9_-]+$/);
   expect(look.report_route).toBe(`${offer.outcome.route}/task/${encodeURIComponent(look.task_id)}`);
   // Select this existing offer through the real scoped GET, not a mocked body
@@ -89,8 +89,15 @@ export async function verifySavedFirstLook(
   await page.goto('/');
   if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
   await expect(panel).toBeVisible();
+  const strip = page.locator('#personalAssistantTodayStripToggle');
+  if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
   const report = page.locator('#personalAssistantFolderOffer').getByRole('link', {
-    name: 'Open the full report',
+    name:
+      look.recipe === 'folder_summary'
+        ? 'Open summary'
+        : look.recipe === 'software_assessment'
+          ? 'Open the assessment'
+          : 'Open the full report',
     exact: true
   });
   await expect(report).toHaveAttribute('href', look.report_route);
@@ -102,6 +109,7 @@ export async function verifySavedFirstLook(
   const plain = (text: string) =>
     text
       .replace(/^[\t ]{0,3}(?:`{3,}|~{3,})[^\n]*$/gm, '')
+      .replace(/^[\t ]{0,3}(?:-{3,}|\*{3,}|_{3,})[\t ]*$/gm, '')
       .replace(/[`*#]/g, '')
       .replace(/\s+/g, ' ')
       .trim();

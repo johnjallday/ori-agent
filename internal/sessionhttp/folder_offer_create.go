@@ -186,23 +186,27 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		rows = append(rows, personalassistant.FolderReceiptRow{
 			Kind: "blueprint", Name: provenance.TemplateName,
 		})
-		for _, instance := range ws.AgentInstances {
-			if strings.TrimSpace(instance.Name) != "" {
-				_, model, _ := h.SavedAgentModel(instance.Name)
-				rows = append(rows, personalassistant.FolderReceiptRow{
-					Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model),
-				})
-			}
+	}
+	// Membership belongs to this workspace, independent of whether it was
+	// created from a blueprint. A profile alone never contributes a row.
+	for _, instance := range ws.AgentInstances {
+		if strings.TrimSpace(instance.Name) != "" {
+			_, model, _ := h.SavedAgentModel(instance.Name)
+			rows = append(rows, personalassistant.FolderReceiptRow{
+				Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance), Assigned: true, Model: personalassistant.FolderReceiptModel(model),
+			})
 		}
 	}
 	if task := personalassistant.FindFolderFirstTask(ws); task != nil {
 		// Say only what will really happen: the task starts on one click when it
 		// has an agent and no setup dialog is still to open. Nothing starts it
 		// without that click, so no model tokens are spent until the user asks.
+		detail := "Optional task; execution status unavailable"
+		if view, ok := h.FolderFirstTaskView(context.Background(), ws.ID); ok {
+			detail = view.Detail
+		}
 		rows = append(rows, personalassistant.FolderReceiptRow{
-			Kind: "task", Name: task.Description,
-			Detail: personalassistant.FolderFirstTaskRowDetail(
-				personalassistant.FolderFirstTaskStateOf(task), h.folderFirstTaskStartsOnClick(ws), task.Result),
+			Kind: "task", Name: task.Description, Detail: detail,
 		})
 	}
 	return rows, nil

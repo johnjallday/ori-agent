@@ -5,6 +5,8 @@ import {
   folderDiscussionBinding,
   folderDiscussionOptions,
   folderDiscussionText,
+  folderFindings,
+  renderFolderFindings,
   folderPresentation,
   renderFolderSummary
 } from './personal-assistant-folder-presentation.js';
@@ -169,6 +171,68 @@ test('duplicate names require distinguishable literal markers, never silently se
   assert.match(folderDiscussionText(observation, 'b'), /logicx/);
 });
 
+test('findings bind to the exact saved subject, never same-named live metadata', () => {
+  const offer = {
+    folder: 'Parent',
+    subject: { name: 'Child', observed_files: 2, marker: 'REAPER project', is_root: false },
+    reason: 'A supported saved project marker was observed.',
+    scanned_at: '2026-10-05T10:00:00Z',
+    partial: true
+  };
+  const view = folderFindings({ offer, observation: fixtures.album });
+  assert.equal(view.name, 'Child');
+  assert.equal(view.scope, 'Selected child folder');
+  assert.match(view.facts.join(' '), /2 files observed/);
+  assert.match(view.status, /Saved metadata · Partial/);
+  assert.equal(view.interpretation, offer.reason);
+  assert.equal(
+    folderFindings({ offer: { ...offer, subject: { name: 'Child' } } }).facts[0],
+    'File count not recorded for this scope.'
+  );
+  assert.equal(folderFindings({ observation: fixtures.album, candidateId: 'foreign' }), null);
+  assert.equal(folderFindings(), null);
+});
+
+test('local findings distinguish root and child IDs and do not classify unsupported audio', () => {
+  const observation = {
+    ...fixtures.album,
+    projects: [
+      { id: 'r', name: 'Root', root: true, files: 8 },
+      { id: 'a', name: 'Same', files: 0, marker: '*.logicx' },
+      { id: 'b', name: 'Same', files: 3 }
+    ]
+  };
+  assert.match(folderFindings({ observation, candidateId: 'r' }).facts[0], /8 files/);
+  assert.match(folderFindings({ observation, candidateId: 'a' }).facts[0], /0 files/);
+  const unsupported = folderFindings({ observation, candidateId: 'b' });
+  assert.match(unsupported.interpretation, /No supported project marker/);
+  assert.doesNotMatch(JSON.stringify(unsupported), /REAPER/);
+  const unknown = folderFindings({ offer: { folder: 'Legacy', subject: {} } });
+  assert.equal(unknown.date, 'Snapshot date not recorded');
+  assert.match(unknown.facts[0], /not recorded/);
+});
+
+test('findings rendering is bounded text, including literal hostile labels', () => {
+  const container = fixtureDocument().createElement('section');
+  const input = {
+    offer: { folder: '<img onerror=run()>', reason: '<script>do not run</script>', subject: {} }
+  };
+  renderFolderFindings(container, input);
+  const nodes = allNodes(container);
+  assert.ok(nodes.some(node => node.textContent === 'What I found'));
+  assert.ok(nodes.some(node => node.textContent.includes('<script>')));
+  assert.ok(
+    nodes.some(node => node.textContent.includes('No file contents were read for this snapshot'))
+  );
+  assert.equal(
+    nodes.some(node => 'innerHTML' in node),
+    false
+  );
+  const children = container.children;
+  renderFolderFindings(container, input);
+  assert.equal(container.children, children, 'same snapshot does not churn the mounted card');
+});
+
 // Minimal text-only document: no HTML parser. Browser specs check actual markup,
 // disclosure keyboard behavior, themes and layout on the built drawer.
 function fixtureDocument() {
@@ -178,6 +242,7 @@ function fixtureDocument() {
       ownerDocument: document,
       children: [],
       textContent: '',
+      dataset: {},
       setAttribute() {},
       append(...nodes) {
         this.children.push(...nodes);

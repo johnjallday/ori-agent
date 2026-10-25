@@ -35,10 +35,7 @@ func newReportFixture(t *testing.T, result string) *reportFixture {
 		FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the look record", func() bool {
-		o := f.stored(t)
-		return o.Outcome != nil && o.Outcome.FirstLook != nil
-	})
+	waitFor(t, "verified setup", func() bool { return f.stored(t).Status == FolderOfferResolved && !f.service.isRunning(f.offer.ID) })
 	finished := f.now.Add(-time.Hour)
 	ws := &workspace.Workspace{ID: "quest-project", Name: "My Song", FolderSlug: "my-song", Status: workspace.StatusActive,
 		AgentInstances: []workspace.AgentInstance{{Name: "Song Assistant"}},
@@ -50,6 +47,12 @@ func newReportFixture(t *testing.T, result string) *reportFixture {
 	}
 	store := workspace.NewInMemoryStore()
 	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	f.service.deps.FirstTaskView = func(context.Context, string) (FolderFirstTaskView, bool) {
+		return FolderFirstTaskView{WorkspaceID: "quest-project", TaskID: "look-1", State: FolderFirstTaskFinished}, true
+	}
+	if err := f.service.LinkOptionalFirstTask(context.Background(), "local", "quest-project", "look-1"); err != nil {
 		t.Fatal(err)
 	}
 	r := &reportFixture{oneCardFixture: f, workspaces: store}

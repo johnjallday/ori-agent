@@ -7,6 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // hireRoleLabel is the role a hire card shows for an agent: the role the
@@ -89,7 +90,17 @@ func (h *folderSetupHost) softwareHire(plan personalassistant.FolderSetupPlan, r
 		}
 	}
 	if intent.Outcome != personalassistant.FolderSoftwareCreate {
+		if h.builder != nil && h.builder.workspaceStore != nil && intent.WorkspaceID != "" {
+			if ws, err := h.builder.workspaceStore.Get(intent.WorkspaceID); err == nil {
+				hire.AssignedHere = folderHireAssignedHere(ws, hire)
+			}
+		}
 		return hire, ""
 	}
 	return hire, personalassistant.FolderDefaultBrief(row.Shape, roster.Goal)
+}
+
+func folderHireAssignedHere(ws *workspace.Workspace, hire *personalassistant.FolderHire) bool {
+	return ws != nil && ws.GetStatus() == workspace.StatusActive && hire != nil &&
+		hire.Mode == personalassistant.FolderHireBind && strings.TrimSpace(hire.AgentName) != "" && ws.HasAgent(hire.AgentName)
 }

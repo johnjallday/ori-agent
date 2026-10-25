@@ -184,7 +184,16 @@
       : '';
     return {
       mode: hire.mode,
-      confirmLabel: hire.mode === 'bind' ? 'Assign & start' : 'Hire & start',
+      confirmLabel:
+        plan.optional_task === true
+          ? hire.assigned_here === true
+            ? 'Confirm setup'
+            : hire.mode === 'bind'
+              ? 'Assign & set up'
+              : 'Hire & set up'
+          : hire.mode === 'bind'
+            ? 'Assign & start'
+            : 'Hire & start',
       headline,
       agent: { initials: initialsOf(name || role || 'Agent'), detail },
       brief: brief

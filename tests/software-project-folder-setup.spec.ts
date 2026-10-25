@@ -193,6 +193,8 @@ const fixtureReport = [
 ].join('\n');
 
 type Reply = 'report' | 'tool';
+// Audit project/discussion calls separately from the app's unrelated Daily Brief.
+let backgroundCalls = 0;
 const provider: { server: Server | null; calls: any[]; replies: Reply[] } = {
   server: null,
   calls: [],
@@ -227,7 +229,29 @@ test.beforeAll(async () => {
     if (request.method === 'GET' && request.url === '/v1/models')
       return send(200, { object: 'list', data: [{ id: fixtureModel, object: 'model' }] });
     if (request.method === 'POST' && request.url === '/v1/chat/completions') {
-      provider.calls.push(JSON.parse(await readBody(request)));
+      const body = JSON.parse(await readBody(request));
+      if (
+        body.messages?.some(
+          (message: any) =>
+            message.role === 'system' &&
+            String(message.content).startsWith('You write a concise daily brief')
+        )
+      ) {
+        backgroundCalls++;
+        console.log('Unrelated scripted Daily Brief calls:', backgroundCalls);
+        return send(
+          200,
+          completion(
+            {
+              content: JSON.stringify({
+                opening_summary: 'Unrelated scripted Daily Brief fixture.'
+              })
+            },
+            'stop'
+          )
+        );
+      }
+      provider.calls.push(body);
       const reply = provider.replies.shift() || 'report';
       if (reply === 'tool')
         return send(
@@ -475,13 +499,17 @@ async function comeBack(page: Page) {
     await list.locator('button[data-conversation-id]').first().click();
   }
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('#personalAssistantFolderOfferHeadline')).toBeVisible();
+  await expect(
+    card(page)
+      .locator('.folder-visual:visible, #personalAssistantFolderOfferHeadline:visible')
+      .first()
+  ).toBeVisible();
 }
 
 const headline = (page: Page) => page.locator('#personalAssistantFolderOfferHeadline');
 const question = (page: Page) => page.locator('#personalAssistantFolderOfferQuestion');
 const list = async (page: Page, id: string) =>
-  (await page.locator(`${id} li`).allInnerTexts()).map(line => line.replace(/\n/g, ' '));
+  (await page.locator(`${id} li`).allTextContents()).map(line => line.replace(/\n/g, ' '));
 const buttons = (page: Page) =>
   card(page).locator('#personalAssistantFolderOfferActions').locator('button, a').allInnerTexts();
 const press = (page: Page, name: string) =>
@@ -579,13 +607,17 @@ test.describe('stored report handoff', () => {
         reply => reply.request().method() === 'POST' && /\/setup$/.test(reply.url())
       );
       await card(page)
-        .getByRole('button', { name: /^(Hire|Assign) & start$/ })
+        .getByRole('button', { name: /^(Hire|Assign) & set up$/ })
         .click();
       const accepted = await ok(await response);
+      const available = await lookIs(request, accepted.offer.id, ['seeded']);
+      expect(available.can_start).toBe(true);
+      await expect(headline(page)).toContainText('Workspace ready');
+      await press(page, 'Start assessment');
       const look = await lookIs(request, accepted.offer.id, ['finished']);
       expect(await taskIDs(request, look.workspace_id)).toEqual([look.task_id]);
       await expect(
-        card(page).getByRole('link', { name: `Open ${project}`, exact: true })
+        card(page).getByRole('link', { name: 'Open workspace', exact: true })
       ).toBeVisible();
       await closeAssistantDrawer(page);
     }
@@ -755,21 +787,27 @@ test.describe('a fresh server', () => {
     await closeReview(page);
   });
 
-  test('Set up with no model pauses before anything is created', async ({ page, request }) => {
+  test('missing model holds an unstarted review without creating a paused run', async ({
+    page,
+    request
+  }) => {
     const before = readCarried();
     await show(page, 'Documents', 'widget');
     await review(page);
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan[2]).toContain('has no model yet');
-    await press(page, 'Hire & start');
-
-    await expect(card(page)).toBeVisible({ timeout: 30_000 });
-    await expect(headline(page)).toContainText('needs you', { timeout: 30_000 });
-    await expect(question(page)).toContainText('0 of 5 steps finished');
-    await expect(question(page)).toContainText('has no model yet');
+    await expect(card(page).getByRole('region', { name: 'Project agent model' })).toContainText(
+      'Configuration needed'
+    );
+    await expect(
+      card(page).getByRole('button', { name: 'Hire & set up', exact: true })
+    ).toHaveCount(0);
+    await expect(
+      card(page).getByRole('button', { name: 'Configure project model', exact: true })
+    ).toBeVisible();
+    expect((await currentOffer(request)).setup).toBeFalsy();
     await expect(card(page).locator('.folder-visual')).toBeVisible();
     await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
-    expect(await buttons(page)).toEqual(['Set up a model', 'Continue']);
 
     expect(await workspaceCount(request)).toBe(before.workspaces);
     expect(await developmentAssistants(request)).toBe(0);
@@ -783,7 +821,7 @@ test.describe('a fresh server', () => {
 test.describe('after the server was restarted', () => {
   test.skip(phase !== 'restarted', 'runs in the restarted phase');
 
-  test('the paused setup is still there, finishes once a model is chosen, and the hire starts the assessment', async ({
+  test('the saved review survives restart; setup ends ready and the assessment needs its own start', async ({
     page,
     request
   }) => {
@@ -796,10 +834,10 @@ test.describe('after the server was restarted', () => {
     // restart (the conversation-bound review holds the folder in memory); the
     // paused setup itself is saved, and shows again once the folder is picked.
     await expect(question(page)).toContainText('the server was restarted');
-    await expect(question(page)).toBeInViewport();
-    await expect(
-      card(page).getByRole('button', { name: 'Pick it again', exact: true })
-    ).toBeInViewport({ ratio: 1 });
+    const repick = card(page).getByRole('button', { name: 'Pick it again', exact: true });
+    await repick.focus();
+    await expect(repick).toBeFocused();
+    await expect(repick).toBeInViewport({ ratio: 1 });
     if (process.env.ORI_VISUAL_EVIDENCE) {
       await page.screenshot({
         path: `${process.env.ORI_VISUAL_EVIDENCE}/04-scripted-software-repick.png`
@@ -812,23 +850,32 @@ test.describe('after the server was restarted', () => {
     await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     await chooseProject(page, 'widget');
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
-    expect((await currentOffer(request))?.id).toBe(before.offer);
-    await expect(question(page)).toContainText('has no model yet');
-    expect(await buttons(page)).toEqual(['Set up a model', 'Continue']);
+    await review(page);
+    // No setup was accepted before restart. Fresh held evidence may issue a
+    // refreshed review identity; it must not create a workspace or task.
+    const refreshed = await currentOffer(request);
+    expect(refreshed.subject.name).toBe('widget');
+    expect(refreshed.setup).toBeFalsy();
+    before.offer = refreshed.id;
+    writeCarried(before);
+    await expect(card(page).getByRole('region', { name: 'Project agent model' })).toContainText(
+      'Configuration needed'
+    );
+    expect((await currentOffer(request)).setup).toBeFalsy();
     expect(await workspaceCount(request)).toBe(before.workspaces);
 
-    // Choose a model the way Settings does. It is the fixture provider's. The
-    // hire's consent covers the first look, so the assessment starts once the
-    // workspace is verified; its first reply asks to run a command.
+    // Choose the scripted provider's model, then reload the refreshed review.
+    // Setup and the separately disclosed assessment have distinct consent.
     await ok(
       await request.post('/api/settings/system-model', {
         data: { provider: 'lmstudio', model: fixtureModel }
       })
     );
     provider.replies = ['tool', 'report'];
-    await press(page, 'Continue');
-    await expect(headline(page)).toContainText('is ready', { timeout: 60_000 });
-    await expect(card(page).locator('.folder-visual')).toContainText('Confirmed workspace member');
+    await comeBack(page);
+    await press(page, 'Hire & set up');
+    await expect(headline(page)).toContainText('Workspace ready', { timeout: 60_000 });
+    await expect(card(page).locator('.folder-visual')).toContainText('Assigned here');
     await expect(card(page).locator('.folder-visual')).toContainText(fixtureModel);
     const receipt = (await list(page, '#personalAssistantFolderReceipt')).join(' | ');
     expect(receipt).toContain('widget (created)');
@@ -836,13 +883,18 @@ test.describe('after the server was restarted', () => {
     expect(receipt).toContain('Code Project (planning first; approved work waits for you');
     expect(receipt).toContain('Development Assistant (development assistant, added)');
     expect(receipt).toContain('Assess this project and suggest a first task');
-    expect(receipt).not.toContain('Starts when you press Start assessment');
+    expect(receipt).toContain('Starts when you press Start assessment');
 
-    const resolved = await currentOffer(request);
+    const resolved = (
+      await ok(await request.get(`${folderApi}?offer_id=${encodeURIComponent(before.offer!)}`))
+    ).folder_digest.offer;
     expect(resolved.status).toBe('resolved');
     expect(resolved.first_task.recipe).toBe('software_assessment');
     expect(resolved.first_task.agent).toBe('Development Assistant');
-    expect(resolved.outcome.first_look.started).toBe(true);
+    expect(resolved.outcome.first_look).toBeFalsy();
+    expect(resolved.first_task.state).toBe('seeded');
+    expect(provider.calls.filter(call => call.temperature === 0)).toHaveLength(0);
+    await press(page, 'Start assessment');
     // Nothing is run in the project: the reply that asked for a tool is thrown
     // away, and the look did not finish.
     const refused = await lookIs(request, resolved.id, ['failed', 'finished']);
@@ -929,20 +981,21 @@ test.describe('after the server was restarted', () => {
     expect(writes.some(write => /\/mission\/(first-open|trigger|baseline)$/.test(write))).toBe(
       false
     );
-    // The hire started the look on the server; the page only ever asked to
-    // run it again.
+    // Retry uses the same reviewed start boundary and exact owned task.
     expect(
       writes.filter(write => /folder-first-task\/start$|\/tasks\/execute$/.test(write))
-    ).toEqual(['POST /api/orchestration/tasks/execute']);
+    ).toEqual([`POST /api/workspaces/${before.workspace}/folder-first-task/start`]);
 
     await expect(
       card(page).getByRole('link', { name: 'Open the assessment', exact: true })
     ).toBeVisible({ timeout: 30_000 });
-    expect(await buttons(page)).toEqual([
-      'Open the assessment',
-      'Plan the suggested task',
-      'Open widget'
-    ]);
+    expect(await buttons(page)).toEqual(['Open workspace']);
+    expect(
+      await card(page)
+        .locator('#personalAssistantFolderTaskActions')
+        .locator('button, a')
+        .allInnerTexts()
+    ).toEqual(['Open the assessment', 'Plan the suggested task']);
     const result = page.locator('#personalAssistantFolderFirstLookResult');
     await expect(result).toContainText('Widget is a small service that counts widgets');
     await expect(result).toContainText('Add a health check endpoint to the service.');
@@ -1229,7 +1282,7 @@ test.describe('a repository attached to the conversation', () => {
     const plan = await list(page, '#personalAssistantFolderPlan');
     expect(plan).toHaveLength(5);
     expect(plan[0]).toContain('Creates a Code project workspace named Downloads');
-    expect(await buttons(page)).toContain('Hire & start');
+    expect(await buttons(page)).toContain('Hire & set up');
     await expect(status).not.toContainText('not available');
 
     // Nothing private and no path reaches the card; nothing was created, the
@@ -1257,7 +1310,7 @@ test.describe('a repository attached to the conversation', () => {
 
     // Review setup beside the folder's chip: no reply is needed, and with one
     // project there is nothing to choose from.
-    await page.locator('#personalAssistantReviewFolderSetup').click();
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
     const reviewCard = card(page);
     await expect(reviewCard).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeHidden();

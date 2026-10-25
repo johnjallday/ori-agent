@@ -46,6 +46,11 @@ async function openDrawer(page: Page) {
       document.getElementById('personalAssistantLauncher')
     )
   );
+  const strip = page.locator('#personalAssistantTodayStripToggle');
+  if (new URL(page.url()).pathname === '/') {
+    await expect(strip).toBeVisible();
+    if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
+  }
 }
 
 // The composer's own Add folder: the drawer opens on any page, and the chooser
@@ -72,6 +77,12 @@ const count = async (page: Page, kind: 'workspaces' | 'agents', name: string) =>
   return (JSON.stringify(body).match(new RegExp(`"name":"${name}"`, 'g')) || []).length;
 };
 
+async function expectCurator(page: Page, folder: string) {
+  await expect(panel(page).locator('.folder-visual__source h4')).toHaveText(folder);
+  await expect(panel(page).locator('.folder-visual__agent strong')).toHaveText('File Curator');
+  await expect(panel(page).locator('.folder-visual__agent')).toBeVisible();
+}
+
 async function hireAndStart(page: Page, label: RegExp, folder: string) {
   await page.getByRole('button', { name: label }).click();
   await expect(panel(page).getByText(`${folder} is ready`, { exact: true })).toBeVisible({
@@ -88,8 +99,11 @@ test('no model is configured, and Downloads is answered by a hire card on Home',
 }) => {
   await attachFromHome(page, 'Downloads');
   const card = panel(page);
-  await expect(card.getByText('Hire File Curator for Downloads')).toBeVisible({ timeout: 30_000 });
+  await expectCurator(page, 'Downloads');
   await expect(card.getByText('Nothing to download: File Janitor is built into Ori')).toBeVisible();
+  const ready = card.locator('details.folder-requirements__ready');
+  if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
+    await ready.locator('summary').first().click();
   await expect(card.getByText('Not needed for the first batch')).toBeVisible();
   await expect(card.getByLabel('What should it do with it?')).toHaveValue(
     /^Prepare reviewable filing batches/
@@ -111,12 +125,12 @@ test('the composer answers Downloads with the same card, and Not now is this fol
 }) => {
   await attachFromComposer(page, 'Downloads');
   const card = panel(page);
-  await expect(card.getByText('Hire File Curator for Downloads')).toBeVisible({ timeout: 30_000 });
+  await expectCurator(page, 'Downloads');
   await card.getByRole('button', { name: /Keep chatting/ }).click();
-  await expect(card.getByText('Hire File Curator for Downloads')).toHaveCount(0);
+  await expect(page.locator('#personalAssistantFolderOffer')).toBeHidden();
   // Another folder is still offered a hire.
   await attachFromComposer(page, 'Documents');
-  await expect(card.getByText(/File Curator (for|to) Documents/)).toBeVisible({ timeout: 30_000 });
+  await expectCurator(page, 'Documents');
   await card.getByRole('button', { name: /Keep chatting/ }).click();
 });
 
@@ -124,9 +138,7 @@ test('Hire and start makes one workspace, links the folder metadata-only and rep
   page
 }) => {
   await attachFromHome(page, 'Downloads');
-  await expect(panel(page).getByText('Hire File Curator for Downloads')).toBeVisible({
-    timeout: 30_000
-  });
+  await expectCurator(page, 'Downloads');
   const before = readdirSync(downloads).sort();
   await hireAndStart(page, /Hire & start/, 'Downloads');
   await expect(
@@ -165,10 +177,11 @@ test('the first batch is reported under Needs you on Home and in the drawer, and
   await page.goto('/');
   await openDrawer(page);
   const link = page
-    .locator(`article[data-look-id="${item!.ref.entity_id}"]`)
+    .locator(`#personalAssistantNeedsYouReports article[data-look-id="${item!.ref.entity_id}"]`)
     .first()
     .getByRole('link', { name: 'Review batch' });
-  await link.click();
+  await expect(link).toBeVisible({ timeout: 30_000 });
+  await link.click({ timeout: 10_000 });
   await expect(page).toHaveURL(/\/workspaces\/downloads\?panel=file-janitor&batch_id=/);
   await expect(page.getByText(/files ready for review|proposed/).first()).toBeVisible({
     timeout: 30_000
@@ -197,9 +210,7 @@ test('where the loose files are few the project leads, and the tidy is one link 
     /^5 loose files of 5 kinds sit beside a Go module changed on .+: the project is the bigger job\.$/
   );
   await toTidy.click();
-  await expect(card.getByText(/File Curator to Desktop|File Curator for Desktop/)).toBeVisible({
-    timeout: 30_000
-  });
+  await expectCurator(page, 'Desktop');
   expect((await api(page, '/api/workspaces')).folders.length).toBe(workspacesBefore);
   await card.getByRole('button', { name: /Keep chatting/ }).click();
 });
@@ -211,9 +222,8 @@ test('a second inbox folder is an Assign, and the same folder again is already t
   for (const name of readdirSync(desktop))
     rmSync(join(desktop, name), { recursive: true, force: true });
   await attachFromHome(page, 'Desktop');
-  await expect(panel(page).getByText('Assign File Curator to Desktop')).toBeVisible({
-    timeout: 30_000
-  });
+  await expectCurator(page, 'Desktop');
+  await expect(panel(page).locator('.folder-visual__agent')).toContainText('Already hired');
   await expect(panel(page).getByRole('button', { name: /Assign & start/ })).toBeVisible();
   await hireAndStart(page, /Assign & start/, 'Desktop');
   // An empty folder reports that there is nothing to file.
@@ -258,7 +268,7 @@ test('a mixed folder leads with one hire, says why, and swaps without creating a
   const workspacesBefore = (await api(page, '/api/workspaces')).folders.length;
   await attachFromHome(page, 'Documents');
   const card = panel(page);
-  await expect(card.getByText(/File Curator (for|to) Documents/)).toBeVisible({ timeout: 30_000 });
+  await expectCurator(page, 'Documents');
   await card.locator('#personalAssistantFolderLeadWhy summary').click();
   await expect(card.locator('#personalAssistantFolderLeadReason')).toContainText(
     /\d+ loose files of \d+ kinds sit beside a Go module changed on .+: the loose files are the bigger job\./
@@ -270,6 +280,6 @@ test('a mixed folder leads with one hire, says why, and swaps without creating a
   const back = card.getByText('Or: hire File Curator to tidy the loose files instead');
   await expect(back).toHaveCount(1);
   await back.click();
-  await expect(card.getByText(/File Curator (for|to) Documents/)).toBeVisible({ timeout: 30_000 });
+  await expectCurator(page, 'Documents');
   expect((await api(page, '/api/workspaces')).folders.length).toBe(workspacesBefore);
 });

@@ -119,6 +119,10 @@ func TestRecipeTaskRunsExactlyOnceWhateverItsWordingSuggests(t *testing.T) {
 	task, _ := ws.GetTask("assess")
 	delete(task.Context, workspace.TaskContextFirstTaskRecipe)
 	delete(task.Context, workspace.TaskContextFirstTaskRecipeVersion)
+	// A legacy folder starter is now restricted too; this comparison is a
+	// genuinely ordinary task, not a starter with its explicit recipe removed.
+	delete(task.Context, "template_id")
+	delete(task.Context, "template_starter_task")
 	if err := ws.UpdateTask(*task); err != nil {
 		t.Fatal(err)
 	}

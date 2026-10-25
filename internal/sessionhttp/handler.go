@@ -127,6 +127,8 @@ type Handler struct {
 	// it could). Unset means no recipe can run here: such a task stays seeded and
 	// is never started as an ordinary agent task.
 	firstTaskRecipeGate func(task workspace.Task) string
+	firstTaskExecutor   func(task workspace.Task) (*workspace.RecipeExecutor, string)
+	firstTaskLinker     func(context.Context, string, string) error
 	// firstTaskViewer reads a workspace's first task with what only the server
 	// knows added (what it needs and can use right now). Unset, the handler's
 	// own reading is served.
@@ -374,6 +376,14 @@ func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 
 // SetTemplateSetupTaskStarter injects the function that starts a task through
 // the manual-execution path, used by the template-setup first-open auto-start.
+func (h *Handler) SetFolderFirstTaskLinker(fn func(context.Context, string, string) error) {
+	h.firstTaskLinker = fn
+}
+
+func (h *Handler) SetFolderFirstTaskExecutor(fn func(workspace.Task) (*workspace.RecipeExecutor, string)) {
+	h.firstTaskExecutor = fn
+}
+
 func (h *Handler) SetTemplateSetupTaskStarter(fn func(workspaceID, taskID string) error) {
 	h.templateSetupStarter = fn
 }

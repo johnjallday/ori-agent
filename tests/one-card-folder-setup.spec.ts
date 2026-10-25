@@ -2,11 +2,14 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createServer, type Server } from 'node:http';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 import { verifySavedFirstLook } from './helpers/folder-saved-report';
+import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // One card, one click: a recognized project folder shows its whole plan as a
-// hire, Hire & start runs it on the server, and the same card ends on a receipt.
+// hire, Hire & set up runs setup, and the same card ends on a receipt.
 // The authorized first look is separate; opening the workspace does not start it.
 //
 // Run it against the isolated demo sandbox (the folders are written into the
@@ -32,8 +35,9 @@ import { verifySavedFirstLook } from './helpers/folder-saved-report';
 const sandbox = process.env.ORI_ONE_CARD_SANDBOX || '';
 const phase = process.env.ORI_ONE_CARD_PHASE || 'no-model';
 const providerPhase = phase === 'provider';
+const adjustPhase = phase === 'adjust';
 const setupConfirmation =
-  /^(?:(?:Hire|Assign) & start|(?:Install|Update|Enable) .+ & set up|Set (?:up|it up))$/;
+  /^(?:(?:Hire|Assign) & set up|(?:Install|Update|Enable) .+ & set up|Set (?:up|it up))$/;
 
 async function expectPrimary(card: Locator) {
   await expect(
@@ -49,7 +53,8 @@ const reportTimeout = Number(process.env.ORI_ONE_CARD_REPORT_TIMEOUT_MS || 180_0
 if (!Number.isSafeInteger(reportTimeout) || reportTimeout < 1000 || reportTimeout > 900_000) {
   throw new Error('ORI_ONE_CARD_REPORT_TIMEOUT_MS must be 1000–900000');
 }
-if (sandbox && !['no-model', 'provider'].includes(phase)) throw new Error('Unknown one-card phase');
+if (sandbox && !['no-model', 'provider', 'adjust'].includes(phase))
+  throw new Error('Unknown one-card phase');
 test.skip(!sandbox, 'requires ORI_ONE_CARD_SANDBOX (the demo sandbox directory)');
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(240_000);
@@ -61,6 +66,43 @@ async function ok(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   expect(response.ok(), text).toBeTruthy();
   return text ? JSON.parse(text) : {};
 }
+
+// Optional deterministic runner; ordinary manual/live invocations are unchanged.
+// The wrapper explicitly supplies this port and isolates every server/package.
+let scriptedModel: Server | undefined;
+test.beforeAll(async ({ request }) => {
+  const port = Number(process.env.ORI_ONE_CARD_SCRIPTED_PORT || 0);
+  if (!port) return;
+  scriptedModel = createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method === 'GET')
+      return res.end(JSON.stringify({ data: [{ id: 'one-card-fixture', object: 'model' }] }));
+    let data = '';
+    for await (const chunk of req) data += chunk;
+    const body = JSON.parse(data);
+    const brief = body.messages?.some((message: any) =>
+      String(message.content).startsWith('You write a concise daily brief')
+    );
+    const content = brief
+      ? JSON.stringify({ opening_summary: 'Unrelated scripted Daily Brief fixture.' })
+      : '## Saved session\nThe supplied session fixture declares no tracks. No audio was analyzed or history inferred.\n\nNext: Review the saved session before recording.';
+    res.end(
+      JSON.stringify({
+        id: 'one-card-fixture',
+        model: body.model,
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content } }]
+      })
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    scriptedModel!.once('error', reject);
+    scriptedModel!.listen(port, '127.0.0.1', resolve);
+  });
+  await stageReviewedFolderPackages(request);
+});
+test.afterAll(async () => {
+  if (scriptedModel) await new Promise<void>(resolve => scriptedModel!.close(() => resolve()));
+});
 
 function seedProject(chip: 'Desktop' | 'Documents' | 'Downloads', name: string) {
   const folder = chip === 'Desktop' ? join(sandbox, chip) : join(sandbox, chip, name);
@@ -94,13 +136,60 @@ async function workspaceIDs(request: APIRequestContext) {
   return rows.map((row: { id: string }) => row.id).sort();
 }
 
-async function scan(request: APIRequestContext, chip: string) {
-  const payload = await ok(await request.post(`${folderApi}/scan`, { data: { chip } }));
-  return payload.offer;
+let scopedOfferID = '';
+async function scan(page: Page, _request: APIRequestContext, chip: string) {
+  await page.goto('/?panel=today');
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
+  await page.evaluate(() =>
+    (window as any).PersonalAssistantPanel.open(
+      document.getElementById('personalAssistantLauncher')
+    )
+  );
+  await chooseAttach(page, '#personalAssistantFolderChip:enabled');
+  const selected = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/home-assistant/folder-context/select'
+  );
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: chip[0].toUpperCase() + chip.slice(1), exact: true })
+    .click();
+  const selectionResponse = await selected;
+  expect(selectionResponse.ok()).toBeTruthy();
+  const selection = await selectionResponse.json();
+  const expected = chip === 'downloads' ? 'Third' : chip === 'documents' ? 'Fourth' : 'Desktop';
+  // The real selection says whether it is opening a single canonical review.
+  // Do not race that request with a second chooser that will be removed by it.
+  if (!selection.hire_candidate) {
+    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
+    await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
+    const label = await page
+      .locator('#personalAssistantFolderSetupCandidate option')
+      .evaluateAll(
+        (nodes, name) =>
+          nodes.map(node => node.textContent || '').find(text => text.startsWith(name)) || '',
+        expected
+      );
+    expect(label).not.toBe('');
+    await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label });
+    await page.locator('#personalAssistantFolderSetupReview').click({ timeout: 10_000 });
+  }
+  await page.waitForFunction(
+    name => {
+      const current = (window as any).PersonalAssistantFolder.current();
+      return current?.subject?.name === name && Boolean(current.plan?.digest);
+    },
+    expected,
+    { timeout: 30_000 }
+  );
+  const offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
+  scopedOfferID = offer.id;
+  return offer;
 }
 
 async function openCard(page: Page) {
-  await page.goto('/');
+  if (!page.url().includes('panel=today')) await page.goto('/?panel=today');
   // The app polls, so the network never goes idle; wait for the panel instead.
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
   await page.evaluate(() =>
@@ -109,6 +198,8 @@ async function openCard(page: Page) {
     )
   );
   const card = page.locator('#personalAssistantFolderOffer');
+  const strip = page.locator('#personalAssistantTodayStripToggle');
+  if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
   await expect(card).toBeVisible();
   await card.scrollIntoViewIfNeeded();
   await revealFolderSetupDetails(card);
@@ -156,7 +247,7 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
   seedProject('Desktop', 'Session');
   seedProject('Downloads', 'Third');
 
-  const offer = await scan(request, 'desktop');
+  const offer = await scan(page, request, 'desktop');
   expect(offer.plan?.lines?.length).toBeGreaterThanOrEqual(6);
   expect(offer.plan.digest).toMatch(/^[0-9a-f]{64}$/);
 
@@ -168,7 +259,7 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
   expect(text).toMatch(/File-only mode/);
   expect(text).toMatch(/where it is/);
   expect(text).toMatch(/agents/);
-  expect(text).toMatch(/first read-only look, started right away/);
+  expect(text).toMatch(/optional read-only summary, available for you to start after setup/);
   expect(text).not.toMatch(/\/Users\/|\/var\/|\/private\//);
   // The plan is a hire: who is hired for the folder, one labelled question that
   // starts from a default brief, and the lines under their heading.
@@ -181,7 +272,7 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
   );
   expect(offer.plan.visual?.model?.state).toBe(providerPhase ? 'configured' : 'missing');
   await expectPrimary(card);
-  await expect(card.getByRole('button', { name: 'Not now', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Keep chatting', exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Adjust', exact: true })).toBeVisible();
 
   // Phone width: the plan wraps instead of scrolling the page sideways.
@@ -193,17 +284,20 @@ test('a hired assistant with a recognized project folder shows the whole plan', 
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth
   );
   expect(pageOverflow).toBeLessThanOrEqual(1);
+  await card.getByRole('button', { name: 'Keep chatting', exact: true }).click();
+  await expect(card).toBeHidden();
 });
 
 test('Adjust… opens today’s step-by-step journey instead of running the plan', async ({
   page,
   request
 }) => {
+  test.skip(!adjustPhase, 'dedicated fresh Adjust phase preserves its unfinished journey');
   const pluginNames = async () =>
     ((await ok(await request.get('/api/plugins'))).plugins || [])
       .map((row: { name: string }) => row.name)
       .sort();
-  await scan(request, 'desktop');
+  await scan(page, request, 'desktop');
   const before = await pluginNames();
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Adjust', exact: true }).click();
@@ -225,17 +319,19 @@ test('Adjust… opens today’s step-by-step journey instead of running the plan
   await expectPrimary(resumed);
   await expect(resumed.getByRole('button', { name: 'Continue setup' })).toBeVisible();
   await expect(resumed.locator('#personalAssistantFolderPlan li').first()).toBeVisible();
+  // Its unfinished journey is intentionally preserved. This phase has its
+  // own sandbox, so later tests never bypass that pending review's ownership.
 });
 
 test('a known missing project model blocks confirmation without manufacturing a paused run', async ({
   page,
   request
 }) => {
-  test.skip(providerPhase, 'no-model phase only');
+  test.skip(providerPhase || adjustPhase, 'no-model phase only');
   const before = await workspaceIDs(request);
   const source = join(sandbox, 'Downloads', 'Third');
   const original = sourceSnapshot(source);
-  const offer = await scan(request, 'downloads');
+  const offer = await scan(page, request, 'downloads');
   expect(offer.plan?.digest).toBeTruthy();
   expect(offer.plan.visual?.model?.state).toBe('missing');
   expect(offer.setup).toBeFalsy();
@@ -264,7 +360,7 @@ test('a configured model invalidates the old review digest before effects', asyn
   page,
   request
 }) => {
-  test.skip(providerPhase, 'no-model phase only');
+  test.skip(providerPhase || adjustPhase, 'no-model phase only');
   test.skip(
     !process.env.ORI_ONE_CARD_PROVIDER && !process.env.ORI_ONE_CARD_MODEL,
     'explicit model needed to exercise changed consent'
@@ -272,7 +368,9 @@ test('a configured model invalidates the old review digest before effects', asyn
   const before = await workspaceIDs(request);
   const source = join(sandbox, 'Downloads', 'Third');
   const original = sourceSnapshot(source);
-  const pending = (await ok(await request.get(folderApi))).folder_digest.offer;
+  const pending = (
+    await ok(await request.get(`${folderApi}?offer_id=${encodeURIComponent(scopedOfferID)}`))
+  ).folder_digest.offer;
   expect(pending.status).toBe('pending');
   expect(pending.setup).toBeFalsy();
   const oldDigest = pending.plan.digest;
@@ -287,17 +385,22 @@ test('a configured model invalidates the old review digest before effects', asyn
   expect((await refused.json()).plan_changed).toBe(true);
   expect(await workspaceIDs(request)).toEqual(before);
   const card = await openCard(page);
+  const ready = card.locator('details.folder-requirements__ready');
+  if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
+    await ready.locator('summary').first().click();
   await expect(card.getByRole('region', { name: 'Project agent model' })).toContainText(
     'Configured'
   );
   await expect(card.getByRole('button', { name: setupConfirmation })).toBeVisible();
-  const refreshed = (await ok(await request.get(folderApi))).folder_digest.offer;
+  const refreshed = (
+    await ok(await request.get(`${folderApi}?offer_id=${encodeURIComponent(scopedOfferID)}`))
+  ).folder_digest.offer;
   expect(refreshed.plan.digest).not.toBe(oldDigest);
   expect(refreshed.setup).toBeFalsy();
   expect(sourceSnapshot(source)).toEqual(original);
 });
 
-test('a hire with the reviewed model finishes on the same card and produces the first report', async ({
+test('setup ends ready on the same card; a separate summary start produces its report', async ({
   page,
   request
 }, testInfo) => {
@@ -305,7 +408,7 @@ test('a hire with the reviewed model finishes on the same card and produces the 
   test.setTimeout(reportTimeout + 60_000);
   const source = join(sandbox, 'Downloads', 'Third');
   const original = sourceSnapshot(source);
-  await scan(request, 'downloads');
+  await scan(page, request, 'downloads');
   const startCalls: string[] = [];
   page.on('response', async response => {
     if (
@@ -319,26 +422,28 @@ test('a hire with the reviewed model finishes on the same card and produces the 
   await card
     .locator('#personalAssistantFolderBrief')
     .fill(
-      'Read the primary REAPER file once, using the directory ID returned by workspace_directories, not its name. Summarize only its actual contents in a concise final answer; reuse those findings rather than calling the same tools again.'
+      'Summarize the permitted saved REAPER session. Report missing track data honestly and suggest one next step; do not run or change anything.'
     );
-  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await card.getByRole('button', { name: 'Hire & set up', exact: true }).click();
   const receipt = card.locator('#personalAssistantFolderReceipt li');
   await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
-  const rows = (await receipt.allInnerTexts()).join('\n');
+  const rows = (await receipt.allTextContents()).join('\n');
   expect(rows).toMatch(/Workspace/);
   expect(rows).toMatch(/Agent/);
   // The song's agent is the Home's one shared assistant, not "<label> · <song>".
   expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
   expect(rows).toMatch(/First task/);
 
-  await expect(card.locator('.folder-visual')).toContainText('Confirmed workspace member');
+  await expect(card.locator('.folder-visual')).toContainText('Assigned here');
   await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
-  // The hire's consent started the look on the server; the page never asked to.
   const receiptCard = page.locator('#personalAssistantFolderOffer');
-  await expect(receiptCard.locator('#personalAssistantFolderPlan')).toContainText(
-    'Reading the project, read-only'
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
+    'Workspace ready'
   );
-  await expect(receiptCard.getByRole('button', { name: 'Start first look' })).toHaveCount(0);
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toContainText(
+    'Configuration only; connection not verified'
+  );
+  await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toBeVisible();
   expect(startCalls).toEqual([]);
   const open = receiptCard
     .locator('a[href^="/workspaces/"]')
@@ -348,17 +453,12 @@ test('a hire with the reviewed model finishes on the same card and produces the 
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
-  // The card follows the look on Home, with no page change.
-  await expect(receiptCard.locator('#personalAssistantFolderReceipt')).toContainText(
-    /Running…|Done|Did not finish/,
-    {
-      timeout: 60_000
-    }
-  );
+  // Only this separate click starts the same seeded task.
+  await card.getByRole('button', { name: 'Start summary', exact: true }).click();
 
   // Actual provider-backed acceptance needs a finished report, not merely a
   // configured model or a ready workspace with a failed first look.
-  await expect(card.getByRole('link', { name: 'Open the full report', exact: true })).toBeVisible({
+  await expect(card.getByRole('link', { name: 'Open summary', exact: true })).toBeVisible({
     timeout: reportTimeout
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
@@ -380,20 +480,20 @@ test('a hire with the reviewed model finishes on the same card and produces the 
     () => (window as any).PersonalAssistantFolder.current()?.id
   );
   const reportHref = await card
-    .getByRole('link', { name: 'Open the full report', exact: true })
+    .getByRole('link', { name: 'Open summary', exact: true })
     .getAttribute('href');
   expect(reportHref).toBe(await verifySavedFirstLook(page, request, sandbox, savedOfferID, href!));
   expect(startCalls.length).toBe(before);
 });
 
-test('keyboard only: Assign & start runs from the focused button and the card announces its progress', async ({
+test('keyboard only: Assign & set up ends ready and the card announces its progress', async ({
   page,
   request
 }) => {
   test.skip(!providerPhase, 'fresh provider phase only');
   const source = seedProject('Documents', 'Fourth');
   const original = sourceSnapshot(source);
-  await scan(request, 'documents');
+  await scan(page, request, 'documents');
   const card = await openCard(page);
   // A later song in the same Home is assigned the Home's one shared assistant.
   await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
@@ -404,14 +504,14 @@ test('keyboard only: Assign & start runs from the focused button and the card an
     'aria-live',
     'polite'
   );
-  const setUp = card.getByRole('button', { name: 'Assign & start', exact: true });
+  const setUp = card.getByRole('button', { name: 'Assign & set up', exact: true });
   await setUp.focus();
   await expect(setUp).toBeFocused();
   await page.keyboard.press('Enter');
   const receipt = card.locator('#personalAssistantFolderReceipt li');
   await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
   // A later song in the same Home joins the assistant the first one added.
-  expect((await receipt.allInnerTexts()).join('\n')).toMatch(/REAPER Assistant[^\n·]*joined/);
+  expect((await receipt.allTextContents()).join('\n')).toMatch(/REAPER Assistant[^\n·]*joined/);
   const agents = await ok(await request.get('/api/agents/dashboard/list'));
   const names = (Array.isArray(agents) ? agents : agents.agents || []).map(
     (agent: { name: string }) => agent.name
@@ -420,7 +520,7 @@ test('keyboard only: Assign & start runs from the focused button and the card an
     'REAPER Assistant'
   ]);
   // The actual workspace link remains keyboard reachable in the same card.
-  const open = card.getByRole('link', { name: 'Open Fourth', exact: true });
+  const open = card.getByRole('link', { name: 'Open workspace', exact: true });
   await open.focus();
   await expect(open).toBeFocused();
   expect(sourceSnapshot(source)).toEqual(original);

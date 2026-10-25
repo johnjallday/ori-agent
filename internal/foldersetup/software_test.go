@@ -46,7 +46,7 @@ func TestBuildSoftwarePlanListsEveryConsequenceAndInstallsNothing(t *testing.T) 
 	if got := line(plan, personalassistant.FolderPlanMode).Detail; !strings.Contains(got, "runs no code") || !strings.HasSuffix(got, "Its instructions were found in AGENTS.md.") {
 		t.Errorf("mode detail = %q", got)
 	}
-	if got := line(plan, personalassistant.FolderPlanTask); got.Name != FirstLookLine || !strings.Contains(got.Detail, "Model tokens are spent then") {
+	if got := line(plan, personalassistant.FolderPlanTask); got.Name != FirstLookLine || !strings.Contains(got.Detail, "Model tokens are spent only then") {
 		t.Errorf("task line = %+v", got)
 	}
 
@@ -69,6 +69,26 @@ func TestBuildSoftwarePlanListsEveryConsequenceAndInstallsNothing(t *testing.T) 
 	}
 	if plan.Digest == "" {
 		t.Fatal("the plan carries no digest")
+	}
+}
+
+func TestBuildSoftwarePlanProjectsOnlyKnownModelConfiguration(t *testing.T) {
+	facts := softwareFacts()
+	plan := BuildSoftwarePlan(facts)
+	if !plan.Visual.RequirementsChecked || plan.Visual.Builtin != "Code project" || plan.Visual.Model.State != "configured" || plan.Visual.Model.Settings != "system" {
+		t.Fatalf("configured: %+v", plan.Visual)
+	}
+	facts.Assistant.Model = ""
+	if model := BuildSoftwarePlan(facts).Visual.Model; model.State != "missing" || model.Name != "" {
+		t.Fatalf("missing: %+v", model)
+	}
+	facts.Assistant.Action = personalassistant.FolderSoftwareReuse
+	if model := BuildSoftwarePlan(facts).Visual.Model; model.Settings != "agent" || model.AgentName != facts.Assistant.Name {
+		t.Fatalf("saved agent owner: %+v", model)
+	}
+	facts.Existing = &SoftwareExisting{WorkspaceID: "existing", Name: "Existing", EntryAgent: "Workspace-local assistant"}
+	if model := BuildSoftwarePlan(facts).Visual.Model; model.State != "not_checked" || model.Name != "" || model.Settings != "" {
+		t.Fatalf("invented workspace-local model: %+v", model)
 	}
 }
 

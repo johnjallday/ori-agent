@@ -127,7 +127,8 @@ func (f *assessmentFixture) look(t *testing.T) map[string]any {
 
 func (f *assessmentFixture) start(t *testing.T) map[string]any {
 	t.Helper()
-	status, body := f.call(t, http.MethodPost, "/api/workspaces/"+f.workspaceID+"/folder-first-task/start", nil)
+	executor, _ := f.look(t)["executor"].(map[string]any)
+	status, body := f.call(t, http.MethodPost, "/api/workspaces/"+f.workspaceID+"/folder-first-task/start", map[string]any{"execution_digest": executor["digest"]})
 	if status != http.StatusOK {
 		t.Fatalf("start: %d %v", status, body)
 	}

@@ -80,7 +80,10 @@ const (
 // what the user can do about it, and routes built from the workspace slug. It
 // never carries a filesystem path.
 type FolderFirstTaskView struct {
-	State FolderFirstTaskState `json:"state"`
+	Optional   bool                      `json:"optional,omitempty"`
+	Executor   *workspace.RecipeExecutor `json:"executor,omitempty"`
+	InputScope string                    `json:"input_scope,omitempty"`
+	State      FolderFirstTaskState      `json:"state"`
 	// OfferID names the folder offer whose setup seeded this look, when the
 	// view was read through the folder digest.
 	OfferID        string     `json:"offer_id,omitempty"`
@@ -258,6 +261,9 @@ func FolderFirstTaskViewDetail(view FolderFirstTaskView, result string) string {
 	switch view.State {
 	case FolderFirstTaskSeeded:
 		if view.CanStart {
+			if view.Recipe == workspace.FirstTaskRecipeFolderSummary {
+				return "Optional · starts only when you press Start summary"
+			}
 			return "Starts when you press Start assessment"
 		}
 		return folderFirstTaskWaitsFor(view.Reason)
@@ -395,7 +401,10 @@ func FolderFirstTaskStateAt(task *workspace.Task, now time.Time) FolderFirstTask
 		// the model was answering) is put back to pending at start-up while its
 		// ticket still says In Progress. Nothing is running it, so it did not
 		// finish; saying "running" would leave it stuck with nothing to press.
-		if task.Status == workspace.TaskStatusPending && workspace.FirstTaskRecipe(task) != "" {
+		// Legacy running work keeps its historical state; inferred restrictions
+		// govern its next execution, not the interpretation of that old run.
+		recordedRecipe, _ := task.Context[workspace.TaskContextFirstTaskRecipe].(string)
+		if task.Status == workspace.TaskStatusPending && strings.TrimSpace(recordedRecipe) != "" {
 			return FolderFirstTaskFailed
 		}
 		return FolderFirstTaskRunning

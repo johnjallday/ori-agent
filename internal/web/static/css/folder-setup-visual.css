@@ -111,6 +111,15 @@
   font-size: 1.4rem;
 }
 
+.folder-visual__connection[data-state="proposed"] {
+  border-bottom: 1px dashed currentcolor;
+  opacity: 0.75;
+}
+
+.folder-visual__connection[data-state="linked"] {
+  border-bottom: 1px solid currentcolor;
+}
+
 .folder-visual__destination {
   padding: 0.5rem;
   border: 1px solid var(--fv-line);
@@ -150,8 +159,22 @@
   gap: 0.65rem;
   align-items: center;
   margin-top: 0.85rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--fv-line);
+  padding: 0.75rem;
+  border: 1px dashed var(--fv-accent);
+  border-radius: 0.6rem;
+  background: var(--fv-paper);
+}
+
+.folder-visual__workspace[data-state="complete"],
+.folder-visual__agent[data-membership="assigned"],
+.folder-visual__agent[data-membership="assigned"] .folder-visual__initials {
+  border-style: solid;
+}
+
+.folder-visual__action {
+  margin: 0.3rem 0;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .folder-visual__initials {
@@ -174,9 +197,107 @@
   }
 }
 
+.folder-findings {
+  min-width: 0;
+  margin-block: 0.75rem 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-left: 3px solid var(--pa-accent-text, var(--text-primary));
+  border-radius: 0.75rem;
+  background: var(--ori-paper, var(--bg-secondary));
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.folder-findings h3,
+.folder-recommendation > h3 {
+  margin: 0 0 0.5rem;
+  font:
+    700 1.1rem "Chakra Petch",
+    sans-serif;
+}
+
+.folder-findings__subject {
+  margin-bottom: 0;
+  font-weight: 600;
+}
+
+.folder-findings__facts {
+  padding-left: 1.2rem;
+  margin-block: 0.75rem;
+}
+
+.folder-findings > p:last-child {
+  margin-bottom: 0;
+}
+
 .folder-setup-decision,
 .folder-setup-diagram {
   min-width: 0;
+}
+
+.folder-setup-decision {
+  padding: 1rem;
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-radius: 0.75rem;
+  background: var(--ori-paper, var(--bg-secondary));
+  overflow-wrap: anywhere;
+}
+
+.folder-optional-task {
+  min-width: 0;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--ori-border, var(--border-color));
+  border-radius: 0.75rem;
+  background: var(--ori-paper, var(--bg-secondary));
+  overflow-wrap: anywhere;
+}
+
+.folder-optional-task h3 {
+  margin-block: 0.5rem;
+  font:
+    700 1.1rem "Chakra Petch",
+    sans-serif;
+}
+
+.folder-optional-task .pa-specialist-offer__actions {
+  margin-top: 0.75rem;
+}
+
+.folder-setup-decision > h3 {
+  font:
+    700 1.1rem "Chakra Petch",
+    sans-serif;
+  margin-bottom: 0.75rem;
+}
+
+.folder-visual__access {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.folder-visual__access span {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--fv-line);
+  border-radius: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.folder-requirements__ready > summary {
+  min-height: 44px;
+  padding-block: 0.65rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.folder-requirements__ready > summary:focus-visible {
+  outline: 2px solid var(--pa-accent-text, var(--text-primary));
+  outline-offset: 2px;
 }
 
 .folder-setup-consequences {
@@ -239,8 +360,8 @@
   outline-offset: 3px;
 }
 
-/* Requirements and their confirmation lead at every width. The proposed
-   relationship follows the decision instead of occupying half the drawer. */
+/* Evidence, then recommendation, then the decision: the same reading order
+   at every width. Requirements retain their independent review controls. */
 .folder-requirements {
   --fv-muted: var(--pa-ink-dim, var(--text-secondary));
   margin-block: 0.75rem;

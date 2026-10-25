@@ -466,6 +466,11 @@ func (h *LLMTaskHandler) buildTaskWorkspaceSnapshot(ctx context.Context, task Ta
 // PrepareTaskContext records the same high-level context surfaces that task
 // execution already uses so the run harness can expose them before Execute.
 func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName string, task Task) (*TaskPreparedContext, error) {
+	canonical, policyErr := h.canonicalRecipeTask(task)
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	task = canonical
 	if ctx == nil {
 		ctx = context.Background()
 	}

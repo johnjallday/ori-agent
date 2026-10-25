@@ -51,6 +51,10 @@ type Marker struct {
 	// ProjectFormat is inert, host-owned catalog identity for a recognized
 	// project marker. It grants no plugin, project connection or execution.
 	ProjectFormat string
+	// SummaryTitle and SummaryGuidance are inert copy for supported saved-file
+	// summaries. They grant no reads, tools or runtime capability.
+	SummaryTitle    string
+	SummaryGuidance string
 	// ProjectBundle allows a recognized project format to be a directory
 	// marker. Other project-format globs match regular files only.
 	ProjectBundle bool
@@ -84,6 +88,21 @@ type ProjectFacts struct {
 	Item       string
 	ItemStart  string
 	ItemLength string
+}
+
+// ProjectSummaryForFile reads summary copy from the same recognition table.
+// It does not inspect content or let a plugin register another classifier.
+func ProjectSummaryForFile(name string) (shape Shape, title, guidance string, ok bool) {
+	base := strings.ToLower(filepath.Base(name))
+	for _, marker := range Markers {
+		if marker.Kind != MarkerGlob || marker.ProjectBundle || marker.SummaryTitle == "" {
+			continue
+		}
+		if matched, err := filepath.Match(strings.ToLower(marker.Name), base); err == nil && matched {
+			return marker.Shape, marker.SummaryTitle, marker.SummaryGuidance, true
+		}
+	}
+	return "", "", "", false
 }
 
 // FactsMarker returns the project marker of format that declares facts, so

@@ -6211,7 +6211,11 @@ export class WorkspaceDetailPage {
 
   /** A first task that runs under one of Ori's own recipes: an assessment. */
   isAssessmentTask(task) {
-    return Boolean(String(task?.context?.folder_first_task_recipe || '').trim());
+    return (
+      Boolean(String(task?.context?.folder_first_task_recipe || '').trim()) ||
+      (task?.context?.template_id === 'folder-digest' &&
+        task.context.template_starter_task === true)
+    );
   }
 
   /**
@@ -6290,19 +6294,18 @@ export class WorkspaceDetailPage {
     let reason = 'start_failed';
     try {
       const request = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
-      const response = retry
-        ? await fetch('/api/orchestration/tasks/execute', {
-            ...request,
-            body: JSON.stringify({ task_id: taskId })
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task/start`,
+        {
+          ...request,
+          body: JSON.stringify({
+            execution_digest: look.executor?.digest || '',
+            ...(retry ? { retry: true } : {})
           })
-        : await fetch(
-            `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task/start`,
-            { ...request, body: '{}' }
-          );
+        }
+      );
       const result = response.ok ? await response.json().catch(() => ({})) : {};
-      if (retry) {
-        if (response.ok && result?.success !== false) started = taskId;
-      } else if (response.ok) {
+      if (response.ok) {
         if (result?.started === true) started = String(result.task_id || taskId).trim();
         reason = String(result?.reason || 'start_failed');
       }

@@ -62,7 +62,10 @@ const reviewOffer = (mode = 'create') => ({
   verdict: 'project',
   status: 'pending',
   folder: 'Session',
-  subject: { name: 'Session' },
+  subject: { name: 'Session', is_root: true, marker: 'REAPER project', observed_files: 1 },
+  scanned_at: '2026-10-05T10:00:00Z',
+  partial: false,
+  reason: 'A REAPER project marker was observed in this folder.',
   capability: {
     recognized: 'REAPER song',
     workspace: 'REAPER Song workspace',
@@ -221,7 +224,8 @@ test('fixture review preserves exact Unicode drafts and only submits the reviewe
   const card = await mountReview(page);
   const brief = card.getByLabel('What should it do with it?');
   const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
-  await expect(card.getByText('Before you start', { exact: true })).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Confirm setup', exact: true })).toBeVisible();
+  await expect(card.getByText('Setup effects', { exact: true })).toBeVisible();
   await expect(card.locator('#personalAssistantFolderConsequences')).toContainText(
     'shares permitted folder content'
   );
@@ -791,7 +795,8 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
 test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {
   const card = await mountReview(page, reviewOffer('bind'));
   await expect(card.getByRole('button', { name: 'Assign & start', exact: true })).toBeVisible();
-  await expect(card.locator('.folder-visual__agent')).toContainText('Proposed assignment');
+  await expect(card.locator('.folder-visual__agent')).toContainText('Already hired');
+  await expect(card.locator('.folder-visual__agent')).toContainText('Assign on setup');
   await page.evaluate(
     offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
     reviewOffer('pending')
@@ -799,6 +804,64 @@ test('fixture bind and pending reviews do not invent a completed hire', async ({
   await expect(card.locator('.folder-visual__agent')).toContainText('Identity pending');
   await expect(card.locator('.folder-visual__agent')).not.toContainText('Ari');
   await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
+});
+
+test('fixture agent existence and exact workspace membership stay distinct on reload', async ({
+  page
+}) => {
+  const card = await mountReview(page);
+  const agent = card.locator('.folder-visual__agent');
+  await expect(agent).toContainText('Needs hiring');
+  await expect(agent).toContainText('Hire & assign on setup');
+  await expect(card.locator('.pa-folder__hire-agent')).toBeHidden();
+  const capture = async (name: string) => {
+    if (!process.env.ORI_VISUAL_EVIDENCE) return;
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+    await card
+      .locator('.folder-visual')
+      .screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/${name}.png` });
+  };
+  await capture('agent-needs-hiring');
+  const brief = card.getByLabel('What should it do with it?');
+  await brief.fill('');
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    reviewOffer('bind')
+  );
+  await expect(agent).toContainText('Already hired');
+  await expect(agent).toContainText('Assign on setup');
+  await capture('agent-already-hired');
+  const pending = reviewOffer('pending');
+  pending.plan.hire.model = '';
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    pending
+  );
+  await expect(agent).toContainText('Identity pending');
+  await expect(agent).toContainText('Model not yet known');
+  await capture('agent-pending');
+  const reused: any = reviewOffer('bind');
+  reused.plan.visual.entity.operation = 'reuse';
+  reused.plan.hire.assigned_here = true;
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    reused
+  );
+  await expect(agent).toContainText('Assigned here');
+  await expect(agent).toContainText('On this workspace');
+  await expect(brief).toHaveValue('');
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(agent).toContainText('Assigned here');
+  await expect(brief).toHaveValue('');
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+    await card
+      .locator('.folder-visual')
+      .screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/agent-assigned-here.png` });
+  }
 });
 
 test('fixture requirements keep independently known operations ahead of the proposed outcome', async ({
@@ -841,6 +904,15 @@ test('fixture requirements keep independently known operations ahead of the prop
       const card = await mountReview(page, offer);
       const requirements = card.locator('#personalAssistantFolderRequirements');
       await expect(requirements.locator('li')).toHaveCount(2);
+      const ready = requirements.locator('.folder-requirements__ready');
+      if (process.env.ORI_VISUAL_EVIDENCE && ['ready', 'partial'].includes(name)) {
+        await requirements.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/group3-${name}-collapsed-${width}.png`
+        });
+      }
+      if (await ready.count()) await ready.locator(':scope > summary').click();
+      await requirements.scrollIntoViewIfNeeded();
       for (const plugin of ['REAPER', 'Music Project Management']) {
         const label = requirements.getByText(plugin, { exact: true });
         await expect(label).toBeVisible();
@@ -862,10 +934,10 @@ test('fixture requirements keep independently known operations ahead of the prop
       const action = card.locator('#personalAssistantFolderOfferActions');
       const diagram = card.locator('#personalAssistantFolderVisual');
       expect(
-        await action.evaluate(
+        await diagram.evaluate(
           (node, other) =>
             Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
-          await diagram.elementHandle()
+          await action.elementHandle()
         )
       ).toBe(true);
       if (process.env.ORI_VISUAL_EVIDENCE)
@@ -893,6 +965,110 @@ test('fixture requirements keep independently known operations ahead of the prop
         });
       }
     }
+  }
+});
+
+test('fixture findings precede recommendation and stay bound through replace and reopen', async ({
+  page
+}) => {
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (
+      request.method() !== 'GET' &&
+      /\/(ask|route|setup|decide|prerequisites|install|enable|update|files)(\/|$)/.test(
+        new URL(request.url()).pathname
+      )
+    )
+      writes.push(request.url());
+  });
+  const card = await mountReview(page);
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await card.locator('#personalAssistantFolderFindings').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-reaper-desktop.png`
+    });
+    await page.setViewportSize({ width: 390, height: 1400 });
+    await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+    await card.locator('.folder-visual').screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-reaper-narrow-diagram.png`
+    });
+  }
+  const findings = card.getByRole('region', { name: 'What I found', exact: true });
+  const recommendation = card.getByRole('region', { name: 'Recommendation', exact: true });
+  await expect(findings).toContainText('1 file observed in this scope');
+  await expect(findings).toContainText('No file contents were read for this snapshot');
+  await expect(findings).toContainText('REAPER project marker');
+  expect(
+    await findings.evaluate(
+      (node, other) =>
+        Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
+      await recommendation.elementHandle()
+    )
+  ).toBe(true);
+  const updated = {
+    ...reviewOffer(),
+    folder: '<literal> very long parent '.repeat(8),
+    partial: true,
+    subject: { name: 'Ambiguous child '.repeat(12), is_root: false, marker: '', observed_files: 0 },
+    reason: 'No supported project marker was recorded in this scope.'
+  };
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    updated
+  );
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(findings).toContainText('Partial, bounded look');
+    await expect(findings).toContainText('0 files observed');
+    await expect(findings).not.toContainText('REAPER');
+    expect(await card.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await findings.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-partial-${width}.png`
+      });
+      await card
+        .locator('.folder-visual')
+        .screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-diagram-${width}.png` });
+    }
+  }
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(findings).toContainText(updated.subject.name);
+  expect(writes).toEqual([]);
+  await page.evaluate(() => (window as any).PersonalAssistantFolder.parkConversation());
+  await expect(card).toBeHidden();
+});
+
+test('fixture saved findings use the same single card in Needs you', async ({ page }) => {
+  await mockHiredAssistant(page);
+  const offer = { ...reviewOffer(), conversation_id: '' };
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({
+      json: {
+        today: {
+          state: 'healthy_empty',
+          display_name: 'Atlas',
+          needs_you: { items: [] },
+          working_on: { items: [] },
+          done: { items: [] }
+        }
+      }
+    })
+  );
+  await page.route('**/api/personal-assistant/folder-digest**', route =>
+    route.fulfill({ json: { folder_digest: { offer, chips: [] } } })
+  );
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toHaveAttribute('data-placement', 'needs');
+  await expect(card.locator('#personalAssistantFolderFindings')).toContainText('Saved metadata');
+  await expect(card.locator('.folder-visual')).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderFindings')).toHaveCount(1);
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await card.locator('#personalAssistantFolderFindings').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-needs-you.png` });
   }
 });
 
@@ -996,6 +1172,108 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
   expect(forbidden).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+for (const theme of ['light', 'dark']) {
+  test(`fixture optional summary remains separate, disclosed and keyboard reachable ${theme}`, async ({
+    page
+  }) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    const offer: any = reviewOffer();
+    const longName = 'Saved session 長い名前 '.repeat(6);
+    const agentName = 'Project assistant '.repeat(5);
+    offer.folder = offer.subject.name = offer.plan.visual.entity.name = longName;
+    offer.status = 'resolved';
+    offer.plan.optional_task = true;
+    offer.outcome = {
+      kind: 'project',
+      workspace_id: 'summary-ws',
+      route: '/workspaces/session',
+      receipt: [
+        {
+          kind: 'workspace',
+          name: longName,
+          detail: 'created',
+          route: '/workspaces/session',
+          operation: 'create'
+        },
+        { kind: 'folder', name: longName, detail: 'linked where it is; source files stay here' },
+        {
+          kind: 'agent',
+          name: agentName,
+          detail: 'added',
+          assigned: true,
+          model: 'configured-model'
+        }
+      ]
+    };
+    offer.first_task = {
+      optional: true,
+      recipe: 'folder_summary',
+      state: 'seeded',
+      can_start: true,
+      task_id: 'summary-task',
+      workspace_id: 'summary-ws',
+      workspace_route: '/workspaces/session',
+      workspace_name: longName,
+      agent: agentName,
+      description: 'Summarize the REAPER session: tracks, overview and one next step',
+      input_scope: 'Saved session file only, up to 64 KiB; no audio analysis',
+      executor: {
+        agent: agentName,
+        provider: 'scripted-provider',
+        model: 'configured-model-with-a-long-version-'.repeat(4),
+        digest: 'fixture-summary-digest'
+      }
+    };
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (
+        request.method() !== 'GET' &&
+        /\/folder-first-task\/start$|\/tasks\/execute$|\/offers\/[^/]+\/setup$/.test(
+          new URL(request.url()).pathname
+        )
+      )
+        writes.push(request.url());
+    });
+    const card = await mountReview(page, offer);
+    const panel = card.locator('#personalAssistantFolderOptionalTask');
+    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
+      'Workspace ready'
+    );
+    await expect(panel).toContainText('Configuration only; connection not verified');
+    await expect(panel).toContainText('Each explicit attempt uses model tokens');
+    await expect(panel).toContainText('no model tools, source-file changes or external actions');
+    await expect(card.locator('[aria-label="Folder setup relationship"]')).toHaveCount(1);
+    await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width > 400 ? 1100 : 844 });
+      const open = card.getByRole('link', { name: 'Open workspace', exact: true });
+      await open.focus();
+      const start = panel.getByRole('button', { name: 'Start summary', exact: true });
+      await keyboardReach(page, start);
+      expect(await panel.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(
+        1
+      );
+      expect(await card.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(
+        1
+      );
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+      ).toBeLessThanOrEqual(1);
+      expect(
+        await card
+          .locator('[id]')
+          .evaluateAll(nodes => new Set(nodes.map(node => node.id)).size === nodes.length)
+      ).toBe(true);
+      await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
+      if (process.env.ORI_VISUAL_EVIDENCE)
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/optional-${theme}-${width}.png`
+        });
+    }
+    expect(writes).toEqual([]);
+  });
+}
 
 async function expectUnobscured(target: Locator) {
   const visibility = await target.evaluate(node => {
@@ -1302,16 +1580,20 @@ for (const theme of ['light', 'dark']) {
               node.scrollWidth - node.clientWidth,
               document.documentElement.scrollWidth - innerWidth
             ),
-            decisionFirst: Boolean(
-              decision.compareDocumentPosition(diagram) & Node.DOCUMENT_POSITION_FOLLOWING
-            ),
-            diagramBelow:
-              diagram.getBoundingClientRect().top >= decision.getBoundingClientRect().bottom
+            storyOrder:
+              Boolean(
+                node
+                  .querySelector('#personalAssistantFolderFindings')!
+                  .compareDocumentPosition(diagram) & Node.DOCUMENT_POSITION_FOLLOWING
+              ) &&
+              Boolean(diagram.compareDocumentPosition(decision) & Node.DOCUMENT_POSITION_FOLLOWING),
+            decisionBelow:
+              decision.getBoundingClientRect().top >= diagram.getBoundingClientRect().bottom
           };
         });
         expect(layout.overflow).toBeLessThanOrEqual(1);
-        expect(layout.decisionFirst).toBe(true);
-        if (width <= 768) expect(layout.diagramBelow).toBe(true);
+        expect(layout.storyOrder).toBe(true);
+        if (width <= 768) expect(layout.decisionBelow).toBe(true);
         const target = await confirm.boundingBox();
         expect(target!.height).toBeGreaterThanOrEqual(24);
         expect(target!.x).toBeGreaterThanOrEqual(0);
@@ -1332,11 +1614,11 @@ for (const theme of ['light', 'dark']) {
         await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
           'Integration · Did not finish'
         );
-        await expect(card).not.toContainText('Confirmed workspace member');
+        await expect(card.locator('.folder-visual__agent')).not.toContainText('Assigned here');
         const retry = card.getByRole('button', { name: 'Try again', exact: true });
         await keyboardReach(page, retry);
         await page.keyboard.press('Enter');
-        await expect(card.locator('.folder-visual')).toContainText('Confirmed workspace member');
+        await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
         await expect(card.locator('.folder-visual')).toContainText('Separate workspace');
         const open = card.getByRole('link', { name: 'Open Session', exact: true });
         await expect(open).toHaveAttribute('href', '/workspaces/fixture-session');

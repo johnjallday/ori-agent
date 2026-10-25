@@ -75,6 +75,76 @@ export function folderPresentation(
   };
 }
 
+// Findings are inert evidence, not a classifier or a new observation. A saved
+// offer owns its exact subject; never join it to a live snapshot by folder name.
+export function folderFindings({ observation, offer, candidateId = '', locale } = {}) {
+  if (!observation && !offer) return null;
+  const subject = offer
+    ? offer.subject
+    : candidateId
+      ? (observation.projects || []).find(project => project.id === candidateId)
+      : null;
+  if (!offer && candidateId && !subject) return null;
+  const files = offer ? subject?.observed_files : (subject?.files ?? observation.files);
+  const date = new Date((offer ? offer.scanned_at : observation.scanned_at) || '');
+  const knownDate = !Number.isNaN(date.getTime()) && date.getUTCFullYear() > 1;
+  const partial = offer ? offer.partial : observation.coverage?.partial;
+  const marker = subject?.marker;
+  const name = String(
+    subject?.name || (offer ? offer.folder : observation.folder) || 'Selected folder'
+  );
+  const scope =
+    subject && !(offer ? subject.is_root : subject.root) ? 'Selected child folder' : 'Whole folder';
+  const interpretation = offer
+    ? String(offer.reason || '')
+    : marker
+      ? `A ${String(marker)} marker was observed. Markers do not prove file contents or project progress.`
+      : 'No supported project marker is recorded for this scope. File kinds alone do not identify an application.';
+  return {
+    name,
+    scope,
+    status: `${offer ? 'Saved metadata' : 'Local metadata'} · ${partial ? 'Partial, bounded look' : 'Bounded look'}`,
+    date: knownDate ? date.toLocaleDateString(locale) : 'Snapshot date not recorded',
+    facts: [
+      Number.isInteger(files) && files >= 0
+        ? `${plural(files, 'file')} observed in this scope.`
+        : 'File count not recorded for this scope.',
+      ...(marker ? [`Observed marker: ${String(marker)}.`] : [])
+    ],
+    interpretation,
+    disclosure:
+      'Names, kinds and dates only. No file contents were read for this snapshot; this is not a complete inventory.'
+  };
+}
+
+export function renderFolderFindings(container, input) {
+  if (!container) return;
+  const view = folderFindings(input);
+  container.hidden = !view;
+  const signature = JSON.stringify(view);
+  if (container.dataset.signature === signature) return;
+  container.dataset.signature = signature;
+  container.replaceChildren();
+  if (!view) return;
+  const doc = container.ownerDocument;
+  const node = (tag, text, className = '') => {
+    const el = doc.createElement(tag);
+    el.textContent = text;
+    el.className = className;
+    return el;
+  };
+  container.append(
+    node('h3', 'What I found'),
+    node('p', `${view.scope} · ${view.name}`, 'folder-findings__subject'),
+    node('p', `${view.status} · ${view.date}`, 'folder-visual__note')
+  );
+  const facts = node('ul', '', 'folder-findings__facts');
+  for (const fact of view.facts) facts.append(node('li', fact));
+  container.append(facts);
+  if (view.interpretation) container.append(node('p', view.interpretation));
+  container.append(node('p', view.disclosure, 'folder-visual__note'));
+}
+
 // Latest atomic folder turn only. Event-only reviews, detached revisions,
 // imported and legacy prose never manufacture a discussion binding.
 export function folderDiscussionBinding(messages, conversationId, saved) {

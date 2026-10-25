@@ -21,15 +21,15 @@ func (run folderSuggestionTaskRunner) ExecuteTask(ctx context.Context, agent str
 	return run(ctx, agent, task)
 }
 
-// firstLookRecord waits for what the hire did about its agent's first look,
-// which is written just after the offer resolves.
+// firstLookRecord waits for the trusted optional-task link, which records
+// ownership without pretending the setup started it.
 func (f *softwareCardFixture) firstLookRecord(t *testing.T) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		outcome, _ := f.read(t)["outcome"].(map[string]any)
-		if look, _ := outcome["first_look"].(map[string]any); look != nil {
-			return look
+		if id, _ := outcome["first_task_id"].(string); id != "" {
+			return outcome
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -96,8 +96,8 @@ func TestFolderHire_ALookTheModelCannotRunIsLeftWithItsReason(t *testing.T) {
 		t.Fatalf("the setup stopped: %v", offer["setup"])
 	}
 	look := f.firstLookRecord(t)
-	if look == nil || look["started"] != false || look["reason"] != personalassistant.FolderFirstTaskReasonModelUnsupported {
-		t.Fatalf("first look record = %v", look)
+	if look == nil || look["first_look"] != nil || look["first_task_id"] == "" {
+		t.Fatalf("setup must link but not start its optional task: %v", look)
 	}
 	first, _ := f.read(t)["first_task"].(map[string]any)
 	if first == nil || first["state"] != string(personalassistant.FolderFirstTaskSeeded) || first["agent"] != "Development Assistant" ||
