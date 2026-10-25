@@ -186,16 +186,20 @@ func TestGetProviderForModel_InfersClaudeForClaudeModel(t *testing.T) {
 func TestNormalizeModelForProvider_ClaudeAliases(t *testing.T) {
 	handler := newTestTaskHandler("claude")
 
-	if got := handler.normalizeModelForProvider("claude", "haiku"); got != "claude-3-5-haiku-latest" {
+	if got := handler.normalizeModelForProvider("claude", "haiku"); got != "claude-haiku-5-5" {
 		t.Fatalf("expected claude haiku alias mapping, got %q", got)
 	}
 
-	if got := handler.normalizeModelForProvider("claude", "sonnet"); got != "claude-3-5-sonnet-latest" {
+	if got := handler.normalizeModelForProvider("claude", "sonnet"); got != "claude-sonnet-5-5" {
 		t.Fatalf("expected claude sonnet alias mapping, got %q", got)
 	}
 
-	if got := handler.normalizeModelForProvider("claude", "opus"); got != "claude-3-opus-latest" {
+	if got := handler.normalizeModelForProvider("claude", "opus"); got != "claude-opus-5-5" {
 		t.Fatalf("expected claude opus alias mapping, got %q", got)
+	}
+
+	if got := handler.normalizeModelForProvider("claude", "claude-opus-4-5"); got != "claude-opus-4-5" {
+		t.Fatalf("expected a full model ID unchanged, got %q", got)
 	}
 }
 

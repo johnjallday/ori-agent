@@ -525,19 +525,11 @@ func resolveSkillPromptProviderName(factory *llm.Factory, configuredProvider, mo
 
 func normalizeSkillPromptModelForProvider(providerName, model string) string {
 	trimmedModel := strings.TrimSpace(model)
-	normalizedModel := strings.ToLower(trimmedModel)
-
 	if providerName == "claude" {
-		switch normalizedModel {
-		case "haiku":
-			return "claude-3-5-haiku-latest"
-		case "sonnet":
-			return "claude-3-5-sonnet-latest"
-		case "opus":
-			return "claude-3-opus-latest"
+		if apiModel := llm.ClaudeAPIModelForAlias(trimmedModel); apiModel != "" {
+			return apiModel
 		}
 	}
-
 	return trimmedModel
 }
 
