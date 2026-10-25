@@ -739,6 +739,10 @@ function renderAgentDetails() {
   const modelEl = document.getElementById('agentModel');
   if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
+  // The assistant's model is the System Model; say so where the model is shown.
+  const systemModelNote = document.getElementById('agentModelSystemNote');
+  if (systemModelNote) systemModelNote.hidden = !currentAgent.system_model_linked;
+
   const providerEl = document.getElementById('agentProvider');
   const provider = currentAgent.provider || currentAgent.llm_provider || '';
   if (providerEl) providerEl.textContent = provider || 'Not set';
@@ -1358,6 +1362,9 @@ function populateConfigForm() {
   // Reset provider filter and populate models
   if (providerFilter) providerFilter.value = '';
 
+  const systemModelHint = document.getElementById('editSystemModelHint');
+  if (systemModelHint) systemModelHint.hidden = !currentAgent.system_model_linked;
+
   // Populate the model dropdown and select current model
   populateEditModelOptions();
 
@@ -1440,8 +1447,13 @@ async function saveConfigChanges() {
     }
 
     const carried = await carriedEditNote(response);
+    const saved = await response
+      .clone()
+      .json()
+      .catch(() => ({}));
     await refreshAgentDetails();
-    setConfigStatus('Configuration updated successfully.', 'success');
+    const status = systemModelSaveStatus(saved && saved.system_model);
+    setConfigStatus(status.message, status.type);
     setConfigEditMode(false);
     if (carried) showToast(carried, 'success');
   } catch (error) {
@@ -1467,6 +1479,24 @@ function setConfigSavingState(isSaving) {
   if (editBtn) {
     editBtn.disabled = isSaving;
   }
+}
+
+// The assistant's model is the System Model (system_model_linked): after a
+// save, say what its conversations now run on, or why Settings were left as
+// they were.
+function systemModelSaveStatus(mirror) {
+  if (!mirror) return { message: 'Configuration updated successfully.', type: 'success' };
+  if (mirror.mirrored) {
+    refreshSystemModelDisplay();
+    return {
+      message: `Configuration updated. System Model is now ${mirror.provider} / ${mirror.model}.`,
+      type: 'success'
+    };
+  }
+  return {
+    message: `Configuration updated, but ${mirror.reason || 'the System Model was left unchanged'}.`,
+    type: 'error'
+  };
 }
 
 function setConfigStatus(message, type = 'info') {

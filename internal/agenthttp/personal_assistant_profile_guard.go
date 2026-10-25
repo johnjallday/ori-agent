@@ -59,3 +59,30 @@ func (c personalAssistantSupportClassifier) protectsHiredProfile(ctx context.Con
 	}
 	return strings.EqualFold(strings.TrimSpace(projection.GlobalAgentProfile), name)
 }
+
+// isHiredProfile reports whether name is the hired personal assistant's global
+// profile in any state that has one. It backs a non-destructive link (the
+// profile's model is the System Model), so unlike protectsHiredProfile an
+// unresolvable user or relationship reads as "not hired" rather than failing
+// closed.
+func (c personalAssistantSupportClassifier) isHiredProfile(ctx context.Context, name string) bool {
+	name = strings.TrimSpace(name)
+	if c.reader == nil || name == "" {
+		return false
+	}
+	userID := userprofile.LocalUserID
+	if c.provider != nil {
+		resolved, err := c.provider.CurrentUserID(ctx)
+		if err != nil {
+			return false
+		}
+		if strings.TrimSpace(resolved) != "" {
+			userID = resolved
+		}
+	}
+	projection, err := c.reader.Get(ctx, userID)
+	if err != nil || projection == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(projection.GlobalAgentProfile), name)
+}
