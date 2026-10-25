@@ -51,7 +51,12 @@
     </section>
     <div class="folder-setup-decision" aria-label="Current setup decision">
     <h3 id="personalAssistantFolderConfirmTitle" hidden>Confirm setup</h3>
-    <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
+    <!-- The headline and, for a stopped setup, its Remove: the way out sits
+         where people look for one, apart from the way forward below. -->
+    <div class="pa-folder__offer-head">
+      <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
+      <div id="personalAssistantFolderOfferHeadActions" class="pa-folder__offer-head-actions" hidden></div>
+    </div>
     <div id="personalAssistantFolderRequirements" hidden></div>
     <!-- A recognized project's plan as a hire: the agent the setup hires for the
          folder, and the one question whose answer becomes the workspace goal.

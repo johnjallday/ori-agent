@@ -331,6 +331,68 @@ test('partial/legacy requirements keep known rows without inventing a zero-downl
   );
 });
 
+test('a saved run has outstanding requirements only for a failed plugin or a missing model', () => {
+  const { requirementsOutstanding } = globalThis.OriFolderSetupVisual;
+  const saved = (state, model) => ({
+    offer: {
+      setup: {
+        status: 'stopped',
+        visual: {
+          plugins: [{ kind: 'integration', name: 'REAPER integration', operation: 'ready' }],
+          ...(model ? { model } : {})
+        },
+        lines: [{ kind: 'integration', name: 'Enables REAPER integration', state }]
+      }
+    }
+  });
+  // Complete, not started, or "Version not reported" asks nothing of the user.
+  assert.equal(requirementsOutstanding(saved('done')), false);
+  assert.equal(requirementsOutstanding(saved('waiting')), false);
+  assert.equal(requirementsOutstanding(saved('done', { state: 'not_checked' })), false);
+  assert.equal(
+    requirementsOutstanding(saved('done', { state: 'configured', provider: 'p', name: 'm' })),
+    false
+  );
+  // The plugin the run stopped on, or a model still to configure, does.
+  assert.equal(requirementsOutstanding(saved('failed')), true);
+  assert.equal(requirementsOutstanding(saved('done', { state: 'missing' })), true);
+  // A legacy run with lines and no display identity is judged by its lines.
+  assert.equal(
+    requirementsOutstanding({
+      offer: { setup: { lines: [{ kind: 'provider', name: 'Home plugin', state: 'failed' }] } }
+    }),
+    true
+  );
+  assert.equal(requirementsOutstanding({}), false);
+});
+
+test('a saved run folds every finished step under Ready and keeps the one it stopped on', () => {
+  const container = documentFixture().createElement('div');
+  renderRequirements(container, {
+    offer: {
+      id: 'stopped',
+      setup: {
+        status: 'stopped',
+        visual: {
+          plugins: [
+            { kind: 'integration', name: 'Updated integration', operation: 'update' },
+            { kind: 'provider', name: 'Failed provider', operation: 'install' }
+          ]
+        },
+        lines: [
+          { kind: 'integration', name: 'Updates the integration', state: 'done' },
+          { kind: 'provider', name: 'Installs the provider', state: 'failed' }
+        ]
+      }
+    }
+  });
+  const ready = nodes(container).find(node => node.className === 'folder-requirements__ready');
+  assert.ok(nodes(ready).some(node => node.textContent === 'Updated integration'));
+  assert.ok(nodes(ready).some(node => node.textContent === 'Complete'));
+  assert.ok(!nodes(ready).some(node => node.textContent === 'Failed provider'));
+  assert.ok(nodes(container).some(node => node.textContent === 'Stopped here'));
+});
+
 test('ready configuration can collapse while missing and unknown requirements stay visible', () => {
   const container = documentFixture().createElement('div');
   const visual = {

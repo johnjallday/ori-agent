@@ -748,10 +748,18 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
     'Integration · Complete'
   );
   await expect(card).toContainText('Stopped at Music Project Management.');
-  await expect(card).toContainText('Reviewed: provider-old → provider-reviewed');
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    'Session needs you to check a plugin that did not install'
+  );
+  // The plugin it stopped on is still the user's to settle, so the requirements
+  // stay in view below the way forward; the diagram waits under the details.
+  const requirements = card.getByRole('region', { name: 'Setup requirements', exact: true });
+  await expect(requirements).toBeVisible();
+  await expect(requirements).toContainText('Reviewed: provider-old → provider-reviewed');
   await expect(card).toContainText('Completed work is kept.');
   await expect(card).not.toContainText('network');
-  await expect(card.locator('.folder-visual')).toBeVisible();
+  await expect(card.locator('#personalAssistantFolderDetails')).not.toHaveAttribute('open', '');
+  await expect(card.locator('#personalAssistantFolderDetails .folder-visual')).toHaveCount(1);
   await expect(page.locator('#folderSetupRunModal')).toBeHidden();
   await expect(card).not.toContainText('Assigned to workspace');
   await expect(page.locator('#homeAssistantConversation')).not.toContainText('Hired.');

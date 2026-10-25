@@ -316,6 +316,39 @@ const STRUCTURE_STOP_COPY = {
     'A step did not finish. What finished is kept and nothing in your folder was changed; Try again carries on from there.'
 };
 
+// What a stopped setup asks of the user, short enough for its headline, so the
+// card reads "Album-4 needs you to choose the project file" before its sentence.
+// A variant overrides only the asks its own stop copy words differently.
+const SETUP_STOP_ASK = {
+  plan_changed: 'review the changed setup',
+  needs_pick: 'pick the folder again',
+  needs_choice: 'choose the project file',
+  needs_model: 'set up a model',
+  install_failed: 'check a plugin that did not install',
+  interrupted: 'finish setup',
+  consent_stale: 'review its shared agent',
+  assistant_missing: 'choose its agent',
+  member_failed: 'continue creating its workspaces',
+  failed: 'retry a step that did not finish'
+};
+const SOFTWARE_STOP_ASK = { plan_changed: 'review the setup again' };
+const STRUCTURE_STOP_ASK = { plan_changed: 'review the saved workspaces' };
+const INBOX_STOP_ASK = { plan_changed: 'pick the folder again' };
+
+// stopAsk is the headline ask for one stop reason. A reason the variant's stop
+// copy does not explain is "a step did not finish" there, so it asks the same.
+function stopAsk(reason, { software, structure, inbox }) {
+  const [copy, asks] = inbox
+    ? [INBOX_STOP_COPY, INBOX_STOP_ASK]
+    : structure
+      ? [STRUCTURE_STOP_COPY, STRUCTURE_STOP_ASK]
+      : software
+        ? [SOFTWARE_STOP_COPY, SOFTWARE_STOP_ASK]
+        : [SETUP_STOP_COPY, {}];
+  if (!copy[reason]) return SETUP_STOP_ASK.failed;
+  return asks[reason] || SETUP_STOP_ASK[reason] || SETUP_STOP_ASK.failed;
+}
+
 function structureStoppedActions(reason) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
   switch (reason) {
@@ -453,6 +486,7 @@ export function setupRunView(
     status,
     lines,
     statusLine: '',
+    ask: stopAsk(reason, { software, structure, inbox }),
     question: `${progress}${sentence}`,
     // Remove is last, so the first-glance primary stays "finish it".
     actions: [...actions, REMOVE_SETUP]
@@ -3299,11 +3333,47 @@ function monitoringChosen(offer) {
   return Boolean(offer?.id) && state.monitoring.offerId === offer.id && state.monitoring.checked;
 }
 
+// What a stopped setup's card keeps under Full setup details, each with the
+// element it sits in front of otherwise. Restored in this order, every anchor
+// is back in place before a piece is put in front of it.
+const STOPPED_TUCKED = [
+  ['personalAssistantFolderRecommendation', '.folder-setup-decision'],
+  ['personalAssistantFolderFindings', '#personalAssistantFolderRecommendation'],
+  ['personalAssistantFolderRequirements', '#personalAssistantFolderHire'],
+  ['personalAssistantFolderProgress', '#personalAssistantFolderProfile']
+];
+
+// arrangeStoppedCard lays a stopped setup's card out as headline, the one
+// sentence and the way forward. What it found, the diagram, the progress
+// chips and requirements already settled move under Full setup details;
+// requirements the user must still settle stay in view, below the actions.
+// Every other card has the review's order. A piece is moved only when its
+// place changes, so a redraw never takes focus from inside it.
+function arrangeStoppedCard(card, details, { stopped, outstanding }) {
+  if (!card || !details?.parentElement) return;
+  const tucked = STOPPED_TUCKED.map(([id, anchor]) => [document.getElementById(id), anchor]);
+  if (!stopped) {
+    for (const [node, selector] of tucked) {
+      const anchor = card.querySelector(selector);
+      if (node && anchor && anchor.previousElementSibling !== node)
+        anchor.parentElement.insertBefore(node, anchor);
+    }
+    return;
+  }
+  for (const [node] of [...tucked].reverse()) {
+    if (!node) continue;
+    if (node.id === 'personalAssistantFolderRequirements' && outstanding) {
+      if (details.previousElementSibling !== node)
+        details.parentElement.insertBefore(node, details);
+    } else if (node.parentElement !== details) details.append(node);
+  }
+}
+
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
   const focusedAction =
-    state.reviewSlot && els.actions?.contains(document.activeElement)
+    state.reviewSlot && inOfferActions(document.activeElement)
       ? document.activeElement.dataset.folderAction
       : '';
   if (state.reviewSlot) window.PersonalAssistantTranscript?.beforeChange?.();
@@ -3383,7 +3453,11 @@ function renderOffer(place) {
       : view.setup
         ? segments([
             { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
-            view.setup.status === 'stopped' ? ' needs you' : ' · setting up'
+            view.setup.status !== 'stopped'
+              ? ' · setting up'
+              : view.setup.ask
+                ? ` needs you to ${view.setup.ask}`
+                : ' needs you'
           ])
         : view.headline;
     headline.forEach(part => {
@@ -3452,9 +3526,24 @@ function renderOffer(place) {
   );
   renderProfileLine(document.getElementById('personalAssistantFolderProfile'), receipt.profile);
   const details = document.getElementById('personalAssistantFolderDetails');
-  if (details && details.dataset.offer !== state.offer?.id) {
-    details.dataset.offer = state.offer?.id || '';
-    details.open = !state.offer?.plan;
+  const stopped = view.setup?.status === 'stopped' && !receipt.visible;
+  if (details) {
+    // A stopped setup opens collapsed, and collapses when a run stops, so the
+    // card leads with what it needs. Otherwise the user's choice is kept.
+    const id = state.offer?.id || '';
+    const key = stopped ? `${id}:stopped` : id;
+    if (details.dataset.offer !== key) {
+      const sameOffer = [id, `${id}:stopped`].includes(details.dataset.offer || '');
+      details.dataset.offer = key;
+      if (stopped) details.open = false;
+      else if (!sameOffer) details.open = !state.offer?.plan;
+    }
+    arrangeStoppedCard(els.offer, details, {
+      stopped,
+      outstanding:
+        stopped &&
+        globalThis.OriFolderSetupVisual.requirementsOutstanding?.({ offer: state.offer }) === true
+    });
   }
   setText(
     els.question,
@@ -3579,8 +3668,10 @@ function renderOffer(place) {
     });
     const rebuild = els.actions.dataset.signature !== signature;
     els.actions.dataset.signature = signature;
+    const headActions = offerHeadActions();
     if (rebuild) {
       els.actions.replaceChildren();
+      headActions?.replaceChildren();
       taskActions?.replaceChildren();
     }
     if (rebuild && firstLook.visible) {
@@ -3640,9 +3731,17 @@ function renderOffer(place) {
         button.textContent = action.label;
         button.disabled = actionBusy;
         button.addEventListener('click', () => runAction(action));
-        els.actions.appendChild(button);
+        // Remove sits beside the headline, where a way out is looked for; the
+        // row below keeps the way forward. Its confirm returns to the row.
+        if (action.remove && headActions) {
+          button.setAttribute('aria-describedby', 'personalAssistantFolderOfferHeadline');
+          headActions.appendChild(button);
+        } else els.actions.appendChild(button);
       });
     }
+    // Written only on change: the transcript re-anchors on every mutation.
+    const headHidden = !headActions?.childElementCount;
+    if (headActions && headActions.hidden !== headHidden) headActions.hidden = headHidden;
   }
   if (els.offerNote) {
     // A one-card run says what it is doing; a stopped one already said what it
@@ -3676,10 +3775,10 @@ function renderOffer(place) {
   }
   if (
     focusedAction &&
-    !els.actions.contains(document.activeElement) &&
+    !inOfferActions(document.activeElement) &&
     !document.getElementById('personalAssistantPanel')?.hidden
   ) {
-    const replacement = Array.from(els.actions.querySelectorAll('[data-folder-action]')).find(
+    const replacement = offerActionControls().find(
       control => control.dataset.folderAction === focusedAction
     );
     const control = replacement || els.offer;
@@ -4840,14 +4939,32 @@ function showOfferFailure(payload) {
 // focusFolderAction moves focus to the first of the named card actions that is
 // there, so a keyboard user lands on what the card now offers.
 function focusFolderAction(...ids) {
-  const actions = elements()?.actions;
+  const controls = offerActionControls();
   for (const id of ids) {
-    const control = actions?.querySelector(`[data-folder-action="${id}"]`);
+    const control = controls.find(node => node.dataset.folderAction === id);
     if (control) {
       control.focus({ preventScroll: true });
       return;
     }
   }
+}
+
+// The card's actions are its row and, for a stopped setup, Remove in the
+// headline row. Focus is looked for and restored across both.
+function offerHeadActions() {
+  return document.getElementById('personalAssistantFolderOfferHeadActions');
+}
+
+function offerActionControls() {
+  return [elements()?.actions, offerHeadActions()].flatMap(scope =>
+    scope ? Array.from(scope.querySelectorAll('[data-folder-action]')) : []
+  );
+}
+
+function inOfferActions(node) {
+  return Boolean(
+    node && (elements()?.actions?.contains(node) || offerHeadActions()?.contains(node))
+  );
 }
 
 // reviewSoftware is the click on Review setup (or Review again). It is the one

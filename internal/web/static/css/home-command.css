@@ -1070,6 +1070,32 @@ body.home-command-page .home-command-bridge * {
   text-decoration: underline;
 }
 
+/* The headline row: the headline takes the width, and a stopped setup's
+   Remove sits at its end, above the way forward. */
+.pa-folder__offer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pa-folder__offer-head > .pa-specialist-offer__headline {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pa-folder__offer-head-actions {
+  flex: none;
+}
+
+.pa-folder__offer-head-actions[hidden] {
+  display: none;
+}
+
+.pa-folder__offer-head-actions .btn-link {
+  min-height: 24px;
+}
+
 .pa-specialist-setup {
   display: grid;
   min-width: 0;

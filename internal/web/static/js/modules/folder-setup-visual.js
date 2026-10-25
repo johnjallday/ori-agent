@@ -444,6 +444,15 @@
     };
   }
 
+  // requirementsOutstanding is whether the block names something the user must
+  // still settle: a plugin the saved run stopped on, or a model that is not
+  // configured. A stopped card keeps such a block in view and tucks any other
+  // under its details, where "Complete" and "Version not reported" stay readable.
+  function requirementsOutstanding(input) {
+    const view = requirementsView(input);
+    return view.rows.some(row => row.progress === 'failed') || view.model?.state === 'missing';
+  }
+
   function stoppedRequirement(setup) {
     const failed = list(setup?.lines).find(
       line => ['integration', 'provider'].includes(line.kind) && line.state === 'failed'
@@ -534,7 +543,9 @@
         node('p', requirement.source || 'Source not reported', 'folder-visual__note')
       );
       row.append(details, node('div', '', 'folder-requirements__actions'));
-      if (requirement.operation === 'ready' && (!view.saved || requirement.progress === 'done')) {
+      // Before setup a ready plugin needs nothing; in a saved run a finished
+      // step does not either, whatever it did. Both fold under Ready.
+      if (view.saved ? requirement.progress === 'done' : requirement.operation === 'ready') {
         readyList.append(row);
         readyCount++;
       } else requirements.append(row);
@@ -726,6 +737,7 @@
     requirementsView,
     modelRequirementView,
     stoppedRequirement,
+    requirementsOutstanding,
     requirementsActionLabel,
     renderRequirements,
     reviewConsequences,
