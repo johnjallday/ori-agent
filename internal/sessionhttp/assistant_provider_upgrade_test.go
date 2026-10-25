@@ -17,13 +17,20 @@ import (
 )
 
 type fakeHomeUpgrades struct {
-	status    *homeupgrade.Operation
-	statusErr error
-	review    homeupgrade.Review
-	reviewErr error
-	commit    homeupgrade.Operation
-	commitErr error
-	calls     []string
+	status     *homeupgrade.Operation
+	statusErr  error
+	review     homeupgrade.Review
+	reviewErr  error
+	commit     homeupgrade.Operation
+	commitErr  error
+	attempt    homeupgrade.Attempt
+	attemptErr error
+	calls      []string
+}
+
+func (f *fakeHomeUpgrades) Attempt(_ context.Context, owner, pluginID, token string) (homeupgrade.Attempt, error) {
+	f.calls = append(f.calls, "attempt "+owner+" "+pluginID+" "+token)
+	return f.attempt, f.attemptErr
 }
 
 func (f *fakeHomeUpgrades) Status(_ context.Context, owner, pluginID string) (*homeupgrade.Operation, error) {

@@ -901,6 +901,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/provider-upgrade", s.Handlers.Session.GetAssistantProviderUpgrade)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/review", s.Handlers.Session.ReviewAssistantProviderUpgrade)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/commit", s.Handlers.Session.CommitAssistantProviderUpgrade)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/outcome", s.Handlers.Session.OutcomeAssistantProviderUpgrade)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/roots", s.Handlers.Session.ListAssistantLibraryRoots)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/summary", s.Handlers.Session.GetAssistantLibrarySummary)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/arrangements/context", s.Handlers.Session.GetAssistantLibraryArrangementContext)
@@ -1701,6 +1702,7 @@ func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("GET /api/plugins/{name}/home-upgrade", s.Handlers.Session.GetPluginHomeUpgrade)
 			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/review", s.Handlers.Session.ReviewPluginHomeUpgrade)
 			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/commit", s.Handlers.Session.CommitPluginHomeUpgrade)
+			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/outcome", s.Handlers.Session.OutcomePluginHomeUpgrade)
 		}
 	}
 }

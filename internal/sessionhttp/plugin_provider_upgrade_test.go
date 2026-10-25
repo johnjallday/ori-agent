@@ -171,6 +171,86 @@ func TestPluginHomeUpgradeHTTP(t *testing.T) {
 	}
 }
 
+// A client that lost a commit's response asks what became of its review, by
+// the token in the body, from either page; the answer is that review's own
+// operation or the review's state, never another operation.
+func TestPluginHomeUpgradeOutcomeHTTP(t *testing.T) {
+	handler, store, station, _ := assistantPortfolioHTTPFixture(t)
+	owner := station.OwnerUserID
+	handler.currentUserID = func(context.Context) (string, error) { return owner, nil }
+	pin := workspace.AssistantProgramHomeOwner{PluginID: "studio-home", PluginVersion: "0.1.0", ProgramID: "portfolio-guide",
+		HomeSchemaVersion: 1, HomeVersion: 1, DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 1, ComponentFingerprint: strings.Repeat("b", 64)}
+	if err := store.Update(station.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.HomeProvider = &pin
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeHomeUpgrades{}
+	handler.SetHomePackageUpgrades(fake, nil)
+	handler.SetInstalledPluginLister(fakeInstalledPlugins{{Name: "studio-home", Version: "0.1.0"}})
+	fromPlugins := func(body string) *httptest.ResponseRecorder {
+		return pluginUpgradeRequest(t, handler.OutcomePluginHomeUpgrade, http.MethodPost, "studio-home", "/outcome", body)
+	}
+	fromHome := func(body string) *httptest.ResponseRecorder {
+		return providerUpgradeRequest(t, handler.OutcomeAssistantProviderUpgrade, http.MethodPost, station.ID, "/outcome", body)
+	}
+
+	for _, body := range []string{`{}`, `{"token":" "}`, `{"token":"review-1","operation_id":"op-1"}`} {
+		if rr := fromPlugins(body); rr.Code != http.StatusBadRequest {
+			t.Fatalf("outcome %s = %d %s", body, rr.Code, rr.Body.String())
+		}
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("malformed outcome requests reached the service: %v", fake.calls)
+	}
+
+	fake.attempt = homeupgrade.Attempt{Review: homeupgrade.ReviewPending}
+	for name, request := range map[string]func(string) *httptest.ResponseRecorder{"plugins": fromPlugins, "home": fromHome} {
+		rr := request(`{"token":"review-1"}`)
+		var view providerUpgradeAttemptView
+		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &view) != nil || view.Review != "pending" || view.Operation != nil {
+			t.Fatalf("%s pending outcome = %d %s", name, rr.Code, rr.Body.String())
+		}
+		if last := fake.calls[len(fake.calls)-1]; last != "attempt "+owner+" studio-home review-1" {
+			t.Fatalf("%s outcome reached the service as %q", name, last)
+		}
+	}
+
+	fake.attempt = homeupgrade.Attempt{Operation: &homeupgrade.Operation{ID: "op-1", Status: homeupgrade.StatusSucceeded,
+		Plan: homeupgrade.Plan{FromVersion: "0.1.0", ToVersion: "0.2.0"}}}
+	rr := fromPlugins(`{"token":"review-1"}`)
+	var view providerUpgradeAttemptView
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &view) != nil || view.Review != "" ||
+		view.Operation == nil || view.Operation.ID != "op-1" || view.Operation.Status != homeupgrade.StatusSucceeded || view.Operation.ToVersion != "0.2.0" {
+		t.Fatalf("finished outcome = %d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "review-1") {
+		t.Fatalf("outcome echoed the review token: %s", rr.Body.String())
+	}
+
+	// An unreadable outcome is said to be unavailable, never success.
+	fake.attempt, fake.attemptErr = homeupgrade.Attempt{}, errors.Join(homeupgrade.ErrUnavailable, errors.New("database is locked"))
+	if rr := fromPlugins(`{"token":"review-1"}`); rr.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(rr.Body.String(), `"code":"home_upgrade_unavailable"`) || strings.Contains(rr.Body.String(), "locked") {
+		t.Fatalf("unreadable outcome = %d %s", rr.Code, rr.Body.String())
+	}
+
+	handler.currentUserID = func(context.Context) (string, error) { return "someone-else", nil }
+	before := len(fake.calls)
+	if rr := fromPlugins(`{"token":"review-1"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("other owner outcome = %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := fromHome(`{"token":"review-1"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("other owner Home outcome = %d %s", rr.Code, rr.Body.String())
+	}
+	if len(fake.calls) != before {
+		t.Fatalf("another owner reached the service: %v", fake.calls[before:])
+	}
+}
+
 func TestPluginHomeUpgradeCommitHTTP(t *testing.T) {
 	handler, store, station, _ := assistantPortfolioHTTPFixture(t)
 	owner := station.OwnerUserID

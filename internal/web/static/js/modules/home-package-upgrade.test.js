@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 import {
   HomePackageUpgradeDialog,
+  homeUpgradeRowNotice,
   openHomePackageUpgrade,
   pluginUpgradeTransport,
   providerUpgradeSummary,
@@ -109,6 +110,13 @@ class FakeNode {
     this.open = false;
   }
 
+  contains(node) {
+    for (let current = node; current; current = current.parent) {
+      if (current === this) return true;
+    }
+    return false;
+  }
+
   all(predicate) {
     return this.children.flatMap(child => [
       ...(predicate(child) ? [child] : []),
@@ -158,7 +166,7 @@ const REVIEW = {
   skills: ['studio-home']
 };
 
-function harness({ review = REVIEW, commit } = {}) {
+function harness({ review = REVIEW, commit, status, outcome } = {}) {
   const doc = fakeDocument();
   const trigger = doc.createElement('button');
   doc.body.append(trigger);
@@ -174,8 +182,38 @@ function harness({ review = REVIEW, commit } = {}) {
       return commit ? commit(token) : { id: 'op-1', status: 'succeeded', to_version: '0.2.0' };
     }
   };
+  if (status) {
+    transport.status = async () => {
+      calls.push('status');
+      return status();
+    };
+  }
+  if (outcome) {
+    transport.outcome = async token => {
+      calls.push(`outcome ${token}`);
+      return outcome(token);
+    };
+  }
   return { doc, trigger, calls, transport };
 }
+
+function lost() {
+  const error = new Error('Ori could not be reached, so its answer was lost.');
+  error.transport = true;
+  return error;
+}
+
+// Answers in order, repeating the last one.
+function answers(...items) {
+  let index = 0;
+  return () => {
+    const item = items[Math.min(index++, items.length - 1)];
+    if (item instanceof Error) throw item;
+    return typeof item === 'function' ? item() : item;
+  };
+}
+
+const QUICK = [0, 1, 1, 1];
 
 test('the review names the Homes that move and says how much changes', () => {
   assert.equal(
@@ -283,9 +321,14 @@ test('only a succeeded operation is success', async () => {
   await dialog.open();
   await dialog.commit();
   assert.equal(succeeded, false);
-  assert.equal(dialog.state, 'commit-failed');
-  assert.match(dialog.parts.error.textContent, /did not finish \(reconcile_required\).*op-9/);
-  assert.equal(button(dialog.parts.dialog, 'Cancel').disabled, false);
+  // An operation that stopped partway holds the package; nothing here offers
+  // to repair or retry it.
+  assert.equal(dialog.state, 'held');
+  assert.equal(dialog.parts.heading.textContent, 'This update needs attention');
+  assert.match(dialog.parts.status.textContent, /stopped partway \(operation op-9\)/);
+  assert.equal(button(dialog.parts.dialog, 'Check again'), null);
+  assert.equal(button(dialog.parts.dialog, 'Review again'), null);
+  assert.equal(button(dialog.parts.dialog, 'Close').disabled, false);
 });
 
 test('a refused commit reports the server message and operation', async () => {
@@ -323,7 +366,7 @@ test('a review that arrives after the dialog closed changes nothing', async () =
   assert.deepEqual(calls, ['review']);
 });
 
-test('a review that cannot be made says why and offers only Cancel', async () => {
+test('a review that cannot be made says why and offers only Close', async () => {
   const { doc, trigger, transport } = harness({
     review: () => {
       throw new Error('No newer release of this plugin is available.');
@@ -335,7 +378,7 @@ test('a review that cannot be made says why and offers only Cancel', async () =>
   assert.equal(dialog.parts.error.getAttribute('role'), 'alert');
   assert.equal(dialog.parts.error.textContent, 'No newer release of this plugin is available.');
   assert.equal(button(dialog.parts.dialog, 'Confirm update'), null);
-  assert.equal(doc.activeElement, button(dialog.parts.dialog, 'Cancel'));
+  assert.equal(doc.activeElement, button(dialog.parts.dialog, 'Close'));
 });
 
 test('the plugin transport names the plugin in the path and the token only in the body', async () => {
@@ -400,10 +443,13 @@ const HOME_UPGRADE_REQUIRED = {
 
 // pluginsPage runs the real Plugins page script against the real shared
 // dialog, recording every request, toast and navigation it makes.
-function pluginsPage({ updateResponses }) {
+function pluginsPage({ updateResponses, statusAnswers = {} }) {
   const doc = fakeDocument();
   doc.addEventListener = () => {};
-  doc.getElementById = () => null;
+  // The installed list is drawn as markup; its rows are read as that markup.
+  const pluginList = doc.createElement('div');
+  pluginList.querySelectorAll = () => [];
+  doc.getElementById = id => (id === 'pluginList' ? pluginList : null);
   doc.querySelectorAll = selector =>
     selector === '[data-plugin-action="update"]'
       ? doc.body.all(node => node.getAttribute('data-plugin-action') === 'update')
@@ -427,6 +473,10 @@ function pluginsPage({ updateResponses }) {
   const upgradeFetch = async (url, options) => {
     requests.push(`${options.method} ${url}`);
     const name = decodeURIComponent(url.split('/')[3]);
+    if (options.method === 'GET' && statusAnswers[name]) {
+      const { status = 200, body } = statusAnswers[name];
+      return { ok: status < 400, status, json: async () => body };
+    }
     const payload = url.endsWith('/commit')
       ? { id: 'op-1', status: 'succeeded', to_version: '0.2.0', agents: [] }
       : { ...REVIEW, plugin_id: name };
@@ -481,7 +531,8 @@ function pluginsPage({ updateResponses }) {
           opened.push({ options, dialog });
           return dialog;
         },
-        pluginUpgradeTransport: name => pluginUpgradeTransport(name, { fetchImpl: upgradeFetch })
+        pluginUpgradeTransport: name => pluginUpgradeTransport(name, { fetchImpl: upgradeFetch }),
+        homeUpgradeRowNotice
       }
     }
   };
@@ -492,6 +543,7 @@ function pluginsPage({ updateResponses }) {
     page: sandbox.window,
     doc,
     location,
+    pluginList,
     updateButton,
     requests,
     toasts,
@@ -512,8 +564,10 @@ test('Update of a plugin a Home uses opens the shared review in place; Cancel co
   assert.equal(dialog.state, 'review');
   assert.equal(dialog.parts.dialog.open, true);
   assert.match(dialog.parts.dialog.textContent, /Update studio-home to 0\.2\.0\?/);
+  // The dialog reads the package's status before reviewing.
   assert.deepEqual(plugins.requests, [
     'POST /api/plugins/studio-home/update {"confirm":false}',
+    'GET /api/plugins/studio-home/home-upgrade',
     'POST /api/plugins/studio-home/home-upgrade/review'
   ]);
   // No navigation, no hand-off toast, and the page URL is what it was.
@@ -701,4 +755,370 @@ test('a confirmed update on the Plugins page commits the reviewed token once and
   assert.ok(plugins.requests.includes('refresh update status'));
   assert.deepEqual(plugins.navigations, []);
   assert.equal(plugins.location.href, 'http://ori.test/plugins');
+});
+
+test('only an answer without Ori’s own code counts as a lost answer', async () => {
+  const fetchFrom = response => async () => response;
+  const cases = [
+    [
+      async () => {
+        throw new TypeError('Failed to fetch');
+      },
+      true
+    ],
+    [fetchFrom({ ok: false, status: 502, json: async () => JSON.parse('<html>') }), true],
+    [fetchFrom({ ok: false, status: 504, json: async () => ({ error: 'gateway' }) }), true],
+    [fetchFrom({ ok: true, status: 200, json: async () => JSON.parse('not json') }), true],
+    [
+      fetchFrom({
+        ok: false,
+        status: 503,
+        json: async () => ({ code: 'home_upgrade_unavailable', message: 'Nothing was changed.' })
+      }),
+      false
+    ],
+    // The reset fence answers before any handler runs: Ori's own answer.
+    [
+      fetchFrom({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: 'reset_pending', message: 'Ordinary work is paused.' })
+      }),
+      false
+    ]
+  ];
+  for (const [fetchImpl, transport] of cases) {
+    await assert.rejects(
+      () => upgradeRequest(fetchImpl, '/api/plugins/x/home-upgrade/commit', { method: 'POST' }),
+      error => Boolean(error.transport) === transport
+    );
+  }
+});
+
+test('a lost commit answer is resolved from that review’s own operation, never by committing again', async () => {
+  let succeeded = null;
+  const { doc, trigger, calls, transport } = harness({
+    commit: answers(lost()),
+    outcome: answers(
+      { review: 'pending' },
+      { operation: { id: 'op-5', status: 'replaced', to_version: '0.2.0' } },
+      { operation: { id: 'op-5', status: 'succeeded', to_version: '0.2.0', agents: [] } }
+    )
+  });
+  const dialog = new HomePackageUpgradeDialog({
+    transport,
+    trigger,
+    documentRef: doc,
+    outcomeDelays: QUICK,
+    onSucceeded: operation => {
+      succeeded = operation;
+    }
+  });
+  await dialog.open();
+  const operation = await dialog.commit();
+  assert.equal(operation.id, 'op-5');
+  assert.equal(succeeded.id, 'op-5');
+  assert.equal(dialog.state, 'succeeded');
+  assert.deepEqual(calls, [
+    'review',
+    'commit review-token-1',
+    'outcome review-token-1',
+    'outcome review-token-1',
+    'outcome review-token-1'
+  ]);
+});
+
+test('an outcome that stays unknown says so, offers Check again, and never commits again', async () => {
+  let outcome = answers({ review: 'pending' });
+  const { doc, trigger, calls, transport } = harness({
+    commit: answers(lost()),
+    outcome: token => outcome(token)
+  });
+  const dialog = new HomePackageUpgradeDialog({
+    transport,
+    trigger,
+    documentRef: doc,
+    outcomeDelays: QUICK
+  });
+  await dialog.open();
+  assert.equal(await dialog.commit(), null);
+  assert.equal(dialog.state, 'unknown');
+  assert.equal(dialog.parts.heading.textContent, 'The outcome is not known yet');
+  assert.match(
+    dialog.parts.status.textContent,
+    /no record that this update started.*nothing will be committed again/
+  );
+  assert.equal(button(dialog.parts.dialog, 'Confirm update'), null);
+  assert.equal(button(dialog.parts.dialog, 'Review again'), null);
+  assert.equal(calls.filter(call => call.startsWith('commit')).length, 1);
+  assert.equal(calls.filter(call => call.startsWith('outcome')).length, QUICK.length);
+
+  outcome = answers({ operation: { id: 'op-6', status: 'succeeded', to_version: '0.2.0' } });
+  button(dialog.parts.dialog, 'Check again').click();
+  await settle();
+  assert.equal(dialog.state, 'succeeded');
+  assert.equal(calls.filter(call => call.startsWith('commit')).length, 1);
+});
+
+test('an outcome that cannot be read is unavailable, never success', async () => {
+  const refused = new Error('The upgrade could not be completed. Nothing was changed; try again.');
+  refused.code = 'home_upgrade_unavailable';
+  const { doc, trigger, transport } = harness({
+    commit: answers(lost()),
+    outcome: answers(refused)
+  });
+  const dialog = new HomePackageUpgradeDialog({
+    transport,
+    trigger,
+    documentRef: doc,
+    outcomeDelays: QUICK
+  });
+  await dialog.open();
+  await dialog.commit();
+  assert.equal(dialog.state, 'unknown');
+  assert.match(dialog.parts.status.textContent, /could not say what became of the update/);
+});
+
+test('a review that was never applied offers Review again with a fresh review and confirmation', async () => {
+  for (const [answer, words] of [
+    [
+      {
+        operation: {
+          id: 'op-8',
+          status: 'cancelled',
+          reason: 'The download failed. Nothing changed.'
+        }
+      },
+      /download failed.*op-8/
+    ],
+    [{ review: 'expired' }, /expired before Ori applied it/],
+    [{ review: 'unknown' }, /no record of this review/]
+  ]) {
+    let reviews = 0;
+    const { doc, trigger, calls, transport } = harness({
+      review: () => ({ ...REVIEW, token: `review-token-${++reviews}` }),
+      commit: answers(lost(), { id: 'op-9', status: 'succeeded', to_version: '0.2.0' }),
+      outcome: answers(answer)
+    });
+    const dialog = new HomePackageUpgradeDialog({
+      transport,
+      trigger,
+      documentRef: doc,
+      outcomeDelays: QUICK
+    });
+    await dialog.open();
+    await dialog.commit();
+    assert.equal(dialog.state, 'settled');
+    assert.equal(dialog.parts.heading.textContent, 'The update was not applied');
+    assert.match(dialog.parts.status.textContent, words);
+
+    button(dialog.parts.dialog, 'Review again').click();
+    await settle();
+    assert.equal(dialog.state, 'review');
+    assert.equal(dialog.review.token, 'review-token-2');
+    button(dialog.parts.dialog, 'Confirm update').click();
+    await settle();
+    assert.equal(dialog.state, 'succeeded');
+    assert.deepEqual(
+      calls.filter(call => call.startsWith('commit')),
+      ['commit review-token-1', 'commit review-token-2']
+    );
+  }
+});
+
+test('a stale review offers Review again; a newer load wins over an older one', async () => {
+  const slow = deferred();
+  let reviews = 0;
+  const stale = new Error(
+    'The review expired or something changed since. Review the upgrade again.'
+  );
+  stale.code = 'home_upgrade_review_stale';
+  const { doc, trigger, transport } = harness({
+    review: () => {
+      reviews += 1;
+      if (reviews === 2) return slow.promise;
+      return { ...REVIEW, token: `review-token-${reviews}` };
+    },
+    commit: answers(stale)
+  });
+  const dialog = new HomePackageUpgradeDialog({ transport, trigger, documentRef: doc });
+  await dialog.open();
+  await dialog.commit();
+  assert.equal(dialog.state, 'commit-failed');
+  const again = button(dialog.parts.dialog, 'Review again');
+  assert.equal(doc.activeElement, again);
+  again.click(); // review 2 hangs
+  void dialog.load(); // review 3 answers first
+  await settle();
+  assert.equal(dialog.review.token, 'review-token-3');
+  slow.resolve({ ...REVIEW, token: 'review-token-2' });
+  await settle();
+  assert.equal(dialog.review.token, 'review-token-3');
+  assert.equal(dialog.parts.dialog.all(node => node.textContent === 'Confirm update').length, 1);
+});
+
+test('reopening while an operation holds the package shows it instead of a review', async () => {
+  let status = answers({ operation: { id: 'op-4', status: 'claimed', to_version: '0.2.0' } });
+  const { doc, trigger, calls, transport } = harness({ status: () => status() });
+  const dialog = new HomePackageUpgradeDialog({ transport, trigger, documentRef: doc });
+  await dialog.open();
+  assert.equal(dialog.state, 'held');
+  assert.equal(dialog.parts.heading.textContent, 'An update is in progress');
+  assert.match(dialog.parts.status.textContent, /operation op-4/);
+  assert.deepEqual(calls, ['status']);
+
+  status = answers({ last_operation: { id: 'op-4', status: 'succeeded' } });
+  button(dialog.parts.dialog, 'Check again').click();
+  await settle();
+  assert.equal(dialog.state, 'review');
+  assert.deepEqual(calls, ['status', 'status', 'review']);
+
+  // One that needs reconciliation is shown, with nothing to retry here.
+  const held = harness({
+    status: answers({
+      operation: {
+        id: 'op-2',
+        status: 'reconcile_required',
+        to_version: '0.2.0',
+        reason: 'The plugin replacement stopped partway.'
+      }
+    })
+  });
+  const blocked = new HomePackageUpgradeDialog({
+    transport: held.transport,
+    trigger: held.trigger,
+    documentRef: held.doc
+  });
+  await blocked.open();
+  assert.equal(blocked.state, 'held');
+  assert.match(
+    blocked.parts.status.textContent,
+    /op-2.*stopped partway.*Nothing is chosen automatically/
+  );
+  assert.equal(button(blocked.parts.dialog, 'Check again'), null);
+  assert.deepEqual(held.calls, ['status']);
+});
+
+test('closing while the outcome is being checked stops checking', async () => {
+  const { doc, trigger, calls, transport } = harness({
+    commit: answers(lost()),
+    outcome: answers({ review: 'pending' })
+  });
+  const dialog = new HomePackageUpgradeDialog({
+    transport,
+    trigger,
+    documentRef: doc,
+    outcomeDelays: [0, 60_000, 60_000]
+  });
+  await dialog.open();
+  const committing = dialog.commit();
+  await settle();
+  assert.equal(dialog.state, 'checking');
+  assert.equal(dialog.close(), true);
+  await committing; // the pending wait is woken and the check ends
+  assert.equal(dialog.timer, null);
+  assert.equal(calls.filter(call => call.startsWith('outcome')).length, 1);
+  assert.equal(dialog.state, 'closed');
+});
+
+test('a plugin row names what its Homes are going through', () => {
+  assert.equal(homeUpgradeRowNotice(null), null);
+  assert.equal(homeUpgradeRowNotice({ homes: [] }), null);
+  assert.deepEqual(homeUpgradeRowNotice({ homes: [{ name: 'North Studio' }] }), {
+    state: 'homes',
+    text: 'Used by North Studio; Update moves it with the plugin.'
+  });
+  assert.equal(
+    homeUpgradeRowNotice({ homes: [{ name: 'A' }, { name: 'B' }, { name: 'C' }] }).text,
+    'Used by A, B and C; Update moves them together.'
+  );
+  assert.deepEqual(
+    homeUpgradeRowNotice({
+      homes: [{ name: 'A' }],
+      operation: { id: 'op-3', status: 'claimed', to_version: '0.2.0' }
+    }),
+    { state: 'running', text: 'Home update to 0.2.0 is in progress (operation op-3).' }
+  );
+  // A finished operation is history: it does not hold the row.
+  assert.equal(
+    homeUpgradeRowNotice({
+      homes: [{ name: 'A' }],
+      last_operation: { id: 'op-3', status: 'succeeded' }
+    }).state,
+    'homes'
+  );
+  assert.equal(homeUpgradeRowNotice({ status_unavailable: true }).state, 'unavailable');
+});
+
+test('a plugin row keeps an operation holding its Homes visible without an update badge', async () => {
+  const installed = name => ({
+    name,
+    version: '0.1.0',
+    format: 'claude',
+    enabled: true,
+    workspace_surfaces: { assistant_program_homes: [{ id: 'studio-home' }] }
+  });
+  const plugins = pluginsPage({
+    updateResponses: [
+      {
+        ok: true,
+        data: {
+          plugins: [
+            installed('held-home'),
+            installed('other-owners-home'),
+            installed('unreadable-home'),
+            installed('quiet-home'),
+            { name: 'plain', version: '1.0.0', format: 'claude', enabled: true }
+          ]
+        }
+      }
+    ],
+    statusAnswers: {
+      'held-home': {
+        body: {
+          plugin_id: 'held-home',
+          homes: [{ name: 'North Studio' }],
+          operation: {
+            id: 'op-4',
+            status: 'reconcile_required',
+            to_version: '0.2.0',
+            reason: 'The plugin replacement stopped partway.'
+          }
+        }
+      },
+      'other-owners-home': {
+        status: 404,
+        body: { code: 'not_found', message: 'This plugin has no Home package upgrade' }
+      },
+      'unreadable-home': {
+        status: 503,
+        body: { code: 'home_upgrade_unavailable', message: 'unavailable' }
+      },
+      'quiet-home': {
+        body: {
+          plugin_id: 'quiet-home',
+          homes: [{ name: 'North Studio' }, { name: 'South Label' }]
+        }
+      }
+    }
+  });
+  await plugins.page.loadPlugins();
+  await settle();
+  await settle();
+  const html = plugins.pluginList.innerHTML;
+  assert.match(
+    html,
+    /data-plugin-home-upgrade="attention">Home update to 0\.2\.0 needs attention \(operation op-4\)\. The plugin replacement stopped partway\. Nothing is chosen automatically\./
+  );
+  assert.match(
+    html,
+    /data-plugin-home-upgrade="homes">Used by North Studio and South Label; Update moves them together\./
+  );
+  assert.match(
+    html,
+    /data-plugin-home-upgrade="unavailable">Home update status is unavailable right now\./
+  );
+  assert.equal((html.match(/data-plugin-home-upgrade=/g) || []).length, 3);
+  // Only plugins that declare Homes are asked about.
+  assert.ok(!plugins.requests.some(request => request.includes('/plain/home-upgrade')));
 });

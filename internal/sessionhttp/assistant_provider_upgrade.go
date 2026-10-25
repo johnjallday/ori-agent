@@ -21,6 +21,7 @@ type HomePackageUpgrades interface {
 	Status(ctx context.Context, ownerID, pluginID string) (*homeupgrade.Operation, error)
 	Review(ctx context.Context, ownerID, pluginID string) (homeupgrade.Review, error)
 	Commit(ctx context.Context, ownerID, pluginID, reviewToken string) (homeupgrade.Operation, error)
+	Attempt(ctx context.Context, ownerID, pluginID, reviewToken string) (homeupgrade.Attempt, error)
 }
 
 // SetHomePackageUpgrades wires the upgrade and the Plugins page's cached update
@@ -125,6 +126,14 @@ func providerUpgradeResourceAddition(label string) string {
 
 type providerUpgradeCommitRequest struct {
 	Token string `json:"token"`
+}
+
+// providerUpgradeAttemptView is what became of one review's commit: its
+// operation, or, when it started none, the review's state (pending, expired
+// or unknown).
+type providerUpgradeAttemptView struct {
+	Operation *providerUpgradeOperationView `json:"operation,omitempty"`
+	Review    string                        `json:"review,omitempty"`
 }
 
 // providerUpgradeScope resolves the owner's Home and the package its pin names.
@@ -309,6 +318,40 @@ func (h *Handler) respondProviderUpgradeCommit(w http.ResponseWriter, r *http.Re
 		return
 	}
 	_ = orihttp.RespondSuccess(w, providerUpgradeOperation(operation))
+}
+
+// OutcomeAssistantProviderUpgrade is POST .../assistant-program/provider-upgrade/outcome.
+func (h *Handler) OutcomeAssistantProviderUpgrade(w http.ResponseWriter, r *http.Request) {
+	owner, station, ok := h.providerUpgradeScope(w, r)
+	if !ok {
+		return
+	}
+	h.respondProviderUpgradeAttempt(w, r, owner, station.GetAssistantProgramState().HomeProvider.PluginID)
+}
+
+// respondProviderUpgradeAttempt answers a client that lost a commit's
+// response. The token travels in the body, never in a URL, and the answer is
+// only that review's own operation: reading it settles an interrupted
+// operation as every upgrade read does, and never commits.
+func (h *Handler) respondProviderUpgradeAttempt(w http.ResponseWriter, r *http.Request, owner, pluginID string) {
+	var request providerUpgradeCommitRequest
+	if !h.decodeAssistantProgramJSON(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.Token) == "" {
+		_ = orihttp.RespondBadRequest(w, "Name the reviewed update")
+		return
+	}
+	attempt, err := h.homePackageUpgrades.Attempt(r.Context(), owner, pluginID, request.Token)
+	if err != nil {
+		respondProviderUpgradeError(w, err, nil)
+		return
+	}
+	view := providerUpgradeAttemptView{Review: attempt.Review}
+	if attempt.Operation != nil {
+		view.Operation, view.Review = providerUpgradeOperation(*attempt.Operation), ""
+	}
+	_ = orihttp.RespondSuccess(w, view)
 }
 
 var providerUpgradeMessages = map[string]string{

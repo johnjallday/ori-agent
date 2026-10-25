@@ -153,6 +153,26 @@ test('package upgrade card offers a review only for an available release', () =>
     providerUpgradeCard({ operation: { status: 'replaced', to_version: '0.1.1' } }).state,
     'running'
   );
+
+  // An unreadable status is shown as such, not as "nothing running", and
+  // offers no review until it can be read.
+  const unreadable = providerUpgradeCard({
+    plugin_id: 'music-project-management',
+    available: true,
+    status_unavailable: true
+  });
+  assert.equal(unreadable.state, 'unavailable');
+  assert.equal(unreadable.reviewable, false);
+  assert.match(unreadable.text, /could not read.*Nothing is assumed to have finished/);
+  // A finished operation is history: the card still offers a newer release.
+  assert.equal(
+    providerUpgradeCard({
+      available: true,
+      available_version: '0.1.2',
+      last_operation: { status: 'succeeded' }
+    }).state,
+    'available'
+  );
 });
 
 test('package upgrade result counts updated and kept agents', () => {

@@ -80,6 +80,17 @@ export function providerUpgradeCard(upgrade, result = null) {
       reviewable: false
     };
   }
+  // An unreadable status is said to be unreadable: it is not evidence that
+  // nothing is running.
+  if (upgrade?.status_unavailable) {
+    return {
+      hidden: false,
+      state: 'unavailable',
+      title: 'Package upgrade status unavailable',
+      text: `Ori could not read whether an upgrade of ${text(upgrade.plugin_id)} is running. Nothing is assumed to have finished; reload to check again.`,
+      reviewable: false
+    };
+  }
   if (upgrade?.available) {
     return {
       hidden: false,
@@ -655,7 +666,7 @@ export class AssistantProgramPage {
   // does; this page only addresses it through its own Home.
   openProviderUpgradeReview(trigger) {
     return openHomePackageUpgrade({
-      transport: homeUpgradeTransport((path, options) => this.request(path, options)),
+      transport: homeUpgradeTransport(this.workspaceId, { fetchImpl: this.fetchImpl }),
       trigger,
       // A succeeded upgrade hides the Review button, so focus returns to the
       // card that now says what happened.

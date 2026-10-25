@@ -121,6 +121,45 @@ func (s *Service) Status(ctx context.Context, ownerID, pluginID string) (*Operat
 	return &operations[0], nil
 }
 
+// Attempt recovers interrupted operations, then reports what became of the
+// commit of exactly the review reviewToken names, for its owner and package.
+// It is how a client that lost a commit's response learns the outcome without
+// committing again, and without mistaking another review's operation (an
+// older success, another tab's commit) for its own.
+func (s *Service) Attempt(ctx context.Context, ownerID, pluginID, reviewToken string) (Attempt, error) {
+	if !s.ready() || strings.TrimSpace(ownerID) == "" || strings.TrimSpace(pluginID) == "" || strings.TrimSpace(reviewToken) == "" {
+		return Attempt{}, ErrUnavailable
+	}
+	if err := s.Recover(ctx); err != nil {
+		return Attempt{}, errors.Join(ErrUnavailable, err)
+	}
+	operations, err := s.operations(ctx, `WHERE owner_user_id = ? AND plugin_id = ? AND review_token = ?`, ownerID, pluginID, reviewToken)
+	if err != nil {
+		return Attempt{}, errors.Join(ErrUnavailable, err)
+	}
+	if len(operations) == 1 {
+		return Attempt{Operation: &operations[0]}, nil
+	}
+	var expiresAt time.Time
+	var consumedAt sql.NullTime
+	err = s.db.QueryRowContext(ctx, `SELECT expires_at, consumed_at FROM home_package_upgrade_review
+		WHERE token = ? AND owner_user_id = ? AND plugin_id = ?`, reviewToken, ownerID, pluginID).Scan(&expiresAt, &consumedAt)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return Attempt{Review: ReviewUnknown}, nil
+	case err != nil:
+		return Attempt{}, errors.Join(ErrUnavailable, err)
+	case consumedAt.Valid:
+		// Consumed with no operation cannot happen (one transaction); claim
+		// nothing about it rather than guess.
+		return Attempt{Review: ReviewUnknown}, nil
+	case !expiresAt.After(s.now().UTC()):
+		return Attempt{Review: ReviewExpired}, nil
+	default:
+		return Attempt{Review: ReviewPending}, nil
+	}
+}
+
 // Recover settles every claimed or replaced operation this process is not
 // already driving: see independent-program-homes.md §6.1 Recovery.
 func (s *Service) Recover(ctx context.Context) error {

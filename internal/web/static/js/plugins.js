@@ -42,6 +42,8 @@
   let questCache = [];
   let pluginLoadGeneration = 0;
   let updateIndex = new Map();
+  // The Home upgrade status of each installed plugin Homes use, by name.
+  let homeUpgradeIndex = new Map();
   let lastNoticeSignature = '';
 
   function renderUpdateNotice(model) {
@@ -72,10 +74,92 @@
   function renderInstalledPlugins() {
     const list = byId('pluginList');
     if (!list || !installedLoaded) return;
+    // Redrawing replaces every row; keyboard focus stays on the same control.
+    const active = document.activeElement;
+    const focused =
+      active && list.contains(active) && active.getAttribute
+        ? {
+            action: active.getAttribute('data-plugin-action'),
+            name: active.getAttribute('data-plugin-name')
+          }
+        : null;
     list.innerHTML = installedCache.length
       ? installedCache.map(renderPlugin).join('')
       : '<p class="text-muted mb-0">No plugins installed yet.</p>';
+    if (focused && focused.action) {
+      const again = Array.from(list.querySelectorAll('[data-plugin-action]')).find(
+        button =>
+          button.getAttribute('data-plugin-action') === focused.action &&
+          button.getAttribute('data-plugin-name') === focused.name
+      );
+      if (again) again.focus();
+    }
     renderAvailableIntegrations();
+  }
+
+  // ---- Home upgrade status ----
+
+  function backsHomes(p) {
+    const homes = p && p.workspace_surfaces && p.workspace_surfaces.assistant_program_homes;
+    return Array.isArray(homes) && homes.length > 0;
+  }
+
+  // homeUpgradeStatus reads one plugin's Home upgrade status. A plugin none
+  // of this owner's Homes use has none (404); any other failure is shown as
+  // unavailable rather than as "nothing running".
+  async function homeUpgradeStatus(name) {
+    const upgrade = window.HomePackageUpgrade;
+    if (!upgrade) return null;
+    try {
+      return await upgrade.pluginUpgradeTransport(name).status();
+    } catch (e) {
+      return e && e.status === 404 ? null : { status_unavailable: true };
+    }
+  }
+
+  async function loadHomeUpgradeStatus(generation) {
+    const names = installedCache.filter(backsHomes).map(p => String(p.name));
+    const next = new Map();
+    await Promise.all(
+      names.map(async name => {
+        const view = await homeUpgradeStatus(name);
+        if (view) next.set(name, view);
+      })
+    );
+    if (generation !== pluginLoadGeneration) return;
+    homeUpgradeIndex = next;
+    renderInstalledPlugins();
+  }
+
+  async function refreshHomeUpgradeStatus(name) {
+    const generation = pluginLoadGeneration;
+    const view = await homeUpgradeStatus(name);
+    if (generation !== pluginLoadGeneration) return;
+    if (view) homeUpgradeIndex.set(name, view);
+    else homeUpgradeIndex.delete(name);
+    renderInstalledPlugins();
+  }
+
+  function homeUpgradeRow(rawName) {
+    const upgrade = window.HomePackageUpgrade;
+    if (!upgrade || typeof upgrade.homeUpgradeRowNotice !== 'function') return '';
+    const notice = upgrade.homeUpgradeRowNotice(homeUpgradeIndex.get(rawName));
+    if (!notice) return '';
+    const tone =
+      notice.state === 'attention'
+        ? 'text-danger'
+        : notice.state === 'homes'
+          ? 'text-muted'
+          : 'text-warning';
+    return (
+      '<div class="small mt-1 plugin-home-upgrade ' +
+      tone +
+      '" data-plugin-home-upgrade="' +
+      esc(notice.state) +
+      '">' +
+      esc(notice.text) +
+      '</div>'
+    );
   }
 
   // Host-generated install quests carry an integration key. The catalog lists
@@ -394,6 +478,7 @@
       installedLoaded = true;
       questCache = [];
       renderInstalledPlugins();
+      void loadHomeUpgradeStatus(generation);
       try {
         const { loadSetupQuests } = await import('/js/modules/setup-quest-links.js');
         const quests = await loadSetupQuests();
@@ -464,6 +549,7 @@
       ' &middot; Skills: ' +
       skills +
       '</div>' +
+      homeUpgradeRow(rawName) +
       // Lifecycle state in the same words the creation wizard uses, so a user
       // moving between the two surfaces is never told two different things
       // about one plugin.
@@ -618,6 +704,13 @@
         const scroll = typeof window.scrollY === 'number' ? window.scrollY : null;
         await window.refreshPluginsPage();
         if (scroll !== null && typeof window.scrollTo === 'function') window.scrollTo(0, scroll);
+      },
+      // Whatever the dialog last showed (a hold, an unknown outcome), the row
+      // reads the plugin's status again; closing stopped nothing on the server.
+      onClosed: dialog => {
+        if (!dialog.operation || dialog.operation.status !== 'succeeded') {
+          void refreshHomeUpgradeStatus(name);
+        }
       }
     });
   }

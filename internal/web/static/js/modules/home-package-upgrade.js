@@ -81,58 +81,95 @@ function homesPhrase(review) {
   return homes.length > 1 ? `${homes.length} Homes` : 'the Home';
 }
 
+function lostAnswer(message, cause = null) {
+  const error = new Error(message);
+  // transport: Ori's own answer never arrived (or could not be read), so it
+  // says nothing about what Ori did.
+  error.transport = true;
+  error.cause = cause;
+  return error;
+}
+
 // upgradeRequest performs one upgrade call. A refusal throws with the
 // server's message, stable code and details (an operation's ID and status).
+// When Ori's answer is lost — no response, an unreadable body, or an error
+// page without Ori's own code — the error is marked transport.
 export async function upgradeRequest(fetchImpl, url, options = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('Network access is unavailable');
-  const response = await fetchImpl(url, {
-    headers: {
-      Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {})
-    },
-    ...options
-  });
-  let payload = {};
+  let response;
   try {
-    payload = (await response.json()) || {};
+    response = await fetchImpl(url, {
+      headers: {
+        Accept: 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...options
+    });
+  } catch (cause) {
+    throw lostAnswer('Ori could not be reached, so its answer was lost.', cause);
+  }
+  let payload = null;
+  try {
+    payload = await response.json();
   } catch (_) {
-    payload = {};
+    payload = null;
   }
   if (!response.ok) {
-    const error = new Error(
-      text(payload.error || payload.message || `Request failed (${response.status})`)
-    );
+    // Ori's own refusals carry a code; a few (the reset fence) carry it as
+    // error beside a message. Anything else is not Ori's answer.
+    const code =
+      typeof payload?.code === 'string' && payload.code !== ''
+        ? payload.code
+        : typeof payload?.error === 'string' && typeof payload?.message === 'string'
+          ? payload.error
+          : '';
+    const error = code
+      ? new Error(
+          text(
+            (payload.code ? payload.error || payload.message : payload.message) ||
+              `Request failed (${response.status})`
+          )
+        )
+      : lostAnswer(`Ori's answer was lost (${response.status}).`);
     error.status = response.status;
-    error.code = text(payload.code);
-    error.details = payload.details || null;
+    error.code = code;
+    error.details = (code && payload.details) || null;
     throw error;
+  }
+  if (payload == null || typeof payload !== 'object') {
+    throw lostAnswer("Ori's answer could not be read.");
   }
   return payload;
 }
 
-// homeUpgradeTransport addresses the upgrade from one Home. request is the
-// Home page's own API call, rooted at that Home's assistant program.
-export function homeUpgradeTransport(request) {
+function upgradeTransport(base, fetchImpl) {
+  // Keep browser fetch a plain invocation: a stored Window.fetch called as a
+  // method gets the wrong receiver.
+  const call = (suffix, options) =>
+    upgradeRequest((...args) => fetchImpl(...args), base + suffix, options);
+  const named = token => JSON.stringify({ token });
   return {
-    review: () => request('/provider-upgrade/review', { method: 'POST', body: '{}' }),
-    commit: token =>
-      request('/provider-upgrade/commit', { method: 'POST', body: JSON.stringify({ token }) })
+    status: () => call('', { method: 'GET' }),
+    review: () => call('/review', { method: 'POST', body: '{}' }),
+    commit: token => call('/commit', { method: 'POST', body: named(token) }),
+    // outcome asks what became of one review's commit; it never commits.
+    outcome: token => call('/outcome', { method: 'POST', body: named(token) })
   };
+}
+
+// homeUpgradeTransport addresses the upgrade from one Home, by its workspace
+// ID; it covers every Home the package backs all the same.
+export function homeUpgradeTransport(workspaceId, { fetchImpl = globalThis.fetch } = {}) {
+  return upgradeTransport(
+    `/api/workspaces/${encodeURIComponent(text(workspaceId))}/assistant-program/provider-upgrade`,
+    fetchImpl
+  );
 }
 
 // pluginUpgradeTransport addresses the upgrade by plugin. The name is only a
 // lookup key; the server decides which Homes the review covers.
 export function pluginUpgradeTransport(name, { fetchImpl = globalThis.fetch } = {}) {
-  const base = `/api/plugins/${encodeURIComponent(text(name))}/home-upgrade`;
-  // Keep browser fetch a plain invocation: a stored Window.fetch called as a
-  // method gets the wrong receiver.
-  const call = (suffix, options) =>
-    upgradeRequest((...args) => fetchImpl(...args), base + suffix, options);
-  return {
-    status: () => call('', { method: 'GET' }),
-    review: () => call('/review', { method: 'POST', body: '{}' }),
-    commit: token => call('/commit', { method: 'POST', body: JSON.stringify({ token }) })
-  };
+  return upgradeTransport(`/api/plugins/${encodeURIComponent(text(name))}/home-upgrade`, fetchImpl);
 }
 
 function element(doc, tag, { className = '', text: content = null, attributes = {} } = {}) {
@@ -285,11 +322,95 @@ export function renderUpgradeResult(
 
 let dialogSequence = 0;
 
+// A refusal after which a fresh review is the way forward: the review was
+// used or changed, or nothing was installed.
+const REVIEW_AGAIN_CODES = new Set([
+  'home_upgrade_review_stale',
+  'home_upgrade_cancelled',
+  'home_upgrade_unavailable'
+]);
+// Refusals that mean an operation holds the package.
+const HOLD_CODES = new Set(['home_upgrade_active', 'home_upgrade_reconcile_required']);
+// How long to keep asking what became of a commit whose answer was lost:
+// about fifteen seconds in all, then the outcome is said to be unknown.
+const OUTCOME_DELAYS = [0, 1000, 2000, 4000, 8000];
+
+// operationHold describes an operation that still holds the package. One
+// that needs reconciliation is not something this dialog can repair.
+export function operationHold(operation = {}) {
+  const id = text(operation.id);
+  const to = text(operation.to_version);
+  if (operation.status === 'reconcile_required') {
+    return {
+      title: 'This update needs attention',
+      text: [
+        `The update to ${to} stopped partway (operation ${id}).`,
+        text(operation.reason).trim(),
+        'Nothing is chosen automatically, and it cannot be reviewed again until it is reconciled.'
+      ]
+        .filter(Boolean)
+        .join(' '),
+      retry: false
+    };
+  }
+  return {
+    title: 'An update is in progress',
+    text: `Ori is still moving the Homes to ${to} (operation ${id}). Check again in a moment.`,
+    retry: true
+  };
+}
+
+// homeUpgradeRowNotice is the persistent line on a Plugins row for a plugin
+// Homes use, from its GET status: an operation that holds the package stays
+// visible whatever the update badge says, an unreadable status says so, and
+// otherwise the row names the Homes an Update moves together.
+export function homeUpgradeRowNotice(view) {
+  const operation = view?.operation;
+  if (operation?.status === 'reconcile_required') {
+    return {
+      state: 'attention',
+      text: [
+        `Home update to ${text(operation.to_version)} needs attention (operation ${text(operation.id)}).`,
+        text(operation.reason).trim(),
+        'Nothing is chosen automatically.'
+      ]
+        .filter(Boolean)
+        .join(' ')
+    };
+  }
+  if (operation?.status === 'claimed' || operation?.status === 'replaced') {
+    return {
+      state: 'running',
+      text: `Home update to ${text(operation.to_version)} is in progress (operation ${text(operation.id)}).`
+    };
+  }
+  if (view?.status_unavailable) {
+    return { state: 'unavailable', text: 'Home update status is unavailable right now.' };
+  }
+  const names = (Array.isArray(view?.homes) ? view.homes : [])
+    .map(home => text(home?.name).trim())
+    .filter(Boolean);
+  if (!names.length) return null;
+  const listed =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return {
+    state: 'homes',
+    text:
+      names.length === 1
+        ? `Used by ${listed}; Update moves it with the plugin.`
+        : `Used by ${listed}; Update moves them together.`
+  };
+}
+
 // HomePackageUpgradeDialog is one review-and-confirm of the upgrade. Its
-// states are loading, review, failed (the review could not be made),
-// committing, succeeded, commit-failed and closed. It commits at most once,
-// only from review, and cannot be closed while a commit is in flight: closing
-// would not stop the server's work, so it must not look as if it could.
+// states are loading, review, failed (no review could be made), held (an
+// operation holds the package), committing, checking (the commit's answer was
+// lost), unknown, settled (not applied), succeeded, commit-failed and closed.
+// It commits at most once per review, only from review, never replays a
+// commit, and cannot be closed while a commit is in flight: closing would not
+// stop the server's work, so it must not look as if it could.
 export class HomePackageUpgradeDialog {
   constructor({
     transport,
@@ -301,7 +422,8 @@ export class HomePackageUpgradeDialog {
     homeLinks = false,
     currentPath = '',
     onSucceeded = null,
-    onClosed = null
+    onClosed = null,
+    outcomeDelays = OUTCOME_DELAYS
   } = {}) {
     this.transport = transport;
     this.trigger = trigger;
@@ -317,15 +439,25 @@ export class HomePackageUpgradeDialog {
     this.currentPath = currentPath;
     this.onSucceeded = onSucceeded;
     this.onClosed = onClosed;
+    this.outcomeDelays = outcomeDelays;
     this.state = 'idle';
     this.review = null;
     this.operation = null;
     this.parts = null;
     this.unloadGuard = null;
+    // run numbers each load or outcome check, so a late answer to an earlier
+    // one changes nothing.
+    this.run = 0;
+    this.timer = null;
+    this.wake = null;
   }
 
   get closed() {
     return this.state === 'closed';
+  }
+
+  stale(run) {
+    return this.closed || run !== this.run;
   }
 
   setState(state) {
@@ -335,8 +467,60 @@ export class HomePackageUpgradeDialog {
     dialog.dataset.state = state;
     dialog.setAttribute(
       'aria-busy',
-      state === 'loading' || state === 'committing' ? 'true' : 'false'
+      state === 'loading' || state === 'committing' || state === 'checking' ? 'true' : 'false'
     );
+  }
+
+  // setActions replaces the dialog's extra buttons (Cancel/Close stays first).
+  setActions(actions = []) {
+    for (const button of this.parts.extras || []) button.remove();
+    this.parts.extras = actions.map(({ label, onClick, primary = true }) => {
+      const button = element(this.document, 'button', {
+        className: `modern-btn ${primary ? 'modern-btn-primary' : 'modern-btn-secondary'}`,
+        text: label,
+        attributes: { type: 'button' }
+      });
+      button.addEventListener('click', () => void onClick());
+      this.parts.controls.append(button);
+      return button;
+    });
+    return this.parts.extras;
+  }
+
+  // settle shows a state with nothing in flight: Close and the given actions.
+  settle(state, heading, statusText, actions = []) {
+    const { cancel, error, body } = this.parts;
+    this.guardUnload(false);
+    this.setState(state);
+    this.parts.heading.textContent = heading;
+    this.parts.status.textContent = statusText;
+    error.textContent = '';
+    body.replaceChildren();
+    this.parts.confirm?.remove();
+    this.parts.confirm = null;
+    cancel.disabled = false;
+    cancel.textContent = 'Close';
+    const buttons = this.setActions(actions);
+    (buttons[0] || cancel).focus();
+  }
+
+  wait(ms) {
+    return new Promise(resolve => {
+      this.wake = resolve;
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.wake = null;
+        resolve();
+      }, ms);
+    });
+  }
+
+  stopWaiting() {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+    const wake = this.wake;
+    this.wake = null;
+    wake?.();
   }
 
   build() {
@@ -378,7 +562,17 @@ export class HomePackageUpgradeDialog {
       event.preventDefault();
       this.close();
     });
-    this.parts = { dialog, heading, status, body, error, controls, cancel, confirm: null };
+    this.parts = {
+      dialog,
+      heading,
+      status,
+      body,
+      error,
+      controls,
+      cancel,
+      confirm: null,
+      extras: []
+    };
     return dialog;
   }
 
@@ -388,27 +582,90 @@ export class HomePackageUpgradeDialog {
     this.document.body.append(dialog);
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
+    await this.load();
+    return this;
+  }
+
+  // load reads the package's status before reviewing, so a reopened dialog
+  // shows an operation that still holds the package instead of offering a
+  // second commit. Review again comes back here.
+  async load() {
+    const run = ++this.run;
+    const { heading, status, body, error, cancel } = this.parts;
+    this.guardUnload(false);
+    this.review = null;
+    this.operation = null;
+    heading.textContent = 'Review the Home upgrade';
+    status.textContent = 'Inspecting the new release…';
+    error.textContent = '';
+    body.replaceChildren();
+    this.parts.confirm?.remove();
+    this.parts.confirm = null;
+    this.setActions([]);
+    cancel.disabled = false;
+    cancel.textContent = 'Cancel';
     this.setState('loading');
-    this.parts.cancel.focus();
+    cancel.focus();
+    if (typeof this.transport.status === 'function') {
+      let summary = null;
+      try {
+        summary = await this.transport.status();
+      } catch (_) {
+        summary = null; // the review below answers for itself
+      }
+      if (this.stale(run)) return;
+      if (summary?.operation) {
+        this.showHold(summary.operation);
+        return;
+      }
+    }
     let review;
     try {
       review = await this.transport.review();
     } catch (requestError) {
-      if (this.closed) return this;
+      // A late answer for a dialog already closed, or for an earlier load,
+      // changes nothing.
+      if (this.stale(run)) return;
+      if (HOLD_CODES.has(requestError?.code)) {
+        this.showHold(requestError.details, requestError.message);
+        return;
+      }
       this.setState('failed');
-      this.parts.status.textContent = '';
-      this.parts.error.textContent = requestError?.message || 'The update could not be reviewed.';
-      this.parts.cancel.focus();
-      return this;
+      status.textContent = '';
+      error.textContent = requestError?.message || 'The update could not be reviewed.';
+      cancel.textContent = 'Close';
+      cancel.focus();
+      return;
     }
-    // A late answer for a dialog already closed changes nothing.
-    if (this.closed) return this;
+    if (this.stale(run)) return;
     this.showReview(review);
-    return this;
+  }
+
+  // showHold says an operation holds the package. Only one that is still
+  // running offers Check again; nothing here repairs or retries a commit.
+  showHold(operation, message = '') {
+    if (!operation?.id) {
+      this.settle(
+        'held',
+        'Another update is in progress or needs attention',
+        message || 'Another update of this plugin is in progress or needs attention.',
+        [{ label: 'Check again', onClick: () => this.load() }]
+      );
+      return;
+    }
+    const hold = operationHold(operation);
+    this.operation = operation;
+    this.settle(
+      'held',
+      hold.title,
+      hold.text,
+      hold.retry ? [{ label: 'Check again', onClick: () => this.load() }] : []
+    );
   }
 
   showReview(review) {
     const { heading, status, body, controls } = this.parts;
+    this.parts.confirm?.remove();
     this.review = review;
     heading.textContent = `Update ${text(review?.plugin_id)} to ${text(review?.to_version)}?`;
     status.textContent = providerUpgradeSummary(review);
@@ -441,32 +698,122 @@ export class HomePackageUpgradeDialog {
     try {
       operation = await this.transport.commit(review.token);
     } catch (commitError) {
-      this.showCommitFailure(
-        commitError?.details?.id
-          ? `${commitError.message} Operation ${text(commitError.details.id)}.`
-          : commitError?.message || 'The update was not applied.'
-      );
+      this.guardUnload(false);
+      // Ori's answer was lost: the update may or may not have happened, so
+      // ask what became of this review instead of guessing or committing again.
+      if (commitError?.transport) return this.resolveOutcome();
+      this.showCommitFailure(commitError);
       return null;
     }
     // Only the service's own succeeded status is success.
-    if (operation?.status !== 'succeeded') {
-      this.showCommitFailure(
-        `The update did not finish (${text(operation?.status) || 'no status'}). Operation ${text(operation?.id)}.`
-      );
-      return null;
-    }
+    if (operation?.status !== 'succeeded') return this.showSettled(operation);
+    return this.finishSucceeded(operation);
+  }
+
+  async finishSucceeded(operation) {
     this.showResult(operation);
     if (typeof this.onSucceeded === 'function') {
       try {
         await this.onSucceeded(operation, this);
       } catch (refreshError) {
         // The update itself succeeded; only this page's refresh did not.
-        error.textContent = `The update succeeded, but this page could not refresh: ${
+        this.parts.error.textContent = `The update succeeded, but this page could not refresh: ${
           refreshError?.message || 'reload it to see the new version'
         }.`;
       }
     }
     return operation;
+  }
+
+  // resolveOutcome asks, for a bounded while, what became of the commit of
+  // this dialog's review. Only the review's own operation answers; success is
+  // only its succeeded status. It never commits again.
+  async resolveOutcome() {
+    const run = ++this.run;
+    this.settle(
+      'checking',
+      'Checking what happened',
+      'The answer to your update was lost on the way back, so whether it happened is not known yet. Checking with Ori…'
+    );
+    let last = 'unreachable';
+    for (const delay of this.outcomeDelays) {
+      if (delay) await this.wait(delay);
+      if (this.stale(run)) return null;
+      let attempt;
+      try {
+        attempt = await this.transport.outcome(this.review.token);
+      } catch (checkError) {
+        if (this.stale(run)) return null;
+        if (checkError?.transport) continue;
+        return this.showUnknown(
+          `Ori could not say what became of the update: ${checkError?.message || 'its status is unavailable'}. Nothing will be committed again.`
+        );
+      }
+      if (this.stale(run)) return null;
+      const operation = attempt?.operation;
+      if (operation?.status === 'succeeded') return this.finishSucceeded(operation);
+      if (operation && !['claimed', 'replaced'].includes(operation.status)) {
+        return this.showSettled(operation);
+      }
+      if (!operation && attempt?.review === 'expired') {
+        return this.showNotApplied('This review expired before Ori applied it. Nothing changed.');
+      }
+      if (!operation && attempt?.review === 'unknown') {
+        return this.showNotApplied(
+          'Ori has no record of this review, so nothing was applied from it.'
+        );
+      }
+      last = operation ? 'running' : 'pending';
+    }
+    const where = {
+      running: 'Ori is still applying the update.',
+      pending: 'Ori has no record that this update started; your request may still be on its way.',
+      unreachable: 'Ori could not be reached to check.'
+    }[last];
+    return this.showUnknown(
+      `${where} The outcome is not known yet, and nothing will be committed again.`
+    );
+  }
+
+  showUnknown(message) {
+    this.settle('unknown', 'The outcome is not known yet', message, [
+      { label: 'Check again', onClick: () => this.resolveOutcome() }
+    ]);
+    return null;
+  }
+
+  // showSettled reports an operation that ended without success.
+  showSettled(operation) {
+    if (operation?.status === 'cancelled') {
+      return this.showNotApplied(
+        text(operation.reason).trim() || 'The new release could not be installed. Nothing changed.',
+        operation
+      );
+    }
+    if (
+      operation?.status === 'reconcile_required' ||
+      operation?.status === 'claimed' ||
+      operation?.status === 'replaced'
+    ) {
+      this.showHold(operation);
+      return null;
+    }
+    return this.showUnknown(
+      `The update did not report success (${text(operation?.status) || 'no status'}). Nothing will be committed again.`
+    );
+  }
+
+  // showNotApplied says, from the server's own record, that this review
+  // changed nothing; a new review and confirmation are the way forward.
+  showNotApplied(message, operation = null) {
+    this.operation = operation;
+    this.settle(
+      'settled',
+      'The update was not applied',
+      operation?.id ? `${message} Operation ${text(operation.id)}.` : message,
+      [{ label: 'Review again', onClick: () => this.load() }]
+    );
+    return null;
   }
 
   showResult(operation) {
@@ -486,6 +833,8 @@ export class HomePackageUpgradeDialog {
     );
     confirm?.remove();
     this.parts.confirm = null;
+    this.setActions([]);
+    this.parts.error.textContent = '';
     cancel.disabled = false;
     cancel.textContent = 'Close';
     cancel.focus();
@@ -508,18 +857,31 @@ export class HomePackageUpgradeDialog {
     }
   }
 
-  showCommitFailure(message) {
+  // showCommitFailure reports Ori's own refusal of the commit: nothing was
+  // applied from this review, or an operation holds the package.
+  showCommitFailure(commitError) {
+    if (HOLD_CODES.has(commitError?.code)) {
+      this.showHold(commitError.details, commitError.message);
+      return;
+    }
     const { status, error, cancel } = this.parts;
-    this.guardUnload(false);
     this.setState('commit-failed');
     status.textContent = '';
-    error.textContent = message;
+    error.textContent = commitError?.details?.id
+      ? `${commitError.message} Operation ${text(commitError.details.id)}.`
+      : commitError?.message || 'The update was not applied.';
+    this.parts.confirm?.remove();
+    this.parts.confirm = null;
     cancel.disabled = false;
-    cancel.focus();
+    cancel.textContent = 'Close';
+    const buttons = REVIEW_AGAIN_CODES.has(commitError?.code)
+      ? this.setActions([{ label: 'Review again', onClick: () => this.load() }])
+      : this.setActions([]);
+    (buttons[0] || cancel).focus();
   }
 
-  // close ends the dialog unless a commit is still in flight. It reports
-  // whether the dialog closed.
+  // close ends the dialog unless a commit is still in flight; it stops any
+  // outcome check. It reports whether the dialog closed.
   close() {
     if (this.state === 'committing') {
       this.parts.status.textContent = `Still installing ${text(this.review?.to_version)}. Closing this would not stop the update; wait for it to finish.`;
@@ -527,6 +889,9 @@ export class HomePackageUpgradeDialog {
     }
     if (this.closed || !this.parts) return false;
     const { dialog } = this.parts;
+    this.run++;
+    this.stopWaiting();
+    this.guardUnload(false);
     this.setState('closed');
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
     dialog.remove();
@@ -550,5 +915,9 @@ export function openHomePackageUpgrade(options) {
 // global, as it reaches window.PluginLifecycle. Module scripts run before
 // DOMContentLoaded, so the global exists before any Update button does.
 if (typeof window !== 'undefined') {
-  window.HomePackageUpgrade = Object.freeze({ openHomePackageUpgrade, pluginUpgradeTransport });
+  window.HomePackageUpgrade = Object.freeze({
+    homeUpgradeRowNotice,
+    openHomePackageUpgrade,
+    pluginUpgradeTransport
+  });
 }

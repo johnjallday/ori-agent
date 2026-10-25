@@ -27,6 +27,8 @@ var pluginHomeUpgradeRoutes = []struct{ method, path, pattern string }{
 	{http.MethodGet, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade", "GET /api/plugins/{name}/home-upgrade"},
 	{http.MethodPost, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade/review", "POST /api/plugins/{name}/home-upgrade/review"},
 	{http.MethodPost, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade/commit", "POST /api/plugins/{name}/home-upgrade/commit"},
+	{http.MethodPost, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade/outcome", "POST /api/plugins/{name}/home-upgrade/outcome"},
+	{http.MethodPost, "/api/workspaces/ws-1/assistant-program/provider-upgrade/outcome", "POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/outcome"},
 }
 
 // The plugin-addressed upgrade routes are ordinary work on the production
@@ -188,6 +190,22 @@ func TestPluginHomeUpgradeCommitThroughTheProductionRouter(t *testing.T) {
 	commit := func(token string) *httptest.ResponseRecorder {
 		return serve(http.MethodPost, base+"/home-upgrade/commit", `{"token":"`+token+`"}`)
 	}
+	type attempt struct {
+		Review    string `json:"review"`
+		Operation *struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"operation"`
+	}
+	outcome := func(token string) attempt {
+		t.Helper()
+		w := serve(http.MethodPost, base+"/home-upgrade/outcome", `{"token":"`+token+`"}`)
+		var got attempt
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil {
+			t.Fatalf("outcome = %d %s", w.Code, w.Body.String())
+		}
+		return got
+	}
 
 	root := t.TempDir()
 	writeNamedHomePackage(t, root, inPlaceUpgradeFixturePlugin, "0.1.0", oldPrompt)
@@ -258,6 +276,14 @@ func TestPluginHomeUpgradeCommitThroughTheProductionRouter(t *testing.T) {
 	// Replaying the confirmation changes nothing and starts no operation.
 	if w := commit(token); w.Code != http.StatusConflict {
 		t.Fatalf("replayed commit = %d %s", w.Code, w.Body.String())
+	}
+	// Each review answers for its own commit only: the confirmed one names its
+	// operation; the refused one started nothing, whatever succeeded since.
+	if got := outcome(token); got.Operation == nil || got.Operation.ID != operation.ID || got.Operation.Status != "succeeded" {
+		t.Fatalf("confirmed review outcome = %#v", got)
+	}
+	if got := outcome(stale); got.Operation != nil || got.Review != "pending" {
+		t.Fatalf("refused review outcome = %#v", got)
 	}
 	w = serve(http.MethodGet, base+"/home-upgrade", "")
 	var status struct {

@@ -133,3 +133,13 @@ func (h *Handler) CommitPluginHomeUpgrade(w http.ResponseWriter, r *http.Request
 	}
 	h.respondProviderUpgradeCommit(w, r, owner, installed.Name)
 }
+
+// OutcomePluginHomeUpgrade is POST /api/plugins/{name}/home-upgrade/outcome:
+// what became of one review's commit, for a client that lost its response.
+func (h *Handler) OutcomePluginHomeUpgrade(w http.ResponseWriter, r *http.Request) {
+	owner, installed, _, ok := h.pluginUpgradeScope(w, r)
+	if !ok {
+		return
+	}
+	h.respondProviderUpgradeAttempt(w, r, owner, installed.Name)
+}
