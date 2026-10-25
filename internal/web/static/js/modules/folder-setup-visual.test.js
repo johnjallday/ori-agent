@@ -99,12 +99,14 @@ test('visible consequences retain install/read/token/shared-agent and profile co
       { kind: 'folder', name: 'Link the folder', detail: 'Read-only' },
       { kind: 'agents', name: 'Add agent', detail: 'Shared with later projects' },
       { kind: 'task', name: 'One first look' },
-      { kind: 'profile', name: 'Home profile', detail: 'Reads the templates folder' }
+      { kind: 'profile', name: 'Home profile', detail: 'Reads the templates folder' },
+      { kind: 'arrangement', name: 'Only selected folders', detail: 'Others remain untouched' }
     ]
   });
   assert.ok(effects.includes('Update Music to 2.'));
   assert.match(effects.join(' '), /Shared with later projects/);
   assert.match(effects.join(' '), /Reads the templates folder/);
+  assert.match(effects.join(' '), /Only selected folders.*Others remain untouched/);
   assert.match(effects.join(' '), /shares permitted folder content.*model tokens/);
   assert.doesNotMatch(effects.join(' '), /from 1/);
 });
@@ -326,6 +328,57 @@ test('partial/legacy requirements keep known rows without inventing a zero-downl
   assert.equal(
     requirementsView({ offer: { setup: { visual: { plugins } } } }).summary,
     'Requirements recorded for this setup'
+  );
+});
+
+test('ready configuration can collapse while missing and unknown requirements stay visible', () => {
+  const container = documentFixture().createElement('div');
+  const visual = {
+    requirements_checked: true,
+    plugins: [
+      { kind: 'integration', name: 'Ready integration', operation: 'ready' },
+      { kind: 'provider', name: 'Needs update', operation: 'update' }
+    ],
+    model: { state: 'missing' }
+  };
+  renderRequirements(container, { offer: { id: 'a', plan: { visual } } });
+  const all = nodes(container);
+  const ready = all.find(node => node.className === 'folder-requirements__ready');
+  assert.equal(ready.open, false);
+  assert.ok(nodes(ready).some(node => node.textContent === 'Ready integration'));
+  assert.ok(!nodes(ready).some(node => node.textContent === 'Needs update'));
+  assert.ok(!nodes(ready).some(node => node.textContent === 'Configuration needed'));
+  assert.ok(all.some(node => node.textContent === 'Configuration needed'));
+  renderRequirements(container, { plan: { visual: {} } });
+  assert.equal(container.hidden, false);
+  assert.ok(
+    nodes(container).some(node => node.textContent === 'Download requirements not fully checked')
+  );
+  renderRequirements(container, {});
+  assert.equal(container.hidden, true);
+});
+
+test('diagram shows source staying in place and the proposed access grant without hiding material effects', () => {
+  const container = documentFixture().createElement('div');
+  const reviewed = {
+    ...plan,
+    lines: [
+      { kind: 'folder', name: 'Grant read access' },
+      { kind: 'profile', name: 'Read shared templates' },
+      { kind: 'assistant', name: 'Change shared assistant setup' }
+    ]
+  };
+  renderDiagram(container, { plan: reviewed }, { artwork: null });
+  const all = nodes(container);
+  assert.ok(all.some(node => node.textContent === 'Source files stay here'));
+  assert.ok(all.some(node => node.textContent === 'Folder read access on setup'));
+  assert.ok(
+    globalThis.OriFolderSetupVisual.reviewConsequences(reviewed).includes('Read shared templates')
+  );
+  assert.ok(
+    globalThis.OriFolderSetupVisual.reviewConsequences(reviewed).includes(
+      'Change shared assistant setup'
+    )
   );
 });
 

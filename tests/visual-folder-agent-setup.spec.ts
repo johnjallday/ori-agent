@@ -224,7 +224,8 @@ test('fixture review preserves exact Unicode drafts and only submits the reviewe
   const card = await mountReview(page);
   const brief = card.getByLabel('What should it do with it?');
   const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
-  await expect(card.getByText('Before you start', { exact: true })).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Confirm setup', exact: true })).toBeVisible();
+  await expect(card.getByText('Setup effects', { exact: true })).toBeVisible();
   await expect(card.locator('#personalAssistantFolderConsequences')).toContainText(
     'shares permitted folder content'
   );
@@ -903,6 +904,14 @@ test('fixture requirements keep independently known operations ahead of the prop
       const card = await mountReview(page, offer);
       const requirements = card.locator('#personalAssistantFolderRequirements');
       await expect(requirements.locator('li')).toHaveCount(2);
+      const ready = requirements.locator('.folder-requirements__ready');
+      if (process.env.ORI_VISUAL_EVIDENCE && ['ready', 'partial'].includes(name)) {
+        await requirements.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: `${process.env.ORI_VISUAL_EVIDENCE}/group3-${name}-collapsed-${width}.png`
+        });
+      }
+      if (await ready.count()) await ready.locator(':scope > summary').click();
       await requirements.scrollIntoViewIfNeeded();
       for (const plugin of ['REAPER', 'Music Project Management']) {
         const label = requirements.getByText(plugin, { exact: true });

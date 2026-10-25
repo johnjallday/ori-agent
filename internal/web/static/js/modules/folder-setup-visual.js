@@ -204,6 +204,29 @@
       node('h4', view.source),
       node('p', view.sourceNote, 'folder-visual__note')
     );
+    const folderAccess =
+      input?.offer?.status === 'resolved'
+        ? list(input.offer.outcome?.receipt).some(row => row.kind === 'folder')
+        : list(input?.offer?.setup?.lines || input?.plan?.lines || input?.offer?.plan?.lines).some(
+            row => row.kind === 'folder'
+          );
+    if (folderAccess) {
+      const chips = node('p', '', 'folder-visual__access');
+      const access =
+        view.entity?.kind === 'group' || view.entity?.kind === 'home'
+          ? view.sourceLinked
+            ? 'Selected folder links verified'
+            : 'Selected folders linked on setup'
+          : input?.offer?.subject?.shape === 'inbox'
+            ? view.sourceLinked
+              ? 'Folder metadata access linked'
+              : 'Folder metadata access on setup'
+            : view.sourceLinked
+              ? 'Folder access linked'
+              : 'Folder read access on setup';
+      chips.append(node('span', 'Source files stay here'), node('span', access));
+      source.append(chips);
+    }
     if (view.entries.length) {
       const entries = node('ul', '', 'folder-visual__entries');
       for (const entry of view.entries) {
@@ -439,11 +462,27 @@
   function renderRequirements(container, input) {
     if (!container) return;
     const view = requirementsView(input);
-    const empty = !view.rows.length && !view.model && !view.builtin;
+    const evidence =
+      input?.plan ||
+      input?.readiness ||
+      input?.offer?.plan ||
+      input?.offer?.setup ||
+      input?.offer?.readiness;
+    const empty = !view.rows.length && !view.model && !view.builtin && !evidence;
     container.hidden = empty;
-    const signature = JSON.stringify(view);
+    const owner = text(input?.offer?.id);
+    const signature = JSON.stringify({ owner, view });
     if (container.dataset.signature === signature) return;
+    const opened =
+      container.dataset.owner === owner
+        ? new Set(
+            Array.from(container.querySelectorAll?.('details[data-requirement-disclosure]') || [])
+              .filter(node => node.open)
+              .map(node => node.dataset.requirementDisclosure)
+          )
+        : new Set();
     container.dataset.signature = signature;
+    container.dataset.owner = owner;
     container.replaceChildren();
     if (empty) return;
     const doc = container.ownerDocument;
@@ -456,9 +495,15 @@
     const section = node('section', '', 'folder-requirements');
     section.setAttribute('aria-label', 'Setup requirements');
     section.append(node('h4', 'What you need'));
-    if (view.rows.length || view.builtin)
+    if (view.rows.length || view.builtin || !view.complete)
       section.append(node('p', view.summary, 'folder-requirements__summary'));
     const requirements = node('ul', '', 'folder-requirements__list');
+    const ready = node('details', '', 'folder-requirements__ready');
+    ready.dataset.requirementDisclosure = 'ready';
+    ready.open = opened.has('ready');
+    ready.append(node('summary', 'Ready / configured details'));
+    const readyList = node('ul', '', 'folder-requirements__list');
+    let readyCount = 0;
     for (const requirement of view.rows) {
       const row = node('li', '', 'folder-requirements__row');
       row.dataset.operation = requirement.operation;
@@ -476,13 +521,19 @@
         node('p', requirement.version, 'folder-visual__note folder-requirements__version')
       );
       const details = node('details', '', 'folder-requirements__source');
+      details.dataset.requirementDisclosure = requirement.kind;
+      details.open = opened.has(requirement.kind);
       details.append(
         node('summary', 'Source details'),
         node('p', requirement.source || 'Source not reported', 'folder-visual__note')
       );
       row.append(details, node('div', '', 'folder-requirements__actions'));
-      requirements.append(row);
+      if (requirement.operation === 'ready' && (!view.saved || requirement.progress === 'done')) {
+        readyList.append(row);
+        readyCount++;
+      } else requirements.append(row);
     }
+    if (readyCount) ready.append(readyList);
     // A built-in needs no plugin, so there is no plugin to tell apart.
     if (view.rows.length || !view.builtin)
       section.append(
@@ -506,8 +557,12 @@
         node('p', view.model.status, 'folder-requirements__status'),
         node('p', view.model.detail, 'folder-visual__note')
       );
-      section.append(model);
+      if (['configured', MODEL_NOT_NEEDED].includes(view.model.state)) {
+        ready.append(model);
+        readyCount++;
+      } else section.append(model);
     }
+    if (readyCount) section.append(ready);
     container.append(section);
   }
 
@@ -539,7 +594,10 @@
           'profile',
           'library',
           'songs',
-          'assistant'
+          'assistant',
+          'arrangement',
+          'member',
+          'unavailable'
         ].includes(line.kind)
       ) {
         effects.push([text(line.name), text(line.detail)].filter(Boolean).join('. '));
@@ -571,7 +629,7 @@
     if (!effects.length) return;
     const doc = container.ownerDocument;
     const heading = doc.createElement('h4');
-    heading.textContent = 'Before you start';
+    heading.textContent = 'Setup effects';
     container.append(heading);
     const list = doc.createElement('ul');
     for (const effect of effects) {

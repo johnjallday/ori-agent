@@ -186,7 +186,7 @@ test('Home Explore and PA Add folder → explicit sharing → goal-dependent sav
       .getByRole('button', { name: 'Documents', exact: true })
       .click();
     const panel = page.locator('#personalAssistantArrangement');
-    await expect(panel).toBeVisible();
+    await expect(panel).toBeHidden();
     expect(calls.length).toBe(0);
     expect(totalRequests).toBe(beforeAttachment);
     await chooseAttach(page, '#personalAssistantFolderChip');
@@ -195,14 +195,29 @@ test('Home Explore and PA Add folder → explicit sharing → goal-dependent sav
       .getByRole('button', { name: 'Documents', exact: true })
       .click();
     expect(totalRequests).toBe(beforeAttachment);
-    const entry = page
-      .locator('#personalAssistantChips')
-      .getByRole('button', { name: 'Suggest arrangement', exact: true });
+    const entry = { click: () => chooseAttach(page, '#personalAssistantArrangeFolder') };
     await entry.click();
     await expect(page.locator('#personalAssistantInput')).toBeInViewport();
     await expect(panel.getByText('Model checked.', { exact: false })).toBeVisible({
       timeout: 15000
     });
+    const draft = '  Unsent organizing draft 🎼  ';
+    await page.locator('#personalAssistantInput').fill(draft);
+    const folder = await page.evaluate(() =>
+      (window as any).PersonalAssistantFolderContext.request()
+    );
+    await panel.locator('summary').first().focus();
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(page.locator('#personalAssistantAttachMenu')).toBeFocused();
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
+    expect(
+      await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request())
+    ).toEqual(folder);
+    expect(totalRequests).toBe(beforeAttachment);
+    await entry.click();
+    await expect(panel.getByText('Model checked.', { exact: false })).toBeVisible();
+    await panel.screenshot({ path: info.outputPath('pa-arrangement-disclosure.png') });
     const plans: any[] = [];
     for (const goal of ['Keep experiments unchanged', 'Group selected client projects']) {
       if (!(await panel.evaluate(element => (element as HTMLDetailsElement).open)))
@@ -432,10 +447,8 @@ test('PA arranged group → Review group → Set up → canonical receipt in the
       .getByRole('button', { name: 'Music', exact: true })
       .click();
     const panel = page.locator('#personalAssistantArrangement');
-    await expect(panel).toBeVisible();
-    const entry = page
-      .locator('#personalAssistantChips')
-      .getByRole('button', { name: 'Suggest arrangement', exact: true });
+    await expect(panel).toBeHidden();
+    const entry = { click: () => chooseAttach(page, '#personalAssistantArrangeFolder') };
     if (!(await panel.evaluate(element => (element as HTMLDetailsElement).open)))
       await entry.click();
     await expect(panel.getByText('Model checked.', { exact: false })).toBeVisible({
@@ -488,7 +501,11 @@ test('PA arranged group → Review group → Set up → canonical receipt in the
         { exact: false }
       )
     ).toBeVisible({ timeout: 15000 });
-    await expect(card.getByText('Only the folders your saved arrangement selected')).toBeVisible();
+    await expect(
+      card
+        .locator('#personalAssistantFolderConsequences')
+        .getByText('Only the folders your saved arrangement selected', { exact: false })
+    ).toBeVisible();
     await expect(card.getByRole('button', { name: 'Adjust…' })).toHaveCount(0);
     await expect(card.getByText('Experiments', { exact: true })).toHaveCount(0);
     expect((await ok(await request.get('/api/workspaces'))).folders.length).toBe(before);

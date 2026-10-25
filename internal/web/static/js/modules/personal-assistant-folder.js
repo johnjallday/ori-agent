@@ -3286,6 +3286,11 @@ function renderOffer(place) {
     offer: state.offer
   });
   renderHire(els, view.hire, state.offer);
+  const confirmTitle = document.getElementById('personalAssistantFolderConfirmTitle');
+  if (confirmTitle)
+    confirmTitle.hidden = Boolean(
+      receipt.visible || view.setup || !folderOfferWaiting(state.offer)
+    );
   globalThis.OriFolderSetupVisual.renderRequirements(
     document.getElementById('personalAssistantFolderRequirements'),
     receipt.visible ? {} : { offer: state.offer }
