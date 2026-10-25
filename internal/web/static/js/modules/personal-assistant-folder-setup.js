@@ -917,7 +917,14 @@ export function recheckReview(offer, trigger) {
 }
 
 function reviewStructure(trigger) {
-  if (currentStructure()) reviewFrom(trigger, rootCandidate());
+  const structure = currentStructure();
+  if (structure)
+    reviewFrom(trigger, rootCandidate(), {
+      structure: {
+        group_type:
+          structure.recommendation?.operation === 'library' ? 'library' : structure.group.type
+      }
+    });
 }
 
 // Adjust is one sheet: the group's name and type, the member checklist with

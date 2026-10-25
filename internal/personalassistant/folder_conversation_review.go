@@ -438,12 +438,12 @@ func (s *FolderObservationService) reviewOption(ctx context.Context, held heldFo
 	inbox, isInbox := folderdigest.InboxCapability()
 	isInbox = isInbox && isInboxOffer(offer)
 	switch {
-	case offer.Structure.ProposesWorkspaces():
+	case offer.Structure != nil:
 		// A structure never waits on a plugin, only on a host that can set
 		// one up at all.
 		option.WorkspaceType = offer.Structure.summary()
 		option.Declined = offer.Declined.clone()
-		if view.Plan == nil {
+		if view.Plan == nil && offer.Structure.ProposesWorkspaces() {
 			unavailable(view.Availability)
 		} else {
 			option.Structure = offer.Structure.view()
@@ -576,12 +576,10 @@ type FolderStructureProposal struct {
 }
 
 // Structure describes an attached folder that holds several projects as one
-// group with a workspace per subfolder, for the card shown as soon as the folder
-// is attached. Like ReviewOptions it reads only: no scan, no offer, no model.
-// Neither an earlier No thanks nor a Home in place keeps the card away; only
-// another pending setup review and a host that cannot set a group up do, and
-// each says so. A collection whose folders are all workspaces already has no
-// card and no reason.
+// recommendation and its generic alternative, immediately on attachment.
+// It reads only local metadata: no scan, offer, prerequisite check or model.
+// Earlier declines and pending setup reviews are independent display state.
+// A collection whose folders are all workspaces already has no duplicate card.
 func (s *FolderObservationService) Structure(ctx context.Context, target foldercontext.Target, observationID string) FolderStructureProposal {
 	held, _, err := s.resolve(ctx, target, observationID)
 	if err != nil || !folderdigest.IsCollection(held.result, s.digest.now()) {
@@ -598,14 +596,29 @@ func (s *FolderObservationService) Structure(ctx context.Context, target folderc
 	if err != nil {
 		return FolderStructureProposal{}
 	}
-	if doc.Pending() != nil {
-		return unavailable(FolderStructureReviewPending)
-	}
-	offer, err := s.prepareReviewOffer(ctx, held, target, folderRootCandidateID)
-	if err != nil || !offer.Structure.ProposesWorkspaces() {
+	// Discovery uses the held scan and local canonical records. In particular it
+	// never enters plan/readiness or release-verification hooks. A pending offer
+	// blocks a write, not the observation or recommendation.
+	verdict := folderdigest.Decide(held.result, s.digest.now())
+	structure := BuildFolderStructure(held.result, verdict, s.digest.now(), false)
+	s.digest.readStructureLinks(ctx, target.UserID, held.result, structure)
+	if len(structure.Included()) == 0 {
 		return FolderStructureProposal{}
 	}
-	return FolderStructureProposal{Structure: offer.Structure.view(), Declined: offer.Declined.clone()}
+	structure.Recommendation = s.digest.recommendCollection(ctx, target.UserID, held.result, verdict)
+	if recommendation := structure.Recommendation; recommendation != nil {
+		recommendation.ObservationID, recommendation.Coverage = held.observation.ID, held.observation.Coverage
+		structure.Group.HomeAvailable = recommendation.Operation == FolderGroupLibrary && recommendation.Destination.State != "unknown"
+	}
+	s.digest.freeStructureNames(ctx, structure)
+	proposal := FolderStructureProposal{Structure: structure.view()}
+	if tombstone := doc.Tombstone(FolderKey(held.root)); tombstone != nil {
+		proposal.Declined = &FolderRootDecline{FolderKey: tombstone.Key, Name: tombstone.Name, At: tombstone.CreatedAt}
+	}
+	if doc.Pending() != nil {
+		proposal.Unavailable = FolderStructureReviewPending
+	}
+	return proposal
 }
 
 // folderOfferCapabilityWorkspace names the workspace a recognized offer's

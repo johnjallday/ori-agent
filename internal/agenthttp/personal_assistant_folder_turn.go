@@ -300,6 +300,9 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 			resp.DraftContext = draftContext
 			// The proposal never depended on the model: it stays, with its controls.
 			resp.FolderStructure = folderProposedStructure(options)
+			if proposal := h.folderStructure(ctx, turn.target, turn.observation); proposal.Structure != nil {
+				resp.FolderStructure = proposal.Structure
+			}
 			return resp
 		}
 	}

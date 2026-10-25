@@ -2222,7 +2222,7 @@ func (s *FolderDigestService) PortfolioProvider(ctx context.Context, userID, off
 func folderOfferDomainClass(offer FolderOffer) (domain, evidence string) {
 	// A proposed group is the host's own setup, not a capability: a no to it is
 	// a no to that folder, never to a kind of work.
-	if offer.Structure.ProposesWorkspaces() {
+	if offer.Structure != nil {
 		return "", ""
 	}
 	if offer.Portfolio != nil {

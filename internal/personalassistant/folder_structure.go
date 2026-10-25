@@ -65,8 +65,8 @@ const (
 	// plugin, so a structure can always be proposed.
 	FolderGroupPlain = "group"
 	// FolderGroupLibrary lists the collection in the shape's Home and makes no
-	// workspace per project: the earlier Home-plus-library setup. It is never
-	// proposed; the user chooses it in Adjust.
+	// workspace per project. Recognized collections recommend this operation;
+	// a plain group remains an explicit alternative.
 	FolderGroupLibrary = "library"
 )
 
@@ -282,6 +282,7 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 	if structure == nil {
 		return nil, nil
 	}
+	structure.Recommendation = s.recommendCollection(ctx, userID, result, verdict)
 	reader, _ := s.deps.Setup.(FolderStructureAvailabilityReader)
 	if declined == nil {
 		declined = func(string) bool { return false }
@@ -289,6 +290,13 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 	chosen := ""
 	if adjustment != nil {
 		chosen = adjustment.GroupType
+		if chosen == FolderGroupPlain {
+			structure.Recommendation = nil
+		}
+	}
+	if chosen == "" && structure.Recommendation != nil && structure.Recommendation.Operation == FolderGroupLibrary &&
+		structure.Recommendation.Destination.State != "unknown" && offer.Portfolio != nil {
+		chosen = FolderGroupLibrary
 	}
 	wantsHome := chosen == FolderGroupHome || chosen == FolderGroupLibrary
 	revived := ""
@@ -303,9 +311,8 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 				reason = FolderAvailabilityPlanUnavailable
 			}
 		}
-		// The Home can be chosen in Adjust whenever the owner can be offered it;
-		// reason says whether it is in place now. It is never the default: the
-		// plain group is, so nothing is created lazily behind the user's back.
+		// The Home can be reviewed whenever the owner can be offered it; local
+		// recognition recommends library mode without granting any setup effect.
 		structure.Group.HomeAvailable = offer.Portfolio != nil
 		useHome := false
 		switch {
@@ -340,25 +347,20 @@ func (s *FolderDigestService) structureFor(ctx context.Context, userID string, r
 			structure.Group.Type, structure.Group.Name = FolderGroupLibrary, structure.Group.HomeName
 			if offer.Portfolio.ExistingHome {
 				structure.Group.DestinationState = "existing"
+				if review := offer.ConversationReview; review != nil && review.Destination != nil {
+					structure.Group.Name = review.Destination.Name
+				} else if structure.Recommendation != nil && structure.Recommendation.Destination.State == "existing" {
+					structure.Group.Name = structure.Recommendation.Destination.Name
+				}
 			}
 		}
 	} else if wantsHome {
 		return nil, structureAdjustmentError("this folder has no Home to use")
 	}
 	integrations := map[string]string{}
+	s.readStructureLinks(ctx, userID, result, structure)
 	for i := range structure.Members {
 		member := &structure.Members[i]
-		if identity, err := portfolioDirectoryIdentity(filepath.Join(result.Root, member.RelPath)); err == nil {
-			member.Identity = identity
-		}
-		// A folder that is already a workspace is listed, never set up twice.
-		if s.deps.ExistingProjects != nil {
-			path := filepath.Join(result.Root, member.RelPath)
-			if existing, err := s.deps.ExistingProjects(ctx, userID, path, member.Identity); err == nil && len(existing) > 0 {
-				member.ExistingWorkspace = foldercontext.DisplayName(existing[0].Name)
-				member.Included = false
-			}
-		}
 		row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(member.Shape), member.MarkerName, member.DominantExtension)
 		if !ok {
 			// No integration is involved. The workspace starts blank: a blueprint
@@ -644,7 +646,8 @@ func validFolderAvailability(reason string) bool {
 // FolderStructure is a path-free proposal: one group and its member
 // workspaces. It is a description, never a plan or an execution grant.
 type FolderStructure struct {
-	Version int `json:"version"`
+	Version        int                   `json:"version"`
+	Recommendation *FolderRecommendation `json:"recommendation,omitempty"`
 	// Folder is the attached folder's display name.
 	Folder  string                  `json:"folder"`
 	Group   FolderStructureGroup    `json:"group"`
@@ -813,9 +816,8 @@ func (s *FolderStructure) Included() []FolderStructureMember {
 	return included
 }
 
-// ProposesWorkspaces says the structure is the setup on offer: a group with a
-// workspace per member. It is false for no structure and for one the user
-// turned into the Home-plus-library listing in Adjust.
+// ProposesWorkspaces selects the group/member execution path. It is false for
+// library listing and must not be used to decide whether discovery is visible.
 func (s *FolderStructure) ProposesWorkspaces() bool {
 	return s != nil && s.Group.Type != FolderGroupLibrary
 }
@@ -827,6 +829,9 @@ func (s *FolderStructure) AvailabilityNotes() []string { return s.availabilityNo
 // summary names the proposal in a few words ("Music Production Home with 6
 // workspaces", "Group with 2 workspaces").
 func (s *FolderStructure) summary() string {
+	if s.Group.Type == FolderGroupLibrary {
+		return s.Group.Name + " library"
+	}
 	group := "Group"
 	if s.Group.Type == FolderGroupHome {
 		group = s.Group.Name
@@ -886,6 +891,10 @@ func (s *FolderStructure) clone() *FolderStructure {
 	copied := *s
 	copied.Members = append([]FolderStructureMember(nil), s.Members...)
 	copied.Notes = append([]string(nil), s.Notes...)
+	if s.Recommendation != nil {
+		recommendation := *s.Recommendation
+		copied.Recommendation = &recommendation
+	}
 	if s.Arrangement != nil {
 		binding := *s.Arrangement
 		copied.Arrangement = &binding
@@ -927,6 +936,9 @@ func validStructureName(value string) bool {
 // display names only, known types and reasons, counts within the scan's bounds.
 func (s FolderStructure) Validate() error {
 	invalid := func(part string) error { return fmt.Errorf("%w: structure %s", errFolderDigestInvalid, part) }
+	if !s.Recommendation.valid() {
+		return invalid("recommendation")
+	}
 	selected := s.Version == FolderStructureSelectedVersion
 	if selected {
 		return s.validateSelected(invalid)

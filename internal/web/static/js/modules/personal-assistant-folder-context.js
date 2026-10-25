@@ -120,9 +120,7 @@ export function createFolderContextController({
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
       state.declined = state.structure ? folderDecline(result.declined) : null;
-      state.structureUnavailable = state.structure
-        ? ''
-        : String(result.structure_unavailable || '');
+      state.structureUnavailable = String(result.structure_unavailable || '');
       // One project Ori can set up as a hire: its review opens on attach.
       state.hireCandidate = state.structure ? '' : String(result.hire_candidate || '');
       // Or why it cannot open now (another setup review waits), said in one line.
@@ -500,9 +498,12 @@ export function structureCardView(state, parkedId = '') {
   if (state.structure) {
     if (parkedId && parkedId === id) return { kind: 'none', key: '' };
     const declined = Boolean(state.declined);
+    const recommendation = state.structure.recommendation;
+    const library = recommendation?.operation === 'library';
+    const blocked = state.structureUnavailable === 'review_pending';
     return {
       kind: 'proposal',
-      key: `${id}:${declined ? 'declined' : 'open'}`,
+      key: `${id}:${declined ? 'declined' : 'open'}:${JSON.stringify(recommendation || null)}:${state.structureUnavailable || ''}`,
       actions: [
         // An earlier No thanks stands where Set up would, until Ask again.
         declined
@@ -514,15 +515,23 @@ export function structureCardView(state, parkedId = '') {
             }
           : {
               id: 'setup',
-              label: 'Set up',
+              label: library ? 'Review library setup' : 'Review group setup',
               style: 'btn btn-sm btn-primary',
-              disabled: Boolean(state.pending)
+              disabled: Boolean(
+                state.pending ||
+                blocked ||
+                (library &&
+                  (recommendation.destination?.state === 'unknown' ||
+                    ['unavailable', 'destination_incompatible', 'destination_ambiguous'].includes(
+                      recommendation.destination?.readiness
+                    )))
+              )
             },
         {
           id: 'adjust',
-          label: 'Adjust…',
+          label: library ? 'Choose another setup…' : 'Adjust…',
           style: 'btn btn-sm btn-outline-secondary',
-          disabled: Boolean(state.pending)
+          disabled: Boolean(state.pending || blocked)
         },
         { id: 'later', label: 'Not now', style: 'btn btn-sm btn-link', disabled: false }
       ]
@@ -594,6 +603,15 @@ function renderStructure(state) {
       window.OriWorkspaceBuildingArt
     )
   );
+  if (state.structureUnavailable === 'review_pending') {
+    const status = node(
+      'p',
+      'Another setup review is open. Finish or close it before reviewing this collection.',
+      'personal-assistant-proposal__note'
+    );
+    status.setAttribute('role', 'status');
+    host.append(status);
+  }
   const actions = node('div', '', 'personal-assistant-structure__actions');
   const runs = {
     setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),

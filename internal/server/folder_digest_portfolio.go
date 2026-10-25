@@ -66,13 +66,32 @@ func (h *folderSetupHost) station(userID string, provider reviewedintegration.Ho
 	if b.workspaceFileStore == nil {
 		return nil, errSetupUnavailable
 	}
-	station, err := workspace.NewAssistantProgramStore(b.workspaceFileStore).FindStation(workspace.AssistantProgramKey{
-		OwnerUserID: userID, PluginID: provider.PluginID, ProgramID: provider.ProgramID,
-	})
-	if errors.Is(err, workspace.ErrAssistantStationNotFound) {
+	// FindStation tolerates unreadable unrelated entries. Setup must prove
+	// absence before proposing a new Home, so a failed record read is unknown.
+	ids, err := b.workspaceFileStore.List()
+	if err != nil {
+		return nil, errSetupUnavailable
+	}
+	key := workspace.AssistantProgramKey{OwnerUserID: userID, PluginID: provider.PluginID, ProgramID: provider.ProgramID}
+	var station *workspace.Workspace
+	for _, id := range ids {
+		candidate, readErr := b.workspaceFileStore.Get(id)
+		if readErr != nil || candidate == nil {
+			return nil, errSetupUnavailable
+		}
+		state := candidate.GetAssistantProgramState()
+		if state == nil || state.Key.Normalize() != key.Normalize() {
+			continue
+		}
+		if station != nil && station.ID != candidate.ID {
+			return nil, workspace.ErrAssistantStationAmbiguous
+		}
+		station = candidate
+	}
+	if station == nil {
 		return nil, nil
 	}
-	if err != nil || station == nil || station.OwnerUserID != userID {
+	if station.OwnerUserID != userID {
 		return nil, errSetupUnavailable
 	}
 	state := station.GetAssistantProgramState()

@@ -814,11 +814,14 @@ function capabilityConfirmView(offer, base, subject) {
       decline,
       later
     ];
-  const headline = hire
-    ? hire.headline
-    : portfolio
-      ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
-      : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
+  const headline =
+    offer.structure?.recommendation && !run
+      ? segments([String(offer.structure.recommendation.evidence || '')])
+      : hire
+        ? hire.headline
+        : portfolio
+          ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
+          : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
   let question = portfolio
     ? String(capability.question || `Set up a ${capability.workspace}?`)
     : `Set up ${subject} as a ${capability.workspace}?`;

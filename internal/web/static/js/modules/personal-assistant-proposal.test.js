@@ -17,6 +17,36 @@ const option = (kind, effect, extra = {}) => ({
     ...extra
   }
 });
+
+test('library recommendation describes observed folders and actual listing effects', () => {
+  const structure = {
+    version: 1,
+    folder: 'Albums',
+    group: { type: 'group', name: 'Albums' },
+    members: [],
+    recommendation: {
+      operation: 'library',
+      evidence: 'Observed 5 REAPER session folders, 1 Logic Pro project folder.',
+      destination: { state: 'existing', name: 'My Music', readiness: 'review' },
+      alternative: 'A plain group creates a workspace for each selected folder.',
+      limitation: 'Logic can be listed; supported activation is separate.'
+    }
+  };
+  let view = proposalView(structureOption(structure));
+  assert.match(view.label, /5 REAPER.*1 Logic/);
+  assert.match(view.description, /your My Music library/);
+  assert.match(view.destination, /does not create a workspace/);
+  assert.equal(view.members.length, 0);
+  assert.equal(view.action, 'Review library setup');
+  structure.recommendation.destination = { state: 'absent', readiness: 'provider_missing' };
+  view = proposalView(structureOption(structure));
+  assert.match(view.description, /review a new/);
+  assert.match(view.notes.join(' '), /installed through reviewed setup/);
+  structure.recommendation.destination = { state: 'unknown', readiness: 'destination_ambiguous' };
+  view = proposalView(structureOption(structure));
+  assert.doesNotMatch(view.description, /new/);
+  assert.match(view.notes.join(' '), /More than one Home/);
+});
 test('proposal kind and effects use closed host fields, never type prose/names/counts', () => {
   assert.equal(
     proposalView(

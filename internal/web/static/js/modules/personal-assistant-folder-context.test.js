@@ -454,7 +454,7 @@ test('an attached collection keeps its proposed group as a local preview until S
   assert.equal(f.controller.state.structure, null);
 });
 
-test('the attach card is the proposal with Set up, Adjust and Not now, or one line', async () => {
+test('the attach card offers explicit review, Adjust and Not now, or one line', async () => {
   const structure = {
     version: 1,
     folder: 'Albums',
@@ -470,7 +470,7 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   assert.deepEqual(
     view.actions.map(action => [action.label, action.disabled]),
     [
-      ['Set up', false],
+      ['Review group setup', false],
       ['Adjust…', false],
       ['Not now', false]
     ]
@@ -522,6 +522,40 @@ test('the attach card is the proposal with Set up, Adjust and Not now, or one li
   assert.equal(folderDecline({ ...declined, folder_key: '../etc' }), null);
 });
 
+test('library discovery coexists with a pending review and never sends on attach', async () => {
+  let reply = {
+    observation: observation('albums'),
+    revision: '',
+    structure_unavailable: 'review_pending',
+    structure: {
+      version: 1,
+      folder: 'Albums',
+      group: { type: 'group', name: 'Albums' },
+      members: [],
+      recommendation: {
+        operation: 'library',
+        destination: { state: 'existing', name: 'My Music', readiness: 'review' }
+      }
+    }
+  };
+  const requests = [];
+  const f = fixture(async (url, body) => {
+    requests.push([url, body]);
+    return reply;
+  });
+  await f.controller.select('chip', 'downloads');
+  const view = structureCardView(f.controller.state);
+  assert.equal(view.kind, 'proposal');
+  assert.equal(view.actions[0].label, 'Review library setup');
+  assert.equal(view.actions[0].disabled, true);
+  assert.equal(f.controller.state.structureUnavailable, 'review_pending');
+  assert.equal(requests.length, 1);
+  assert.match(requests[0][0], /folder-context\/select$/);
+  reply = { ...reply, observation: observation('other'), structure_unavailable: '' };
+  await f.controller.select('chip', 'downloads');
+  assert.equal(structureCardView(f.controller.state).actions[0].disabled, false);
+});
+
 test('the proposal card stays when the turn sent with it gets no answer', async () => {
   const structure = {
     version: 1,
@@ -535,7 +569,7 @@ test('the proposal card stays when the turn sent with it gets no answer', async 
   // folder is never accepted into a conversation and the preview stays.
   assert.ok(f.controller.request());
   assert.equal(structureCardView(f.controller.state).kind, 'proposal');
-  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Review group setup');
   // Retry asks again with the same references.
   assert.deepEqual(f.controller.request(), f.controller.request());
 });
@@ -563,7 +597,7 @@ test('Ask again sends only the decline key and gives the card its Set up back', 
   // The folder was not looked at again: same observation, same proposal.
   assert.equal(f.controller.state.observation.id, 'a');
   assert.equal(f.controller.state.structure, structure);
-  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Set up');
+  assert.equal(structureCardView(f.controller.state).actions[0].label, 'Review group setup');
   // Nothing to ask again about: no request.
   assert.equal(await f.controller.askAgain(), false);
   assert.equal(f.calls.length, 2);

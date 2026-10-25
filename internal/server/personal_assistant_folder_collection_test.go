@@ -153,6 +153,7 @@ func reviewAlbums(t *testing.T, f *draftServerFixture) albumsReview {
 	}
 	review.conversation, review.revision, review.offer = reviewFolder(t, f, map[string]any{
 		"draft_id": draft, "revision": "", "selection_id": review.selection, "candidate_id": review.candidate,
+		"structure": map[string]any{"group_type": "group"}, // explicit generic alternative
 	})
 	review.view = review.read(t, f)
 	return review
@@ -441,6 +442,7 @@ func TestAssistantFolderCollection_AttachAndScanCarryTheProposedStructure(t *tes
 	provider := &capturingChatProvider{}
 	f.builder.llmFactory.Register("claude_code", provider)
 	root := seedAlbumsCollection(t)
+	sourceHash := folderTreeHash(t, root)
 	before := len(f.builder.workspaceFileStore.CachedWorkspaces())
 
 	// Attaching in the composer: the proposal arrives with the observation,
@@ -454,7 +456,12 @@ func TestAssistantFolderCollection_AttachAndScanCarryTheProposedStructure(t *tes
 	if !ok {
 		t.Fatalf("the attach response carries no structure: %v", body)
 	}
-	assertProposedAlbums(t, structure, root)
+	recommendation := structure["recommendation"].(map[string]any)
+	destination := recommendation["destination"].(map[string]any)
+	if recommendation["operation"] != "library" || recommendation["supported_projects"] != float64(5) ||
+		destination["state"] != "absent" || destination["readiness"] != "provider_missing" {
+		t.Fatalf("local library recommendation: %v", recommendation)
+	}
 
 	// A single folder attaches exactly as before, with no structure.
 	single := filepath.Join(os.Getenv("HOME"), "Desktop")
@@ -480,12 +487,11 @@ func TestAssistantFolderCollection_AttachAndScanCarryTheProposedStructure(t *tes
 	if !ok {
 		t.Fatalf("the scan's offer carries no structure: %v", offer)
 	}
-	assertProposedAlbums(t, scanned, root)
-	// The offer's plan is the group's own: it needs no plugin, so it is there
-	// although the Home's provider is not, and nothing is reported unavailable.
-	if lines := planLineNames(offer); len(lines) == 0 || lines[0] != "group: Creates group Music" ||
-		offer["setup_unavailable_reason"] != nil || offer["availability"] != nil {
-		t.Fatalf("collection plan: %v, reason %v, availability %v", lines, offer["setup_unavailable_reason"], offer["availability"])
+	if scanned["group"].(map[string]any)["type"] != "library" || scanned["recommendation"] == nil || offer["portfolio"] == nil || offer["plan"] != nil {
+		t.Fatalf("Home must retain library recommendation and disclose prerequisites: %v", offer)
+	}
+	if folderTreeHash(t, root) != sourceHash {
+		t.Fatal("discovery changed source files")
 	}
 
 	if len(f.builder.workspaceFileStore.CachedWorkspaces()) != before || len(provider.requests) != 0 {
