@@ -610,7 +610,15 @@
       // plugin's Update button as it is now.
       returnFocus: () => liveUpdateButton(name),
       documentRef: document,
-      label: 'Review plugin update'
+      label: 'Review plugin update',
+      homeLinks: true,
+      // The installed version, its update badge and the notice count read
+      // again; the reader stays where they were on the page.
+      onSucceeded: async () => {
+        const scroll = typeof window.scrollY === 'number' ? window.scrollY : null;
+        await window.refreshPluginsPage();
+        if (scroll !== null && typeof window.scrollTo === 'function') window.scrollTo(0, scroll);
+      }
     });
   }
 

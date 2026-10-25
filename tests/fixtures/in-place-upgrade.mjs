@@ -67,6 +67,21 @@ function homeDeclaration(program, version) {
       max_evidence: 8,
       rubric: 'Offer bounded improvements.'
     },
+    // The newer release also adds a profile card to the studio: an addition
+    // the upgrade discloses but never detects, reads or staffs.
+    ...(program.id === HOME_PROGRAMS[0].id && version !== OLD_VERSION
+      ? {
+          home_profile: {
+            schema_version: 1,
+            title: 'Your studio',
+            intro: 'What Ori knows about where you make music.',
+            fields: [
+              { id: 'apps', kind: 'apps', label: 'DAWs on this Mac' },
+              { id: 'main_app', kind: 'main_app', label: 'Main DAW' }
+            ]
+          }
+        }
+      : {}),
     ...(program.id === HOME_PROGRAMS[0].id
       ? {
           allowed_project_attachments: [
@@ -93,7 +108,10 @@ export function homePackageFiles(version = OLD_VERSION) {
         name: HOME_PLUGIN,
         version,
         protocol: { min: 1, max: 1 },
-        requires_host_features: ['independent_program_homes_v1'],
+        requires_host_features:
+          version === OLD_VERSION
+            ? ['independent_program_homes_v1']
+            : ['independent_program_homes_v1', 'home_profile_v1'],
         capabilities: [],
         services: [],
         blueprints: [],

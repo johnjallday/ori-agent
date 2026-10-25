@@ -11,10 +11,24 @@
 // providerUpgradeAgentLine says what the reviewed Home package upgrade does to
 // one staffed agent: a prompt is replaced only while it still equals the old
 // role prompt, so an edited profile or Home copy keeps the owner's text.
-export function providerUpgradeAgentLine(agent = {}) {
-  if (agent.profile === 'keep' || agent.home_copy === 'keep') return 'keeps your edited prompt';
-  if (agent.profile === 'replace' || agent.home_copy === 'replace') return 'gets the new guidance';
-  return 'has no saved profile; nothing to update';
+// With done, it says what the committed upgrade did instead.
+export function providerUpgradeAgentLine(agent = {}, { done = false } = {}) {
+  if (agent.profile === 'keep' || agent.home_copy === 'keep') {
+    return done ? 'kept your edited prompt' : 'keeps your edited prompt';
+  }
+  if (agent.profile === 'replace' || agent.home_copy === 'replace') {
+    return done ? 'got the new guidance' : 'gets the new guidance';
+  }
+  return done
+    ? 'had no saved profile; nothing was updated'
+    : 'has no saved profile; nothing to update';
+}
+
+// safeHomeLink accepts only a Home page path on this host, as the server
+// builds it; anything else is no link at all.
+export function safeHomeLink(link) {
+  const value = text(link);
+  return /^\/workspaces\/[^/?#\\]+\/assistant$/.test(value) ? value : '';
 }
 
 // providerUpgradeAdditions lists what a newer release adds to a Home besides
@@ -210,6 +224,65 @@ export function renderUpgradeReview(review, doc = globalThis.document) {
   return container;
 }
 
+// renderUpgradeResult says what the succeeded operation did: which Homes are
+// on the new release (each with its page when homeLinks is set and it is not
+// the page already open) and what happened to each staffed agent's prompt.
+export function renderUpgradeResult(
+  review,
+  operation,
+  { homeLinks = false, currentPath = '' } = {},
+  doc = globalThis.document
+) {
+  const container = element(doc, 'div', { className: 'home-package-upgrade__sections' });
+  const section = (title, items) => {
+    const wrapper = element(doc, 'section', { className: 'home-package-upgrade__section' });
+    const list = element(doc, 'ul', { className: 'home-package-upgrade__list' });
+    items.forEach(item => list.append(item));
+    wrapper.append(element(doc, 'h3', { text: title }), list);
+    container.append(wrapper);
+  };
+  const item = content => element(doc, 'li', { text: content });
+
+  const homes = reviewHomes(review).map(home => {
+    const entry = item(text(home.name));
+    const link = homeLinks ? safeHomeLink(home.link) : '';
+    if (link && link !== currentPath) {
+      const anchor = element(doc, 'a', {
+        className: 'home-package-upgrade__home-link',
+        text: `Open ${text(home.name)}`,
+        attributes: { href: link }
+      });
+      entry.append(anchor);
+    }
+    return entry;
+  });
+  if (Number(review?.trashed_homes || 0) > 0) {
+    homes.push(item(`${review.trashed_homes} in the Trash keep the old release.`));
+  }
+  section(`Homes now on ${text(operation?.to_version)}`, homes);
+
+  const labels = new Map(
+    (Array.isArray(review?.roles) ? review.roles : []).map(role => [role.role_id, role.label])
+  );
+  const agents = (Array.isArray(operation?.agents) ? operation.agents : []).map(agent => {
+    const label = text(labels.get(agent.role_id) || agent.role_id);
+    return item(
+      `${text(agent.agent_name)}${label ? ` (${label})` : ''}: ${providerUpgradeAgentLine(agent, { done: true })}`
+    );
+  });
+  section(
+    'Staffed agents',
+    agents.length ? agents : [item('No staffed agent used a changed role.')]
+  );
+  container.append(
+    element(doc, 'p', {
+      className: 'home-package-upgrade__operation',
+      text: `Operation ${text(operation?.id)}`
+    })
+  );
+  return container;
+}
+
 let dialogSequence = 0;
 
 // HomePackageUpgradeDialog is one review-and-confirm of the upgrade. Its
@@ -223,7 +296,10 @@ export class HomePackageUpgradeDialog {
     trigger = null,
     returnFocus = null,
     documentRef = globalThis.document,
+    windowRef = globalThis.window,
     label = 'Review package update',
+    homeLinks = false,
+    currentPath = '',
     onSucceeded = null,
     onClosed = null
   } = {}) {
@@ -233,13 +309,19 @@ export class HomePackageUpgradeDialog {
     // replaced the trigger meanwhile (a re-rendered list row).
     this.returnFocus = returnFocus;
     this.document = documentRef;
+    this.window = windowRef;
     this.label = label;
+    // After success the result may link each Home's page; currentPath is the
+    // page already open, which is not linked again.
+    this.homeLinks = homeLinks;
+    this.currentPath = currentPath;
     this.onSucceeded = onSucceeded;
     this.onClosed = onClosed;
     this.state = 'idle';
     this.review = null;
     this.operation = null;
     this.parts = null;
+    this.unloadGuard = null;
   }
 
   get closed() {
@@ -354,6 +436,7 @@ export class HomePackageUpgradeDialog {
     cancel.disabled = true;
     error.textContent = '';
     status.textContent = `Installing ${text(review.to_version)} and moving ${homesPhrase(review)}… Keep this open; closing it would not stop the update.`;
+    this.guardUnload(true);
     let operation;
     try {
       operation = await this.transport.commit(review.token);
@@ -372,19 +455,62 @@ export class HomePackageUpgradeDialog {
       );
       return null;
     }
+    this.showResult(operation);
+    if (typeof this.onSucceeded === 'function') {
+      try {
+        await this.onSucceeded(operation, this);
+      } catch (refreshError) {
+        // The update itself succeeded; only this page's refresh did not.
+        error.textContent = `The update succeeded, but this page could not refresh: ${
+          refreshError?.message || 'reload it to see the new version'
+        }.`;
+      }
+    }
+    return operation;
+  }
+
+  showResult(operation) {
+    const { heading, status, body, cancel, confirm } = this.parts;
     this.operation = operation;
+    this.guardUnload(false);
     this.setState('succeeded');
+    heading.textContent = `${text(this.review?.plugin_id)} is updated to ${text(operation.to_version)}`;
     status.textContent = `Updated to ${text(operation.to_version)}.`;
+    body.replaceChildren(
+      renderUpgradeResult(
+        this.review,
+        operation,
+        { homeLinks: this.homeLinks, currentPath: this.currentPath },
+        this.document
+      )
+    );
+    confirm?.remove();
+    this.parts.confirm = null;
     cancel.disabled = false;
     cancel.textContent = 'Close';
-    confirm.remove();
-    this.parts.confirm = null;
-    if (typeof this.onSucceeded === 'function') await this.onSucceeded(operation, this);
-    return operation;
+    cancel.focus();
+  }
+
+  // guardUnload asks before leaving the page while a commit is in flight:
+  // leaving would not stop the update, and its result would go unseen.
+  guardUnload(on) {
+    const target = this.window;
+    if (typeof target?.addEventListener !== 'function') return;
+    if (on && !this.unloadGuard) {
+      this.unloadGuard = event => {
+        event.preventDefault();
+        event.returnValue = '';
+      };
+      target.addEventListener('beforeunload', this.unloadGuard);
+    } else if (!on && this.unloadGuard) {
+      target.removeEventListener('beforeunload', this.unloadGuard);
+      this.unloadGuard = null;
+    }
   }
 
   showCommitFailure(message) {
     const { status, error, cancel } = this.parts;
+    this.guardUnload(false);
     this.setState('commit-failed');
     status.textContent = '';
     error.textContent = message;

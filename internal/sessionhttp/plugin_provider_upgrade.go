@@ -121,3 +121,15 @@ func (h *Handler) ReviewPluginHomeUpgrade(w http.ResponseWriter, r *http.Request
 	}
 	h.respondProviderUpgradeReview(w, r, owner, installed.Name)
 }
+
+// CommitPluginHomeUpgrade is POST /api/plugins/{name}/home-upgrade/commit. It
+// applies exactly the review its token names: the service re-derives the plan
+// and refuses one that changed, belongs to another owner or plugin, or was
+// already used.
+func (h *Handler) CommitPluginHomeUpgrade(w http.ResponseWriter, r *http.Request) {
+	owner, installed, _, ok := h.pluginUpgradeScope(w, r)
+	if !ok {
+		return
+	}
+	h.respondProviderUpgradeCommit(w, r, owner, installed.Name)
+}

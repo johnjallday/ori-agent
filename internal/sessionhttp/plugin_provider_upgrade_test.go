@@ -170,3 +170,82 @@ func TestPluginHomeUpgradeHTTP(t *testing.T) {
 		t.Fatalf("status with a trashed Home = %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestPluginHomeUpgradeCommitHTTP(t *testing.T) {
+	handler, store, station, _ := assistantPortfolioHTTPFixture(t)
+	owner := station.OwnerUserID
+	handler.currentUserID = func(context.Context) (string, error) { return owner, nil }
+	pin := workspace.AssistantProgramHomeOwner{PluginID: "studio-home", PluginVersion: "0.1.0", ProgramID: "portfolio-guide",
+		HomeSchemaVersion: 1, HomeVersion: 1, DeclarationDigest: strings.Repeat("a", 64), PluginGeneration: 1, ComponentFingerprint: strings.Repeat("b", 64)}
+	if err := store.Update(station.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.HomeProvider = &pin
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeHomeUpgrades{commit: homeupgrade.Operation{ID: "op-1", Status: homeupgrade.StatusSucceeded,
+		Plan: homeupgrade.Plan{FromVersion: "0.1.0", ToVersion: "0.2.0"}}}
+	handler.SetHomePackageUpgrades(fake, nil)
+	handler.SetInstalledPluginLister(fakeInstalledPlugins{{Name: "studio-home", Version: "0.1.0"}})
+	commit := func(name, body string) *httptest.ResponseRecorder {
+		return pluginUpgradeRequest(t, handler.CommitPluginHomeUpgrade, http.MethodPost, name, "/commit", body)
+	}
+
+	// A commit names exactly one review by its token, and nothing else.
+	for _, body := range []string{`{}`, `{"token":"  "}`, `{"token":"review-1","plugin_id":"other"}`, `not json`} {
+		if rr := commit("studio-home", body); rr.Code != http.StatusBadRequest {
+			t.Fatalf("commit %s = %d %s", body, rr.Code, rr.Body.String())
+		}
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("malformed commits reached the service: %v", fake.calls)
+	}
+
+	rr := commit("studio-home", `{"token":"review-1"}`)
+	var operation providerUpgradeOperationView
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &operation) != nil ||
+		operation.ID != "op-1" || operation.Status != homeupgrade.StatusSucceeded || operation.ToVersion != "0.2.0" {
+		t.Fatalf("commit = %d %s", rr.Code, rr.Body.String())
+	}
+	if last := fake.calls[len(fake.calls)-1]; last != "commit "+owner+" studio-home review-1" {
+		t.Fatalf("commit reached the service as %q", last)
+	}
+
+	// The service's refusals keep their codes; a stopped operation is named.
+	for _, refusal := range []struct {
+		err       error
+		operation homeupgrade.Operation
+		code      string
+	}{
+		{homeupgrade.ErrReviewStale, homeupgrade.Operation{}, "home_upgrade_review_stale"},
+		{homeupgrade.ErrCurrent, homeupgrade.Operation{}, "home_upgrade_current"},
+		{homeupgrade.ErrOtherOwner, homeupgrade.Operation{}, "home_upgrade_other_owner"},
+		{homeupgrade.ErrUpgradeActive, homeupgrade.Operation{}, "home_upgrade_active"},
+		{errors.Join(homeupgrade.ErrUnavailable, errors.New("replace failed")),
+			homeupgrade.Operation{ID: "op-2", Status: homeupgrade.StatusCancelled}, "home_upgrade_cancelled"},
+		{errors.Join(homeupgrade.ErrReconcileRequired, errors.New("disk full")),
+			homeupgrade.Operation{ID: "op-3", Status: homeupgrade.StatusReconcileRequired}, "home_upgrade_reconcile_required"},
+	} {
+		fake.commit, fake.commitErr = refusal.operation, refusal.err
+		rr := commit("studio-home", `{"token":"review-2"}`)
+		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"code":"`+refusal.code+`"`) ||
+			strings.Contains(rr.Body.String(), "disk full") || strings.Contains(rr.Body.String(), "replace failed") {
+			t.Fatalf("%s = %d %s", refusal.code, rr.Code, rr.Body.String())
+		}
+		if refusal.operation.ID != "" && !strings.Contains(rr.Body.String(), `"id":"`+refusal.operation.ID+`"`) {
+			t.Fatalf("%s did not name its operation: %s", refusal.code, rr.Body.String())
+		}
+	}
+
+	// Another person cannot commit this owner's review, whatever token they hold.
+	handler.currentUserID = func(context.Context) (string, error) { return "someone-else", nil }
+	before := len(fake.calls)
+	if rr := commit("studio-home", `{"token":"review-1"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("other owner commit = %d %s", rr.Code, rr.Body.String())
+	}
+	if len(fake.calls) != before {
+		t.Fatalf("another owner reached the service: %v", fake.calls[before:])
+	}
+}

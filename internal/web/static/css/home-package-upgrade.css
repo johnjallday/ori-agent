@@ -98,6 +98,18 @@
   border-radius: 3px;
 }
 
+.home-package-upgrade__home-link {
+  margin-left: 0.5rem;
+  font-weight: 600;
+}
+
+.home-package-upgrade__operation {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted, #5c5c5e);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
 .home-package-upgrade__actions {
   display: flex;
   flex-wrap: wrap;

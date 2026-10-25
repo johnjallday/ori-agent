@@ -1700,6 +1700,7 @@ func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 		if s.Handlers.Session != nil {
 			mux.HandleFunc("GET /api/plugins/{name}/home-upgrade", s.Handlers.Session.GetPluginHomeUpgrade)
 			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/review", s.Handlers.Session.ReviewPluginHomeUpgrade)
+			mux.HandleFunc("POST /api/plugins/{name}/home-upgrade/commit", s.Handlers.Session.CommitPluginHomeUpgrade)
 		}
 	}
 }

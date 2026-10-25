@@ -9,6 +9,7 @@ import {
   pluginUpgradeTransport,
   providerUpgradeSummary,
   renderUpgradeReview,
+  safeHomeLink,
   upgradeRequest
 } from './home-package-upgrade.js';
 
@@ -426,7 +427,10 @@ function pluginsPage({ updateResponses }) {
   const upgradeFetch = async (url, options) => {
     requests.push(`${options.method} ${url}`);
     const name = decodeURIComponent(url.split('/')[3]);
-    return { ok: true, json: async () => ({ ...REVIEW, plugin_id: name }) };
+    const payload = url.endsWith('/commit')
+      ? { id: 'op-1', status: 'succeeded', to_version: '0.2.0', agents: [] }
+      : { ...REVIEW, plugin_id: name };
+    return { ok: true, json: async () => payload };
   };
   const toast = type => (message, options) => toasts.push({ type, message, options });
   const responses = [...updateResponses];
@@ -454,7 +458,13 @@ function pluginsPage({ updateResponses }) {
       },
       PluginUpdateNotifications: {
         escapeHTML: value => String(value),
-        createController: () => ({ refresh() {}, start() {}, stop() {} }),
+        createController: () => ({
+          refresh() {
+            requests.push('refresh update status');
+          },
+          start() {},
+          stop() {}
+        }),
         indexUpdates: () => new Map(),
         pluginNotice: () => null
       },
@@ -560,4 +570,135 @@ test('focus returns to the plugin row Update button even after the list re-rende
   const rerendered = plugins.updateButton('studio-home');
   button(plugins.opened[0].dialog.parts.dialog, 'Cancel').click();
   assert.equal(plugins.doc.activeElement, rerendered);
+});
+
+test('only a Home page path on this host is ever a link', () => {
+  assert.equal(
+    safeHomeLink('/workspaces/north-studio/assistant'),
+    '/workspaces/north-studio/assistant'
+  );
+  for (const unsafe of [
+    'javascript:alert(1)',
+    '//evil.example/workspaces/x/assistant',
+    'https://evil.example/workspaces/x/assistant',
+    '/workspaces/x/assistant?upgrade=commit',
+    '/workspaces/x/../settings/assistant',
+    '/workspaces/a/b/assistant',
+    '/workspaces/x\\y/assistant',
+    '/workspaces/x/assistant#top',
+    ''
+  ]) {
+    assert.equal(safeHomeLink(unsafe), '', unsafe);
+  }
+});
+
+const MULTI_HOME_REVIEW = {
+  ...REVIEW,
+  roles: [
+    { role_id: 'guide', label: 'Guide', old: 'a', new: 'b' },
+    { role_id: 'label', label: 'Label Manager', old: 'c', new: 'd' }
+  ],
+  homes: [
+    { name: 'North Studio', link: '/workspaces/north-studio/assistant', projects: ['First Song'] },
+    { name: 'South Label', link: 'javascript:alert(1)', projects: [] },
+    { name: 'East Room', link: '/workspaces/east-room/assistant', projects: [] }
+  ]
+};
+
+test('a succeeded update shows what happened, links other Homes and guards leaving meanwhile', async () => {
+  const pending = deferred();
+  const { doc, trigger, transport } = harness({
+    review: MULTI_HOME_REVIEW,
+    commit: () => pending.promise
+  });
+  const listeners = new Map();
+  const windowRef = {
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type, listener) => {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    }
+  };
+  const dialog = new HomePackageUpgradeDialog({
+    transport,
+    trigger,
+    documentRef: doc,
+    windowRef,
+    homeLinks: true,
+    currentPath: '/workspaces/east-room/assistant'
+  });
+  await dialog.open();
+  void dialog.commit();
+  const leaving = { returnValue: undefined, preventDefault() {} };
+  listeners.get('beforeunload')(leaving);
+  assert.equal(leaving.returnValue, '');
+
+  pending.resolve({
+    id: 'op-7',
+    status: 'succeeded',
+    to_version: '0.2.0',
+    agents: [
+      { agent_name: 'North Manager', role_id: 'guide', profile: 'replace', home_copy: 'replace' },
+      { agent_name: 'South Manager', role_id: 'label', profile: 'keep', home_copy: 'keep' }
+    ]
+  });
+  await settle();
+  const element = dialog.parts.dialog;
+  assert.equal(dialog.state, 'succeeded');
+  assert.equal(listeners.has('beforeunload'), false);
+  assert.equal(dialog.parts.heading.textContent, 'studio-home is updated to 0.2.0');
+  assert.match(element.textContent, /Homes now on 0\.2\.0/);
+  assert.match(element.textContent, /North Manager \(Guide\): got the new guidance/);
+  assert.match(element.textContent, /South Manager \(Label Manager\): kept your edited prompt/);
+  assert.match(element.textContent, /Operation op-7/);
+  // Each Home is named; only a safe page that is not this one is linked.
+  const links = element.all(node => node.tagName === 'A');
+  assert.deepEqual(
+    links.map(link => [link.textContent, link.getAttribute('href')]),
+    [['Open North Studio', '/workspaces/north-studio/assistant']]
+  );
+  assert.match(element.textContent, /South Label/);
+  assert.match(element.textContent, /East Room/);
+  assert.equal(doc.activeElement, button(element, 'Close'));
+  button(element, 'Close').click();
+  assert.equal(dialog.state, 'closed');
+});
+
+test('a page that cannot refresh after success does not call the update failed', async () => {
+  const { doc, trigger, transport } = harness();
+  const dialog = new HomePackageUpgradeDialog({
+    transport,
+    trigger,
+    documentRef: doc,
+    onSucceeded: () => {
+      throw new Error('network down');
+    }
+  });
+  await dialog.open();
+  const operation = await dialog.commit();
+  assert.equal(operation.status, 'succeeded');
+  assert.equal(dialog.state, 'succeeded');
+  assert.match(
+    dialog.parts.error.textContent,
+    /^The update succeeded, but this page could not refresh: network down/
+  );
+});
+
+test('a confirmed update on the Plugins page commits the reviewed token once and refreshes in place', async () => {
+  const plugins = pluginsPage({ updateResponses: [HOME_UPGRADE_REQUIRED] });
+  const trigger = plugins.updateButton('studio-home');
+  await plugins.page.pluginUpdate('studio-home', { trigger });
+  await settle();
+  const { dialog } = plugins.opened[0];
+  button(dialog.parts.dialog, 'Confirm update').click();
+  await settle();
+  await settle();
+  assert.equal(dialog.state, 'succeeded');
+  const commits = plugins.requests.filter(request => request.includes('/commit'));
+  assert.deepEqual(commits, ['POST /api/plugins/studio-home/home-upgrade/commit']);
+  // The installed list and the cached update status read again; nothing
+  // navigated.
+  assert.ok(plugins.requests.some(request => request.startsWith('GET /api/plugins ')));
+  assert.ok(plugins.requests.includes('refresh update status'));
+  assert.deepEqual(plugins.navigations, []);
+  assert.equal(plugins.location.href, 'http://ori.test/plugins');
 });

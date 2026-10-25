@@ -657,10 +657,18 @@ export class AssistantProgramPage {
     return openHomePackageUpgrade({
       transport: homeUpgradeTransport((path, options) => this.request(path, options)),
       trigger,
+      // A succeeded upgrade hides the Review button, so focus returns to the
+      // card that now says what happened.
+      returnFocus: () => {
+        const card = document.getElementById('assistantProgramUpgrade');
+        if (trigger && !trigger.hidden) return trigger;
+        return card && !card.hidden ? card : null;
+      },
       label: 'Review package upgrade',
-      onSucceeded: async (operation, dialog) => {
+      homeLinks: true,
+      currentPath: this.workspaceURL('/assistant'),
+      onSucceeded: async operation => {
         this.providerUpgradeResult = operation;
-        dialog.close();
         this.announceAction(`Upgraded to ${text(operation.to_version)}.`);
         await this.load();
         // The new release may declare things other panels on this page show

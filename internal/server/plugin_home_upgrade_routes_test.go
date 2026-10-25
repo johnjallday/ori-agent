@@ -2,15 +2,19 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -22,6 +26,7 @@ const inPlaceUpgradeFixturePlugin = "in-place-upgrade-fixture"
 var pluginHomeUpgradeRoutes = []struct{ method, path, pattern string }{
 	{http.MethodGet, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade", "GET /api/plugins/{name}/home-upgrade"},
 	{http.MethodPost, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade/review", "POST /api/plugins/{name}/home-upgrade/review"},
+	{http.MethodPost, "/api/plugins/" + inPlaceUpgradeFixturePlugin + "/home-upgrade/commit", "POST /api/plugins/{name}/home-upgrade/commit"},
 }
 
 // The plugin-addressed upgrade routes are ordinary work on the production
@@ -140,6 +145,157 @@ func TestPluginHomeUpgradeRoutesServeOnlyTheOwnersHomes(t *testing.T) {
 	}
 	if after, _ := manager.List(); after[slices.IndexFunc(after, func(record plugin.InstalledPlugin) bool { return record.Name == inPlaceUpgradeFixturePlugin })].Version != "0.1.0" {
 		t.Fatal("a refused review installed the newer release")
+	}
+}
+
+// Through the production router, Update applies exactly the reviewed upgrade:
+// the ordinary update stays refused before and after a review, a release that
+// changed after the review refuses that review, and the confirmed review moves
+// the package, its Home and the Home's staffed copies once.
+func TestPluginHomeUpgradeCommitThroughTheProductionRouter(t *testing.T) {
+	const oldPrompt, newPrompt = "Coordinate only reviewed Home work.", "Coordinate reviewed Home work and the approved project library."
+	s := newRoutesTestServer(t)
+	mux := http.NewServeMux()
+	registerRoutes(mux, s)
+	serve := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return w
+	}
+	base := "/api/plugins/" + inPlaceUpgradeFixturePlugin
+	manager := s.Handlers.Plugin.Manager()
+	installedVersion := func() string {
+		t.Helper()
+		records, err := manager.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return records[slices.IndexFunc(records, func(record plugin.InstalledPlugin) bool { return record.Name == inPlaceUpgradeFixturePlugin })].Version
+	}
+	review := func() string {
+		t.Helper()
+		w := serve(http.MethodPost, base+"/home-upgrade/review", "{}")
+		var reviewed struct {
+			Token     string `json:"token"`
+			ToVersion string `json:"to_version"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &reviewed) != nil || reviewed.Token == "" {
+			t.Fatalf("review = %d %s", w.Code, w.Body.String())
+		}
+		return reviewed.Token
+	}
+	commit := func(token string) *httptest.ResponseRecorder {
+		return serve(http.MethodPost, base+"/home-upgrade/commit", `{"token":"`+token+`"}`)
+	}
+
+	root := t.TempDir()
+	writeNamedHomePackage(t, root, inPlaceUpgradeFixturePlugin, "0.1.0", oldPrompt)
+	installed, err := manager.Install(root, plugin.FormatClaude, func(plugin.TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetEnabled(installed.Name, true); err != nil {
+		t.Fatal(err)
+	}
+	records, _ := manager.List()
+	installed = records[slices.IndexFunc(records, func(record plugin.InstalledPlugin) bool { return record.Name == inPlaceUpgradeFixturePlugin })]
+	store := s.Storage.WorkspaceStore
+	home := seedPinnedHome(t, store, installed, userprofile.LocalUserID, "Studio Home")
+	staffHomeCopies(t, store, home.ID, "portfolio_manager", map[string]string{"Studio Manager": oldPrompt, "Night Manager": "My own guidance."})
+
+	writeNamedHomePackage(t, root, inPlaceUpgradeFixturePlugin, "0.1.1", newPrompt)
+	directUpdate := func() {
+		t.Helper()
+		w := serve(http.MethodPost, base+"/update", `{"confirm":true}`)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"code":"home_upgrade_required"`) || installedVersion() != "0.1.0" {
+			t.Fatalf("direct update = %d %s (installed %s)", w.Code, w.Body.String(), installedVersion())
+		}
+	}
+	directUpdate()
+	stale := review()
+	directUpdate() // a review is consent to one commit, not to an ordinary replacement
+
+	// The release changed after the review: that review commits nothing.
+	writeNamedHomePackage(t, root, inPlaceUpgradeFixturePlugin, "0.1.2", newPrompt+" Later.")
+	if w := commit(stale); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"code":"home_upgrade_review_stale"`) || installedVersion() != "0.1.0" {
+		t.Fatalf("commit of a changed release = %d %s (installed %s)", w.Code, w.Body.String(), installedVersion())
+	}
+
+	writeNamedHomePackage(t, root, inPlaceUpgradeFixturePlugin, "0.1.1", newPrompt)
+	token := review()
+	w := commit(token)
+	var operation struct {
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		ToVersion string `json:"to_version"`
+		Agents    []struct {
+			AgentName string `json:"agent_name"`
+			HomeCopy  string `json:"home_copy"`
+		} `json:"agents"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &operation) != nil || operation.Status != "succeeded" || operation.ToVersion != "0.1.1" {
+		t.Fatalf("commit = %d %s", w.Code, w.Body.String())
+	}
+	outcomes := map[string]string{}
+	for _, agent := range operation.Agents {
+		outcomes[agent.AgentName] = agent.HomeCopy
+	}
+	if installedVersion() != "0.1.1" || outcomes["Studio Manager"] != "replace" || outcomes["Night Manager"] != "keep" {
+		t.Fatalf("after commit: installed %s, outcomes %v", installedVersion(), outcomes)
+	}
+	moved, _ := store.Get(home.ID)
+	if pin := moved.GetAssistantProgramState().HomeProvider; pin == nil || pin.PluginVersion != "0.1.1" {
+		t.Fatalf("Home pin after commit = %#v", pin)
+	}
+	for name, want := range map[string]string{"Studio Manager": newPrompt, "Night Manager": "My own guidance."} {
+		copyAgent, found, err := store.GetWorkspaceAgent(home.ID, name)
+		if err != nil || !found || copyAgent.Settings.SystemPrompt != want {
+			t.Fatalf("%s Home copy = %#v, %v, %v", name, copyAgent, found, err)
+		}
+	}
+
+	// Replaying the confirmation changes nothing and starts no operation.
+	if w := commit(token); w.Code != http.StatusConflict {
+		t.Fatalf("replayed commit = %d %s", w.Code, w.Body.String())
+	}
+	w = serve(http.MethodGet, base+"/home-upgrade", "")
+	var status struct {
+		Operation     *struct{ ID string } `json:"operation"`
+		LastOperation *struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"last_operation"`
+		InstalledVersion string `json:"installed_version"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &status) != nil || status.Operation != nil ||
+		status.LastOperation == nil || status.LastOperation.ID != operation.ID || status.LastOperation.Status != "succeeded" || status.InstalledVersion != "0.1.1" {
+		t.Fatalf("status after commit = %d %s", w.Code, w.Body.String())
+	}
+}
+
+// staffHomeCopies binds agents to a Home role and saves each one's Home copy
+// with the given prompt; no global profile exists for them.
+func staffHomeCopies(t *testing.T, store workspace.Store, homeID, roleID string, prompts map[string]string) {
+	t.Helper()
+	names := slices.Sorted(maps.Keys(prompts))
+	if err := store.Update(homeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		for index, name := range names {
+			instance := fmt.Sprintf("instance-%d", index)
+			home.AgentInstances = append(home.AgentInstances, workspace.AgentInstance{ID: instance, Name: name, RoleID: roleID})
+			state.HomeBindings.Bindings = append(state.HomeBindings.Bindings, workspace.AssistantRoleBinding{RoleID: roleID, AgentInstanceID: instance, AgentName: name})
+		}
+		state.HomeBindings.StateRevision++
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if err := store.SaveWorkspaceAgent(homeID, name, &agent.Agent{Settings: types.Settings{Provider: "openai", Model: "fixture", SystemPrompt: prompts[name]}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

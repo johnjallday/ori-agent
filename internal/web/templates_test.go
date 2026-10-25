@@ -78,6 +78,11 @@ func TestRenderedUpgradeEntryPointsLoadTheSharedDialog(t *testing.T) {
 			t.Errorf("%s page must link the shared upgrade styles exactly once", page)
 		}
 	}
+	// The Home's action announcements are for screen readers only; Bootstrap 5
+	// has no .sr-only, so that class left them printed on the page.
+	if !strings.Contains(home, `id="assistantProgramActionLive" class="visually-hidden"`) {
+		t.Error("the Home page's action announcements must be visually hidden")
+	}
 	if strings.Count(plugins, `<script type="module" src="/js/modules/home-package-upgrade.js"></script>`) != 1 {
 		t.Error("plugins page must load the shared upgrade dialog as a module exactly once")
 	}
