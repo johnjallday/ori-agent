@@ -413,6 +413,14 @@ for (const kind of ['station', 'detachment']) {
         await Promise.resolve();
       }
       assert.match(painted, /5 files ready for review/);
+      if (kind === 'detachment') {
+        painted = '';
+        command._renderDeferredByDrag = true;
+        handlers.pointerup();
+        command.disposeNextAction();
+        await Promise.resolve();
+        assert.equal(painted, '', 'teardown cancels a queued repaint');
+      }
       command.disposeNextAction();
     } finally {
       globalThis.document = previous;

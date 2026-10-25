@@ -2163,6 +2163,7 @@ export class WorkspaceCommandView {
   }
 
   disposeNextAction() {
+    this._renderDeferredByDrag = false;
     this._nextActionUnsubscribe?.();
     this._nextActionUnsubscribe = null;
     this._nextActionController = null;
