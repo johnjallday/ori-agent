@@ -45,6 +45,7 @@ import {
   structureOption
 } from './personal-assistant-proposal.js';
 import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
+import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
 // can use it without mounting this card; it is re-exported for existing callers.
@@ -3274,6 +3275,9 @@ function renderOffer(place) {
       }
     });
   }
+  renderFolderFindings(document.getElementById('personalAssistantFolderFindings'), {
+    offer: state.offer
+  });
   renderHire(els, view.hire, state.offer);
   globalThis.OriFolderSetupVisual.renderRequirements(
     document.getElementById('personalAssistantFolderRequirements'),
@@ -3299,6 +3303,13 @@ function renderOffer(place) {
       globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer: state.offer });
     else diagram.replaceChildren();
     els.offer.classList.toggle('pa-folder__offer--visual', !diagram.hidden);
+    const recommendation = document.getElementById('personalAssistantFolderRecommendation');
+    if (recommendation) recommendation.hidden = diagram.hidden;
+    // The diagram already names the proposed workspace and agent. Keep the
+    // recognition reason above it rather than repeating the hire headline.
+    if (!diagram.hidden && !receipt.visible && !view.setup && view.hire && els.headline)
+      els.headline.hidden = true;
+    else if (els.headline) els.headline.hidden = false;
   }
   globalThis.OriFolderSetupVisual.renderConsequences(
     document.getElementById('personalAssistantFolderConsequences'),

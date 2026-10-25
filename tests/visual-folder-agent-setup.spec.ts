@@ -62,7 +62,10 @@ const reviewOffer = (mode = 'create') => ({
   verdict: 'project',
   status: 'pending',
   folder: 'Session',
-  subject: { name: 'Session' },
+  subject: { name: 'Session', is_root: true, marker: 'REAPER project', observed_files: 1 },
+  scanned_at: '2026-10-05T10:00:00Z',
+  partial: false,
+  reason: 'A REAPER project marker was observed in this folder.',
   capability: {
     recognized: 'REAPER song',
     workspace: 'REAPER Song workspace',
@@ -841,6 +844,7 @@ test('fixture requirements keep independently known operations ahead of the prop
       const card = await mountReview(page, offer);
       const requirements = card.locator('#personalAssistantFolderRequirements');
       await expect(requirements.locator('li')).toHaveCount(2);
+      await requirements.scrollIntoViewIfNeeded();
       for (const plugin of ['REAPER', 'Music Project Management']) {
         const label = requirements.getByText(plugin, { exact: true });
         await expect(label).toBeVisible();
@@ -862,10 +866,10 @@ test('fixture requirements keep independently known operations ahead of the prop
       const action = card.locator('#personalAssistantFolderOfferActions');
       const diagram = card.locator('#personalAssistantFolderVisual');
       expect(
-        await action.evaluate(
+        await diagram.evaluate(
           (node, other) =>
             Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
-          await diagram.elementHandle()
+          await action.elementHandle()
         )
       ).toBe(true);
       if (process.env.ORI_VISUAL_EVIDENCE)
@@ -893,6 +897,110 @@ test('fixture requirements keep independently known operations ahead of the prop
         });
       }
     }
+  }
+});
+
+test('fixture findings precede recommendation and stay bound through replace and reopen', async ({
+  page
+}) => {
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (
+      request.method() !== 'GET' &&
+      /\/(ask|route|setup|decide|prerequisites|install|enable|update|files)(\/|$)/.test(
+        new URL(request.url()).pathname
+      )
+    )
+      writes.push(request.url());
+  });
+  const card = await mountReview(page);
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await card.locator('#personalAssistantFolderFindings').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-reaper-desktop.png`
+    });
+    await page.setViewportSize({ width: 390, height: 1400 });
+    await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+    await card.locator('.folder-visual').screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-reaper-narrow-diagram.png`
+    });
+  }
+  const findings = card.getByRole('region', { name: 'What I found', exact: true });
+  const recommendation = card.getByRole('region', { name: 'Recommendation', exact: true });
+  await expect(findings).toContainText('1 file observed in this scope');
+  await expect(findings).toContainText('File contents have not been read');
+  await expect(findings).toContainText('REAPER project marker');
+  expect(
+    await findings.evaluate(
+      (node, other) =>
+        Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
+      await recommendation.elementHandle()
+    )
+  ).toBe(true);
+  const updated = {
+    ...reviewOffer(),
+    folder: '<literal> very long parent '.repeat(8),
+    partial: true,
+    subject: { name: 'Ambiguous child '.repeat(12), is_root: false, marker: '', observed_files: 0 },
+    reason: 'No supported project marker was recorded in this scope.'
+  };
+  await page.evaluate(
+    offer => (window as any).PersonalAssistantFolder.updateConversationReview(offer),
+    updated
+  );
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(findings).toContainText('Partial, bounded look');
+    await expect(findings).toContainText('0 files observed');
+    await expect(findings).not.toContainText('REAPER');
+    expect(await card.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await findings.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-partial-${width}.png`
+      });
+      await card
+        .locator('.folder-visual')
+        .screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-diagram-${width}.png` });
+    }
+  }
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(findings).toContainText(updated.subject.name);
+  expect(writes).toEqual([]);
+  await page.evaluate(() => (window as any).PersonalAssistantFolder.parkConversation());
+  await expect(card).toBeHidden();
+});
+
+test('fixture saved findings use the same single card in Needs you', async ({ page }) => {
+  await mockHiredAssistant(page);
+  const offer = { ...reviewOffer(), conversation_id: '' };
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({
+      json: {
+        today: {
+          state: 'healthy_empty',
+          display_name: 'Atlas',
+          needs_you: { items: [] },
+          working_on: { items: [] },
+          done: { items: [] }
+        }
+      }
+    })
+  );
+  await page.route('**/api/personal-assistant/folder-digest**', route =>
+    route.fulfill({ json: { folder_digest: { offer, chips: [] } } })
+  );
+  await page.goto('/?panel=today');
+  const card = page.locator('#personalAssistantFolderOffer');
+  await expect(card).toHaveAttribute('data-placement', 'needs');
+  await expect(card.locator('#personalAssistantFolderFindings')).toContainText('Saved metadata');
+  await expect(card.locator('.folder-visual')).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderFindings')).toHaveCount(1);
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await card.locator('#personalAssistantFolderFindings').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/findings-needs-you.png` });
   }
 });
 

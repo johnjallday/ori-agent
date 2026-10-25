@@ -88,6 +88,9 @@ type FolderCandidateRecord struct {
 	// directory listing: "directory", "file" (a worktree or submodule), or empty.
 	// It was never opened, so it does not say the checkout is valid.
 	Repository string `json:"repository,omitempty"`
+	// ObservedFiles is a bounded metadata count for this exact subject, frozen
+	// at scan time. Nil on legacy records means unknown, not zero.
+	ObservedFiles *int `json:"observed_files,omitempty"`
 	// DominantExtension is the candidate's most common file kind (".tex"),
 	// for tool candidates.
 	DominantExtension string `json:"dominant_ext,omitempty"`
@@ -580,6 +583,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 }
 
 func validateFolderCandidate(c FolderCandidateRecord) error {
+	if c.ObservedFiles != nil && (*c.ObservedFiles < 0 || *c.ObservedFiles > folderdigest.DefaultMaxEntries) {
+		return fmt.Errorf("%w: observed files", errFolderDigestInvalid)
+	}
 	if err := validateFolderKey(c.Key); err != nil {
 		return err
 	}

@@ -44,6 +44,11 @@
   <section id="personalAssistantFolderOffer" class="pa-thread__reply pa-specialist-offer pa-folder__offer"
            aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
     <div class="folder-setup-surface">
+    <section id="personalAssistantFolderFindings" class="folder-findings" aria-label="What I found" hidden></section>
+    <section id="personalAssistantFolderRecommendation" class="folder-recommendation" aria-label="Recommendation" hidden>
+      <h3>Recommendation:</h3>
+      <div id="personalAssistantFolderVisual" class="folder-setup-diagram" hidden></div>
+    </section>
     <div class="folder-setup-decision" aria-label="Current setup decision">
     <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
     <div id="personalAssistantFolderRequirements" hidden></div>
@@ -124,8 +129,6 @@
     <div id="personalAssistantFolderMap" hidden></div>
     </details>
     </div>
-    <!-- Decision controls precede the diagram in DOM order, including on phones. -->
-    <div id="personalAssistantFolderVisual" class="folder-setup-diagram" hidden></div>
     </div>
   </section>
 </section>

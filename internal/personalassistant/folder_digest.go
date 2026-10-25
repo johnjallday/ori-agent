@@ -658,6 +658,7 @@ type FolderOfferView struct {
 	Verdict        string                   `json:"verdict"`
 	Reason         string                   `json:"reason"`
 	Partial        bool                     `json:"partial,omitempty"`
+	ScannedAt      time.Time                `json:"scanned_at,omitempty"`
 	Folder         string                   `json:"folder"`
 	Chip           string                   `json:"chip,omitempty"`
 	Subject        FolderSubjectView        `json:"subject"`
@@ -812,11 +813,12 @@ type FolderJourneyInput struct {
 
 // FolderSubjectView names what the offer is about.
 type FolderSubjectView struct {
-	Name   string `json:"name"`
-	Kind   string `json:"kind"`
-	Shape  string `json:"shape,omitempty"`
-	Marker string `json:"marker,omitempty"`
-	IsRoot bool   `json:"is_root,omitempty"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	Shape         string `json:"shape,omitempty"`
+	Marker        string `json:"marker,omitempty"`
+	IsRoot        bool   `json:"is_root,omitempty"`
+	ObservedFiles *int   `json:"observed_files,omitempty"`
 }
 
 // FolderTidiedView names the workspace that already tidies a folder and the
@@ -2592,11 +2594,11 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 // describeOffer projects capabilities without resolving execution authority.
 func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
 	v := FolderOfferView{
-		ID: offer.ID, Status: offer.Status, Verdict: offer.Verdict, Reason: offer.Reason, Partial: offer.Partial,
+		ID: offer.ID, Status: offer.Status, Verdict: offer.Verdict, Reason: offer.Reason, Partial: offer.Partial, ScannedAt: offer.ScannedAt,
 		Folder: offer.FolderName, Chip: offer.Chip,
 		Subject: FolderSubjectView{
 			Name: offer.Subject.Name, Kind: offer.Subject.Kind, Shape: offer.Subject.Shape,
-			Marker: offer.Subject.Marker, IsRoot: offer.Subject.IsRoot,
+			Marker: offer.Subject.Marker, IsRoot: offer.Subject.IsRoot, ObservedFiles: offer.Subject.ObservedFiles,
 		},
 		ProjectsCount: offer.ProjectsCount, Portfolio: offer.Portfolio, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
 		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome, Structure: offer.Structure.view(),
@@ -2899,6 +2901,10 @@ func folderCandidateRecord(c folderdigest.Candidate, kind, reason string) Folder
 		DominantExtension: c.DominantExtension,
 		IsRoot:            c.IsRoot, RelPath: c.RelPath,
 		Repository: string(c.Repository),
+	}
+	if c.FileCount >= 0 && c.FileCount <= folderdigest.DefaultMaxEntries {
+		files := c.FileCount
+		record.ObservedFiles = &files
 	}
 	if c.Marker != nil {
 		record.Marker = c.Marker.Label
