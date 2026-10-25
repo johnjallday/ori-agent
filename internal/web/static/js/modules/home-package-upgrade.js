@@ -8,20 +8,61 @@
 // the owner, the package and the plan, and a commit applies only the review
 // its token names.
 
+// agentEffect sums up what the upgrade does to one staffed agent's two saved
+// prompts, its profile and its copy in the Home: each is replaced only while
+// it still equals the old role prompt. "mixed" is one kept and one replaced,
+// which is neither "kept" nor "updated".
+export function agentEffect(agent = {}) {
+  const actions = [agent.profile, agent.home_copy].filter(
+    action => action === 'replace' || action === 'keep'
+  );
+  if (!actions.length) return 'missing';
+  if (actions.includes('replace') && actions.includes('keep')) return 'mixed';
+  return actions[0];
+}
+
 // providerUpgradeAgentLine says what the reviewed Home package upgrade does to
-// one staffed agent: a prompt is replaced only while it still equals the old
-// role prompt, so an edited profile or Home copy keeps the owner's text.
-// With done, it says what the committed upgrade did instead.
+// one staffed agent. With done, it says what the committed upgrade did.
 export function providerUpgradeAgentLine(agent = {}, { done = false } = {}) {
-  if (agent.profile === 'keep' || agent.home_copy === 'keep') {
-    return done ? 'kept your edited prompt' : 'keeps your edited prompt';
+  switch (agentEffect(agent)) {
+    case 'replace':
+      return done ? 'got the new guidance' : 'gets the new guidance';
+    case 'keep':
+      return done ? 'kept your edited prompt' : 'keeps your edited prompt';
+    case 'mixed':
+      return agent.profile === 'keep'
+        ? done
+          ? 'kept your edited profile prompt; its Home copy got the new guidance'
+          : 'keeps your edited profile prompt; its Home copy gets the new guidance'
+        : done
+          ? 'got the new guidance in its profile; its Home copy kept your edits'
+          : 'gets the new guidance in its profile; its Home copy keeps your edits';
+    default:
+      return done
+        ? 'had no saved profile; nothing was updated'
+        : 'has no saved profile; nothing to update';
   }
-  if (agent.profile === 'replace' || agent.home_copy === 'replace') {
-    return done ? 'got the new guidance' : 'gets the new guidance';
-  }
-  return done
-    ? 'had no saved profile; nothing was updated'
-    : 'has no saved profile; nothing to update';
+}
+
+function plural(count, one, many = `${one}s`) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+// providerUpgradeImpact is the review's one-line count of what moves.
+export function providerUpgradeImpact(review) {
+  const homes = reviewHomes(review);
+  const projects = homes.reduce(
+    (total, home) => total + (Array.isArray(home.projects) ? home.projects.length : 0),
+    0
+  );
+  const agents = homes.reduce(
+    (total, home) => total + (Array.isArray(home.agents) ? home.agents.length : 0),
+    0
+  );
+  return `${plural(homes.length, 'Home')}, ${plural(projects, 'linked project')} and ${plural(
+    agents,
+    'staffed agent'
+  )} affected.`;
 }
 
 // safeHomeLink accepts only a Home page path on this host, as the server
@@ -40,8 +81,11 @@ export function providerUpgradeAdditions(review) {
     .slice(0, 8);
 }
 
+// reviewHomes lists the review's Homes by name, so several read in order.
 function reviewHomes(review) {
-  return Array.isArray(review?.homes) ? review.homes : [];
+  return (Array.isArray(review?.homes) ? [...review.homes] : []).sort((a, b) =>
+    String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
+  );
 }
 
 // providerUpgradeSummary is the review's opening sentence: which Homes move,
@@ -53,7 +97,7 @@ export function providerUpgradeSummary(review) {
   if (homes.length === 1 && text(homes[0]?.name).trim()) {
     subject = `${text(homes[0].name).trim()} and its linked projects move`;
   } else if (homes.length > 1) {
-    subject = `${homes.length} Homes and their linked projects move`;
+    subject = `${homes.length} Homes and their linked projects move together`;
   }
   const moves = `${subject} from ${text(review?.from_version)} to ${text(review?.to_version)}.`;
   if (!providerUpgradeAdditions(review).length) return `${moves} Only Home guidance changes.`;
@@ -195,11 +239,50 @@ export function renderUpgradeReview(review, doc = globalThis.document) {
     return items;
   };
 
+  // The version transition and the size of the change come first.
+  const versions = element(doc, 'p', { className: 'home-package-upgrade__versions' });
+  versions.append(
+    element(doc, 'span', {
+      className: 'home-package-upgrade__version',
+      text: review?.from_version
+    }),
+    element(doc, 'span', {
+      className: 'home-package-upgrade__arrow',
+      text: '→',
+      attributes: { 'aria-hidden': 'true' }
+    }),
+    element(doc, 'span', { className: 'visually-hidden', text: ' to ' }),
+    element(doc, 'span', {
+      className: 'home-package-upgrade__version home-package-upgrade__version--new',
+      text: review?.to_version
+    })
+  );
+  const overview = element(doc, 'div', { className: 'home-package-upgrade__overview' });
+  overview.append(
+    versions,
+    element(doc, 'p', {
+      className: 'home-package-upgrade__impact',
+      text: providerUpgradeImpact(review)
+    })
+  );
+  container.append(overview);
+
+  // The plugin review's own warnings are read before anything else.
+  const warnings = (Array.isArray(review?.warnings) ? review.warnings : [])
+    .map(warning => text(warning).trim())
+    .filter(Boolean);
+  if (warnings.length) section('Before you confirm', list(warnings));
+
+  // What the newer release adds besides guidance, in the server's words.
+  const additions = providerUpgradeAdditions(review);
+  if (additions.length) section('What this release adds', list(additions));
+
   const roles = Array.isArray(review?.roles) ? review.roles : [];
   if (roles.length) {
     section(
       'Guidance changes',
       ...roles.map(role => {
+        // Long prompts stay folded unless there is only one to read.
         const details = element(doc, 'details');
         details.open = roles.length === 1;
         const diff = element(doc, 'div', { className: 'home-package-upgrade__diff' });
@@ -210,7 +293,7 @@ export function renderUpgradeReview(review, doc = globalThis.document) {
           const column = element(doc, 'div');
           column.append(
             element(doc, 'strong', { text: label }),
-            element(doc, 'pre', { text: value })
+            element(doc, 'pre', { text: value, attributes: { tabindex: '0' } })
           );
           diff.append(column);
         }
@@ -222,41 +305,55 @@ export function renderUpgradeReview(review, doc = globalThis.document) {
     section('Guidance changes', element(doc, 'p', { text: providerUpgradeGuidanceNote(review) }));
   }
 
-  // What the newer release adds besides guidance, in the server's words.
-  const additions = providerUpgradeAdditions(review);
-  if (additions.length) section('What this release adds', list(additions));
-
-  const homes = reviewHomes(review).map(home => {
+  const homes = reviewHomes(review);
+  const homeLines = homes.map(home => {
     const projects = Array.isArray(home.projects) ? home.projects : [];
     return projects.length
-      ? `${text(home.name)}: ${projects.length} linked ${projects.length === 1 ? 'project' : 'projects'} (${projects.join(', ')})`
+      ? `${text(home.name)}: ${plural(projects.length, 'linked project')} (${projects.join(', ')})`
       : `${text(home.name)}: no linked projects`;
   });
   if (Number(review?.trashed_homes || 0) > 0) {
-    homes.push(`${review.trashed_homes} in the Trash keep the old release.`);
+    homeLines.push(
+      `${plural(Number(review.trashed_homes), 'Home')} in the Trash ${
+        Number(review.trashed_homes) === 1 ? 'keeps' : 'keep'
+      } the old release.`
+    );
   }
-  section('Homes and projects', list(homes));
+  section('Homes and projects', list(homeLines));
 
-  const agents = reviewHomes(review).flatMap(home =>
+  // Each staffed agent's outcome, grouped by Home when there are several.
+  const agentLines = home =>
     (Array.isArray(home.agents) ? home.agents : []).map(
       agent =>
         `${text(agent.agent_name)} (${text(agent.role_label)}): ${providerUpgradeAgentLine(agent)}`
-    )
-  );
-  section(
-    'Staffed agents',
-    list(agents.length ? agents : ['No staffed agent uses a changed role.'])
-  );
+    );
+  const staffed = homes.filter(home => agentLines(home).length);
+  if (!staffed.length) {
+    section('Staffed agents', list(['No staffed agent uses a changed role.']));
+  } else if (homes.length === 1) {
+    section('Staffed agents', list(agentLines(homes[0])));
+  } else {
+    section(
+      'Staffed agents',
+      ...staffed.flatMap(home => [
+        element(doc, 'p', { className: 'home-package-upgrade__group', text: home.name }),
+        list(agentLines(home))
+      ])
+    );
+  }
 
-  const stays = [
-    'Approved project library folders stay approved.',
-    'Pending library reviews and scans are cancelled; start them again afterwards.'
-  ];
+  // What the upgrade stops is told apart from what it leaves alone.
+  section(
+    'What is cancelled',
+    list([
+      `Pending library reviews and scans in ${
+        homes.length === 1 ? 'this Home' : 'these Homes'
+      } are cancelled; start them again afterwards.`
+    ])
+  );
+  const stays = ['Approved project library folders stay approved.'];
   const skills = Array.isArray(review?.skills) ? review.skills : [];
   if (skills.length) stays.push(`Skills in the new release: ${skills.join(', ')}.`);
-  (Array.isArray(review?.warnings) ? review.warnings : []).forEach(warning =>
-    stays.push(text(warning))
-  );
   section('What stays the same', list(stays));
   return container;
 }
@@ -537,7 +634,7 @@ export class HomePackageUpgradeDialog {
     const heading = element(doc, 'h2', {
       className: 'home-package-upgrade__title',
       text: 'Review the Home upgrade',
-      attributes: { id: `${id}Title` }
+      attributes: { id: `${id}Title`, tabindex: '-1' }
     });
     const status = element(doc, 'p', {
       className: 'home-package-upgrade__status',
@@ -679,7 +776,9 @@ export class HomePackageUpgradeDialog {
     controls.append(confirm);
     this.parts.confirm = confirm;
     this.setState('review');
-    confirm.focus();
+    // The review is read from its heading; Enter must not confirm an update
+    // nobody has read yet, so Confirm update is reached by Tab.
+    heading.focus();
   }
 
   async commit() {

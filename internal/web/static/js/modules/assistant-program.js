@@ -1,8 +1,8 @@
 import { workspaceRootURL } from './workspace-routes.js';
 import {
+  agentEffect,
   homeUpgradeTransport,
-  openHomePackageUpgrade,
-  providerUpgradeAgentLine
+  openHomePackageUpgrade
 } from './home-package-upgrade.js';
 
 // The review's wording lives with the shared upgrade dialog; these stay
@@ -38,20 +38,22 @@ export function assistantProviderUnavailableMessage(program = {}, declaration = 
 export function providerUpgradeCard(upgrade, result = null) {
   if (result && result.status === 'succeeded') {
     const agents = Array.isArray(result.agents) ? result.agents : [];
-    const kept = agents.filter(
-      agent => providerUpgradeAgentLine(agent) === 'keeps your edited prompt'
-    );
-    const updated = agents.filter(
-      agent => providerUpgradeAgentLine(agent) === 'gets the new guidance'
-    );
+    const count = effect => agents.filter(agent => agentEffect(agent) === effect).length;
+    const updated = count('replace');
+    const kept = count('keep');
+    const mixed = count('mixed');
     const parts = [];
-    if (updated.length) {
+    if (updated) {
       parts.push(
-        `${updated.length} staffed ${updated.length === 1 ? 'agent got' : 'agents got'} the new guidance`
+        `${updated} staffed ${updated === 1 ? 'agent got' : 'agents got'} the new guidance`
       );
     }
-    if (kept.length) {
-      parts.push(`${kept.length} kept ${kept.length === 1 ? 'its' : 'their'} edited prompt`);
+    if (kept) {
+      parts.push(`${kept} kept ${kept === 1 ? 'its' : 'their'} edited prompt`);
+    }
+    // One copy kept and one replaced is neither "kept" nor "updated".
+    if (mixed) {
+      parts.push(`${mixed} kept an edited prompt in one copy while the other got the new guidance`);
     }
     return {
       hidden: false,
@@ -96,7 +98,7 @@ export function providerUpgradeCard(upgrade, result = null) {
       hidden: false,
       state: 'available',
       title: `${text(upgrade.plugin_id)} ${text(upgrade.available_version)} is available`,
-      text: `This Home uses ${text(upgrade.installed_version)}. Review what changes before upgrading; the Plugins page cannot update it while this Home uses it.`,
+      text: `This Home uses ${text(upgrade.installed_version)}. Review what changes before updating; the update moves every Home that uses this plugin, from here or from the Plugins page.`,
       reviewable: true
     };
   }

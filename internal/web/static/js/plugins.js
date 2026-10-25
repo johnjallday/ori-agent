@@ -693,8 +693,9 @@
       transport: upgrade.pluginUpgradeTransport(name),
       trigger,
       // Refreshing the list replaces the row, so focus returns to the same
-      // plugin's Update button as it is now.
-      returnFocus: () => liveUpdateButton(name),
+      // plugin's Update button as it is now, or to the list's heading when
+      // the row is gone.
+      returnFocus: () => liveUpdateButton(name) || byId('pluginInstalledHeading'),
       documentRef: document,
       label: 'Review plugin update',
       homeLinks: true,

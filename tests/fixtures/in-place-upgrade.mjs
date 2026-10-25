@@ -10,8 +10,11 @@
 // install. Nothing here talks to a network release, a real plugin store, or
 // the user's own Ori.
 //
-//   node tests/fixtures/in-place-upgrade.mjs seed    --base-url URL --sandbox DIR
-//   node tests/fixtures/in-place-upgrade.mjs release --sandbox DIR [--version V]
+//   node tests/fixtures/in-place-upgrade.mjs seed    --base-url URL --sandbox DIR [--homes "A,B"]
+//   node tests/fixtures/in-place-upgrade.mjs release --sandbox DIR [--version V] [--long]
+//
+// --homes names the two Homes (the first gets the song); --long writes
+// prompts long enough to scroll.
 
 import { mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -38,7 +41,15 @@ export function rolePrompt(program, version) {
     : `${program.label}: coordinate this Home's portfolio and its reviewed library. (in-place fixture ${version})`;
 }
 
-function homeDeclaration(program, version) {
+// LONG_GUIDANCE makes a release's prompts long enough to scroll, for layout
+// checks of the review's guidance diff.
+const LONG_GUIDANCE = Array.from(
+  { length: 24 },
+  (_, index) =>
+    `Rule ${index + 1}: keep every session's notes, stems and decisions together, and say what changed before anything is moved.`
+).join('\n');
+
+function homeDeclaration(program, version, long = false) {
   return {
     schema_version: 1,
     version: 1,
@@ -53,7 +64,9 @@ function homeDeclaration(program, version) {
         required: true,
         primary: true,
         role: 'orchestrator',
-        system_prompt: rolePrompt(program, version),
+        system_prompt: long
+          ? `${rolePrompt(program, version)}\n${LONG_GUIDANCE}`
+          : rolePrompt(program, version),
         skills: [HOME_PLUGIN]
       }
     ],
@@ -99,7 +112,7 @@ function homeDeclaration(program, version) {
   };
 }
 
-export function homePackageFiles(version = OLD_VERSION) {
+export function homePackageFiles(version = OLD_VERSION, { long = false } = {}) {
   return {
     '.claude-plugin/plugin.json': JSON.stringify({ name: HOME_PLUGIN, version }),
     '.ori-plugin/plugin.json': JSON.stringify(
@@ -115,7 +128,9 @@ export function homePackageFiles(version = OLD_VERSION) {
         capabilities: [],
         services: [],
         blueprints: [],
-        assistant_program_homes: HOME_PROGRAMS.map(program => homeDeclaration(program, version))
+        assistant_program_homes: HOME_PROGRAMS.map(program =>
+          homeDeclaration(program, version, long)
+        )
       },
       null,
       2
@@ -217,11 +232,11 @@ export function homePackageDir(sandbox) {
 
 // writeHomeRelease replaces the installed Home package export with another
 // release, as a developer replacing a local export would.
-export async function writeHomeRelease(sandbox, version = NEW_VERSION) {
+export async function writeHomeRelease(sandbox, version = NEW_VERSION, { long = false } = {}) {
   const root = homePackageDir(await assertSandbox(sandbox));
   await mkdir(root, { recursive: true, mode: 0o750 });
   for (const entry of await readdir(root)) await rm(join(root, entry), { recursive: true, force: true });
-  await writeTree(root, homePackageFiles(version));
+  await writeTree(root, homePackageFiles(version, { long }));
   return root;
 }
 
@@ -342,14 +357,21 @@ async function main(argv) {
   const [command, ...args] = argv;
   const sandbox = argument(args, '--sandbox');
   if (command === 'seed') {
-    const result = await seed({ baseURL: argument(args, '--base-url'), sandbox });
+    const names = argument(args, '--homes');
+    const result = await seed({
+      baseURL: argument(args, '--base-url'),
+      sandbox,
+      ...(names ? { homes: names.split(',').map(name => name.trim()) } : {})
+    });
     console.log(JSON.stringify(result, null, 2));
   } else if (command === 'release') {
     const version = argument(args, '--version') || NEW_VERSION;
-    const root = await writeHomeRelease(sandbox, version);
+    const root = await writeHomeRelease(sandbox, version, { long: args.includes('--long') });
     console.log(JSON.stringify({ home_package: root, version }, null, 2));
   } else {
-    throw new Error('usage: in-place-upgrade.mjs seed --base-url URL --sandbox DIR | release --sandbox DIR [--version V]');
+    throw new Error(
+      'usage: in-place-upgrade.mjs seed --base-url URL --sandbox DIR [--homes "A,B"] | release --sandbox DIR [--version V] [--long]'
+    );
   }
 }
 

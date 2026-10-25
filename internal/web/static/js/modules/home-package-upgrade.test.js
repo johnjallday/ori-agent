@@ -5,7 +5,10 @@ import vm from 'node:vm';
 
 import {
   HomePackageUpgradeDialog,
+  agentEffect,
   homeUpgradeRowNotice,
+  providerUpgradeAgentLine,
+  providerUpgradeImpact,
   openHomePackageUpgrade,
   pluginUpgradeTransport,
   providerUpgradeSummary,
@@ -222,11 +225,140 @@ test('the review names the Homes that move and says how much changes', () => {
   );
   assert.equal(
     providerUpgradeSummary({ ...REVIEW, homes: [{ name: 'A' }, { name: 'B' }] }),
-    '2 Homes and their linked projects move from 0.1.0 to 0.2.0. Only Home guidance changes.'
+    '2 Homes and their linked projects move together from 0.1.0 to 0.2.0. Only Home guidance changes.'
   );
   assert.match(
     providerUpgradeSummary({ from_version: '1', to_version: '2' }),
     /^This Home and its/
+  );
+});
+
+test('an agent whose two copies are treated differently is said to be, both before and after', () => {
+  assert.equal(agentEffect({ profile: 'replace', home_copy: 'replace' }), 'replace');
+  assert.equal(agentEffect({ profile: 'keep', home_copy: 'missing' }), 'keep');
+  assert.equal(agentEffect({ profile: 'missing', home_copy: 'replace' }), 'replace');
+  assert.equal(agentEffect({ profile: 'missing', home_copy: 'missing' }), 'missing');
+  assert.equal(agentEffect({ profile: 'keep', home_copy: 'replace' }), 'mixed');
+  assert.equal(agentEffect({ profile: 'replace', home_copy: 'keep' }), 'mixed');
+  const keptProfile = { profile: 'keep', home_copy: 'replace' };
+  assert.equal(
+    providerUpgradeAgentLine(keptProfile),
+    'keeps your edited profile prompt; its Home copy gets the new guidance'
+  );
+  assert.equal(
+    providerUpgradeAgentLine(keptProfile, { done: true }),
+    'kept your edited profile prompt; its Home copy got the new guidance'
+  );
+  assert.equal(
+    providerUpgradeAgentLine({ profile: 'replace', home_copy: 'keep' }),
+    'gets the new guidance in its profile; its Home copy keeps your edits'
+  );
+  assert.equal(
+    providerUpgradeAgentLine({ profile: 'keep', home_copy: 'keep' }, { done: true }),
+    'kept your edited prompt'
+  );
+});
+
+test('the review leads with the version change and its size, with accurate plurals', () => {
+  assert.equal(
+    providerUpgradeImpact({ homes: [{ name: 'A', projects: [], agents: [{}] }] }),
+    '1 Home, 0 linked projects and 1 staffed agent affected.'
+  );
+  assert.equal(
+    providerUpgradeImpact({
+      homes: [
+        { name: 'A', projects: ['x'], agents: [{}, {}] },
+        { name: 'B', projects: [], agents: [] }
+      ]
+    }),
+    '2 Homes, 1 linked project and 2 staffed agents affected.'
+  );
+
+  const doc = fakeDocument();
+  const content = renderUpgradeReview(
+    {
+      ...REVIEW,
+      warnings: ['This release runs a new command.'],
+      additions: [
+        'Adds a Your studio card to this Home. Nothing is detected or read until you open it.'
+      ],
+      homes: [
+        {
+          name: 'North Studio',
+          projects: ['First Song', 'Second Song'],
+          agents: [
+            {
+              agent_name: 'North Manager',
+              role_label: 'Guide',
+              profile: 'replace',
+              home_copy: 'replace'
+            }
+          ]
+        },
+        {
+          name: 'South Label',
+          projects: [],
+          agents: [
+            {
+              agent_name: 'South Manager',
+              role_label: 'Guide',
+              profile: 'keep',
+              home_copy: 'replace'
+            }
+          ]
+        }
+      ],
+      trashed_homes: 2
+    },
+    doc
+  );
+  const overview = content.children[0];
+  assert.equal(overview.className, 'home-package-upgrade__overview');
+  // Read aloud as "0.1.0 to 0.2.0"; the arrow is decoration.
+  assert.equal(overview.children[0].textContent, '0.1.0→ to 0.2.0');
+  assert.equal(overview.children[0].children[1].getAttribute('aria-hidden'), 'true');
+  assert.equal(
+    overview.children[1].textContent,
+    '2 Homes, 2 linked projects and 2 staffed agents affected.'
+  );
+  assert.deepEqual(
+    content.all(node => node.tagName === 'H3').map(node => node.textContent),
+    [
+      'Before you confirm',
+      'What this release adds',
+      'Guidance changes',
+      'Homes and projects',
+      'Staffed agents',
+      'What is cancelled',
+      'What stays the same'
+    ]
+  );
+  assert.match(content.textContent, /North Studio: 2 linked projects \(First Song, Second Song\)/);
+  assert.match(content.textContent, /2 Homes in the Trash keep the old release\./);
+  // With several Homes, each Home's agents are listed under its name.
+  assert.deepEqual(
+    content
+      .all(node => node.className === 'home-package-upgrade__group')
+      .map(node => node.textContent),
+    ['North Studio', 'South Label']
+  );
+  assert.match(
+    content.textContent,
+    /South Manager \(Guide\): keeps your edited profile prompt; its Home copy gets the new guidance/
+  );
+  // What is cancelled is not presented as something that stays the same.
+  const sections = content.all(node => node.tagName === 'SECTION');
+  const cancelled = sections.find(node => node.children[0].textContent === 'What is cancelled');
+  const stays = sections.find(node => node.children[0].textContent === 'What stays the same');
+  assert.match(
+    cancelled.textContent,
+    /Pending library reviews and scans in these Homes are cancelled/
+  );
+  assert.doesNotMatch(stays.textContent, /cancelled/);
+  assert.match(stays.textContent, /Approved project library folders stay approved\./);
+  assert.match(
+    renderUpgradeReview({ ...REVIEW, trashed_homes: 1 }, doc).textContent,
+    /1 Home in the Trash keeps the old release\./
   );
 });
 
@@ -256,7 +388,11 @@ test('cancelling the review commits nothing and returns focus to Update', async 
   assert.match(element.textContent, /Update studio-home to 0\.2\.0\?/);
   assert.match(element.textContent, /Portfolio Home: 1 linked project \(Song One\)/);
   assert.match(element.textContent, /Guide \(Guide\): gets the new guidance/);
-  assert.equal(doc.activeElement, button(element, 'Confirm update'));
+  // The review is read from its heading; Confirm update is one Tab away, so
+  // Enter cannot confirm what was not read.
+  assert.equal(doc.activeElement, dialog.parts.heading);
+  assert.equal(dialog.parts.heading.getAttribute('tabindex'), '-1');
+  assert.equal(element.getAttribute('aria-labelledby'), dialog.parts.heading.getAttribute('id'));
 
   button(element, 'Cancel').click();
   assert.equal(dialog.state, 'closed');

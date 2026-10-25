@@ -90,8 +90,9 @@ func skillNameTakenMessage(err error) string {
 }
 
 // respondHomeUpgradeRequired answers the replacement guard's refusal with a
-// stable code and, when known, the Home page where the owner reviews the
-// upgrade. It reports whether err was that refusal.
+// stable code and, when known, a Home page that opens the same review. The
+// Plugins page reviews the upgrade in place by plugin instead. It reports
+// whether err was that refusal.
 func respondHomeUpgradeRequired(w http.ResponseWriter, err error) bool {
 	if !errors.Is(err, plugin.ErrHomeUpgradeRequired) {
 		return false
@@ -107,7 +108,7 @@ func respondHomeUpgradeRequired(w http.ResponseWriter, err error) bool {
 		}
 	}
 	if writeErr := orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError(HomeUpgradeRequiredCode,
-		"A Home uses this plugin. Upgrade it from that Home, so its linked projects and staffed agents move with it.",
+		"A Home uses this plugin, so its update is the reviewed Home upgrade: every Home that uses it, their linked projects and staffed agents move with it.",
 	).WithDetails(details)); writeErr != nil {
 		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}

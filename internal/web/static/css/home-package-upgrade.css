@@ -1,7 +1,8 @@
 /* The reviewed Home package upgrade dialog, shared by the Home page and the
    Plugins page. It is a native modal <dialog>, so it sits in the top layer
    above every page's chrome, and it reads the application's theme tokens so
-   both pages show it the same way in light and dark themes. */
+   both pages show it the same way in light and dark themes. Small text uses
+   --text-secondary: the dark theme's --text-muted is too faint for it. */
 
 .home-package-upgrade {
   width: min(44rem, calc(100vw - 2rem));
@@ -22,7 +23,7 @@
 
 .home-package-upgrade__eyebrow {
   margin: 0 0 0.2rem;
-  color: var(--text-muted, #5c5c5e);
+  color: var(--text-secondary, #1f2128);
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.11em;
@@ -36,6 +37,10 @@
   overflow-wrap: anywhere;
 }
 
+.home-package-upgrade__title:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .home-package-upgrade__status {
   margin: 0 0 0.5rem;
   line-height: 1.5;
@@ -45,6 +50,52 @@
   min-height: 1.25rem;
   margin: 0.5rem 0;
   color: var(--danger-color, #9f2f24);
+  overflow-wrap: anywhere;
+}
+
+.home-package-upgrade__overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 1rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-secondary, #e8eaed);
+  border: 1px solid var(--border-color, #c9ccd1);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.home-package-upgrade__versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-weight: 700;
+}
+
+.home-package-upgrade__version {
+  padding: 0.1rem 0.45rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85rem;
+  border: 1px solid var(--border-color, #c9ccd1);
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+
+.home-package-upgrade__version--new {
+  border-color: var(--primary-color, #1f6b4e);
+}
+
+.home-package-upgrade__impact {
+  margin: 0;
+  color: var(--text-secondary, #1f2128);
+  font-size: 0.85rem;
+}
+
+.home-package-upgrade__group {
+  margin: 0.4rem 0 0;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -105,7 +156,7 @@
 
 .home-package-upgrade__operation {
   margin: 0.5rem 0 0;
-  color: var(--text-muted, #5c5c5e);
+  color: var(--text-secondary, #1f2128);
   font-size: 0.8rem;
   overflow-wrap: anywhere;
 }

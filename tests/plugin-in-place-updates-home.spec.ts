@@ -10,6 +10,7 @@ import {
   seed,
   writeHomeRelease
 } from './fixtures/in-place-upgrade.mjs';
+import { contrastOfText } from './helpers/contrast';
 
 // The Home page's entry to the same reviewed upgrade, on its own fresh server
 // (the Plugins journey is tests/plugin-in-place-updates.spec.ts):
@@ -47,7 +48,7 @@ test.describe('Home-started package update', () => {
     });
     expect(new URL(page.url()).search).toBe('');
     await expect(dialog).toContainText(
-      `2 Homes and their linked projects move from ${OLD_VERSION} to ${NEW_VERSION}`
+      `2 Homes and their linked projects move together from ${OLD_VERSION} to ${NEW_VERSION}`
     );
     // Before the upgrade this Home declares no profile card.
     await expect(page.locator('#homeProfilePanel')).toBeHidden();
@@ -72,6 +73,15 @@ test.describe('Home-started package update', () => {
     await expect(card).toHaveAttribute('data-state', 'succeeded');
     await expect(card).toContainText(`Upgraded to ${NEW_VERSION}`);
     await expect(card).toBeFocused();
+    // The card the result returns focus to stays readable in the dark theme
+    // the page takes from the saved or system preference.
+    await page.evaluate(() => document.documentElement.setAttribute('data-bs-theme', 'dark'));
+    // An opaque surface, so the ratio below is the one a reader sees.
+    expect(await card.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(
+      /^rgb\(/
+    );
+    expect(await card.evaluate(contrastOfText)).toBeGreaterThanOrEqual(4.5);
+    await page.evaluate(() => document.documentElement.setAttribute('data-bs-theme', 'light'));
     // The profile card the release adds appears on this page, unread.
     await expect(page.locator('#homeProfilePanel')).toBeVisible();
     await expect(page.locator('#homeProfileTitle')).toHaveText('Your studio');
