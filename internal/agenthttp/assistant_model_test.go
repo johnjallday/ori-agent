@@ -35,6 +35,27 @@ func assistantModel(t *testing.T, h *HomeAssistantAskHandler, query string) (int
 	return w.Code, got
 }
 
+type modelRelationshipOnly struct{ work *PersonalAssistantWorkContext }
+
+func (p modelRelationshipOnly) ResolvePersonalAssistantRelationship(context.Context, string) (*PersonalAssistantWorkContext, error) {
+	return p.work, nil
+}
+func (modelRelationshipOnly) ResolvePersonalAssistantContext(context.Context, string) (*PersonalAssistantWorkContext, error) {
+	panic("model inspection must not expand profile or memory")
+}
+
+func TestAssistantModel_PrefersRelationshipOnlyMetadata(t *testing.T) {
+	f := newConversationFixture(t)
+	f.handler.SetPersonalAssistantContextProvider(modelRelationshipOnly{f.context}, "local")
+	code, view := assistantModel(t, f.handler, "")
+	if code != http.StatusOK || view.State != "configured" {
+		t.Fatalf("projection = %d %+v", code, view)
+	}
+	if len(f.provider.requests) != 0 || f.mutator.writes != 0 {
+		t.Fatal("metadata performed work")
+	}
+}
+
 func TestAssistantModel_ReadOnlyAndAgreesWithConversation(t *testing.T) {
 	for _, model := range []string{"sonnet", "", "different-default"} {
 		t.Run(model, func(t *testing.T) {

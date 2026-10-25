@@ -550,8 +550,21 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { in_sync: true });
       return;
     }
+    // Match the fictional active Assistant's available-model state. The drawer
+    // now reads the same configured default through its credential-free view.
     if (url.pathname === '/api/settings/system-model') {
-      await json(route, { provider: '', model: '' });
+      await json(route, { provider: 'openai', model: 'gpt-5', configured: true });
+      return;
+    }
+    if (url.pathname === '/api/home-assistant/model') {
+      await json(route, {
+        recipient: 'personal',
+        source: 'default',
+        state: 'configured',
+        provider: 'openai',
+        model: 'gpt-5',
+        settings_href: '/settings#system-model'
+      });
       return;
     }
     if (url.pathname === '/api/workspaces/rescan') {
@@ -1245,6 +1258,13 @@ test('captures the Home command bridge and the Personal Assistant drawer', async
       await expectFinalHomePrimary(scenePage);
       await scenePage.locator('#personalAssistantLauncher').click();
       await expect(scenePage.locator('#personalAssistantToday')).toBeVisible();
+      await expect(scenePage.locator('#personalAssistantModelText')).toHaveText(
+        'Model: openai / gpt-5'
+      );
+      await expect(scenePage.locator('#personalAssistantModelSettings')).toHaveAttribute(
+        'href',
+        '/settings#system-model'
+      );
       // The context line settles after its own request; wait for its final text
       // so both captures photograph the same drawer.
       await expect(scenePage.locator('#personalAssistantWorkspaceContext')).toHaveText(

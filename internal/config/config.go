@@ -1584,7 +1584,7 @@ func validateSystemModel(provider, model string) error {
 
 	// Validate model is not empty (we already checked this above, but be explicit)
 	if model == "" {
-		return fmt.Errorf("Default model cannot be empty when provider is set")
+		return fmt.Errorf("the Default model cannot be empty when provider is set")
 	}
 
 	// Basic model format validation - must contain only alphanumeric, dash,

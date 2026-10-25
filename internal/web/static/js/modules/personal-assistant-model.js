@@ -85,8 +85,9 @@ export async function sharedModelSaveFeedback(
     ? `Conversation uses Default model: ${modelDescription(selection)}.`
     : 'The current conversational model could not be read. Check Default model in Settings.';
   if (!mirror.mirrored) {
+    const reason = String(mirror.reason || 'Check Settings before retrying.').trim();
     return {
-      message: `Agent saved, but the Default model update was not confirmed. ${mirror.reason || 'Check Settings before retrying.'} ${current}`,
+      message: `Agent saved, but the Default model update was not confirmed. ${reason}${/[.!?]$/.test(reason) ? '' : '.'} ${current}`,
       type: 'error'
     };
   }

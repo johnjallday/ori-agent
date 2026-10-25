@@ -75,6 +75,13 @@ func TestDefaultModel_ConversationUsesDefaultWhileBuildKeepsProfileFirst(t *test
 	if profile.Settings.Model != "sonnet" {
 		t.Fatal("conversation metadata changed profile")
 	}
+	if err := cfg.SetSystemModel("claude_code", "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	build, err = resolveWorkspaceBuildModel(st, cfg, factory, "missing-profile")
+	if err != nil || build.Model != "sonnet" {
+		t.Fatalf("default fallback changed: %+v %v", build, err)
+	}
 }
 
 func TestDefaultModel_ProductionMetadataRejectsStaleCachedOwner(t *testing.T) {

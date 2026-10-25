@@ -7,6 +7,14 @@ import vm from 'node:vm';
 // Rendering is absent here; browser acceptance covers the mounted drawer.
 const source = await readFile(new URL('./dashboard.js', import.meta.url), 'utf8');
 
+// The dashboard announces turn state to the model display through DOM events.
+class CustomEventFixture {
+  constructor(type, { detail }) {
+    this.type = type;
+    this.detail = detail;
+  }
+}
+
 function harness(route, options = {}) {
   const calls = [];
   const notices = [];
@@ -31,8 +39,10 @@ function harness(route, options = {}) {
   };
   const context = vm.createContext({
     window,
+    CustomEvent: CustomEventFixture,
     document: {
       addEventListener() {},
+      dispatchEvent() {},
       getElementById: () => null,
       querySelector: () => null,
       querySelectorAll: () => []
@@ -181,8 +191,10 @@ function entryHarness(options = {}) {
   };
   const context = vm.createContext({
     window,
+    CustomEvent: CustomEventFixture,
     document: {
       addEventListener() {},
+      dispatchEvent() {},
       getElementById: () => null,
       querySelector: () => null,
       querySelectorAll: () => []
