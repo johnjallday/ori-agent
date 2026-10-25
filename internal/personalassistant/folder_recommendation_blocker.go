@@ -48,7 +48,9 @@ func (s *FolderObservationService) blockerForOffer(ctx context.Context, target f
 		Message: "Another setup review is open. Its navigation is unavailable; finish or close it from its original entry."}
 	review := offer.ConversationReview
 	if review == nil {
-		b.Kind, b.Subject = "home", foldercontext.DisplayName(offer.Subject.Name)
+		// The offer came from Read(target.UserID), whose owner/binding check
+		// is Home's same-user authority (there is no conversation target).
+		b.Kind, b.Subject, b.OfferID = "home", foldercontext.DisplayName(offer.Subject.Name), offer.ID
 		b.Message = "This review was opened from Home. Finish or close it there, then refresh this recommendation."
 		return b
 	}
@@ -56,11 +58,13 @@ func (s *FolderObservationService) blockerForOffer(ctx context.Context, target f
 		return b
 	}
 	if IsBuildReview(review.Target) {
-		b.Kind = "build"
-		b.Message = "A workspace creation review is open. Return to Create Workspace to finish or close it, then refresh this recommendation."
-		if s.buildGuard != nil && s.buildGuard(ctx, *offer) == nil {
-			b.Subject = foldercontext.DisplayName(offer.Subject.Name)
+		if s.buildGuard == nil || s.buildGuard(ctx, *offer) != nil {
+			return b
 		}
+		b.Kind, b.Subject = "build", foldercontext.DisplayName(offer.Subject.Name)
+		// buildResume may create a session; no verified navigation-only route
+		// exists. Never expose the synthetic build target as a conversation.
+		b.Message = "A workspace creation review is open. Return to Create Workspace to finish or close it, then refresh this recommendation."
 		return b
 	}
 	if review.Target.ConversationID == "" || s.reviewGuard == nil || s.reviewGuard(ctx, *offer) != nil {

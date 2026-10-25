@@ -69,6 +69,13 @@ async function screenshot(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path: dir ? join(dir, `${name}.png`) : info.outputPath(`${name}.png`) });
 }
 
+async function closeReview(request: APIRequestContext, reviewed: any) {
+  return ok(await request.post('/api/home-assistant/folder-context/review/close', { data: {
+    conversation_id: reviewed.conversation.id, revision: reviewed.folder_context.revision,
+    offer_id: reviewed.folder_context.offer_id
+  } }));
+}
+
 const digestPath = () => join(sandbox, 'Ori Workspaces', 'my-hq', '.ori', 'folder-digest-v1.json');
 const storedDigest = () => readFileSync(digestPath(), 'utf8');
 
@@ -135,4 +142,69 @@ test('Album-3 returns from Album-5 to its normal visual review, preserving the d
   // Retire this review using its real control, keeping later cases independent.
   await card.getByRole('button', { name: 'Keep chatting', exact: true }).click();
   await expect(card).toBeHidden();
+});
+
+test('Open rechecks a review closed in another tab and stays at the attached folder', async ({ page, request }, info) => {
+  const blocking = await review(request, 'Album-5');
+  const seen = watchFolderRequests(page);
+  await attach(page);
+  const notice = page.locator('#personalAssistantFolderStructure');
+  await expect(notice.getByRole('button', { name: 'Open Album-5 review' })).toBeVisible();
+  await page.locator('#personalAssistantInput').fill('Do not navigate away');
+  await closeReview(request, blocking); // another tab's existing Close control
+  const before = await state(request);
+  await notice.getByRole('button', { name: 'Open Album-5 review' }).click();
+  await expect(page.getByRole('button', { name: 'Review workspace setup', exact: true })).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderReturn')).toBeHidden();
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('Do not navigate away');
+  expect(await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId())).toBe('');
+  expect(await state(request)).toEqual(before);
+  expectNoFolderExecution(seen);
+  expect(seen.posts.map(item => item.path).filter(path => path.includes('/folder-context/')))
+    .toEqual(['/api/home-assistant/folder-context/select', '/api/home-assistant/folder-context/recommendation']);
+  await screenshot(page, info, 'resolved-on-open');
+});
+
+test('a Home blocker opens its exact card from collapsed Needs you without changing the conversation', async ({ page, request }, info) => {
+  const picked = await ok(await request.post('/api/folder-picker/select-path', { data: { path: seed('Album-Home') } }));
+  const scanned = await ok(await request.post('/api/personal-assistant/folder-digest/scan', { data: { selection_token: picked.selection_token } }));
+  const offerId = scanned.offer.id;
+  const before = await state(request);
+  const seen = watchFolderRequests(page);
+  await attach(page);
+  const strip = page.locator('#personalAssistantTodayStripToggle');
+  await expect(strip).toHaveAttribute('aria-expanded', 'false');
+  await page.locator('#personalAssistantInput').fill('Keep my Home draft');
+  await page.getByRole('button', { name: 'Open Album-Home review', exact: true }).click();
+  await expect(strip).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#personalAssistantNeedsYouCards #personalAssistantFolderOffer')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).PersonalAssistantFolder.current().id)).toBe(offerId);
+  expect(await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId())).toBe('');
+  await expect(page.locator('#personalAssistantFolderReturn')).toBeHidden();
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('Keep my Home draft');
+  expect(await state(request)).toEqual(before);
+  expectNoFolderExecution(seen);
+  expect(seen.posts.filter(item => /\/scan|\/review$|\/build-sessions/.test(item.path))).toEqual([]);
+  await screenshot(page, info, 'home-revealed');
+  // Fixture cleanup is a separate explicit decision, after all no-effects checks.
+  await ok(await request.post(`/api/personal-assistant/folder-digest/offers/${offerId}/decide`, { data: { decision: 'later', request_id: randomUUID() } }));
+});
+
+test('presentation fixture: a verified build blocker has text and Refresh, never a resume button', async ({ page }, info) => {
+  const seen = watchFolderRequests(page);
+  await page.route('**/api/home-assistant/folder-context/select', async route => {
+    const response = await route.fetch();
+    const selected = await response.json();
+    await route.fulfill({ json: { ...selected, hire_candidate: '', hire_unavailable: 'review_pending', blocker: {
+      kind: 'build', subject: 'Album-Build', status: 'pending', blocks: true,
+      message: 'A workspace creation review is open. Return to Create Workspace to finish or close it, then refresh this recommendation.'
+    } } });
+  });
+  await attach(page);
+  const notice = page.locator('#personalAssistantFolderStructure');
+  await expect(notice).toContainText('Album-Build');
+  await expect(notice.getByRole('button')).toHaveText(['Refresh recommendation']);
+  expect(seen.posts.filter(item => /\/build-sessions|\/review$/.test(item.path))).toEqual([]);
+  expectNoFolderExecution(seen);
+  await screenshot(page, info, 'build-text-only');
 });

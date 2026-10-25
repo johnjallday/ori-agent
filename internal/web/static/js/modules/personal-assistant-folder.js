@@ -4832,6 +4832,41 @@ async function load() {
   announceOffer();
 }
 
+// Exact Home-card navigation deliberately bypasses load(): load may persist
+// the first-folder prompt. This path is GET-only and never changes the chat.
+async function showHomeReview(offerId, valid = () => true) {
+  if (!offerId || state.busy || !state.available || !valid()) return false;
+  const generation = state.reviewGeneration;
+  try {
+    const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(offerId)}`, {
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return false;
+    const payload = await readJSON(response);
+    const offer = payload?.folder_digest?.offer;
+    if (
+      !valid() ||
+      generation !== state.reviewGeneration ||
+      state.busy ||
+      offer?.id !== offerId ||
+      offer.conversation_id ||
+      offer.status !== 'pending'
+    )
+      return false;
+    state.reviewGeneration++;
+    state.reviewSlot = null;
+    state.offer = offer;
+    state.inThread = false;
+    state.userAsked = false;
+    state.pinned = offer.id;
+    state.confirm = '';
+    render();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function scan(body) {
   if (state.busy) return;
   // Exploring happens in the conversation. A scan asked for from a card in
@@ -5423,6 +5458,7 @@ function init() {
     open: openChooser,
     openChooser,
     reload: load,
+    showHomeReview,
     current: () => state.offer,
     // The mission card's in-place action: start (or retry) the latest folder's
     // first look, and read where it stands.

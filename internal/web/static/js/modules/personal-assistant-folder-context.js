@@ -62,6 +62,7 @@ export function createFolderContextController({
     notice: ''
   };
   let recommendationGeneration = 0;
+  let revealingBlocker = false;
   const target = () => ({
     ...(state.conversationId
       ? { conversation_id: state.conversationId }
@@ -388,6 +389,28 @@ export function createFolderContextController({
       return false;
     }
   }
+  async function recheckBlocker(expected) {
+    if (!folderBlockerView(expected)?.open || state.authority) return false;
+    if (!(await refreshRecommendation())) return false;
+    return ['kind', 'offer_id', 'conversation_id'].every(
+      key => (expected[key] || '') === (state.blocker?.[key] || '')
+    );
+  }
+  // Home stays in this conversation; it needs no return slot. Guard both its
+  // recheck and exact-card read against duplicate clicks and source changes.
+  async function revealBlocker(expected, reveal) {
+    if (revealingBlocker || expected?.kind !== 'home') return false;
+    revealingBlocker = true;
+    const generation = state.generation;
+    const owner = state.conversationId;
+    const valid = () => generation === state.generation && owner === currentId() && !state.pending;
+    try {
+      if (!(await recheckBlocker(expected)) || !valid()) return false;
+      return Boolean(await reveal(valid));
+    } finally {
+      revealingBlocker = false;
+    }
+  }
   async function restore(saved) {
     if (!saved || saved.conversationId !== currentId()) return false;
     const generation = state.generation + 1;
@@ -414,6 +437,8 @@ export function createFolderContextController({
     askAgain,
     snapshot,
     restore,
+    recheckBlocker,
+    revealBlocker,
     refreshRecommendation
   };
 }
@@ -568,9 +593,9 @@ export function folderBlockerView(blocker) {
   return {
     line: `${blocker.subject} · ${status}. ${blocker.message}`,
     open: Boolean(
-      ['conversation', 'arranged'].includes(blocker.kind) &&
-      blocker.conversation_id &&
-      blocker.offer_id
+      blocker.offer_id &&
+      (blocker.kind === 'home' ||
+        (['conversation', 'arranged'].includes(blocker.kind) && blocker.conversation_id))
     ),
     label: `Open ${blocker.subject} review`
   };
@@ -677,14 +702,15 @@ function renderStructure(state) {
   const host = elements?.structure;
   if (!host) return;
   const view = structureCardView(state, parkedStructure);
-  if (host.dataset.structureKey === view.key) {
+  const key = `${view.key}:${state.generation}`;
+  if (host.dataset.structureKey === key) {
     for (const action of view.actions || []) {
       const button = host.querySelector(`[data-structure-action="${action.id}"]`);
       if (button) button.disabled = action.disabled;
     }
     return;
   }
-  host.dataset.structureKey = view.key;
+  host.dataset.structureKey = key;
   host.replaceChildren();
   host.hidden = view.kind === 'none';
   if (view.kind === 'unavailable') {
@@ -739,7 +765,9 @@ function renderStructure(state) {
 
 // Shared by a collection proposal and a single-project hire that cannot open.
 function renderBlockerNotice(host, state, fallback) {
-  const view = folderBlockerView(state.blocker);
+  const blocker = { ...state.blocker };
+  const view = folderBlockerView(blocker);
+  const generation = state.generation;
   const notice = node('div', '', 'personal-assistant-blocker');
   const status = node('p', view?.line || fallback, 'personal-assistant-proposal__note');
   status.setAttribute('role', 'status');
@@ -749,13 +777,19 @@ function renderBlockerNotice(host, state, fallback) {
     const open = node('button', view.label, 'btn btn-sm btn-outline-secondary');
     open.type = 'button';
     open.dataset.structureAction = 'blocker';
-    open.addEventListener(
-      'click',
-      () =>
-        void window.PersonalAssistantConversation?.visitFolderReview?.(
-          state.blocker.conversation_id
-        )
-    );
+    open.addEventListener('click', () => {
+      if (generation !== controller.state.generation) return;
+      if (blocker.kind === 'home') {
+        void controller.revealBlocker(blocker, valid =>
+          window.PersonalAssistantToday?.revealFolderReview?.(blocker.offer_id, valid)
+        );
+      } else {
+        void window.PersonalAssistantConversation?.visitFolderReview?.(blocker.conversation_id, {
+          offerId: blocker.offer_id,
+          recheck: () => controller.recheckBlocker(blocker)
+        });
+      }
+    });
     actions.append(open);
   }
   const refresh = node('button', 'Refresh recommendation', 'btn btn-sm btn-link');

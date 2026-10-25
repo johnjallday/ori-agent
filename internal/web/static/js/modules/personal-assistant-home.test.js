@@ -15,6 +15,7 @@ import {
   progressRowText,
   progressRowVisible,
   resumeWorkspaceBuild,
+  revealFolderReview,
   safeTodayRoute,
   specialistSetupView,
   studioSectionView,
@@ -24,6 +25,40 @@ import {
   todayThreeSectionView,
   todaySectionRows
 } from './personal-assistant-home.js';
+
+test('folder blocker reveals and focuses exactly its Home card with Needs you folded', async () => {
+  let expanded = false;
+  const calls = [];
+  const card = { hidden: false, focus: () => calls.push('focus') };
+  const win = {
+    PersonalAssistantFolder: {
+      showHomeReview: async id => {
+        calls.push(id);
+        return true;
+      },
+      current: () => ({ id: 'offer-5' })
+    },
+    document: { getElementById: () => card },
+    PersonalAssistantToday: {
+      reveal: (reason, options) => {
+        assert.equal(reason, 'folder-review');
+        assert.equal(options.item, card);
+        expanded = true;
+        return true;
+      }
+    }
+  };
+  assert.equal(await revealFolderReview('offer-5', () => true, win), true);
+  assert.equal(expanded, true);
+  assert.equal(card.tabIndex, -1);
+  assert.deepEqual(calls, ['offer-5', 'focus']);
+  expanded = false;
+  assert.equal(await revealFolderReview('other', () => true, win), false);
+  assert.equal(await revealFolderReview('offer-5', () => false, win), false);
+  assert.equal(expanded, false);
+  win.PersonalAssistantFolder.current = () => ({ id: 'offer-5', conversation_id: 'chat' });
+  assert.equal(await revealFolderReview('offer-5', () => true, win), false);
+});
 
 test('partial assistant requests retain canonical identity and deduplicate only within an owner', () => {
   const item = {

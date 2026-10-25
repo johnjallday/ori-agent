@@ -95,6 +95,7 @@ func TestFolderRecommendationBlocker_OwnerAndStatusMatrix(t *testing.T) {
 		{"Album-5", "album-5", "conversation", FolderOfferPending, false, false, true, true},
 		{"Home", "", "home", FolderOfferPending, false, false, true, false},
 		{"build", "build:workspace", "build", FolderOfferPending, false, false, true, false},
+		{"missing build", "build:workspace", "unavailable", FolderOfferPending, true, false, true, false},
 		{"abandoned confirmed build", "build:workspace", "", FolderOfferAwaitingOutcome, true, false, false, false},
 		{"arranged own review", "albums", "arranged", FolderOfferPending, false, true, true, true},
 		{"confirmed running chat", "album-5", "conversation", FolderOfferAwaitingOutcome, false, false, true, true},
@@ -138,7 +139,7 @@ func TestFolderRecommendationBlocker_OwnerAndStatusMatrix(t *testing.T) {
 				}
 				return
 			}
-			if got == nil || got.Kind != tc.kind || got.Blocks != tc.blocks || (got.ConversationID != "") != tc.link || (got.OfferID != "") != tc.link {
+			if got == nil || got.Kind != tc.kind || got.Blocks != tc.blocks || (got.ConversationID != "") != tc.link || (got.OfferID != "") != (tc.link || tc.kind == "home") {
 				t.Fatalf("blocker: %+v", got)
 			}
 			if tc.kind == "unavailable" && got.Subject != "Another setup" {

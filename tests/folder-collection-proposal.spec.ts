@@ -826,7 +826,7 @@ test.describe('[collection:pending-return] exact Albums beside an Album-5 review
       );
       expect(
         seen.posts.filter(item => item.path.endsWith('/folder-context/recommendation'))
-      ).toHaveLength(1);
+      ).toHaveLength(2);
       expect(
         (await ok(await request.get('/api/home-assistant/conversations'))).conversations.length
       ).toBe(before.conversations);
