@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { folderResponseFixtures } from './fixtures/assistant-folder-response.js';
 import { chooseAttach, chooseConversation, openAttachMenu } from './helpers/assistant-menus';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
 // Browser controller/ordering fixtures, not proof of model grounding. Hire/HQ
 // use real host routes. Folder selection/Route/Ask/history below are explicit
@@ -425,6 +426,11 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   const workspaceName = `Next step fixture ${test.info().repeatEachIndex}`;
   await card.getByLabel('Workspace name').fill(workspaceName);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
+  await expect(page.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  await expect(input).toHaveValue('Preserve my exact review draft 🎼  ');
+  await expect(input).toHaveAttribute('placeholder', 'What would you like to do next?');
+  await revealFolderSetupDetails(card);
   await expect(page.locator('#personalAssistantFolderReceipt')).toBeVisible();
   await expect(page.locator('#personalAssistantFolderReceipt')).toContainText(workspaceName);
   const link = card.getByRole('link', { name: /Open/ }).first();
@@ -433,6 +439,11 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await page.reload();
   await reopen(page);
   await expect(card.getByRole('link', { name: /Open/ }).first()).toHaveAttribute('href', href!);
+  await expect(page.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  if (evidence)
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'real-compact-replay.png') });
   await page.locator('#personalAssistantRemoveFolder').click();
   await expect(
     page.locator('#homeAssistantConversation').getByRole('link', { name: /Open/ }).first()

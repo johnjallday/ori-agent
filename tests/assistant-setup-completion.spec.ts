@@ -42,6 +42,8 @@ async function mount(page: Page, offer: any = completed(), url = '/?panel=today'
   await page.waitForFunction(() =>
     Boolean((window as any).PersonalAssistantFolder?.showConversationReview)
   );
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
   await page.evaluate(offer => {
     const slot = document.createElement('div');
     slot.id = 'completion-fixture-slot';
@@ -409,6 +411,144 @@ test('fixture replacement, detach, New and a newer review revoke composer comple
   await page.evaluate(() => (window as any).PersonalAssistantConversation.startNew());
   await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await expect(input).not.toHaveAttribute('placeholder', 'What would you like to do next?');
+});
+
+for (const url of ['/?panel=today', '/settings?panel=today']) {
+  test(`fixture replay and detached historical receipt stay compact and inert on ${url}`, async ({
+    page
+  }) => {
+    const offer: any = completed();
+    offer.first_task = {
+      state: 'finished',
+      result_excerpt: 'Saved historical result',
+      report_route: '/workspaces/album-three/task/result'
+    };
+    const { card, effects } = await mount(page, offer, url);
+    await restore(page, offer);
+    await revealFolderSetupDetails(card);
+    await page.locator('#personalAssistantClose').click();
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(card.locator('#personalAssistantFolderDetails')).toHaveAttribute('open', '');
+    await page.reload();
+    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+      '✓ Album-3 is ready'
+    );
+    await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+    await page.evaluate(() =>
+      (window as any).PersonalAssistantFolderContext.hydrate('completion-chat', {
+        revision: 'detached'
+      })
+    );
+    const historical = page.locator('[data-saved-completion="completion-fixture"]');
+    await expect(historical).toBeVisible();
+    await expect(historical.getByText('Saved historical result', { exact: true })).toHaveCount(1);
+    await expect(historical.getByRole('button')).toHaveCount(0);
+    const details = historical.locator('details').first();
+    await expect(details).not.toHaveAttribute('open', '');
+    const summary = details.locator('summary').first();
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await page.evaluate(offer => {
+      document.dispatchEvent(
+        new CustomEvent('personal-assistant:folder-offer', { detail: { offer } })
+      );
+    }, offer);
+    await expect(summary).toBeFocused();
+    await expect(details).toHaveAttribute('open', '');
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await evidence(page, url.startsWith('/settings') ? '04-settings-history' : '04-home-history');
+    expect(effects).toEqual([]);
+  });
+}
+
+test('fixture late first-task read from A cannot replace B or its exact draft', async ({
+  page
+}) => {
+  const a: any = completed();
+  a.first_task = { state: 'running', offer_id: a.id, recipe: 'folder_summary', optional: true };
+  const { card, effects } = await mount(page, a);
+  await restore(page, a);
+  let release!: () => void;
+  let reads = 0;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await page.route(
+    '**/api/personal-assistant/folder-digest?offer_id=completion-fixture',
+    async route => {
+      reads++;
+      await held;
+      await route.fulfill({
+        json: {
+          folder_digest: {
+            offer: {
+              ...a,
+              first_task: { ...a.first_task, state: 'finished', result_excerpt: 'Late A result' }
+            }
+          }
+        }
+      });
+    }
+  );
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect.poll(() => reads).toBeGreaterThan(0);
+  const b = {
+    ...completed(),
+    id: 'review-b',
+    conversation_id: 'chat-b',
+    status: 'pending',
+    outcome: null,
+    subject: { name: 'New B project' }
+  };
+  await restore(page, b);
+  const input = page.locator('#personalAssistantInput');
+  const draft = '  B 界 draft\n stays exact  ';
+  await input.fill(draft);
+  const response = page.waitForResponse(
+    '**/api/personal-assistant/folder-digest?offer_id=completion-fixture'
+  );
+  release();
+  await (await response).finished();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue(draft);
+  await expect(input).toHaveAttribute('placeholder', 'Explore this folder');
+  await expect(card).toContainText('New B project');
+  await expect(page.locator('#homeAssistantConversation')).not.toContainText('Late A result');
+  expect(await page.evaluate(() => (window as any).PersonalAssistantFolder.current().id)).toBe(
+    'review-b'
+  );
+  await evidence(page, '04-late-a');
+  expect(effects).toEqual([]);
+});
+
+test('fixture task completion while typing preserves expansion, focus and saved output once', async ({
+  page
+}) => {
+  const offer: any = completed();
+  offer.first_task = { state: 'running', recipe: 'folder_summary', optional: true };
+  const { card, effects } = await mount(page, offer);
+  await restore(page, offer);
+  await revealFolderSetupDetails(card);
+  const input = page.locator('#personalAssistantInput');
+  await input.fill('  Still typing 🎼  ');
+  offer.first_task = {
+    ...offer.first_task,
+    state: 'finished',
+    result_excerpt: 'One new saved result'
+  };
+  await page.evaluate(offer => {
+    for (let n = 0; n < 3; n++)
+      document.dispatchEvent(
+        new CustomEvent('personal-assistant:folder-offer', { detail: { offer } })
+      );
+  }, offer);
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('  Still typing 🎼  ');
+  await expect(card.locator('#personalAssistantFolderDetails')).toHaveAttribute('open', '');
+  await expect(card.getByText('One new saved result', { exact: true })).toHaveCount(1);
+  await evidence(page, '04-focused-expanded');
+  expect(effects).toEqual([]);
 });
 
 test('fixture first completion never collapses focused evidence', async ({ page }) => {

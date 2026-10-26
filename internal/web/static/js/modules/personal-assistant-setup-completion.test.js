@@ -84,6 +84,13 @@ test('Home, group and batch retain their canonical nouns and distinct destinatio
   });
   assert.equal(home.headline, '✓ Music Home is ready');
   assert.equal(home.href, '/workspaces/music/assistant#projectLibraryPanel');
+  const deletedHome = folderReceiptView({
+    ...offer,
+    workspace_gone: 'removed',
+    outcome: { kind: 'home', receipt: [{ kind: 'home', name: 'Music Home', route: home.href }] }
+  });
+  assert.ok(deletedHome.gone);
+  assert.equal(deletedHome.route, '');
   const group = view({
     ...offer,
     outcome: {

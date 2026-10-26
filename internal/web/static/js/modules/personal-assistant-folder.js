@@ -2086,6 +2086,21 @@ function groupReceiptView(offer) {
 }
 
 export function folderReceiptView(offer, options = {}) {
+  if (offer?.status === 'resolved' && ['home', 'group'].includes(offer?.outcome?.kind)) {
+    const gone = workspaceGoneView(offer);
+    if (gone) {
+      const receipt =
+        offer.outcome.kind === 'home' ? homeReceiptView(offer) : groupReceiptView(offer);
+      return {
+        ...receipt,
+        rows: (receipt.rows || []).map(({ kind, name, detail }) => ({ kind, name, detail })),
+        route: '',
+        homeRoute: '',
+        openLabel: '',
+        gone
+      };
+    }
+  }
   if (offer?.status === 'resolved' && offer?.outcome?.kind === 'home')
     return homeReceiptView(offer);
   if (offer?.status === 'resolved' && offer?.outcome?.kind === 'group')
@@ -2842,14 +2857,14 @@ function renderProfileLine(node, line, doc = document) {
 // Shared by the card and the run pop-up so both say the same thing.
 // renderMapRow draws a receipt's "On the Map" row (mapPlacementView) into its
 // host, or empties and hides it.
-function renderMapRow(host, view) {
+export function renderMapRow(host, view) {
   if (!host) return;
   host.hidden = !view;
   if (view) host.replaceChildren(renderMapPlacement(view, document, 'pa-folder__map'));
   else host.replaceChildren();
 }
 
-function renderReceiptRows(list, rows, doc = document) {
+export function renderReceiptRows(list, rows, doc = document) {
   if (!list) return;
   list.replaceChildren();
   rows.forEach(row => {
@@ -3522,6 +3537,7 @@ function arrangeCompletedCard(details, completed) {
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
+  const focusedControl = document.activeElement;
   const focusedAction =
     state.reviewSlot && inOfferActions(document.activeElement)
       ? document.activeElement.dataset.folderAction
@@ -3625,11 +3641,7 @@ function renderOffer(place) {
                 state.offer.subject?.name ||
                 'Workspace'
             },
-            receipt.gone
-              ? ' was deleted'
-              : receipt.homeName || receipt.group || receipt.batch
-                ? ' is ready'
-                : ' · Workspace ready'
+            receipt.gone ? ' was deleted' : ' · Saved setup receipt'
           ])
         : view.setup
           ? segments([
@@ -4008,6 +4020,13 @@ function renderOffer(place) {
     if (!replacement) control.tabIndex = -1;
     control.focus({ preventScroll: true });
   }
+  if (
+    focusedControl?.isConnected &&
+    els.offer.contains(focusedControl) &&
+    document.activeElement === document.body &&
+    !focusedControl.closest('[hidden]')
+  )
+    focusedControl.focus({ preventScroll: true });
   if (state.reviewSlot) window.PersonalAssistantTranscript?.changed?.();
 }
 
@@ -4545,6 +4564,7 @@ async function refreshFirstLook(offerID) {
   const id = String(offerID || '');
   if (!id) return;
   const before = currentFirstLook()?.state;
+  const current = reviewResponseGuard(state.offer);
   try {
     const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(id)}`, {
       headers: { Accept: 'application/json' }
@@ -4552,7 +4572,7 @@ async function refreshFirstLook(offerID) {
     if (!response.ok) return;
     const payload = await readJSON(response);
     const offer = payload?.folder_digest?.offer;
-    if (!offer || offer.id !== id) return;
+    if (!current() || !offer || offer.id !== id) return;
     if (state.offer?.id === id && offer.status === 'resolved') state.offer = offer;
     applyFirstLook(id, offer.first_task || null);
   } catch (_) {
@@ -5736,6 +5756,10 @@ function init() {
         state.reviewGeneration++;
         state.workspaceName = offer.subject?.name || '';
         state.editingName = false;
+        // A newly restored canonical slot defaults compact; redraws of the
+        // same mounted slot keep the disclosure's native user preference.
+        const details = document.getElementById('personalAssistantFolderDetails');
+        if (details) details.dataset.offer = '';
         slot.replaceChildren();
       }
       if (
