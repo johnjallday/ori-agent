@@ -87,20 +87,9 @@ async function reviewCreateWizard(page: Page, name: string) {
   await page.locator('#folderNameInput').fill(name);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  // Blank now includes a proposed assistant. Review its setup through the
-  // same controls used by the create-workspace suite, without running it.
-  const batch = page.locator('[data-team-accept-all]');
-  if (await batch.isVisible()) await batch.click();
-  const pending = page
-    .locator('#workspaceTeamRoster .workspace-team-row')
-    .filter({ hasText: 'New · Needs setup' });
-  while ((await pending.count()) > 0) {
-    await pending.first().locator('[data-team-agent-setup]').click();
-    await expect(page.locator('#addAgentModal')).toBeVisible();
-    await page.locator('#createAgentBtn').click();
-    await expect(page.locator('#addAgentModal')).toBeHidden();
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-  }
+  // Geometry does not need a team. Use the current explicit agentless choice,
+  // not the retired flat-roster selectors (which leave Ask Ori unfilled).
+  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
 }
@@ -136,6 +125,17 @@ async function anchors(page: Page) {
 const cameraOf = (page: Page) =>
   page.evaluate(() => (window as unknown as { OriWorkspaceMap: any }).OriWorkspaceMap.getCamera());
 
+async function settleMapFrame(page: Page) {
+  // Camera state changes before its queued DOM transform. Hit-test the painted
+  // frame, not a point a building may move under on the next animation frame.
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+}
+
 /**
  * A viewport point that is genuinely empty world space.
  *
@@ -145,6 +145,7 @@ const cameraOf = (page: Page) =>
  * the world layer itself.
  */
 async function emptyPointOn(page: Page): Promise<{ x: number; y: number }> {
+  await settleMapFrame(page);
   const box = (await page.locator('.ws-map-canvas').boundingBox())!;
   const candidates = [
     [0.5, 0.25],
@@ -196,6 +197,7 @@ async function ownWorkspaceAt(page: Page): Promise<string> {
  * and the test then reports that dragging is broken when it is not.
  */
 async function grabPointOn(page: Page, id: string): Promise<{ x: number; y: number }> {
+  await settleMapFrame(page);
   const box = (await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).boundingBox())!;
   const candidates = [
     [0.5, 0.5],
@@ -512,6 +514,10 @@ test.describe('Coordinate Workspace Map', () => {
     const preview = page.locator('[data-ws-map-placement-preview]');
     await expect(preview).toBeVisible();
 
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+    await settleMapFrame(page);
+    // Placement deliberately makes tiles pointer-transparent: target their
+    // painted footprint, not grabPointOn's normal draggable DOM target.
     const existing = page.locator('.ws-map-tile[data-ws-id]').first();
     const existingBox = (await existing.boundingBox())!;
     await page.mouse.click(
@@ -1425,7 +1431,9 @@ test.describe('Coordinate Workspace Map', () => {
       }
       const y = Math.max(0, ...bottoms) + 570;
       const make = async (name: string, kind = 'workspace') => {
+        if (kind === 'group') return createReviewedGroup(page, name);
         const res = await page.request.post('/api/workspaces', { data: { name, kind } });
+        expect(res.ok(), await res.text()).toBe(true);
         return (await res.json()).folder.id;
       };
       const group = await make(`District ${tag}`, 'group');
