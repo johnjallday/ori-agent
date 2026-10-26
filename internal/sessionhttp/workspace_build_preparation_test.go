@@ -215,6 +215,34 @@ func TestWorkspaceBuildPreparation_ExactEditedDraftAndOneInitialResult(t *testin
 	}
 }
 
+func TestWorkspaceBuildPreparation_ReviewIsObservationalAndNeedsNoModel(t *testing.T) {
+	f := newBuildPreparationFixture(t)
+	// Neither admission nor inference is being exercised here: the existing
+	// canonical edited draft's domain review must not resolve a provider.
+	f.h.workspaceBuild.ResolveModel = func(context.Context, string) (WorkspaceBuildModel, error) {
+		t.Fatal("permission review called the model resolver")
+		return WorkspaceBuildModel{}, nil
+	}
+	first := f.review(t)
+	second := f.review(t)
+	if first != second {
+		t.Fatal("unchanged review is not stable")
+	}
+	doc, err := f.builds.Read(context.Background(), "local")
+	if err != nil || doc.Session(f.build.ID).Preparation != nil || doc.Session(f.build.ID).Version != 1 {
+		t.Fatalf("review changed the draft or accepted an operation: %+v, %v", doc, err)
+	}
+	if ids, err := f.workspaces.List(); err != nil || len(ids) != 0 {
+		t.Fatalf("review created resources: %v, %v", ids, err)
+	}
+	if _, found := f.agents.GetAgent("Reviewed Curator"); found {
+		t.Fatal("review persisted a draft agent")
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "Filed")); !os.IsNotExist(err) {
+		t.Fatal("review created Filed")
+	}
+}
+
 func TestWorkspaceBuildPreparation_AssignedProfileKeepsItsEffectiveSettingsAndOwnership(t *testing.T) {
 	f := newBuildPreparationFixture(t)
 	if err := f.agents.CreateAgent("Saved Curator", &agentstore.CreateAgentConfig{Model: "saved-model", LLMProvider: "ollama", SystemPrompt: "Saved prompt", Role: types.RoleSpecialist}); err != nil {

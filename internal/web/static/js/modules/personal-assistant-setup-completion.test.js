@@ -155,6 +155,31 @@ test('composer completion requires the exact accepted canonical review binding',
   assert.equal(ownsSetupCompletion(state, offer, { ready: false }), false);
 });
 
+test('a reserved placement build and planned role are not a completed setup receipt', () => {
+  const pending = {
+    ...offer,
+    status: 'closed',
+    placement_handoff: { build_id: 'reserved-build' },
+    outcome: null,
+    plan: { hire: { agent_name: 'File Curator' } }
+  };
+  const completion = view(pending);
+  assert.equal(completion.ready, false);
+  assert.equal(
+    ownsSetupCompletion(
+      {
+        conversationId: 'chat',
+        offerId: 'review',
+        observation: { id: 'root' },
+        accepted: { id: 'root' }
+      },
+      pending,
+      completion
+    ),
+    false
+  );
+});
+
 test('finished output is saved text with inert canonical report actions only', () => {
   const saved = {
     ...offer,

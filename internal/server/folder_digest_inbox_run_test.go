@@ -420,6 +420,18 @@ func TestInboxRun_ATickedCheckboxTurnsWatchingOnAndNothingElseDoes(t *testing.T)
 	}
 }
 
+func TestInboxRun_ReviewDoesNotAcceptOrPerformSetup(t *testing.T) {
+	f := newInboxFixture(t, "create")
+	first := f.plan(t)
+	second := f.plan(t)
+	if first.Digest != second.Digest || first.Intent.Inbox == nil || first.Visual.Model.State != personalassistant.FolderSetupModelNotNeeded {
+		t.Fatal("inbox review is not a stable model-free proposal")
+	}
+	if len(f.world.writes) != 0 || len(f.team.created) != 0 || len(f.janitor.grants) != 0 || len(f.reviewer.prepared) != 0 {
+		t.Fatalf("review performed setup: %v", f.world.writes)
+	}
+}
+
 func TestInboxRun_ReplayOfASettledRunWritesNothingAgain(t *testing.T) {
 	f := newInboxFixture(t, "create")
 	plan := f.plan(t)

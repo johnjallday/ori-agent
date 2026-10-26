@@ -9946,18 +9946,22 @@
       'px">' +
       structure +
       '<span class="ws-map-placement-preview-name">' +
+      (state.mode === 'draft' ? 'Draft · ' : '') +
       escapeHtml(name) +
       '</span></div>'
     );
   }
 
   function placementConfirmLabel(state) {
+    if (state.mode === 'draft' && !state.saving) return 'Use this position';
     if (state.saving) return 'Saving position…';
     return state.submitting ? 'Creating workspace…' : 'Create workspace here';
   }
 
   function placementInstructionText(state, problem) {
     if (problem) return problem;
+    if (state.mode === 'draft')
+      return 'Draft only. Click open ground or use Arrow keys to choose a position. Setup is confirmed separately; this does not join a district.';
     var groupName = String((state.payload && state.payload.group_name) || '').trim();
     return groupName
       ? 'Reviewed district: ' + groupName + '. Move to preview, click open ground to create.'
@@ -10084,6 +10088,9 @@
     var problem = placementProblem(state.candidate);
     var status = problem ? 'blocked' : 'available';
     updatePlacementPresentation(container);
+    if (state.mode === 'draft' && typeof state.onCandidate === 'function') {
+      state.onCandidate(state.token, { x: state.candidate.x, y: state.candidate.y }, problem);
+    }
     // Pointer hover can emit dozens of events per second. Announce only a
     // validity transition there; Arrow keys are intentional discrete moves and
     // receive the exact coordinate so keyboard placement remains observable.
@@ -10133,6 +10140,14 @@
       updatePlacementPresentation(container);
       return;
     }
+    if (state.mode === 'draft') {
+      state.selected = true;
+      if (typeof state.onSelect === 'function') {
+        state.onSelect(state.token, { x: state.candidate.x, y: state.candidate.y });
+      }
+      announce(container, 'Draft position selected. Review the setup before creating anything.');
+      return;
+    }
     if (typeof state.onConfirm !== 'function') return;
     state.submitting = true;
     updatePlacementPresentation(container);
@@ -10163,6 +10178,11 @@
   function handlePlacementKey(container, event) {
     var state = placementSession;
     if (!state || state.container !== container) return false;
+    if (
+      state.mode === 'draft' &&
+      event.target?.closest?.('button, a, input, select, textarea, [contenteditable="true"]')
+    )
+      return false;
     if (
       event.key === 'Enter' &&
       event.target &&
@@ -10273,7 +10293,7 @@
       // Hover previews the candidate without treating it as a drag or flooding
       // the live region with every pixel crossed.
       if (!press || event.pointerId !== press.pointerId) {
-        updateFromPointer(event, false);
+        if (state.mode !== 'draft' || !state.selected) updateFromPointer(event, false);
         return;
       }
       var point = pointerPosition(canvas, event);
@@ -10369,6 +10389,10 @@
       revision: Number(options.revision) || 1,
       payload: placementPayload(options),
       candidate: suggestedPlacementPoint(options),
+      // Opt-in only: ordinary wizard callers retain creation-on-click/Enter.
+      mode: options.mode === 'draft' ? 'draft' : 'create',
+      onCandidate: options.onCandidate,
+      onSelect: options.onSelect,
       onConfirm: options.onConfirm,
       onBack: options.onBack,
       onCancel: options.onCancel,
@@ -10379,7 +10403,9 @@
     settleLayout();
     announce(
       container,
-      'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
+      placementSession.mode === 'draft'
+        ? 'Draft workspace. Choose a position; nothing is created until you confirm setup separately.'
+        : 'Choose an exact position for the new workspace. Move to preview, click open ground to create; drag navigates.'
     );
     return true;
   }

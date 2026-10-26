@@ -5941,6 +5941,17 @@ test('automatic permissions coalesce edits, preserve monitoring, and never confi
   assert.equal(build.draftUser, undefined);
 });
 
+test('a server draft version change invalidates even an otherwise identical permission review', async () => {
+  const f = permissionReviewFixture();
+  await f.manager.reviewWorkspaceBuildPreparation();
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), true);
+  f.build.session.version++;
+  assert.equal(f.manager.workspaceBuildPreparationCurrent(), false);
+  await f.manager.confirmWorkspaceBuildPreparation();
+  assert.equal(f.confirms(), 0, 'an old tab must obtain a new exact review');
+  assert.equal(f.build.session.draft.name, 'Reviewed inbox');
+});
+
 test('an expired held selection blocks preview and confirmation without losing the draft', async () => {
   const f = permissionReviewFixture();
   await f.manager.reviewWorkspaceBuildPreparation();

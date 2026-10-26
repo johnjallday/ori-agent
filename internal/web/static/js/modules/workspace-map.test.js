@@ -4330,6 +4330,63 @@ test('reviewed placement previews the reviewed name/art and confirms one exact c
   assert.equal(map.endPlacement('custom-fallback'), true);
 });
 
+test('draft-only placement selects geometry without invoking ordinary creation or writing layout', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, positions: { distant: { x: 4800, y: 2800 } }, snap_to_grid: false }
+  });
+  mountWithCamera(map, harness, [{ id: 'distant', name: 'Distant' }]);
+  await flush();
+  let creates = 0;
+  const selections = [];
+  map.beginPlacement({
+    token: 'draft-only',
+    mode: 'draft',
+    initialCandidate: { x: 760, y: 456 },
+    preview: { name: 'Music', groupName: 'Must not imply membership' },
+    onConfirm: () => creates++,
+    onSelect: (_token, point) => selections.push(point)
+  });
+  assert.match(harness.container.innerHTML, /Draft · Music/);
+  assert.match(harness.container.innerHTML, /Use this position/);
+  assert.doesNotMatch(harness.container.innerHTML, /Create workspace here|Reviewed district/);
+  harness.fire('keydown', keyEvent('ArrowRight', { target: { closest: () => ({}) } }));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(selections)),
+    [{ x: 760, y: 456 }],
+    'input keys are not map nudges'
+  );
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(selections[1].x, 761);
+  harness.fire('pointerdown', pointerEvent(640, 260));
+  harness.fire('pointerup', pointerEvent(640, 260));
+  assert.equal(selections.length, 3);
+  assert.equal(creates, 0);
+  assert.equal(patches.length, 0);
+  assert.equal(map.endPlacement('draft-only'), true);
+});
+
+test('ordinary placement remains explicit creation and cancellation cannot save a reserved site', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  let confirmations = 0;
+  map.beginPlacement({
+    token: 'ordinary-cancel',
+    initialCandidate: { x: 760, y: 456 },
+    onConfirm: () => confirmations++
+  });
+  assert.match(harness.container.innerHTML, /Create workspace here/);
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('Escape'));
+  const result = await map.commitPlacement('not-created', { token: 'ordinary-cancel' });
+  assert.equal(result.saved, false);
+  assert.equal(result.reason, 'stale_placement');
+  assert.equal(confirmations, 0);
+  assert.equal(patches.length, 0);
+});
+
 test('reviewed pointer placement uses current screen/world camera math and shared snap rules', async () => {
   const { map, harness } = buildHarness({
     layout: {
