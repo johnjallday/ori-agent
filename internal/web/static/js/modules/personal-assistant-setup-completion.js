@@ -41,6 +41,19 @@ export function setupCompletionView(offer, receipt) {
   };
 }
 
+// Saved output only. No new summary, task or synthetic conversation turn.
+export function completedTaskView(offer, firstLook, completion) {
+  if (!completion?.ready || !firstLook?.visible || firstLook.state !== 'finished')
+    return { visible: false };
+  return {
+    visible: true,
+    title: offer.first_task?.recipe === 'folder_summary' ? 'Summary' : 'First task result',
+    excerpt: String(firstLook.excerpt || ''),
+    next: String(firstLook.next || offer.first_task?.next_request || '').trim(),
+    actions: firstLook.actions.filter(action => action.href && action.id !== 'open')
+  };
+}
+
 // The canonical context's offer reference binds its accepted observation to
 // this review. A preview/replacement is not that binding, even in the same chat.
 export function ownsSetupCompletion(state, offer, completion) {

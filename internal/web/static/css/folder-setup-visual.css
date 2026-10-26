@@ -270,6 +270,18 @@
   overflow-wrap: anywhere;
 }
 
+.folder-task-result {
+  border: 0;
+  border-left: 3px solid var(--pa-accent-text, var(--text-primary));
+  border-radius: 0;
+  background: transparent;
+}
+
+.folder-task-result .pa-folder__first-look {
+  white-space: pre-wrap;
+  margin-block: 0.5rem;
+}
+
 .folder-optional-task h3 {
   margin-block: 0.5rem;
   font:

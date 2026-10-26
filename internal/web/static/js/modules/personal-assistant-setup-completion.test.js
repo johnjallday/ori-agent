@@ -4,6 +4,7 @@ import { folderReceiptView } from './personal-assistant-folder.js';
 import {
   setupCompletionView,
   ownsSetupCompletion,
+  completedTaskView,
   completionDisclosureOpen
 } from './personal-assistant-setup-completion.js';
 
@@ -130,6 +131,31 @@ test('composer completion requires the exact accepted canonical review binding',
   ])
     assert.equal(ownsSetupCompletion({ ...state, ...change }, offer, view(offer)), false);
   assert.equal(ownsSetupCompletion(state, offer, { ready: false }), false);
+});
+
+test('finished output is saved text with inert canonical report actions only', () => {
+  const saved = {
+    ...offer,
+    first_task: { recipe: 'folder_summary', next_request: 'Saved suggestion' }
+  };
+  const firstLook = {
+    visible: true,
+    state: 'finished',
+    excerpt: '<script>literal</script>',
+    actions: [
+      { id: 'report', href: '/workspaces/album/task/one', label: 'Open summary' },
+      { id: 'open', href: '/workspaces/album' },
+      { id: 'start', start: true }
+    ]
+  };
+  const result = completedTaskView(saved, firstLook, view(offer));
+  assert.equal(result.title, 'Summary');
+  assert.equal(result.excerpt, '<script>literal</script>');
+  assert.equal(result.next, 'Saved suggestion');
+  assert.deepEqual(result.actions, [firstLook.actions[0]]);
+  for (const state of ['seeded', 'running', 'waiting', 'failed'])
+    assert.equal(completedTaskView(saved, { ...firstLook, state }, view(offer)).visible, false);
+  assert.equal(completedTaskView(saved, firstLook, { ready: false }).visible, false);
 });
 
 test('first collapse keeps focused evidence open and redraw preserves reader intent', () => {

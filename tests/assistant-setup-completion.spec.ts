@@ -60,6 +60,7 @@ async function redraw(page: Page, offer: any) {
 }
 
 async function evidence(page: Page, name: string) {
+  if (name.startsWith('02-')) await page.setViewportSize({ width: 1440, height: 1100 });
   await page.screenshot({ path: `tasks/evidence-assistant-setup-completion/${name}.png` });
 }
 
@@ -149,6 +150,109 @@ test('fixture deleted and awaiting-receipt setup cannot become ready', async ({ 
   await redraw(page, pending);
   await expect(card.locator('#personalAssistantFolderOfferHeadline')).not.toContainText('is ready');
   await expect(card).toContainText('checking the saved result');
+  expect(effects).toEqual([]);
+});
+
+test('fixture finished result appears once and opens its saved report without execution', async ({
+  page
+}) => {
+  const offer: any = completed();
+  offer.first_task = {
+    state: 'finished',
+    recipe: 'folder_summary',
+    optional: true,
+    description: 'Read the session',
+    result_excerpt: '<img src=x onerror=alert(1)> Saved overview',
+    next_request: 'Review the chorus',
+    report_route: '/workspaces/album-three/task/summary',
+    next_route: '/workspaces/album-three/plans?next=assessment',
+    executor: { agent: 'Ari', model: 'Fixture model', provider: 'loopback' }
+  };
+  const { card, effects } = await mount(page, offer);
+  const result = card.locator('#personalAssistantFolderOptionalTask');
+  await expect(result.getByRole('heading', { name: 'Summary', exact: true })).toBeVisible();
+  await expect(result.locator('#personalAssistantFolderTaskDisclosure')).toBeHidden();
+  await expect(result.locator('#personalAssistantFolderTaskLabel')).toBeHidden();
+  await expect(card.getByText(offer.first_task.result_excerpt, { exact: false })).toHaveCount(1);
+  await expect(result.locator('img')).toHaveCount(0);
+  await expect(result).toContainText('Review the chorus');
+  await expect(result.getByRole('button')).toHaveCount(0);
+  await redraw(page, offer);
+  await redraw(page, offer);
+  await expect(card.locator('#personalAssistantFolderFirstLookResult')).toHaveCount(1);
+  await evidence(page, '02-finished');
+  await page.route('**/workspaces/album-three/task/summary', route =>
+    route.fulfill({ contentType: 'text/html', body: '<h1>Saved report navigation fixture</h1>' })
+  );
+  await result.getByRole('link', { name: 'Open summary', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Saved report navigation fixture' })
+  ).toBeVisible();
+  expect(effects).toEqual([]);
+});
+
+for (const state of ['seeded', 'running', 'waiting', 'failed']) {
+  test(`fixture compact setup retains actionable ${state} task`, async ({ page }) => {
+    const offer: any = completed();
+    offer.first_task = {
+      state,
+      recipe: 'folder_summary',
+      optional: true,
+      can_start: true,
+      can_retry: state === 'failed',
+      description: 'Summarize this project',
+      message:
+        state === 'waiting'
+          ? 'Which section should I read?'
+          : state === 'failed'
+            ? 'The summary did not finish.'
+            : '',
+      executor: { agent: 'Ari', model: 'Fixture model', provider: 'loopback' }
+    };
+    const { card, effects } = await mount(page, offer);
+    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+      '✓ Album-3 is ready'
+    );
+    await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+    const task = card.locator('#personalAssistantFolderOptionalTask');
+    if (state === 'seeded' || state === 'failed') {
+      await expect(task).toContainText('Each explicit attempt uses model tokens');
+      await expect(
+        task.getByRole('button', {
+          name: state === 'seeded' ? 'Start summary' : 'Try again',
+          exact: true
+        })
+      ).toBeVisible();
+    } else if (state === 'running')
+      await expect(task.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+    else await expect(task).toContainText('Which section should I read?');
+    await evidence(page, `02-${state}`);
+    expect(effects).toEqual([]);
+  });
+}
+
+test('fixture ticket-only output and File Janitor preserve truthful link labels', async ({
+  page
+}) => {
+  const offer: any = completed();
+  offer.first_task = { state: 'finished', ticket_route: '/workspaces/album-three?ticket=legacy' };
+  const { card, effects } = await mount(page, offer);
+  await expect(card.getByRole('link', { name: 'Open task', exact: true })).toBeVisible();
+  await expect(card.getByRole('link', { name: /summary|report/i })).toHaveCount(0);
+  delete offer.first_task;
+  offer.outcome.first_look = {
+    batch: { outcome: 'batch', route: '/workspaces/album-three?panel=file-janitor&batch_id=one' }
+  };
+  await redraw(page, offer);
+  await expect(card.getByRole('link', { name: 'Open workspace', exact: true })).toHaveAttribute(
+    'href',
+    '/workspaces/album-three'
+  );
+  await expect(card.getByRole('link', { name: 'Review batch', exact: true })).toHaveAttribute(
+    'href',
+    '/workspaces/album-three?panel=file-janitor&batch_id=one'
+  );
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
   expect(effects).toEqual([]);
 });
 

@@ -49,6 +49,7 @@ import { renderFolderFindings } from './personal-assistant-folder-presentation.j
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
 import {
   setupCompletionView,
+  completedTaskView,
   completionDisclosureOpen
 } from './personal-assistant-setup-completion.js';
 
@@ -3548,22 +3549,41 @@ function renderOffer(place) {
     completion.facts || ''
   );
   const firstLook = receipt.firstLook || { visible: false };
+  const result = completedTaskView(state.offer, firstLook, completion);
   const taskPanel = document.getElementById('personalAssistantFolderOptionalTask');
   const taskActions = document.getElementById('personalAssistantFolderTaskActions');
   const separateTask = Boolean(taskPanel && receipt.visible && firstLook.visible);
   if (taskPanel) {
     taskPanel.hidden = !separateTask;
+    taskPanel.classList.toggle('folder-task-result', result.visible);
+    setText(
+      document.getElementById('personalAssistantFolderTaskLabel'),
+      result.visible ? '' : 'Optional project task · separate from setup'
+    );
     setText(
       document.getElementById('personalAssistantFolderTaskTitle'),
-      state.offer?.first_task?.description || 'Optional project task'
+      result.visible
+        ? result.title
+        : state.offer?.first_task?.description || 'Optional project task'
     );
+    const disclosure = document.getElementById('personalAssistantFolderTaskDisclosure');
+    const execution = document.getElementById('personalAssistantFolderTaskDetails');
+    if (execution && disclosure) {
+      const key = `${state.offer?.conversation_id || ''}:${state.offer?.id || ''}`;
+      if (execution.dataset.offer !== key) execution.open = false;
+      execution.dataset.offer = key;
+      execution.hidden = !result.visible;
+      if (result.visible) {
+        if (disclosure.parentElement !== execution) execution.append(disclosure);
+      } else if (disclosure.parentElement !== taskPanel) execution.before(disclosure);
+    }
     setText(
       document.getElementById('personalAssistantFolderTaskDisclosure'),
       separateTask ? folderTaskDisclosure(state.offer.first_task) : ''
     );
     setText(
       document.getElementById('personalAssistantFolderTaskStatus'),
-      separateTask ? firstLook.status || firstLook.message : ''
+      separateTask && !result.visible ? firstLook.status || firstLook.message : ''
     );
   }
   // A canonical conversation reload can replace this card. Do not let a fast
@@ -3784,11 +3804,14 @@ function renderOffer(place) {
   // What the agent found, once its first look has finished, and for an
   // assessment the one next request it suggested. Both are text the model
   // wrote: they are set as text, never as markup.
-  setText(els.result, firstLook.visible ? firstLook.excerpt : '');
-  if (els.result && firstLook.visible && firstLook.next) {
+  setText(
+    els.result,
+    result.visible ? result.excerpt || 'The task finished. Open its saved output below.' : ''
+  );
+  if (els.result && result.visible && result.next) {
     const label = document.createElement('strong');
     label.textContent = 'Suggested next task: ';
-    els.result.append(document.createElement('br'), label, firstLook.next);
+    els.result.append(document.createElement('br'), label, result.next);
     els.result.hidden = false;
   }
   if (els.plan) {
@@ -3857,7 +3880,10 @@ function renderOffer(place) {
       // The first look's own actions: its one primary (Start first look, Try
       // again, or the report) and the workspace as the other.
       firstLook.actions.forEach(action => {
-        const style = action.style === 'primary' ? 'btn-primary' : 'btn-outline-secondary';
+        const style =
+          action.style === 'primary' || (completion.ready && action.id === 'open')
+            ? 'btn-primary'
+            : 'btn-outline-secondary';
         const control = document.createElement(action.href ? 'a' : 'button');
         control.className = `btn btn-sm ${style}`;
         control.dataset.folderAction = action.id;
@@ -4545,7 +4571,12 @@ async function refreshFirstLook(offerID) {
   if (before !== after) firstLookMoved();
   // A hired agent's look that this page watched finish: the assistant points
   // at its report, and "Needs you" in that line opens it.
-  if (finished && state.offer?.id === id && state.offer?.outcome?.first_look) {
+  if (
+    finished &&
+    state.offer?.id === id &&
+    state.offer?.outcome?.first_look &&
+    !setupCompletionView(state.offer, folderReceiptView(state.offer)).ready
+  ) {
     const look = state.offer.first_task;
     const row = sayInConversation(
       reportedLine(look?.agent, state.offer.subject?.name || look?.folder_name)
