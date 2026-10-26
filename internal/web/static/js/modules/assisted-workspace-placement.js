@@ -50,18 +50,47 @@ export function placementPanelHTML(view = {}) {
   if (view.result)
     return `<section class="assisted-placement" aria-label="Workspace preparation result">
     <h2>Workspace prepared</h2>
-    <p>${escape(draft.name)}</p>
+    <p>${escape(view.resultName || draft.name)}</p>
+    ${Array.isArray(view.members) && view.members.length ? `<p>Assigned: ${view.members.map(escape).join(', ')}</p>` : ''}
     <p>${view.result.outcome === 'batch' ? `${escape(view.result.eligible_count)} ${Number(view.result.eligible_count) === 1 ? 'file' : 'files'} in the first filing review.` : 'The first scan found no eligible files.'}</p>
     <p>Source files were not moved. Filing still needs your separate approval.</p>
-    <p role="status" aria-live="polite">${escape(view.message)}</p>
+    <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message)}</p>
+    ${view.sourceReceiptPending ? '<p>The assistant receipt is not yet saved. Read status again to reconcile this same setup; do not create another.</p>' : ''}
     <div class="assisted-placement__footer">
-      ${view.positionFailed ? '<button type="button" data-placement-action="retry-position">Retry position only</button>' : ''}
-      <button type="button" data-placement-action="open">Open filing review</button>
-      <button type="button" data-placement-action="back">Close</button>
+      ${view.sourceReceiptPending ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
+      ${view.positionFailed ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
+      <button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>Open filing review</button>
+      <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
     </div></section>`;
+  const saved = view.review?.outcome;
+  if (view.accepted)
+    return `<section class="assisted-placement" aria-label="Confirmed workspace setup">
+      <h2>Check confirmed setup</h2>
+      <p>Work may already exist. Closing is not undo, and this draft cannot create a second workspace.</p>
+      <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message)}</p>
+      <p>Reading status never continues setup. An explicit continuation uses only the original confirmed choices.</p>
+      ${
+        view.recoveryRoute && saved
+          ? `<section class="assisted-placement__review" aria-label="Saved setup">
+        <dl><dt>Existing workspace</dt><dd>${escape(saved.name)}</dd>
+        <dt>Goal</dt><dd class="assisted-placement__goal">${escape(saved.goal || 'No goal recorded')}</dd>
+        <dt>Assigned team</dt><dd>${Array.isArray(saved.members) ? saved.members.map(escape).join(', ') : ''}</dd>
+        <dt>Source</dt><dd>${escape(saved.folder_path || saved.folder_name)} — linked, not moved</dd>
+        <dt>Access</dt><dd>Top-level metadata only; create or reuse Filed/. No file contents, moves or deletions.</dd>
+        <dt>Next</dt><dd>Continue the original filing-review preparation, not a new workspace.</dd>
+        <dt>Confirmed monitoring</dt><dd>${view.review.monitoring ? `On · watch for new files; daily catch-up at ${escape(saved.terms?.daily_scan_local_time || 'the confirmed time')} (${escape(saved.terms?.timezone || 'local time')}).` : 'Off · manual scans only.'}</dd></dl>
+      </section>`
+          : ''
+      }
+      <div class="assisted-placement__footer">
+        <button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>
+        ${view.recoveryRoute ? `<button type="button" data-placement-action="open-settings"${view.busy ? ' disabled' : ''}>Open existing filing review</button>` : ''}
+        <button type="button" data-placement-action="confirm"${view.busy || view.reconciliationRequired || !view.review ? ' disabled' : ''}>Continue accepted setup</button>
+        <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>${view.onMap ? 'Back to review' : 'Close'}</button>
+      </div></section>`;
   const review = view.review;
   const busy = Boolean(view.busy);
-  const locked = busy || view.accepted;
+  const locked = busy || view.accepted || view.conflict || view.closed;
   const disabled = locked ? ' disabled' : '';
   const art =
     globalThis.OriWorkspaceBuildingArt?.svgForVariant?.('depot', { context: 'map' }) || '';
@@ -124,23 +153,24 @@ export function placementPanelHTML(view = {}) {
           review
             ? `<dl>
           <dt>Workspace</dt><dd>${escape(workspace.name)} · standalone</dd>
-          <dt>Goal</dt><dd>${escape(workspace.mission)}</dd>
+          <dt>Goal</dt><dd class="assisted-placement__goal">${escape(workspace.mission)}</dd>
           <dt>Team</dt><dd>${escape(teamText)}</dd>
           <dt>Source</dt><dd>${escape(folder.path || folder.name)} — linked, not moved</dd>
           <dt>Access</dt><dd>Top-level names, types, sizes and dates only. No file contents.</dd>
           <dt>Destination</dt><dd>Create or reuse Filed/ inside this folder.</dd>
           <dt>Next</dt><dd>Prepare the first filing review. No model call. Nothing is moved or deleted.</dd>
-          <dt>Monitoring</dt><dd>${review.monitoring ? `On · watch for new files; daily catch-up at ${escape(review.terms?.daily_scan_local_time || 'the reviewed time')}.` : 'Off · manual scans only.'}</dd>
+          <dt>Monitoring</dt><dd>${review.monitoring ? `On · watch for new files; daily catch-up at ${escape(review.terms?.daily_scan_local_time || 'the reviewed time')} (${escape(review.terms?.timezone || 'local time')}).` : 'Off · manual scans only.'}</dd>
         </dl>`
             : '<p>Your current choices need a fresh server review before you can confirm.</p>'
         }
       </section>
-      <p class="assisted-placement__status" role="status" aria-live="polite">${escape(view.message || '')}</p>
+      <p class="assisted-placement__status" role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message || '')}</p>
+      ${view.conflict ? `<button type="button" data-placement-action="reload-draft"${busy ? ' disabled' : ''}>Discard local edits &amp; load saved draft</button>` : ''}
       ${view.canRefresh ? '<button type="button" data-placement-action="review">Refresh permission review</button>' : ''}
       <footer class="assisted-placement__footer">
         <button type="button" data-placement-action="back"${busy ? ' disabled' : ''}>${view.onMap ? 'Back to review' : 'Back'}</button>
         <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>
-        <button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !review || busy ? ' disabled' : ''}>${busy ? 'Working…' : view.accepted ? 'Continue accepted setup' : 'Create workspace & scan'}</button>
+        <button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !review || busy || view.conflict || view.closed ? ' disabled' : ''}>${busy ? 'Working…' : view.accepted ? 'Continue accepted setup' : 'Create workspace & scan'}</button>
       </footer>
     </section>`;
 }
@@ -277,14 +307,19 @@ export function mountPlacementPanel(host, onAction) {
       const field = focused?.dataset?.placementField;
       const action = focused?.dataset?.placementAction;
       const card = focused?.dataset?.placementCard;
+      const marker = focused?.dataset?.placementFocus;
       host.innerHTML = placementPanelHTML(current);
-      // Retain the same labelled control, not an arbitrary first button.
-      if (card || field || action)
-        host
-          .querySelector(
-            `[data-placement-${card ? 'card' : field ? 'field' : 'action'}="${card || field || action}"]`
-          )
-          ?.focus();
+      // Retain the same labelled control. When acceptance or a conflict
+      // removes/disables it, keep focus with this editor's readable status,
+      // never on the document body or another editor's arbitrary first button.
+      let target;
+      if (card || field || action || marker)
+        target = host.querySelector(
+          `[data-placement-${card ? 'card' : field ? 'field' : action ? 'action' : 'focus'}="${card || field || action || marker}"]`
+        );
+      if (focused && (!target || target.disabled))
+        target = host.querySelector('[data-placement-focus="status"]');
+      target?.focus();
     },
     destroy() {
       clearTimeout(redrawTimer);

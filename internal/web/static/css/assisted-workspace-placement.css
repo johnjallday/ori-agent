@@ -31,6 +31,11 @@
     600 1.5rem/1.2 "Chakra Petch",
     sans-serif;
   margin-block: 0.35rem;
+  /* The full name remains in the labelled field and final review. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 .assisted-placement h3 {
   font-size: 0.9rem;
@@ -199,6 +204,9 @@
 .assisted-placement dd {
   margin: 0;
 }
+.assisted-placement__goal {
+  white-space: pre-wrap;
+}
 .assisted-placement__status:not(:empty) {
   border: 1px solid var(--ap-line);
   padding: 0.65rem;
@@ -251,7 +259,7 @@ body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls
   .assisted-placement__slot {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .assisted-placement__slot button {
+  .assisted-placement__slot-actions {
     grid-column: 2;
     justify-self: start;
   }

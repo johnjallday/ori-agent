@@ -153,6 +153,31 @@ before effects. Concurrent confirmations join/replay that claim; stale tabs
 cannot overwrite or confirm newer drafts. No ordinary-create fallback on a
 network error. Reserved IDs and resource names do not prove creation.
 
+Accepted `janitor-review` observes the original result through File Janitor's
+`ReviewLinkedSetup`, not `Status` (which has a persistence probe). Explicit
+continuation and observation share workspace ownership/lifecycle, provenance,
+team, capability, root and terms checks. A matching linked-review revision and
+retained canonical scan/batch receipt are required; missing or changed proof is
+reconciliation-required. The pure observer never grants, configures monitoring,
+prepares or scans. A lost reply can therefore display observed membership and
+the original batch/empty result without replaying preparation or saving geometry.
+If the created workspace is verified but its preparation is incomplete, offer
+its actual filing-review route separately from explicit continuation. The
+observed saved name/goal, team, exact linked path and confirmed scope/schedule
+remain readable; local unsaved choices are not presented as the accepted setup.
+
+After verified completion, the POST preparation/review handler may record that
+observation in the original source offer. This is receipt bookkeeping only,
+outside build-store locks: no dossier producer, first task, model call or scan.
+The exact immutable source/build binding is checked again, the transfer fence
+remains, and no legacy source acceptance/run is invented. The historical source
+receipt survives build pruning and later workspace deletion. Existing completion
+and consumed-attachment adapters own presentation and match the original
+conversation/offer/observation; a newer attachment is never consumed. Recording
+failure preserves the actual result and reports the pending assistant receipt;
+reading status can retry that bookkeeping, never setup. Repeated reads of an
+already-recorded receipt do not rewrite it or emit a task message.
+
 ## Geometry, fallback and layout repair
 
 Add an explicitly opted-in draft-selection mode to `beginPlacement`; existing
@@ -161,7 +186,12 @@ nudges and Enter select a candidate only. A translucent building has a visible
 Draft label and says **Standalone workspace — map position does not join a
 district**. Input keys in the adjacent panel belong to its controls, not the
 canvas. Selection uses existing snap/collision/camera rules. Candidate changes
-are UI-only and do not invalidate material server consent.
+are UI-only and do not invalidate material server consent. The draft-only
+pending guard and owner callbacks freeze the requested point when confirmation
+starts. Only a definite pre-admission refusal restores editing; uncertain or
+accepted work stays locked. Switching away from Map can still show compact
+status without continuing or undoing setup. Delayed activation rechecks map
+visibility and the current editor/acceptance state.
 
 The panel is outside the transformed canvas and scrolls independently, with
 focused controls and final consent visible at desktop zoom. On narrow screens,
@@ -177,6 +207,8 @@ A layout failure does not undo setup or recreate anything. Show setup result
 and position result independently. Position repair only updates layout for that
 verified existing workspace, with fresh collision checks; it cannot move it into
 a group or retry grants/scans. Never silently substitute a nearby position.
+Late layout replies may preserve a real committed position, but cannot clear,
+select over, or change the Move mode of a replacement placement session.
 
 ## Return and recovery matrix
 
@@ -209,6 +241,10 @@ identity changes, late responses, replay and ordinary-create bypass at the
 server boundary. Real-server acceptance must count resources/grants/batches/
 watches and check source bytes, not just stub receipts. Prototype fixtures are
 inert test-only pages and cannot be enabled by a production URL parameter.
+The accessibility suite checks actual Chrome tab zoom in a disposable profile
+and captures its complete renderer surface, not a CSS-zoom substitute. The
+separate expiry spec waits for the real server-issued 30-minute hold deadline;
+its seed/review passes neither change the clock nor fabricate a selection.
 
 Use isolated HOME/data, synthetic directories and explicit no-provider launch.
 Desktop native picker and actual 200% zoom checks remain required observations,

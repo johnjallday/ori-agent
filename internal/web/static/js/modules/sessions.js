@@ -879,7 +879,14 @@ const sessionManager = {
     // leaving it to be overwritten on the next open, and invalidates any plan
     // request still in flight so a late response cannot repopulate a closed
     // wizard. Nothing was persisted, so nothing needs undoing (FR13).
+    let closingCreatorContext;
+    addFolderModal?.addEventListener('hide.bs.modal', () => {
+      closingCreatorContext = this.workspaceCreatorContext;
+    });
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
+      const closing = closingCreatorContext;
+      closingCreatorContext = null;
+      if (closing && this.workspaceCreatorContext !== closing) return;
       // Agent setup reuses the sibling Create New Agent modal. Map placement
       // is another, distinct in-draft navigation. Neither is cancellation.
       if (addFolderModal.dataset.suspendedForAgentSetup) return;
@@ -11787,6 +11794,15 @@ const sessionManager = {
   },
 
   workspaceCreatorClosed() {
+    const context = this.workspaceCreatorContext;
+    const placement = this.workspaceBuild?.placement;
+    const focused = document.activeElement;
+    const restoreFocus =
+      placement &&
+      (!focused ||
+        focused === document.body ||
+        placement.host?.contains?.(focused) ||
+        document.getElementById('addFolderModal')?.contains?.(focused));
     void window.FileJanitorProtection?.creatorClosed?.().catch(error =>
       this.showToast(error.message, 'warning')
     );
@@ -11802,6 +11818,14 @@ const sessionManager = {
     this.workspaceCreatorContext = null;
     this.pendingWorkspaceCreatorOptions = null;
     window.OriWorkspaceMap?.cancelBuild?.();
+    if (restoreFocus) {
+      const restored = context?.inboxPlacement?.onReturn?.();
+      if (
+        !restored &&
+        (document.activeElement === focused || document.activeElement === document.body)
+      )
+        document.getElementById('personalAssistantLauncher')?.focus();
+    }
   },
 
   closeInboxWorkspacePlacement() {
@@ -12307,15 +12331,22 @@ const sessionManager = {
   // handoff saves only a draft; it is never preparation or a create fallback.
   async openInboxWorkspacePlacement(
     input,
-    { mode = 'suggested', current = () => true, invoker } = {}
+    { mode = 'suggested', current = () => true, invoker, onReturn } = {}
   ) {
     if (!current()) return null;
-    if (document.getElementById('addFolderModal')?.classList.contains('show'))
+    if (
+      this.workspaceCreatorContext ||
+      this.workspaceBuild ||
+      document.getElementById('addFolderModal')?.classList.contains('show')
+    )
       throw new Error(
         'Finish or close the current workspace editor first. Its choices are unchanged.'
       );
+    const generation = this.workspaceCreatorGeneration;
     const result = await this.workspaceBuildApi().fromInbox(input);
-    if (!current()) return null;
+    // An unrelated editor may have opened (and even closed) during the read.
+    // The saved handoff remains recoverable, but must not take over that UI.
+    if (!current() || this.workspaceCreatorGeneration !== generation) return null;
     if (!result.ok)
       throw new Error(
         result.body?.error?.message ||
@@ -12341,7 +12372,7 @@ const sessionManager = {
       name: session.draft?.name,
       fixedKind: 'workspace',
       invoker,
-      inboxPlacement: { session, mode, sourceCurrent: current }
+      inboxPlacement: { session, mode, sourceCurrent: current, onReturn }
     });
     return session;
   },
@@ -12532,6 +12563,11 @@ const sessionManager = {
       const button = document.getElementById(id);
       if (button) button.hidden = true;
     }
+    // The draft response is adopted before its in-flight promise settles.
+    // Do not briefly replace/disable the focused next field or button in that
+    // interval: native Tab has already moved there. The finally-render uses
+    // the same canonical response without interrupting keyboard navigation.
+    if (build.draftInFlight && !build.draftError && !build.draftConflict) return;
     if (placement.dirty && host.contains(document.activeElement)) return;
     const review =
       this.workspaceBuildPreparationCurrent() ||
@@ -12541,13 +12577,19 @@ const sessionManager = {
         : null;
     const accepted = Boolean(build.acceptedPreparation || build.preparationUncertain);
     const cards = this.inboxWorkspacePlacementCards(build);
+    const closed = build.session?.status !== 'open' && !accepted;
+    const draft = build.draftConflict
+      ? this.workspaceBuildDraftBody(true).draft
+      : build.session?.draft;
     placement.panel.update({
+      conflict: Boolean(build.draftConflict),
+      closed,
       cardsAvailable: Boolean(placement.cards),
       cardsOpen: placement.cardsOpen,
       cards,
       selectedCard: cards.find(card => card.key === placement.selectedCard),
-      draft: build.session?.draft,
-      team: (build.session?.draft?.role_staffing || []).map(role => ({
+      draft,
+      team: (draft?.role_staffing || []).map(role => ({
         name: role.name,
         action: role.mode
       })),
@@ -12560,6 +12602,7 @@ const sessionManager = {
       accepted,
       busy: Boolean(
         build.preparationBusy ||
+        build.preparationReading ||
         build.busy ||
         build.draftInFlight ||
         build.folderPending ||
@@ -12575,23 +12618,34 @@ const sessionManager = {
         (!placement.onMap || Boolean(placement.candidate)),
       canRefresh:
         !accepted &&
+        !closed &&
+        !build.draftConflict &&
         !review &&
         !build.janitorReviewRequest &&
         !build.draftInFlight &&
         !placement.dirty,
-      message:
-        placement.message ||
-        build.preparationMessage ||
-        'Choose a position or keep the automatic layout. Review permissions before confirming.',
+      message: build.draftConflict
+        ? `This draft changed in another tab. Local edits have not replaced the saved draft. Load the saved draft to review its current choices. ${placement.message || ''}`
+        : closed
+          ? 'This draft was closed elsewhere. It cannot create anything; close this editor and return to the assistant.'
+          : placement.message ||
+            build.preparationMessage ||
+            'Choose a position or keep the automatic layout. Review permissions before confirming.',
       result: placement.result,
-      positionFailed: placement.positionFailed
+      positionFailed: placement.positionFailed,
+      resultName: placement.resultName,
+      members: placement.members,
+      reconciliationRequired: placement.reconciliationRequired,
+      recoveryRoute: placement.recoveryRoute,
+      sourceReceiptPending: placement.sourceReceiptPending
     });
   },
 
   async actOnInboxWorkspacePlacement({ action, field, value, key, slot }) {
     const build = this.workspaceBuild;
     const placement = build?.placement;
-    if (!placement || build.preparationBusy || placement.saving) return;
+    if (!placement || build.preparationBusy || build.preparationReading || placement.saving) return;
+    if (action === 'read-status') return this.readInboxWorkspacePreparation(build);
     if (action.startsWith('card-')) return this.actOnInboxWorkspaceCard({ action, key, slot });
     if (action === 'cards') {
       if (
@@ -12608,6 +12662,18 @@ const sessionManager = {
       if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
       return;
     }
+    if (action === 'reload-draft' && build.draftConflict) {
+      await this.reloadInboxWorkspaceDraft(build);
+      return;
+    }
+    if (
+      action !== 'back' &&
+      (build.draftConflict ||
+        (build.session?.status !== 'open' &&
+          !build.acceptedPreparation &&
+          !build.preparationUncertain))
+    )
+      return;
     if (action === 'dirty') {
       placement.dirty = true;
       this.noteWorkspaceBuildIntent();
@@ -12647,10 +12713,15 @@ const sessionManager = {
       placement.message = 'Ori will use automatic map layout. Your setup choices are unchanged.';
       this.returnInboxWorkspaceToReview();
     } else if (action === 'back') {
-      if (placement.onMap) this.returnInboxWorkspaceToReview();
-      else this.hideWorkspaceCreatorModal();
+      if (!build.acceptedPreparation && !build.preparationUncertain)
+        await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
+      if (placement.onMap && !placement.result) this.returnInboxWorkspaceToReview();
+      else this.closeInboxWorkspacePlacement();
     } else if (action === 'agent' || action === 'folder') {
       if (build.acceptedPreparation || build.preparationUncertain) return;
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build || build.draftError || build.draftConflict) return;
       this.returnInboxWorkspaceToReview();
       if (action === 'agent') {
         this.collapseWorkspaceBuild({ focus: false });
@@ -12675,17 +12746,57 @@ const sessionManager = {
       this.closeInboxWorkspacePlacement();
     } else if (action === 'open' && placement.route) {
       window.location.href = placement.route;
+    } else if (action === 'open-settings' && placement.recoveryRoute) {
+      window.location.href = placement.recoveryRoute;
     } else if (action === 'retry-position' && placement.workspaceID && placement.positionFailed) {
       placement.saving = true;
-      const result = await window.OriWorkspaceMap?.retryPlacement?.(placement.workspaceID);
+      this.syncWorkspaceBuildPresentation();
+      let saved = false;
+      try {
+        saved =
+          (await window.OriWorkspaceMap?.retryPlacement?.(
+            placement.workspaceID,
+            placement.candidate
+          )) === true;
+      } catch (_) {
+        /* The workspace survives a failed layout-only retry. */
+      }
       if (this.workspaceBuild !== build) return;
       placement.saving = false;
-      placement.positionFailed = result?.saved !== true;
-      placement.message = result?.saved
+      placement.positionFailed = !saved;
+      placement.message = saved
         ? 'The requested map position is now saved.'
-        : 'Setup is complete; the requested position is still not saved. Only layout was retried.';
+        : 'Setup is complete; the requested position is still not saved. Open Map and retry when that point is available. Only layout was retried.';
     }
     if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+  },
+
+  async reloadInboxWorkspaceDraft(build) {
+    if (this.workspaceBuild !== build || build.preparationBusy || build.preparationUncertain)
+      return;
+    const placement = build.placement;
+    placement.saving = true;
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.readCurrentWorkspaceBuild(build);
+      if (this.workspaceBuild !== build) return;
+      const session = result?.body?.session;
+      if (!result?.ok || session?.id !== build.session.id)
+        throw new Error('The saved draft could not be read. Your local edits are still kept.');
+      build.draftConflict = false;
+      build.draftError = false;
+      build.draftUser = undefined;
+      build.lastDraftKey = '';
+      build.janitorMonitoring = session.placement_monitoring === true;
+      placement.dirty = false;
+      placement.message = 'Loaded the saved draft. Review its current choices before confirming.';
+      await this.applyWorkspaceBuildSession(session, { resume: true });
+    } finally {
+      if (this.workspaceBuild === build) {
+        placement.saving = false;
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
   },
 
   placeInboxWorkspaceDraft() {
@@ -12700,8 +12811,11 @@ const sessionManager = {
       build.preparationBusy
     )
       return;
-    const viewport = document.querySelector('[data-ws-map-viewport]');
-    if (!viewport?.getClientRects?.().length || window.innerWidth < 980) {
+    const mapVisible = () => {
+      const viewport = document.querySelector('[data-ws-map-viewport]');
+      return Boolean(viewport?.getClientRects?.().length) && window.innerWidth >= 980;
+    };
+    if (!mapVisible()) {
       placement.message =
         'Use this compact review, or switch the workspace view to Map on a wider screen. Nothing was created.';
       this.syncWorkspaceBuildPresentation();
@@ -12710,8 +12824,30 @@ const sessionManager = {
     const modal = document.getElementById('addFolderModal');
     modal.dataset.suspendedForMapPlacement = placement.token;
     const activate = () => {
-      if (this.workspaceBuild !== build || build.session.status !== 'open' || build.closeReady)
+      if (this.workspaceBuild !== build || build.session.status === 'abandoned' || build.closeReady)
         return;
+      if (
+        build.session.status !== 'open' ||
+        build.acceptedPreparation ||
+        build.preparationUncertain ||
+        build.preparationBusy
+      ) {
+        this.returnInboxWorkspaceToReview();
+        return;
+      }
+      if (!mapVisible()) {
+        placement.message =
+          'Map view changed. Your setup choices and requested position are kept here.';
+        this.returnInboxWorkspaceToReview();
+        return;
+      }
+      const editable = () =>
+        this.workspaceBuild === build &&
+        build.session.status === 'open' &&
+        !build.preparationBusy &&
+        !build.acceptedPreparation &&
+        !build.preparationUncertain &&
+        !build.closeReady;
       const started = window.OriWorkspaceMap?.beginPlacement?.({
         token: placement.token,
         mode: 'draft',
@@ -12723,8 +12859,7 @@ const sessionManager = {
           blueprintBuiltin: true
         },
         onCandidate: (token, point) => {
-          if (this.workspaceBuild !== build || token !== placement.token || !placement.candidate)
-            return;
+          if (!editable() || token !== placement.token || !placement.candidate) return;
           if (point.x === placement.candidate.x && point.y === placement.candidate.y) return;
           placement.candidate = null;
           placement.message =
@@ -12732,7 +12867,7 @@ const sessionManager = {
           this.syncInboxWorkspacePlacement();
         },
         onSelect: (token, point) => {
-          if (this.workspaceBuild !== build || token !== placement.token) return;
+          if (!editable() || token !== placement.token) return;
           placement.candidate = { x: point.x, y: point.y };
           placement.message =
             'Draft position selected. Review setup before confirming; no district membership is added.';
@@ -12754,7 +12889,7 @@ const sessionManager = {
       this.syncWorkspaceBuildPresentation();
     };
     modal.addEventListener('hidden.bs.modal', activate, { once: true });
-    bootstrap.Modal.getInstance(modal)?.hide();
+    this.hideWorkspaceCreatorModal();
   },
 
   returnInboxWorkspaceToReview() {
@@ -13185,6 +13320,7 @@ const sessionManager = {
       };
       pane.applySession(session);
       this.syncWorkspaceBuildPresentation();
+      if (build.placement) await this.readInboxWorkspacePreparation(build);
       return;
     }
     this.rememberWorkspaceBuildSession(session);
@@ -14756,6 +14892,7 @@ const sessionManager = {
     this.adoptWorkspaceBuildSession(session);
     build.draftConflict = true;
     build.draftError = true;
+    if (build.placement) build.placement.message = '';
     this.workspaceBuildPane()?.showLine(
       'This draft changed in another tab. Your edits are kept here. Review them before saving your draft over the newer version.',
       { chips: [{ id: 'sync_again', label: 'Save my draft' }] }
@@ -15975,6 +16112,110 @@ const sessionManager = {
     }
   },
 
+  workspaceBuildPreparedOutcome(body) {
+    const id = body?.workspace_id;
+    const slug = body?.folder_slug;
+    const preparation = body?.preparation;
+    const receipt = preparation?.result;
+    if (
+      typeof id !== 'string' ||
+      !id ||
+      typeof slug !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]*$/.test(slug) ||
+      preparation?.workspace_id !== id ||
+      !preparation.operation_id ||
+      receipt?.operation_id !== `${preparation.operation_id}:scan` ||
+      !receipt.root_id ||
+      receipt.privacy_mode !== 'metadata_only' ||
+      typeof receipt.completed_at !== 'string' ||
+      receipt.completed_at.startsWith('0001-') ||
+      !Number.isFinite(Date.parse(receipt.completed_at)) ||
+      !Number.isSafeInteger(receipt.eligible_count) ||
+      receipt.eligible_count < 0 ||
+      !Number.isSafeInteger(receipt.ineligible_count) ||
+      receipt.ineligible_count < 0 ||
+      !(
+        (receipt.outcome === 'batch' && receipt.batch_id) ||
+        (receipt.outcome === 'no_eligible' && receipt.eligible_count === 0 && !receipt.batch_id)
+      )
+    )
+      return null;
+    const params = new URLSearchParams({
+      panel: 'file-janitor',
+      tab: 'review',
+      preparation: preparation.operation_id
+    });
+    if (receipt.batch_id) params.set('batch_id', receipt.batch_id);
+    return { id, receipt, route: `/workspaces/${slug}?${params}` };
+  },
+
+  adoptInboxWorkspaceObservedResult(build, review) {
+    if (this.workspaceBuild !== build || !build.placement) return false;
+    const placement = build.placement;
+    const outcome = review?.outcome;
+    placement.recoveryRoute =
+      outcome?.workspace_id === review?.workspace_id &&
+      typeof outcome?.folder_slug === 'string' &&
+      /^[a-z0-9][a-z0-9-]*$/.test(outcome.folder_slug)
+        ? `/workspaces/${outcome.folder_slug}?panel=file-janitor&tab=review`
+        : '';
+    placement.sourceReceiptPending = outcome?.source_receipt_pending === true;
+    placement.reconciliationRequired = outcome?.state === 'reconciliation_required';
+    if (outcome?.state !== 'prepared') {
+      placement.message =
+        outcome?.message || 'The saved outcome is not yet available. No work was continued.';
+      return false;
+    }
+    const proven = this.workspaceBuildPreparedOutcome(outcome);
+    if (!proven || proven.id !== review.workspace_id) {
+      placement.reconciliationRequired = true;
+      placement.message =
+        'The saved result could not be verified. Read its status again; do not create another workspace.';
+      return false;
+    }
+    if (!placement.result && placement.candidate) placement.positionFailed = true;
+    placement.workspaceID = proven.id;
+    placement.result = proven.receipt;
+    placement.route = proven.route;
+    placement.resultName = outcome.name;
+    placement.members = outcome.members;
+    window.OriWorkspaceMap?.endPlacement?.(placement.token);
+    this.notifyWorkspacesChanged({ workspaceId: proven.id });
+    placement.message = placement.positionFailed
+      ? 'Setup is complete. The requested position has not been verified; retry position only. No setup work was continued.'
+      : 'The original filing review is saved. No setup or map position was changed by this status read.';
+    return true;
+  },
+
+  async readInboxWorkspacePreparation(build = this.workspaceBuild) {
+    if (!build?.placement || build.preparationReading || this.workspaceBuild !== build) return;
+    const review = build.janitorReview;
+    if (!review?.review_revision) return;
+    build.preparationReading = true;
+    this.syncWorkspaceBuildPresentation();
+    try {
+      const result = await this.workspaceBuildApi().janitorReview(build.session.id, {
+        version: review.version,
+        monitoring: Boolean(review.monitoring)
+      });
+      if (this.workspaceBuild !== build) return;
+      if (!result?.ok || result.body?.review?.state !== 'accepted')
+        throw new Error(
+          'The saved confirmation could not be read. Its outcome is still uncertain; nothing was continued.'
+        );
+      build.acceptedPreparation = true;
+      build.janitorReview = result.body.review;
+      this.adoptInboxWorkspaceObservedResult(build, result.body.review);
+    } catch (error) {
+      if (this.workspaceBuild === build) build.placement.message = error.message;
+    } finally {
+      if (this.workspaceBuild === build) {
+        build.preparationReading = false;
+        this.syncWorkspaceBuildPresentation();
+      }
+    }
+  },
+
   async confirmWorkspaceBuildPreparation() {
     const build = this.workspaceBuild;
     const review = build?.janitorReview;
@@ -15982,6 +16223,8 @@ const sessionManager = {
       !build ||
       !review?.review_revision ||
       build.busy ||
+      build.preparationReading ||
+      build.placement?.reconciliationRequired ||
       build.preparationBusy ||
       this.isCreatingFolder
     )
@@ -16021,6 +16264,8 @@ const sessionManager = {
     // Freeze this exact request even when both POST and recovery reads fail.
     build.preparationUncertain = true;
     build.preparationBusy = true;
+    if (build.placement)
+      window.OriWorkspaceMap?.setDraftPlacementPending?.(build.placement.token, true);
     build.preparationMessage =
       alreadyUncertain || build.acceptedPreparation
         ? 'Checking your previous confirmation and continuing its saved setup…'
@@ -16056,44 +16301,21 @@ const sessionManager = {
             'Preparation stopped. Keep this build; do not create another workspace.'
         );
       }
-      const receipt = result.body?.preparation?.result;
-      const id = result.body?.workspace_id;
-      const slug = result.body?.folder_slug;
-      if (
-        typeof slug !== 'string' ||
-        !slug ||
-        typeof id !== 'string' ||
-        !id ||
-        result.body?.preparation?.workspace_id !== id ||
-        !receipt?.operation_id ||
-        !receipt.root_id ||
-        receipt.privacy_mode !== 'metadata_only' ||
-        typeof receipt.completed_at !== 'string' ||
-        receipt.completed_at.startsWith('0001-') ||
-        !Number.isSafeInteger(receipt.eligible_count) ||
-        receipt.eligible_count < 0 ||
-        !Number.isSafeInteger(receipt.ineligible_count) ||
-        receipt.ineligible_count < 0 ||
-        !(
-          (receipt.outcome === 'batch' && receipt.batch_id) ||
-          (receipt.outcome === 'no_eligible' && receipt.eligible_count === 0 && !receipt.batch_id)
-        )
-      ) {
+      const proven = this.workspaceBuildPreparedOutcome(result.body);
+      if (!proven) {
         throw new Error(
           'The preparation response was incomplete. Checking its accepted identity; do not create another workspace.'
         );
       }
+      const { id, receipt, route } = proven;
       build.acceptedPreparation = true;
       this.notifyWorkspacesChanged({ workspaceId: id });
-      const params = new URLSearchParams({ panel: 'file-janitor', tab: 'review' });
-      if (result.body.preparation?.operation_id)
-        params.set('preparation', result.body.preparation.operation_id);
-      const batch = result.body.preparation?.result?.batch_id;
-      if (batch) params.set('batch_id', batch);
-      const route = '/workspaces/' + encodeURIComponent(slug) + '?' + params.toString();
       if (build.placement) {
         const placement = build.placement;
         placement.workspaceID = id;
+        placement.sourceReceiptPending = result.body.outcome?.source_receipt_pending === true;
+        placement.resultName = result.body.outcome?.name;
+        placement.members = result.body.outcome?.members;
         placement.result = receipt;
         placement.route = route;
         if (placement.candidate) {
@@ -16159,6 +16381,7 @@ const sessionManager = {
             ? 'The connection was interrupted.'
             : String(error.message || 'The response was lost.').replace(/([^.?!])$/, '$1.');
           build.preparationMessage = `${detail} Your confirmation is saved. Retry preparation to check its result; no second workspace will be created.`;
+          if (build.placement) this.adoptInboxWorkspaceObservedResult(build, recovered.body.review);
         } else if (
           this.workspaceBuild === build &&
           refusedBeforeAcceptance &&
@@ -16193,6 +16416,8 @@ const sessionManager = {
     } finally {
       if (this.workspaceBuild === build) {
         build.preparationBusy = false;
+        if (build.placement && !build.acceptedPreparation && !build.preparationUncertain)
+          window.OriWorkspaceMap?.setDraftPlacementPending?.(build.placement.token, false);
         this.workspaceBuildPane()?.setBusy?.(false);
         if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = false;
         this.syncWorkspaceBuildPresentation();
@@ -18069,7 +18294,9 @@ const sessionManager = {
       const context = this.workspaceCreatorContext;
       const hideWhenShown = () => {
         // A prior dismissal must never close a newer creator generation.
-        if (this.workspaceCreatorContext === context) window.setTimeout(() => instance.hide(), 0);
+        window.setTimeout(() => {
+          if (this.workspaceCreatorContext === context) instance.hide();
+        }, 0);
       };
       element.addEventListener('shown.bs.modal', hideWhenShown, { once: true });
       element.addEventListener(

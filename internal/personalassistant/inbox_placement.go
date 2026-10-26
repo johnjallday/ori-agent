@@ -152,9 +152,6 @@ func (s *FolderObservationService) HandoffInbox(ctx context.Context, userID stri
 		return result, placementError("source_changed")
 	}
 	review = offer.ConversationReview
-	if err := s.placementSourceCurrent(ctx, offer, input.SourceRevision, false); err != nil {
-		return result, err
-	}
 	buildID := d.deps.NewID()
 	if handoff := offer.PlacementHandoff; handoff != nil {
 		if handoff.Revision != input.SourceRevision || handoff.PlanDigest != input.PlanDigest {
@@ -167,6 +164,22 @@ func (s *FolderObservationService) HandoffInbox(ctx context.Context, userID stri
 	source := InboxPlacementSource{OfferID: offer.ID, Target: review.Target, ObservationID: review.ObservationID, Revision: input.SourceRevision, PlanDigest: input.PlanDigest}
 	if source.validate() != nil || !placementReference(buildID) {
 		return result, ErrValidation
+	}
+	accepted := false
+	if offer.PlacementHandoff != nil {
+		doc, err := builds.Read(ctx, userID)
+		if err != nil {
+			return result, err
+		}
+		if existing := doc.Session(buildID); existing != nil {
+			accepted = existing.Preparation != nil && existing.PlacementSource != nil && *existing.PlacementSource == source
+		}
+	}
+	// Before acceptance the source must still be current. Once the exact bound
+	// build accepted work, detach is not undo: its original canonical event may
+	// be reopened for recovery, never as permission for a new setup.
+	if err := s.placementSourceCurrent(ctx, offer, input.SourceRevision, accepted); err != nil {
+		return result, err
 	}
 	// Keep the prepared seed through optimistic retries. It has no effects and
 	// may not adopt newer card edits or allocate a second source identity.

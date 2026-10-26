@@ -435,6 +435,61 @@ func TestWorkspaceBuildPreparation_UncertainCreateNeverAllocatesAnotherWorkspace
 	}
 }
 
+func TestWorkspaceBuildPreparation_AcceptedResultReadsAreObservational(t *testing.T) {
+	f := newBuildPreparationFixture(t)
+	request := f.review(t)
+	if response := f.call("janitor-prepare", request); response.Code != http.StatusOK {
+		t.Fatalf("prepare: %s", response.Body.String())
+	}
+	doc, _ := f.builds.Read(context.Background(), "local")
+	build := doc.Session(f.build.ID)
+	id := build.Preparation.WorkspaceID
+	settings, err := filejanitor.NewStore(f.h.workspaceStore).LoadSettings(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(settings)
+	var operation string
+	for range 3 {
+		response := f.call("janitor-review", buildPreparationRequest{Version: request.Version})
+		var body struct {
+			Review struct {
+				Outcome WorkspaceBuildPreparationObservation `json:"outcome"`
+			} `json:"review"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		outcome := body.Review.Outcome
+		if response.Code != http.StatusOK || outcome.State != "prepared" || outcome.WorkspaceID != id || outcome.FolderSlug == "" || outcome.Name != f.build.Draft.Name ||
+			len(outcome.Members) != 1 || outcome.Members[0] != "Reviewed Curator" || outcome.Preparation == nil || outcome.Preparation.Result == nil {
+			t.Fatalf("unverified result: %d %s", response.Code, response.Body.String())
+		}
+		terms, err := digestJSON(outcome.Terms)
+		if err != nil || outcome.Terms == nil || terms != build.Preparation.TermsRevision || outcome.Goal != f.build.Draft.Mission || outcome.FolderPath != f.root {
+			t.Fatalf("observed choices differ from the verified workspace/scope: %+v", outcome)
+		}
+		if operation == "" {
+			operation = outcome.Preparation.Result.OperationID
+		}
+		if operation == "" || outcome.Preparation.Result.OperationID != operation || outcome.Preparation.Result.EligibleCount != 1 {
+			t.Fatalf("changed first result: %+v", outcome)
+		}
+	}
+	afterSettings, err := filejanitor.NewStore(f.h.workspaceStore).LoadSettings(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(afterSettings)
+	if string(before) != string(after) {
+		t.Fatal("status reads changed grant/monitoring/preparation settings")
+	}
+	batches, err := f.janitor.ListBatches(id)
+	if err != nil || len(batches) != 1 {
+		t.Fatalf("status reads scanned: %v %v", batches, err)
+	}
+}
+
 func TestWorkspaceBuildPreparation_LaterRevocationOrLifecycleChangeStopsReplay(t *testing.T) {
 	for _, change := range []string{"revoke", "pause", "remove", "reinstall", "owner", "archive", "team"} {
 		t.Run(change, func(t *testing.T) {
@@ -482,6 +537,10 @@ func TestWorkspaceBuildPreparation_LaterRevocationOrLifecycleChangeStopsReplay(t
 			f.folders.rootErr = personalassistant.ErrFolderSelection
 			f.janitor = filejanitor.NewService(filejanitor.NewStore(f.h.workspaceStore), f.workspaces)
 			f.h.workspaceBuild.FileJanitor = func() (*filejanitor.Service, filejanitor.PreparationAutomation) { return f.janitor, nil }
+			observed := f.h.ObserveWorkspaceBuildPreparation("local", *doc.Session(f.build.ID))
+			if observed.State != "reconciliation_required" || observed.Preparation != nil {
+				t.Fatalf("status read trusted changed %s: %+v", change, observed)
+			}
 			replay := f.call("janitor-prepare", request)
 			if replay.Code < 400 {
 				t.Fatalf("replay undid %s: %s", change, replay.Body.String())

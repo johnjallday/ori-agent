@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -83,6 +84,22 @@ func TestInboxPlacementEditing_ActualAlternateTeamAndGoalAreCreatedOnlyAfterRevi
 			ws, err := f.builder.workspaceFileStore.Get(response["workspace_id"].(string))
 			if err != nil || len(ws.AgentInstances) != 1 || ws.AgentInstances[0].Name != selected || ws.Mission != "음악 — exact\ninterior whitespace" {
 				t.Fatalf("wrong actual workspace: %+v %v", ws, err)
+			}
+			source, err := f.builder.personalAssistantFolderDigest.StoredOffer(context.Background(), "local", build["placement_source"].(map[string]any)["offer_id"].(string))
+			if err != nil || source.Outcome == nil || source.Outcome.WorkspaceID != ws.ID {
+				t.Fatalf("missing edited completion: %+v %v", source, err)
+			}
+			assigned := false
+			for _, row := range source.Outcome.Receipt {
+				if row.Kind == "agent" {
+					if row.Name != selected || !row.Assigned {
+						t.Fatalf("completion substituted the default: %+v", row)
+					}
+					assigned = true
+				}
+			}
+			if !assigned {
+				t.Fatal("missing observed membership")
 			}
 			profile, ok := f.builder.st.GetAgent(selected)
 			if !ok {

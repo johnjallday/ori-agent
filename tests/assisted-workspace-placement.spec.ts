@@ -1,4 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import {
+  attachPlacementFolder as attach,
+  placementJSON as json
+} from './helpers/assisted-workspace-placement';
 import {
   existsSync,
   readFileSync,
@@ -11,7 +15,9 @@ import {
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 
-// Real, no-provider host; never route/mock create, grant, scan or layout APIs.
+// Real, no-provider host. Never fabricate create/grant/scan/layout responses.
+// Recovery tests explicitly lose a REAL response or abort a layout write;
+// every successful operation and recovery read still uses the actual server.
 // Use a FRESH scripts/demo-inbox-folder.sh sandbox, separate from its legacy
 // serial compatibility story. No paid model or real user directory is used.
 const sandbox = process.env.ORI_INBOX_SANDBOX || '';
@@ -22,24 +28,6 @@ test.beforeEach(async ({ page }) => {
   page.setDefaultTimeout(15_000);
 });
 const evidence = 'tasks/evidence-assisted-workspace-placement/group-2';
-
-async function json(page: Page, path: string) {
-  const response = await page.request.get(path);
-  expect(response.ok(), path).toBeTruthy();
-  const body = await response.json();
-  // Roster map iteration order is not a resource/configuration change.
-  if (path === '/api/agents') body.agents.sort((a: any, b: any) => a.name.localeCompare(b.name));
-  return body;
-}
-async function attach(page: Page, folder: string, map = false) {
-  await page.goto('/');
-  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.close));
-  await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  if (map) await page.locator('[data-cockpit-view="map"]').click();
-  await page.locator('#cockpitPrimaryActionBtn').click();
-  await page.locator('.personal-assistant-panel__chip', { hasText: folder }).first().click();
-  await expect(page.getByRole('button', { name: 'Place & review', exact: true })).toBeVisible();
-}
 
 test.beforeAll(async ({ request }) => {
   expect(realpathSync(sandbox).startsWith(realpathSync(tmpdir()) + sep)).toBeTruthy();
@@ -100,6 +88,10 @@ test('map selection is inert; separate confirmation produces one actual workspac
 }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const source = join(sandbox, 'Downloads');
+  // The demo ages files to minute precision; two can still be inside the real
+  // settling window near a minute boundary. Make this golden count explicit.
+  const settled = new Date(Date.now() - 60_000);
+  for (const name of readdirSync(source)) utimesSync(join(source, name), settled, settled);
   const bytes = Object.fromEntries(
     readdirSync(source).map(name => [name, readFileSync(join(source, name)).toString('base64')])
   );
@@ -368,4 +360,211 @@ test('cancelling on the map closes the hidden editor without reopening it or cre
   expect((await json(page, '/api/workspaces')).folders).toEqual(before.folders);
   expect(await json(page, '/api/agents')).toEqual(profiles);
   expect(existsSync(join(sandbox, 'Desktop', 'Filed'))).toBe(false);
+});
+
+test('two tabs preserve current consent; explicit reload, Back and map view changes retain the same draft without creating', async ({
+  page,
+  context
+}) => {
+  const recoveryEvidence = 'tasks/evidence-assisted-workspace-placement/group-4';
+  mkdirSync(recoveryEvidence, { recursive: true });
+  const before = await json(page, '/api/workspaces');
+  const profiles = await json(page, '/api/agents');
+  await attach(page, 'Desktop');
+  await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  const sheet = page.locator('#assistedWorkspacePlacementPanel');
+  const confirm = sheet.getByRole('button', { name: 'Create workspace & scan', exact: true });
+  await expect(confirm).toBeEnabled({ timeout: 30_000 });
+  const id = await page.evaluate(() => (window as any).sessionManager.workspaceBuild.session.id);
+  const conversation = await page.evaluate(
+    () =>
+      (window as any).sessionManager.workspaceBuild.session.placement_source.target.conversation_id
+  );
+  const other = await context.newPage();
+  other.setDefaultTimeout(15_000);
+  try {
+    await other.goto('/');
+    await other.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
+    await other.locator('#personalAssistantLauncher').click();
+    await other.locator('#personalAssistantConversationMenu').click();
+    await other.locator('#personalAssistantConversationContinue').click();
+    await other.locator(`[data-conversation-id="${conversation}"]`).click();
+    await other.getByRole('button', { name: 'Return to workspace draft', exact: true }).click();
+    const newer = other.locator('#assistedWorkspacePlacementPanel');
+    await expect(
+      newer.getByRole('button', { name: 'Create workspace & scan', exact: true })
+    ).toBeEnabled({ timeout: 30_000 });
+    await newer.getByLabel('Workspace name').fill('Saved in another tab');
+    await newer.getByLabel('Goal', { exact: true }).fill('Keep the current goal.');
+    await newer.getByLabel(/Also watch/).check();
+    await expect(
+      newer.getByRole('button', { name: 'Create workspace & scan', exact: true })
+    ).toBeEnabled({ timeout: 30_000 });
+    await sheet.getByLabel('Workspace name').fill('Local unsaved name');
+    await sheet.getByLabel('Workspace name').press('Tab');
+    await expect(sheet.getByRole('status')).toContainText('changed in another tab');
+    await expect(confirm).toBeDisabled();
+    await expect(sheet.getByLabel('Workspace name')).toHaveValue('Local unsaved name');
+    const stored = await json(page, `/api/workspaces/build-sessions/${id}`);
+    expect(stored.session.draft.name).toBe('Saved in another tab');
+    await sheet.getByRole('status').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${recoveryEvidence}/other-tab-conflict.png`, fullPage: true });
+    await sheet
+      .getByRole('button', { name: 'Discard local edits & load saved draft', exact: true })
+      .click();
+    await expect(sheet.getByLabel('Workspace name')).toHaveValue('Saved in another tab');
+    await expect(sheet.getByLabel('Goal', { exact: true })).toHaveValue('Keep the current goal.');
+    await expect(sheet.getByLabel(/Also watch/)).toBeChecked();
+    await expect(confirm).toBeEnabled({ timeout: 30_000 });
+  } finally {
+    await other.close();
+  }
+  await sheet.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(sheet).toBeHidden();
+  const resume = page.getByRole('button', { name: 'Return to workspace draft', exact: true });
+  await expect(resume).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByLabel('Workspace name')).toHaveValue('Saved in another tab');
+  expect(await page.evaluate(() => (window as any).sessionManager.workspaceBuild.session.id)).toBe(
+    id
+  );
+  await sheet.getByRole('button', { name: 'Place on map', exact: true }).click();
+  await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+  const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
+  await canvas.focus();
+  await canvas.press('ArrowRight');
+  await canvas.press('Enter');
+  const candidate = await page.evaluate(
+    () => (window as any).sessionManager.workspaceBuild.placement.candidate
+  );
+  await sheet.getByRole('button', { name: 'Back to review', exact: true }).click();
+  await sheet.getByRole('button', { name: 'Adjust position', exact: true }).click();
+  await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as any).sessionManager.workspaceBuild.placement.candidate)
+  ).toEqual(candidate);
+  await page.locator('[data-cockpit-view="tree"]').click();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByLabel('Workspace name')).toHaveValue('Saved in another tab');
+  await expect(sheet.getByLabel(/Also watch/)).toBeChecked();
+  await sheet.getByRole('region', { name: 'Before you confirm' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${recoveryEvidence}/map-hidden-review.png`, fullPage: true });
+  await sheet.getByRole('button', { name: 'Cancel draft', exact: true }).click();
+  await expect(sheet).toBeHidden();
+  expect((await json(page, '/api/workspaces')).folders).toEqual(before.folders);
+  expect(await json(page, '/api/agents')).toEqual(profiles);
+  expect(existsSync(join(sandbox, 'Desktop', 'Filed'))).toBe(false);
+});
+
+test('a lost real confirmation is observed without replay; failed position repair retries only layout', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const recoveryEvidence = 'tasks/evidence-assisted-workspace-placement/group-4';
+  mkdirSync(recoveryEvidence, { recursive: true });
+  const before = await json(page, '/api/workspaces');
+  let confirmations = 0;
+  let positionWrites = 0;
+  const inference: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && /\/(turns|ask)$/.test(new URL(request.url()).pathname))
+      inference.push(request.url());
+  });
+  await page.route(/\/api\/workspaces\/build-sessions\/[^/]+\/janitor-prepare$/, async route => {
+    confirmations++;
+    const real = await route.fetch();
+    expect(real.ok()).toBeTruthy();
+    // Effects and receipt are real; only delivery of this reply is lost.
+    await route.abort('failed');
+  });
+  await page.route('**/api/workspace-map/layout', async route => {
+    const request = route.request();
+    if (
+      request.method() === 'PATCH' &&
+      request.postDataJSON()?.operations?.some((op: any) => op.op === 'set_positions')
+    ) {
+      positionWrites++;
+      if (positionWrites === 1) {
+        await route.abort('failed');
+        return;
+      }
+    }
+    await route.continue();
+  });
+  await attach(page, 'Desktop', true);
+  await page.getByRole('button', { name: 'Place & review', exact: true }).click();
+  const sheet = page.locator('#assistedWorkspacePlacementPanel');
+  await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
+  const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
+  await canvas.focus();
+  await canvas.press('ArrowRight');
+  await canvas.press('Enter');
+  const candidate = await page.evaluate(
+    () => (window as any).sessionManager.workspaceBuild.placement.candidate
+  );
+  const confirm = sheet.getByRole('button', { name: 'Create workspace & scan', exact: true });
+  await expect(confirm).toBeEnabled({ timeout: 30_000 });
+  await confirm.click();
+  await expect(sheet.getByRole('heading', { name: 'Workspace prepared' })).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(sheet).toContainText('Assigned: File Curator');
+  await expect(sheet).toContainText('first scan found no eligible files');
+  expect(confirmations).toBe(1);
+  expect(positionWrites).toBe(0);
+  const folders = (await json(page, '/api/workspaces')).folders;
+  const created = folders.find((workspace: any) => workspace.name === 'Desktop');
+  expect(folders.length).toBe(before.folders.length + 1);
+  expect(created.agents).toEqual(['File Curator']);
+  const setup = await json(page, `/api/workspaces/${created.id}/file-janitor/setup-review`);
+  expect(setup.review).toMatchObject({
+    state: 'prepared',
+    monitoring: false,
+    result: { outcome: 'no_eligible', eligible_count: 0 }
+  });
+  const retry = sheet.getByRole('button', { name: 'Retry position only', exact: true });
+  await retry.click();
+  await expect(sheet.getByRole('status')).toContainText('position is still not saved');
+  expect(positionWrites).toBe(1);
+  await page.screenshot({
+    path: `${recoveryEvidence}/lost-response-position-failed.png`,
+    fullPage: true
+  });
+  await retry.click();
+  await expect(sheet.getByRole('status')).toContainText('position is now saved');
+  expect(positionWrites).toBe(2);
+  const layout = await json(page, '/api/workspace-map/layout');
+  expect(layout.layout.positions[created.id]).toMatchObject(candidate);
+  expect(await json(page, `/api/workspaces/${created.id}/file-janitor/setup-review`)).toEqual(
+    setup
+  );
+  expect(confirmations).toBe(1);
+  await page.screenshot({ path: `${recoveryEvidence}/position-repaired.png`, fullPage: true });
+  await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(sheet).toBeHidden();
+  const headline = page.locator('#personalAssistantFolderOfferHeadline');
+  await expect(headline).toHaveText('✓ Desktop is ready');
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(
+    page.getByRole('button', { name: 'Return to workspace draft', exact: true })
+  ).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Open workspace', exact: true })).toBeFocused();
+  await page.reload();
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
+  await page.evaluate(() => (window as any).PersonalAssistantPanel.open());
+  await expect(headline).toHaveText('✓ Desktop is ready');
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(page.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
+  expect(confirmations).toBe(1);
+  expect(positionWrites).toBe(2);
+  expect(await json(page, `/api/workspaces/${created.id}/file-janitor/setup-review`)).toEqual(
+    setup
+  );
+  expect(inference).toEqual([]);
+  await page.screenshot({
+    path: `${recoveryEvidence}/source-completed-history.png`,
+    fullPage: true
+  });
 });

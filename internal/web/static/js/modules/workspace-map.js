@@ -9953,13 +9953,16 @@
   }
 
   function placementConfirmLabel(state) {
-    if (state.mode === 'draft' && !state.saving) return 'Use this position';
+    if (state.mode === 'draft' && !state.saving)
+      return state.submitting ? 'Position locked' : 'Use this position';
     if (state.saving) return 'Saving position…';
     return state.submitting ? 'Creating workspace…' : 'Create workspace here';
   }
 
   function placementInstructionText(state, problem) {
     if (problem) return problem;
+    if (state.mode === 'draft' && state.submitting)
+      return 'The requested position is locked. Check setup status in the review; moving the pointer cannot change this confirmation.';
     if (state.mode === 'draft')
       return 'Draft only. Click open ground or use Arrow keys to choose a position. Setup is confirmed separately; this does not join a district.';
     var groupName = String((state.payload && state.payload.group_name) || '').trim();
@@ -10423,6 +10426,25 @@
     return true;
   }
 
+  // Only the opted-in draft owner can lock geometry while its independent
+  // setup confirmation is pending. This never confirms or writes anything.
+  function setDraftPlacementPending(token, pending) {
+    var state = placementSession;
+    if (!placementMatches(state, token) || state.mode !== 'draft' || state.saving) return false;
+    state.submitting = !!pending;
+    updatePlacementPresentation(state.container);
+    return true;
+  }
+
+  // A host may retain the mounted Map while showing another view. Return only
+  // an opted-in draft editor; ordinary creation keeps its existing lifecycle.
+  function suspendDraftPlacement() {
+    var state = placementSession;
+    if (!state || state.mode !== 'draft') return false;
+    finishPlacement(state.container, true);
+    return true;
+  }
+
   function endPlacement(options, secondary) {
     if (!placementMatches(placementSession, options, secondary)) return false;
     var state = placementSession;
@@ -10470,23 +10492,31 @@
     positions[id] = { x: point.x, y: point.y };
     return patchLayout([{ op: 'set_positions', positions: positions }]).then(
       function () {
-        selectedId = id;
-        pendingPlacementSelectionId = id;
-        placementSession = null;
-        announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
+        var current = placementSession === state;
+        if (current) {
+          selectedId = id;
+          pendingPlacementSelectionId = id;
+          placementSession = null;
+          announce(state.container, 'Workspace placed at ' + formatCoordinate(point));
+        }
+        // The committed geometry remains real after navigation, but the old
+        // callback does not own a replacement draft, its focus or Move mode.
         settleLayout();
-        restorePlacementMoveMode(state);
+        if (current && !placementSession) restorePlacementMoveMode(state);
         return { saved: true, point: point };
       },
       function () {
         rememberFailedPlacement(id, point);
-        placementSession = null;
-        announce(
-          state.container,
-          'Workspace was created, but its position could not be saved. It remains available at a default spot; retry position to try again.'
-        );
+        var current = placementSession === state;
+        if (current) {
+          placementSession = null;
+          announce(
+            state.container,
+            'Workspace was created, but its position could not be saved. It remains available at a default spot; retry position to try again.'
+          );
+        }
         settleLayout();
-        restorePlacementMoveMode(state);
+        if (current && !placementSession) restorePlacementMoveMode(state);
         return { saved: false, reason: 'layout_save_failed', point: point };
       }
     );
@@ -10614,9 +10644,17 @@
     failedPlacements[workspaceId] = { x: point.x, y: point.y };
   }
 
-  function retryFailedPlacement(workspaceId) {
-    var point = failedPlacements[workspaceId];
-    if (!point) return Promise.resolve(false);
+  function retryFailedPlacement(workspaceId, reviewedPoint) {
+    // Assisted recovery may know the requested point even when the successful
+    // setup reply was lost before commitPlacement ran. This explicit retry is
+    // geometry only, with current collision/readiness checks, never a new site.
+    var explicit = reviewedPoint !== undefined;
+    var point = explicit ? safePoint(reviewedPoint) : failedPlacements[workspaceId];
+    if (
+      !point ||
+      (explicit && (!lastMount || isMapReadOnly() || placementProblem(point, workspaceId)))
+    )
+      return Promise.resolve(false);
     var retry = {};
     retry[workspaceId] = point;
     var positions = withAutomaticLayoutPins(retry);
@@ -11243,6 +11281,8 @@
     // request and never writes a placeholder layout record.
     beginPlacement: beginPlacement,
     updateDraftPlacementName: updateDraftPlacementName,
+    suspendDraftPlacement: suspendDraftPlacement,
+    setDraftPlacementPending: setDraftPlacementPending,
     endPlacement: endPlacement,
     cancelPlacement: cancelPlacement,
     commitPlacement: commitPlacement,

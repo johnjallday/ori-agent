@@ -81,6 +81,22 @@ test('a transferred source opens the same draft even though its original review 
   assert.equal(inboxPlacementRequest(transferred, context()).plan_digest, 'digest');
 });
 
+test('a canonically resolved transferred source has no remaining draft or setup invitation', () => {
+  const completed = {
+    ...offer(),
+    status: 'resolved',
+    placement_handoff: { build_id: 'bound-build' },
+    outcome: {
+      kind: 'project',
+      workspace_id: 'real-workspace',
+      route: '/workspaces/music',
+      receipt: [{ kind: 'workspace', name: 'Music' }]
+    }
+  };
+  for (const project of [folderOfferView, conversationFolderOfferView])
+    assert.ok(!project(completed).actions.some(action => action.placement || action.oneCard));
+});
+
 test('handoff carries exact explicit edits and canonical references, never paths or serialized plans', () => {
   const input = inboxPlacementRequest(offer(), context(), {
     brief: '  음악 — exact\nbrief  ',

@@ -40,6 +40,54 @@ test('runner done keeps observational polling until its separate verified receip
   assert.equal(folderSetupPolling({ ...offer, setup: { status: 'done' } }), false);
 });
 
+test('a transferred draft compacts and consumes only its own attachment after a canonical batch receipt', () => {
+  const binding = { build_id: 'bound-build', draft_saved: true };
+  const source = {
+    ...offer,
+    placement_handoff: binding,
+    outcome: {
+      ...offer.outcome,
+      first_look: {
+        batch: {
+          outcome: 'batch',
+          eligible: 1,
+          batch_id: 'actual-batch',
+          route: '/workspaces/album?panel=file-janitor&batch_id=actual-batch'
+        }
+      }
+    }
+  };
+  const state = {
+    conversationId: 'chat',
+    offerId: 'review',
+    observation: { id: 'original' },
+    accepted: { id: 'original' }
+  };
+  const receipt = folderReceiptView(source);
+  assert.equal(view(source).ready, true);
+  assert.equal(view(source).facts, 'Folder linked · Ari assigned');
+  assert.equal(folderSetupPolling(source), false);
+  assert.equal(setupAttachmentConsumed(state, source, receipt), true);
+  assert.equal(
+    setupAttachmentConsumed({ ...state, offerId: 'newer-review' }, source, receipt),
+    false
+  );
+  assert.equal(
+    setupAttachmentConsumed({ ...state, preview: { id: 'replacement' } }, source, receipt),
+    false
+  );
+  assert.equal(
+    setupAttachmentConsumed({ ...state, conversationId: 'elsewhere' }, source, receipt),
+    false
+  );
+  const gone = { ...source, workspace_gone: 'removed' };
+  assert.equal(view(gone).ready, false);
+  assert.equal(setupAttachmentConsumed(state, gone, folderReceiptView(gone)), true);
+  const reserved = { ...source, status: 'closed', outcome: null };
+  assert.equal(view(reserved).ready, false);
+  assert.equal(setupAttachmentConsumed(state, reserved, folderReceiptView(reserved)), false);
+});
+
 test('verified receipt compacts independently of each optional task state', () => {
   for (const state of [undefined, 'seeded', 'running', 'waiting', 'finished', 'failed']) {
     const result = view({ ...offer, first_task: state ? { state } : null });

@@ -3249,6 +3249,8 @@ import {
     // The note stays mounted, hidden with the rest of the Tree, so its text is
     // still there on the way back whether or not the save worked.
     if (view !== VIEW_TREE && state.view === VIEW_TREE) void noteController.flush();
+    if (view === VIEW_TREE && state.view === VIEW_MAP)
+      window.OriWorkspaceMap?.suspendDraftPlacement?.();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
     els.viewButtons.forEach(btn => {
       const isActive = btn.getAttribute('data-cockpit-view') === state.view;

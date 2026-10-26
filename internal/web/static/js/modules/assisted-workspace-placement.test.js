@@ -35,13 +35,65 @@ test('a visual draft is never sufficient for confirmation', () => {
     {},
     { canConfirm: true },
     { review },
-    { review, canConfirm: true, busy: true }
+    { review, canConfirm: true, busy: true },
+    { review, canConfirm: true, conflict: true },
+    { review, canConfirm: true, closed: true }
   ]) {
     assert.match(
       placementPanelHTML({ draft, ...view }),
       /data-placement-action="confirm" disabled/
     );
   }
+});
+
+test('another-tab conflict locks material controls and offers an explicit saved-draft read', () => {
+  const html = placementPanelHTML({ draft, conflict: true });
+  assert.match(html, /data-placement-action="reload-draft"/);
+  assert.match(html, /Discard local edits &amp; load saved draft/);
+  assert.match(html, /data-placement-action="agent" disabled/);
+  assert.match(html, /data-placement-action="cancel" disabled/);
+  assert.doesNotMatch(html, /data-placement-action="back" disabled/);
+});
+
+test('accepted or uncertain setup offers observational recovery, never cancellation or an uncreated promise', () => {
+  const html = placementPanelHTML({ accepted: true, review, reconciliationRequired: true });
+  assert.match(html, /Read saved status/);
+  assert.match(html, /Closing is not undo/);
+  assert.match(html, /data-placement-action="confirm" disabled/);
+  assert.doesNotMatch(html, /Nothing is created|Cancel draft|data-placement-field=/);
+});
+
+test('incomplete accepted setup shows observed choices and separates its existing route from continuation', () => {
+  const html = placementPanelHTML({
+    accepted: true,
+    recoveryRoute: '/workspaces/saved?panel=file-janitor',
+    review: {
+      monitoring: true,
+      outcome: {
+        name: 'Saved <inbox>',
+        goal: 'Keep this goal',
+        members: ['Actual Curator'],
+        folder_path: '/synthetic/exact-inbox',
+        terms: { daily_scan_local_time: '09:00' }
+      }
+    }
+  });
+  for (const text of [
+    'Saved &lt;inbox&gt;',
+    'Keep this goal',
+    'Actual Curator',
+    '/synthetic/exact-inbox',
+    '09:00',
+    'Open existing filing review'
+  ])
+    assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /data-placement-field=/);
+  const pending = placementPanelHTML({
+    result: { outcome: 'no_eligible' },
+    sourceReceiptPending: true
+  });
+  assert.match(pending, /assistant receipt is not yet saved/);
+  assert.match(pending, /Read saved status/);
 });
 
 test('names, paths and draft fields are inert text, including review and messages', () => {
@@ -143,6 +195,38 @@ test('card drop and slot buttons emit the same intention; OS files are refused',
   assert.deepEqual(actions[2], { action: 'card-reject' });
   panel.destroy();
   assert.equal(events.size, 0);
+});
+
+test('acceptance and result keep disabled-control focus on readable status without stealing outside focus', () => {
+  const control = { dataset: { placementAction: 'confirm' } };
+  let focused = 0;
+  const document = { activeElement: control, addEventListener() {}, removeEventListener() {} };
+  const status = {
+    dataset: { placementFocus: 'status' },
+    focus() {
+      document.activeElement = status;
+      focused++;
+    }
+  };
+  const host = {
+    ownerDocument: document,
+    addEventListener() {},
+    removeEventListener() {},
+    replaceChildren() {},
+    contains: element => element === control || element === status,
+    querySelector: selector =>
+      selector.includes('placement-focus')
+        ? status
+        : { disabled: true, focus: () => assert.fail('disabled control') }
+  };
+  const panel = mountPlacementPanel(host, () => {});
+  panel.update({ accepted: true, busy: true, message: 'Checking the confirmation.' });
+  panel.update({ result: { outcome: 'no_eligible' }, message: 'Setup complete.' });
+  assert.equal(focused, 2);
+  document.activeElement = {};
+  panel.update({ result: { outcome: 'no_eligible' }, message: 'Setup complete.' });
+  assert.equal(focused, 2);
+  panel.destroy();
 });
 
 test('panel emits intentions only, cleans listeners and preserves the focused control', () => {
