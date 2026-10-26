@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -49,7 +50,8 @@ type WorkspaceBuildStore interface {
 
 // WorkspaceBuildDeps is what build sessions need from the server.
 type WorkspaceBuildDeps struct {
-	Store WorkspaceBuildStore
+	Store     WorkspaceBuildStore
+	Placement WorkspaceBuildPlacement
 	// Assistant reads the Personal Assistant relationship (GET
 	// /api/personal-assistant's projection).
 	Assistant func(ctx context.Context, userID string) (*personalassistant.Projection, error)
@@ -141,6 +143,12 @@ const workspaceBuildMaxBody = 256 * 1024
 func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Request, rest string) {
 	rest = strings.Trim(rest, "/")
 	switch rest {
+	case "from-inbox":
+		if r.Method != http.MethodPost {
+			_ = orihttp.RespondMethodNotAllowed(w)
+			return
+		}
+		h.handoffInboxBuild(w, r)
 	case "availability":
 		if r.Method != http.MethodGet {
 			_ = orihttp.RespondMethodNotAllowed(w)
@@ -161,6 +169,15 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		h.createWorkspaceBuildSession(w, r)
 	default:
 		parts := strings.Split(rest, "/")
+		// Preparation serializes on buildPreparationMu before taking a source
+		// lease, so concurrent tabs observe the same accepted claim.
+		if r.Method != http.MethodGet && len(parts) >= 2 && !strings.HasPrefix(parts[len(parts)-1], "janitor-") {
+			release, ok := h.acquirePlacementBuild(w, r, parts[0], parts[len(parts)-1])
+			if !ok {
+				return
+			}
+			defer release()
+		}
 		if len(parts) == 3 && strings.TrimSpace(parts[0]) != "" && (parts[1] == "folder" || parts[1] == "link") && parts[2] == "detach" {
 			if r.Method != http.MethodPost {
 				_ = orihttp.RespondMethodNotAllowed(w)
@@ -372,6 +389,10 @@ func decodeBuildBody(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, workspaceBuildMaxBody))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
+		_ = orihttp.RespondBadRequest(w, "Invalid build request")
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		_ = orihttp.RespondBadRequest(w, "Invalid build request")
 		return false
 	}

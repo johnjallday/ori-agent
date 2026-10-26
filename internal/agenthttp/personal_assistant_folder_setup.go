@@ -23,6 +23,17 @@ func (h *HomeAssistantAskHandler) SetFolderSetups(service PersonalAssistantFolde
 	h.FolderSetups = service
 	if service != nil {
 		service.ConfigureConversationReviews(h.validateFolderReview, h.folderRequests.enter)
+		if placement, ok := service.(interface {
+			ConfigureInboxPlacementRevision(func(context.Context, personalassistant.FolderOffer) (string, error))
+		}); ok {
+			placement.ConfigureInboxPlacementRevision(func(ctx context.Context, offer personalassistant.FolderOffer) (string, error) {
+				if offer.ConversationReview == nil {
+					return "", foldercontext.ErrInvalid
+				}
+				state, err := h.folderState(ctx, offer.ConversationReview.Target)
+				return state.Revision, err
+			})
+		}
 	}
 }
 
@@ -209,7 +220,14 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		}
 		return
 	}
-	if req.Recheck && !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID == req.SelectionID {
+	if offer.PlacementHandoff != nil && (created || state.OfferID != offer.ID || state.Observation == nil || state.Observation.ID != req.SelectionID) {
+		if created {
+			_ = h.Conversations.Discard(r.Context(), id)
+		}
+		writeFolderReviewError(w, personalassistant.ErrFolderOfferDecided)
+		return
+	}
+	if (req.Recheck || offer.PlacementHandoff != nil) && !created && state.OfferID == offer.ID && state.Observation != nil && state.Observation.ID == req.SelectionID {
 		// Refresh this existing canonical review in place. A readiness check is
 		// not another folder turn, a new conversation or a setup confirmation.
 		orihttp.WriteJSON(w, map[string]any{

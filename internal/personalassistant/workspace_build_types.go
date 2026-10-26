@@ -20,7 +20,7 @@ import (
 // draft is exactly the create request the wizard submits; nothing here
 // creates, installs, or attaches anything.
 const (
-	WorkspaceBuildSchemaVersion = 4
+	WorkspaceBuildSchemaVersion = 5
 	workspaceBuildFileName      = "workspace-build-v1.json"
 	workspaceBuildLockName      = "workspace-build-v1.lock"
 	workspaceBuildMaxBytes      = 512 * 1024
@@ -322,23 +322,25 @@ func (d BuildDraft) HasBlueprint() bool {
 
 // WorkspaceBuildSession is one build (FR11).
 type WorkspaceBuildSession struct {
-	ID              string                 `json:"id"`
-	Status          WorkspaceBuildStatus   `json:"status"`
-	Version         int64                  `json:"version"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
-	EntryPoint      string                 `json:"entry_point"`
-	Assistant       BuildAssistant         `json:"assistant"`
-	Draft           BuildDraft             `json:"draft"`
-	TeamState       json.RawMessage        `json:"team_state,omitempty"`
-	TeamPatch       *BuildTeamPatch        `json:"team_patch,omitempty"`
-	Transcript      []BuildTranscriptEntry `json:"transcript"`
-	PendingQuestion *BuildQuestion         `json:"pending_question"`
-	Why             []BuildWhy             `json:"why,omitempty"`
-	Alternatives    []BuildAlternative     `json:"alternatives,omitempty"`
-	Rejections      []BuildRejection       `json:"rejections,omitempty"`
-	NeedsHome       *BuildNeedsHome        `json:"needs_home"`
-	FurthestStep    int                    `json:"furthest_step"`
+	PlacementSource     *InboxPlacementSource  `json:"placement_source,omitempty"`
+	PlacementMonitoring bool                   `json:"placement_monitoring,omitempty"`
+	ID                  string                 `json:"id"`
+	Status              WorkspaceBuildStatus   `json:"status"`
+	Version             int64                  `json:"version"`
+	CreatedAt           time.Time              `json:"created_at"`
+	UpdatedAt           time.Time              `json:"updated_at"`
+	EntryPoint          string                 `json:"entry_point"`
+	Assistant           BuildAssistant         `json:"assistant"`
+	Draft               BuildDraft             `json:"draft"`
+	TeamState           json.RawMessage        `json:"team_state,omitempty"`
+	TeamPatch           *BuildTeamPatch        `json:"team_patch,omitempty"`
+	Transcript          []BuildTranscriptEntry `json:"transcript"`
+	PendingQuestion     *BuildQuestion         `json:"pending_question"`
+	Why                 []BuildWhy             `json:"why,omitempty"`
+	Alternatives        []BuildAlternative     `json:"alternatives,omitempty"`
+	Rejections          []BuildRejection       `json:"rejections,omitempty"`
+	NeedsHome           *BuildNeedsHome        `json:"needs_home"`
+	FurthestStep        int                    `json:"furthest_step"`
 	// Applied lists the draft fields the last assistant turn set, so the
 	// wizard applies (and animates) only those.
 	Applied   []string `json:"applied,omitempty"`
@@ -568,6 +570,19 @@ func validateWorkspaceBuild(doc WorkspaceBuildDocument) error {
 }
 
 func validateBuildSession(session WorkspaceBuildSession) error {
+	if err := session.PlacementSource.validate(); err != nil {
+		return err
+	}
+	if session.PlacementMonitoring && session.PlacementSource == nil {
+		return fmt.Errorf("%w: placement monitoring without source", ErrWorkspaceBuildInvalid)
+	}
+	if session.PlacementSource != nil && (session.Setup != nil || session.Link != nil || session.Proposal != nil || session.CreateNow || session.InferenceID != "") {
+		return fmt.Errorf("%w: placement cannot infer or run another setup", ErrWorkspaceBuildInvalid)
+	}
+	if session.PlacementSource != nil && session.Status == WorkspaceBuildOpen &&
+		(session.Draft.TemplateID != "file-janitor" || session.Draft.Blank || session.Draft.ParentID != "") {
+		return fmt.Errorf("%w: placement is standalone File Janitor", ErrWorkspaceBuildInvalid)
+	}
 	if err := validateBuildProposalState(session); err != nil {
 		return err
 	}

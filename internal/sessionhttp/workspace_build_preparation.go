@@ -76,8 +76,8 @@ func (h *Handler) refuseClaimedBuildCreate(ctx context.Context, id string) error
 	if err != nil {
 		return err
 	}
-	if build := doc.Session(id); build != nil && build.Preparation != nil {
-		return errors.New("creation accepted")
+	if build := doc.Session(id); build != nil && (build.Preparation != nil || build.PlacementSource != nil) {
+		return errors.New("creation belongs to reviewed preparation")
 	}
 	return nil
 }
@@ -119,6 +119,11 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 		respondBuildPreparationError(w, "not_found", "Build not found.", http.StatusNotFound, nil)
 		return
 	}
+	release, ok := h.acquirePlacementBuild(w, r, id, "janitor-prepare")
+	if !ok {
+		return
+	}
+	defer release()
 	if claim := build.Preparation; claim != nil {
 		if build.Status == personalassistant.WorkspaceBuildAbandoned {
 			respondBuildPreparationError(w, "preparation_deferred", "This preparation was explicitly deferred. Open the workspace's current settings; its old confirmation cannot resume or create anything.", http.StatusConflict, map[string]any{"workspace_id": claim.WorkspaceID})
@@ -136,6 +141,10 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 			return
 		}
 		h.prepareCreatedBuild(w, r, owner, *build, janitor, automation)
+		return
+	}
+	if build.PlacementSource != nil && request.Monitoring != build.PlacementMonitoring {
+		respondBuildPreparationError(w, "review_changed", "Review the draft's current monitoring choice.", http.StatusConflict, nil)
 		return
 	}
 	if build.Status != personalassistant.WorkspaceBuildOpen || build.Version != request.Version {
@@ -246,6 +255,9 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 		return refuse("team_changed", "The effective team cannot be reviewed.")
 	}
 	roles := projecttemplates.AgentRoleIDs(tpl.Agents)
+	if p.build.PlacementSource != nil && (len(roles) != 1 || len(staffing) != 1 || len(req.ExistingAgentNames) != 0 || req.ParentID != "" || staffing[roles[0]].Mode == "") {
+		return refuse("team_changed", "Choose one agent for the File Curator role in this standalone setup.")
+	}
 	savedNames := append([]string(nil), req.ExistingAgentNames...)
 	// Use the SAME effective spec/config functions as seedRoleStaffedAgents,
 	// not the blueprint's default roster. Vacancies create nothing; assignment

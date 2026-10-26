@@ -21,8 +21,18 @@ func decodeFolderDigest(data []byte, owner KnowledgeOwner) (FolderDigestDocument
 	if err := decoder.Decode(&doc); err != nil {
 		return FolderDigestDocument{}, ErrKnowledgeCorrupt
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF || doc.SchemaVersion != FolderDigestSchemaVersion || doc.Version < 1 || doc.Owner != owner {
+	if err := decoder.Decode(&struct{}{}); err != io.EOF || doc.Version < 1 || doc.Owner != owner {
 		return FolderDigestDocument{}, ErrKnowledgeCorrupt
+	}
+	if doc.SchemaVersion == 1 {
+		// Genuine legacy records have no transfer authority. A new binding
+		// disguised as an old schema is corruption, not consent to migrate.
+		for _, offer := range doc.Offers {
+			if offer.PlacementHandoff != nil {
+				return FolderDigestDocument{}, ErrKnowledgeCorrupt
+			}
+		}
+		doc.SchemaVersion = FolderDigestSchemaVersion
 	}
 	if err := validateFolderDigest(doc); err != nil {
 		return FolderDigestDocument{}, ErrKnowledgeCorrupt

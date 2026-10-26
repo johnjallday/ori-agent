@@ -178,6 +178,12 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 				(prior.Structure.Arranged() && prior.Status != FolderOfferAwaitingOutcome) {
 				continue
 			}
+			if prior.PlacementHandoff != nil && prior.ConversationReview.ObservationID == observationID && prior.ConversationReview.CandidateID == candidateID {
+				// This review has one destination owner. Reopening cannot erase
+				// its fence or mint an independently confirmable replacement.
+				result = *prior
+				return nil
+			}
 			if prior.FolderKey == offer.FolderKey && prior.Subject.Key == offer.Subject.Key &&
 				prior.RootIdentity == offer.RootIdentity && prior.ConversationReview.CandidateIdentity == offer.ConversationReview.CandidateIdentity &&
 				prior.ConversationReview.Operation == offer.ConversationReview.Operation && prior.ConversationReview.DestinationID == offer.ConversationReview.DestinationID &&

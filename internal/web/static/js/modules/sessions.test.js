@@ -47,6 +47,141 @@ function loadSessionManager(
   return window.sessionManager;
 }
 
+test('inbox entry transfers only references and opens the returned draft without generic model admission', async () => {
+  const calls = [];
+  const manager = loadSessionManager();
+  const session = {
+    id: 'build',
+    status: 'open',
+    draft: { name: 'Exact name' },
+    placement_source: { offer_id: 'offer', target: { conversation_id: 'chat' } }
+  };
+  manager.workspaceBuildApi = () => ({
+    fromInbox: async input => {
+      calls.push(input);
+      return { ok: true, body: { session } };
+    }
+  });
+  let opened;
+  manager.showAddWorkspaceModal = options => {
+    opened = options;
+  };
+  const input = {
+    offer_id: 'offer',
+    conversation_id: 'chat',
+    brief: ' exact\ngoal ',
+    monitoring: false
+  };
+  assert.equal(await manager.openInboxWorkspacePlacement(input, { mode: 'map' }), session);
+  assert.deepEqual(calls, [input]);
+  assert.equal(opened.inboxPlacement.session, session);
+  assert.equal(opened.inboxPlacement.mode, 'map');
+  assert.equal(opened.fixedKind, 'workspace');
+});
+
+test('a late inbox handoff cannot open a newer conversation or replace its editor', async () => {
+  let current = true;
+  let resolve;
+  const manager = loadSessionManager();
+  manager.workspaceBuildApi = () => ({
+    fromInbox: () =>
+      new Promise(done => {
+        resolve = done;
+      })
+  });
+  manager.showAddWorkspaceModal = () => assert.fail('late handoff opened an editor');
+  const pending = manager.openInboxWorkspacePlacement(
+    { offer_id: 'offer' },
+    { current: () => current }
+  );
+  current = false;
+  resolve({ ok: true, body: { session: { id: 'reserved' } } });
+  assert.equal(await pending, null);
+});
+
+test('a refused or unverifiable inbox handoff has no ordinary-create fallback', async () => {
+  for (const result of [
+    { ok: false, body: { code: 'build_conflict', error: 'Resolve the other build first.' } },
+    { ok: true, body: { session: { id: 'wrong', placement_source: { offer_id: 'different' } } } }
+  ]) {
+    const manager = loadSessionManager();
+    manager.workspaceBuildApi = () => ({ fromInbox: async () => result });
+    manager.showAddWorkspaceModal = () => assert.fail('unverified draft opened');
+    await assert.rejects(manager.openInboxWorkspacePlacement({ offer_id: 'offer' }));
+  }
+});
+
+test('inbox map callbacks select geometry only and ignore a superseded source generation', () => {
+  let spec;
+  let hidden;
+  let confirmations = 0;
+  const modal = {
+    dataset: {},
+    addEventListener: (name, callback) => {
+      if (name === 'hidden.bs.modal') hidden = callback;
+    }
+  };
+  const manager = loadSessionManager(
+    undefined,
+    {
+      innerWidth: 1440,
+      OriWorkspaceMap: {
+        beginPlacement: value => {
+          spec = value;
+          return true;
+        }
+      },
+      bootstrap: { Modal: { getInstance: () => ({ hide: () => hidden() }) } }
+    },
+    {
+      getElementById: id => (id === 'addFolderModal' ? modal : null),
+      querySelector: () => ({ getClientRects: () => [{}] }),
+      body: { append() {} }
+    }
+  );
+  const placement = {
+    token: 'source-generation',
+    candidate: null,
+    host: { classList: { add() {} } }
+  };
+  const build = { session: { draft: { name: 'Inbox' } }, placement };
+  manager.workspaceBuild = build;
+  manager.syncWorkspaceBuildPresentation = () => {};
+  manager.syncInboxWorkspacePlacement = () => {};
+  manager.confirmWorkspaceBuildPreparation = () => {
+    confirmations++;
+  };
+  manager.placeInboxWorkspaceDraft();
+  assert.equal(spec.mode, 'draft');
+  assert.equal(spec.onConfirm, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(spec.origin)), {});
+  spec.onSelect(placement.token, { x: 12, y: 24 });
+  assert.deepEqual(JSON.parse(JSON.stringify(placement.candidate)), { x: 12, y: 24 });
+  assert.equal(confirmations, 0);
+  spec.onCandidate(placement.token, { x: 13, y: 24 });
+  assert.equal(placement.candidate, null, 'nudges need their own selection before final consent');
+  manager.workspaceBuild = { session: { id: 'newer' }, placement: { candidate: null } };
+  spec.onSelect(placement.token, { x: 100, y: 200 });
+  assert.equal(manager.workspaceBuild.placement.candidate, null);
+  assert.equal(confirmations, 0);
+});
+
+test('placement reconciliation reads its exact build instead of invoking generic model admission', async () => {
+  const manager = loadSessionManager();
+  const ids = [];
+  manager.workspaceBuildApi = () => ({
+    read: async id => {
+      ids.push(id);
+      return { ok: true };
+    },
+    create: () => assert.fail('generic build admission')
+  });
+  await manager.readCurrentWorkspaceBuild({
+    session: { id: 'exact-build', placement_source: { offer_id: 'source' } }
+  });
+  assert.deepEqual(ids, ['exact-build']);
+});
+
 test('a copied workspace this build cannot restore blocks the ordinary import and says why', async () => {
   const elements = new Map([
     ['folderImportPathInput', { value: '/synthetic/selected' }],

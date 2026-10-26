@@ -1203,7 +1203,7 @@ func TestFolderDigestStore_RejectsUnknownFieldsAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tampered := strings.Replace(string(data), `"schema_version": 1,`, `"schema_version": 1, "root_path": "/Users/x",`, 1)
+	tampered := strings.Replace(string(data), `"schema_version":`, `"root_path": "/Users/x", "schema_version":`, 1)
 	if err := os.WriteFile(sidecar, []byte(tampered), 0o600); err != nil {
 		t.Fatal(err)
 	}

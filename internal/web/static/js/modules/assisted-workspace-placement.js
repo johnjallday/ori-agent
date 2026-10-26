@@ -15,9 +15,22 @@ const escape = value =>
 
 export function placementPanelHTML(view = {}) {
   const draft = view.draft || {};
+  if (view.result)
+    return `<section class="assisted-placement" aria-label="Workspace preparation result">
+    <h2>Workspace prepared</h2>
+    <p>${escape(draft.name)}</p>
+    <p>${view.result.outcome === 'batch' ? `${escape(view.result.eligible_count)} files in the first filing review.` : 'The first scan found no eligible files.'}</p>
+    <p>Source files were not moved. Filing still needs your separate approval.</p>
+    <p role="status" aria-live="polite">${escape(view.message)}</p>
+    <div class="assisted-placement__footer">
+      ${view.positionFailed ? '<button type="button" data-placement-action="retry-position">Retry position only</button>' : ''}
+      <button type="button" data-placement-action="open">Open filing review</button>
+      <button type="button" data-placement-action="back">Close</button>
+    </div></section>`;
   const review = view.review;
   const busy = Boolean(view.busy);
-  const disabled = busy ? ' disabled' : '';
+  const locked = busy || view.accepted;
+  const disabled = locked ? ' disabled' : '';
   const art =
     globalThis.OriWorkspaceBuildingArt?.svgForVariant?.('depot', { context: 'map' }) || '';
   const team = review?.team || view.team || [];
@@ -80,9 +93,11 @@ export function placementPanelHTML(view = {}) {
         }
       </section>
       <p class="assisted-placement__status" role="status" aria-live="polite">${escape(view.message || '')}</p>
+      ${view.canRefresh ? '<button type="button" data-placement-action="review">Refresh permission review</button>' : ''}
       <footer class="assisted-placement__footer">
+        <button type="button" data-placement-action="back"${busy ? ' disabled' : ''}>${view.onMap ? 'Back to review' : 'Back'}</button>
         <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>
-        <button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !review || busy ? ' disabled' : ''}>${busy ? 'Working…' : 'Create workspace & scan'}</button>
+        <button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !review || busy ? ' disabled' : ''}>${busy ? 'Working…' : view.accepted ? 'Continue accepted setup' : 'Create workspace & scan'}</button>
       </footer>
     </section>`;
 }
@@ -107,7 +122,16 @@ export function mountPlacementPanel(host, onAction) {
       value: field === 'monitoring' ? control.checked : control.value
     });
   };
+  const input = event => {
+    if (!event.target.dataset?.placementField || event.target.disabled) return;
+    // Block the old review immediately, without replacing an actively typed
+    // field or losing its unsaved value before its change event.
+    const confirm = host.querySelector('[data-placement-action="confirm"]');
+    if (confirm) confirm.disabled = true;
+    onAction({ action: 'dirty', field: event.target.dataset.placementField });
+  };
   host.addEventListener('click', click);
+  host.addEventListener('input', input);
   host.addEventListener('change', change);
   return {
     update(view) {
@@ -126,6 +150,7 @@ export function mountPlacementPanel(host, onAction) {
     },
     destroy() {
       host.removeEventListener('click', click);
+      host.removeEventListener('input', input);
       host.removeEventListener('change', change);
       host.replaceChildren();
     }

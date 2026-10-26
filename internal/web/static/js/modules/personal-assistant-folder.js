@@ -600,6 +600,38 @@ export function isInboxFolderOffer(offer) {
   );
 }
 
+// A handoff carries references and explicit card edits, never display plans or
+// paths. The server independently resolves the owner, event and held selection.
+export function inboxPlacementRequest(offer, context, edits = {}) {
+  const binding = offer?.placement_handoff;
+  if (
+    !isInboxFolderOffer(offer) ||
+    !offer?.conversation_id ||
+    offer.setup ||
+    (!binding && offer.status !== 'pending') ||
+    context?.conversationId !== offer.conversation_id ||
+    context?.offerId !== offer.id ||
+    context.pending ||
+    !context.revision ||
+    !context.observation?.id ||
+    (binding && binding.revision !== context.revision)
+  )
+    return null;
+  const digest = binding?.plan_digest || offer.plan?.digest;
+  if (!digest) return null;
+  const request = {
+    offer_id: offer.id,
+    conversation_id: offer.conversation_id,
+    observation_id: context.observation.id,
+    source_revision: context.revision,
+    plan_digest: digest,
+    monitoring: edits.monitoring === true
+  };
+  if (typeof edits.brief === 'string') request.brief = edits.brief;
+  if (typeof edits.name === 'string') request.name = edits.name;
+  return request;
+}
+
 const WORKSPACE_PAGE = /^\/workspaces\/[a-z0-9][a-z0-9-]*(?:\?panel=file-janitor)?$/;
 
 // inboxRefusalView is the card of an inbox folder that cannot be hired for (FR16):
@@ -665,6 +697,25 @@ function homeUpgradeFirstView(offer, view) {
 // lines and Hire & start or Not now. It installs nothing and has no
 // step-by-step journey, so there is no Adjust.
 function inboxConfirmView(offer, base, subject) {
+  if (offer.placement_handoff)
+    return {
+      ...base,
+      headline: segments([{ text: subject }, ' has a workspace draft.']),
+      question: 'Return to its current choices and reviewed setup. Opening it creates nothing.',
+      reason: '',
+      plan: null,
+      hire: null,
+      setup: null,
+      resume: true,
+      actions: [
+        {
+          id: 'placement-resume',
+          label: 'Return to workspace draft',
+          style: 'primary',
+          placement: 'suggested'
+        }
+      ]
+    };
   const run = offer.setup ? setupRunView(offer.setup, subject, { inbox: true }) : null;
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
@@ -682,6 +733,18 @@ function inboxConfirmView(offer, base, subject) {
     ];
   else if (hire && continuing)
     actions = [{ id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true }];
+  if (hire && !base.decided && offer.conversation_id && !offer.setup) {
+    actions = [
+      { id: 'place-review', label: 'Place & review', style: 'primary', placement: 'map' },
+      {
+        id: 'suggested-setup',
+        label: 'Use suggested setup',
+        style: 'outline',
+        placement: 'suggested'
+      },
+      { id: 'no', label: 'Not now', style: 'outline', decision: 'no' }
+    ];
+  }
   // Another workspace already tidies this folder, or File Janitor will not take
   // it: the card says so, creates nothing, and offers the owner when there is one.
   const refusal = inboxRefusalView(offer, base, subject);
@@ -3354,7 +3417,7 @@ function renderFacts(list, rows) {
 
 export function conversationFolderOfferView(offer, options = {}) {
   const view = folderOfferView(offer, options);
-  if (offer?.conversation_id && offer.status === 'closed')
+  if (offer?.conversation_id && offer.status === 'closed' && !offer.placement_handoff)
     return {
       ...view,
       question: 'This setup review is closed. It created no workspace.',
@@ -4321,6 +4384,10 @@ function runAction(action) {
     void saveSoftwareNames();
     return;
   }
+  if (action.placement) {
+    void startInboxPlacement(action.placement);
+    return;
+  }
   if (action.oneCard) {
     startOneCardSetup(action);
     return;
@@ -4432,6 +4499,52 @@ export function folderReviewResponseCurrent(offer, generation, currentGeneration
 function reviewResponseGuard(offer) {
   const generation = state.reviewGeneration;
   return () => folderReviewResponseCurrent(offer, generation, state.reviewGeneration, state.offer);
+}
+
+async function startInboxPlacement(mode) {
+  const offer = state.offer;
+  const manager = window.sessionManager;
+  if (!offer?.conversation_id || state.busy || !manager?.openInboxWorkspacePlacement) return;
+  const current = reviewResponseGuard(offer);
+  const context = window.PersonalAssistantFolderContext?.current?.();
+  const input = inboxPlacementRequest(offer, context, {
+    brief: briefFor(offer),
+    name: state.workspaceName || undefined,
+    monitoring: monitoringChosen(offer)
+  });
+  if (!input) {
+    showError(
+      'Reopen this folder’s current conversation review before placing its workspace. Nothing was created.'
+    );
+    return;
+  }
+  const sourceCurrent = () => {
+    const latest = window.PersonalAssistantFolderContext?.current?.();
+    return (
+      current() &&
+      latest?.conversationId === input.conversation_id &&
+      latest?.revision === input.source_revision &&
+      latest?.observation?.id === input.observation_id
+    );
+  };
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    await manager.openInboxWorkspacePlacement(input, {
+      mode,
+      current: sourceCurrent,
+      invoker: document.activeElement
+    });
+  } catch (error) {
+    if (sourceCurrent())
+      showError(
+        error.message || 'This workspace draft could not be opened. Nothing was confirmed.'
+      );
+  } finally {
+    state.busy = false;
+    render();
+  }
 }
 
 // Confirm the displayed plan only; the server rechecks it and runs the setup.

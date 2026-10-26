@@ -182,7 +182,15 @@ func buildFolderTarget(userID string, projection *personalassistant.Projection, 
 func (h *Handler) getWorkspaceBuildFolderChoices(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := h.workspaceBuildUserID(ctx)
-	readiness := h.workspaceBuildReadiness(ctx, userID)
+	buildID := r.URL.Query().Get("build_id")
+	if buildID != "" {
+		release, ok := h.acquirePlacementBuild(w, r, buildID, "folder")
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	readiness := h.workspaceBuildFolderReadiness(ctx, userID, buildID)
 	if !readiness.available {
 		respondBuildUnavailable(w, readiness.reason)
 		return
@@ -265,7 +273,7 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 	}
 	ctx := r.Context()
 	userID := h.workspaceBuildUserID(ctx)
-	readiness := h.workspaceBuildReadiness(ctx, userID)
+	readiness := h.workspaceBuildFolderReadiness(ctx, userID, id)
 	if !readiness.available {
 		respondBuildUnavailable(w, readiness.reason)
 		return
@@ -324,6 +332,15 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		logger.Info("Workspace build folder not recognized", logger.Fields{"session_id": id, "error": err})
 		recognition = nil
 	}
+	if current.PlacementSource != nil {
+		if err := h.validatePlacementFolder(ctx, target, observation.ID, recognition); err != nil {
+			respondBuildFolderError(w, err)
+			return
+		}
+		// This fixed-purpose draft never becomes a recognized-folder recipe
+		// or an automatic inference proposal on attachment.
+		recognition = nil
+	}
 	// What the recognized folder's setup needs, said once the folder is in.
 	probe := *current
 	probe.Folder = &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition}
@@ -345,7 +362,7 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		build.InvalidateBuildInference(false)
 		build.Folder = &personalassistant.BuildFolder{Observation: *observation, Recognition: recognition}
 		build.Proposal = nil
-		if genericBuildFolder(build) && build.Setup == nil {
+		if genericBuildFolder(build) && build.Setup == nil && build.PlacementSource == nil {
 			build.Proposal = &personalassistant.BuildProposal{ID: uuid.NewString(), FolderID: observation.ID, ContextVersion: build.ContextVersion, Status: "pending"}
 		}
 		build.Append(personalassistant.BuildTranscriptEntry{

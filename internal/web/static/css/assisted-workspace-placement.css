@@ -183,6 +183,35 @@
   font-weight: 600;
 }
 
+.assisted-placement-host {
+  overflow: auto;
+  min-height: 0;
+  padding: 0.75rem;
+}
+.assisted-placement-host[hidden] {
+  display: none;
+}
+.assisted-placement-host--map {
+  position: fixed;
+  z-index: 1040;
+  top: 5rem;
+  right: 1rem;
+  width: min(34rem, 42vw);
+  max-height: calc(100dvh - 6rem);
+  overscroll-behavior: contain;
+  filter: drop-shadow(0 0.5rem 1rem rgb(0 0 0 / 15%));
+}
+
+/* Keep the geometry controls beside, not underneath, the setup sheet. */
+body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls {
+  left: 1rem;
+  right: calc(min(34rem, 42vw) + 1rem);
+  width: auto;
+  max-width: none;
+  transform: none;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 600px) {
   .assisted-placement {
     padding: 1rem;

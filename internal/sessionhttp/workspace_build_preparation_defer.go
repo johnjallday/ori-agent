@@ -36,6 +36,11 @@ func (h *Handler) deferWorkspaceBuildPreparation(w http.ResponseWriter, r *http.
 		respondBuildPreparationError(w, "not_found", "Accepted preparation not found.", http.StatusNotFound, nil)
 		return
 	}
+	release, ok := h.acquirePlacementBuild(w, r, id, "janitor-defer")
+	if !ok {
+		return
+	}
+	defer release()
 	claim := build.Preparation
 	if request.Version != claim.BuildVersion || request.ReviewRevision != claim.ReviewRevision || request.Monitoring != claim.Monitoring {
 		respondBuildPreparationError(w, "review_changed", "This accepted preparation changed. Open its current review.", http.StatusConflict, nil)

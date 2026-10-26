@@ -17,7 +17,7 @@ import (
 // the knowledge sidecar under <HQ>/.ori/ and is written with the same
 // discipline. It stores folder keys and base names only, never full paths.
 const (
-	FolderDigestSchemaVersion = 1
+	FolderDigestSchemaVersion = 2
 	folderDigestFileName      = "folder-digest-v1.json"
 	folderDigestLockName      = "folder-digest-v1.lock"
 	folderDigestMaxBytes      = 256 * 1024
@@ -163,6 +163,7 @@ type FolderPortfolioEvidence struct {
 
 // FolderOffer is one question about one folder and its answer.
 type FolderOffer struct {
+	PlacementHandoff   *InboxPlacementHandoff    `json:"placement_handoff,omitempty"`
 	ConversationReview *FolderConversationReview `json:"conversation_review,omitempty"`
 	ID                 string                    `json:"id"`
 	Status             FolderOfferStatus         `json:"status"`
@@ -445,6 +446,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		case FolderOfferLater, FolderOfferAwaitingOutcome, FolderOfferResolved, FolderOfferDeclined, FolderOfferClosed, FolderOfferAbandoned:
 		default:
 			return fmt.Errorf("%w: offer status", errFolderDigestInvalid)
+		}
+		if err := validatePlacementHandoff(offer); err != nil {
+			return err
 		}
 		if err := validateConversationReview(offer.ConversationReview); err != nil {
 			return err

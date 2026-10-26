@@ -59,7 +59,7 @@ the build and a destination binding to the folder offer:
 - Build schema **4 → 5**: optional `placement_source` (offer, conversation,
   observation, source revision and plan digest), plus draft monitoring choice.
 - Folder digest schema **1 → 2**: optional `placement_handoff` (build ID, source
-  revision and plan digest). A handed-off source is closed, not accepted,
+  revision, plan digest and a `draft_saved` acknowledgment). A handed-off source is closed, not accepted,
   declined or tombstoned. It cannot enter the original setup/ordinary create.
 - Old records decode with these fields absent, never with inferred consent.
   Unix and Windows stores share validation/codec behavior. Unknown future
@@ -69,10 +69,15 @@ The handoff service holds the existing source conversation lease while checking
 canonical source state and seeding. Inside the build store mutation, reject an
 unrelated open **or preparing** build before changing the source. Keep the lock
 order **conversation lease → build store → folder store**; no inverse nesting.
+Preparation first serializes on its existing preparation mutex, then acquires
+that lease, so concurrent confirmations read the latest accepted claim.
 Persist the immutable source binding before the build document. That ordering
 can leave a closed source with a missing destination on failure, but never two
 live creation owners. An explicit retry may finish that same reserved build
-identity after revalidation. GET does not repair or create anything. A conflicting
+identity after revalidation, but only while `draft_saved` is false. After the
+destination is proven durable, acknowledge it in the source; acceptance requires
+this acknowledgment. A later missing/pruned acknowledged draft is never rebuilt.
+GET does not repair or create anything. A conflicting
 build that appeared after an interrupted write is not overwritten; report it.
 Do not roll the source back to independently confirmable state on uncertainty.
 
@@ -85,7 +90,9 @@ unavailable but must never authorize a new operation under the old source.
 
 Before acceptance, material writes and preparation require the current owner,
 source provenance and canonical source context. Source revision changes cause a
-conflict, not a re-seed. After acceptance, retain the accepted envelope and use
+conflict, not a re-seed. Reopening the same handed-off review preserves its
+canonical event revision. Owner-scoped abandonment remains available after
+detach/expiry, and uses the draft version fence. After acceptance, retain the accepted envelope and use
 the existing canonical ownership/receipt recovery rules; detach is not undo.
 Ordinary `POST /api/workspaces` cannot bypass preparation by naming a placement
 build, even before acceptance. A placed draft stays built-in File Janitor,

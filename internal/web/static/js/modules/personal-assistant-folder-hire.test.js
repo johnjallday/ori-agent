@@ -755,12 +755,12 @@ test('the confirmation line names plugins only for a plan that installs one', ()
   );
 });
 
-test('in a conversation the inbox hire keeps its own words and closes with Keep chatting', () => {
+test('in a conversation the inbox proposal opens reviewed placement and closes with Keep chatting', () => {
   const view = conversationFolderOfferView(inboxOffer({}, { conversation_id: 'conversation-1' }));
   assert.doesNotMatch(view.question, /unavailable here/);
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire & start', 'Keep chatting']
+    ['Place & review', 'Use suggested setup', 'Keep chatting']
   );
 });
 
