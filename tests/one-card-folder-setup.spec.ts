@@ -83,9 +83,14 @@ test.beforeAll(async ({ request }) => {
     const brief = body.messages?.some((message: any) =>
       String(message.content).startsWith('You write a concise daily brief')
     );
+    const followup = body.messages?.some((message: any) =>
+      String(message.content).includes('Discuss the next step without starting work')
+    );
     const content = brief
       ? JSON.stringify({ opening_summary: 'Unrelated scripted Daily Brief fixture.' })
-      : '## Saved session\nThe supplied session fixture declares no tracks. No audio was analyzed or history inferred.\n\nNext: Review the saved session before recording.';
+      : followup
+        ? 'We can discuss the next step. No additional task was started.'
+        : '## Saved session\nThe supplied session fixture declares no tracks. No audio was analyzed or history inferred.\n\nNext: Review the saved session before recording.';
     res.end(
       JSON.stringify({
         id: 'one-card-fixture',
@@ -419,14 +424,24 @@ test('setup ends ready on the same card; a separate summary start produces its r
     }
   });
   const card = await openCard(page);
+  const composer = page.locator('#personalAssistantInput');
+  const exactDraft = '  Unsent 界 draft\n keep exact  ';
+  await composer.fill(exactDraft);
   await card
     .locator('#personalAssistantFolderBrief')
     .fill(
       'Summarize the permitted saved REAPER session. Report missing track data honestly and suggest one next step; do not run or change anything.'
     );
   await card.getByRole('button', { name: 'Hire & set up', exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready', {
+    timeout: 180_000
+  });
+  await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  await expect(composer).toHaveValue(exactDraft);
+  await expect(composer).toHaveAttribute('placeholder', 'What would you like to do next?');
+  await revealFolderSetupDetails(card);
   const receipt = card.locator('#personalAssistantFolderReceipt li');
-  await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
+  await expect(receipt.first()).toBeVisible();
   const rows = (await receipt.allTextContents()).join('\n');
   expect(rows).toMatch(/Workspace/);
   expect(rows).toMatch(/Agent/);
@@ -437,9 +452,7 @@ test('setup ends ready on the same card; a separate summary start produces its r
   await expect(card.locator('.folder-visual')).toContainText('Assigned here');
   await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
   const receiptCard = page.locator('#personalAssistantFolderOffer');
-  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
-    'Workspace ready'
-  );
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
   await expect(card.locator('#personalAssistantFolderOptionalTask')).toContainText(
     'Configuration only; connection not verified'
   );
@@ -465,8 +478,33 @@ test('setup ends ready on the same card; a separate summary start produces its r
   const details = card.locator('#personalAssistantFolderDetails');
   if ((await details.getAttribute('open')) !== null)
     await details.locator('summary').first().click();
-  await card.locator('.folder-visual').scrollIntoViewIfNeeded();
+  await card.locator('#personalAssistantFolderOfferHeadline').scrollIntoViewIfNeeded();
+  await expect(card.locator('#personalAssistantFolderTaskDetails')).not.toHaveAttribute('open', '');
+  await expect(card.locator('#personalAssistantFolderTaskLabel')).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath('live-ready-report.png') });
+  const evidence = process.env.ORI_ONE_CARD_EVIDENCE_DIR;
+  if (evidence) {
+    mkdirSync(evidence, { recursive: true, mode: 0o750 });
+    await page.screenshot({ path: join(evidence, '05-real-compact-summary.png') });
+  }
+  const asks: string[] = [];
+  page.on('request', req => {
+    if (
+      req.method() === 'POST' &&
+      /\/home-assistant\/(ask|route)$/.test(new URL(req.url()).pathname)
+    )
+      asks.push(req.url());
+  });
+  await composer.fill('  \n\t ');
+  await page.locator('#personalAssistantSend').click();
+  expect(asks).toEqual([]);
+  await composer.fill('Discuss the next step without starting work');
+  await page.locator('#personalAssistantSend').click();
+  await expect(page.locator('#homeAssistantConversation')).toContainText(
+    'No additional task was started.'
+  );
+  expect(asks.filter(url => url.endsWith('/ask'))).toHaveLength(1);
+  if (evidence) await page.screenshot({ path: join(evidence, '05-real-typed-followup.png') });
 
   // Closing/reopening preserves the result. The shared read-only tail checks
   // workspace/report navigation without repeating expensive live inference.
@@ -484,6 +522,12 @@ test('setup ends ready on the same card; a separate summary start produces its r
     .getAttribute('href');
   expect(reportHref).toBe(await verifySavedFirstLook(page, request, sandbox, savedOfferID, href!));
   expect(startCalls.length).toBe(before);
+  if (evidence) {
+    if (await page.locator('#personalAssistantPanel').isVisible())
+      await page.locator('#personalAssistantClose').click();
+    await page.locator('#workspace-task-output').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, '05-real-report-reloaded.png') });
+  }
 });
 
 test('keyboard only: Assign & set up ends ready and the card announces its progress', async ({
@@ -508,8 +552,13 @@ test('keyboard only: Assign & set up ends ready and the card announces its progr
   await setUp.focus();
   await expect(setUp).toBeFocused();
   await page.keyboard.press('Enter');
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready', {
+    timeout: 180_000
+  });
+  await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  await revealFolderSetupDetails(card);
   const receipt = card.locator('#personalAssistantFolderReceipt li');
-  await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
+  await expect(receipt.first()).toBeVisible();
   // A later song in the same Home joins the assistant the first one added.
   expect((await receipt.allTextContents()).join('\n')).toMatch(/REAPER Assistant[^\n·]*joined/);
   const agents = await ok(await request.get('/api/agents/dashboard/list'));

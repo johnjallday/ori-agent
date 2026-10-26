@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
@@ -28,7 +29,7 @@ async function mount(page: Page, offer: any = completed(), url = '/?panel=today'
   await page.route('**/api/**', async route => {
     const request = route.request();
     if (
-      /\/(ask|route)$|\/folder-context\/(review|select)|\/folder-digest\/offers\/.*\/(setup|decide|resolve|first-look|prerequisites)|\/plugins\/.*(install|enable|update)/.test(
+      /\/(ask|route)$|\/folder-context\/(review|select)|\/folder-digest\/offers\/.*\/(setup|decide|resolve|first-look|prerequisites)|\/folder-first-task\/(start|stop)|\/tasks\/.*(execute|retry)|\/plugins\/.*(install|enable|update)/.test(
         new URL(request.url()).pathname
       ) &&
       request.method() !== 'GET'
@@ -283,6 +284,11 @@ test('fixture ticket-only output and File Janitor preserve truthful link labels'
   const { card, effects } = await mount(page, offer);
   await expect(card.getByRole('link', { name: 'Open task', exact: true })).toBeVisible();
   await expect(card.getByRole('link', { name: /summary|report/i })).toHaveCount(0);
+  await expect(card).toContainText('No saved excerpt is available here.');
+  delete offer.first_task.ticket_route;
+  await redraw(page, offer);
+  await expect(card).toContainText('No saved excerpt is available here.');
+  await expect(card.getByRole('link', { name: /task|summary|report/i })).toHaveCount(0);
   delete offer.first_task;
   offer.outcome.first_look = {
     batch: { outcome: 'batch', route: '/workspaces/album-three?panel=file-janitor&batch_id=one' }
@@ -455,11 +461,65 @@ for (const url of ['/?panel=today', '/settings?panel=today']) {
     }, offer);
     await expect(summary).toBeFocused();
     await expect(details).toHaveAttribute('open', '');
+    const execution = historical.locator('.folder-task-result > details');
+    await execution.locator('summary').focus();
+    await page.keyboard.press('Enter');
+    const updated = {
+      ...offer,
+      first_task: { ...offer.first_task, result_excerpt: 'Updated saved historical result' }
+    };
+    await page.evaluate(
+      offer =>
+        document.dispatchEvent(
+          new CustomEvent('personal-assistant:folder-offer', { detail: { offer } })
+        ),
+      updated
+    );
+    await summary.focus(); // Moving within the same receipt must not lose its deferred refresh.
+    await page.locator('#personalAssistantInput').focus();
+    await expect(
+      historical.getByText('Updated saved historical result', { exact: true })
+    ).toBeVisible();
+    await expect(historical.locator('details').first()).toHaveAttribute('open', '');
+    await expect(historical.locator('.folder-task-result > details')).toHaveAttribute('open', '');
     await page.setViewportSize({ width: 1440, height: 1100 });
     await evidence(page, url.startsWith('/settings') ? '04-settings-history' : '04-home-history');
     expect(effects).toEqual([]);
   });
 }
+
+test('fixture finished runner waits for its delayed verified receipt without repeating setup', async ({
+  page
+}) => {
+  const waiting: any = {
+    ...completed(),
+    status: 'awaiting_outcome',
+    outcome: null,
+    setup: { status: 'done', lines: [] }
+  };
+  const { card, effects } = await mount(page, waiting);
+  await restore(page, waiting);
+  let reads = 0;
+  await page.route('**/api/personal-assistant/folder-digest?offer_id=completion-fixture', route => {
+    reads++;
+    return route.fulfill({
+      json: { folder_digest: { offer: reads === 1 ? waiting : completed() } }
+    });
+  });
+  await expect(card).toContainText('checking the saved result');
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).not.toContainText('is ready');
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    '✓ Album-3 is ready',
+    { timeout: 10_000 }
+  );
+  await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  await expect(page.locator('#personalAssistantInput')).toHaveAttribute(
+    'placeholder',
+    'What would you like to do next?'
+  );
+  expect(reads).toBe(2);
+  expect(effects).toEqual([]);
+});
 
 test('fixture late first-task read from A cannot replace B or its exact draft', async ({
   page
@@ -522,6 +582,42 @@ test('fixture late first-task read from A cannot replace B or its exact draft', 
   expect(effects).toEqual([]);
 });
 
+test('fixture late refused task start cannot contaminate another review', async ({ page }) => {
+  const a: any = completed();
+  a.first_task = {
+    state: 'seeded',
+    offer_id: a.id,
+    workspace_id: 'album-three',
+    recipe: 'folder_summary',
+    can_start: true,
+    optional: true
+  };
+  const { card } = await mount(page, a);
+  await restore(page, a);
+  let finish!: () => Promise<void>;
+  await page.route('**/api/workspaces/album-three/folder-first-task/start', route => {
+    finish = () => route.fulfill({ json: { started: false, reason: 'start_failed' } });
+  });
+  await card.getByRole('button', { name: 'Start summary', exact: true }).click();
+  await expect.poll(() => Boolean(finish)).toBe(true);
+  const b: any = { ...completed(), id: 'ready-b', conversation_id: 'chat-b' };
+  b.first_task = {
+    state: 'seeded',
+    recipe: 'folder_summary',
+    optional: true,
+    message: 'B needs its own agent.',
+    can_start: false
+  };
+  await restore(page, b);
+  const response = page.waitForResponse('**/api/workspaces/album-three/folder-first-task/start');
+  await finish();
+  await (await response).finished();
+  await expect(card.locator('#personalAssistantFolderTaskStatus')).toHaveText(
+    'B needs its own agent.'
+  );
+  await expect(card).not.toContainText('could not start');
+});
+
 test('fixture task completion while typing preserves expansion, focus and saved output once', async ({
   page
 }) => {
@@ -550,6 +646,113 @@ test('fixture task completion while typing preserves expansion, focus and saved 
   await evidence(page, '04-focused-expanded');
   expect(effects).toEqual([]);
 });
+
+for (const theme of ['light', 'dark']) {
+  for (const width of [320, 1440]) {
+    test(`fixture long completed result reflows ${theme} ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1100 });
+      await page.addInitScript(theme => localStorage.setItem('ori-theme', theme), theme);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      const offer: any = completed();
+      offer.outcome.receipt[0].name = 'Album 長い名前 '.repeat(12);
+      offer.first_task = {
+        state: 'finished',
+        recipe: 'software_assessment',
+        result_excerpt: 'Saved literal result 界 '.repeat(20),
+        report_route: '/workspaces/album-three/task/assessment'
+      };
+      const { card, effects } = await mount(page, offer);
+      await expect(
+        card.getByRole('link', { name: 'Open the assessment', exact: true })
+      ).toBeVisible();
+      expect(
+        await card.evaluate(el =>
+          Math.max(
+            el.scrollWidth - el.clientWidth,
+            document.documentElement.scrollWidth - innerWidth
+          )
+        )
+      ).toBeLessThanOrEqual(1);
+      await evidence(page, `05-result-${theme}-${width}`);
+      expect(effects).toEqual([]);
+    });
+  }
+  test(`fixture completed receipt and result at actual 200% Chromium page zoom ${theme}`, async ({
+    browserName
+  }, testInfo) => {
+    test.skip(browserName !== 'chromium', 'uses disposable Chromium browser preferences');
+    const context = await chromium.launchPersistentContext(
+      testInfo.outputPath('completion-zoom-profile'),
+      {
+        channel: 'chromium',
+        headless: true,
+        viewport: null,
+        deviceScaleFactor: undefined,
+        baseURL: testInfo.project.use.baseURL,
+        args: ['--window-size=1280,900']
+      }
+    );
+    try {
+      const page = await context.newPage();
+      await page.addInitScript(theme => localStorage.setItem('ori-theme', theme), theme);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      const offer: any = completed();
+      offer.first_task = {
+        state: 'finished',
+        recipe: 'folder_summary',
+        result_excerpt: 'Saved result 長い名前 '.repeat(20),
+        report_route: '/workspaces/album-three/task/summary'
+      };
+      await mount(page, offer);
+      const metrics = () => page.evaluate(() => ({ innerWidth, outerWidth, devicePixelRatio }));
+      const before = await metrics();
+      const settings = await context.newPage();
+      await settings.goto('chrome://settings/appearance');
+      const zoom = settings.getByRole('combobox', { name: 'Page zoom' });
+      await zoom.selectOption('2');
+      const { card, effects } = await mount(page, offer);
+      const after = await metrics();
+      expect(after.outerWidth).toBe(before.outerWidth);
+      expect(after.innerWidth).toBeCloseTo(before.innerWidth / 2, 0);
+      expect(after.devicePixelRatio).toBeCloseTo(before.devicePixelRatio * 2, 2);
+      await testInfo.attach('completion-native-zoom.json', {
+        contentType: 'application/json',
+        body: JSON.stringify({ before, after })
+      });
+      expect(
+        await card.evaluate(el =>
+          Math.max(
+            el.scrollWidth - el.clientWidth,
+            document.documentElement.scrollWidth - innerWidth
+          )
+        )
+      ).toBeLessThanOrEqual(1);
+      const summary = card.locator('#personalAssistantFolderDetails > summary');
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      await expect(card.locator('#personalAssistantFolderReceipt')).toBeVisible();
+      await page.keyboard.press('Enter');
+      await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+      await page.locator('#personalAssistantInput').focus();
+      await page.keyboard.press('Tab');
+      await expect(page.locator('#personalAssistantSend')).toBeFocused();
+      const capture = await context.newCDPSession(page);
+      const image = await capture.send('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: false
+      });
+      await writeFile(
+        `tasks/evidence-assistant-setup-completion/05-native-zoom-${theme}.png`,
+        Buffer.from(image.data, 'base64')
+      );
+      await capture.detach();
+      expect(effects).toEqual([]);
+      await zoom.selectOption('1');
+    } finally {
+      await context.close();
+    }
+  });
+}
 
 test('fixture first completion never collapses focused evidence', async ({ page }) => {
   const waiting: any = {

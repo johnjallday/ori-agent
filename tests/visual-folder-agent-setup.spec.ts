@@ -1317,6 +1317,17 @@ async function keyboardReach(page: Page, target: Locator) {
     await page.keyboard.press(key);
   }
   await expect(target, 'reachable by keyboard').toBeFocused();
+  // Focus reveal waits for transcript anchoring; observe its settled geometry,
+  // without repairing scroll from the test (important at short zoomed heights).
+  await expect
+    .poll(() =>
+      target.evaluate(node => {
+        const viewport = node.closest('.personal-assistant-panel__scroll')!.getBoundingClientRect();
+        const bounds = node.getBoundingClientRect();
+        return bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1;
+      })
+    )
+    .toBe(true);
   const geometry = await target.evaluate(node => {
     const scroll = node.closest('.personal-assistant-panel__scroll')!;
     const viewport = scroll.getBoundingClientRect();

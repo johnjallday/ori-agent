@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { folderReceiptView } from './personal-assistant-folder.js';
+import { folderReceiptView, folderSetupPolling } from './personal-assistant-folder.js';
 import {
   setupCompletionView,
   ownsSetupCompletion,
@@ -24,6 +24,19 @@ const offer = {
   }
 };
 const view = value => setupCompletionView(value, folderReceiptView(value));
+
+test('runner done keeps observational polling until its separate verified receipt arrives', () => {
+  assert.equal(folderSetupPolling({ status: 'awaiting_outcome', setup: { status: 'done' } }), true);
+  assert.equal(
+    folderSetupPolling({ status: 'awaiting_outcome', setup: { status: 'running' } }),
+    true
+  );
+  assert.equal(
+    folderSetupPolling({ status: 'awaiting_outcome', setup: { status: 'stopped' } }),
+    false
+  );
+  assert.equal(folderSetupPolling({ ...offer, setup: { status: 'done' } }), false);
+});
 
 test('verified receipt compacts independently of each optional task state', () => {
   for (const state of [undefined, 'seeded', 'running', 'waiting', 'finished', 'failed']) {

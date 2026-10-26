@@ -2096,6 +2096,8 @@ export function folderReceiptView(offer, options = {}) {
         rows: (receipt.rows || []).map(({ kind, name, detail }) => ({ kind, name, detail })),
         route: '',
         homeRoute: '',
+        homeID: '',
+        profile: null,
         openLabel: '',
         gone
       };
@@ -3559,6 +3561,16 @@ function renderOffer(place) {
     message: state.firstLookMessage
   });
   const completion = setupCompletionView(state.offer, receipt);
+  // Capture before evidence renderers retire obsolete controls. A completion
+  // must not collapse the area the reader was using, even if that control's
+  // old authority is correctly removed by the canonical update.
+  const completingEvidenceFocus = Boolean(
+    completion.ready &&
+    (document.getElementById('personalAssistantFolderDetails')?.contains(focusedControl) ||
+      [...STOPPED_TUCKED.map(([id]) => id), ...COMPLETED_TUCKED].some(id =>
+        document.getElementById(id)?.contains(focusedControl)
+      ))
+  );
   els.offer.classList.toggle('pa-folder__offer--completed', completion.ready);
   setText(
     document.getElementById('personalAssistantFolderCompletionFacts'),
@@ -3726,6 +3738,7 @@ function renderOffer(place) {
     const id = state.offer?.id || '';
     const key = `${state.offer?.conversation_id || ''}:${id}:${completion.ready ? 'completed' : stopped ? 'stopped' : 'review'}`;
     const focused = Boolean(
+      completingEvidenceFocus ||
       details.contains(document.activeElement) ||
       (completion.ready &&
         [...STOPPED_TUCKED.map(([id]) => id), ...COMPLETED_TUCKED].some(id =>
@@ -3818,7 +3831,7 @@ function renderOffer(place) {
   // wrote: they are set as text, never as markup.
   setText(
     els.result,
-    result.visible ? result.excerpt || 'The task finished. Open its saved output below.' : ''
+    result.visible ? result.excerpt || 'The task finished. No saved excerpt is available here.' : ''
   );
   if (els.result && result.visible && result.next) {
     const label = document.createElement('strong');
@@ -4027,6 +4040,12 @@ function renderOffer(place) {
     !focusedControl.closest('[hidden]')
   )
     focusedControl.focus({ preventScroll: true });
+  if (
+    completingEvidenceFocus &&
+    !focusedControl?.isConnected &&
+    document.activeElement === document.body
+  )
+    details?.querySelector(':scope > summary')?.focus({ preventScroll: true });
   if (state.reviewSlot) window.PersonalAssistantTranscript?.changed?.();
 }
 
@@ -4481,12 +4500,22 @@ async function startOneCardSetup(action) {
   }
 }
 
-// syncSetupPolling polls the existing digest read while a run is going, and
-// only then: a one-card setup, or a folder's first look while the drawer that
+// A runner can finish before its verified receipt is committed. Keep the
+// existing observational read alive until the outcome arrives; never execute
+// or repaint the awaiting-result state as ready.
+export function folderSetupPolling(offer) {
+  return (
+    offer?.setup?.status === 'running' ||
+    (offer?.status === 'awaiting_outcome' && offer?.setup?.status === 'done')
+  );
+}
+
+// syncSetupPolling polls the existing digest read while a run is going or
+// awaiting its receipt: a one-card setup, or a folder's first look while the drawer that
 // shows it is open. A page that loads onto either resumes it the same way;
 // nothing polls otherwise, so an idle page makes no extra request.
 function syncSetupPolling() {
-  const running = state.offer?.setup?.status === 'running' || firstLookPolling();
+  const running = folderSetupPolling(state.offer) || firstLookPolling();
   if (running && !setupPollTimer) {
     setupPollTimer = setInterval(() => void pollTick(), SETUP_POLL_MS);
   } else if (!running && setupPollTimer) {
@@ -4499,7 +4528,7 @@ function syncSetupPolling() {
 let firstLookTick = 0;
 
 async function pollTick() {
-  if (state.offer?.setup?.status === 'running') return pollSetup();
+  if (folderSetupPolling(state.offer)) return pollSetup();
   if (!firstLookPolling()) {
     // The look settled or the drawer closed: stop asking.
     syncSetupPolling();
@@ -4627,6 +4656,7 @@ async function startFirstLook() {
   const look = currentFirstLook();
   const idle = { started: false, message: '' };
   if (!look || state.firstLookBusy) return idle;
+  const current = reviewResponseGuard(state.offer);
   const retry = look.state === 'failed';
   if (!retry && !(look.state === 'seeded' && look.can_start === true)) return idle;
   // An assessment is tried again only when nothing has to be repaired first.
@@ -4662,6 +4692,7 @@ async function startFirstLook() {
   } catch (_) {
     started = false;
   }
+  if (!current()) return idle;
   if (started) {
     // This tab started it, so its report will open Today's strip once.
     claimNeedsItem(`offer:${look.offer_id}`);
@@ -4706,6 +4737,7 @@ async function stopFirstLook() {
   if (!look || look.state !== 'running' || state.firstLookBusy) return false;
   const workspaceID = String(look.workspace_id || '').trim();
   if (!workspaceID) return false;
+  const current = reviewResponseGuard(state.offer);
   state.firstLookBusy = true;
   state.firstLookMessage = '';
   render();
@@ -4725,8 +4757,10 @@ async function stopFirstLook() {
   } catch (_) {
     stopped = false;
   }
+  if (!current()) return false;
   state.firstLookBusy = false;
   await refreshFirstLook(look.offer_id);
+  if (!current()) return stopped;
   if (stopped) firstLookMoved();
   else {
     state.firstLookMessage = FIRST_LOOK_NOT_STOPPED;
@@ -4748,6 +4782,7 @@ async function restoreOutcomeWorkspace() {
   const gone = workspaceGoneView(state.offer);
   if (!gone?.workspaceId || state.restoreBusy) return false;
   const offerID = state.offer.id;
+  const current = reviewResponseGuard(state.offer);
   state.restoreBusy = true;
   state.restoreMessage = '';
   render();
@@ -4761,6 +4796,7 @@ async function restoreOutcomeWorkspace() {
   } catch (_) {
     restored = false;
   }
+  if (!current()) return restored;
   state.restoreBusy = false;
   if (!restored) state.restoreMessage = workspaceNotRestored(gone.name);
   render();
@@ -5754,6 +5790,10 @@ function init() {
       if (!slot?.isConnected || !offer?.conversation_id) return;
       if (state.offer?.id !== offer.id || state.reviewSlot !== slot) {
         state.reviewGeneration++;
+        state.firstLookBusy = false;
+        state.firstLookMessage = '';
+        state.restoreBusy = false;
+        state.restoreMessage = '';
         state.workspaceName = offer.subject?.name || '';
         state.editingName = false;
         // A newly restored canonical slot defaults compact; redraws of the
@@ -5792,6 +5832,10 @@ function init() {
     parkConversation: () => {
       if (!state.reviewSlot) return;
       state.reviewGeneration++;
+      state.firstLookBusy = false;
+      state.firstLookMessage = '';
+      state.restoreBusy = false;
+      state.restoreMessage = '';
       const els = elements();
       if (els?.offer && els.root) els.root.append(els.offer);
       state.reviewSlot = null;

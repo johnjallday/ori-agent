@@ -1007,19 +1007,19 @@ function renderSavedCompletion(slot, offer, receipt, completion) {
   if (previous?.contains(document.activeElement)) {
     if (!slot.dataset.completionRefresh) {
       slot.dataset.completionRefresh = 'pending';
-      slot.addEventListener(
-        'focusout',
-        () =>
-          queueMicrotask(() => {
-            delete slot.dataset.completionRefresh;
-            if (!slot.contains(document.activeElement)) renderReferences();
-          }),
-        { once: true }
-      );
+      const refreshAfterFocus = () =>
+        queueMicrotask(() => {
+          if (slot.contains(document.activeElement)) return;
+          slot.removeEventListener('focusout', refreshAfterFocus);
+          delete slot.dataset.completionRefresh;
+          renderReferences();
+        });
+      slot.addEventListener('focusout', refreshAfterFocus);
     }
     return;
   }
   const expanded = previous?.querySelector('details')?.open === true;
+  const executionExpanded = previous?.querySelector('.folder-task-result > details')?.open === true;
   const doc = slot.ownerDocument;
   const node = (tag, text = '', className = '') => {
     const element = doc.createElement(tag);
@@ -1070,13 +1070,14 @@ function renderSavedCompletion(slot, offer, receipt, completion) {
       node('h3', result.title),
       node(
         'p',
-        result.excerpt || 'The task finished. Open its saved output below.',
+        result.excerpt || 'The task finished. No saved excerpt is available here.',
         'pa-folder__first-look'
       )
     );
     if (result.next) block.append(node('p', `Suggested next task: ${result.next}`));
     result.actions.forEach(action => link(block, action.href, action.label));
     const execution = node('details', '', 'folder-setup-details');
+    execution.open = executionExpanded;
     execution.append(
       node('summary', 'Execution details'),
       node('p', folderTaskDisclosure(offer.first_task))

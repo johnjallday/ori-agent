@@ -1746,7 +1746,7 @@ function revealFocusedControl() {
     !active ||
     !scroll?.contains(active) ||
     !active.closest(
-      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderOffer, #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
     )
   )
     return;
@@ -1960,6 +1960,10 @@ function init() {
   // scroll viewport. Recover only this feature's keyboard position; do not
   // interfere with existing message, saved-draft or memory focus lifecycles.
   const scroll = document.getElementById('personalAssistantScroll');
+  // Native Tab scrolling can race an in-flight transcript anchor. Reveal the
+  // explicitly focused setup control after that anchor settles, not just on
+  // resize. This never moves focus or follows background receipt updates.
+  scroll?.addEventListener('focusin', () => requestAnimationFrame(revealFocusedControl));
   if (scroll && typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => requestAnimationFrame(revealFocusedControl)).observe(scroll);
   }

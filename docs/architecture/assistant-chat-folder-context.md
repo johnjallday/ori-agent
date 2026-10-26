@@ -123,8 +123,13 @@ owns keyboard focus so Escape closes only the chooser. Closing the drawer or
 resetting context invalidates late choice loads; selection restores Add folder
 focus only when the user has not moved elsewhere. No path is stored in the browser.
 
-Send displays any attachment-only default request (`Explore this folder`) and
-carries only opaque references, including optional next-turn focus node IDs. The validated personal-folder route bypasses
+For a fresh/uncompleted attachment, Send displays its attachment-only default
+request (`Explore this folder`, or an explanation of its setup recommendation).
+For the current canonically owned completed setup, the placeholder instead says
+**What would you like to do next?** and blank/whitespace Send does nothing. Both
+the displayed hint and actual submit default change together; no implicit
+exploration/model request survives completion. Typed Send still carries only
+opaque references, including optional next-turn focus node IDs. The validated personal-folder route bypasses
 specialist/generic-create detection, not intentional workspace routing. Reviewed
 memory/backlog actions retain their own gates. Prompt context is escaped,
 delimited reference data with explicit contents/coverage limits and historical
@@ -267,7 +272,17 @@ carry server-owned conversation/observation/candidate provenance, not paths or
 permissions. The current canonical offer reference is checked under the same
 in-process lease as folder turns and mutations. Detach/replacement makes
 unconfirmed reviews stale.
-Completed outcomes are not undone. The existing creator, reviewed plan digest,
+Completed outcomes are not undone. Composer completion applies only to the
+current conversation, its exact canonical offer reference and accepted attached
+observation, never a replacement preview or an older completed review. The
+canonical offer reference is the server-validated observation binding; no new
+public provenance field or success store is introduced. Hydration and offer
+updates reconstruct presentation from existing records, without changing drafts,
+conversation titles/history, folder attachments, recipients or App-wide context.
+Detach, New, replacement and a newer current review revoke this applicability.
+Late first-task reads use the same review-generation fence as setup reads.
+
+The existing creator, reviewed plan digest,
 receipt and provider-specific gates remain the sole execution path. Canonical
 outcome references are read back in the owning conversation; hydration executes
 nothing.
@@ -412,7 +427,7 @@ the group with its reviewed Group Manager, then a blank workspace per included
 member, each linked to its own folder where it is. The run calls no model,
 seeds no task, installs nothing and opens no file. It is idempotent per offer
 and per member, so a stop (`member_failed`) continues from the workspace that
-failed. A workspace per folder *inside* a plugin Home is not created here: that
+failed. A workspace per folder _inside_ a plugin Home is not created here: that
 Home's own library makes each one when a project is opened, so the Home stays
 available as the "list them in the Home" choice in Adjust. Choosing it hands
 the offer back to the earlier collection setup, with that setup's own review,
