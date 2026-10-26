@@ -191,6 +191,28 @@ test('an inbox hire reports its first batch with Review batch as a link and Not 
   );
 });
 
+test('Needs you retains the same prepared filing link as source completion', () => {
+  const base = '/workspaces/downloads?panel=file-janitor';
+  for (const suffix of ['&preparation=accepted-1', '&preparation=accepted-1&batch_id=batch-1']) {
+    const route = base + suffix;
+    const view = firstLookReportView(batchReport({ report_route: route }), now);
+    assert.equal(view.actions.find(action => action.id === 'review_batch')?.href, route);
+  }
+  for (const suffix of [
+    '&preparation=',
+    '&preparation=x&preparation=y',
+    '&preparation=%2Fother',
+    '&preparation=x&scan=true',
+    '&preparation=x#other'
+  ]) {
+    const view = firstLookReportView(batchReport({ report_route: base + suffix }), now);
+    assert.equal(
+      view.actions.some(action => action.href),
+      false
+    );
+  }
+});
+
 test('a first batch report posts Not now and Retry to its own setup, and Review batch posts nothing', async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {

@@ -27,7 +27,12 @@ import {
 } from './library-open.js';
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
-import { mapPlacementView, renderMapPlacement, reportedLine } from './first-look-report.js';
+import {
+  isFileJanitorReviewRoute,
+  mapPlacementView,
+  renderMapPlacement,
+  reportedLine
+} from './first-look-report.js';
 import {
   claimNeedsItem,
   linkNeedsYouWords,
@@ -2294,12 +2299,6 @@ export function workspaceGoneView(offer) {
   };
 }
 
-// The File Janitor review a first batch opens: its workspace's panel, on the
-// batch when the scan made one. A preparation identity lets the destination
-// observe the original empty result too; it is never permission to scan again.
-const FILE_JANITOR_ROUTE =
-  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&preparation=[A-Za-z0-9_-]+)?(?:&batch_id=[A-Za-z0-9_-]+)?$/;
-
 // firstBatchView is an inbox hire's first batch, as its outcome recorded it:
 // where Review batch (or Open File Janitor) leads, and the counts. Null for
 // any other outcome, or a route that is not a File Janitor review.
@@ -2307,7 +2306,7 @@ export function firstBatchView(offer) {
   const batch = offer?.outcome?.first_look?.batch;
   if (!batch || typeof batch !== 'object') return null;
   const route = String(batch.route || '').trim();
-  if (!FILE_JANITOR_ROUTE.test(route)) return null;
+  if (!isFileJanitorReviewRoute(route)) return null;
   const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
   const outcome = ['batch', 'no_eligible', 'failed'].includes(batch.outcome) ? batch.outcome : '';
   if (!outcome) return null;

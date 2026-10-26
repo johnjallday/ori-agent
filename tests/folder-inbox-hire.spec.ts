@@ -83,11 +83,21 @@ async function expectCurator(page: Page, folder: string) {
   await expect(panel(page).locator('.folder-visual__agent')).toBeVisible();
 }
 
-async function hireAndStart(page: Page, label: RegExp, folder: string) {
-  await page.getByRole('button', { name: label }).click();
-  await expect(panel(page).getByText(`${folder} is ready`, { exact: true })).toBeVisible({
+async function reviewAndPrepare(page: Page, folder: string) {
+  const before = (await api(page, '/api/workspaces')).folders.length;
+  await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  const review = page.locator('#assistedWorkspacePlacementPanel');
+  const confirm = review.getByRole('button', { name: 'Create workspace & scan', exact: true });
+  await expect(confirm).toBeEnabled();
+  expect((await api(page, '/api/workspaces')).folders.length).toBe(before);
+  await confirm.click();
+  await expect(review.getByRole('heading', { name: 'Workspace prepared' })).toBeVisible({
     timeout: 60_000
   });
+  await review.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(panel(page).locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    `✓ ${folder} is ready`
+  );
 }
 
 test.beforeAll(async ({ request }) => {
@@ -109,7 +119,7 @@ test('no model is configured, and Downloads is answered by a hire card on Home',
     /^Prepare reviewable filing batches/
   );
   await expect(card.getByLabel(/Also watch this folder/)).not.toBeChecked();
-  await expect(card.getByRole('button', { name: /Hire & start/ })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Place & review', exact: true })).toBeVisible();
   const text = await card.innerText();
   expect(text).not.toMatch(/model tokens|Start first look/);
   expect(text).toContain('Linked where it is');
@@ -134,18 +144,14 @@ test('the composer answers Downloads with the same card, and Not now is this fol
   await card.getByRole('button', { name: /Keep chatting/ }).click();
 });
 
-test('Hire and start makes one workspace, links the folder metadata-only and reports the batch', async ({
+test('reviewed suggested setup makes one workspace, links metadata-only and preserves the batch report', async ({
   page
 }) => {
   await attachFromHome(page, 'Downloads');
   await expectCurator(page, 'Downloads');
   const before = readdirSync(downloads).sort();
-  await hireAndStart(page, /Hire & start/, 'Downloads');
-  await expect(
-    panel(page)
-      .getByRole('button', { name: 'Review batch' })
-      .or(panel(page).getByRole('link', { name: 'Review batch' }))
-  ).toBeVisible();
+  await reviewAndPrepare(page, 'Downloads');
+  await expect(panel(page).getByRole('link', { name: 'Review batch', exact: true })).toBeVisible();
   // The canonical result: one workspace, one agent, Filed/ inside, nothing moved,
   // watching off.
   expect(await count(page, 'workspaces', 'Downloads')).toBe(1);
@@ -161,7 +167,11 @@ test('Hire and start makes one workspace, links the folder metadata-only and rep
   const readiness = await api(page, `/api/workspaces/${id}/file-janitor/readiness`);
   expect(readiness.readiness.paused).toBe(true);
   const review = await api(page, `/api/workspaces/${id}/file-janitor/setup-review`);
-  expect(review.review.current_mode).toBe('manual');
+  expect(review.review).toMatchObject({
+    state: 'prepared',
+    monitoring: false,
+    result: { privacy_mode: 'metadata_only' }
+  });
 });
 
 test('the first batch is reported under Needs you on Home and in the drawer, and opens its review', async ({
@@ -182,7 +192,12 @@ test('the first batch is reported under Needs you on Home and in the drawer, and
     .getByRole('link', { name: 'Review batch' });
   await expect(link).toBeVisible({ timeout: 30_000 });
   await link.click({ timeout: 10_000 });
-  await expect(page).toHaveURL(/\/workspaces\/downloads\?panel=file-janitor&batch_id=/);
+  const destination = new URL(item!.report_route!, page.url());
+  expect(destination.pathname).toBe('/workspaces/downloads');
+  expect(destination.searchParams.get('panel')).toBe('file-janitor');
+  expect(destination.searchParams.get('batch_id')).toBeTruthy();
+  expect(destination.searchParams.get('preparation')).toBeTruthy();
+  await expect(page).toHaveURL(destination.href);
   await expect(page.getByText(/files ready for review|proposed/).first()).toBeVisible({
     timeout: 30_000
   });
@@ -224,8 +239,10 @@ test('a second inbox folder is an Assign, and the same folder again is already t
   await attachFromHome(page, 'Desktop');
   await expectCurator(page, 'Desktop');
   await expect(panel(page).locator('.folder-visual__agent')).toContainText('Already hired');
-  await expect(panel(page).getByRole('button', { name: /Assign & start/ })).toBeVisible();
-  await hireAndStart(page, /Assign & start/, 'Desktop');
+  await expect(
+    panel(page).getByRole('button', { name: 'Place & review', exact: true })
+  ).toBeVisible();
+  await reviewAndPrepare(page, 'Desktop');
   // An empty folder reports that there is nothing to file.
   const items = await inboxFirstBatchItems(page.request);
   const empty = items.find(entry => entry.title === 'Nothing to file in Desktop right now.');
@@ -242,7 +259,9 @@ test('a second inbox folder is an Assign, and the same folder again is already t
     '/workspaces/downloads'
   );
   await expect(
-    panel(page).getByRole('button', { name: /Hire & start|Assign & start/ })
+    panel(page).getByRole('button', {
+      name: /Hire & start|Assign & start|Place & review|Use suggested setup/
+    })
   ).toHaveCount(0);
   expect(await count(page, 'workspaces', 'Downloads')).toBe(1);
 });

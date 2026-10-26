@@ -21,9 +21,14 @@ const REPORT_ACTIONS = ['start_this', 'not_now', 'retry', 'review_batch', 'open_
 const REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
 // A workspace's own page, and nothing else.
 const WORKSPACE_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*$/;
-// A workspace's File Janitor review, on one batch or not, and nothing else.
+// Shared by source completion and Needs you. A preparation identity observes
+// the original empty result; this local link never authorizes another scan.
 const FILE_JANITOR_ROUTE =
-  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&batch_id=[A-Za-z0-9_-]+)?$/;
+  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&preparation=[A-Za-z0-9_-]+)?(?:&batch_id=[A-Za-z0-9_-]+)?$/;
+
+export function isFileJanitorReviewRoute(route) {
+  return FILE_JANITOR_ROUTE.test(route);
+}
 
 // isFirstLookReportKind says whether a Today item is drawn as a report card
 // rather than a row.
@@ -158,7 +163,7 @@ function firstBatchReportView(item, now) {
   );
   const route = String(item.report_route || '').trim();
   const actions = [];
-  if (!failed && FILE_JANITOR_ROUTE.test(route)) {
+  if (!failed && isFileJanitorReviewRoute(route)) {
     if (offered.includes('review_batch'))
       actions.push({ id: 'review_batch', label: 'Review batch', primary: true, href: route });
     else if (offered.includes('open_janitor'))
