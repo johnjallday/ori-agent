@@ -672,8 +672,9 @@ let parkedStructure = '';
 // emptySendView is what an empty Send means with a folder attached: a folder
 // Ori recommended setup for is asked to explain that recommendation.
 // The placeholder says it before Send.
-export function emptySendView(folder, collection) {
+export function emptySendView(folder, collection, completed = false) {
   if (!folder) return null;
+  if (completed) return { placeholder: 'What would you like to do next?', text: '' };
   return collection
     ? {
         placeholder: `Explain setup for ${folder}`,
@@ -688,7 +689,11 @@ function currentEmptySend() {
   const collection =
     Boolean(state.preview && state.structure) ||
     Boolean(window.PersonalAssistantFolderSetup?.structure?.());
-  return emptySendView(state.observation.folder, collection);
+  return emptySendView(
+    state.observation.folder,
+    collection,
+    window.PersonalAssistantFolderSetup?.completed?.() === true
+  );
 }
 
 // The reply whose proposal the user chose to just discuss: its chips go, and
@@ -1250,6 +1255,10 @@ const api = {
   hasFolder: () => Boolean(controller?.state.observation),
   // What an empty Send sends with this folder attached, or null.
   emptySend: () => currentEmptySend(),
+  refreshEmptySend: () => {
+    updateSendHint();
+    window.PersonalAssistantPanel?.setComposerPlaceholder?.(currentEmptySend()?.placeholder || '');
+  },
   _controller: () => controller
 };
 if (typeof window !== 'undefined') window.PersonalAssistantFolderContext = api;

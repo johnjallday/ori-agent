@@ -57,6 +57,17 @@ function fixture(post) {
   };
 }
 
+test('completed folder retires both the setup placeholder and implicit empty request', () => {
+  assert.deepEqual(emptySendView('Album', true, true), {
+    placeholder: 'What would you like to do next?',
+    text: ''
+  });
+  assert.equal(emptySendView('Album', false, true).text, '');
+  assert.equal(emptySendView('Fresh', false, false).text, 'Explore this folder');
+  assert.match(emptySendView('Fresh', true, false).text, /Explain the setup/);
+  assert.equal(emptySendView('', false, true), null);
+});
+
 test('select is local, request is references only, and disclosure names provider boundary', async () => {
   const { controller, calls } = fixture(async () => ({
     observation: observation('a'),

@@ -1,6 +1,7 @@
 // Presentation of server-authored canonical review references. Model prose never
 // supplies a control, offer ID, candidate, route, or confirmation here.
 import { folderReceiptView } from './personal-assistant-folder.js';
+import { setupCompletionView, ownsSetupCompletion } from './personal-assistant-setup-completion.js';
 import {
   proposalView,
   placementProposalView,
@@ -1073,6 +1074,20 @@ function renderReferences() {
   }
 }
 
+function completedSetup() {
+  const offer = reviews[current?.offerId];
+  return Boolean(
+    current?.conversationId === window.PersonalAssistantConversation?.currentId?.() &&
+    ownsSetupCompletion(current, offer, setupCompletionView(offer, folderReceiptView(offer)))
+  );
+}
+
+// Publish only composer presentation. Never call contextChanged/render from
+// here: that would feed a review event back into the card's mutation owner.
+function publishCompletion() {
+  window.PersonalAssistantFolderContext?.refreshEmptySend?.();
+}
+
 function contextChanged(state) {
   if (!elements || !state) return;
   if (owner !== state.conversationId) {
@@ -1103,6 +1118,7 @@ function contextChanged(state) {
   if (!currentSuggestion(current, suggestion, reviews[suggestion?.offer_id])) suggestion = null;
   renderSuggestion();
   renderReferences();
+  publishCompletion();
 }
 
 function hydrate(
@@ -1183,6 +1199,7 @@ function init() {
       applyReviewContext(null);
     reviews[offer.id] = offer;
     renderReferences();
+    publishCompletion();
   });
   contextChanged(window.PersonalAssistantFolderContext.current());
 }
@@ -1190,6 +1207,7 @@ function init() {
 if (typeof window !== 'undefined')
   window.PersonalAssistantFolderSetup = {
     contextChanged,
+    completed: completedSetup,
     applySuggestion,
     applyReviewContext,
     hydrate,

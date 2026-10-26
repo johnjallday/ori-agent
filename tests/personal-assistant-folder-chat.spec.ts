@@ -326,7 +326,11 @@ async function choose(page: Page, name = 'Documents') {
 async function say(page: Page, prompt: string) {
   await page.locator('#personalAssistantInput').fill(prompt);
   await page.locator('#personalAssistantSend').click();
-  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  // Model selection is an asynchronous pre-send read before routing is busy.
+  await page.waitForFunction(() => {
+    const app = window as any;
+    return !app.PersonalAssistantPanel._state.pending && !app.OriAskRouting.getState().busy;
+  });
 }
 
 test('real host: local review, Keep chatting, adjusted setup and canonical receipt without a model', async ({
@@ -1028,7 +1032,10 @@ test('browser fixture: current choices survive cancellation but reject stale cal
   await strip.getByRole('button').first().click();
   expect(fixture.requests.length).toBe(before);
   await page.locator('#personalAssistantSend').click();
-  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  await page.waitForFunction(() => {
+    const app = window as any;
+    return !app.PersonalAssistantPanel._state.pending && !app.OriAskRouting.getState().busy;
+  });
   const latest = fixture.requests.filter(row => row.stage === 'ask').at(-1)!;
   expect(latest.folder_context.historical).toBe(true);
   expect(latest.folder_context.reference).toBeUndefined();

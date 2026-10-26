@@ -59,6 +59,48 @@ async function redraw(page: Page, offer: any) {
   );
 }
 
+const observation = {
+  version: 1,
+  id: 'completion-observation',
+  folder: 'Album-3',
+  files: 1,
+  projects: [{ id: 'candidate-0', name: 'Album-3', root: true }],
+  coverage: { max_depth: 3, max_entries: 5000, budget_seconds: 3, partial: false }
+};
+
+function conversationBody(offer: any = completed(), context: any = null, reviews: any = null) {
+  const binding = context || { revision: 'completion-event', observation, offer_id: offer.id };
+  return {
+    conversation: { id: offer.conversation_id, title: 'Keep this original title' },
+    messages: [
+      {
+        id: 'completion-event',
+        role: 'folder_context',
+        folder_context: { version: 1, observation, offer_id: offer.id }
+      }
+    ],
+    saved: [],
+    folder_context: binding,
+    folder_reviews: reviews || { [offer.id]: offer }
+  };
+}
+
+async function restore(
+  page: Page,
+  offer: any = completed(),
+  context: any = null,
+  reviews: any = null
+) {
+  const body = conversationBody(offer, context, reviews);
+  await page.route(`**/api/home-assistant/conversations/${offer.conversation_id}`, route =>
+    route.fulfill({ json: body })
+  );
+  await page.evaluate(
+    id => (window as any).PersonalAssistantConversation.resume(id),
+    offer.conversation_id
+  );
+}
+
 async function evidence(page: Page, name: string) {
   if (name.startsWith('02-')) await page.setViewportSize({ width: 1440, height: 1100 });
   await page.screenshot({ path: `tasks/evidence-assistant-setup-completion/${name}.png` });
@@ -254,6 +296,119 @@ test('fixture ticket-only output and File Janitor preserve truthful link labels'
   );
   await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
   expect(effects).toEqual([]);
+});
+
+test('fixture completed composer preserves draft, ignores empty Send and routes only typed follow-up', async ({
+  page
+}) => {
+  const offer: any = completed();
+  offer.first_task = {
+    state: 'failed',
+    recipe: 'folder_summary',
+    optional: true,
+    message: 'Summary unavailable'
+  };
+  const { card, effects } = await mount(page, offer);
+  const input = page.locator('#personalAssistantInput');
+  const draft = '  界 🎼 Exact\n draft  ';
+  await input.fill(draft);
+  await restore(page, offer);
+  await expect(input).toHaveValue(draft);
+  await expect(input).toHaveAttribute('placeholder', 'What would you like to do next?');
+  await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText('Album-3');
+  await expect(page.locator('#personalAssistantConversationTitle')).toHaveText(
+    'Keep this original title'
+  );
+  for (const value of ['', '  \n\t ']) {
+    await input.fill(value);
+    await page.locator('#personalAssistantSend').click();
+    await expect(input).toHaveValue(value);
+  }
+  expect(effects).toEqual([]);
+  const sent: any[] = [];
+  await page.route('**/api/home-assistant/route', route => {
+    sent.push({ stage: 'route', ...route.request().postDataJSON() });
+    return route.fulfill({
+      json: {
+        intent: 'assistant_conversation',
+        route_mode: 'home_inline',
+        target_surface: 'current'
+      }
+    });
+  });
+  await page.route('**/api/home-assistant/ask', route => {
+    sent.push({ stage: 'ask', ...route.request().postDataJSON() });
+    return route.fulfill({
+      json: {
+        response: 'Controlled follow-up fixture response.',
+        intent: 'assistant_conversation',
+        conversation: {
+          id: offer.conversation_id,
+          stored: true,
+          title: 'Keep this original title'
+        },
+        folder_context: conversationBody(offer).folder_context,
+        folder_reviews: { [offer.id]: offer }
+      }
+    });
+  });
+  await input.fill('What should we discuss next?');
+  await page.locator('#personalAssistantSend').click();
+  await expect.poll(() => sent.filter(row => row.stage === 'ask').length).toBe(1);
+  const ask = sent.find(row => row.stage === 'ask');
+  expect(ask.prompt).toBe('What should we discuss next?');
+  expect(ask.folder_context.selection_id).toBe(observation.id);
+  expect(ask.conversation.id).toBe(offer.conversation_id);
+  await expect(page.locator('#homeAssistantConversation')).toContainText(
+    'Controlled follow-up fixture response.'
+  );
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await evidence(page, '03-composer');
+  await page.route('**/workspaces/album-three', route =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<h1>Existing workspace navigation fixture</h1>'
+    })
+  );
+  await card.getByRole('link', { name: 'Open workspace', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Existing workspace navigation fixture' })
+  ).toBeVisible();
+  expect(effects).toEqual([]);
+});
+
+test('fixture replacement, detach, New and a newer review revoke composer completion', async ({
+  page
+}) => {
+  await mount(page);
+  await restore(page);
+  const input = page.locator('#personalAssistantInput');
+  await expect(input).toHaveAttribute('placeholder', 'What would you like to do next?');
+  await page.evaluate(() => {
+    const app = window as any;
+    const context = app.PersonalAssistantFolderContext;
+    context._controller().state.preview = true;
+    app.PersonalAssistantFolderSetup.contextChanged(context.current());
+  });
+  await expect(input).toHaveAttribute('placeholder', 'Explore this folder');
+  const newer = { ...completed(), id: 'new-pending', status: 'pending', outcome: null };
+  await restore(page, newer, null, { [completed().id]: completed(), [newer.id]: newer });
+  await page.evaluate(
+    offer =>
+      document.dispatchEvent(
+        new CustomEvent('personal-assistant:folder-offer', { detail: { offer } })
+      ),
+    completed()
+  );
+  await expect(input).toHaveAttribute('placeholder', 'Explore this folder');
+  await page.evaluate(() => {
+    const app = window as any;
+    app.PersonalAssistantFolderContext.hydrate('completion-chat', { revision: 'detached' });
+  });
+  await expect(input).not.toHaveAttribute('placeholder', 'What would you like to do next?');
+  await page.evaluate(() => (window as any).PersonalAssistantConversation.startNew());
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(input).not.toHaveAttribute('placeholder', 'What would you like to do next?');
 });
 
 test('fixture first completion never collapses focused evidence', async ({ page }) => {

@@ -42,6 +42,7 @@ import {
   restoreAssistantPanelFocus,
   restoredDraft,
   composerPlaceholder,
+  assistantSendText,
   safeTodayRoute,
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
@@ -54,6 +55,33 @@ const workspacePage = {
   entry: { status: 'ready', name: 'REAPER Assistant', role: 'orchestrator' },
   personal: { name: 'Mina', available: true }
 };
+
+test('actual submit text retires completed empty defaults without changing other recipients', () => {
+  for (const draft of ['', '  \n\t']) {
+    assert.equal(
+      assistantSendText({ draft, personal: true, hasFolder: true, folderDefault: '' }),
+      ''
+    );
+    assert.equal(
+      assistantSendText({ draft, personal: true, hasFolder: true }),
+      'Explore this folder'
+    );
+    assert.equal(
+      assistantSendText({ draft, personal: true, linkDefault: 'Discuss link' }),
+      'Discuss link'
+    );
+    assert.equal(assistantSendText({ draft, personal: false, hasFolder: true }), '');
+  }
+  assert.equal(
+    assistantSendText({
+      draft: '  Explicit 界 follow-up  ',
+      personal: true,
+      hasFolder: true,
+      folderDefault: ''
+    }),
+    'Explicit 界 follow-up'
+  );
+});
 
 test('the header, launcher and composer name the entry agent on a workspace page', () => {
   const view = personalAssistantPanelView({ state: 'active', display_name: 'Mina' });
