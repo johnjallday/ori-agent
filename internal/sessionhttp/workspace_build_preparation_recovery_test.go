@@ -30,9 +30,7 @@ func (s splitPreparationOwnerStore) Get(id string) (*workspace.Workspace, error)
 	if err != nil || ws == nil {
 		return ws, err
 	}
-	copy := *ws
-	copy.OwnerUserID = ""
-	return &copy, nil
+	return &workspace.Workspace{ID: ws.ID, Status: ws.Status}, nil
 }
 
 func (s splitPreparationOwnerStore) GetFolderWorkspace(id string) (*workspace.Workspace, error) {
@@ -40,9 +38,16 @@ func (s splitPreparationOwnerStore) GetFolderWorkspace(id string) (*workspace.Wo
 	if err != nil || ws == nil {
 		return ws, err
 	}
-	copy := *ws
-	copy.OwnerUserID = "foreign"
-	return &copy, nil
+	data, err := json.Marshal(ws)
+	if err != nil {
+		return nil, err
+	}
+	var mirror workspace.Workspace
+	if err := json.Unmarshal(data, &mirror); err != nil {
+		return nil, err
+	}
+	mirror.OwnerUserID = "foreign"
+	return &mirror, nil
 }
 
 func TestWorkspaceBuildPreparation_BlankPrimaryOwnerIsLocalNotUnowned(t *testing.T) {

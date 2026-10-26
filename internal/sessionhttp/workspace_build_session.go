@@ -169,20 +169,16 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		h.createWorkspaceBuildSession(w, r)
 	default:
 		parts := strings.Split(rest, "/")
-		// Preparation serializes on buildPreparationMu before taking a source
-		// lease, so concurrent tabs observe the same accepted claim.
-		if r.Method != http.MethodGet && len(parts) >= 2 && !strings.HasPrefix(parts[len(parts)-1], "janitor-") {
-			release, ok := h.acquirePlacementBuild(w, r, parts[0], parts[len(parts)-1])
-			if !ok {
-				return
-			}
-			defer release()
-		}
 		if len(parts) == 3 && strings.TrimSpace(parts[0]) != "" && (parts[1] == "folder" || parts[1] == "link") && parts[2] == "detach" {
 			if r.Method != http.MethodPost {
 				_ = orihttp.RespondMethodNotAllowed(w)
 				return
 			}
+			release, ok := h.acquirePlacementBuild(w, r, parts[0], "detach")
+			if !ok {
+				return
+			}
+			defer release()
 			if parts[1] == "link" {
 				h.postWorkspaceBuildLinkDetach(w, r, parts[0])
 			} else {
@@ -203,6 +199,17 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 			return
 		}
 		id, action := parts[0], parts[1]
+		// Acquire only after matching a route and method. Wrong verbs and unknown
+		// paths retain their ordinary 405/404 response without reading authority.
+		mutate := func(handler func(http.ResponseWriter, *http.Request, string)) {
+			release, ok := h.acquirePlacementBuild(w, r, id, action)
+			if !ok {
+				return
+			}
+			defer release()
+			handler(w, r, id)
+		}
+		// Preparation instead takes buildPreparationMu before its source lease.
 		switch {
 		case action == "janitor-defer" && r.Method == http.MethodPost:
 			h.deferWorkspaceBuildPreparation(w, r, id)
@@ -213,23 +220,23 @@ func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Re
 		case action == "janitor-review" || action == "janitor-prepare":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		case action == "pause" && r.Method == http.MethodPost:
-			h.pauseWorkspaceBuild(w, r, id)
+			mutate(h.pauseWorkspaceBuild)
 		case action == "pause":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		case action == "turns" && r.Method == http.MethodPost:
-			h.postWorkspaceBuildTurn(w, r, id)
+			mutate(h.postWorkspaceBuildTurn)
 		case action == "draft" && r.Method == http.MethodPatch:
-			h.patchWorkspaceBuildDraft(w, r, id)
+			mutate(h.patchWorkspaceBuildDraft)
 		case action == "abandon" && r.Method == http.MethodPost:
-			h.abandonWorkspaceBuildSession(w, r, id)
+			mutate(h.abandonWorkspaceBuildSession)
 		case action == "folder" && r.Method == http.MethodPost:
-			h.postWorkspaceBuildFolder(w, r, id)
+			mutate(h.postWorkspaceBuildFolder)
 		case action == "link" && r.Method == http.MethodPost:
-			h.postWorkspaceBuildLink(w, r, id)
+			mutate(h.postWorkspaceBuildLink)
 		case action == "setup" && r.Method == http.MethodPost:
-			h.postWorkspaceBuildSetup(w, r, id)
+			mutate(h.postWorkspaceBuildSetup)
 		case action == "home-provider" && r.Method == http.MethodPost:
-			h.postWorkspaceBuildHomeProvider(w, r, id)
+			mutate(h.postWorkspaceBuildHomeProvider)
 		case action == "turns" || action == "draft" || action == "abandon" || action == "folder" || action == "link" || action == "setup" || action == "home-provider":
 			_ = orihttp.RespondMethodNotAllowed(w)
 		default:
