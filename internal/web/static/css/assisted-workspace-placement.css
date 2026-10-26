@@ -1,5 +1,5 @@
-/* Building-side setup sheet. Outside the map's transformed world; compact
-   mode uses the same sheet, not a separate creation flow. */
+/* Review first, then a compact positioning summary outside the map's
+   transformed world. Both present the same canonical draft. */
 .assisted-placement {
   --ap-paper: var(--ori-paper, var(--bg-secondary, #faf8f2));
   --ap-ink: var(--ori-ink, var(--text-primary, #20342d));
@@ -235,16 +235,26 @@
   z-index: 1040;
   top: 5rem;
   right: 1rem;
-  width: min(34rem, 42vw);
+  width: min(24rem, 34vw);
   max-height: calc(100dvh - 6rem);
   overscroll-behavior: contain;
   filter: drop-shadow(0 0.5rem 1rem rgb(0 0 0 / 15%));
 }
 
-/* Keep the geometry controls beside, not underneath, the setup sheet. */
+.assisted-placement--position {
+  padding: 1rem;
+}
+.assisted-placement--position .assisted-placement__hint {
+  margin-top: 0.75rem;
+}
+.assisted-placement--position .assisted-placement__primary {
+  width: 100%;
+}
+
+/* Keep geometry controls beside, not underneath, the compact summary. */
 body:has(.assisted-placement-host--map:not([hidden])) .ws-map-placement-controls {
   left: 1rem;
-  right: calc(min(34rem, 42vw) + 1rem);
+  right: calc(min(24rem, 34vw) + 1rem);
   width: auto;
   max-width: none;
   transform: none;

@@ -33,7 +33,7 @@ async function prototype(page: Page) {
     const { mountPlacementPanel } = await import(moduleURL);
     const host = document.createElement('main');
     host.id = 'placement-prototype';
-    host.innerHTML = `<div id="placement-prototype-map" class="ws-map"></div><div id="placement-prototype-panel"></div><section id="placement-prototype-entry" aria-label="Prototype assistant proposal"><strong>Prototype · Your assistant suggests</strong><p>A File Janitor workspace for Music.</p><button data-entry="place">Place & review</button><button data-entry="suggested">Use suggested setup</button></section>`;
+    host.innerHTML = `<div id="placement-prototype-map" class="ws-map"></div><div id="placement-prototype-panel"></div><section id="placement-prototype-entry" aria-label="Prototype assistant proposal"><strong>Prototype · Your assistant suggests</strong><p>A File Janitor workspace for Music.</p><button data-entry="place">Review setup</button><button data-entry="suggested">Use automatic placement</button></section>`;
     document.body.append(host);
     const map = (window as any).OriWorkspaceMap;
     map.mount(document.getElementById('placement-prototype-map'), {
@@ -54,6 +54,8 @@ async function prototype(page: Page) {
     const panel = mountPlacementPanel(
       document.getElementById('placement-prototype-panel'),
       (intent: any) => {
+        // Like the real owner, preserve an actively typed value until change.
+        if (intent.action === 'dirty') return;
         if (intent.action === 'edit') {
           if (intent.field === 'monitoring') view.monitoring = intent.value;
           else view.draft[intent.field] = intent.value;
@@ -62,6 +64,11 @@ async function prototype(page: Page) {
         } else if (intent.action === 'suggested') {
           map.endPlacement('prototype-only');
           view.candidate = null;
+          view.onMap = false;
+          view.automatic = true;
+        } else if (intent.action === 'back') {
+          map.endPlacement('prototype-only');
+          view.onMap = false;
         } else if (intent.action === 'agent') {
           view.team = [{ name: 'Saved Curator', action: 'attach' }];
         } else if (intent.action === 'folder') {
@@ -91,13 +98,15 @@ async function prototype(page: Page) {
         terms: { daily_scan_local_time: '09:00' }
       };
       view.canConfirm = true;
+      view.canPlace = true;
       const focusedField = (document.activeElement as HTMLElement)?.dataset?.placementField;
-      if (view.candidate) place();
       panel.update(view);
       if (focusedField)
         host.querySelector<HTMLInputElement>(`[data-placement-field="${focusedField}"]`)?.focus();
     }
     function place() {
+      view.onMap = true;
+      view.automatic = false;
       map.beginPlacement({
         token: 'prototype-only',
         mode: 'draft',
@@ -108,6 +117,7 @@ async function prototype(page: Page) {
           render();
         },
         onBack: () => {
+          view.onMap = false;
           view.message = 'Position selection closed. Your draft choices are kept.';
           render();
         }
@@ -116,9 +126,9 @@ async function prototype(page: Page) {
     host.querySelectorAll('[data-entry]').forEach(button =>
       button.addEventListener('click', () => {
         document.getElementById('placement-prototype-entry')!.hidden = true;
+        view.automatic = (button as HTMLElement).dataset.entry === 'suggested';
         render();
-        if ((button as HTMLElement).dataset.entry === 'place' && innerWidth > 700) place();
-        else host.querySelector<HTMLInputElement>('[data-placement-field="name"]')?.focus();
+        host.querySelector<HTMLInputElement>('[data-placement-field="name"]')?.focus();
       })
     );
   });
@@ -135,19 +145,13 @@ for (const narrow of [false, true]) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const effects = await prototype(page);
     await page
-      .getByRole('button', { name: narrow ? 'Use suggested setup' : 'Place & review', exact: true })
+      .getByRole('button', {
+        name: narrow ? 'Use automatic placement' : 'Review setup',
+        exact: true
+      })
       .click();
-    const panel = page.getByRole('region', { name: 'Review proposed workspace' });
+    const panel = page.locator('#placement-prototype-panel');
     await expect(panel).toBeVisible();
-    if (!narrow) {
-      const canvas = page.locator('#placement-prototype-map [data-ws-map-viewport]');
-      await canvas.click({ position: { x: 650, y: 350 } });
-      await canvas.focus();
-      await page.keyboard.press('ArrowRight');
-      await page.keyboard.press('Enter');
-      await expect(panel).toContainText('Requested position:');
-      await expect(page.locator('[data-ws-map-placement-preview]')).toContainText('Draft');
-    }
     await panel.getByRole('textbox', { name: 'Workspace name', exact: true }).fill('Music inbox');
     await page.keyboard.press('Tab');
     await expect(panel.getByRole('region', { name: 'Before you confirm' })).toContainText(
@@ -156,10 +160,21 @@ for (const narrow of [false, true]) {
     await panel.getByRole('button', { name: 'Choose agent' }).click();
     await expect(panel).toContainText('Saved Curator · saved agent');
     await expect(panel).toContainText('Off · manual scans only.');
-    await expect(panel.getByRole('button', { name: 'Create workspace & scan' })).toBeEnabled();
     await mkdir('tasks/evidence-assisted-workspace-placement/group-1', { recursive: true });
     const prefix = `tasks/evidence-assisted-workspace-placement/group-1/prototype-${narrow ? 'narrow' : 'desktop'}`;
     await page.screenshot({ path: `${prefix}-review.png` });
+    if (!narrow) {
+      await panel.getByRole('button', { name: 'Next: place on map' }).click();
+      await expect(panel.getByLabel('Workspace name')).toHaveCount(0);
+      const canvas = page.locator('#placement-prototype-map [data-ws-map-viewport]');
+      await canvas.click({ position: { x: 650, y: 350 } });
+      await canvas.focus();
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Enter');
+      await expect(panel).toContainText('Requested position:');
+      await expect(page.locator('[data-ws-map-placement-preview]')).toContainText('Draft');
+    }
+    await expect(panel.getByRole('button', { name: 'Create workspace & scan' })).toBeEnabled();
     await panel.getByRole('button', { name: 'Create workspace & scan' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${prefix}-confirmation.png` });
     const cancel = panel.getByRole('button', { name: 'Cancel draft' });

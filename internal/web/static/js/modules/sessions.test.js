@@ -202,6 +202,75 @@ test('a refused or unverifiable inbox handoff has no ordinary-create fallback', 
   }
 });
 
+test('both inbox entries open review without automatically activating map placement', async () => {
+  for (const mode of ['map', 'suggested']) {
+    const host = { parentElement: {} };
+    const manager = loadSessionManager(
+      undefined,
+      {
+        OriAssistedWorkspacePlacement: {
+          createPlacementCards: () => ({}),
+          mountPlacementPanel: () => ({})
+        }
+      },
+      { getElementById: () => host }
+    );
+    const session = { id: 'current', status: 'open' };
+    manager.mountWorkspaceBuildPane = manager.syncWorkspaceBuildPresentation = () => {};
+    manager.newWorkspaceBuildState = () => ({});
+    manager.applyWorkspaceBuildSession = async value => {
+      manager.workspaceBuild.session = value;
+    };
+    manager.placeInboxWorkspaceDraft = () => assert.fail('review was skipped');
+    assert.equal(
+      await manager.startInboxWorkspacePlacement({ inboxPlacement: { session, mode } }),
+      true
+    );
+    assert.equal(manager.workspaceBuild.placement.ready, true);
+    assert.equal(manager.workspaceBuild.placement.onMap, undefined);
+  }
+});
+
+test('unreviewed, unsaved and conflicted setups cannot enter placement', () => {
+  for (const state of [
+    { current: false },
+    { dirty: true },
+    { draftInFlight: true },
+    { draftError: true },
+    { draftConflict: true }
+  ]) {
+    const manager = loadSessionManager();
+    manager.workspaceBuild = {
+      session: { status: 'open' },
+      placement: { ready: true, dirty: state.dirty },
+      ...state
+    };
+    manager.workspaceBuildPreparationCurrent = () => state.current !== false;
+    manager.hideWorkspaceCreatorModal = () => assert.fail('unreviewed placement opened');
+    manager.placeInboxWorkspaceDraft();
+    assert.equal(manager.workspaceBuild.placement.onMap, undefined);
+  }
+});
+
+test('manual review cannot confirm before placement; automatic selection remains inert', async () => {
+  const manager = loadSessionManager();
+  const placement = { mode: 'map', candidate: { x: 1, y: 2 } };
+  manager.workspaceBuild = { session: { status: 'open' }, placement };
+  let confirmations = 0;
+  manager.confirmWorkspaceBuildPreparation = async () => {
+    confirmations++;
+  };
+  manager.syncWorkspaceBuildPresentation = manager.returnInboxWorkspaceToReview = () => {};
+  await manager.actOnInboxWorkspacePlacement({ action: 'confirm' });
+  assert.equal(confirmations, 0);
+  await manager.actOnInboxWorkspacePlacement({ action: 'suggested' });
+  assert.equal(confirmations, 0);
+  assert.equal(placement.candidate, null);
+  assert.equal(placement.mode, 'suggested');
+  await manager.actOnInboxWorkspacePlacement({ action: 'confirm' });
+  assert.equal(confirmations, 1);
+});
+
 test('inbox map callbacks select geometry only and ignore a superseded source generation', () => {
   let spec;
   const listeners = new Map();
@@ -241,6 +310,7 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
     }
   );
   const placement = {
+    ready: true,
     token: 'source-generation',
     candidate: null,
     host: { classList: { add() {} } }
@@ -252,6 +322,7 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
   manager.confirmWorkspaceBuildPreparation = () => {
     confirmations++;
   };
+  manager.workspaceBuildPreparationCurrent = () => true;
   manager.placeInboxWorkspaceDraft();
   assert.equal(spec, undefined, 'placement waits for the opening transition');
   emit('shown.bs.modal');
@@ -283,9 +354,10 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
 });
 
 test('Map disappearing or setup starting during modal suspension returns the same choices to review', () => {
-  for (const interruption of ['hidden', 'preparing']) {
+  for (const interruption of ['hidden', 'preparing', 'stale-review']) {
     let hidden;
     let visible = true;
+    let reviewCurrent = true;
     let returned = 0;
     const modal = {
       dataset: {},
@@ -307,16 +379,18 @@ test('Map disappearing or setup starting during modal suspension returns the sam
     const point = { x: 760, y: 456 };
     const build = {
       session: { status: 'open', draft: { name: 'Keep my choices' } },
-      placement: { token: 'current', candidate: point }
+      placement: { ready: true, token: 'current', candidate: point }
     };
     manager.workspaceBuild = build;
     manager.hideWorkspaceCreatorModal = () => {};
+    manager.workspaceBuildPreparationCurrent = () => reviewCurrent;
     manager.returnInboxWorkspaceToReview = () => {
       returned++;
     };
     manager.placeInboxWorkspaceDraft();
     if (interruption === 'hidden') visible = false;
-    else build.preparationBusy = true;
+    else if (interruption === 'preparing') build.preparationBusy = true;
+    else reviewCurrent = false;
     hidden();
     assert.equal(returned, 1);
     assert.equal(build.placement.candidate, point);
@@ -346,7 +420,7 @@ test('draft adoption does not transiently disable the next keyboard control befo
 });
 
 test('Back and slot navigation wait for queued material edits without claiming a later editor', async () => {
-  for (const action of ['back', 'agent', 'folder']) {
+  for (const action of ['back', 'agent', 'folder', 'place']) {
     for (const replaced of [false, true]) {
       const manager = loadSessionManager();
       manager.workspaceBuild = { session: { status: 'open' }, placement: { onMap: true } };
@@ -359,6 +433,7 @@ test('Back and slot navigation wait for queued material edits without claiming a
       manager.returnInboxWorkspaceToReview = () => {
         returned++;
       };
+      manager.placeInboxWorkspaceDraft = manager.returnInboxWorkspaceToReview;
       manager.collapseWorkspaceBuild =
         manager.goToWizardStep =
         manager.openWorkspaceBuildFolderChooser =

@@ -85,7 +85,7 @@ async function expectCurator(page: Page, folder: string) {
 
 async function reviewAndPrepare(page: Page, folder: string) {
   const before = (await api(page, '/api/workspaces')).folders.length;
-  await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const review = page.locator('#assistedWorkspacePlacementPanel');
   const confirm = review.getByRole('button', { name: 'Create workspace & scan', exact: true });
   await expect(confirm).toBeEnabled();
@@ -119,7 +119,7 @@ test('no model is configured, and Downloads is answered by a hire card on Home',
     /^Prepare reviewable filing batches/
   );
   await expect(card.getByLabel(/Also watch this folder/)).not.toBeChecked();
-  await expect(card.getByRole('button', { name: 'Place & review', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Review setup', exact: true })).toBeVisible();
   const text = await card.innerText();
   expect(text).not.toMatch(/model tokens|Start first look/);
   expect(text).toContain('Linked where it is');
@@ -240,7 +240,7 @@ test('a second inbox folder is an Assign, and the same folder again is already t
   await expectCurator(page, 'Desktop');
   await expect(panel(page).locator('.folder-visual__agent')).toContainText('Already hired');
   await expect(
-    panel(page).getByRole('button', { name: 'Place & review', exact: true })
+    panel(page).getByRole('button', { name: 'Review setup', exact: true })
   ).toBeVisible();
   await reviewAndPrepare(page, 'Desktop');
   // An empty folder reports that there is nothing to file.
@@ -260,7 +260,7 @@ test('a second inbox folder is an Assign, and the same folder again is already t
   );
   await expect(
     panel(page).getByRole('button', {
-      name: /Hire & start|Assign & start|Place & review|Use suggested setup/
+      name: /Hire & start|Assign & start|Review setup|Use automatic placement/
     })
   ).toHaveCount(0);
   expect(await count(page, 'workspaces', 'Downloads')).toBe(1);

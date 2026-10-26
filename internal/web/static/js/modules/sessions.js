@@ -12387,21 +12387,8 @@ const sessionManager = {
       candidate: null
     };
     build.janitorMonitoring = session.placement_monitoring === true;
-    const modal = document.getElementById('addFolderModal');
-    let shown = modal?.getAttribute('aria-modal') === 'true';
-    modal?.addEventListener(
-      'shown.bs.modal',
-      () => {
-        shown = true;
-        if (
-          this.workspaceBuild === build &&
-          build.placement.ready &&
-          build.placement.mode === 'map'
-        )
-          this.placeInboxWorkspaceDraft();
-      },
-      { once: true }
-    );
+    // Both assistant entries start with the full setup review. Map placement
+    // is a separate, explicit step after the current choices have been reviewed.
     const ui =
       window.OriAssistedWorkspacePlacement ||
       (await import('/js/modules/assisted-workspace-placement.js'));
@@ -12424,7 +12411,6 @@ const sessionManager = {
     if (this.workspaceBuild !== build) return false;
     build.placement.ready = true;
     this.syncWorkspaceBuildPresentation();
-    if (shown && build.placement.mode === 'map') this.placeInboxWorkspaceDraft();
     return true;
   },
 
@@ -12610,12 +12596,21 @@ const sessionManager = {
       ),
       candidate: placement.candidate,
       onMap: placement.onMap,
+      automatic: placement.mode !== 'map',
+      canPlace:
+        placement.ready &&
+        !placement.dirty &&
+        !editing &&
+        !accepted &&
+        !closed &&
+        !build.draftConflict &&
+        Boolean(review),
       canConfirm:
         placement.ready &&
         !placement.dirty &&
         !editing &&
         (accepted || Boolean(review)) &&
-        (!placement.onMap || Boolean(placement.candidate)),
+        (placement.onMap ? Boolean(placement.candidate) : placement.mode !== 'map'),
       canRefresh:
         !accepted &&
         !closed &&
@@ -12630,7 +12625,7 @@ const sessionManager = {
           ? 'This draft was closed elsewhere. It cannot create anything; close this editor and return to the assistant.'
           : placement.message ||
             build.preparationMessage ||
-            'Choose a position or keep the automatic layout. Review permissions before confirming.',
+            'Review this setup, then choose its position. Nothing is created until Create workspace & scan.',
       result: placement.result,
       positionFailed: placement.positionFailed,
       resultName: placement.resultName,
@@ -12663,6 +12658,8 @@ const sessionManager = {
       return;
     }
     if (action === 'reload-draft' && build.draftConflict) {
+      // Changed material choices must be seen in the full review before placing.
+      if (placement.onMap) this.returnInboxWorkspaceToReview();
       await this.reloadInboxWorkspaceDraft(build);
       return;
     }
@@ -12700,15 +12697,25 @@ const sessionManager = {
       this.scheduleWorkspaceBuildDraft({ user: true });
       await this.flushWorkspaceBuildDraft({ force: true });
     } else if (action === 'confirm') {
-      if (placement.dirty || (placement.onMap && !placement.candidate)) return;
+      if (
+        placement.dirty ||
+        (!build.acceptedPreparation &&
+          !build.preparationUncertain &&
+          (placement.onMap ? !placement.candidate : placement.mode === 'map'))
+      )
+        return;
       await this.confirmWorkspaceBuildPreparation();
     } else if (action === 'review') {
       placement.message = '';
       build.janitorReviewFailureKey = '';
       await this.reviewWorkspaceBuildPreparation();
     } else if (action === 'place') {
+      await this.flushWorkspaceBuildDraft({ force: true });
+      if (this.workspaceBuild !== build) return;
       this.placeInboxWorkspaceDraft();
     } else if (action === 'suggested') {
+      if (build.acceptedPreparation || build.preparationUncertain) return;
+      placement.mode = 'suggested';
       placement.candidate = null;
       placement.message = 'Ori will use automatic map layout. Your setup choices are unchanged.';
       this.returnInboxWorkspaceToReview();
@@ -12803,12 +12810,17 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const placement = build?.placement;
     if (
-      !placement ||
+      !placement?.ready ||
       placement.onMap ||
+      placement.dirty ||
+      build.draftInFlight ||
+      build.draftError ||
+      build.draftConflict ||
       build.session?.status !== 'open' ||
       build.acceptedPreparation ||
       build.preparationUncertain ||
-      build.preparationBusy
+      build.preparationBusy ||
+      !this.workspaceBuildPreparationCurrent()
     )
       return;
     const mapVisible = () => {
@@ -12830,7 +12842,8 @@ const sessionManager = {
         build.session.status !== 'open' ||
         build.acceptedPreparation ||
         build.preparationUncertain ||
-        build.preparationBusy
+        build.preparationBusy ||
+        !this.workspaceBuildPreparationCurrent()
       ) {
         this.returnInboxWorkspaceToReview();
         return;
@@ -12870,7 +12883,7 @@ const sessionManager = {
           if (!editable() || token !== placement.token) return;
           placement.candidate = { x: point.x, y: point.y };
           placement.message =
-            'Draft position selected. Review setup before confirming; no district membership is added.';
+            'Position selected. Create workspace & scan applies the setup you reviewed. Nothing has been created yet.';
           this.syncInboxWorkspacePlacement();
         },
         onBack: token => {
@@ -12883,7 +12896,9 @@ const sessionManager = {
         this.returnInboxWorkspaceToReview();
         return;
       }
+      placement.mode = 'map';
       placement.onMap = true;
+      placement.message = 'Choose a position. Your reviewed setup is unchanged.';
       placement.host.classList.add('assisted-placement-host--map');
       document.body.append(placement.host);
       this.syncWorkspaceBuildPresentation();

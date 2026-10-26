@@ -97,7 +97,7 @@ async function reviewAndCancel(
   });
   await attach(page, 'Desktop', map, !touch);
   const entry = page.getByRole('button', {
-    name: map ? 'Place & review' : 'Use suggested setup',
+    name: map ? 'Review setup' : 'Use automatic placement',
     exact: true
   });
   if (touch) await entry.tap();
@@ -107,17 +107,15 @@ async function reviewAndCancel(
   }
   const panel = page.locator('#assistedWorkspacePlacementPanel');
   await expect(panel).toBeVisible();
-  if (map && (await page.evaluate(() => innerWidth >= 980))) {
-    const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
-    await expect(canvas).toBeFocused();
-    await canvas.press('ArrowRight');
-    await canvas.press('Enter');
-    await canvas.press('Tab');
-    await expect(canvas).not.toBeFocused();
-  } else {
-    await expect(panel).not.toHaveClass(/assisted-placement-host--map/);
-  }
-  const confirm = panel.getByRole('button', { name: 'Create workspace & scan', exact: true });
+  await expect(panel).not.toHaveClass(/assisted-placement-host--map/);
+  await expect(page.locator('[data-ws-map-placement-preview]')).toHaveCount(0);
+  const manual = map && (await page.evaluate(() => innerWidth >= 980));
+  if (map && !manual)
+    await panel.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const confirm = panel.getByRole('button', {
+    name: manual ? 'Next: place on map' : 'Create workspace & scan',
+    exact: true
+  });
   await expect(confirm).toBeEnabled({ timeout: 30_000 });
   const point = await page.evaluate(
     () => (window as any).sessionManager.workspaceBuild.placement.candidate
@@ -162,6 +160,30 @@ async function reviewAndCancel(
     await unobscured(control);
   await accessibility(page);
   await capture(page, `${evidence}/a11y-${name}-review.png`, tabZoom);
+  if (manual) {
+    await confirm.focus();
+    await confirm.press('Enter');
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+    await expect(field).toHaveCount(0);
+    const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
+    await expect(canvas).toBeFocused();
+    await canvas.press('ArrowRight');
+    await canvas.press('Enter');
+    await canvas.press('Tab');
+    await expect(canvas).not.toBeFocused();
+    const create = panel.getByRole('button', { name: 'Create workspace & scan', exact: true });
+    await expect(create).toBeEnabled();
+    await unobscured(create);
+    await accessibility(page);
+    await capture(page, `${evidence}/a11y-${name}-placement.png`, tabZoom);
+    await panel.getByRole('button', { name: 'Edit setup', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(field).toHaveValue(longName);
+    await expect(goal).toHaveValue(
+      '매일 검토. <b>Plain text, not markup.</b>\nKeep this exact goal.'
+    );
+  }
   expect((await json(page, '/api/workspaces')).folders).toEqual(before.folders);
   expect(await json(page, '/api/agents')).toEqual(profiles);
   expect(existsSync(join(sandbox, 'Desktop', 'Filed'))).toBe(false);
@@ -296,7 +318,7 @@ test('narrow keyboard-only suggested setup confirms once without dragging', asyn
   await page.setViewportSize({ width: 390, height: 844 });
   const before = await json(page, '/api/workspaces');
   await attach(page, 'Desktop', false, true);
-  const entry = page.getByRole('button', { name: 'Use suggested setup', exact: true });
+  const entry = page.getByRole('button', { name: 'Use automatic placement', exact: true });
   await entry.focus();
   await entry.press('Enter');
   const panel = page.locator('#assistedWorkspacePlacementPanel');

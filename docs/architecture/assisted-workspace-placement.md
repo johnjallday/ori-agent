@@ -197,12 +197,25 @@ accepted work stays locked. Switching away from Map can still show compact
 status without continuing or undoing setup. Delayed activation rechecks map
 visibility and the current editor/acceptance state.
 
-The panel is outside the transformed canvas and scrolls independently, with
-focused controls and final consent visible at desktop zoom. On narrow screens,
-keyboard-only use or unavailable/read-only map, use the same compact controls.
-**Use suggested setup** opens the same current draft/review, preserving edits.
-Without manual placement, leave layout to the existing automatic layout; say
-so explicitly. Do not invent a coordinate or district membership.
+The interaction is **review → place → explicitly create**, not placement with
+an open setup editor. Both assistant entries open the canonical full review
+first. **Review setup** offers **Next: place on map** only after current material
+choices have a fresh server review; navigation flushes edits and rechecks the
+same editor/review after modal suspension. It never creates resources.
+
+Placement hides the modal/backdrop and replaces its editable panel with a
+compact read-only summary outside the transformed canvas. Name, team, exact
+folder, first action and monitoring remain visible. **Edit setup** returns to
+the full review with the same choices and valid candidate; reloading a conflict
+also returns there so revised choices cannot silently skip review. Ground
+click/Enter selects geometry only; **Create workspace & scan** is the distinct
+final action. The full editor and confirmation cannot compete while placing.
+
+**Use automatic placement** is the no-map alternative, including on narrow
+screens, at 200% zoom, or with an unavailable map. It preserves material edits,
+clears a manually requested point and exposes the same explicit final action
+in the full review. It does not confirm anything itself. Leave position to the
+existing automatic layout; never invent a coordinate or district membership.
 
 After canonical proof of a created workspace, the owner passes its returned ID
 and exact chosen coordinate to `commitPlacement` before normal navigation.

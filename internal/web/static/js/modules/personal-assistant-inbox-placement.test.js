@@ -32,7 +32,7 @@ test('active inbox review offers two draft-only entries, not the original one-cl
     const actions = view.actions.filter(action => action.placement);
     assert.deepEqual(
       actions.map(action => action.label),
-      ['Place & review', 'Use suggested setup']
+      ['Review setup', 'Use automatic placement']
     );
     assert.deepEqual(
       actions.map(action => action.placement),

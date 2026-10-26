@@ -740,10 +740,10 @@ function inboxConfirmView(offer, base, subject) {
     actions = [{ id: 'setup', label: hire.confirmLabel, style: 'primary', oneCard: true }];
   if (hire && !base.decided && offer.conversation_id && !offer.setup) {
     actions = [
-      { id: 'place-review', label: 'Place & review', style: 'primary', placement: 'map' },
+      { id: 'place-review', label: 'Review setup', style: 'primary', placement: 'map' },
       {
         id: 'suggested-setup',
-        label: 'Use suggested setup',
+        label: 'Use automatic placement',
         style: 'outline',
         placement: 'suggested'
       },

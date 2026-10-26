@@ -780,7 +780,7 @@ test('in a conversation the inbox proposal opens reviewed placement and closes w
   assert.doesNotMatch(view.question, /unavailable here/);
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Place & review', 'Use suggested setup', 'Keep chatting']
+    ['Review setup', 'Use automatic placement', 'Keep chatting']
   );
 });
 

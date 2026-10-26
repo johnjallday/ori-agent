@@ -45,7 +45,7 @@ test('suggested setup opens a canonical draft and cancellation creates no domain
   const before = await json(page, '/api/workspaces');
   const profiles = await json(page, '/api/agents');
   await attach(page, 'Desktop');
-  await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
   await expect(sheet).toBeVisible();
   await expect(
@@ -103,10 +103,26 @@ test('map selection is inert; separate confirmation produces one actual workspac
       inference.push(request.url());
   });
   await attach(page, 'Downloads', true);
-  await page.getByRole('button', { name: 'Place & review', exact: true }).click();
+  await page.getByRole('button', { name: 'Review setup', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
   await expect(sheet).toBeVisible();
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  await expect(page.locator('[data-ws-map-placement-preview]')).toHaveCount(0);
+  await expect(sheet.getByRole('region', { name: 'Before you confirm' })).toContainText(
+    'Downloads'
+  );
+  await expect(
+    sheet.getByRole('button', { name: 'Create workspace & scan', exact: true })
+  ).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Next: place on map', exact: true }).click();
   await expect(sheet).toHaveClass(/assisted-placement-host--map/, { timeout: 30_000 });
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(sheet.getByLabel('Workspace name')).toHaveCount(0);
+  await expect(sheet.getByRole('region', { name: 'Before you confirm' })).toHaveCount(0);
+  await expect(
+    sheet.getByRole('button', { name: 'Create workspace & scan', exact: true })
+  ).toBeDisabled();
   const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
   await canvas.focus();
   await canvas.press('ArrowRight');
@@ -186,7 +202,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   const profiles = await json(page, '/api/agents');
   const saved = await json(page, '/api/agents/Journal/detail');
   await attach(page, 'Desktop');
-  await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
   await expect(sheet).toBeVisible();
   await sheet.getByRole('button', { name: 'Choose agent', exact: true }).click();
@@ -242,13 +258,19 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   await page.getByRole('button', { name: 'Assign Journal to File Curator', exact: true }).click();
   await page.getByRole('button', { name: 'Return to workspace review', exact: true }).click();
   await expect(sheet).toContainText('Journal · saved agent');
-  await sheet.getByRole('button', { name: 'Place on map', exact: true }).click();
-  await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   await sheet.getByLabel('Workspace name').fill('Filing desk');
   await sheet.getByLabel('Goal', { exact: true }).fill('음악 — retain this exact goal.');
   await sheet.getByLabel('Goal', { exact: true }).press('Tab');
+  await sheet.getByRole('button', { name: 'Next: place on map', exact: true }).click();
+  await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   await expect(page.locator('.ws-map-placement-preview-name')).toHaveText('Draft · Filing desk');
-  await sheet.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  await expect(sheet.getByLabel('Workspace name')).toHaveCount(0);
+  await sheet.getByRole('button', { name: 'Edit setup', exact: true }).click();
+  await expect(sheet.getByLabel('Workspace name')).toHaveValue('Filing desk');
+  await expect(sheet.getByLabel('Goal', { exact: true })).toHaveValue(
+    '음악 — retain this exact goal.'
+  );
+  await sheet.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toHaveCount(0);
   await sheet.getByRole('button', { name: 'Choose folder', exact: true }).click();
   const chooser = page.locator('#workspaceBuildPane');
@@ -348,9 +370,10 @@ test('cancelling on the map closes the hidden editor without reopening it or cre
   const before = await json(page, '/api/workspaces');
   const profiles = await json(page, '/api/agents');
   await attach(page, 'Desktop', true);
-  await page.getByRole('button', { name: 'Place & review', exact: true }).click();
+  await page.getByRole('button', { name: 'Review setup', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
   await expect(sheet).toBeVisible();
+  await sheet.getByRole('button', { name: 'Next: place on map', exact: true }).click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   await sheet.getByRole('button', { name: 'Cancel draft', exact: true }).click();
   await expect(sheet).toBeHidden();
@@ -371,7 +394,7 @@ test('two tabs preserve current consent; explicit reload, Back and map view chan
   const before = await json(page, '/api/workspaces');
   const profiles = await json(page, '/api/agents');
   await attach(page, 'Desktop');
-  await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
   const confirm = sheet.getByRole('button', { name: 'Create workspace & scan', exact: true });
   await expect(confirm).toBeEnabled({ timeout: 30_000 });
@@ -429,7 +452,7 @@ test('two tabs preserve current consent; explicit reload, Back and map view chan
   expect(await page.evaluate(() => (window as any).sessionManager.workspaceBuild.session.id)).toBe(
     id
   );
-  await sheet.getByRole('button', { name: 'Place on map', exact: true }).click();
+  await sheet.getByRole('button', { name: 'Next: place on map', exact: true }).click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
   await canvas.focus();
@@ -438,8 +461,10 @@ test('two tabs preserve current consent; explicit reload, Back and map view chan
   const candidate = await page.evaluate(
     () => (window as any).sessionManager.workspaceBuild.placement.candidate
   );
-  await sheet.getByRole('button', { name: 'Back to review', exact: true }).click();
-  await sheet.getByRole('button', { name: 'Adjust position', exact: true }).click();
+  await sheet.getByRole('button', { name: 'Edit setup', exact: true }).click();
+  await expect(sheet.getByLabel('Workspace name')).toHaveValue('Saved in another tab');
+  await expect(sheet.getByLabel(/Also watch/)).toBeChecked();
+  await sheet.getByRole('button', { name: 'Next: place on map', exact: true }).click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   expect(
     await page.evaluate(() => (window as any).sessionManager.workspaceBuild.placement.candidate)
@@ -494,8 +519,9 @@ test('a lost real confirmation is observed without replay; failed position repai
     await route.continue();
   });
   await attach(page, 'Desktop', true);
-  await page.getByRole('button', { name: 'Place & review', exact: true }).click();
+  await page.getByRole('button', { name: 'Review setup', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
+  await sheet.getByRole('button', { name: 'Next: place on map', exact: true }).click();
   await expect(page.locator('[data-ws-map-placement-preview]')).toBeVisible();
   const canvas = page.locator('[data-ws-map-viewport]').filter({ visible: true }).first();
   await canvas.focus();

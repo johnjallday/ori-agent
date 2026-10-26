@@ -12,7 +12,14 @@ const folder = { name: 'Music', path: '/synthetic/Music' };
 const review = { workspace: draft, team, folder, monitoring: false, terms: {} };
 
 test('the primary surface describes all five comprehension facts without a map', () => {
-  const html = placementPanelHTML({ draft, team, folder, review, canConfirm: true });
+  const html = placementPanelHTML({
+    draft,
+    team,
+    folder,
+    review,
+    canConfirm: true,
+    automatic: true
+  });
   for (const text of [
     'Music',
     'File Curator · new agent',
@@ -22,12 +29,79 @@ test('the primary surface describes all five comprehension facts without a map',
     'linked, not moved',
     'Filed/',
     'No file contents.',
-    'Create workspace & scan',
-    'Use suggested setup',
+    'Create workspace &amp; scan',
+    'Use automatic placement',
     'Position does not join a district'
   ])
     assert.ok(html.includes(text), text);
   assert.doesNotMatch(html, /data-placement-action="confirm" disabled/);
+});
+
+test('manual placement begins with full review and no creation action', () => {
+  const html = placementPanelHTML({ draft, team, folder, review, canPlace: true });
+  assert.match(html, /Next: place on map/);
+  assert.match(html, /Before you confirm/);
+  assert.match(html, /data-placement-field="name"/);
+  assert.doesNotMatch(html, /data-placement-action="confirm"/);
+  assert.doesNotMatch(html, /data-placement-action="place" disabled/);
+  for (const state of [
+    { review: null },
+    { busy: true },
+    { conflict: true },
+    { closed: true },
+    { canPlace: false }
+  ])
+    assert.match(
+      placementPanelHTML({ draft, review, canPlace: true, ...state }),
+      /data-placement-action="place" disabled/
+    );
+});
+
+test('map step shows only the reviewed summary and explicit confirmation, never the editor', () => {
+  const view = { draft, review, onMap: true, canConfirm: true, candidate: { x: 12, y: 24 } };
+  const html = placementPanelHTML(view);
+  for (const text of [
+    'Place reviewed workspace',
+    'File Curator',
+    '/synthetic/Music',
+    'Off · manual scans only.',
+    'Requested position: 12, 24',
+    'Edit setup',
+    'Create workspace &amp; scan'
+  ])
+    assert.ok(html.includes(text), text);
+  assert.doesNotMatch(
+    html,
+    /data-placement-field=|Choose agent|Choose folder|Before you confirm|Use automatic placement|Browse setup cards/
+  );
+  assert.doesNotMatch(html, /data-placement-action="confirm" disabled/);
+  for (const state of [
+    { candidate: null },
+    { review: null },
+    { canConfirm: false },
+    { busy: true },
+    { conflict: true },
+    { closed: true }
+  ])
+    assert.match(
+      placementPanelHTML({ ...view, ...state }),
+      /data-placement-action="confirm" disabled/
+    );
+  assert.match(
+    placementPanelHTML({ ...view, review: null }),
+    /Review required — choose Edit setup/
+  );
+  assert.doesNotMatch(
+    placementPanelHTML({
+      ...view,
+      review: {
+        ...review,
+        workspace: { name: '<img src=x>' },
+        folder: { path: '<script>bad</script>' }
+      }
+    }),
+    /<img|<script/
+  );
 });
 
 test('a visual draft is never sufficient for confirmation', () => {
@@ -40,7 +114,7 @@ test('a visual draft is never sufficient for confirmation', () => {
     { review, canConfirm: true, closed: true }
   ]) {
     assert.match(
-      placementPanelHTML({ draft, ...view }),
+      placementPanelHTML({ draft, automatic: true, ...view }),
       /data-placement-action="confirm" disabled/
     );
   }

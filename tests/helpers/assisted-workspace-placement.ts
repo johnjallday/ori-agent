@@ -29,5 +29,5 @@ export async function attachPlacementFolder(
     await chip.focus();
     await chip.press('Enter');
   } else await chip.click();
-  await expect(page.getByRole('button', { name: 'Place & review', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review setup', exact: true })).toBeVisible();
 }

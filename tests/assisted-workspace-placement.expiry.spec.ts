@@ -47,7 +47,7 @@ test(`real held-folder expiry: ${phase}`, async ({ page }) => {
     const before = await json(page, '/api/workspaces');
     const profiles = await json(page, '/api/agents');
     await attach(page, 'Desktop');
-    await page.getByRole('button', { name: 'Use suggested setup', exact: true }).click();
+    await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
     await expect(confirm).toBeEnabled({ timeout: 30_000 });
     await sheet.getByLabel('Workspace name').fill('Expiry keeps my draft');
     await sheet.getByLabel('Goal', { exact: true }).fill('보관 — keep this exact goal.');
