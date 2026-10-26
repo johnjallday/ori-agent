@@ -231,6 +231,17 @@ export function composerPlaceholder(view, folderPlaceholder = '') {
   return (view?.available && String(folderPlaceholder || '')) || view?.placeholder || '';
 }
 
+// An explicit empty folder default retires attachment-only Send after verified
+// completion. Missing defaults retain legacy exploration; non-personal turns
+// never inherit personal folder/link attachments.
+export function assistantSendText({ draft, personal, hasFolder, folderDefault, linkDefault }) {
+  const typed = String(draft || '').trim();
+  if (typed) return typed;
+  if (!personal) return '';
+  if (hasFolder) return folderDefault ?? 'Explore this folder';
+  return linkDefault || '';
+}
+
 /**
  * The composer text after an unsent message comes back. Text typed since the
  * failed send is never overwritten.
@@ -1628,13 +1639,15 @@ async function submit(event) {
   if (composerCommand(typed) === 'clear') return clearConversation(who);
   // An empty Send explores an attached folder or link only in the hired
   // assistant's conversation; neither is attached to a workspace agent's turn.
-  const text =
-    typed ||
-    (who.personal && window.PersonalAssistantFolderContext?.hasFolder?.()
-      ? window.PersonalAssistantFolderContext.emptySend?.()?.text || 'Explore this folder'
-      : who.personal && window.PersonalAssistantLink?.hasLink?.()
-        ? window.PersonalAssistantLink.sendText()
-        : '');
+  const text = assistantSendText({
+    draft: composerDraft,
+    personal: who.personal,
+    hasFolder: window.PersonalAssistantFolderContext?.hasFolder?.(),
+    folderDefault: window.PersonalAssistantFolderContext?.emptySend?.()?.text,
+    linkDefault: window.PersonalAssistantLink?.hasLink?.()
+      ? window.PersonalAssistantLink.sendText()
+      : ''
+  });
   if (who.personal && window.PersonalAssistantConversation?.isLoading?.()) {
     setStatus('Wait for the conversation to open before sending. Your draft is kept.');
     return false;
@@ -1733,7 +1746,7 @@ function revealFocusedControl() {
     !active ||
     !scroll?.contains(active) ||
     !active.closest(
-      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderOffer, #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
     )
   )
     return;
@@ -1947,6 +1960,10 @@ function init() {
   // scroll viewport. Recover only this feature's keyboard position; do not
   // interfere with existing message, saved-draft or memory focus lifecycles.
   const scroll = document.getElementById('personalAssistantScroll');
+  // Native Tab scrolling can race an in-flight transcript anchor. Reveal the
+  // explicitly focused setup control after that anchor settles, not just on
+  // resize. This never moves focus or follows background receipt updates.
+  scroll?.addEventListener('focusin', () => requestAnimationFrame(revealFocusedControl));
   if (scroll && typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => requestAnimationFrame(revealFocusedControl)).observe(scroll);
   }

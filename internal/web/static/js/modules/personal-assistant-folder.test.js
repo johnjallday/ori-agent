@@ -1867,14 +1867,14 @@ test('a project yes opens the creator pre-filled with the name, blueprint, note,
   );
 });
 
-test('Set up sends only the plan digest and a chosen file name, and polls only while running', () => {
+test('Set up sends only the plan digest and a chosen file name, and polls while running or awaiting its receipt', () => {
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   assert.match(source, /postOffer\(offer\.id, 'setup', body\)/);
   assert.match(source, /const body = \{ plan_digest: digest \}/);
   assert.match(source, /body\.entry_name = action\.entry/);
   assert.match(source, /offer\.plan\?\.digest \|\| offer\.setup\?\.plan_digest/);
-  // Polling starts from a click or an already-running read, never on its own.
-  assert.match(source, /state\.offer\?\.setup\?\.status === 'running'/);
+  // Polling uses the tested run/awaiting-receipt predicate, never idle offers.
+  assert.match(source, /if \(folderSetupPolling\(state\.offer\)\) return pollSetup\(\)/);
   assert.match(source, /SETUP_POLL_MS = 1500/);
   // It polls its own offer by name, so another waiting offer cannot hide the receipt.
   assert.match(source, /\$\{DIGEST_ENDPOINT\}\?offer_id=\$\{encodeURIComponent\(id\)\}/);

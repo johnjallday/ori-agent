@@ -5,6 +5,7 @@ import {
   createFolderContextController,
   discussionChips,
   emptySendView,
+  folderComposerState,
   folderContextChoices,
   folderDecline,
   folderBlockerView,
@@ -56,6 +57,44 @@ function fixture(post) {
     }
   };
 }
+
+test('consumed attachment stops supplying references without changing canonical history or writing detach', () => {
+  let consumed = false;
+  const calls = [];
+  const controller = createFolderContextController({
+    post: (...args) => {
+      calls.push(args);
+    },
+    uuid: () => 'draft',
+    currentId: () => 'chat',
+    isConsumed: () => consumed
+  });
+  const saved = { observation: observation('a'), revision: 'r', offer_id: 'offer' };
+  controller.reset('chat', saved);
+  assert.equal(controller.request().selection_id, 'a');
+  const canonical = controller.snapshot();
+  consumed = true;
+  assert.equal(controller.request(), null);
+  assert.equal(controller.setFocus([]), false);
+  assert.deepEqual(controller.snapshot(), canonical);
+  assert.equal(folderComposerState(controller.state, true).observation, null);
+  assert.equal(folderComposerState(controller.state, true).authority, '');
+  assert.equal(folderComposerState(controller.state, false), controller.state);
+  assert.deepEqual(calls, []);
+  consumed = false; // A new owner/selection can share its own references again.
+  assert.equal(controller.request().selection_id, 'a');
+});
+
+test('completed folder retires both the setup placeholder and implicit empty request', () => {
+  assert.deepEqual(emptySendView('Album', true, true), {
+    placeholder: 'What would you like to do next?',
+    text: ''
+  });
+  assert.equal(emptySendView('Album', false, true).text, '');
+  assert.equal(emptySendView('Fresh', false, false).text, 'Explore this folder');
+  assert.match(emptySendView('Fresh', true, false).text, /Explain the setup/);
+  assert.equal(emptySendView('', false, true), null);
+});
 
 test('select is local, request is references only, and disclosure names provider boundary', async () => {
   const { controller, calls } = fixture(async () => ({

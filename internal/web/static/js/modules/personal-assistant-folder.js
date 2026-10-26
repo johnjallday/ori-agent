@@ -47,6 +47,12 @@ import {
 import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
 import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
+import {
+  setupCompletionView,
+  setupTaskVisible,
+  completedTaskView,
+  completionDisclosureOpen
+} from './personal-assistant-setup-completion.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
 // can use it without mounting this card; it is re-exported for existing callers.
@@ -2081,6 +2087,23 @@ function groupReceiptView(offer) {
 }
 
 export function folderReceiptView(offer, options = {}) {
+  if (offer?.status === 'resolved' && ['home', 'group'].includes(offer?.outcome?.kind)) {
+    const gone = workspaceGoneView(offer);
+    if (gone) {
+      const receipt =
+        offer.outcome.kind === 'home' ? homeReceiptView(offer) : groupReceiptView(offer);
+      return {
+        ...receipt,
+        rows: (receipt.rows || []).map(({ kind, name, detail }) => ({ kind, name, detail })),
+        route: '',
+        homeRoute: '',
+        homeID: '',
+        profile: null,
+        openLabel: '',
+        gone
+      };
+    }
+  }
   if (offer?.status === 'resolved' && offer?.outcome?.kind === 'home')
     return homeReceiptView(offer);
   if (offer?.status === 'resolved' && offer?.outcome?.kind === 'group')
@@ -2837,14 +2860,14 @@ function renderProfileLine(node, line, doc = document) {
 // Shared by the card and the run pop-up so both say the same thing.
 // renderMapRow draws a receipt's "On the Map" row (mapPlacementView) into its
 // host, or empties and hides it.
-function renderMapRow(host, view) {
+export function renderMapRow(host, view) {
   if (!host) return;
   host.hidden = !view;
   if (view) host.replaceChildren(renderMapPlacement(view, document, 'pa-folder__map'));
   else host.replaceChildren();
 }
 
-function renderReceiptRows(list, rows, doc = document) {
+export function renderReceiptRows(list, rows, doc = document) {
   if (!list) return;
   list.replaceChildren();
   rows.forEach(row => {
@@ -3465,10 +3488,10 @@ const STOPPED_TUCKED = [
 // requirements the user must still settle stay in view, below the actions.
 // Every other card has the review's order. A piece is moved only when its
 // place changes, so a redraw never takes focus from inside it.
-function arrangeStoppedCard(card, details, { stopped, outstanding }) {
+function arrangeStoppedCard(card, details, { stopped, outstanding, completed }) {
   if (!card || !details?.parentElement) return;
   const tucked = STOPPED_TUCKED.map(([id, anchor]) => [document.getElementById(id), anchor]);
-  if (!stopped) {
+  if (!stopped && !completed) {
     for (const [node, selector] of tucked) {
       const anchor = card.querySelector(selector);
       if (node && anchor && anchor.previousElementSibling !== node)
@@ -3485,9 +3508,39 @@ function arrangeStoppedCard(card, details, { stopped, outstanding }) {
   }
 }
 
+// Keep the original slots so completion can tuck settled evidence without
+// cloning the card or leaving the next review in the completed layout.
+const completionSlots = new Map();
+const COMPLETED_TUCKED = [
+  'personalAssistantFolderHire',
+  'personalAssistantFolderOfferQuestion',
+  'personalAssistantFolderOfferStructure',
+  'personalAssistantFolderProfile',
+  'personalAssistantFolderOfferCapability',
+  'personalAssistantFolderLeadWhy'
+];
+function arrangeCompletedCard(details, completed) {
+  for (const id of COMPLETED_TUCKED) {
+    const node = document.getElementById(id);
+    if (!node || !details) continue;
+    if (!completionSlots.has(id)) {
+      const marker = document.createComment(`${id} original slot`);
+      node.before(marker);
+      completionSlots.set(id, marker);
+    }
+    if (completed) {
+      if (node.parentElement !== details) details.append(node);
+    } else {
+      const marker = completionSlots.get(id);
+      if (node.parentNode !== marker.parentNode) marker.after(node);
+    }
+  }
+}
+
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
+  const focusedControl = document.activeElement;
   const focusedAction =
     state.reviewSlot && inOfferActions(document.activeElement)
       ? document.activeElement.dataset.folderAction
@@ -3508,23 +3561,59 @@ function renderOffer(place) {
     busy: state.firstLookBusy,
     message: state.firstLookMessage
   });
+  const completion = setupCompletionView(state.offer, receipt);
+  // Capture before evidence renderers retire obsolete controls. A completion
+  // must not collapse the area the reader was using, even if that control's
+  // old authority is correctly removed by the canonical update.
+  const completingEvidenceFocus = Boolean(
+    completion.ready &&
+    (document.getElementById('personalAssistantFolderDetails')?.contains(focusedControl) ||
+      [...STOPPED_TUCKED.map(([id]) => id), ...COMPLETED_TUCKED].some(id =>
+        document.getElementById(id)?.contains(focusedControl)
+      ))
+  );
+  els.offer.classList.toggle('pa-folder__offer--completed', completion.ready);
+  setText(
+    document.getElementById('personalAssistantFolderCompletionFacts'),
+    completion.facts || ''
+  );
   const firstLook = receipt.firstLook || { visible: false };
+  const result = completedTaskView(state.offer, firstLook, completion);
   const taskPanel = document.getElementById('personalAssistantFolderOptionalTask');
   const taskActions = document.getElementById('personalAssistantFolderTaskActions');
   const separateTask = Boolean(taskPanel && receipt.visible && firstLook.visible);
+  const showTask = separateTask && setupTaskVisible(firstLook, completion);
   if (taskPanel) {
-    taskPanel.hidden = !separateTask;
+    taskPanel.hidden = !showTask;
+    taskPanel.classList.toggle('folder-task-result', result.visible);
+    setText(
+      document.getElementById('personalAssistantFolderTaskLabel'),
+      result.visible ? '' : 'Optional project task · separate from setup'
+    );
     setText(
       document.getElementById('personalAssistantFolderTaskTitle'),
-      state.offer?.first_task?.description || 'Optional project task'
+      result.visible
+        ? result.title
+        : state.offer?.first_task?.description || 'Optional project task'
     );
+    const disclosure = document.getElementById('personalAssistantFolderTaskDisclosure');
+    const execution = document.getElementById('personalAssistantFolderTaskDetails');
+    if (execution && disclosure) {
+      const key = `${state.offer?.conversation_id || ''}:${state.offer?.id || ''}`;
+      if (execution.dataset.offer !== key) execution.open = false;
+      execution.dataset.offer = key;
+      execution.hidden = !result.visible;
+      if (result.visible) {
+        if (disclosure.parentElement !== execution) execution.append(disclosure);
+      } else if (disclosure.parentElement !== taskPanel) execution.before(disclosure);
+    }
     setText(
       document.getElementById('personalAssistantFolderTaskDisclosure'),
       separateTask ? folderTaskDisclosure(state.offer.first_task) : ''
     );
     setText(
       document.getElementById('personalAssistantFolderTaskStatus'),
-      separateTask ? firstLook.status || firstLook.message : ''
+      separateTask && !result.visible ? firstLook.status || firstLook.message : ''
     );
   }
   // A canonical conversation reload can replace this card. Do not let a fast
@@ -3555,31 +3644,29 @@ function renderOffer(place) {
   els.offer.dataset.status = view.status;
   if (els.headline) {
     els.headline.replaceChildren();
-    const headline = receipt.visible
-      ? segments([
-          {
-            text:
-              receipt.homeName ||
-              receipt.rows?.find(row => row.kind === 'workspace')?.name ||
-              state.offer.subject?.name ||
-              'Workspace'
-          },
-          receipt.gone
-            ? ' was deleted'
-            : receipt.homeName || receipt.group || receipt.batch
-              ? ' is ready'
-              : ' · Workspace ready'
-        ])
-      : view.setup
+    const headline = completion.ready
+      ? segments([completion.headline])
+      : receipt.visible
         ? segments([
-            { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
-            view.setup.status !== 'stopped'
-              ? ' · setting up'
-              : view.setup.ask
-                ? ` needs you to ${view.setup.ask}`
-                : ' needs you'
+            {
+              text:
+                receipt.homeName ||
+                receipt.rows?.find(row => row.kind === 'workspace')?.name ||
+                state.offer.subject?.name ||
+                'Workspace'
+            },
+            receipt.gone ? ' was deleted' : ' · Saved setup receipt'
           ])
-        : view.headline;
+        : view.setup
+          ? segments([
+              { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
+              view.setup.status !== 'stopped'
+                ? ' · setting up'
+                : view.setup.ask
+                  ? ` needs you to ${view.setup.ask}`
+                  : ' needs you'
+            ])
+          : view.headline;
     headline.forEach(part => {
       if (part.strong) {
         const strong = document.createElement('strong');
@@ -3651,20 +3738,35 @@ function renderOffer(place) {
     // A stopped setup opens collapsed, and collapses when a run stops, so the
     // card leads with what it needs. Otherwise the user's choice is kept.
     const id = state.offer?.id || '';
-    const key = stopped ? `${id}:stopped` : id;
-    if (details.dataset.offer !== key) {
-      const sameOffer = [id, `${id}:stopped`].includes(details.dataset.offer || '');
-      details.dataset.offer = key;
-      if (stopped) details.open = false;
-      else if (!sameOffer) details.open = !state.offer?.plan;
-    }
+    const key = `${state.offer?.conversation_id || ''}:${id}:${completion.ready ? 'completed' : stopped ? 'stopped' : 'review'}`;
+    const focused = Boolean(
+      completingEvidenceFocus ||
+      details.contains(document.activeElement) ||
+      (completion.ready &&
+        [...STOPPED_TUCKED.map(([id]) => id), ...COMPLETED_TUCKED].some(id =>
+          document.getElementById(id)?.contains(document.activeElement)
+        ))
+    );
+    details.open = completionDisclosureOpen({
+      sameState: details.dataset.offer === key,
+      open: details.open,
+      focused,
+      compact: completion.ready || stopped,
+      hasPlan: Boolean(state.offer?.plan)
+    });
+    details.dataset.offer = key;
+    details.querySelector(':scope > summary').textContent = completion.ready
+      ? 'Setup details'
+      : 'Full setup details';
     arrangeStoppedCard(els.offer, details, {
       stopped,
+      completed: completion.ready,
       outstanding:
         stopped &&
         globalThis.OriFolderSetupVisual.requirementsOutstanding?.({ offer: state.offer }) === true
     });
   }
+  arrangeCompletedCard(details, completion.ready);
   setText(
     els.question,
     state.offer?.software && view.plan
@@ -3729,11 +3831,14 @@ function renderOffer(place) {
   // What the agent found, once its first look has finished, and for an
   // assessment the one next request it suggested. Both are text the model
   // wrote: they are set as text, never as markup.
-  setText(els.result, firstLook.visible ? firstLook.excerpt : '');
-  if (els.result && firstLook.visible && firstLook.next) {
+  setText(
+    els.result,
+    result.visible ? result.excerpt || 'The task finished. No saved excerpt is available here.' : ''
+  );
+  if (els.result && result.visible && result.next) {
     const label = document.createElement('strong');
     label.textContent = 'Suggested next task: ';
-    els.result.append(document.createElement('br'), label, firstLook.next);
+    els.result.append(document.createElement('br'), label, result.next);
     els.result.hidden = false;
   }
   if (els.plan) {
@@ -3782,9 +3887,11 @@ function renderOffer(place) {
     const signature = JSON.stringify({
       offer: state.offer?.id || '',
       look: firstLook.visible ? firstLook.actions : null,
+      showTask,
       route: receipt.route || '',
       open: receipt.openLabel || '',
       home: receipt.homeRoute || '',
+      completion,
       restore: restore?.workspaceId || '',
       actions: showView ? view.actions : null,
       busy: actionBusy || state.restoreBusy
@@ -3801,7 +3908,11 @@ function renderOffer(place) {
       // The first look's own actions: its one primary (Start first look, Try
       // again, or the report) and the workspace as the other.
       firstLook.actions.forEach(action => {
-        const style = action.style === 'primary' ? 'btn-primary' : 'btn-outline-secondary';
+        if (separateTask && !showTask && action.id !== 'open') return;
+        const style =
+          action.style === 'primary' || (completion.ready && action.id === 'open')
+            ? 'btn-primary'
+            : 'btn-outline-secondary';
         const control = document.createElement(action.href ? 'a' : 'button');
         control.className = `btn btn-sm ${style}`;
         control.dataset.folderAction = action.id;
@@ -3825,9 +3936,16 @@ function renderOffer(place) {
     } else if (rebuild && receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
-      open.href = receipt.route;
-      open.textContent = receipt.openLabel;
+      open.href = completion.ready ? completion.href : receipt.route;
+      open.textContent = completion.ready ? completion.openLabel : receipt.openLabel;
       els.actions.append(open);
+      if (completion.ready && receipt.batch) {
+        const batch = document.createElement('a');
+        batch.className = 'btn btn-sm btn-outline-secondary';
+        batch.href = receipt.route;
+        batch.textContent = receipt.openLabel;
+        els.actions.append(batch);
+      }
     } else if (rebuild && restore) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -3919,6 +4037,19 @@ function renderOffer(place) {
     if (!replacement) control.tabIndex = -1;
     control.focus({ preventScroll: true });
   }
+  if (
+    focusedControl?.isConnected &&
+    els.offer.contains(focusedControl) &&
+    document.activeElement === document.body &&
+    !focusedControl.closest('[hidden]')
+  )
+    focusedControl.focus({ preventScroll: true });
+  if (
+    completingEvidenceFocus &&
+    !focusedControl?.isConnected &&
+    document.activeElement === document.body
+  )
+    details?.querySelector(':scope > summary')?.focus({ preventScroll: true });
   if (state.reviewSlot) window.PersonalAssistantTranscript?.changed?.();
 }
 
@@ -4373,12 +4504,22 @@ async function startOneCardSetup(action) {
   }
 }
 
-// syncSetupPolling polls the existing digest read while a run is going, and
-// only then: a one-card setup, or a folder's first look while the drawer that
+// A runner can finish before its verified receipt is committed. Keep the
+// existing observational read alive until the outcome arrives; never execute
+// or repaint the awaiting-result state as ready.
+export function folderSetupPolling(offer) {
+  return (
+    offer?.setup?.status === 'running' ||
+    (offer?.status === 'awaiting_outcome' && offer?.setup?.status === 'done')
+  );
+}
+
+// syncSetupPolling polls the existing digest read while a run is going or
+// awaiting its receipt: a one-card setup, or a folder's first look while the drawer that
 // shows it is open. A page that loads onto either resumes it the same way;
 // nothing polls otherwise, so an idle page makes no extra request.
 function syncSetupPolling() {
-  const running = state.offer?.setup?.status === 'running' || firstLookPolling();
+  const running = folderSetupPolling(state.offer) || firstLookPolling();
   if (running && !setupPollTimer) {
     setupPollTimer = setInterval(() => void pollTick(), SETUP_POLL_MS);
   } else if (!running && setupPollTimer) {
@@ -4391,7 +4532,7 @@ function syncSetupPolling() {
 let firstLookTick = 0;
 
 async function pollTick() {
-  if (state.offer?.setup?.status === 'running') return pollSetup();
+  if (folderSetupPolling(state.offer)) return pollSetup();
   if (!firstLookPolling()) {
     // The look settled or the drawer closed: stop asking.
     syncSetupPolling();
@@ -4456,6 +4597,7 @@ async function refreshFirstLook(offerID) {
   const id = String(offerID || '');
   if (!id) return;
   const before = currentFirstLook()?.state;
+  const current = reviewResponseGuard(state.offer);
   try {
     const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(id)}`, {
       headers: { Accept: 'application/json' }
@@ -4463,7 +4605,7 @@ async function refreshFirstLook(offerID) {
     if (!response.ok) return;
     const payload = await readJSON(response);
     const offer = payload?.folder_digest?.offer;
-    if (!offer || offer.id !== id) return;
+    if (!current() || !offer || offer.id !== id) return;
     if (state.offer?.id === id && offer.status === 'resolved') state.offer = offer;
     applyFirstLook(id, offer.first_task || null);
   } catch (_) {
@@ -4482,7 +4624,12 @@ async function refreshFirstLook(offerID) {
   if (before !== after) firstLookMoved();
   // A hired agent's look that this page watched finish: the assistant points
   // at its report, and "Needs you" in that line opens it.
-  if (finished && state.offer?.id === id && state.offer?.outcome?.first_look) {
+  if (
+    finished &&
+    state.offer?.id === id &&
+    state.offer?.outcome?.first_look &&
+    !setupCompletionView(state.offer, folderReceiptView(state.offer)).ready
+  ) {
     const look = state.offer.first_task;
     const row = sayInConversation(
       reportedLine(look?.agent, state.offer.subject?.name || look?.folder_name)
@@ -4513,6 +4660,7 @@ async function startFirstLook() {
   const look = currentFirstLook();
   const idle = { started: false, message: '' };
   if (!look || state.firstLookBusy) return idle;
+  const current = reviewResponseGuard(state.offer);
   const retry = look.state === 'failed';
   if (!retry && !(look.state === 'seeded' && look.can_start === true)) return idle;
   // An assessment is tried again only when nothing has to be repaired first.
@@ -4548,6 +4696,7 @@ async function startFirstLook() {
   } catch (_) {
     started = false;
   }
+  if (!current()) return idle;
   if (started) {
     // This tab started it, so its report will open Today's strip once.
     claimNeedsItem(`offer:${look.offer_id}`);
@@ -4592,6 +4741,7 @@ async function stopFirstLook() {
   if (!look || look.state !== 'running' || state.firstLookBusy) return false;
   const workspaceID = String(look.workspace_id || '').trim();
   if (!workspaceID) return false;
+  const current = reviewResponseGuard(state.offer);
   state.firstLookBusy = true;
   state.firstLookMessage = '';
   render();
@@ -4611,8 +4761,10 @@ async function stopFirstLook() {
   } catch (_) {
     stopped = false;
   }
+  if (!current()) return false;
   state.firstLookBusy = false;
   await refreshFirstLook(look.offer_id);
+  if (!current()) return stopped;
   if (stopped) firstLookMoved();
   else {
     state.firstLookMessage = FIRST_LOOK_NOT_STOPPED;
@@ -4634,6 +4786,7 @@ async function restoreOutcomeWorkspace() {
   const gone = workspaceGoneView(state.offer);
   if (!gone?.workspaceId || state.restoreBusy) return false;
   const offerID = state.offer.id;
+  const current = reviewResponseGuard(state.offer);
   state.restoreBusy = true;
   state.restoreMessage = '';
   render();
@@ -4647,6 +4800,7 @@ async function restoreOutcomeWorkspace() {
   } catch (_) {
     restored = false;
   }
+  if (!current()) return restored;
   state.restoreBusy = false;
   if (!restored) state.restoreMessage = workspaceNotRestored(gone.name);
   render();
@@ -5640,8 +5794,16 @@ function init() {
       if (!slot?.isConnected || !offer?.conversation_id) return;
       if (state.offer?.id !== offer.id || state.reviewSlot !== slot) {
         state.reviewGeneration++;
+        state.firstLookBusy = false;
+        state.firstLookMessage = '';
+        state.restoreBusy = false;
+        state.restoreMessage = '';
         state.workspaceName = offer.subject?.name || '';
         state.editingName = false;
+        // A newly restored canonical slot defaults compact; redraws of the
+        // same mounted slot keep the disclosure's native user preference.
+        const details = document.getElementById('personalAssistantFolderDetails');
+        if (details) details.dataset.offer = '';
         slot.replaceChildren();
       }
       if (
@@ -5674,6 +5836,10 @@ function init() {
     parkConversation: () => {
       if (!state.reviewSlot) return;
       state.reviewGeneration++;
+      state.firstLookBusy = false;
+      state.firstLookMessage = '';
+      state.restoreBusy = false;
+      state.restoreMessage = '';
       const els = elements();
       if (els?.offer && els.root) els.root.append(els.offer);
       state.reviewSlot = null;

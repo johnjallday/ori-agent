@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { folderResponseFixtures } from './fixtures/assistant-folder-response.js';
 import { chooseAttach, chooseConversation, openAttachMenu } from './helpers/assistant-menus';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
 // Browser controller/ordering fixtures, not proof of model grounding. Hire/HQ
 // use real host routes. Folder selection/Route/Ask/history below are explicit
@@ -326,7 +327,11 @@ async function choose(page: Page, name = 'Documents') {
 async function say(page: Page, prompt: string) {
   await page.locator('#personalAssistantInput').fill(prompt);
   await page.locator('#personalAssistantSend').click();
-  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  // Model selection is an asynchronous pre-send read before routing is busy.
+  await page.waitForFunction(() => {
+    const app = window as any;
+    return !app.PersonalAssistantPanel._state.pending && !app.OriAskRouting.getState().busy;
+  });
 }
 
 test('real host: local review, Keep chatting, adjusted setup and canonical receipt without a model', async ({
@@ -421,6 +426,16 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   const workspaceName = `Next step fixture ${test.info().repeatEachIndex}`;
   await card.getByLabel('Workspace name').fill(workspaceName);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
+  await expect(page.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  await expect(input).toHaveValue('Preserve my exact review draft 🎼  ');
+  await expect(input).toHaveAttribute('placeholder', 'What would you like to do next?');
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
+  expect(
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request())
+  ).toBeNull();
+  await revealFolderSetupDetails(card);
   await expect(page.locator('#personalAssistantFolderReceipt')).toBeVisible();
   await expect(page.locator('#personalAssistantFolderReceipt')).toContainText(workspaceName);
   const link = card.getByRole('link', { name: /Open/ }).first();
@@ -429,10 +444,12 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await page.reload();
   await reopen(page);
   await expect(card.getByRole('link', { name: /Open/ }).first()).toHaveAttribute('href', href!);
-  await page.locator('#personalAssistantRemoveFolder').click();
-  await expect(
-    page.locator('#homeAssistantConversation').getByRole('link', { name: /Open/ }).first()
-  ).toHaveAttribute('href', href!);
+  await expect(page.locator('#personalAssistantFolderReceipt')).toBeHidden();
+  if (evidence)
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'real-compact-replay.png') });
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await page.goto('/settings');
   await reopen(page);
   await expect(
@@ -1028,7 +1045,10 @@ test('browser fixture: current choices survive cancellation but reject stale cal
   await strip.getByRole('button').first().click();
   expect(fixture.requests.length).toBe(before);
   await page.locator('#personalAssistantSend').click();
-  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  await page.waitForFunction(() => {
+    const app = window as any;
+    return !app.PersonalAssistantPanel._state.pending && !app.OriAskRouting.getState().busy;
+  });
   const latest = fixture.requests.filter(row => row.stage === 'ask').at(-1)!;
   expect(latest.folder_context.historical).toBe(true);
   expect(latest.folder_context.reference).toBeUndefined();

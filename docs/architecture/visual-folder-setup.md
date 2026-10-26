@@ -1,7 +1,8 @@
 # Visual folder setup: one display seam, existing authority
 
 The folder review, saved setup progress, recovery and receipt stay on one card.
-**Full setup details** retains the complete plan/receipt. There is no nested
+**Full setup details** retains the complete plan/receipt during review/recovery;
+completed receipts use **Setup details**. There is no nested
 folder-run modal. The advanced specialist journey remains a separate explicit
 **Adjust** / **Continue setup** route.
 
@@ -57,7 +58,8 @@ legacy line-only identity stays generic. A named failed prerequisite retains
 completed work, without inferring a network cause from a generic install stop. Task lines are separate from setup milestones. There is no percentage,
 elapsed-time progression, forced ordering, or repainting unfinished optional work
 as done. A finished runner without its verified outcome is still awaiting the
-saved result.
+saved result; the existing digest poll continues observational reads until that
+separate receipt arrives. A read never repeats setup.
 
 Canonical receipt readers add optional `operation` (create/reuse), `assigned`
 (observed workspace membership), `model` (recorded agent configuration) and
@@ -82,6 +84,45 @@ workspace rows, not the group's agent rows.
   all …** when those shortcuts are available. Explicit **Open** uses the existing
   library API and its saved request identity/file-choice rules. Closing or
   switching targets suppresses late navigation; it does not undo accepted work.
+
+## Completed receipt and conversational return
+
+The shared drawer card compacts only a resolved, available canonical receipt
+with a valid destination. A finished runner awaiting its outcome, stopped/partial
+setup, unreadable record or deleted workspace is not ready. The compact headline
+is **✓ <name> is ready**, followed by known facts and the canonical open action.
+Assigned-agent facts require `assigned: true` receipt membership, never a planned
+hire, model configuration or prose. File Janitor's **Review batch** remains a
+separate action; Home/library and group/member destinations retain their nouns.
+
+Recognition, diagram, milestones, complete receipt, configuration and map remain
+inside a closed **Setup details** disclosure. Collapse occurs once on completion
+or a fresh canonical mount, not on every poll. If focused evidence would be
+hidden, details stay open for that mount. Ordinary redraws and drawer reopening
+preserve native expansion; fresh reload defaults compact. Existing transcript
+anchors retain the reader's position; completion does not rename the conversation
+or switch workspace scope. The successfully used folder is consumed from the
+composer: no active chip/tree/discussion/setup shortcut and no next-turn folder
+reference. Saved observations/review ownership remain canonical history; no
+synthetic detach event or new success store is written. Fresh attachment still
+works normally. Even later workspace deletion does not reattach the old folder.
+
+Setup and first-task completion are independent. Unstarted/seeded optional work
+has no post-setup task card or Start prompt in the drawer; it remains available
+through the existing workspace banner with its scope/cost disclosure. Running,
+waiting and failed tasks retain Stop, current question, Retry/repair and required
+disclosure. Finished tasks show one saved excerpt/suggestion and canonical report
+navigation next to the receipt, with execution metadata under **Execution
+details**. This spends no summary tokens and creates no persisted assistant
+message. Report navigation cannot execute work; ticket-only legacy output still
+says **Open task**. Duplicate transient completion prose is not appended when the
+receipt already presents the result; existing saved prose and Today remain.
+
+`personal-assistant-setup-completion.js` is a pure projection supplied by the
+existing receipt/task readers. The active card retains all mutation authority;
+historical references reuse those projections and inert receipt/visual renderers,
+not a second setup controller. Historical output contains no execution controls.
+Presentation preferences live only in mounted disclosures, not browser storage.
 
 ## Applicable project model and explicit return
 

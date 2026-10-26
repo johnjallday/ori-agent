@@ -2,6 +2,7 @@ import { test, expect, chromium, type Page, type Locator } from '@playwright/tes
 import { chooseAttach } from './helpers/assistant-menus';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { writeFile } from 'node:fs/promises';
+import { revealFolderSetupDetails } from './helpers/folder-setup-card';
 
 // Deterministic presentation fixtures against the real application. These prove
 // rendering/no unintended browser requests, not native selection or live setup.
@@ -1182,9 +1183,7 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`fixture optional summary remains separate, disclosed and keyboard reachable ${theme}`, async ({
-    page
-  }) => {
+  test(`fixture ready setup omits the unstarted summary prompt ${theme}`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     const offer: any = reviewOffer();
     const longName = 'Saved session 長い名前 '.repeat(6);
@@ -1245,20 +1244,16 @@ for (const theme of ['light', 'dark']) {
     });
     const card = await mountReview(page, offer);
     const panel = card.locator('#personalAssistantFolderOptionalTask');
-    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
-      'Workspace ready'
-    );
-    await expect(panel).toContainText('Configuration only; connection not verified');
-    await expect(panel).toContainText('Each explicit attempt uses model tokens');
-    await expect(panel).toContainText('no model tools, source-file changes or external actions');
+    await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
+    await expect(panel).toBeHidden();
+    await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toHaveCount(0);
     await expect(card.locator('[aria-label="Folder setup relationship"]')).toHaveCount(1);
     await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width > 400 ? 1100 : 844 });
       const open = card.getByRole('link', { name: 'Open workspace', exact: true });
       await open.focus();
-      const start = panel.getByRole('button', { name: 'Start summary', exact: true });
-      await keyboardReach(page, start);
+      await keyboardReach(page, card.locator('#personalAssistantFolderDetails > summary'));
       expect(await panel.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(
         1
       );
@@ -1318,6 +1313,17 @@ async function keyboardReach(page: Page, target: Locator) {
     await page.keyboard.press(key);
   }
   await expect(target, 'reachable by keyboard').toBeFocused();
+  // Focus reveal waits for transcript anchoring; observe its settled geometry,
+  // without repairing scroll from the test (important at short zoomed heights).
+  await expect
+    .poll(() =>
+      target.evaluate(node => {
+        const viewport = node.closest('.personal-assistant-panel__scroll')!.getBoundingClientRect();
+        const bounds = node.getBoundingClientRect();
+        return bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1;
+      })
+    )
+    .toBe(true);
   const geometry = await target.evaluate(node => {
     const scroll = node.closest('.personal-assistant-panel__scroll')!;
     const viewport = scroll.getBoundingClientRect();
@@ -1628,10 +1634,12 @@ for (const theme of ['light', 'dark']) {
         await page.keyboard.press('Enter');
         await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
         await expect(card.locator('.folder-visual')).toContainText('Separate workspace');
-        const open = card.getByRole('link', { name: 'Open Session', exact: true });
+        await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
+        const open = card.getByRole('link', { name: 'Open workspace', exact: true });
         await expect(open).toHaveAttribute('href', '/workspaces/fixture-session');
         await keyboardReach(page, open);
         await expect(open).toBeFocused();
+        await revealFolderSetupDetails(card);
         await expect(card.getByRole('figure', { name: 'Folder setup relationship' })).toHaveCount(
           1
         );

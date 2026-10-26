@@ -1,6 +1,14 @@
 // Presentation of server-authored canonical review references. Model prose never
 // supplies a control, offer ID, candidate, route, or confirmation here.
-import { folderReceiptView } from './personal-assistant-folder.js';
+import { folderReceiptView, renderReceiptRows, renderMapRow } from './personal-assistant-folder.js';
+import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
+import { folderTaskDisclosure } from './folder-task-disclosure.js';
+import {
+  setupCompletionView,
+  setupAttachmentConsumed,
+  completedTaskView,
+  ownsSetupCompletion
+} from './personal-assistant-setup-completion.js';
 import {
   proposalView,
   placementProposalView,
@@ -488,7 +496,9 @@ function syncReviewLink() {
   if (!elements || !current) return;
   const structure = currentStructure();
   elements.open.hidden =
-    Boolean(current.hireUnavailable) || reviewLinkHidden(current.observation, structure);
+    Boolean(current.hireUnavailable) ||
+    consumedAttachment() ||
+    reviewLinkHidden(current.observation, structure);
   // Move the one existing control beside a local preview; never clone its
   // authority or create a second review owner. Saved context keeps the chip.
   const previewActions = document.getElementById('personalAssistantFolderPreviewActions');
@@ -990,8 +1000,112 @@ function park(node) {
   if (!node || (card && node.contains(card))) window.PersonalAssistantFolder?.parkConversation?.();
 }
 
+// Historical receipts are inert projections, never a cloned active controller.
+// Stable mounts retain native disclosure/focus state. Changed saved data waits
+// until focus leaves rather than replacing a control under the reader.
+function renderSavedCompletion(slot, offer, receipt, completion) {
+  const key = JSON.stringify(offer);
+  const previous = slot.querySelector('[data-saved-completion]');
+  if (previous && slot.dataset.savedCompletionKey === key) return;
+  if (previous?.contains(document.activeElement)) {
+    if (!slot.dataset.completionRefresh) {
+      slot.dataset.completionRefresh = 'pending';
+      const refreshAfterFocus = () =>
+        queueMicrotask(() => {
+          if (slot.contains(document.activeElement)) return;
+          slot.removeEventListener('focusout', refreshAfterFocus);
+          delete slot.dataset.completionRefresh;
+          renderReferences();
+        });
+      slot.addEventListener('focusout', refreshAfterFocus);
+    }
+    return;
+  }
+  const expanded = previous?.querySelector('details')?.open === true;
+  const executionExpanded = previous?.querySelector('.folder-task-result > details')?.open === true;
+  const doc = slot.ownerDocument;
+  const node = (tag, text = '', className = '') => {
+    const element = doc.createElement(tag);
+    element.textContent = text;
+    element.className = className;
+    return element;
+  };
+  const link = (parent, href, label) => {
+    if (!href) return;
+    const action = node('a', label, 'btn btn-sm btn-outline-secondary');
+    action.href = href;
+    parent.append(action);
+  };
+  const card = node('section', '', 'folder-setup-decision');
+  card.dataset.savedCompletion = offer.id;
+  card.append(
+    node('h3', completion.headline),
+    node('p', completion.facts, 'folder-completion__facts')
+  );
+  link(card, completion.href, completion.openLabel);
+  if (receipt.batch) link(card, receipt.route, receipt.openLabel);
+  link(card, receipt.homeRoute, 'Review this link in the Home library');
+  const details = node('details', '', 'folder-setup-details');
+  details.open = expanded;
+  details.append(node('summary', 'Setup details'));
+  const findings = node('section', '', 'folder-findings');
+  renderFolderFindings(findings, { offer });
+  const diagram = node('div', '', 'folder-setup-diagram');
+  globalThis.OriFolderSetupVisual.renderDiagram(diagram, { offer });
+  const progress = node('div');
+  globalThis.OriFolderSetupVisual.renderProgress(progress, offer.setup);
+  const rows = node('ul', '', 'pa-folder__receipt');
+  renderReceiptRows(rows, receipt.rows, doc);
+  const map = node('div');
+  renderMapRow(map, receipt.map);
+  details.append(findings, diagram, progress, rows, map);
+  if (receipt.profile) {
+    const profile = node('p', receipt.profile.text);
+    link(profile, receipt.profile.route, receipt.profile.linkLabel);
+    details.append(profile);
+  }
+  if (offer.reason) details.append(node('p', offer.reason));
+  card.append(details);
+  const result = completedTaskView(offer, receipt.firstLook, completion);
+  if (result.visible) {
+    const block = node('section', '', 'folder-optional-task folder-task-result');
+    block.append(
+      node('h3', result.title),
+      node(
+        'p',
+        result.excerpt || 'The task finished. No saved excerpt is available here.',
+        'pa-folder__first-look'
+      )
+    );
+    if (result.next) block.append(node('p', `Suggested next task: ${result.next}`));
+    result.actions.forEach(action => link(block, action.href, action.label));
+    const execution = node('details', '', 'folder-setup-details');
+    execution.open = executionExpanded;
+    execution.append(
+      node('summary', 'Execution details'),
+      node('p', folderTaskDisclosure(offer.first_task))
+    );
+    block.append(execution);
+    card.append(block);
+  } else if (receipt.firstLook?.visible) {
+    const look = receipt.firstLook;
+    const task = node('section');
+    task.append(
+      node('h4', offer.first_task?.description || 'First task'),
+      node('p', look.status || look.message || look.hint)
+    );
+    look.actions
+      .filter(action => action.href)
+      .forEach(action => link(task, action.href, action.label));
+    details.append(task);
+  }
+  slot.replaceChildren(card);
+  slot.dataset.savedCompletionKey = key;
+}
+
 function renderReferences() {
   if (!current) return;
+  window.PersonalAssistantTranscript?.beforeChange?.();
   const slots = Array.from(
     document.querySelectorAll('#homeAssistantConversation [data-folder-review-id]')
   );
@@ -1005,6 +1119,12 @@ function renderReferences() {
     // Park before replacing children: the one canonical renderer is moved, not
     // cloned, and must survive New, hydration, and bounded-history trimming.
     park(slot);
+    const savedReceipt = folderReceiptView(offer);
+    const completion = setupCompletionView(offer, savedReceipt);
+    if (completion.ready) {
+      renderSavedCompletion(slot, offer, savedReceipt, completion);
+      continue;
+    }
     slot.replaceChildren();
     const note = document.createElement('p');
     note.className = 'personal-assistant-folder-context__note';
@@ -1071,6 +1191,29 @@ function renderReferences() {
       }
     }
   }
+  window.PersonalAssistantTranscript?.changed?.();
+}
+
+function completedSetup(state = current) {
+  const offer = reviews[state?.offerId];
+  return Boolean(
+    state?.conversationId === window.PersonalAssistantConversation?.currentId?.() &&
+    ownsSetupCompletion(state, offer, setupCompletionView(offer, folderReceiptView(offer)))
+  );
+}
+
+function consumedAttachment(state = current) {
+  const offer = reviews[state?.offerId];
+  return Boolean(
+    state?.conversationId === window.PersonalAssistantConversation?.currentId?.() &&
+    setupAttachmentConsumed(state, offer, folderReceiptView(offer))
+  );
+}
+
+// Publish only composer presentation. Never call contextChanged/render from
+// here: that would feed a review event back into the card's mutation owner.
+function publishCompletion() {
+  window.PersonalAssistantFolderContext?.refreshEmptySend?.();
 }
 
 function contextChanged(state) {
@@ -1103,6 +1246,7 @@ function contextChanged(state) {
   if (!currentSuggestion(current, suggestion, reviews[suggestion?.offer_id])) suggestion = null;
   renderSuggestion();
   renderReferences();
+  publishCompletion();
 }
 
 function hydrate(
@@ -1183,6 +1327,7 @@ function init() {
       applyReviewContext(null);
     reviews[offer.id] = offer;
     renderReferences();
+    publishCompletion();
   });
   contextChanged(window.PersonalAssistantFolderContext.current());
 }
@@ -1190,6 +1335,8 @@ function init() {
 if (typeof window !== 'undefined')
   window.PersonalAssistantFolderSetup = {
     contextChanged,
+    completed: completedSetup,
+    consumed: consumedAttachment,
     applySuggestion,
     applyReviewContext,
     hydrate,
