@@ -47,6 +47,10 @@ import {
 import { createAdjustSheet } from './personal-assistant-folder-adjust.js';
 import { renderFolderFindings } from './personal-assistant-folder-presentation.js';
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
+import {
+  setupCompletionView,
+  completionDisclosureOpen
+} from './personal-assistant-setup-completion.js';
 
 // The chooser's render decision lives in its own module so the interview wizard
 // can use it without mounting this card; it is re-exported for existing callers.
@@ -3465,10 +3469,10 @@ const STOPPED_TUCKED = [
 // requirements the user must still settle stay in view, below the actions.
 // Every other card has the review's order. A piece is moved only when its
 // place changes, so a redraw never takes focus from inside it.
-function arrangeStoppedCard(card, details, { stopped, outstanding }) {
+function arrangeStoppedCard(card, details, { stopped, outstanding, completed }) {
   if (!card || !details?.parentElement) return;
   const tucked = STOPPED_TUCKED.map(([id, anchor]) => [document.getElementById(id), anchor]);
-  if (!stopped) {
+  if (!stopped && !completed) {
     for (const [node, selector] of tucked) {
       const anchor = card.querySelector(selector);
       if (node && anchor && anchor.previousElementSibling !== node)
@@ -3482,6 +3486,35 @@ function arrangeStoppedCard(card, details, { stopped, outstanding }) {
       if (details.previousElementSibling !== node)
         details.parentElement.insertBefore(node, details);
     } else if (node.parentElement !== details) details.append(node);
+  }
+}
+
+// Keep the original slots so completion can tuck settled evidence without
+// cloning the card or leaving the next review in the completed layout.
+const completionSlots = new Map();
+const COMPLETED_TUCKED = [
+  'personalAssistantFolderHire',
+  'personalAssistantFolderOfferQuestion',
+  'personalAssistantFolderOfferStructure',
+  'personalAssistantFolderProfile',
+  'personalAssistantFolderOfferCapability',
+  'personalAssistantFolderLeadWhy'
+];
+function arrangeCompletedCard(details, completed) {
+  for (const id of COMPLETED_TUCKED) {
+    const node = document.getElementById(id);
+    if (!node || !details) continue;
+    if (!completionSlots.has(id)) {
+      const marker = document.createComment(`${id} original slot`);
+      node.before(marker);
+      completionSlots.set(id, marker);
+    }
+    if (completed) {
+      if (node.parentElement !== details) details.append(node);
+    } else {
+      const marker = completionSlots.get(id);
+      if (node.parentNode !== marker.parentNode) marker.after(node);
+    }
   }
 }
 
@@ -3508,6 +3541,12 @@ function renderOffer(place) {
     busy: state.firstLookBusy,
     message: state.firstLookMessage
   });
+  const completion = setupCompletionView(state.offer, receipt);
+  els.offer.classList.toggle('pa-folder__offer--completed', completion.ready);
+  setText(
+    document.getElementById('personalAssistantFolderCompletionFacts'),
+    completion.facts || ''
+  );
   const firstLook = receipt.firstLook || { visible: false };
   const taskPanel = document.getElementById('personalAssistantFolderOptionalTask');
   const taskActions = document.getElementById('personalAssistantFolderTaskActions');
@@ -3555,31 +3594,33 @@ function renderOffer(place) {
   els.offer.dataset.status = view.status;
   if (els.headline) {
     els.headline.replaceChildren();
-    const headline = receipt.visible
-      ? segments([
-          {
-            text:
-              receipt.homeName ||
-              receipt.rows?.find(row => row.kind === 'workspace')?.name ||
-              state.offer.subject?.name ||
-              'Workspace'
-          },
-          receipt.gone
-            ? ' was deleted'
-            : receipt.homeName || receipt.group || receipt.batch
-              ? ' is ready'
-              : ' · Workspace ready'
-        ])
-      : view.setup
+    const headline = completion.ready
+      ? segments([completion.headline])
+      : receipt.visible
         ? segments([
-            { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
-            view.setup.status !== 'stopped'
-              ? ' · setting up'
-              : view.setup.ask
-                ? ` needs you to ${view.setup.ask}`
-                : ' needs you'
+            {
+              text:
+                receipt.homeName ||
+                receipt.rows?.find(row => row.kind === 'workspace')?.name ||
+                state.offer.subject?.name ||
+                'Workspace'
+            },
+            receipt.gone
+              ? ' was deleted'
+              : receipt.homeName || receipt.group || receipt.batch
+                ? ' is ready'
+                : ' · Workspace ready'
           ])
-        : view.headline;
+        : view.setup
+          ? segments([
+              { text: state.offer.subject?.name || state.offer.folder || 'Setup' },
+              view.setup.status !== 'stopped'
+                ? ' · setting up'
+                : view.setup.ask
+                  ? ` needs you to ${view.setup.ask}`
+                  : ' needs you'
+            ])
+          : view.headline;
     headline.forEach(part => {
       if (part.strong) {
         const strong = document.createElement('strong');
@@ -3651,20 +3692,34 @@ function renderOffer(place) {
     // A stopped setup opens collapsed, and collapses when a run stops, so the
     // card leads with what it needs. Otherwise the user's choice is kept.
     const id = state.offer?.id || '';
-    const key = stopped ? `${id}:stopped` : id;
-    if (details.dataset.offer !== key) {
-      const sameOffer = [id, `${id}:stopped`].includes(details.dataset.offer || '');
-      details.dataset.offer = key;
-      if (stopped) details.open = false;
-      else if (!sameOffer) details.open = !state.offer?.plan;
-    }
+    const key = `${state.offer?.conversation_id || ''}:${id}:${completion.ready ? 'completed' : stopped ? 'stopped' : 'review'}`;
+    const focused = Boolean(
+      details.contains(document.activeElement) ||
+      (completion.ready &&
+        [...STOPPED_TUCKED.map(([id]) => id), ...COMPLETED_TUCKED].some(id =>
+          document.getElementById(id)?.contains(document.activeElement)
+        ))
+    );
+    details.open = completionDisclosureOpen({
+      sameState: details.dataset.offer === key,
+      open: details.open,
+      focused,
+      compact: completion.ready || stopped,
+      hasPlan: Boolean(state.offer?.plan)
+    });
+    details.dataset.offer = key;
+    details.querySelector(':scope > summary').textContent = completion.ready
+      ? 'Setup details'
+      : 'Full setup details';
     arrangeStoppedCard(els.offer, details, {
       stopped,
+      completed: completion.ready,
       outstanding:
         stopped &&
         globalThis.OriFolderSetupVisual.requirementsOutstanding?.({ offer: state.offer }) === true
     });
   }
+  arrangeCompletedCard(details, completion.ready);
   setText(
     els.question,
     state.offer?.software && view.plan
@@ -3785,6 +3840,7 @@ function renderOffer(place) {
       route: receipt.route || '',
       open: receipt.openLabel || '',
       home: receipt.homeRoute || '',
+      completion,
       restore: restore?.workspaceId || '',
       actions: showView ? view.actions : null,
       busy: actionBusy || state.restoreBusy
@@ -3825,9 +3881,16 @@ function renderOffer(place) {
     } else if (rebuild && receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
-      open.href = receipt.route;
-      open.textContent = receipt.openLabel;
+      open.href = completion.ready ? completion.href : receipt.route;
+      open.textContent = completion.ready ? completion.openLabel : receipt.openLabel;
       els.actions.append(open);
+      if (completion.ready && receipt.batch) {
+        const batch = document.createElement('a');
+        batch.className = 'btn btn-sm btn-outline-secondary';
+        batch.href = receipt.route;
+        batch.textContent = receipt.openLabel;
+        els.actions.append(batch);
+      }
     } else if (rebuild && restore) {
       const button = document.createElement('button');
       button.type = 'button';
