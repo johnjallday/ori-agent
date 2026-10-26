@@ -9,13 +9,15 @@ import {
   planWithWatching,
   folderOfferView,
   folderReceiptView,
+  folderDiagramVisible,
   folderFirstLookAvailable,
   folderFirstLookOpen,
   isInboxFolderOffer,
   hireLookView,
   hireView,
   setupResultView as setupModalView,
-  setupRunView
+  setupRunView,
+  workspaceGoneView
 } from './personal-assistant-folder.js';
 
 test('an optional seeded task remains available to its card without urgent Home work', () => {
@@ -501,6 +503,71 @@ test('an inbox hire ends on its first batch: Review batch, never Start first loo
   );
   assert.equal(elsewhere.openLabel, 'Open Downloads');
   assert.equal(elsewhere.route, '/workspaces/downloads');
+});
+
+// The server reads the workspace live and drops a deleted one's links; the
+// receipt it sends back has no routes left to open.
+function deletedInboxHire(gone) {
+  const offer = inboxHire({ outcome: 'batch', batch_id: 'batch-1', eligible: 23, needs_review: 4 });
+  offer.workspace_gone = gone;
+  offer.outcome.route = '';
+  offer.outcome.receipt = offer.outcome.receipt.map(({ route: _route, ...row }) => row);
+  return offer;
+}
+
+test('a receipt whose workspace was deleted opens nothing and offers Restore from the Trash', () => {
+  const receipt = folderReceiptView(deletedInboxHire('trashed'));
+  assert.equal(receipt.visible, true);
+  assert.equal(receipt.route, '');
+  assert.equal(receipt.homeRoute, '');
+  assert.equal('batch' in receipt, false);
+  assert.deepEqual(receipt.gone, {
+    name: 'Downloads',
+    workspaceId: 'ws-downloads',
+    restoreLabel: 'Restore Downloads',
+    message:
+      'Downloads was deleted, so there is nothing to open. Restore it from the Trash to pick up where you left off, or show me the folder again to set it up afresh.'
+  });
+  // The receipt is still the record of what the setup made.
+  assert.deepEqual(
+    receipt.rows.map(row => row.kind),
+    ['agent', 'workspace', 'folder', 'batch']
+  );
+  assert.equal(workspaceGoneView(deletedInboxHire('trashed')).workspaceId, 'ws-downloads');
+  // The setup's scene is not drawn for a workspace that is no longer there,
+  // even though the run's visual is still on the offer.
+  const deleted = {
+    ...deletedInboxHire('trashed'),
+    setup: { visual: { placement: 'standalone' } }
+  };
+  assert.equal(folderDiagramVisible(deleted, true), false);
+  assert.equal(folderDiagramVisible({ ...deleted, workspace_gone: undefined }, true), true);
+  assert.equal(
+    conversationFolderOfferView({ ...deleted, verdict: 'project' }).question,
+    'What the setup made, before it was deleted:'
+  );
+});
+
+test('a workspace with no record left cannot be restored, only set up again', () => {
+  const gone = folderReceiptView(deletedInboxHire('removed')).gone;
+  assert.equal(gone.workspaceId, '');
+  assert.equal(gone.restoreLabel, '');
+  assert.equal(
+    gone.message,
+    'Downloads was deleted, so there is nothing to open. Show me the folder again to set it up afresh.'
+  );
+});
+
+test('only a resolved offer the server marked deleted is treated as gone', () => {
+  for (const offer of [
+    inboxHire({
+      outcome: 'batch',
+      route: '/workspaces/downloads?panel=file-janitor&batch_id=batch-1'
+    }),
+    { ...deletedInboxHire('trashed'), status: 'pending' },
+    { ...deletedInboxHire('trashed'), workspace_gone: 'archived' }
+  ])
+    assert.equal(workspaceGoneView(offer), null);
 });
 
 // An inbox folder's review, as the server sends it: no capability, no software

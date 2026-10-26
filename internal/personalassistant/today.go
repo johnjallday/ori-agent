@@ -35,6 +35,13 @@ const (
 
 var todaySafeSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
 
+// todayWorkspaceOpens reports whether Today can link to ws, the workspace read
+// for id: it is that workspace, its slug is safe, and it was not deleted. A
+// workspace in the Trash has no page to open, so Today leaves it out.
+func todayWorkspaceOpens(ws *workspace.Workspace, id string) bool {
+	return ws != nil && ws.ID == id && ws.GetStatus() != workspace.StatusTrashed && todaySafeSlug.MatchString(ws.FolderSlug)
+}
+
 // TodaySourceHealth reports one independent canonical read. Unavailable never
 // means empty, and its bounded reason codes contain no internal error text.
 type TodaySourceHealth struct {
@@ -795,7 +802,7 @@ func (s *TodayService) folderReceiptTodayItem(offer FolderOffer, now time.Time) 
 		return TodayItem{}, false
 	}
 	ws, err := s.workspaces.Get(offer.Outcome.WorkspaceID)
-	if err != nil || ws == nil || ws.ID != offer.Outcome.WorkspaceID || !todaySafeSlug.MatchString(ws.FolderSlug) {
+	if err != nil || !todayWorkspaceOpens(ws, offer.Outcome.WorkspaceID) {
 		return TodayItem{}, false
 	}
 	route := "/workspaces/" + url.PathEscape(ws.FolderSlug)

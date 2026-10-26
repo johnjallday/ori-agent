@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,9 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		FirstTaskView: func(ctx context.Context, workspaceID string) (personalassistant.FolderFirstTaskView, bool) {
 			return b.folderFirstTaskView(ctx, workspaceID, b.assistantModelConfigured(ctx))
 		},
+		OutcomeWorkspace: func(_ context.Context, workspaceID string) (personalassistant.FolderOutcomeWorkspace, bool) {
+			return folderOutcomeWorkspace(b.workspaceStore, workspaceID)
+		},
 	})
 	b.personalAssistantFolderDigest = service
 	if b.sessionHandler != nil {
@@ -109,6 +113,26 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	b.personalAssistantHandler.SetFirstBatchActions(service)
 	b.personalAssistantHandler.SetFolderHomeProvider(folderHomeProviderSetup{builder: b})
 	b.personalAssistantHandler.SetFolderProjectSelections(b.pathSelectionStore)
+}
+
+// folderOutcomeWorkspace reads where a resolved offer's workspace stands now. A
+// record that cannot be read is unknown, never gone: only a trashed record, or
+// a store that lists its workspaces without this one, says it is gone.
+func folderOutcomeWorkspace(store workspace.Store, workspaceID string) (personalassistant.FolderOutcomeWorkspace, bool) {
+	if store == nil || strings.TrimSpace(workspaceID) == "" {
+		return personalassistant.FolderOutcomeWorkspace{}, false
+	}
+	if ws, err := store.Get(workspaceID); err == nil && ws != nil {
+		if ws.GetStatus() == workspace.StatusTrashed {
+			return personalassistant.FolderOutcomeWorkspace{Gone: personalassistant.FolderWorkspaceTrashed}, true
+		}
+		return personalassistant.FolderOutcomeWorkspace{Slug: ws.FolderSlug}, true
+	}
+	ids, err := store.List()
+	if err != nil || slices.Contains(ids, workspaceID) {
+		return personalassistant.FolderOutcomeWorkspace{}, false
+	}
+	return personalassistant.FolderOutcomeWorkspace{Gone: personalassistant.FolderWorkspaceRemoved}, true
 }
 
 // silentAppInstalled keeps the installed-app lookup off the suggestion rail.
