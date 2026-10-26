@@ -391,6 +391,14 @@ func reviewStoppedControls(setup *personalassistant.FolderSetupView) []string {
 		return []string{"Pick it again", continueSetup}
 	case personalassistant.FolderStopNeedsModel:
 		return []string{"Set up a model", "Try again", continueSetup}
+	case personalassistant.FolderStopHomeUpgrade:
+		upgrade := "Upgrade the Home"
+		if setup.HomeUpgrade != nil {
+			if name := workspaceContextText(setup.HomeUpgrade.Name, 80); name != "" {
+				upgrade = "Upgrade " + name
+			}
+		}
+		return []string{upgrade, continueSetup}
 	case personalassistant.FolderStopNeedsChoice:
 		choices := []string{}
 		for _, name := range setup.EntryCandidates {

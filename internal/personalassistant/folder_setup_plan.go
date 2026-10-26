@@ -81,7 +81,40 @@ const (
 	// FolderStopMemberFailed: a structure's run could not create or link one
 	// member's workspace. What finished is kept; Continue carries on from there.
 	FolderStopMemberFailed = "member_failed"
+	// FolderStopHomeUpgrade: the run had to update the Home provider, but a Home
+	// still uses the installed release and is never moved onto a release it was
+	// not reviewed for. The owner upgrades that Home first (the run's HomeUpgrade
+	// names it). The upgrade changes the reviewed Home, so the remaining steps
+	// are then reviewed again (Continue setup), never resumed on the old plan.
+	FolderStopHomeUpgrade = "home_upgrade_required"
 )
+
+// FolderHomeLink names a Home and the page where its owner reviews the Home's
+// package upgrade. Route is a /workspaces/ page, or "" when the Home has no page
+// to open (it is in the trash or its folder is missing). Neither is a path.
+type FolderHomeLink struct {
+	Name  string `json:"name"`
+	Route string `json:"route,omitempty"`
+}
+
+// cloneFolderHomeLink copies a link, so a stored run never shares one.
+func cloneFolderHomeLink(link *FolderHomeLink) *FolderHomeLink {
+	if link == nil {
+		return nil
+	}
+	copied := *link
+	return &copied
+}
+
+// validFolderHomeLink keeps a link plain text and its route a workspace page.
+func validFolderHomeLink(link *FolderHomeLink) bool {
+	if link == nil {
+		return true
+	}
+	name := strings.TrimSpace(link.Name)
+	return name != "" && len(link.Name) <= 200 && !strings.ContainsAny(link.Name, "\x00\r\n") && !looksLikeFilesystemPath(link.Name) &&
+		len(link.Route) <= 512 && (link.Route == "" || (strings.HasPrefix(link.Route, "/workspaces/") && !strings.Contains(link.Route, "//")))
+}
 
 // FolderPlanLine is one consequence the user consents to. Name and Detail are
 // plain text and never contain a filesystem path. State is set only while a
@@ -99,6 +132,10 @@ const (
 	FolderInstallInstall = "install"
 	FolderInstallEnable  = "enable"
 	FolderInstallUpdate  = "update"
+	// FolderVisualHomeUpgrade is a requirement row's state, never a plan's
+	// promise: the plugin's update waits on a Home's own package upgrade, so no
+	// plan is offered until that Home has moved.
+	FolderVisualHomeUpgrade = "home_upgrade"
 )
 
 // FolderSetupIntent is what the confirmed plan promised about the two plugins a
@@ -504,6 +541,9 @@ type FolderSetupUpdate struct {
 	// read back from canonical state when it finished.
 	HomeID  string
 	Receipt []FolderReceiptRow
+	// HomeUpgrade names the Home a FolderStopHomeUpgrade stop waits on; every
+	// other update clears it.
+	HomeUpgrade *FolderHomeLink
 	// keepLines makes the service keep the stored lines and change only the
 	// status; the service uses it to record a stop it decided on itself.
 	keepLines bool
@@ -581,6 +621,8 @@ type FolderSetupView struct {
 	Lines           []FolderPlanLine        `json:"lines"`
 	EntryCandidates []string                `json:"entry_candidates,omitempty"`
 	Destination     *FolderSetupDestination `json:"destination,omitempty"`
+	// HomeUpgrade is the Home a home_upgrade_required stop waits on.
+	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
 	// Hire and Brief are who the run hired and the goal it was given.
 	Hire  *FolderHire `json:"hire,omitempty"`
 	Brief string      `json:"brief,omitempty"`
@@ -673,6 +715,9 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	if len(run.HomeID) > 200 || strings.ContainsAny(run.HomeID, "/\\\x00\r\n") || len(run.Receipt) > folderSetupMaxLines {
 		return fmt.Errorf("%w: setup home", errFolderDigestInvalid)
 	}
+	if !validFolderHomeLink(run.HomeUpgrade) {
+		return fmt.Errorf("%w: setup home upgrade", errFolderDigestInvalid)
+	}
 	if brief, err := NormalizeFolderBrief(run.Brief); err != nil || brief != run.Brief {
 		return fmt.Errorf("%w: setup brief", errFolderDigestInvalid)
 	}
@@ -725,4 +770,6 @@ type FolderSetupRun struct {
 	// canonical state when it finished; the offer resolves to that Home.
 	HomeID  string             `json:"home_id,omitempty"`
 	Receipt []FolderReceiptRow `json:"receipt,omitempty"`
+	// HomeUpgrade is the Home a home_upgrade_required stop waits on.
+	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
 }

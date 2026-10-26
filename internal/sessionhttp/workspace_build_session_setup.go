@@ -62,6 +62,7 @@ var buildSetupStopCopy = map[string]string{
 	personalassistant.FolderStopNeedsChoice:      "The folder has more than one project file. Choose the one to set up.",
 	personalassistant.FolderStopNeedsModel:       "The project agent needs a model before setup can continue. Completed work is kept.",
 	personalassistant.FolderStopInstallFailed:    "A required plugin could not be installed, updated or enabled. Completed work is kept; Retry continues from the saved run.",
+	personalassistant.FolderStopHomeUpgrade:      "Your Home still uses the installed release of a plugin this setup updates. Upgrade it from that Home first, then review this setup again. Completed work is kept.",
 	personalassistant.FolderStopInterrupted:      "Set it up was interrupted before it finished. Retry continues from there.",
 	personalassistant.FolderStopConsentStale:     "The Home's shared assistant needs approval for the current blueprint. Completed work is kept.",
 	personalassistant.FolderStopAssistantMissing: "The Home's shared assistant is unavailable. Completed work is kept.",

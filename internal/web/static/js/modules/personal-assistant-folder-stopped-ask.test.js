@@ -21,6 +21,7 @@ test('each stop reason asks for the step its primary action takes', () => {
     needs_model: 'set up a model',
     plan_changed: 'review the changed setup',
     install_failed: 'check a plugin that did not install',
+    home_upgrade_required: 'upgrade its Home first',
     interrupted: 'finish setup',
     consent_stale: 'review its shared agent',
     assistant_missing: 'choose its agent',

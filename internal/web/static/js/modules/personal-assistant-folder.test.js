@@ -1355,6 +1355,78 @@ test('a stopped setup offers the action that fixes its stop', () => {
   assert.equal(choice.oneCard, true);
 });
 
+const musicHome = {
+  name: 'Music Production Home',
+  route: '/workspaces/music-production-home/assistant?upgrade=review'
+};
+
+test('a setup stopped by a Home on the installed release opens that Home’s upgrade', () => {
+  const view = folderOfferView(stoppedOffer('home_upgrade_required', { home_upgrade: musicHome }));
+  assert.match(view.question, /^1 of 3 steps finished\. /);
+  assert.match(view.question, /Home “Music Production Home” still uses the installed release/);
+  // The upgrade changes the reviewed Home, so the rest is reviewed again rather
+  // than resumed on the old plan: no Try again.
+  assert.match(
+    view.question,
+    /Upgrade that Home first.*Then Continue setup reviews the remaining steps/
+  );
+  assert.doesNotMatch(view.question, /Review Plugins|Try again/);
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.label, action.style, action.href]),
+    [
+      ['upgrade-home', 'Upgrade Music Production Home', 'primary', musicHome.route],
+      ['resume', 'Continue setup', 'outline', undefined],
+      ['remove', 'Remove', 'link', undefined]
+    ]
+  );
+  // A Home with no page of its own (in the trash), or a link that is not a
+  // Home's upgrade review, is upgraded from Plugins instead.
+  for (const home of [
+    { name: 'Music Production Home' },
+    { name: 'Music Production Home', route: 'https://example.com/upgrade' }
+  ]) {
+    const upgrade = folderOfferView(stoppedOffer('home_upgrade_required', { home_upgrade: home }))
+      .actions[0];
+    assert.equal(upgrade.href, '/plugins');
+  }
+  const unnamed = folderOfferView(stoppedOffer('home_upgrade_required'));
+  assert.equal(unnamed.actions[0].label, 'Upgrade the Home');
+  assert.match(unnamed.question, /A Home still uses the installed release/);
+});
+
+test('a project card whose Home must be upgraded first names it instead of offering Set up', () => {
+  const offer = {
+    ...oneCardOffer,
+    plan: undefined,
+    setup_unavailable_reason: 'home_upgrade_required',
+    setup_unavailable_message:
+      'Home “Music Production Home” still uses Music Project Management 0.3.0, and this setup needs 0.4.0. Upgrade that Home first; its review shows what changes. Then Set up is offered here.',
+    home_upgrade: musicHome
+  };
+  const view = folderOfferView(offer);
+  assert.equal(view.question, offer.setup_unavailable_message);
+  assert.equal(view.capabilityDetail, '');
+  assert.ok(!view.plan);
+  assert.deepEqual(
+    view.actions.map(action => [action.id, action.href]),
+    [
+      ['upgrade-home', musicHome.route],
+      ['no', undefined],
+      ['later', undefined]
+    ]
+  );
+  // In a conversation the review closes with Keep chatting, as every review does.
+  const chat = conversationFolderOfferView({ ...offer, conversation_id: 'conv-1' });
+  assert.deepEqual(
+    chat.actions.map(action => action.id),
+    ['upgrade-home', 'keep-chatting']
+  );
+  // Without a Home to name, the card says only that one-click setup is unavailable.
+  const unnamed = folderOfferView({ ...offer, home_upgrade: undefined });
+  assert.match(unnamed.capabilityDetail, /a Home must be upgraded from its own page first/);
+  assert.ok(!unnamed.actions.some(action => action.id === 'upgrade-home'));
+});
+
 test('a finished one-card setup ends on the receipt with Open <workspace>', () => {
   const offer = {
     ...oneCardOffer,

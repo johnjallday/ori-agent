@@ -95,7 +95,7 @@ func CloneFolderSetupVisual(value *FolderSetupVisual) *FolderSetupVisual {
 		}
 		switch plugin.Operation {
 		case FolderInstallReady, FolderInstallInstall, FolderInstallEnable, FolderInstallUpdate:
-		case "not_checked", "unavailable", "unverified":
+		case "not_checked", "unavailable", "unverified", FolderVisualHomeUpgrade:
 			out.RequirementsChecked = false
 		default:
 			out.RequirementsChecked = false

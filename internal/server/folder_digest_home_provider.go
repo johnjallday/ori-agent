@@ -91,8 +91,12 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 			result.Installed, result.Ready = true, entry.Enabled
 		case installedHomeProviderOlder:
 			// An older reviewed release is updated to this one on confirm. The
-			// replacement guard still refuses it while a Home is pinned to it.
+			// replacement guard still refuses it while a Home is pinned to it, so
+			// the preview names that Home rather than promising the update.
 			result.Installed, result.Update, result.InstalledVersion = true, true, entry.Version
+			if refusal := homeUpgradeBlocking(b.workspaceStore, entry, release.version); refusal != nil {
+				result.HomeUpgrade = &personalassistant.FolderHomeLink{Name: refusal.HomeName, Route: refusal.HomePath}
+			}
 		default:
 			// A plugin with this name alone is not evidence of the reviewed pin.
 			// Never enable an unrelated installation on a folder-card click.
@@ -145,6 +149,10 @@ func (s folderHomeProviderSetup) Install(ctx context.Context, key, reviewedVersi
 	if preview.Installed && preview.Update {
 		if preview.Version == "" || preview.Version != reviewedVersion || preview.Source == "" {
 			return personalassistanthttp.FolderHomeProviderPreview{}, personalassistant.ErrFolderWorkspaceRefused
+		}
+		if home := preview.HomeUpgrade; home != nil {
+			// The guard would refuse it after the download; refuse it before.
+			return personalassistanthttp.FolderHomeProviderPreview{}, &plugin.HomeUpgradeRequiredError{HomeName: home.Name, HomePath: home.Route}
 		}
 		if _, err := manager.UpdateFromSource(preview.PluginID, preview.Source, sourceFormat, func(report plugin.TrustReport) bool {
 			return report.Name == preview.PluginID && report.Format == sourceFormat

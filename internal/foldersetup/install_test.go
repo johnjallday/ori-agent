@@ -319,6 +319,43 @@ func TestRunHoldsTheHomeProviderToThePlannedRelease(t *testing.T) {
 	})
 }
 
+// A Home still pinned to the installed provider release blocks its update.
+// Retrying cannot help, so the run says which Home to upgrade, and a retry
+// after that upgrade carries on with nothing left to name.
+func TestRunNamesTheHomeThatBlocksTheProviderUpdate(t *testing.T) {
+	h := newInstallHarness()
+	h.install.installed, h.install.enabled = true, true
+	home := personalassistant.FolderHomeLink{Name: "Music Production Home", Route: "/workspaces/music-production-home/assistant?upgrade=review"}
+	h.provider.installErr = &HomeUpgradeRequired{Home: home, Cause: errors.New("plugin replacement would strand existing Home")}
+	cfg := installConfig(personalassistant.FolderInstallReady, personalassistant.FolderInstallUpdate)
+	result, progress := h.run(t, cfg)
+	if result.StopReason != personalassistant.FolderStopHomeUpgrade || result.Cause == nil {
+		t.Fatalf("result = %+v", result)
+	}
+	if h.opened != 0 || h.projectTouched() {
+		t.Fatalf("the project steps ran after a refused update: %v", h.log)
+	}
+	last := progress.last()
+	if last.HomeUpgrade == nil || *last.HomeUpgrade != home {
+		t.Fatalf("the stop did not name the Home: %+v", last.HomeUpgrade)
+	}
+	if got := lineStates(last)[personalassistant.FolderPlanProvider]; got != personalassistant.FolderLineFailed {
+		t.Fatalf("the provider line = %s, want failed", got)
+	}
+
+	// The owner upgrades the Home from its page; the provider is then current.
+	h.provider.installErr, h.provider.ready = nil, true
+	result, progress = h.run(t, cfg)
+	if result.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("retry after the Home upgrade = %+v cause=%v", result, result.Cause)
+	}
+	for _, update := range progress.updates {
+		if update.HomeUpgrade != nil {
+			t.Fatalf("a run that was not stopped by a Home still named one: %+v", update)
+		}
+	}
+}
+
 func TestRunStopsWhenTheInstalledPluginHasNoQuest(t *testing.T) {
 	h := newInstallHarness()
 	h.install.installed, h.install.enabled, h.provider.ready = true, true, true
