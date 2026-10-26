@@ -567,4 +567,34 @@ test('a lost real confirmation is observed without replay; failed position repai
     path: `${recoveryEvidence}/source-completed-history.png`,
     fullPage: true
   });
+  const filingWrites: string[] = [];
+  page.on('request', request => {
+    if (
+      request.method() !== 'GET' &&
+      new URL(request.url()).pathname.startsWith(`/api/workspaces/${created.id}/file-janitor`)
+    )
+      filingWrites.push(request.url());
+  });
+  const filing = page.getByRole('link', { name: 'Open File Janitor', exact: true });
+  expect(
+    new URL((await filing.getAttribute('href'))!, page.url()).searchParams.get('preparation')
+  ).toBe(setup.review.operation_id);
+  await filing.click();
+  await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Initial scan finished');
+  await expect(page.locator('#fileJanitorConsoleBody')).not.toContainText(
+    'Not scanned in this session'
+  );
+  await page.reload();
+  await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Initial scan finished');
+  expect(await json(page, `/api/workspaces/${created.id}/file-janitor/setup-review`)).toEqual(
+    setup
+  );
+  expect(confirmations).toBe(1);
+  expect(positionWrites).toBe(2);
+  expect(inference).toEqual([]);
+  expect(filingWrites).toEqual([]);
+  await page.screenshot({
+    path: `${recoveryEvidence}/source-empty-filing-review.png`,
+    fullPage: true
+  });
 });

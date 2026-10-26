@@ -39,7 +39,7 @@ func (p inboxBuildPlacement) RecordPreparedOutcome(ctx context.Context, owner st
 	}
 	scan := observed.Preparation.Result
 	route := "/workspaces/" + url.PathEscape(observed.FolderSlug)
-	batchRoute := route + "?panel=file-janitor"
+	batchRoute := route + "?panel=file-janitor&preparation=" + url.QueryEscape(observed.Preparation.OperationID)
 	if scan.BatchID != "" {
 		batchRoute += "&batch_id=" + url.QueryEscape(scan.BatchID)
 	}

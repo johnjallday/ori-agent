@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -136,6 +137,10 @@ func TestInboxPlacementRecovery_AcceptedHistoryCanReopenAfterDetachWithoutContin
 	if err != nil || source.Status != personalassistant.FolderOfferResolved || source.PlacementHandoff == nil || source.Setup != nil || source.DecidedAt != nil ||
 		source.Outcome == nil || source.Outcome.WorkspaceID != workspaceID || source.Outcome.FirstTaskID != "" || source.Outcome.FirstLook == nil || source.Outcome.FirstLook.TaskID != "" || source.Outcome.FirstLook.Started || source.Outcome.FirstLook.Batch == nil {
 		t.Fatalf("source is not a verified, task-free receipt: %+v %v", source, err)
+	}
+	batchURL, err := url.Parse(source.Outcome.FirstLook.Batch.Route)
+	if err != nil || batchURL.Query().Get("preparation") != prepared["preparation"].(map[string]any)["operation_id"] {
+		t.Fatalf("source filing link lost the actual preparation identity: %v %v", batchURL, err)
 	}
 	assigned := false
 	for _, row := range source.Outcome.Receipt {

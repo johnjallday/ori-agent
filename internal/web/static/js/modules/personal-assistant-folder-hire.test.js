@@ -505,6 +505,26 @@ test('an inbox hire ends on its first batch: Review batch, never Start first loo
   assert.equal(elsewhere.route, '/workspaces/downloads');
 });
 
+test('inbox filing links retain preparation identity without widening allowed routes', () => {
+  const base = '/workspaces/downloads?panel=file-janitor';
+  for (const suffix of ['&preparation=accepted-1', '&preparation=accepted-1&batch_id=batch-1']) {
+    const route = base + suffix;
+    assert.equal(folderReceiptView(inboxHire({ outcome: 'no_eligible', route })).route, route);
+  }
+  for (const suffix of [
+    '&preparation=',
+    '&preparation=x&preparation=y',
+    '&preparation=%2Fother',
+    '&preparation=x&scan=true',
+    '&preparation=x#other'
+  ]) {
+    assert.equal(
+      folderReceiptView(inboxHire({ outcome: 'no_eligible', route: base + suffix })).route,
+      '/workspaces/downloads'
+    );
+  }
+});
+
 // The server reads the workspace live and drops a deleted one's links; the
 // receipt it sends back has no routes left to open.
 function deletedInboxHire(gone) {

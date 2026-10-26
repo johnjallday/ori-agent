@@ -165,6 +165,10 @@ If the created workspace is verified but its preparation is incomplete, offer
 its actual filing-review route separately from explicit continuation. The
 observed saved name/goal, team, exact linked path and confirmed scope/schedule
 remain readable; local unsaved choices are not presented as the accepted setup.
+The existing File Janitor console retains a verified empty initial result when
+its first linked-folder status resets old display state. Receipt presentation
+follows that reset and matches the current root; later refresh/deep-link reads
+do not mislabel a completed empty scan as unscanned or repeat it.
 
 After verified completion, the POST preparation/review handler may record that
 observation in the original source offer. This is receipt bookkeeping only,

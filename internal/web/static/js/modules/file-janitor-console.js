@@ -3925,17 +3925,24 @@
   }
 
   async function landOnPreparedReview(result, ctx) {
+    const id = wsId();
+    const current = () => !disposed && wsId() === id;
+    busy = false;
+    ctx?.setBusy?.(false, '');
+    await window.SetupWizard?.refresh?.();
+    if (!current()) return;
+    if (window.SetupWizard?.getStatus?.()?.state === 'ready') await window.SetupWizard.close?.();
+    if (!current()) return;
+    await refresh();
+    if (!current() || lastStatus?.settings?.root_id !== result?.root_id) return;
+    // The first linked status installs a new managed root and clears the old
+    // folder's display state. Adopt the verified result only after that reset.
     linkedBatchID = result?.batch_id || '';
     emptyReviewState = result?.outcome === 'no_eligible' ? 'no_proposals' : 'unscanned';
     reviewStatusMessage =
       result?.outcome === 'no_eligible'
         ? 'Initial scan finished. No eligible files are ready for review. Files may still be settling; scan again when you choose.'
         : 'Your first review is ready. Nothing was moved.';
-    busy = false;
-    ctx?.setBusy?.(false, '');
-    await window.SetupWizard?.refresh?.();
-    if (window.SetupWizard?.getStatus?.()?.state === 'ready') await window.SetupWizard.close?.();
-    await refresh();
     setPreparationRoute(setupReview?.operation_id || '');
     open({ tab: 'review', source: 'folder-preparation' });
     document.getElementById('fileJanitorConsoleTitle')?.focus();
@@ -4638,6 +4645,9 @@
         setupReview = null;
       }
       if (!current()) return;
+      // Install the status (and its managed-root reset) before adopting a
+      // canonical receipt; otherwise the reset erases an empty initial result.
+      render(status);
       // Creation links only an operation identity, never counts or success
       // flags. The first-result message comes from its canonical receipt.
       const preparationID = new URLSearchParams(window.location?.search || '').get('preparation');
@@ -4649,7 +4659,8 @@
         preparationID &&
         setupReview?.state === 'prepared' &&
         setupReview.operation_id === preparationID &&
-        setupReview.result
+        isPreparedResult(setupReview.result) &&
+        setupReview.result.root_id === status.settings?.root_id
       ) {
         if (setupReview.result.outcome === 'no_eligible') {
           emptyReviewState = 'no_proposals';
@@ -4659,7 +4670,6 @@
           reviewStatusMessage = 'Your first review is ready. Nothing was moved.';
         }
       }
-      render(status);
       const renderedScope = requestScope();
       const renderedSequence = statusRequest;
       if (status && status.applies && status.settings && status.settings.root_path) {

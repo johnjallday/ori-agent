@@ -2295,9 +2295,10 @@ export function workspaceGoneView(offer) {
 }
 
 // The File Janitor review a first batch opens: its workspace's panel, on the
-// batch when the scan made one. Nothing else is followed.
+// batch when the scan made one. A preparation identity lets the destination
+// observe the original empty result too; it is never permission to scan again.
 const FILE_JANITOR_ROUTE =
-  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&batch_id=[A-Za-z0-9_-]+)?$/;
+  /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor(?:&preparation=[A-Za-z0-9_-]+)?(?:&batch_id=[A-Za-z0-9_-]+)?$/;
 
 // firstBatchView is an inbox hire's first batch, as its outcome recorded it:
 // where Review batch (or Open File Janitor) leads, and the counts. Null for
