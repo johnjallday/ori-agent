@@ -5,6 +5,7 @@ import { renderFolderFindings } from './personal-assistant-folder-presentation.j
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
 import {
   setupCompletionView,
+  setupAttachmentConsumed,
   completedTaskView,
   ownsSetupCompletion
 } from './personal-assistant-setup-completion.js';
@@ -495,7 +496,9 @@ function syncReviewLink() {
   if (!elements || !current) return;
   const structure = currentStructure();
   elements.open.hidden =
-    Boolean(current.hireUnavailable) || reviewLinkHidden(current.observation, structure);
+    Boolean(current.hireUnavailable) ||
+    consumedAttachment() ||
+    reviewLinkHidden(current.observation, structure);
   // Move the one existing control beside a local preview; never clone its
   // authority or create a second review owner. Saved context keeps the chip.
   const previewActions = document.getElementById('personalAssistantFolderPreviewActions');
@@ -1191,11 +1194,19 @@ function renderReferences() {
   window.PersonalAssistantTranscript?.changed?.();
 }
 
-function completedSetup() {
-  const offer = reviews[current?.offerId];
+function completedSetup(state = current) {
+  const offer = reviews[state?.offerId];
   return Boolean(
-    current?.conversationId === window.PersonalAssistantConversation?.currentId?.() &&
-    ownsSetupCompletion(current, offer, setupCompletionView(offer, folderReceiptView(offer)))
+    state?.conversationId === window.PersonalAssistantConversation?.currentId?.() &&
+    ownsSetupCompletion(state, offer, setupCompletionView(offer, folderReceiptView(offer)))
+  );
+}
+
+function consumedAttachment(state = current) {
+  const offer = reviews[state?.offerId];
+  return Boolean(
+    state?.conversationId === window.PersonalAssistantConversation?.currentId?.() &&
+    setupAttachmentConsumed(state, offer, folderReceiptView(offer))
   );
 }
 
@@ -1325,6 +1336,7 @@ if (typeof window !== 'undefined')
   window.PersonalAssistantFolderSetup = {
     contextChanged,
     completed: completedSetup,
+    consumed: consumedAttachment,
     applySuggestion,
     applyReviewContext,
     hydrate,

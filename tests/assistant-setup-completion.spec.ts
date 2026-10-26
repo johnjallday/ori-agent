@@ -2,6 +2,7 @@ import { test, expect, chromium, type Page } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
+import { chooseAttach } from './helpers/assistant-menus';
 
 // Injected presentation fixtures on the real isolated host: not evidence of
 // native folder selection, setup execution, or a live model/report.
@@ -29,7 +30,7 @@ async function mount(page: Page, offer: any = completed(), url = '/?panel=today'
   await page.route('**/api/**', async route => {
     const request = route.request();
     if (
-      /\/(ask|route)$|\/folder-context\/(review|select)|\/folder-digest\/offers\/.*\/(setup|decide|resolve|first-look|prerequisites)|\/folder-first-task\/(start|stop)|\/tasks\/.*(execute|retry)|\/plugins\/.*(install|enable|update)/.test(
+      /\/(ask|route)$|\/folder-context\/(review|select|detach)|\/folder-digest\/offers\/.*\/(setup|decide|resolve|first-look|prerequisites)|\/folder-first-task\/(start|stop)|\/tasks\/.*(execute|retry)|\/plugins\/.*(install|enable|update)/.test(
         new URL(request.url()).pathname
       ) &&
       request.method() !== 'GET'
@@ -182,6 +183,11 @@ test('fixture completed Home and group retain canonical actions', async ({ page 
 test('fixture deleted and awaiting-receipt setup cannot become ready', async ({ page }) => {
   const gone = { ...completed(), workspace_gone: 'trashed' };
   const { card, effects } = await mount(page, gone);
+  await restore(page, gone);
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  expect(
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request())
+  ).toBeNull();
   await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('was deleted');
   await expect(card.getByRole('button', { name: 'Restore Album-3', exact: true })).toBeVisible();
   await expect(card.getByRole('link', { name: 'Open workspace', exact: true })).toHaveCount(0);
@@ -260,14 +266,14 @@ for (const state of ['seeded', 'running', 'waiting', 'failed']) {
     );
     await expect(card.locator('#personalAssistantFolderReceipt')).toBeHidden();
     const task = card.locator('#personalAssistantFolderOptionalTask');
-    if (state === 'seeded' || state === 'failed') {
-      await expect(task).toContainText('Each explicit attempt uses model tokens');
+    if (state === 'seeded') {
+      await expect(task).toBeHidden();
       await expect(
-        task.getByRole('button', {
-          name: state === 'seeded' ? 'Start summary' : 'Try again',
-          exact: true
-        })
-      ).toBeVisible();
+        card.getByRole('button', { name: /Start summary|Start first look/ })
+      ).toHaveCount(0);
+    } else if (state === 'failed') {
+      await expect(task).toContainText('Each explicit attempt uses model tokens');
+      await expect(task.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
     } else if (state === 'running')
       await expect(task.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
     else await expect(task).toContainText('Which section should I read?');
@@ -306,7 +312,7 @@ test('fixture ticket-only output and File Janitor preserve truthful link labels'
   expect(effects).toEqual([]);
 });
 
-test('fixture completed composer preserves draft, ignores empty Send and routes only typed follow-up', async ({
+test('fixture completed composer consumes its attachment, preserves draft and sends only typed follow-up', async ({
   page
 }) => {
   const offer: any = completed();
@@ -323,7 +329,11 @@ test('fixture completed composer preserves draft, ignores empty Send and routes 
   await restore(page, offer);
   await expect(input).toHaveValue(draft);
   await expect(input).toHaveAttribute('placeholder', 'What would you like to do next?');
-  await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText('Album-3');
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeHidden();
+  expect(
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request())
+  ).toBeNull();
   await expect(page.locator('#personalAssistantConversationTitle')).toHaveText(
     'Keep this original title'
   );
@@ -365,7 +375,9 @@ test('fixture completed composer preserves draft, ignores empty Send and routes 
   await expect.poll(() => sent.filter(row => row.stage === 'ask').length).toBe(1);
   const ask = sent.find(row => row.stage === 'ask');
   expect(ask.prompt).toBe('What should we discuss next?');
-  expect(ask.folder_context.selection_id).toBe(observation.id);
+  expect(ask.folder_context).toBeUndefined();
+  expect(sent.find(row => row.stage === 'route').folder_context).toBeUndefined();
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   expect(ask.conversation.id).toBe(offer.conversation_id);
   await expect(page.locator('#homeAssistantConversation')).toContainText(
     'Controlled follow-up fixture response.'
@@ -417,6 +429,69 @@ test('fixture replacement, detach, New and a newer review revoke composer comple
   await page.evaluate(() => (window as any).PersonalAssistantConversation.startNew());
   await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await expect(input).not.toHaveAttribute('placeholder', 'What would you like to do next?');
+});
+
+test('fixture ready setup has no task prompt/used attachment; a fresh attachment works normally', async ({
+  page
+}) => {
+  const offer: any = completed();
+  offer.first_task = { state: 'seeded', recipe: 'folder_summary', optional: true, can_start: true };
+  const { card, effects } = await mount(page, offer);
+  await restore(page, offer);
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
+  await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toHaveCount(0);
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await page.reload();
+  await expect(card.locator('#personalAssistantFolderOfferHeadline')).toHaveText(
+    '✓ Album-3 is ready'
+  );
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await evidence(page, '06-ready-no-task-or-attachment');
+  await page.route('**/api/home-assistant/folder-context/choices', route =>
+    route.fulfill({
+      json: { chips: [{ id: 'documents', label: 'Documents' }], picker_available: false }
+    })
+  );
+  let selections = 0;
+  await page.route('**/api/home-assistant/folder-context/select', route => {
+    selections++;
+    return route.fulfill({
+      json: {
+        revision: 'fresh-revision',
+        observation: {
+          ...observation,
+          id: 'fresh-observation',
+          folder: 'Fresh folder',
+          projects: []
+        }
+      }
+    });
+  });
+  await chooseAttach(page, '#personalAssistantFolderChip');
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: 'Documents', exact: true })
+    .click();
+  await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText('Fresh folder');
+  await expect(page.locator('#personalAssistantInput')).toHaveAttribute(
+    'placeholder',
+    'Explore this folder'
+  );
+  await page.evaluate(
+    offer =>
+      document.dispatchEvent(
+        new CustomEvent('personal-assistant:folder-offer', { detail: { offer } })
+      ),
+    offer
+  );
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().selection_id)
+  ).toBe('fresh-observation');
+  expect(selections).toBe(1);
+  expect(effects).toEqual([]);
 });
 
 for (const url of ['/?panel=today', '/settings?panel=today']) {
@@ -598,15 +673,19 @@ test('fixture late refused task start cannot contaminate another review', async 
   await page.route('**/api/workspaces/album-three/folder-first-task/start', route => {
     finish = () => route.fulfill({ json: { started: false, reason: 'start_failed' } });
   });
-  await card.getByRole('button', { name: 'Start summary', exact: true }).click();
+  // Explicit controller delegation, as used by the existing workspace task action.
+  // The completed drawer deliberately has no Start summary button.
+  await page.evaluate(() => {
+    void (window as any).PersonalAssistantFolder.startFirstLook();
+  });
   await expect.poll(() => Boolean(finish)).toBe(true);
   const b: any = { ...completed(), id: 'ready-b', conversation_id: 'chat-b' };
   b.first_task = {
-    state: 'seeded',
+    state: 'failed',
     recipe: 'folder_summary',
     optional: true,
     message: 'B needs its own agent.',
-    can_start: false
+    can_retry: false
   };
   await restore(page, b);
   const response = page.waitForResponse('**/api/workspaces/album-three/folder-first-task/start');

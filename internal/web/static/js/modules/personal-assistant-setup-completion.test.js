@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { folderReceiptView, folderSetupPolling } from './personal-assistant-folder.js';
 import {
   setupCompletionView,
+  setupTaskVisible,
+  setupAttachmentConsumed,
   ownsSetupCompletion,
   completedTaskView,
   completionDisclosureOpen
@@ -176,6 +178,46 @@ test('finished output is saved text with inert canonical report actions only', (
   for (const state of ['seeded', 'running', 'waiting', 'failed'])
     assert.equal(completedTaskView(saved, { ...firstLook, state }, view(offer)).visible, false);
   assert.equal(completedTaskView(saved, firstLook, { ready: false }).visible, false);
+});
+
+test('ready setup does not prompt an unstarted task, but keeps live states and finished output', () => {
+  assert.equal(setupTaskVisible({ visible: true, state: 'seeded' }, { ready: true }), false);
+  for (const state of ['running', 'waiting', 'failed', 'finished'])
+    assert.equal(setupTaskVisible({ visible: true, state }, { ready: true }), true);
+  assert.equal(setupTaskVisible({ visible: false }, { ready: true }), false);
+});
+
+test('consumption is owned saved setup, including later deletion, never a plan or replacement', () => {
+  const state = {
+    conversationId: 'chat',
+    offerId: 'review',
+    observation: { id: 'o' },
+    accepted: { id: 'o' }
+  };
+  assert.equal(setupAttachmentConsumed(state, offer, folderReceiptView(offer)), true);
+  const gone = { ...offer, workspace_gone: 'removed' };
+  assert.equal(setupAttachmentConsumed(state, gone, folderReceiptView(gone)), true);
+  assert.equal(view(gone).ready, false);
+  for (const change of [
+    { conversationId: 'other' },
+    { offerId: 'new' },
+    { preview: true },
+    { observation: { id: 'replacement' } },
+    { accepted: null }
+  ])
+    assert.equal(
+      setupAttachmentConsumed({ ...state, ...change }, offer, folderReceiptView(offer)),
+      false
+    );
+  for (const change of [
+    { status: 'pending' },
+    { status: 'awaiting_outcome' },
+    { setup: { status: 'stopped' } },
+    { outcome: null }
+  ]) {
+    const value = { ...offer, ...change };
+    assert.equal(setupAttachmentConsumed(state, value, folderReceiptView(value)), false);
+  }
 });
 
 test('first collapse keeps focused evidence open and redraw preserves reader intent', () => {

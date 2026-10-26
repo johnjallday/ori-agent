@@ -100,12 +100,18 @@ inside a closed **Setup details** disclosure. Collapse occurs once on completion
 or a fresh canonical mount, not on every poll. If focused evidence would be
 hidden, details stay open for that mount. Ordinary redraws and drawer reopening
 preserve native expansion; fresh reload defaults compact. Existing transcript
-anchors retain the reader's position and the composer is never automatically
-focused, detached, renamed or switched to workspace scope.
+anchors retain the reader's position; completion does not rename the conversation
+or switch workspace scope. The successfully used folder is consumed from the
+composer: no active chip/tree/discussion/setup shortcut and no next-turn folder
+reference. Saved observations/review ownership remain canonical history; no
+synthetic detach event or new success store is written. Fresh attachment still
+works normally. Even later workspace deletion does not reattach the old folder.
 
-Setup and first-task completion are independent. Seeded/running/waiting/failed
-tasks retain their explicit disclosure, Start/Retry, Stop, question and repair
-controls. Finished tasks show one saved excerpt/suggestion and canonical report
+Setup and first-task completion are independent. Unstarted/seeded optional work
+has no post-setup task card or Start prompt in the drawer; it remains available
+through the existing workspace banner with its scope/cost disclosure. Running,
+waiting and failed tasks retain Stop, current question, Retry/repair and required
+disclosure. Finished tasks show one saved excerpt/suggestion and canonical report
 navigation next to the receipt, with execution metadata under **Execution
 details**. This spends no summary tokens and creates no persisted assistant
 message. Report navigation cannot execute work; ticket-only legacy output still

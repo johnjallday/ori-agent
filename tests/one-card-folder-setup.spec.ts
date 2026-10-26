@@ -405,7 +405,7 @@ test('a configured model invalidates the old review digest before effects', asyn
   expect(sourceSnapshot(source)).toEqual(original);
 });
 
-test('setup ends ready on the same card; a separate summary start produces its report', async ({
+test('setup ends clean on the same card; the workspace can separately start its summary', async ({
   page,
   request
 }, testInfo) => {
@@ -424,6 +424,9 @@ test('setup ends ready on the same card; a separate summary start produces its r
     }
   });
   const card = await openCard(page);
+  const conversationId = await page.evaluate(() =>
+    (window as any).PersonalAssistantConversation.currentId()
+  );
   const composer = page.locator('#personalAssistantInput');
   const exactDraft = '  Unsent 界 draft\n keep exact  ';
   await composer.fill(exactDraft);
@@ -453,10 +456,12 @@ test('setup ends ready on the same card; a separate summary start produces its r
   await expect(page.locator('#folderSetupRunModal')).toHaveCount(0);
   const receiptCard = page.locator('#personalAssistantFolderOffer');
   await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
-  await expect(card.locator('#personalAssistantFolderOptionalTask')).toContainText(
-    'Configuration only; connection not verified'
-  );
-  await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toBeVisible();
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request())
+  ).toBeNull();
   expect(startCalls).toEqual([]);
   const open = receiptCard
     .locator('a[href^="/workspaces/"]')
@@ -466,14 +471,36 @@ test('setup ends ready on the same card; a separate summary start produces its r
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
-  // Only this separate click starts the same seeded task.
-  await card.getByRole('button', { name: 'Start summary', exact: true }).click();
-
-  // Actual provider-backed acceptance needs a finished report, not merely a
-  // configured model or a ready workspace with a failed first look.
+  // The completed drawer has no task upsell. Optional work is started only
+  // through the unchanged workspace banner and its explicit scope/cost review.
+  await open.click();
+  if (await page.locator('#personalAssistantPanel').isVisible())
+    await page.locator('#personalAssistantClose').click();
+  const banner = page.locator('#workspaceFirstTaskBanner');
+  await expect(banner).toContainText('Configuration only; connection not verified');
+  await expect(banner).toContainText('Each explicit attempt uses model tokens');
+  await expect(banner.getByRole('button', { name: 'Start summary', exact: true })).toBeVisible();
+  expect(startCalls).toEqual([]);
+  await banner.getByRole('button', { name: 'Start summary', exact: true }).click();
+  await expect(banner.getByRole('link', { name: 'Open summary', exact: true })).toBeVisible({
+    timeout: reportTimeout
+  });
+  await page.goto('/?panel=today');
+  await page.waitForFunction(
+    () =>
+      Boolean((window as any).PersonalAssistantConversation) &&
+      !(window as any).PersonalAssistantConversation.isLoading()
+  );
+  await page.evaluate(
+    id => (window as any).PersonalAssistantConversation.resume(id),
+    conversationId
+  );
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
   await expect(card.getByRole('link', { name: 'Open summary', exact: true })).toBeVisible({
     timeout: reportTimeout
   });
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await page.setViewportSize({ width: 1440, height: 1100 });
   const details = card.locator('#personalAssistantFolderDetails');
   if ((await details.getAttribute('open')) !== null)
@@ -487,13 +514,13 @@ test('setup ends ready on the same card; a separate summary start produces its r
     mkdirSync(evidence, { recursive: true, mode: 0o750 });
     await page.screenshot({ path: join(evidence, '05-real-compact-summary.png') });
   }
-  const asks: string[] = [];
+  const asks: { url: string; body: any }[] = [];
   page.on('request', req => {
     if (
       req.method() === 'POST' &&
       /\/home-assistant\/(ask|route)$/.test(new URL(req.url()).pathname)
     )
-      asks.push(req.url());
+      asks.push({ url: req.url(), body: req.postDataJSON() });
   });
   await composer.fill('  \n\t ');
   await page.locator('#personalAssistantSend').click();
@@ -503,7 +530,9 @@ test('setup ends ready on the same card; a separate summary start produces its r
   await expect(page.locator('#homeAssistantConversation')).toContainText(
     'No additional task was started.'
   );
-  expect(asks.filter(url => url.endsWith('/ask'))).toHaveLength(1);
+  expect(asks.filter(row => row.url.endsWith('/ask'))).toHaveLength(1);
+  expect(asks.every(row => row.body.folder_context === undefined)).toBe(true);
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   if (evidence) await page.screenshot({ path: join(evidence, '05-real-typed-followup.png') });
 
   // Closing/reopening preserves the result. The shared read-only tail checks

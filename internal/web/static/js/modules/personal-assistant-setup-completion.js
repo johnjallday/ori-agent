@@ -3,14 +3,20 @@
 const WORKSPACE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/?$/;
 const LIBRARY = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/;
 
+function settledReceipt(offer, receipt) {
+  return Boolean(
+    offer?.status === 'resolved' &&
+    receipt?.visible &&
+    (!offer.setup || offer.setup.status === 'done') &&
+    ['project', 'home', 'group'].includes(offer.outcome?.kind)
+  );
+}
+
 export function setupCompletionView(offer, receipt) {
   if (
-    offer?.status !== 'resolved' ||
-    !receipt?.visible ||
+    !settledReceipt(offer, receipt) ||
     receipt.gone ||
-    ['trashed', 'removed'].includes(offer.workspace_gone) ||
-    (offer.setup && offer.setup.status !== 'done') ||
-    !['project', 'home', 'group'].includes(offer.outcome?.kind)
+    ['trashed', 'removed'].includes(offer.workspace_gone)
   )
     return { ready: false };
   const route = String(offer.outcome.route || '');
@@ -41,6 +47,12 @@ export function setupCompletionView(offer, receipt) {
   };
 }
 
+// Unstarted work belongs in the workspace, not as another post-setup prompt.
+// Live task controls and saved output remain separate from setup success.
+export function setupTaskVisible(firstLook, completion) {
+  return Boolean(firstLook?.visible && !(completion?.ready && firstLook.state === 'seeded'));
+}
+
 // Saved output only. No new summary, task or synthetic conversation turn.
 export function completedTaskView(offer, firstLook, completion) {
   if (!completion?.ready || !firstLook?.visible || firstLook.state !== 'finished')
@@ -56,9 +68,8 @@ export function completedTaskView(offer, firstLook, completion) {
 
 // The canonical context's offer reference binds its accepted observation to
 // this review. A preview/replacement is not that binding, even in the same chat.
-export function ownsSetupCompletion(state, offer, completion) {
+function ownsSetupReference(state, offer) {
   return Boolean(
-    completion?.ready &&
     state?.conversationId &&
     state.conversationId === offer?.conversation_id &&
     state.offerId &&
@@ -66,6 +77,20 @@ export function ownsSetupCompletion(state, offer, completion) {
     state.observation?.id &&
     state.accepted?.id === state.observation.id &&
     !state.preview
+  );
+}
+
+export function ownsSetupCompletion(state, offer, completion) {
+  return Boolean(completion?.ready && ownsSetupReference(state, offer));
+}
+
+// Consumption concerns saved setup, not current resource availability. A later
+// deletion must not silently reattach its old folder or make it ready again.
+export function setupAttachmentConsumed(state, offer, receipt) {
+  return Boolean(
+    ownsSetupReference(state, offer) &&
+    settledReceipt(offer, receipt) &&
+    (setupCompletionView(offer, receipt).ready || receipt.gone)
   );
 }
 

@@ -430,6 +430,11 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await expect(page.locator('#personalAssistantFolderReceipt')).toBeHidden();
   await expect(input).toHaveValue('Preserve my exact review draft 🎼  ');
   await expect(input).toHaveAttribute('placeholder', 'What would you like to do next?');
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
+  await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeHidden();
+  expect(
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request())
+  ).toBeNull();
   await revealFolderSetupDetails(card);
   await expect(page.locator('#personalAssistantFolderReceipt')).toBeVisible();
   await expect(page.locator('#personalAssistantFolderReceipt')).toContainText(workspaceName);
@@ -444,10 +449,7 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, 'real-compact-replay.png') });
-  await page.locator('#personalAssistantRemoveFolder').click();
-  await expect(
-    page.locator('#homeAssistantConversation').getByRole('link', { name: /Open/ }).first()
-  ).toHaveAttribute('href', href!);
+  await expect(page.locator('#personalAssistantActiveFolder')).toBeHidden();
   await page.goto('/settings');
   await reopen(page);
   await expect(

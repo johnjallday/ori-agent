@@ -128,8 +128,13 @@ request (`Explore this folder`, or an explanation of its setup recommendation).
 For the current canonically owned completed setup, the placeholder instead says
 **What would you like to do next?** and blank/whitespace Send does nothing. Both
 the displayed hint and actual submit default change together; no implicit
-exploration/model request survives completion. Typed Send still carries only
-opaque references, including optional next-turn focus node IDs. The validated personal-folder route bypasses
+exploration/model request survives completion. The used attachment is also
+consumed: its chip/tree/discussion/setup entries disappear and typed follow-ups
+omit `folder_context`, rather than hiding a chip while still sharing metadata.
+Saved observations and the canonical review remain intact for history and task
+status; this projection writes no detach event or new browser-storage flag.
+A genuinely fresh attachment still carries only opaque references, including
+optional next-turn focus node IDs. The validated personal-folder route bypasses
 specialist/generic-create detection, not intentional workspace routing. Reviewed
 memory/backlog actions retain their own gates. Prompt context is escaped,
 delimited reference data with explicit contents/coverage limits and historical
@@ -278,8 +283,11 @@ observation, never a replacement preview or an older completed review. The
 canonical offer reference is the server-validated observation binding; no new
 public provenance field or success store is introduced. Hydration and offer
 updates reconstruct presentation from existing records, without changing drafts,
-conversation titles/history, folder attachments, recipients or App-wide context.
-Detach, New, replacement and a newer current review revoke this applicability.
+conversation titles/history, recipients or App-wide context. Composer consumption
+retires only the used attachment's applicability to future turns, not its saved
+history or review authority. A subsequent deleted workspace retains this consumed
+state without becoming ready again. Detach, New, replacement and a newer current
+review revoke old applicability; stopped/partial setups never qualify.
 Late first-task reads use the same review-generation fence as setup reads.
 
 The existing creator, reviewed plan digest,

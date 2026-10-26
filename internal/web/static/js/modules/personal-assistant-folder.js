@@ -49,6 +49,7 @@ import { renderFolderFindings } from './personal-assistant-folder-presentation.j
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
 import {
   setupCompletionView,
+  setupTaskVisible,
   completedTaskView,
   completionDisclosureOpen
 } from './personal-assistant-setup-completion.js';
@@ -3581,8 +3582,9 @@ function renderOffer(place) {
   const taskPanel = document.getElementById('personalAssistantFolderOptionalTask');
   const taskActions = document.getElementById('personalAssistantFolderTaskActions');
   const separateTask = Boolean(taskPanel && receipt.visible && firstLook.visible);
+  const showTask = separateTask && setupTaskVisible(firstLook, completion);
   if (taskPanel) {
-    taskPanel.hidden = !separateTask;
+    taskPanel.hidden = !showTask;
     taskPanel.classList.toggle('folder-task-result', result.visible);
     setText(
       document.getElementById('personalAssistantFolderTaskLabel'),
@@ -3885,6 +3887,7 @@ function renderOffer(place) {
     const signature = JSON.stringify({
       offer: state.offer?.id || '',
       look: firstLook.visible ? firstLook.actions : null,
+      showTask,
       route: receipt.route || '',
       open: receipt.openLabel || '',
       home: receipt.homeRoute || '',
@@ -3905,6 +3908,7 @@ function renderOffer(place) {
       // The first look's own actions: its one primary (Start first look, Try
       // again, or the report) and the workspace as the other.
       firstLook.actions.forEach(action => {
+        if (separateTask && !showTask && action.id !== 'open') return;
         const style =
           action.style === 'primary' || (completion.ready && action.id === 'open')
             ? 'btn-primary'

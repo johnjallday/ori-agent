@@ -33,7 +33,8 @@ export function createFolderContextController({
   changed = () => {},
   uuid,
   currentId,
-  isBusy = () => false
+  isBusy = () => false,
+  isConsumed = () => false
 }) {
   const state = {
     conversationId: currentId(),
@@ -233,7 +234,13 @@ export function createFolderContextController({
     }
   }
   function request() {
-    if (!state.observation || state.pending || state.conversationId !== currentId()) return null;
+    if (
+      !state.observation ||
+      state.pending ||
+      state.conversationId !== currentId() ||
+      isConsumed(state)
+    )
+      return null;
     const focus = folderSelectionFocus(state.observation, state.focusIDs);
     if (!focus) return null;
     return {
@@ -250,6 +257,7 @@ export function createFolderContextController({
     if (
       !state.observation ||
       state.pending ||
+      isConsumed(state) ||
       state.conversationId !== currentId() ||
       (binding &&
         (binding.observationId !== state.observation.id ||
@@ -489,6 +497,7 @@ function closeDiscussionChooser({ restoreFocus = true } = {}) {
 
 function discussionRow(value) {
   if (
+    consumedSetup(controller?.state) ||
     !currentFolderDiscussion(
       controller?.state,
       value,
@@ -683,17 +692,27 @@ export function emptySendView(folder, collection, completed = false) {
     : { placeholder: 'Explore this folder', text: 'Explore this folder' };
 }
 
+// Canonical observations remain review/history provenance. A used setup
+// attachment is no longer an attachment to the next conversational turn.
+export function folderComposerState(state, completed = false) {
+  return completed
+    ? { ...state, observation: null, focusIDs: [], structure: null, authority: '', preview: false }
+    : state;
+}
+function consumedSetup(state = controller?.state) {
+  return window.PersonalAssistantFolderSetup?.consumed?.(state) === true;
+}
+function composerState() {
+  return folderComposerState(controller?.state, consumedSetup());
+}
+
 function currentEmptySend() {
   const state = controller?.state;
   if (!state?.observation) return null;
   const collection =
     Boolean(state.preview && state.structure) ||
     Boolean(window.PersonalAssistantFolderSetup?.structure?.());
-  return emptySendView(
-    state.observation.folder,
-    collection,
-    window.PersonalAssistantFolderSetup?.completed?.() === true
-  );
+  return emptySendView(state.observation.folder, collection, consumedSetup(state));
 }
 
 // The reply whose proposal the user chose to just discuss: its chips go, and
@@ -941,7 +960,7 @@ function bindDiscussion(value) {
 function updateSendHint() {
   if (!elements?.hint) return;
   elements.hint.hidden =
-    !controller?.state.observation ||
+    !composerState()?.observation ||
     Boolean(document.getElementById('personalAssistantInput')?.value.trim());
 }
 const node = (tag, text, className = '') => {
@@ -951,24 +970,46 @@ const node = (tag, text, className = '') => {
   return element;
 };
 
+function renderAttachment(state) {
+  if (!elements) return;
+  const view = folderComposerState(state, consumedSetup(state));
+  const attached = Boolean(view?.observation);
+  const active = document.activeElement;
+  const needsFocus =
+    consumedSetup(state) &&
+    (elements.active.contains(active) ||
+      document.getElementById('personalAssistantFolderExplorer')?.contains(active) ||
+      active?.closest?.(
+        '[data-folder-discussion], #personalAssistantFolderDiscussionChooser, #personalAssistantReviewFolderSetup'
+      ));
+  elements.active.hidden = !attached;
+  elements.add.classList.toggle('personal-assistant-panel__chip--icon', attached);
+  elements.add.setAttribute('aria-label', attached ? 'Replace folder' : 'Add folder');
+  elements.add.title = attached ? 'Replace folder' : '';
+  elements.name.textContent = view?.observation?.folder || '';
+  elements.remove.disabled = Boolean(state?.pending);
+  elements.preview.hidden = !attached || !view.preview;
+  elements.history.hidden = !attached || !view.authority;
+  elements.history.textContent =
+    attached && view.authority
+      ? `Discussing saved observations only (${view.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
+      : '';
+  if (needsFocus) document.getElementById('personalAssistantInput')?.focus({ preventScroll: true });
+}
+
+function refreshCompletion() {
+  renderAttachment(controller?.state);
+  updateSendHint();
+  window.PersonalAssistantPanel?.setComposerPlaceholder?.(currentEmptySend()?.placeholder || '');
+  renderDiscussion();
+  explorer?.refresh();
+  window.PersonalAssistantArrangement?.contextChanged?.();
+}
+
 function render(state) {
   if (!elements) return;
-  elements.active.hidden = !state.observation;
-  // With a folder attached its own chip says which; Add shrinks to its icon and
-  // replaces the folder.
-  elements.add.classList.toggle('personal-assistant-panel__chip--icon', Boolean(state.observation));
-  elements.add.setAttribute('aria-label', state.observation ? 'Replace folder' : 'Add folder');
-  elements.add.title = state.observation ? 'Replace folder' : '';
-  elements.name.textContent = state.observation?.folder || '';
-  elements.remove.disabled = state.pending;
-  elements.preview.hidden = !state.observation || !state.preview;
-  if (state.observation) {
-    renderFolderSummary(elements.summary, state.observation, { local: true });
-  }
-  elements.history.hidden = !state.authority;
-  elements.history.textContent = state.authority
-    ? `Discussing saved observations only (${state.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
-    : '';
+  renderAttachment(state);
+  if (state.observation) renderFolderSummary(elements.summary, state.observation, { local: true });
   for (const row of document.querySelectorAll('[data-folder-observation-id]')) {
     const status = row.querySelector('.personal-assistant-folder-context__status');
     if (status)
@@ -1149,12 +1190,13 @@ function init() {
     changed: render,
     uuid: () => crypto.randomUUID(),
     currentId: () => window.PersonalAssistantConversation?.currentId?.() || '',
+    isConsumed: state => consumedSetup(state),
     isBusy: () =>
       window.OriAskRouting?.getState?.().busy === true ||
       window.PersonalAssistantConversation?.isLoading?.() === true
   });
   explorer = initFolderExplorer({
-    current: () => controller.state,
+    current: composerState,
     setFocus: (ids, binding) =>
       !window.PersonalAssistantConversation?.isLoading?.() && controller.setFocus(ids, binding),
     notify: message => controller.notify(message),
@@ -1252,13 +1294,10 @@ const api = {
   accepted: (id, saved) => controller?.accepted(id, saved),
   adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,
-  hasFolder: () => Boolean(controller?.state.observation),
+  hasFolder: () => Boolean(composerState()?.observation),
   // What an empty Send sends with this folder attached, or null.
   emptySend: () => currentEmptySend(),
-  refreshEmptySend: () => {
-    updateSendHint();
-    window.PersonalAssistantPanel?.setComposerPlaceholder?.(currentEmptySend()?.placeholder || '');
-  },
+  refreshEmptySend: refreshCompletion,
   _controller: () => controller
 };
 if (typeof window !== 'undefined') window.PersonalAssistantFolderContext = api;

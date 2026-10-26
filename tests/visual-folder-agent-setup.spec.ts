@@ -1183,9 +1183,7 @@ test('fixture partial and hostile names remain literal at narrow widths', async 
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`fixture optional summary remains separate, disclosed and keyboard reachable ${theme}`, async ({
-    page
-  }) => {
+  test(`fixture ready setup omits the unstarted summary prompt ${theme}`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     const offer: any = reviewOffer();
     const longName = 'Saved session 長い名前 '.repeat(6);
@@ -1247,17 +1245,15 @@ for (const theme of ['light', 'dark']) {
     const card = await mountReview(page, offer);
     const panel = card.locator('#personalAssistantFolderOptionalTask');
     await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText('is ready');
-    await expect(panel).toContainText('Configuration only; connection not verified');
-    await expect(panel).toContainText('Each explicit attempt uses model tokens');
-    await expect(panel).toContainText('no model tools, source-file changes or external actions');
+    await expect(panel).toBeHidden();
+    await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toHaveCount(0);
     await expect(card.locator('[aria-label="Folder setup relationship"]')).toHaveCount(1);
     await expect(card.locator('.folder-visual__agent')).toContainText('Assigned here');
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width > 400 ? 1100 : 844 });
       const open = card.getByRole('link', { name: 'Open workspace', exact: true });
       await open.focus();
-      const start = panel.getByRole('button', { name: 'Start summary', exact: true });
-      await keyboardReach(page, start);
+      await keyboardReach(page, card.locator('#personalAssistantFolderDetails > summary'));
       expect(await panel.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(
         1
       );
