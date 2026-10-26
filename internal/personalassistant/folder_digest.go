@@ -724,6 +724,9 @@ type FolderOfferView struct {
 	// Tidied is the File Janitor workspace that already tidies an inbox folder
 	// (exact, ancestor or descendant): the card opens it instead.
 	Tidied *FolderTidiedView `json:"tidied,omitempty"`
+	// HomeUpgrade is the Home whose package upgrade must come first: the Home
+	// provider needs an update, and that Home still uses the installed release.
+	HomeUpgrade *FolderHomeLink `json:"home_upgrade,omitempty"`
 	// Lead is the host's choice between a folder's two hires (a project beside
 	// loose files): the reason this one leads, and the other hire one click away.
 	Lead                   *FolderLead        `json:"lead,omitempty"`

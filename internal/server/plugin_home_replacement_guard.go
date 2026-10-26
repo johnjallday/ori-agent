@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -23,6 +24,34 @@ func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.Insta
 	if reviewedUpgrade != nil && reviewedUpgrade(current, nextVersion, nextFingerprint) {
 		return nil
 	}
+	return strandedHome(store, current.Name, func(owner *workspace.AssistantProgramHomeOwner) bool {
+		return owner.PluginVersion != nextVersion || owner.ComponentFingerprint != nextFingerprint
+	})
+}
+
+// homeUpgradeBlocking is the Home an update of installed to version would
+// strand, named as the replacement guard names it, before any release is
+// fetched. A Home on another version is refused whatever the new bytes are, so
+// the version alone decides it; nil means no Home is known to block the update
+// (or the Homes could not be read, and the guard decides at install).
+func homeUpgradeBlocking(store workspace.Store, installed plugin.InstalledPlugin, version string) *plugin.HomeUpgradeRequiredError {
+	if installed.WorkspaceSurfaces == nil || len(installed.WorkspaceSurfaces.AssistantProgramHomes) == 0 {
+		return nil
+	}
+	err := strandedHome(store, installed.Name, func(owner *workspace.AssistantProgramHomeOwner) bool {
+		return owner.PluginVersion != version
+	})
+	var refusal *plugin.HomeUpgradeRequiredError
+	if errors.As(err, &refusal) {
+		return refusal
+	}
+	return nil
+}
+
+// strandedHome refuses with the first Home of pluginID that stranded says a
+// replacement would leave on guidance it was not reviewed for. A store that
+// cannot be read is an error: no Home is assumed unaffected.
+func strandedHome(store workspace.Store, pluginID string, stranded func(*workspace.AssistantProgramHomeOwner) bool) error {
 	if store == nil {
 		return fmt.Errorf("cannot verify existing program Homes before plugin replacement")
 	}
@@ -43,10 +72,10 @@ func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.Insta
 		if owner == nil && state.GroupTemplate != nil {
 			owner = state.GroupTemplate.ProgramHomeOwner
 		}
-		if owner == nil || owner.PluginID != current.Name {
+		if owner == nil || owner.PluginID != pluginID {
 			continue
 		}
-		if owner.PluginVersion != nextVersion || owner.ComponentFingerprint != nextFingerprint {
+		if stranded(owner) {
 			refusal := &plugin.HomeUpgradeRequiredError{HomeName: candidate.Name}
 			if slug := strings.TrimSpace(candidate.FolderSlug); slug != "" && candidate.Status != workspace.StatusTrashed && candidate.Status != workspace.StatusMissing {
 				// The Home page opens the upgrade review, which inspects the

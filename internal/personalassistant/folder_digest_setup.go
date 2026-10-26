@@ -42,7 +42,7 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 	view := &FolderSetupView{
 		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryCandidates: append([]string(nil), run.EntryCandidates...),
 		Lines: append([]FolderPlanLine(nil), run.Lines...), Brief: run.Brief,
-		Visual: CloneFolderSetupVisual(run.Visual),
+		Visual: CloneFolderSetupVisual(run.Visual), HomeUpgrade: cloneFolderHomeLink(run.HomeUpgrade),
 	}
 	if run.Hire != nil {
 		hire := *run.Hire
@@ -88,8 +88,20 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
 			switch reason.SetupPreviewReason() {
 			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable",
-				"project_exists", "assistant_unavailable", "name_taken", "folder_tidied", "root_refused":
+				"project_exists", "assistant_unavailable", "name_taken", "folder_tidied", "root_refused", FolderStopHomeUpgrade:
 				v.SetupUnavailableReason = reason.SetupPreviewReason()
+			}
+		}
+		// The Home provider needs an update a Home still pinned to the installed
+		// release would block: the card names that Home and opens its upgrade.
+		var upgrade interface {
+			SetupHomeUpgrade() (message string, home FolderHomeLink)
+		}
+		if errors.As(err, &upgrade) {
+			message, home := upgrade.SetupHomeUpgrade()
+			if validFolderHomeLink(&home) {
+				v.SetupUnavailableMessage = truncateRunes(strings.TrimSpace(message), 300)
+				v.HomeUpgrade = &home
 			}
 		}
 		if refusal, ok := err.(interface {
@@ -580,6 +592,7 @@ func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID s
 			run.Receipt = append([]FolderReceiptRow(nil), u.Receipt...)
 		}
 		run.EntryCandidates = append([]string(nil), u.EntryCandidates...)
+		run.HomeUpgrade = cloneFolderHomeLink(u.HomeUpgrade)
 		return nil
 	})
 	if errors.Is(err, errFolderReplay) {

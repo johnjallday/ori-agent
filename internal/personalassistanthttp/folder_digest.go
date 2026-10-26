@@ -70,6 +70,9 @@ type FolderHomeProviderPreview struct {
 	Source           string `json:"source,omitempty"`
 	Disclosure       any    `json:"disclosure,omitempty"`
 	DevelopmentCopy  bool   `json:"development_copy,omitempty"`
+	// HomeUpgrade names the Home that still uses InstalledVersion. The update is
+	// refused until that Home's own upgrade moves it; nil when none blocks it.
+	HomeUpgrade *personalassistant.FolderHomeLink `json:"home_upgrade,omitempty"`
 }
 
 type FolderHomeProviderSetup interface {

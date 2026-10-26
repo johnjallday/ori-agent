@@ -107,11 +107,30 @@ type ProviderPreview struct {
 }
 
 // Provider installs the reviewed plugin that supplies a split blueprint's Home.
-// Install takes the version Preview disclosed and refuses any other.
+// Install takes the version Preview disclosed and refuses any other, and
+// refuses with *HomeUpgradeRequired an update a Home still pinned to the
+// installed release would strand.
 type Provider interface {
 	Preview(ctx context.Context) (ProviderPreview, error)
 	Install(ctx context.Context, reviewedVersion string) error
 }
+
+// HomeUpgradeRequired is a Provider's refusal to update the Home provider while
+// Home still uses the installed release. The owner upgrades that Home from its
+// own page first, which moves its projects and agents with it.
+type HomeUpgradeRequired struct {
+	Home  personalassistant.FolderHomeLink
+	Cause error
+}
+
+func (e *HomeUpgradeRequired) Error() string {
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	return "foldersetup: Home " + e.Home.Name + " must be upgraded before the provider is updated"
+}
+
+func (e *HomeUpgradeRequired) Unwrap() error { return e.Cause }
 
 // SharedStaffing fills a project's roles with the one assistant the Home's
 // standing consent names (hire once, assign many). The card's Set up is that
@@ -158,6 +177,8 @@ type stop struct {
 	reason     string
 	candidates []string
 	detail     string
+	// homeUpgrade names the Home a FolderStopHomeUpgrade stop waits on.
+	homeUpgrade *personalassistant.FolderHomeLink
 }
 
 func (s *stop) Error() string {
@@ -195,6 +216,8 @@ type run struct {
 	profiled bool
 	// homeCreated is true only when this pass itself created the Home.
 	homeCreated bool
+	// homeUpgrade is the Home the run stopped for; set only by that stop.
+	homeUpgrade *personalassistant.FolderHomeLink
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
@@ -218,6 +241,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (Result, error) {
 		if halt.detail != "" {
 			cause = halt
 		}
+		state.homeUpgrade = halt.homeUpgrade
 		return state.finish(ctx, personalassistant.FolderSetupStopped, halt.reason, halt.candidates, cause)
 	case errors.Is(err, ErrNeedsPick):
 		return state.finish(ctx, personalassistant.FolderSetupStopped, personalassistant.FolderStopNeedsPick, nil, nil)
@@ -255,6 +279,7 @@ func (s *run) record(ctx context.Context, status, reason string, candidates []st
 	return s.Progress.Update(ctx, Update{
 		Lines: append([]personalassistant.FolderPlanLine(nil), s.lines...), Status: status,
 		StopReason: reason, RunID: s.runID, EntryName: s.entryName, EntryCandidates: candidates, HomeID: s.homeID,
+		HomeUpgrade: s.homeUpgrade,
 	})
 }
 
@@ -540,6 +565,13 @@ func (s *run) installProvider(ctx context.Context, intent personalassistant.Fold
 		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home provider differs from the plan"}
 	}
 	if err := s.Providers.Install(ctx, preview.Version); err != nil {
+		var upgrade *HomeUpgradeRequired
+		if errors.As(err, &upgrade) {
+			// Retrying cannot help until the owner upgrades that Home, so the card
+			// names it rather than calling this a failed install.
+			home := upgrade.Home
+			return &stop{reason: personalassistant.FolderStopHomeUpgrade, detail: err.Error(), homeUpgrade: &home}
+		}
 		return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
 	}
 	if verified, err := s.Providers.Preview(ctx); err != nil || !verified.Ready {

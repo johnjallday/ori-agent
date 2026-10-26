@@ -393,6 +393,70 @@ func TestFolderSetup_AStoppedRunResumesOnItsConfirmedPlan(t *testing.T) {
 	}
 }
 
+// homeUpgradeRefusal is a host's plan refused because a Home still uses the
+// installed release of the provider the setup must update.
+type homeUpgradeRefusal struct{ home FolderHomeLink }
+
+func (homeUpgradeRefusal) Error() string              { return "home upgrade required" }
+func (homeUpgradeRefusal) SetupPreviewReason() string { return FolderStopHomeUpgrade }
+func (e homeUpgradeRefusal) SetupHomeUpgrade() (string, FolderHomeLink) {
+	return "Home “" + e.home.Name + "” still uses Music Project Management 0.3.0, and this setup needs 0.4.0.", e.home
+}
+
+func TestFolderSetup_AHomeOnTheInstalledReleaseIsNamedBeforeSetUp(t *testing.T) {
+	f := newOneCardFixture(t)
+	home := FolderHomeLink{Name: "Music Production Home", Route: "/workspaces/music-production-home/assistant?upgrade=review"}
+	f.setup.planErr = homeUpgradeRefusal{home: home}
+	current, err := f.service.Current(context.Background(), "local")
+	if err != nil || current.Offer == nil {
+		t.Fatalf("current = %+v, %v", current.Offer, err)
+	}
+	offer := current.Offer
+	if offer.Plan != nil || offer.SetupUnavailableReason != FolderStopHomeUpgrade || offer.HomeUpgrade == nil || *offer.HomeUpgrade != home ||
+		offer.SetupUnavailableMessage == "" {
+		t.Fatalf("the card must name the Home instead of offering Set up: plan=%+v reason=%q home=%+v message=%q",
+			offer.Plan, offer.SetupUnavailableReason, offer.HomeUpgrade, offer.SetupUnavailableMessage)
+	}
+	// A link that is not a workspace page is never shown.
+	f.setup.planErr = homeUpgradeRefusal{home: FolderHomeLink{Name: "Music Production Home", Route: "https://example.com/upgrade"}}
+	if current, _ := f.service.Current(context.Background(), "local"); current.Offer.HomeUpgrade != nil {
+		t.Fatalf("an off-site link reached the card: %+v", current.Offer.HomeUpgrade)
+	}
+}
+
+func TestFolderSetup_AStopForAHomeUpgradeNamesTheHomeUntilTheNextAttempt(t *testing.T) {
+	f := newOneCardFixture(t)
+	home := FolderHomeLink{Name: "Music Production Home", Route: "/workspaces/music-production-home/assistant?upgrade=review"}
+	f.setup.finish = func() FolderSetupUpdate {
+		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopHomeUpgrade, RunID: "new-run", HomeUpgrade: &home}
+	}
+	ctx := context.Background()
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to stop", func() bool {
+		s := f.stored(t).Setup
+		return s != nil && s.Status == FolderSetupStopped && !f.service.isRunning(f.offer.ID)
+	})
+	current, err := f.service.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.Setup == nil {
+		t.Fatalf("current = %+v, %v", current.Offer, err)
+	}
+	if setup := current.Offer.Setup; setup.StopReason != FolderStopHomeUpgrade || setup.HomeUpgrade == nil || *setup.HomeUpgrade != home {
+		t.Fatalf("the stopped card must name the Home: %+v", setup)
+	}
+
+	// Try again after the Home was upgraded: the next attempt clears it.
+	f.setup.finish = nil
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r2", PlanDigest: f.stored(t).Setup.PlanDigest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the resumed run to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+	if stored := f.stored(t).Setup; stored == nil || stored.HomeUpgrade != nil {
+		t.Fatalf("a finished run still names a Home: %+v", stored)
+	}
+}
+
 type fakeFirstTaskSeeder struct {
 	mu    sync.Mutex
 	calls []FolderFirstTaskRequest
@@ -626,6 +690,10 @@ func TestFolderSetup_RunStateStaysBoundedAndPathFree(t *testing.T) {
 		{Status: FolderSetupRunning, Lines: []FolderPlanLine{{Kind: "workspace", Name: "Links /Users/me/Songs"}}},
 		{Status: FolderSetupStopped, EntryCandidates: []string{"../A.rpp"}},
 		{Status: FolderSetupRunning, Lines: make([]FolderPlanLine, folderSetupMaxLines+1)},
+		{Status: FolderSetupStopped, HomeUpgrade: &FolderHomeLink{Name: "Home", Route: "//evil.example/workspaces/x"}},
+		{Status: FolderSetupStopped, HomeUpgrade: &FolderHomeLink{Name: "Home", Route: "https://example.com/workspaces/x"}},
+		{Status: FolderSetupStopped, HomeUpgrade: &FolderHomeLink{Name: "/Users/me/Home"}},
+		{Status: FolderSetupStopped, HomeUpgrade: &FolderHomeLink{Name: " "}},
 	}
 	for i, run := range bad {
 		if err := validateFolderSetupRun(run); err == nil {
@@ -645,5 +713,14 @@ func TestFolderSetup_RunStateStaysBoundedAndPathFree(t *testing.T) {
 		}}
 	if err := validateFolderSetupRun(good); err != nil {
 		t.Fatal(err)
+	}
+	for _, home := range []FolderHomeLink{
+		{Name: "Music Production Home", Route: "/workspaces/music-production-home/assistant?upgrade=review"},
+		{Name: "Music Production Home"}, // a Home in the trash has no page to open
+	} {
+		good.HomeUpgrade = &home
+		if err := validateFolderSetupRun(good); err != nil {
+			t.Fatalf("%+v: %v", home, err)
+		}
 	}
 }

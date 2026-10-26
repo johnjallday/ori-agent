@@ -353,7 +353,8 @@
       ready: 'Ready · No download',
       not_checked: 'Not checked',
       unavailable: 'Check unavailable',
-      unverified: 'Not verified'
+      unverified: 'Not verified',
+      home_upgrade: 'Upgrade its Home first'
     };
     const progressStatuses = {
       waiting: 'Waiting',
@@ -417,6 +418,8 @@
       rows.every(row => ['install', 'update', 'enable', 'ready'].includes(row.operation));
     const downloads = rows.filter(row => ['install', 'update'].includes(row.operation)).length;
     const count = `${downloads} ${downloads === 1 ? 'plugin download' : 'plugin downloads'}`;
+    // A plugin whose update waits on a Home's own upgrade is known, not unchecked.
+    const homeUpgrade = rows.some(row => row.operation === 'home_upgrade');
     // A checked set with no plugin at all, set up by a capability built into
     // Ori, says why nothing is downloaded.
     const builtin = complete && !rows.length ? text(visual?.builtin).trim() : '';
@@ -432,15 +435,17 @@
       builtin,
       summary: saved
         ? 'Requirements recorded for this setup'
-        : complete
-          ? downloads
-            ? `${count} for this setup`
-            : builtin
-              ? `Nothing to download: ${builtin} is built into Ori`
-              : 'Nothing to download'
-          : downloads
-            ? `${count} known · other requirements not fully checked`
-            : 'Download requirements not fully checked'
+        : homeUpgrade
+          ? 'A Home must be upgraded before this setup'
+          : complete
+            ? downloads
+              ? `${count} for this setup`
+              : builtin
+                ? `Nothing to download: ${builtin} is built into Ori`
+                : 'Nothing to download'
+            : downloads
+              ? `${count} known · other requirements not fully checked`
+              : 'Download requirements not fully checked'
     };
   }
 

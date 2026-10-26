@@ -249,6 +249,8 @@ const SETUP_STOP_COPY = {
     'The agent needs a model before setup can continue. Completed work is kept; see the saved progress below.',
   install_failed:
     'A required plugin could not be installed, updated or enabled. Completed work is kept. Review Plugins, then Try again continues from the saved run.',
+  home_upgrade_required: (subject, setup) =>
+    `${homeUpgradeSubject(setup?.home_upgrade)} still uses the installed release, so the update was not made. Completed work is kept. Upgrade that Home first; its review shows what changes. Then Continue setup reviews the remaining steps against the upgraded Home.`,
   interrupted: 'Setup was interrupted before it finished.',
   consent_stale:
     'Your shared agent was approved for an older version of this blueprint. Completed work is kept; Continue setup to review staffing yourself.',
@@ -325,6 +327,7 @@ const SETUP_STOP_ASK = {
   needs_choice: 'choose the project file',
   needs_model: 'set up a model',
   install_failed: 'check a plugin that did not install',
+  home_upgrade_required: 'upgrade its Home first',
   interrupted: 'finish setup',
   consent_stale: 'review its shared agent',
   assistant_missing: 'choose its agent',
@@ -371,6 +374,30 @@ const CONTINUE_SETUP = {
   style: 'outline',
   journey: true
 };
+
+// A Home's own upgrade review (assistant-program.js opens it for ?upgrade=review).
+const HOME_UPGRADE_ROUTE = /^\/workspaces\/[A-Za-z0-9._~%-]+\/assistant\?upgrade=review$/;
+const PLUGINS_URL = '/plugins';
+
+// homeUpgradeSubject names the Home a setup waits on, as a sentence starts.
+function homeUpgradeSubject(home) {
+  const name = String(home?.name || '').trim();
+  return name ? `Home “${name}”` : 'A Home';
+}
+
+// homeUpgradeAction opens the Home's package-upgrade review, which moves every
+// Home that uses the plugin. A Home with no page to open (in the trash, or its
+// folder missing) is upgraded from Plugins instead.
+function homeUpgradeAction(home) {
+  const name = String(home?.name || '').trim();
+  const route = String(home?.route || '').trim();
+  return {
+    id: 'upgrade-home',
+    label: name ? `Upgrade ${name}` : 'Upgrade the Home',
+    style: 'primary',
+    href: HOME_UPGRADE_ROUTE.test(route) ? route : PLUGINS_URL
+  };
+}
 
 function softwareStoppedActions(reason) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
@@ -430,6 +457,10 @@ function stoppedActions(reason, setup) {
         { ...retry, style: 'outline' },
         CONTINUE_SETUP
       ];
+    case 'home_upgrade_required':
+      // No Try again: before the upgrade it stops here again, and the upgrade
+      // changes the reviewed Home, so the remaining steps are reviewed afresh.
+      return [homeUpgradeAction(setup.home_upgrade), CONTINUE_SETUP];
     default:
       return [retry, CONTINUE_SETUP];
   }
@@ -472,7 +503,7 @@ export function setupRunView(
   if (software) sentence = SOFTWARE_STOP_COPY[reason] || SOFTWARE_STOP_COPY.failed;
   if (structure) sentence = STRUCTURE_STOP_COPY[reason] || STRUCTURE_STOP_COPY.failed;
   if (inbox) sentence = INBOX_STOP_COPY[reason] || INBOX_STOP_COPY.failed;
-  if (typeof sentence === 'function') sentence = sentence(subject);
+  if (typeof sentence === 'function') sentence = sentence(subject, setup);
   const stopped = globalThis.OriFolderSetupVisual.stoppedRequirement(setup);
   if (stopped) sentence = `Stopped at ${stopped}. ${sentence}`;
   const actions = structure
@@ -602,6 +633,25 @@ function inboxRefusalView(offer, base, subject) {
     };
   }
   return null;
+}
+
+// homeUpgradeFirstView is a project card whose Home provider needs an update
+// that a Home still on the installed release would block: Set up would stop at
+// its first step, so the card names that Home and opens its upgrade review.
+// Set up is offered again once the Home has moved.
+function homeUpgradeFirstView(offer, view) {
+  const home = offer.home_upgrade;
+  return {
+    ...view,
+    question:
+      String(offer.setup_unavailable_message || '').trim() ||
+      `${homeUpgradeSubject(home)} still uses an older release of a plugin this setup needs. Upgrade that Home first; then Set up is offered here.`,
+    capabilityDetail: '',
+    actions: [
+      homeUpgradeAction(home),
+      ...(view.actions || []).filter(action => action.style !== 'primary')
+    ]
+  };
 }
 
 // inboxConfirmView is an inbox folder's hire card: Hire File Curator (or
@@ -1315,10 +1365,21 @@ function folderOfferViewWithoutLead(offer, options = {}) {
     enclosingView(offer, view);
     if (view.enclosing && !view.capabilityDetail) view.capabilityDetail = view.enclosing;
   }
+  if (
+    view.visible &&
+    status === 'pending' &&
+    !structured &&
+    !view.setup &&
+    !view.plan &&
+    offer.setup_unavailable_reason === 'home_upgrade_required' &&
+    offer.home_upgrade
+  )
+    return homeUpgradeFirstView(offer, view);
   if (view.visible && !structured && !view.setup && !view.plan && offer.setup_unavailable_reason) {
     const reasons = {
       integration_unavailable: 'integration readiness could not be verified',
       home_provider_unavailable: 'Home-provider readiness could not be verified',
+      home_upgrade_required: 'a Home must be upgraded from its own page first',
       destination_unavailable: 'the destination could not be verified',
       setup_unavailable: 'its prerequisites could not be verified'
     };

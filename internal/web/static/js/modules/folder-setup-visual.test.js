@@ -283,7 +283,8 @@ test('requirements distinguish install/update/enable/ready from unchecked, unava
     ready: 'Ready · No download',
     not_checked: 'Not checked',
     unavailable: 'Check unavailable',
-    unverified: 'Not verified'
+    unverified: 'Not verified',
+    home_upgrade: 'Upgrade its Home first'
   };
   for (const [operation, status] of Object.entries(labels)) {
     const plan = {
@@ -301,6 +302,28 @@ test('requirements distinguish install/update/enable/ready from unchecked, unava
     assert.equal(view.summary === 'Nothing to download', ['enable', 'ready'].includes(operation));
     if (!view.complete) assert.equal(requirementsActionLabel(plan, 'Hire & start'), 'Hire & start');
   }
+});
+
+test('a provider whose update waits on its Home says so, not "Nothing to download"', () => {
+  const view = requirementsView({
+    readiness: {
+      requirements_checked: false,
+      plugins: [
+        { kind: 'integration', name: 'REAPER', operation: 'ready', installed_version: '0.11.0' },
+        {
+          kind: 'provider',
+          name: 'Music Project Management',
+          operation: 'home_upgrade',
+          installed_version: '0.3.0',
+          version: '0.4.0'
+        }
+      ]
+    }
+  });
+  assert.equal(view.rows[1].status, 'Upgrade its Home first');
+  assert.equal(view.rows[1].version, '0.3.0 → 0.4.0');
+  assert.equal(view.complete, false);
+  assert.equal(view.summary, 'A Home must be upgraded before this setup');
 });
 
 test('partial/legacy requirements keep known rows without inventing a zero-download total', () => {

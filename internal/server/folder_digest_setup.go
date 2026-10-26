@@ -12,6 +12,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
@@ -39,6 +41,21 @@ func (e folderSetupUnavailable) Error() string              { return e.reason }
 func (e folderSetupUnavailable) Unwrap() error              { return errSetupUnavailable }
 func (e folderSetupUnavailable) SetupPreviewReason() string { return e.reason }
 func (e folderSetupUnavailable) SetupAvailability() string  { return e.availability }
+
+// folderSetupHomeUpgrade is a plan that cannot include the Home provider's
+// update yet: a Home still uses the installed release, and the update would be
+// refused. The card names that Home and opens its upgrade review instead of
+// offering a Set up that would stop at the first step.
+type folderSetupHomeUpgrade struct {
+	folderSetupUnavailable
+	home    personalassistant.FolderHomeLink
+	message string
+}
+
+func (e folderSetupHomeUpgrade) Unwrap() error { return e.folderSetupUnavailable }
+func (e folderSetupHomeUpgrade) SetupHomeUpgrade() (string, personalassistant.FolderHomeLink) {
+	return e.message, e.home
+}
 
 // planFactsTTL keeps a card's plan stable while it is read repeatedly, and keeps
 // reading a plugin's release from becoming a request per poll.
@@ -232,6 +249,12 @@ func (h *folderSetupHost) providerFacts(ctx context.Context, provider reviewedin
 			key: provider.Key, detail: homeProviderPreviewDetail(err),
 		}
 	}
+	return providerPlugin(provider, preview)
+}
+
+// providerPlugin is where a previewed Home provider stands, as a plan words it.
+func providerPlugin(provider reviewedintegration.HomeProvider, preview personalassistanthttp.FolderHomeProviderPreview) (foldersetup.Plugin, error) {
+	plugin := foldersetup.Plugin{Name: provider.DisplayName, PluginID: provider.PluginID, Source: provider.SourceLabel, State: "unavailable"}
 	plugin.Version = preview.Version
 	plugin.InstalledVersion = preview.InstalledVersion
 	if preview.Installed && !preview.Update {
@@ -243,6 +266,19 @@ func (h *folderSetupHost) providerFacts(ctx context.Context, provider reviewedin
 	switch {
 	case preview.Ready:
 		plugin.State = personalassistant.FolderInstallReady
+	case preview.Installed && preview.Update && preview.HomeUpgrade != nil:
+		// The requirement row says what waits; the plan itself is refused.
+		plugin.State, plugin.InstalledVersion = personalassistant.FolderVisualHomeUpgrade, preview.InstalledVersion
+		home := *preview.HomeUpgrade
+		return plugin, folderSetupHomeUpgrade{
+			folderSetupUnavailable: folderSetupUnavailable{
+				reason: personalassistant.FolderStopHomeUpgrade, availability: personalassistant.FolderAvailabilityPlanUnavailable,
+				key: provider.Key, detail: "a Home still uses the installed release",
+			},
+			home: home,
+			message: "Home “" + home.Name + "” still uses " + provider.DisplayName + " " + preview.InstalledVersion +
+				", and this setup needs " + preview.Version + ". Upgrade that Home first; its review shows what changes. Then Set up is offered here.",
+		}
 	case preview.Installed && preview.Update:
 		plugin.State, plugin.InstalledVersion = personalassistant.FolderInstallUpdate, preview.InstalledVersion
 	case preview.Installed:
@@ -586,6 +622,10 @@ func (p homeProviderInstaller) Preview(ctx context.Context) (foldersetup.Provide
 
 func (p homeProviderInstaller) Install(ctx context.Context, reviewedVersion string) error {
 	_, err := p.setup.Install(ctx, p.key, reviewedVersion)
+	var upgrade *plugin.HomeUpgradeRequiredError
+	if errors.As(err, &upgrade) {
+		return &foldersetup.HomeUpgradeRequired{Home: personalassistant.FolderHomeLink{Name: upgrade.HomeName, Route: upgrade.HomePath}, Cause: err}
+	}
 	return err
 }
 
