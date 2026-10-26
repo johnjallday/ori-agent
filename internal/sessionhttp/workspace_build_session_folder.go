@@ -157,7 +157,10 @@ type buildFolderRequest struct {
 	// SelectionToken goes with mode "selection": the receipt the folder-picker
 	// endpoint issued for a typed path it checked. Never a path.
 	SelectionToken string `json:"selection_token,omitempty"`
-	Version        int64  `json:"version"`
+	// ObservationID reselects a live hold already scoped to this placement build.
+	// It neither transfers another owner's selection nor refreshes its lifetime.
+	ObservationID string `json:"observation_id,omitempty"`
+	Version       int64  `json:"version"`
 }
 
 type buildFolderDetachRequest struct {
@@ -248,8 +251,18 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	req.Mode, req.Chip, req.SelectionToken = strings.TrimSpace(req.Mode), strings.TrimSpace(req.Chip), strings.TrimSpace(req.SelectionToken)
+	req.ObservationID = strings.TrimSpace(req.ObservationID)
+	if req.ObservationID != "" && req.Mode != "held" {
+		_ = orihttp.RespondBadRequest(w, "Choose a folder with the folder controls")
+		return
+	}
 	choice := ""
 	switch req.Mode {
+	case "held":
+		if _, err := uuid.Parse(req.ObservationID); err != nil || req.Chip != "" || req.SelectionToken != "" {
+			_ = orihttp.RespondBadRequest(w, "Choose a folder already selected in this draft")
+			return
+		}
 	case personalassistant.FolderObserveChip:
 		choice = req.Chip
 		if choice == "" || req.SelectionToken != "" {
@@ -302,6 +315,10 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": buildErrorText("version"), "code": "version"})
 		return
 	}
+	if req.Mode == "held" && current.PlacementSource == nil {
+		_ = orihttp.RespondBadRequest(w, "Folder cards are only available in an assisted placement draft")
+		return
+	}
 	claimID, err := h.claimBuildAttachment(ctx, userID, id, req.Version, req.RequestID, true)
 	if err != nil {
 		respondBuildMutationError(w, err, id, "claimed")
@@ -309,7 +326,19 @@ func (h *Handler) postWorkspaceBuildFolder(w http.ResponseWriter, r *http.Reques
 	}
 	defer h.releaseBuildAttachment(ctx, userID, id, claimID, true)
 	target := buildFolderTarget(userID, readiness.projection, current.ID)
-	observation, err := deps.Folders.Observe(ctx, target, req.Mode, choice)
+	var observation *foldercontext.Observation
+	if req.Mode == "held" {
+		resolver, ok := deps.Folders.(interface {
+			Resolve(context.Context, foldercontext.Target, string) (*foldercontext.Observation, error)
+		})
+		if !ok {
+			err = personalassistant.ErrFolderSelection
+		} else {
+			observation, err = resolver.Resolve(ctx, target, req.ObservationID)
+		}
+	} else {
+		observation, err = deps.Folders.Observe(ctx, target, req.Mode, choice)
+	}
 	if err != nil {
 		logger.Info("Workspace build folder refused", logger.Fields{"session_id": id, "mode": req.Mode, "error": err})
 		respondBuildFolderError(w, err)

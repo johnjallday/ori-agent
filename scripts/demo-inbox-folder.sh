@@ -5,7 +5,7 @@
 # sandboxed folder chips reach them.
 #
 # Usage:
-#   ./scripts/demo-inbox-folder.sh [--port PORT] [--sandbox DIR] [--desktop-project-leads]
+#   ./scripts/demo-inbox-folder.sh [--port PORT] [--sandbox DIR] [--desktop-project-leads] [--native-picker]
 #
 # --desktop-project-leads seeds Desktop with a Go module beside five loose files
 # instead of leaving it empty, so the project hire leads there (the mixed-folder
@@ -13,7 +13,8 @@
 #
 # 1. A new sandbox under $TMPDIR (or --sandbox, which must be under $TMPDIR),
 #    the demo server (scripts/demo-server.sh: builds this worktree, redirects
-#    HOME and ORI_DATA_DIR, sets ORI_NO_DESKTOP_OPEN=1). No Codex home and no
+#    HOME and ORI_DATA_DIR, disables desktop launches unless --native-picker
+#    explicitly opts into native folder dialogs; no browser is opened). No Codex home and no
 #    provider API key is passed, so no model provider is configured.
 # 2. Seeded folders, every one a disposable fixture of loose files:
 #      Downloads   a dump: 25 loose files of 6 kinds, no project marker
@@ -32,8 +33,13 @@ set -euo pipefail
 port=8952
 sandbox=""
 desktop=empty
+native_picker=0
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--native-picker)
+		native_picker=1
+		shift
+		;;
 	--desktop-project-leads)
 		desktop=project-leads
 		shift
@@ -47,7 +53,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	-h | --help)
-		echo "usage: $0 [--port PORT] [--sandbox DIR] [--desktop-project-leads]"
+		echo "usage: $0 [--port PORT] [--sandbox DIR] [--desktop-project-leads] [--native-picker]"
 		echo "Serves this worktree on an isolated sandbox with no model and seeded inbox folders."
 		exit 0
 		;;
@@ -140,8 +146,11 @@ trap stop_server EXIT
 
 # No model provider reaches the server: no Codex home and no provider API key,
 # so the card and its Hire and start are shown working with no model at all.
+demo_args=("$port" "$sandbox")
+if [[ "$native_picker" == 1 ]]; then demo_args=(--native-picker "${demo_args[@]}"); fi
+echo "NATIVE_PICKER=$native_picker"
 env -u CODEX_HOME -u OPENAI_API_KEY -u ANTHROPIC_API_KEY -u GEMINI_API_KEY -u USE_OLLAMA \
-	./scripts/demo-server.sh "$port" "$sandbox" >"$sandbox/server.log" 2>&1 &
+	./scripts/demo-server.sh "${demo_args[@]}" >"$sandbox/server.log" 2>&1 &
 base="http://localhost:$port"
 for _ in $(seq 1 300); do
 	if curl -fsS -o /dev/null -m 2 "$base/" 2>/dev/null; then break; fi

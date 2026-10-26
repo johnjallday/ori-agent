@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import './folder-setup-visual.js';
+import { createPlacementCards } from './assisted-workspace-placement.js';
 import {
   loadInitialWorkspaceTree,
   loadOnboardingStatus,
@@ -144,7 +145,7 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
     candidate: null,
     host: { classList: { add() {} } }
   };
-  const build = { session: { draft: { name: 'Inbox' } }, placement };
+  const build = { session: { status: 'open', draft: { name: 'Inbox' } }, placement };
   manager.workspaceBuild = build;
   manager.syncWorkspaceBuildPresentation = () => {};
   manager.syncInboxWorkspacePlacement = () => {};
@@ -164,6 +165,12 @@ test('inbox map callbacks select geometry only and ignore a superseded source ge
   spec.onSelect(placement.token, { x: 100, y: 200 });
   assert.equal(manager.workspaceBuild.placement.candidate, null);
   assert.equal(confirmations, 0);
+  manager.workspaceBuild = build;
+  build.session.status = 'abandoned';
+  placement.onMap = false;
+  spec = undefined;
+  manager.placeInboxWorkspaceDraft();
+  assert.equal(spec, undefined, 'a cancelled draft cannot reopen map placement');
 });
 
 test('placement reconciliation reads its exact build instead of invoking generic model admission', async () => {
@@ -180,6 +187,123 @@ test('placement reconciliation reads its exact build instead of invoking generic
     session: { id: 'exact-build', placement_source: { offer_id: 'source' } }
   });
   assert.deepEqual(ids, ['exact-build']);
+});
+
+test('placement cards refuse hostile, cross-generation, stale and in-flight selections before setters', async () => {
+  for (const kind of [
+    'raw',
+    'foreign',
+    'stale',
+    'wrong-slot',
+    'dirty',
+    'saving',
+    'accepted',
+    'closed',
+    'hidden'
+  ]) {
+    const manager = loadSessionManager();
+    const cards = createPlacementCards(() => 'opaque-current');
+    cards.update(1, [{ kind: 'agent', id: 'Journal', label: 'Journal' }]);
+    const placement = { cards, cardsOpen: kind !== 'hidden', dirty: kind === 'dirty' };
+    manager.workspaceBuild = {
+      placement,
+      session: {
+        id: 'build',
+        version: kind === 'stale' ? 2 : 1,
+        status: kind === 'closed' ? 'abandoned' : 'open'
+      },
+      draftInFlight: kind === 'saving' ? Promise.resolve() : null,
+      acceptedPreparation: kind === 'accepted' ? {} : null
+    };
+    manager.syncWorkspaceBuildPresentation = () => {};
+    manager.findExistingRosterAgent = manager.attachWorkspaceBuildFolder = () =>
+      assert.fail(`${kind} reached a material setter`);
+    await manager.actOnInboxWorkspaceCard({
+      action: 'card-use',
+      slot: kind === 'wrong-slot' ? 'folder' : 'agent',
+      key:
+        kind === 'raw'
+          ? '{"name":"Journal","path":"/arbitrary"}'
+          : kind === 'foreign'
+            ? 'opaque-another-editor'
+            : 'opaque-current'
+    });
+    assert.match(placement.message, /Use a current setup card/);
+  }
+});
+
+test('assisted cancellation uses transition-safe close and never reopens a hidden map draft', () => {
+  for (const changedGeneration of [false, true]) {
+    const listeners = new Map();
+    const modal = {
+      dataset: {},
+      addEventListener: (name, callback) => listeners.set(name, callback),
+      removeEventListener: name => listeners.delete(name)
+    };
+    let hidden = 0;
+    const instance = { _isTransitioning: true, hide: () => hidden++ };
+    const manager = loadSessionManager(
+      undefined,
+      { setTimeout: callback => callback(), bootstrap: { Modal: { getInstance: () => instance } } },
+      { getElementById: () => modal }
+    );
+    manager.workspaceBuild = { placement: {}, session: { status: 'abandoned' } };
+    manager.workspaceCreatorContext = {};
+    manager.closeInboxWorkspacePlacement();
+    assert.equal(hidden, 0);
+    if (changedGeneration) manager.workspaceCreatorContext = {};
+    listeners.get('shown.bs.modal')();
+    assert.equal(hidden, changedGeneration ? 0 : 1);
+  }
+  const modal = { dataset: { suspendedForMapPlacement: 'draft' } };
+  const manager = loadSessionManager(undefined, {}, { getElementById: () => modal });
+  manager.workspaceBuild = { placement: { onMap: true }, session: { status: 'abandoned' } };
+  let closed = 0;
+  manager.workspaceCreatorClosed = () => {
+    closed++;
+  };
+  manager.hideWorkspaceCreatorModal = () => assert.fail('map cancellation reopened the modal');
+  manager.closeInboxWorkspacePlacement();
+  assert.equal(closed, 1);
+  assert.equal(modal.dataset.suspendedForMapPlacement, undefined);
+});
+
+test('placement monitoring alone changes the canonical draft sync key', async () => {
+  for (const placement of [true, false]) {
+    const manager = loadSessionManager();
+    const writes = [];
+    const build = {
+      session: { id: 'draft', status: 'open', version: 1 },
+      janitorMonitoring: false,
+      draftUser: true
+    };
+    manager.workspaceBuild = build;
+    manager.workspaceBuildDraftBody = () => ({
+      draft: { name: 'Same draft' },
+      version: build.session.version,
+      ...(placement ? { monitoring: build.janitorMonitoring } : {})
+    });
+    manager.workspaceBuildApi = () => ({
+      draft: async (_id, body) => {
+        writes.push(body);
+        return { ok: true, body: { session: { ...build.session, version: body.version + 1 } } };
+      }
+    });
+    manager.workspaceBuildPane = () => ({ applySession() {} });
+    manager.rememberWorkspaceBuildSession = () => {};
+    manager.syncWorkspaceBuildPresentation = () => {};
+    for (const mode of [false, true, false]) {
+      build.janitorMonitoring = mode;
+      build.draftUser = true;
+      await manager.flushWorkspaceBuildDraft({ force: true });
+    }
+    assert.equal(writes.length, placement ? 3 : 1);
+    if (placement)
+      assert.deepEqual(
+        writes.map(write => write.monitoring),
+        [false, true, false]
+      );
+  }
 });
 
 test('a copied workspace this build cannot restore blocks the ordinary import and says why', async () => {
@@ -7827,6 +7951,56 @@ test('a delayed suggestion is ignored after manual mode, without reviving the mo
   assert.equal(pauses.length, 1);
   assert.equal(pauses[0].proposal_id, 'proposal-1');
   assert.equal(nameInput.value, 'My manual name');
+});
+
+test('a refused placement pick recovers only its attachment version and fences other-tab material edits', async () => {
+  for (const changedElsewhere of ['none', 'draft', 'team']) {
+    const { manager } = prepareProposalWizard();
+    const build = manager.workspaceBuild;
+    build.placement = {};
+    build.session.proposal = null;
+    build.session.placement_source = { offer_id: 'source' };
+    build.session.draft = { name: 'My draft' };
+    const latest = {
+      ...build.session,
+      version: 5,
+      draft: { name: changedElsewhere === 'draft' ? 'Another tab' : 'My draft' },
+      team_state:
+        changedElsewhere === 'team'
+          ? { role_fills: [{ name: 'Another choice' }] }
+          : build.session.team_state
+    };
+    let reads = 0,
+      adopted = 0,
+      conflicts = 0;
+    manager.workspaceBuildApi = () => ({
+      folder: async () => ({
+        ok: false,
+        status: 409,
+        body: { code: 'folder', error: 'Incompatible folder.' }
+      }),
+      read: async id => {
+        assert.equal(id, 'b-1');
+        reads++;
+        return { ok: true, body: { session: latest } };
+      }
+    });
+    manager.adoptWorkspaceBuildSession = session => {
+      adopted++;
+      build.session = session;
+    };
+    manager.adoptWorkspaceBuildConflict = () => {
+      conflicts++;
+    };
+    manager.suggestWorkspaceBuildFolder = () => assert.fail('placement invoked inference');
+    await manager.attachWorkspaceBuildFolder({ mode: 'picker' });
+    assert.equal(reads, 1);
+    assert.equal(adopted, changedElsewhere === 'none' ? 1 : 0);
+    assert.equal(conflicts, changedElsewhere === 'none' ? 0 : 1);
+    assert.equal(build.session.folder.observation.id, 'obs-1');
+    assert.equal(build.folderPending, false);
+    assert.equal(build.placement.message, 'Incompatible folder.');
+  }
 });
 
 test('attachment suggests once; cancelled picking restores its trigger without stealing later focus', async () => {

@@ -10410,6 +10410,19 @@
     return true;
   }
 
+  // Update presentation without restarting placement, moving the candidate or
+  // unfreezing a selected point. The current draft owner supplies plain text.
+  function updateDraftPlacementName(token, name) {
+    var state = placementSession;
+    if (!placementMatches(state, token) || state.mode !== 'draft' || state.submitting) return false;
+    state.payload.name = String(name || '');
+    var preview = state.container.querySelector('.ws-map-placement-preview-name');
+    var heading = state.container.querySelector('.ws-map-placement-copy strong');
+    if (preview) preview.textContent = 'Draft · ' + state.payload.name;
+    if (heading) heading.textContent = 'Place ' + state.payload.name;
+    return true;
+  }
+
   function endPlacement(options, secondary) {
     if (!placementMatches(placementSession, options, secondary)) return false;
     var state = placementSession;
@@ -11229,6 +11242,7 @@
     // real workspace POST; the Map only returns an exact candidate or a Back
     // request and never writes a placeholder layout record.
     beginPlacement: beginPlacement,
+    updateDraftPlacementName: updateDraftPlacementName,
     endPlacement: endPlacement,
     cancelPlacement: cancelPlacement,
     commitPlacement: commitPlacement,

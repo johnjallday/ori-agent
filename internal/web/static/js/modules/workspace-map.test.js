@@ -4347,6 +4347,8 @@ test('draft-only placement selects geometry without invoking ordinary creation o
     onSelect: (_token, point) => selections.push(point)
   });
   assert.match(harness.container.innerHTML, /Draft · Music/);
+  assert.equal(map.updateDraftPlacementName('foreign-generation', 'Ignored'), false);
+  assert.equal(map.updateDraftPlacementName('draft-only', 'Edited music'), true);
   assert.match(harness.container.innerHTML, /Use this position/);
   assert.doesNotMatch(harness.container.innerHTML, /Create workspace here|Reviewed district/);
   harness.fire('keydown', keyEvent('ArrowRight', { target: { closest: () => ({}) } }));
@@ -4378,6 +4380,7 @@ test('ordinary placement remains explicit creation and cancellation cannot save 
     onConfirm: () => confirmations++
   });
   assert.match(harness.container.innerHTML, /Create workspace here/);
+  assert.equal(map.updateDraftPlacementName('ordinary-cancel', 'Do not rename'), false);
   harness.fire('keydown', keyEvent('ArrowRight'));
   harness.fire('keydown', keyEvent('Escape'));
   const result = await map.commitPlacement('not-created', { token: 'ordinary-cancel' });

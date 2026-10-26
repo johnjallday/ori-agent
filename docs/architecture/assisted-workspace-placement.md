@@ -110,8 +110,14 @@ Source and destination binding checks gate its use. A restart or expired hold
 requires a fresh trusted pick; persistence cannot revive access.
 
 Scoped placement folder choices/attachment do not require a conversational
-model. Normal picker/approved selection tokens remain the only inputs. A slow,
-cancelled or rejected replacement leaves the previous draft intact. Reject
+model. Normal picker/approved selection tokens remain the inputs for a new
+selection. Placement-only `mode: held` accepts an `observation_id` that the
+existing service can still resolve for this exact build target. It reuses the
+observation without rescanning or extending its lifetime; another conversation,
+build or owner cannot supply one. A slow, cancelled or rejected replacement
+leaves the previous material draft intact. A refused attachment can still advance
+its reservation version: read the same build, adopt only unchanged material
+choices, and use the existing conflict fence if another tab edited them. Reject
 incompatible/managed roots before publishing a replacement. Folder replacement
 invalidates review and requires seeing its new terms, but does not erase a
 previous deliberate monitoring choice. Redraw never rescans.
@@ -123,6 +129,13 @@ version. Unsaved or in-flight material edits disable confirmation. Late model
 replies cannot overwrite user-owned fields; placement drafts do not request one.
 Optional in-app dragging resolves typed same-owner references through the same
 setters as buttons; raw files/paths/serialized plans are rejected with a reason.
+The optional setup-card shelf holds only display projections and opaque local
+handles, scoped to the editor generation and canonical version. Saved-agent
+cards call normal Clear/Assign; folder cards reference only live selections
+previously received from this build's server responses. Click-select plus the
+labelled slot button and native drag/drop emit the same intention. Active drag
+source DOM stays stable across permission-read replies. Neither card handles nor
+displayed folder paths are execution authority.
 
 ## Exact review and acceptance
 

@@ -72,9 +72,11 @@
   display: grid;
   gap: 0.75rem;
 }
-.assisted-placement__fields label {
+.assisted-placement__fields > div {
   display: grid;
   gap: 0.25rem;
+}
+.assisted-placement__fields label {
   font-weight: 600;
 }
 .assisted-placement input:not([type="checkbox"]),
@@ -125,6 +127,35 @@
 }
 .assisted-placement__slot button {
   font-size: 0.78rem;
+}
+.assisted-placement__slot-actions {
+  display: grid;
+  gap: 0.35rem;
+}
+.assisted-placement__slot.is-drop-target {
+  outline: 2px dashed var(--ap-accent);
+  outline-offset: 3px;
+}
+.assisted-placement__cards {
+  margin-block: 0.65rem 1rem;
+}
+.assisted-placement__cards ul {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 13rem;
+  overflow: auto;
+  padding: 0.25rem;
+  margin: 0.5rem 0;
+  list-style: none;
+}
+.assisted-placement__cards button {
+  display: grid;
+  width: 100%;
+  text-align: start;
+  gap: 0.2rem;
+}
+.assisted-placement__cards button[aria-pressed="true"] {
+  border-color: var(--ap-accent);
 }
 .assisted-placement__number {
   font:

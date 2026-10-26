@@ -134,6 +134,14 @@ func (o buildFolderObservations) Observe(ctx context.Context, target folderconte
 	return service.Observe(ctx, target, mode, choice)
 }
 
+func (o buildFolderObservations) Resolve(ctx context.Context, target foldercontext.Target, id string) (*foldercontext.Observation, error) {
+	service := o.service()
+	if service == nil {
+		return nil, personalassistant.ErrFolderSelection
+	}
+	return service.Resolve(ctx, target, id)
+}
+
 func (o buildFolderObservations) ResolveRoot(ctx context.Context, target foldercontext.Target, id string) (string, error) {
 	service := o.service()
 	if service == nil {
