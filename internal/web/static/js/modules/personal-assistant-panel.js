@@ -160,6 +160,26 @@ export const ENTRY_HYDRATION_FAILED =
 // conversation again retires it.
 const CLEARED_STATUS = 'Cleared. Continue… reopens the earlier conversation.';
 
+export function clearedConversationStatus(folder) {
+  const blocker = folder?.preview && !folder.authority ? folder.blocker : null;
+  if (
+    !blocker?.blocks ||
+    !blocker.subject ||
+    !['pending', 'awaiting_outcome'].includes(blocker.status)
+  )
+    return CLEARED_STATUS;
+  let where = '';
+  if (
+    ['conversation', 'arranged'].includes(blocker.kind) &&
+    blocker.conversation_id &&
+    blocker.offer_id
+  )
+    where = 'in its own conversation';
+  else if (blocker.kind === 'home' && blocker.offer_id) where = 'in Home’s Needs you';
+  else if (blocker.kind === 'build') where = 'in Create Workspace';
+  return where ? `${CLEARED_STATUS} ${blocker.subject} is still waiting ${where}.` : CLEARED_STATUS;
+}
+
 export function boundedAssistantHandoff(value) {
   return Array.from(String(value || '').trim())
     .slice(0, HANDOFF_LIMIT)
@@ -1584,12 +1604,17 @@ function clearConversation(who) {
     setStatus('Nothing to clear.');
     return true;
   }
+  // Capture the verified notice before New retires the local attachment and
+  // return slot. It does not close the setup in the other owner.
+  const clearedStatus = clearedConversationStatus(
+    window.PersonalAssistantFolderContext?.current?.()
+  );
   const cleared = who.personal
     ? window.PersonalAssistantConversation?.startNew?.() === true
     : startNewEntryConversation();
   if (!cleared) return false;
   clearComposer();
-  setStatus(who.personal ? CLEARED_STATUS : 'Cleared. The earlier session is still in Sessions.');
+  setStatus(who.personal ? clearedStatus : 'Cleared. The earlier session is still in Sessions.');
   return true;
 }
 
@@ -1830,7 +1855,8 @@ function init() {
   });
   document.addEventListener('personal-assistant:entry-session', renderEntrySessionBar);
   document.addEventListener('personal-assistant:conversation', event => {
-    if (event.detail?.id && state.els?.status?.textContent === CLEARED_STATUS) setStatus('');
+    if (event.detail?.id && state.els?.status?.textContent?.startsWith(CLEARED_STATUS))
+      setStatus('');
   });
   state.els.entrySessionNew?.addEventListener('click', startNewEntryConversation);
   state.recipientMenu = createRecipientMenu({

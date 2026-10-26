@@ -1,8 +1,37 @@
-import { expect, type APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stageReviewedFolderPackages } from './reviewed-folder-packages';
+
+// Shared request guard for collection and single-project recovery journeys.
+export function watchFolderRequests(page: Page) {
+  const seen = {
+    errors: [] as string[],
+    asks: [] as string[],
+    posts: [] as { path: string; body: any }[]
+  };
+  page.on('pageerror', error => seen.errors.push(error.message));
+  page.on('request', request => {
+    if (request.method() === 'POST')
+      seen.posts.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
+    if (/\/api\/home-assistant\/ask$/.test(new URL(request.url()).pathname))
+      seen.asks.push(request.url());
+  });
+  return seen;
+}
+
+export function expectNoFolderExecution(seen: ReturnType<typeof watchFolderRequests>) {
+  expect(
+    seen.posts.filter(item =>
+      /\/offers\/[^/]+\/(setup|decide)$|\/plugins\/.*(install|enable|update)|\/tasks.*execute/.test(
+        item.path
+      )
+    )
+  ).toEqual([]);
+  expect(seen.asks).toEqual([]);
+  expect(seen.errors).toEqual([]);
+}
 
 // Configuration/consent evidence only. The provider never contacts a paid or
 // signed-in model, and its response is not evidence of musical analysis.

@@ -7,6 +7,7 @@ import {
   emptySendView,
   folderContextChoices,
   folderDecline,
+  folderBlockerView,
   structureCardView,
   FOLDER_DISCLOSURE,
   observationSummary,
@@ -194,6 +195,158 @@ test('one project Ori can hire for is reviewed on attach; a group or any other f
   assert.match(setup, /reviewFrom\(elements\.open, candidateId\);/);
   // Review setup on such a folder brings the same review back, with no chooser.
   assert.match(setup, /else if \(!reviewCandidate\(current\?\.hireCandidate\)\) openChoices\(\);/);
+});
+
+test('a single hire names its verified blocker, keeping unknown contracts on the legacy line', async () => {
+  const blocker = {
+    kind: 'conversation',
+    subject: '<img src=x onerror=alert(1)>',
+    status: 'pending',
+    offer_id: 'offer-5',
+    conversation_id: 'album-5',
+    blocks: true,
+    message: 'Finish or close this setup in its owning conversation.'
+  };
+  const f = fixture(async () => ({
+    observation: observation('album-3'),
+    hire_unavailable: 'review_pending',
+    blocker
+  }));
+  await f.controller.select('chip', 'music');
+  assert.equal(structureCardView(f.controller.state).kind, 'unavailable');
+  assert.deepEqual(folderBlockerView(blocker), {
+    line: `${blocker.subject} · Waiting for review. ${blocker.message}`,
+    open: true,
+    label: `Open ${blocker.subject} review`
+  });
+  for (const value of [null, { ...blocker, kind: 'unknown' }]) {
+    assert.equal(folderBlockerView(value), null);
+    assert.match(
+      structureCardView({ ...f.controller.state, blocker: value }).line,
+      /Another setup review/
+    );
+  }
+  assert.equal(folderBlockerView({ ...blocker, conversation_id: '' }).open, false);
+});
+
+test('refresh and return re-read hire eligibility without opening a review', async () => {
+  const f = fixture(async url =>
+    url.endsWith('/select')
+      ? {
+          observation: observation('album-3'),
+          hire_unavailable: 'review_pending',
+          blocker: { subject: 'Album-5' }
+        }
+      : { observation_id: 'album-3', hire_candidate: 'root', hire_unavailable: '', blocker: null }
+  );
+  await f.controller.select('chip', 'music');
+  const saved = f.controller.snapshot();
+  assert.equal(await f.controller.refreshRecommendation(), true);
+  assert.equal(f.controller.state.hireCandidate, 'root');
+  assert.equal(f.controller.state.hireUnavailable, '');
+  assert.equal(f.controller.state.blocker, null);
+  f.controller.reset();
+  assert.equal(await f.controller.restore(saved), true);
+  assert.equal(f.controller.state.hireCandidate, 'root');
+  assert.equal(f.controller.state.hireUnavailable, '');
+  assert.deepEqual(
+    f.calls.map(call => call.url.split('/').at(-1)),
+    ['select', 'recommendation', 'recommendation']
+  );
+});
+
+for (const change of ['replacement', 'removal', 'conversation']) {
+  test(`a late hire refresh cannot cross ${change}`, async () => {
+    const wait = deferred();
+    const f = fixture(async url =>
+      url.endsWith('/recommendation')
+        ? wait.promise
+        : { observation: observation('new'), hire_unavailable: 'review_pending' }
+    );
+    await f.controller.select('chip', 'music');
+    const read = f.controller.refreshRecommendation();
+    if (change === 'replacement') await f.controller.select('chip', 'documents');
+    else if (change === 'removal') await f.controller.remove();
+    else {
+      f.setId('other');
+      f.controller.reset('other');
+    }
+    wait.resolve({ observation_id: 'new', hire_candidate: 'root', hire_unavailable: '' });
+    assert.equal(await read, false);
+    assert.notEqual(f.controller.state.hireCandidate, 'root');
+  });
+}
+
+test('blocker rechecks compare all owner identifiers and update without navigation', async () => {
+  const expected = {
+    kind: 'conversation',
+    subject: 'Album-5',
+    message: 'Waiting',
+    status: 'pending',
+    offer_id: 'offer-5',
+    conversation_id: 'chat-5'
+  };
+  for (const mode of ['same', 'kind', 'offer_id', 'conversation_id', 'resolved', 'failed']) {
+    let blocker = { ...expected };
+    if (['kind', 'offer_id', 'conversation_id'].includes(mode)) blocker[mode] = 'replacement';
+    if (mode === 'resolved') blocker = null;
+    const f = fixture(async url => {
+      if (url.endsWith('/select'))
+        return {
+          observation: observation('a'),
+          blocker: expected,
+          hire_unavailable: 'review_pending'
+        };
+      if (mode === 'failed') throw new Error('offline');
+      return {
+        observation_id: 'a',
+        blocker,
+        ...(blocker ? { hire_unavailable: 'review_pending' } : { hire_candidate: 'root' })
+      };
+    });
+    await f.controller.select('chip', 'music');
+    assert.equal(await f.controller.recheckBlocker(expected), mode === 'same', mode);
+    assert.equal(f.controller.state.observation.id, 'a');
+    if (mode === 'resolved') assert.equal(f.controller.state.hireCandidate, 'root');
+    else if (mode !== 'failed') assert.deepEqual(f.controller.state.blocker, blocker);
+    assert.deepEqual(
+      f.calls.map(call => call.url.split('/').at(-1)),
+      ['select', 'recommendation']
+    );
+  }
+});
+
+test('Home reveal is rechecked once and cannot cross a replacement during its card read', async () => {
+  const blocker = {
+    kind: 'home',
+    subject: 'Album-5',
+    message: 'Waiting on Home',
+    status: 'pending',
+    offer_id: 'offer-5'
+  };
+  const f = fixture(async url =>
+    url.endsWith('/select')
+      ? { observation: observation('a'), blocker, hire_unavailable: 'review_pending' }
+      : { observation_id: 'a', blocker }
+  );
+  await f.controller.select('chip', 'music');
+  const wait = deferred();
+  let valid;
+  const reveal = async guard => {
+    valid = guard;
+    await wait.promise;
+    return guard();
+  };
+  const first = f.controller.revealBlocker(blocker, reveal);
+  assert.equal(await f.controller.revealBlocker(blocker, reveal), false);
+  await Promise.resolve();
+  await Promise.resolve();
+  f.controller.reset();
+  wait.resolve();
+  assert.equal(await first, false);
+  if (valid) assert.equal(valid(), false);
+  assert.equal(folderBlockerView({ ...blocker, kind: 'build' }).open, false);
+  assert.equal(folderBlockerView({ ...blocker, kind: 'unavailable' }).open, false);
 });
 
 test('cancel and failed replacement retain the exact previous selection', async () => {

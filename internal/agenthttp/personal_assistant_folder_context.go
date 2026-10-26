@@ -368,6 +368,7 @@ func (h *HomeAssistantAskHandler) SelectFolderContextHandler(w http.ResponseWrit
 		// Another setup review waits for its answer: the drawer says so in one
 		// line instead of opening nothing.
 		response["hire_unavailable"] = hire.Unavailable
+		response["blocker"] = hire.Blocker
 	}
 	orihttp.WriteJSON(w, response)
 }

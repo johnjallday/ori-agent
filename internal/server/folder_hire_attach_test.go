@@ -9,11 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Attaching one project Ori can set up as a hire names it, so the drawer opens
-// its review straight away; a collection proposes its group instead and names
-// none. Attaching creates nothing either way.
-func TestFolderHireAttach_ARecognizedProjectIsNamedForItsReview(t *testing.T) {
-	f := newDraftServerFixture(t)
+func seedHireProject(t *testing.T) string {
+	t.Helper()
 	widget := filepath.Join(os.Getenv("HOME"), "Documents", "widget") // sandboxed by the fixture
 	for _, name := range []string{"go.mod", "main.go", "README.md", ".git/HEAD"} {
 		full := filepath.Join(widget, name)
@@ -24,6 +21,15 @@ func TestFolderHireAttach_ARecognizedProjectIsNamedForItsReview(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return widget
+}
+
+// Attaching one project Ori can set up as a hire names it, so the drawer opens
+// its review straight away; a collection proposes its group instead and names
+// none. Attaching creates nothing either way.
+func TestFolderHireAttach_ARecognizedProjectIsNamedForItsReview(t *testing.T) {
+	f := newDraftServerFixture(t)
+	seedHireProject(t)
 	before := len(f.builder.workspaceFileStore.CachedWorkspaces())
 
 	status, body := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select",

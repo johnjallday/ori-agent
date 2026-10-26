@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -48,6 +50,81 @@ func TestFolderRecommendationRefresh_PendingOwnerAndCloseKeepTheHeldSelection(t 
 	}
 	if folderTreeHash(t, root) != hash || len(f.builder.workspaceFileStore.CachedWorkspaces()) != before {
 		t.Fatal("refresh or navigation produced effects")
+	}
+}
+
+func TestFolderRecommendationRefresh_HireBlockerAndRecoveryAreReadOnly(t *testing.T) {
+	f := newDraftServerFixture(t)
+	seedAlbumsCollection(t)
+	root := seedHireProject(t)
+	old := reviewAlbums(t, f)
+	stored := func() string {
+		t.Helper()
+		path := filepath.Join(os.Getenv("HOME"), "Ori Workspaces", f.hqSlug, ".ori", "folder-digest-v1.json")
+		data, err := os.ReadFile(path) // #nosec G304 -- this fixture sandboxes HOME and creates the HQ
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	canonical := stored()
+	tickets := len(f.hqTickets(t))
+	draft := uuid.NewString()
+	before := folderTreeHash(t, root)
+	workspaces := len(f.builder.workspaceFileStore.CachedWorkspaces())
+	_, conversations := f.call(t, http.MethodGet, "/api/home-assistant/conversations", nil)
+	status, attached := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/select", map[string]any{"draft_id": draft, "revision": "", "mode": "chip", "chip": "documents"})
+	if status != http.StatusOK || attached["hire_unavailable"] != "review_pending" {
+		t.Fatalf("attach: %d %v", status, attached)
+	}
+	t.Run("attach names the owner", func(t *testing.T) {
+		blocker, _ := attached["blocker"].(map[string]any)
+		if blocker["conversation_id"] != old.conversation || blocker["offer_id"] != old.offer || blocker["subject"] != "Music" {
+			t.Fatalf("hire blocker: %v", blocker)
+		}
+	})
+	selection := attached["observation"].(map[string]any)["id"]
+	for _, invalid := range []map[string]any{
+		{"draft_id": uuid.NewString(), "revision": "", "selection_id": selection},
+		{"draft_id": draft, "revision": "stale", "selection_id": selection},
+		{"draft_id": draft, "revision": "", "selection_id": uuid.NewString()},
+	} {
+		if status, got := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/recommendation", invalid); status == http.StatusOK || got["blocker"] != nil || got["hire_candidate"] != nil {
+			t.Fatalf("invalid hire refresh: %d %v", status, got)
+		}
+	}
+	refresh := func() map[string]any {
+		t.Helper()
+		status, got := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/recommendation", map[string]any{"draft_id": draft, "revision": "", "selection_id": selection})
+		if status != http.StatusOK {
+			t.Fatalf("refresh: %d %v", status, got)
+		}
+		return got
+	}
+	t.Run("refresh names the owner", func(t *testing.T) {
+		got := refresh()
+		blocker, _ := got["blocker"].(map[string]any)
+		if got["hire_unavailable"] != "review_pending" || blocker["offer_id"] != old.offer {
+			t.Fatalf("refresh hire: %v", got)
+		}
+	})
+	if old.read(t, f)["status"] != "pending" || stored() != canonical {
+		t.Fatal("reads changed the canonical store")
+	}
+	status, closed := f.call(t, http.MethodPost, "/api/home-assistant/folder-context/review/close", map[string]any{"conversation_id": old.conversation, "revision": old.revision, "offer_id": old.offer})
+	if status != http.StatusOK {
+		t.Fatalf("close: %d %v", status, closed)
+	}
+	canonical = stored()
+	t.Run("refresh restores the hire", func(t *testing.T) {
+		got := refresh()
+		if got["observation_id"] != selection || got["blocker"] != nil || got["hire_candidate"] == nil || got["hire_candidate"] == "" || got["hire_unavailable"] != "" {
+			t.Fatalf("recovered hire: %v", got)
+		}
+	})
+	_, after := f.call(t, http.MethodGet, "/api/home-assistant/conversations", nil)
+	if stored() != canonical || len(f.hqTickets(t)) != tickets || folderTreeHash(t, root) != before || len(f.builder.workspaceFileStore.CachedWorkspaces()) != workspaces || len(after["conversations"].([]any)) != len(conversations["conversations"].([]any)) {
+		t.Fatal("attach/refresh created a row or changed the folder")
 	}
 }
 

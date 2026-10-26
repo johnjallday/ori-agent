@@ -17,30 +17,35 @@ export function createReviewVisit({ capture, navigate, fresh, restore, focus, ch
       origin = null;
       changed(null);
     },
-    async open(id) {
+    async open(id, { recheck, offerId = '' } = {}) {
       if (busy || !id) return false;
       const saved = capture();
       if (!saved || saved.text.length > 32768) {
         notify('Keep this draft here until it can be safely left.');
         return false;
       }
-      if (saved.id === id) {
-        focus();
-        return true;
-      }
-      if (origin) {
+      if (origin && saved.id !== id) {
         notify('Return to the original folder before opening another review.');
         return false;
       }
       busy = true;
       const ticket = ++epoch;
       try {
-        const ok = await navigate(id, () => ticket === epoch && same(saved, capture()));
+        const guard = () => ticket === epoch && same(saved, capture());
+        if (recheck && (!(await recheck()) || !guard())) return false;
+        if (saved.id === id) {
+          focus(offerId);
+          return true;
+        }
+        const ok = await navigate(id, guard, offerId);
         if (!ok || ticket !== epoch) return false;
         origin = saved;
         changed(origin);
-        focus();
+        focus(offerId);
         return true;
+      } catch (_) {
+        notify('The review could not be checked. Your draft is kept here; refresh and try again.');
+        return false;
       } finally {
         busy = false;
       }

@@ -20,10 +20,10 @@ function fixture(id = '') {
   let intercept = () => {};
   const visit = createReviewVisit({
     capture: () => structuredClone(current),
-    navigate: async (next, guard) => {
+    navigate: async (next, guard, offerId) => {
       await intercept();
       if (!guard()) return false;
-      calls.push(['navigate', next]);
+      calls.push(offerId ? ['navigate', next, offerId] : ['navigate', next]);
       current = {
         id: next,
         text: '',
@@ -41,7 +41,7 @@ function fixture(id = '') {
       calls.push(['restore']);
       current = saved;
     },
-    focus: () => calls.push(['focus']),
+    focus: offerId => calls.push(offerId ? ['focus', offerId] : ['focus']),
     changed: () => {},
     notify: message => calls.push(['notice', message])
   });
@@ -106,6 +106,54 @@ test('failed navigation and overlapping visits keep the original draft', async (
   release();
   assert.equal(await pending, false);
   assert.deepEqual(f.current(), f.original);
+});
+
+test('Open holds its busy guard through recheck and passes the exact offer to navigation/focus', async () => {
+  const f = fixture();
+  let release;
+  let reads = 0;
+  const recheck = () => {
+    reads++;
+    return new Promise(resolve => {
+      release = resolve;
+    });
+  };
+  const first = f.visit.open('album-5-review', { recheck, offerId: 'offer-5' });
+  assert.equal(await f.visit.open('album-5-review', { recheck }), false);
+  assert.equal(reads, 1);
+  assert.deepEqual(f.calls, []);
+  release(true);
+  assert.equal(await first, true);
+  assert.deepEqual(f.calls, [
+    ['navigate', 'album-5-review', 'offer-5'],
+    ['focus', 'offer-5']
+  ]);
+});
+
+test('resolved, replaced, failed or cancelled rechecks leave the source and return slot intact', async () => {
+  for (const mode of ['mismatch', 'failed', 'clear', 'typing']) {
+    const f = fixture();
+    const recheck = async () => {
+      if (mode === 'failed') throw new Error('offline');
+      if (mode === 'clear') f.visit.clear();
+      if (mode === 'typing') f.change({ text: 'keep newer words' });
+      return mode !== 'mismatch';
+    };
+    assert.equal(await f.visit.open('album-5-review', { recheck }), false, mode);
+    assert.equal(f.visit.current(), null);
+    assert.equal(f.current().id, '');
+    assert.equal(f.calls.filter(call => call[0] === 'navigate').length, 0);
+  }
+});
+
+test('/clear retires an existing return trip without closing or revisiting either setup', async () => {
+  const f = fixture();
+  await f.visit.open('album-5-review');
+  const calls = [...f.calls];
+  f.visit.clear();
+  assert.equal(f.visit.current(), null);
+  assert.equal(await f.visit.back(), false);
+  assert.deepEqual(f.calls, calls);
 });
 
 test('a new draft in the visited review is never overwritten by Return', async () => {

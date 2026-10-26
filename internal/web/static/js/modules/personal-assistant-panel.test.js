@@ -20,6 +20,7 @@ import {
   canSubmitAssistantWork,
   clampDrawerWidth,
   composerCommand,
+  clearedConversationStatus,
   composerHeight,
   conversationMenuView,
   createActionMenu,
@@ -218,6 +219,39 @@ test('/clear is New conversation typed; other text is a message', () => {
     assert.equal(composerCommand(text), 'clear', JSON.stringify(text));
   for (const text of ['', 'clear', '/clear this', '/clearall', 'please /clear', '/ clear', null])
     assert.equal(composerCommand(text), '', JSON.stringify(text));
+});
+
+test('/clear mentions only a currently verified blocker and does not claim to close it', () => {
+  const blocker = {
+    kind: 'conversation',
+    subject: '<Album-5>',
+    status: 'pending',
+    blocks: true,
+    conversation_id: 'chat',
+    offer_id: 'offer'
+  };
+  const folder = { preview: true, blocker };
+  assert.match(
+    clearedConversationStatus(folder),
+    /<Album-5> is still waiting in its own conversation\./
+  );
+  const plain = clearedConversationStatus(null);
+  for (const value of [
+    { ...folder, authority: 'expired' },
+    { ...folder, preview: false },
+    { ...folder, blocker: { ...blocker, kind: 'unavailable' } },
+    { ...folder, blocker: { ...blocker, conversation_id: '' } },
+    { ...folder, blocker: { ...blocker, status: 'closed' } }
+  ])
+    assert.equal(clearedConversationStatus(value), plain);
+  assert.match(
+    clearedConversationStatus({ ...folder, blocker: { ...blocker, kind: 'home' } }),
+    /Home’s Needs you/
+  );
+  assert.match(
+    clearedConversationStatus({ ...folder, blocker: { ...blocker, kind: 'build' } }),
+    /Create Workspace/
+  );
 });
 
 test('both New items show /clear without changing their accessible name', () => {

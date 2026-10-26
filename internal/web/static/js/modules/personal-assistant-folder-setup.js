@@ -487,7 +487,8 @@ export function reviewLinkHidden(observation, structure) {
 function syncReviewLink() {
   if (!elements || !current) return;
   const structure = currentStructure();
-  elements.open.hidden = reviewLinkHidden(current.observation, structure);
+  elements.open.hidden =
+    Boolean(current.hireUnavailable) || reviewLinkHidden(current.observation, structure);
   // Move the one existing control beside a local preview; never clone its
   // authority or create a second review owner. Saved context keeps the chip.
   const previewActions = document.getElementById('personalAssistantFolderPreviewActions');

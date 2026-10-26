@@ -48,6 +48,8 @@ export function createFolderContextController({
     declined: null,
     structureUnavailable: '',
     blocker: null,
+    hireCandidate: '',
+    hireUnavailable: '',
     focusIDs: [],
     accepted: null,
     offerId: '',
@@ -60,6 +62,7 @@ export function createFolderContextController({
     notice: ''
   };
   let recommendationGeneration = 0;
+  let revealingBlocker = false;
   const target = () => ({
     ...(state.conversationId
       ? { conversation_id: state.conversationId }
@@ -366,6 +369,9 @@ export function createFolderContextController({
       state.declined = folderDecline(result.declined);
       state.blocker = result.blocker || null;
       state.structureUnavailable = String(result.structure_unavailable || '');
+      state.hireCandidate = state.structure ? '' : String(result.hire_candidate || '');
+      state.hireUnavailable =
+        state.structure || state.hireCandidate ? '' : String(result.hire_unavailable || '');
       state.authority = '';
       notify('');
       return true;
@@ -381,6 +387,28 @@ export function createFolderContextController({
         );
       }
       return false;
+    }
+  }
+  async function recheckBlocker(expected) {
+    if (!folderBlockerView(expected)?.open || state.authority) return false;
+    if (!(await refreshRecommendation())) return false;
+    return ['kind', 'offer_id', 'conversation_id'].every(
+      key => (expected[key] || '') === (state.blocker?.[key] || '')
+    );
+  }
+  // Home stays in this conversation; it needs no return slot. Guard both its
+  // recheck and exact-card read against duplicate clicks and source changes.
+  async function revealBlocker(expected, reveal) {
+    if (revealingBlocker || expected?.kind !== 'home') return false;
+    revealingBlocker = true;
+    const generation = state.generation;
+    const owner = state.conversationId;
+    const valid = () => generation === state.generation && owner === currentId() && !state.pending;
+    try {
+      if (!(await recheckBlocker(expected)) || !valid()) return false;
+      return Boolean(await reveal(valid));
+    } finally {
+      revealingBlocker = false;
     }
   }
   async function restore(saved) {
@@ -409,6 +437,8 @@ export function createFolderContextController({
     askAgain,
     snapshot,
     restore,
+    recheckBlocker,
+    revealBlocker,
     refreshRecommendation
   };
 }
@@ -548,6 +578,29 @@ const HIRE_UNAVAILABLE = {
   review_pending: 'Another setup review is open. Finish or close it to set up this folder.'
 };
 
+// Only the server's known owner projection becomes a named notice. Names stay
+// text, never markup or selectors; unknown contracts keep the legacy line.
+export function folderBlockerView(blocker) {
+  if (
+    !blocker ||
+    !['conversation', 'arranged', 'home', 'build', 'unavailable'].includes(blocker.kind) ||
+    !blocker.subject ||
+    !blocker.message ||
+    !['pending', 'awaiting_outcome'].includes(blocker.status)
+  )
+    return null;
+  const status = blocker.status === 'pending' ? 'Waiting for review' : 'Setup unfinished';
+  return {
+    line: `${blocker.subject} · ${status}. ${blocker.message}`,
+    open: Boolean(
+      blocker.offer_id &&
+      (blocker.kind === 'home' ||
+        (['conversation', 'arranged'].includes(blocker.kind) && blocker.conversation_id))
+    ),
+    label: `Open ${blocker.subject} review`
+  };
+}
+
 // structureCardView is the whole decision for the card shown as soon as a
 // collection is attached, before Send: the proposal and its three controls, the
 // one line that says why there is none, or nothing. parkedId is the folder the
@@ -602,7 +655,14 @@ export function structureCardView(state, parkedId = '') {
     STRUCTURE_UNAVAILABLE[state.structureUnavailable] ||
     HIRE_UNAVAILABLE[state.hireUnavailable] ||
     '';
-  return line ? { kind: 'unavailable', key: `${id}:unavailable`, line } : { kind: 'none', key: '' };
+  const blocker = folderBlockerView(state.blocker);
+  return line
+    ? {
+        kind: 'unavailable',
+        key: `${id}:unavailable${blocker ? `:${JSON.stringify(state.blocker)}` : ''}`,
+        line
+      }
+    : { kind: 'none', key: '' };
 }
 
 // The folder the user said Not now to: its card stays away for this
@@ -642,18 +702,21 @@ function renderStructure(state) {
   const host = elements?.structure;
   if (!host) return;
   const view = structureCardView(state, parkedStructure);
-  if (host.dataset.structureKey === view.key) {
+  const key = `${view.key}:${state.generation}`;
+  if (host.dataset.structureKey === key) {
     for (const action of view.actions || []) {
       const button = host.querySelector(`[data-structure-action="${action.id}"]`);
       if (button) button.disabled = action.disabled;
     }
     return;
   }
-  host.dataset.structureKey = view.key;
+  host.dataset.structureKey = key;
   host.replaceChildren();
   host.hidden = view.kind === 'none';
   if (view.kind === 'unavailable') {
-    host.append(node('p', view.line, 'personal-assistant-structure__unavailable'));
+    if (!folderBlockerView(state.blocker))
+      host.append(node('p', view.line, 'personal-assistant-structure__unavailable'));
+    else renderBlockerNotice(host, state, view.line);
     return;
   }
   if (view.kind !== 'proposal') return;
@@ -664,38 +727,12 @@ function renderStructure(state) {
       window.OriWorkspaceBuildingArt
     )
   );
-  if (state.blocker || state.structureUnavailable === 'review_pending') {
-    const status = node(
-      'p',
-      state.blocker
-        ? `${state.blocker.subject}: ${state.blocker.message}`
-        : 'Another setup review is open. Finish or close it before reviewing this collection.',
-      'personal-assistant-proposal__note'
+  if (state.blocker || state.structureUnavailable === 'review_pending')
+    renderBlockerNotice(
+      host,
+      state,
+      'Another setup review is open. Finish or close it before reviewing this collection.'
     );
-    status.setAttribute('role', 'status');
-    host.append(status);
-    if (state.blocker?.conversation_id) {
-      const open = node(
-        'button',
-        `Open ${state.blocker.subject || 'existing'} review`,
-        'btn btn-sm btn-outline-secondary'
-      );
-      open.type = 'button';
-      open.dataset.structureAction = 'blocker';
-      open.addEventListener(
-        'click',
-        () =>
-          void window.PersonalAssistantConversation?.visitFolderReview?.(
-            state.blocker.conversation_id
-          )
-      );
-      host.append(open);
-    }
-    const refresh = node('button', 'Refresh recommendation', 'btn btn-sm btn-link');
-    refresh.type = 'button';
-    refresh.addEventListener('click', () => void controller.refreshRecommendation());
-    host.append(refresh);
-  }
   const actions = node('div', '', 'personal-assistant-structure__actions');
   const runs = {
     setup: button => window.PersonalAssistantFolderSetup?.reviewStructure?.(button),
@@ -724,6 +761,47 @@ function renderStructure(state) {
   // transcript scrolls to it and stops following the bottom.
   if (typeof requestAnimationFrame === 'function')
     requestAnimationFrame(() => window.PersonalAssistantTranscript?.revealControl?.(host, true));
+}
+
+// Shared by a collection proposal and a single-project hire that cannot open.
+function renderBlockerNotice(host, state, fallback) {
+  const blocker = { ...state.blocker };
+  const view = folderBlockerView(blocker);
+  const generation = state.generation;
+  const notice = node('div', '', 'personal-assistant-blocker');
+  const status = node('p', view?.line || fallback, 'personal-assistant-proposal__note');
+  status.setAttribute('role', 'status');
+  notice.append(status);
+  const actions = node('div', '', 'personal-assistant-structure__actions');
+  if (
+    view?.open &&
+    (blocker.kind !== 'home' ||
+      typeof window.PersonalAssistantToday?.revealFolderReview === 'function')
+  ) {
+    const open = node('button', view.label, 'btn btn-sm btn-outline-secondary');
+    open.type = 'button';
+    open.dataset.structureAction = 'blocker';
+    open.addEventListener('click', () => {
+      if (generation !== controller.state.generation) return;
+      if (blocker.kind === 'home') {
+        void controller.revealBlocker(blocker, valid =>
+          window.PersonalAssistantToday?.revealFolderReview?.(blocker.offer_id, valid)
+        );
+      } else {
+        void window.PersonalAssistantConversation?.visitFolderReview?.(blocker.conversation_id, {
+          offerId: blocker.offer_id,
+          recheck: () => controller.recheckBlocker(blocker)
+        });
+      }
+    });
+    actions.append(open);
+  }
+  const refresh = node('button', 'Refresh recommendation', 'btn btn-sm btn-link');
+  refresh.type = 'button';
+  refresh.addEventListener('click', () => void controller.refreshRecommendation());
+  actions.append(refresh);
+  notice.append(actions);
+  host.append(notice);
 }
 
 function renderDiscussion() {

@@ -173,6 +173,21 @@ export function resumeWorkspaceBuild(win = window) {
   return 'navigated';
 }
 
+// A blocker is navigation only: read/display its exact Home-owned card, then
+// use the shared drawer's reveal seam. No conversation switch or return slot.
+export async function revealFolderReview(offerId, valid = () => true, win = window) {
+  if (!offerId || !valid()) return false;
+  if (!(await win.PersonalAssistantFolder?.showHomeReview?.(offerId, valid)) || !valid())
+    return false;
+  const offer = win.PersonalAssistantFolder?.current?.();
+  const card = win.document?.getElementById?.('personalAssistantFolderOffer');
+  if (offer?.id !== offerId || offer.conversation_id || !card || card.hidden) return false;
+  if (!win.PersonalAssistantToday?.reveal?.('folder-review', { item: card })) return false;
+  card.tabIndex = -1;
+  card.focus?.({ preventScroll: true });
+  return true;
+}
+
 async function discardWorkspaceBuild(id, button) {
   if (!id) return;
   if (button) button.disabled = true;
@@ -1333,6 +1348,7 @@ function init() {
     // Opens the strip, for an arriving item of this tab's (`key`) or at the
     // user's request; see reveal.
     reveal,
+    revealFolderReview,
     // Shows Needs you when the user asked for something under it.
     expand: () => reveal('request')
   };

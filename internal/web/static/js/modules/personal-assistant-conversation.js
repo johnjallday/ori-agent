@@ -175,7 +175,8 @@ const reviewVisit = createReviewVisit({
       focus: document.activeElement?.id || 'personalAssistantInput'
     };
   },
-  navigate: (id, beforeNavigate) => resume(id, { reviewVisit: true, beforeNavigate }),
+  navigate: (id, beforeNavigate, reviewOfferId) =>
+    resume(id, { reviewVisit: true, beforeNavigate, reviewOfferId }),
   fresh: () => startNew({ reviewVisit: true }),
   restore: async saved => {
     const input = document.getElementById('personalAssistantInput');
@@ -187,7 +188,8 @@ const reviewVisit = createReviewVisit({
     document.getElementById(saved.focus)?.focus();
     await window.PersonalAssistantFolderContext?.restore?.(saved.folder);
   },
-  focus: () => {
+  focus: offerId => {
+    if (offerId && window.PersonalAssistantFolder?.current?.()?.id !== offerId) return;
     const card = document.getElementById('personalAssistantFolderOffer');
     if (card && !card.hidden) {
       card.tabIndex = -1;
@@ -446,6 +448,17 @@ async function resume(id, options = {}) {
         );
       }
       return false;
+    }
+    if (options.reviewOfferId) {
+      const offer = result.body.folder_reviews?.[options.reviewOfferId];
+      if (
+        !offer ||
+        offer.conversation_id !== target ||
+        !['pending', 'awaiting_outcome'].includes(offer.status)
+      ) {
+        setNote('That setup review changed. Refresh the recommendation before opening it.');
+        return false;
+      }
     }
     if (options.beforeNavigate && !options.beforeNavigate()) {
       setNote('Your draft changed while the review was opening. It is kept here.');
@@ -815,7 +828,7 @@ const api = {
   applyReply,
   startNew,
   resume,
-  visitFolderReview: id => reviewVisit.open(id),
+  visitFolderReview: (id, options) => reviewVisit.open(id, options),
   reopenHistory: async () => {
     if (state.loading) return false;
     if (state.id) return resume(state.id);
